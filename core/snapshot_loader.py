@@ -15,6 +15,7 @@ from core.memory import CognitiveMemory
 from core.observation import Observation
 from core.prediction import Prediction
 from core.prediction_error import PredictionError
+from core.provenance import ProvenanceLedger
 from core.relation import Relation
 from core.snapshot import Snapshot
 
@@ -26,6 +27,7 @@ class RestoredSnapshot:
     state: CognitiveState
     contexts: ContextRegistry
     causal_graph: CausalGraph
+    provenance: ProvenanceLedger
 
 
 class SnapshotLoader:
@@ -44,10 +46,11 @@ class SnapshotLoader:
         state = self._restore_state(payload.get("state", {}), graph)
         contexts = ContextRegistry.restore(payload.get("contexts", {}))
         causal_graph = self._restore_causal_graph(payload.get("causal_graph", {}))
+        provenance = ProvenanceLedger.restore(payload.get("provenance", {}))
         errors = contexts.validate(graph, state, causal_graph)
         if errors:
             raise ValueError("Invalid restored context: " + "; ".join(errors))
-        return RestoredSnapshot(graph, memory, state, contexts, causal_graph)
+        return RestoredSnapshot(graph, memory, state, contexts, causal_graph, provenance)
 
     def _restore_causal_graph(self, data: dict) -> CausalGraph:
         graph = CausalGraph()

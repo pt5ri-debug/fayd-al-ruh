@@ -8,6 +8,7 @@ from core.knowledge_graph import KnowledgeGraph
 from core.memory import CognitiveMemory
 from core.memory_store import MemoryStore
 from core.persistence import Persistence
+from core.provenance import ProvenanceLedger
 from core.snapshot import Snapshot
 from core.snapshot_loader import RestoredSnapshot, SnapshotLoader
 from core.serializer import Serializer
@@ -29,6 +30,7 @@ class KnowledgeStore:
         state: CognitiveState | None = None,
         contexts: ContextRegistry | None = None,
         causal_graph: CausalGraph | None = None,
+        provenance: ProvenanceLedger | None = None,
     ) -> Snapshot:
         payload = {
             "graph": self.graph_store.dump(graph),
@@ -36,6 +38,7 @@ class KnowledgeStore:
             "state": self.serializer.to_primitive(state) if state is not None else {},
             "contexts": contexts.dump() if contexts is not None else {},
             "causal_graph": self.serializer.to_primitive({"links": causal_graph.links}) if causal_graph is not None else {},
+            "provenance": provenance.dump() if provenance is not None else {},
         }
         snapshot = Snapshot.create(name, payload)
         self.persistence.save("snapshots", name, {
