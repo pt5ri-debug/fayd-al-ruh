@@ -27,3 +27,10 @@ src = ["core", "storage", "tests"]
 # Start by blocking correctness errors. Style rules are introduced gradually
 # so the new CI gate can remain green while legacy files are modernised.
 select = ["F"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["core", "storage", "ai", "tests", "main.py"]
+warn_unused_configs = true
+warn_redundant_casts = true
+no_implicit_optional = true

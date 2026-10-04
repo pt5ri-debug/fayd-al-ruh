@@ -26,7 +26,7 @@ from core.prediction_error import (
 
 @dataclass
 class CognitiveLoopResult:
-    observation: Observation
+    observation: Observation | None
     patterns: list[Pattern]
     hypotheses: list[Hypothesis]
     predictions: list[Prediction]

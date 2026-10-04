@@ -27,9 +27,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: Lint with ruff
-        run: |
-          pip install ruff
-          ruff check .
+        run: ruff check .
+
+      - name: Type-check with mypy
+        run: mypy
 
       - name: Run tests
         run: python -m pytest -q

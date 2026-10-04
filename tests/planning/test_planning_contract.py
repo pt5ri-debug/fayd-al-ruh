@@ -5,4 +5,4 @@ from core.state import State
 
 
 def test_planning_contract_finds_goal_action():
-    assert Planner().create_plan(State(), Goal(frozenset({"done"}), "finish"), [Action("finish", add_effects=frozenset({"done"}))]) is not None
+    assert Planner().create_plan(State(), Goal("finish", frozenset({"done"})), [Action("finish", add_effects=frozenset({"done"}))]) is not None

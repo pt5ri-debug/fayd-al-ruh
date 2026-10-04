@@ -13,5 +13,5 @@ pytestmark = pytest.mark.integration
 
 def test_agent_controller_environment_contract():
     agent = Agent(CognitiveController(), Environment())
-    cycle = agent.step(Belief("agent observes", .5), EvidencePolarity.SUPPORTS, Goal(frozenset({"seen"}), "see"), [Action("see", add_effects=frozenset({"seen"}))])
+    cycle = agent.step(Belief("agent observes", .5), EvidencePolarity.SUPPORTS, Goal("see", frozenset({"seen"})), [Action("see", add_effects=frozenset({"seen"}))])
     assert cycle.execution is not None

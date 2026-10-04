@@ -9,5 +9,5 @@ from core.goal import Goal
 
 def test_agent_runs_perception_to_action_cycle():
     agent = Agent(CognitiveController(), Environment())
-    cycle = agent.step(Belief("agent can see", .5), EvidencePolarity.SUPPORTS, Goal(frozenset({"seen"}), "see"), [Action("see", add_effects=frozenset({"seen"}))])
+    cycle = agent.step(Belief("agent can see", .5), EvidencePolarity.SUPPORTS, Goal("see", frozenset({"seen"})), [Action("see", add_effects=frozenset({"seen"}))])
     assert cycle.execution is not None and "seen" in cycle.resulting_observation.data["facts"]

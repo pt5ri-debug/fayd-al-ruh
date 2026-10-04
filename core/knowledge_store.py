@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from core.causal_graph import CausalGraph
 from core.graph_store import GraphStore
 from core.cognitive_context import ContextRegistry
 from core.cognitive_state import CognitiveState
@@ -27,12 +28,14 @@ class KnowledgeStore:
         memory: CognitiveMemory,
         state: CognitiveState | None = None,
         contexts: ContextRegistry | None = None,
+        causal_graph: CausalGraph | None = None,
     ) -> Snapshot:
         payload = {
             "graph": self.graph_store.dump(graph),
             "memory": self.memory_store.dump(memory),
             "state": self.serializer.to_primitive(state) if state is not None else {},
             "contexts": contexts.dump() if contexts is not None else {},
+            "causal_graph": self.serializer.to_primitive({"links": causal_graph.links}) if causal_graph is not None else {},
         }
         snapshot = Snapshot.create(name, payload)
         self.persistence.save("snapshots", name, {

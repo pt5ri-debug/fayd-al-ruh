@@ -18,7 +18,7 @@ from core.observation import Observation
 
 
 @dataclass
-class CognitiveCycleResult:
+class CognitiveCycleOutcome:
     observation_id: str
     evidence_id: str
     belief_id: str
@@ -68,7 +68,7 @@ class CognitiveCycle:
         observation: Observation,
         belief: Belief,
         polarity: EvidencePolarity,
-    ) -> CognitiveCycleResult:
+    ) -> CognitiveCycleOutcome:
 
         # -----------------------------------------------------
         # 1. Remember the observation
@@ -151,7 +151,7 @@ class CognitiveCycle:
             importance=belief.confidence,
         )
 
-        return CognitiveCycleResult(
+        return CognitiveCycleOutcome(
             observation_id=observation.id,
             evidence_id=evidence.id,
             belief_id=belief.id,

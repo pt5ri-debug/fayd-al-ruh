@@ -5,5 +5,5 @@ from core.state import State
 
 
 def test_risk_detects_missing_preconditions():
-    risk = RiskModel().evaluate(State(), Action("grow", frozenset({"water"})), Goal(frozenset({"plant"}), "grow"))
+    risk = RiskModel().evaluate(State(), Action("grow", frozenset({"water"})), Goal("grow", frozenset({"plant"})))
     assert risk.value > 0 and risk.reasons
