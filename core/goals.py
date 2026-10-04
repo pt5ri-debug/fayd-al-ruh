@@ -13,7 +13,12 @@ class GoalStatus(str, Enum):
 
 
 @dataclass
-class Goal:
+class TaskGoal:
+    """A task-level objective tracked by :class:`GoalPlanner`.
+
+    Distinct from ``core.goal.Goal``, which is a symbolic state target.
+    """
+
     description: str
     priority: float = 0.5
     id: str = field(default_factory=lambda: f"GOAL-{uuid4().hex[:8]}")
@@ -36,7 +41,7 @@ class PlanStep:
 class GoalPlanner:
     """Small transparent planner: it never executes actions by itself."""
 
-    def plan(self, goal: Goal, steps: list[PlanStep]) -> list[PlanStep]:
+    def plan(self, goal: TaskGoal, steps: list[PlanStep]) -> list[PlanStep]:
         known = {step.description for step in steps}
         for step in steps:
             if any(dependency not in known for dependency in step.depends_on):

@@ -1,8 +1,5 @@
 # Runtime dependencies
-numpy
-networkx
-pydantic
-requests
+requests==2.34.2
 
 # Test dependency
-pytest
+pytest==9.1.1

@@ -1,7 +1,7 @@
 from core.cognitive_controller import CognitiveController
-from core.goals import Goal, GoalPlanner, PlanStep
+from core.goals import GoalPlanner, PlanStep, TaskGoal
 from core.model_interface import CallableModel, ModelRequest, MultimodalInput
-from core.safe_learning import ExperimentResult, LearningSandbox
+from core.safe_learning import LearningSandbox, SandboxResult
 from core.semantic_memory import SemanticMemoryIndex
 
 
@@ -14,7 +14,7 @@ def test_semantic_index_returns_related_item():
 
 
 def test_goal_planner_orders_dependencies():
-    goal = Goal("Learn safely")
+    goal = TaskGoal("Learn safely")
     steps = [PlanStep("evaluate"), PlanStep("learn", ("evaluate",))]
 
     assert [step.description for step in GoalPlanner().plan(goal, steps)] == ["evaluate", "learn"]
@@ -22,7 +22,7 @@ def test_goal_planner_orders_dependencies():
 
 def test_sandbox_runs_only_registered_experiment():
     sandbox = LearningSandbox()
-    sandbox.register("reward", lambda state: ExperimentResult("reward", state["score"], "ok"))
+    sandbox.register("reward", lambda state: SandboxResult("reward", state["score"], "ok"))
 
     assert sandbox.run("reward", {"score": 0.5}).reward == 0.5
 
