@@ -1,5 +1,7 @@
 # Runtime dependencies
 requests==2.34.2
 
-# Test dependency
+# Test and quality dependencies
 pytest==9.1.1
+ruff==0.16.10
+mypy==2.4.0

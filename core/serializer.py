@@ -10,7 +10,7 @@ from typing import Any
 class Serializer:
     """Serializes cognitive data to JSON-safe primitives; it never deserializes executable objects."""
     def to_primitive(self, value: Any) -> Any:
-        if is_dataclass(value):
+        if is_dataclass(value) and not isinstance(value, type):
             return self.to_primitive(asdict(value))
         if isinstance(value, datetime):
             return value.isoformat()

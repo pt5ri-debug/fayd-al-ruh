@@ -3,7 +3,7 @@
 from core.belief import Belief
 from core.cognitive_controller import CognitiveController
 from core.evidence_processor import EvidencePolarity
-from core.goals import TaskGoal, PlanStep
+from core.goal import Goal, PlanStep
 from core.observation import Observation
 
 
@@ -22,8 +22,8 @@ def main() -> None:
         EvidencePolarity.SUPPORTS,
     )
 
-    goal = TaskGoal("Verify the belief from further observations.", priority=0.8)
-    plan = controller.goal_planner.plan(
+    goal = Goal("Verify the belief from further observations.", priority=0.8)
+    plan = controller.order_plan_steps(
         goal,
         [
             PlanStep("collect a new observation"),

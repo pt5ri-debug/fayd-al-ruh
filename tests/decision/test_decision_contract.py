@@ -5,4 +5,4 @@ from core.state import State
 
 
 def test_decision_contract_selects_action():
-    assert DecisionEngine().decide(State(), Goal(frozenset({"done"}), "finish"), [Action("finish", add_effects=frozenset({"done"}))]).selected is not None
+    assert DecisionEngine().decide(State(), Goal("finish", frozenset({"done"})), [Action("finish", add_effects=frozenset({"done"}))]).selected is not None

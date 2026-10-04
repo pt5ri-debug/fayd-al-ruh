@@ -1,5 +1,6 @@
 from core.cognitive_controller import CognitiveController
-from core.goals import GoalPlanner, PlanStep, TaskGoal
+from core.goal import Goal, PlanStep
+from core.planner import Planner
 from core.model_interface import CallableModel, ModelRequest, MultimodalInput
 from core.safe_learning import LearningSandbox, SandboxResult
 from core.semantic_memory import SemanticMemoryIndex
@@ -13,11 +14,11 @@ def test_semantic_index_returns_related_item():
     assert index.search("rain water", limit=1)[0].item_id == "weather"
 
 
-def test_goal_planner_orders_dependencies():
-    goal = TaskGoal("Learn safely")
+def test_planner_orders_dependencies():
+    goal = Goal("Learn safely")
     steps = [PlanStep("evaluate"), PlanStep("learn", ("evaluate",))]
 
-    assert [step.description for step in GoalPlanner().plan(goal, steps)] == ["evaluate", "learn"]
+    assert [step.description for step in Planner().order_steps(goal, steps)] == ["evaluate", "learn"]
 
 
 def test_sandbox_runs_only_registered_experiment():

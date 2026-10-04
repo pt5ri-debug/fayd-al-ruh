@@ -37,10 +37,9 @@ from core.belief_revision import BeliefRevision, BeliefRevisionEngine
 from core.consistency_checker import ConsistencyChecker, ConsistencyReport
 from core.conflict_resolver import ConflictResolver, ConflictResolution
 from core.evaluation_suite import EvaluationSuite, QualityAssessment
-from core.goals import GoalPlanner
+from core.goal import Goal, PlanStep
 from core.planner import Planner
 from core.plan_evaluator import PlanEvaluator, PlanEvaluation
-from core.goal import Goal
 from core.action import Action
 from core.state import State
 from core.plan import Plan
@@ -144,7 +143,6 @@ class CognitiveController:
         self.consistency_checker = ConsistencyChecker()
         self.conflict_resolver = ConflictResolver()
         self.quality_suite = EvaluationSuite()
-        self.goal_planner = GoalPlanner()
         self.planner = Planner()
         self.plan_evaluator = PlanEvaluator()
         self.decision_engine = DecisionEngine()
@@ -275,6 +273,10 @@ class CognitiveController:
     ) -> Plan | None:
         return self.planner.create_plan(initial_state, goal, actions)
 
+    def order_plan_steps(self, goal: Goal, steps: list[PlanStep]) -> list[PlanStep]:
+        """Topologically order an explicit task plan for a goal."""
+        return self.planner.order_steps(goal, steps)
+
     def evaluate_plan(
         self,
         plan: Plan,
@@ -329,6 +331,7 @@ class CognitiveController:
             self.memory,
             self.state,
             self.contexts,
+            self.causal_graph,
         )
 
     def restore_snapshot(self, name: str, persistence: Persistence) -> bool:
@@ -340,6 +343,7 @@ class CognitiveController:
         self.memory = restored.memory
         self.state = restored.state
         self.contexts = restored.contexts
+        self.causal_graph = restored.causal_graph
         self.loop = CognitiveLoop(self.graph, self.memory, self.state)
         return True
 
@@ -443,7 +447,7 @@ class CognitiveController:
             belief=belief,
             actual_result=actual_result,
         )
-        self.contexts.add_prediction_error(prediction_error)
+        context = self.contexts.add_prediction_error(prediction_error)
 
         self.history.record(
             self.state
@@ -479,9 +483,5 @@ class CognitiveController:
             metrics=metrics,
             evaluation=evaluation,
             report=report,
-            context_id=(
-                self.contexts.for_prediction(prediction_id).id
-                if self.contexts.for_prediction(prediction_id) is not None
-                else None
-            ),
+            context_id=context.id if context is not None else None,
         )
