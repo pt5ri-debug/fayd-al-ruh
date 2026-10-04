@@ -5,7 +5,7 @@ from typing import Callable
 
 
 @dataclass(frozen=True)
-class ExperimentResult:
+class SandboxResult:
     name: str
     reward: float
     observation: str
@@ -15,16 +15,16 @@ class LearningSandbox:
     """Runs registered pure simulations only; no shell, network, or file access."""
 
     def __init__(self) -> None:
-        self._experiments: dict[str, Callable[[dict[str, float]], ExperimentResult]] = {}
+        self._experiments: dict[str, Callable[[dict[str, float]], SandboxResult]] = {}
 
-    def register(self, name: str, experiment: Callable[[dict[str, float]], ExperimentResult]) -> None:
+    def register(self, name: str, experiment: Callable[[dict[str, float]], SandboxResult]) -> None:
         if not name.strip():
             raise ValueError("Experiment name cannot be empty.")
         if name in self._experiments:
             raise ValueError(f"Experiment '{name}' already exists.")
         self._experiments[name] = experiment
 
-    def run(self, name: str, state: dict[str, float]) -> ExperimentResult:
+    def run(self, name: str, state: dict[str, float]) -> SandboxResult:
         if name not in self._experiments:
             raise KeyError(f"Unknown experiment: {name}")
         if any(not isinstance(value, (int, float)) for value in state.values()):
