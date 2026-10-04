@@ -17,6 +17,7 @@ class ProvenanceStage(str, Enum):
     PREDICTION_ERROR = "prediction_error"
     LEARNING = "learning"
     CAUSAL_LINK = "causal_link"
+    MODEL_PROPOSAL = "model_proposal"
 
 
 def _unique(values: tuple[str, ...] | list[str]) -> tuple[str, ...]:
