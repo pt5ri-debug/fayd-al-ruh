@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from core.causal_chain import CausalChain
+from core.causal_effect import CausalEffect
+from core.causal_explainer import CausalExplainer
 from core.causal_graph import CausalGraph
+from core.counterfactual import Counterfactual
 
 
 class CausalReasoner:
     """Finds directed causal explanations; it never infers reverse causation."""
+
+    def __init__(self) -> None:
+        self.explainer = CausalExplainer()
 
     def explain(self, graph: CausalGraph, cause: str, effect: str, max_depth: int = 4) -> CausalChain | None:
         if max_depth < 1:
@@ -31,3 +37,15 @@ class CausalReasoner:
 
     def effects(self, graph: CausalGraph, cause: str) -> list[str]:
         return [link.effect for link in graph.effects_of(cause)]
+
+    def explain_chain(self, chain: CausalChain) -> str:
+        """Render a human-readable explanation of a discovered causal chain."""
+        return self.explainer.explain_chain(chain)
+
+    def explain_effect(self, effect: CausalEffect) -> str:
+        """Render a human-readable explanation of a measured causal effect."""
+        return self.explainer.explain_effect(effect)
+
+    def explain_counterfactual(self, result: Counterfactual) -> str:
+        """Render a human-readable explanation of a counterfactual simulation."""
+        return self.explainer.explain_counterfactual(result)

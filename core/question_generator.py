@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.information_gap import InformationGap
+from core.inquiry import Inquiry
 from core.question import Question
 
 
@@ -19,3 +20,7 @@ class QuestionGenerator:
             )
             for gap in ranked
         ]
+
+    def open_inquiries(self, gaps: list[InformationGap], limit: int = 5) -> list[Inquiry]:
+        """Wrap generated questions in trackable, answerable inquiries."""
+        return [Inquiry(question) for question in self.generate(gaps, limit=limit)]
