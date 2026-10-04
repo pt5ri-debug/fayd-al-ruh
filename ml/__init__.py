@@ -8,6 +8,7 @@ symbolic substrate:
 - ``models``    : softmax classifiers and a small MLP with backprop, plus an Adam optimiser
 - ``trainer``   : a training loop with metrics, early stopping, and persistence
 - ``learner``   : symbolic reinforcement learning over the sandbox tasks
+- ``interaction_learner`` : the same RL agent, rewarded by observed outcomes
 - ``cognitive_brain`` : a predictive-coding loop wiring the above into one brain
 
 Everything here is deterministic and dependency-light (numpy only), so it runs
@@ -21,5 +22,6 @@ __all__ = [
     "models",
     "trainer",
     "learner",
+    "interaction_learner",
     "cognitive_brain",
 ]
