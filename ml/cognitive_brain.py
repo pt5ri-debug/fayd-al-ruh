@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from core.action import Action
+from core.action_policy import ActionPolicy
 from core.sandbox_environment import SandboxEnvironment, SandboxTask
 from core.state import State
 from ml.dataset import FeatureHasher, ReplayBuffer, Transition
@@ -73,6 +74,9 @@ class CognitiveBrain:
         learning_rate: float = 0.05,
         seed: int = 0,
         memory_capacity: int = 5_000,
+        max_learning_rate: float = 0.1,
+        min_learning_rate: float = 0.005,
+        max_grad_norm: float = 1.0,
     ) -> None:
         self.task = task
         self.success = success
@@ -84,6 +88,9 @@ class CognitiveBrain:
         )
         self.policy = QLearningAgent(feature_size, self.num_actions, seed=seed)
         self.learning_rate = learning_rate
+        self.max_learning_rate = max_learning_rate
+        self.min_learning_rate = min_learning_rate
+        self.max_grad_norm = max_grad_norm
         self._errors: deque[float] = deque(maxlen=50)
 
     # --- perception -----------------------------------------------------
@@ -106,8 +113,12 @@ class CognitiveBrain:
         prediction = self.world_model.forward(inputs)[0]
         error = float(np.mean((prediction - next_features) ** 2))
         grads = self.world_model.backward(inputs, targets)
+        # Clip gradients so a single surprising transition cannot blow up the
+        # world model (predictive coding must stay stable under outlier errors).
+        total_norm = float(np.sqrt(sum(float(np.sum(g * g)) for g in grads)))
+        scale = 1.0 if total_norm <= self.max_grad_norm else self.max_grad_norm / (total_norm + 1e-12)
         for param, grad in zip(self.world_model.parameters(), grads):
-            param -= self.learning_rate * grad
+            param -= self.learning_rate * scale * grad
         self._errors.append(error)
         return error
 
@@ -119,12 +130,14 @@ class CognitiveBrain:
         half = max(1, len(errors) // 2)
         early, late = errors[:half], errors[half:] or errors[-1:]
         trend = float(np.mean(early) - np.mean(late))
-        if trend < 0:
-            # Surprise is rising: increase the rate to adapt faster.
-            self.learning_rate = min(0.5, self.learning_rate * 1.1)
+        if trend >= 0:
+            # Error is falling (or flat): the model is settling, so slow down
+            # for finer adjustments.
+            self.learning_rate = max(self.min_learning_rate, self.learning_rate * 0.95)
         else:
-            # Learning is stable: settle down for finer adjustments.
-            self.learning_rate = max(0.005, self.learning_rate * 0.95)
+            # Error is rising: the model is being surprised, so adapt a little
+            # faster -- but stay bounded so it can never diverge.
+            self.learning_rate = min(self.max_learning_rate, self.learning_rate * 1.1)
         recent = float(np.mean(errors[-5:]))
         confidence = 1.0 / (1.0 + recent)
         return MetacognitiveState(
@@ -140,15 +153,26 @@ class CognitiveBrain:
         return self.policy.act(features, greedy=greedy)
 
     # --- one full episode ----------------------------------------------
-    def run_episode(self, *, train_policy: bool = True, greedy: bool = False) -> tuple[float, bool, int]:
+    def run_episode(
+        self,
+        *,
+        train_policy: bool = True,
+        greedy: bool = False,
+        advisor: ActionPolicy | None = None,
+    ) -> tuple[float, bool, int]:
         environment = SandboxEnvironment(self.task)
         features = self.perceive(environment.state)
         total_reward = 0.0
         achieved = False
         steps = 0
+        action_names = tuple(spec.name for spec in self.task.allowed_actions)
         while True:
             current_tokens = state_tokens(environment.state)
-            action_index = self.act(features, greedy=greedy)
+            if advisor is not None:
+                chosen = advisor.select(environment.state.facts, action_names)
+                action_index = action_names.index(chosen) if chosen in action_names else self.act(features, greedy=greedy)
+            else:
+                action_index = self.act(features, greedy=greedy)
             spec = self.task.allowed_actions[action_index]
             action = Action(
                 spec.name, spec.preconditions, spec.add_effects, spec.remove_effects, spec.cost

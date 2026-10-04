@@ -38,11 +38,28 @@ def _stack_blocks_task() -> SandboxTask:
     )
 
 
+def _light_candle_task() -> SandboxTask:
+    return SandboxTask(
+        name="light-candle",
+        description="Light a candle by first striking a match, then applying it.",
+        allowed_actions=(
+            ActionSpec("strike", frozenset({"match_available"}), frozenset({"match_lit"})),
+            ActionSpec("light", frozenset({"unlit_candle", "match_lit"}),
+                       frozenset({"lit_candle"}), frozenset({"unlit_candle"})),
+        ),
+        initial_facts=frozenset({"unlit_candle", "match_available"}),
+        max_steps=4,
+    )
+
+
 TASKS: tuple[SandboxTask, ...] = (_wet_garden_task(), _stack_blocks_task())
+
+# Tasks the learning agents never train on; used to measure generalisation.
+HELD_OUT_TASKS: tuple[SandboxTask, ...] = (_light_candle_task(),)
 
 
 def task_by_name(name: str) -> SandboxTask:
-    for task in TASKS:
+    for task in (*TASKS, *HELD_OUT_TASKS):
         if task.name == name:
             return task
     raise KeyError(f"Unknown sandbox task: {name}")

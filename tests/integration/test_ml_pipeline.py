@@ -6,10 +6,10 @@ and measurably improves on the project's own safe, replayable tasks.
 
 import pytest
 
-from core.sandbox_tasks import TASKS, task_by_name
+from core.sandbox_tasks import HELD_OUT_TASKS, TASKS, task_by_name
 from ml.cognitive_brain import CognitiveBrain
 from ml.dataset import FeatureHasher, build_classification_dataset, train_val_split
-from ml.learner import evaluate_policy, train_policy
+from ml.learner import QLearningAgent, evaluate_policy, train_policy
 from ml.models import MLP
 from ml.trainer import Trainer
 
@@ -17,9 +17,13 @@ pytestmark = pytest.mark.integration
 
 
 def _success_for(task_name: str):
-    if task_name == "wet-garden":
-        return lambda state: "wet_soil" in state.facts
-    return lambda state: "tower_built" in state.facts
+    facts = {
+        "wet-garden": "wet_soil",
+        "stack-blocks": "tower_built",
+        "light-candle": "lit_candle",
+    }
+    fact = facts[task_name]
+    return lambda state: fact in state.facts
 
 
 def test_learning_improves_policy_on_every_task():
@@ -63,3 +67,33 @@ def test_supervised_classifier_generalises_on_experience():
 
     assert report.final.val_accuracy >= 0.7
     assert report.final.val_loss <= report.epochs[0].val_loss
+
+
+def test_generalisation_on_novel_task_uses_the_same_machinery():
+    """A brand-new task trains with no task-specific tuning and still succeeds."""
+    task = HELD_OUT_TASKS[0]
+    success = _success_for(task.name)
+    hasher = FeatureHasher(64)
+
+    agent, report = train_policy(task, success, episodes=150, hasher=hasher)
+    assert report.success_rate_window == 1.0
+    assert evaluate_policy(task, success, agent, episodes=20, hasher=hasher) == 1.0
+
+    brain = CognitiveBrain(task, success, seed=0)
+    brain_report = brain.learn(episodes=120)
+    assert brain_report.policy_success_rate == 1.0
+    assert brain_report.final_error <= brain_report.initial_error
+
+
+def test_policy_survives_save_and_load(tmp_path):
+    task = task_by_name("wet-garden")
+    success = _success_for("wet-garden")
+    hasher = FeatureHasher(64)
+    agent, _report = train_policy(task, success, episodes=150, hasher=hasher)
+
+    path = agent.save(tmp_path / "policy.npz")
+    restored = QLearningAgent.load(path)
+
+    assert restored.num_actions == agent.num_actions
+    assert restored.num_features == agent.num_features
+    assert evaluate_policy(task, success, restored, episodes=20, hasher=hasher) == 1.0

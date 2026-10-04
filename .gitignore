@@ -29,3 +29,6 @@ env/
 
 # Local environment files
 .env
+
+# Learned ML artifacts (reproducible with `python -m ml --save-dir ml/artifacts`)
+ml/artifacts/

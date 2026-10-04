@@ -9,6 +9,7 @@ environments -- no external tool is touched.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
@@ -157,6 +158,32 @@ class QLearningAgent:
 
     def decay_epsilon(self) -> None:
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+
+    def save(self, path: str | Path) -> Path:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            target,
+            W=self.W,
+            epsilon=np.array(self.epsilon),
+            alpha=np.array(self.alpha),
+            gamma=np.array(self.gamma),
+        )
+        return target
+
+    @classmethod
+    def load(cls, path: str | Path) -> "QLearningAgent":
+        data = np.load(Path(path), allow_pickle=False)
+        weights = data["W"]
+        agent = cls(
+            int(weights.shape[0]),
+            int(weights.shape[1]),
+            alpha=float(data["alpha"]),
+            gamma=float(data["gamma"]),
+            epsilon=float(data["epsilon"]),
+        )
+        agent.W = weights
+        return agent
 
 
 def train_policy(
