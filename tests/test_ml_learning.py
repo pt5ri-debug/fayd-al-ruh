@@ -62,7 +62,7 @@ def test_cognitive_brain_self_tunes_learning_rate():
     brain.learn(episodes=120)
 
     assert brain.learning_rate != initial_rate
-    assert 0.005 <= brain.learning_rate <= 0.5
+    assert brain.min_learning_rate <= brain.learning_rate <= brain.max_learning_rate
 
 
 def test_cognitive_brain_metacognition_tracks_errors():
@@ -73,3 +73,16 @@ def test_cognitive_brain_metacognition_tracks_errors():
 
     assert state.average_error >= 0.0
     assert 0.0 <= state.confidence <= 1.0
+
+
+def test_cognitive_brain_stays_numerically_stable_over_long_training():
+    """Regression: the world model must never diverge, however long it trains."""
+    task = task_by_name("light-candle")
+    success = lambda state: "lit_candle" in state.facts  # noqa: E731
+    brain = CognitiveBrain(task, success, seed=0)
+
+    report = brain.learn(episodes=1500)
+
+    assert all(error < 1e6 for error in report.error_curve)
+    assert report.final_error <= report.initial_error
+    assert brain.min_learning_rate <= brain.learning_rate <= brain.max_learning_rate

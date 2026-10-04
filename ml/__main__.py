@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from core.sandbox_tasks import TASKS
+from core.sandbox_tasks import HELD_OUT_TASKS, TASKS
 from core.state import State
 from ml.cognitive_brain import CognitiveBrain
 from ml.dataset import FeatureHasher, Transition, build_classification_dataset, train_val_split
@@ -21,11 +21,16 @@ from ml.learner import evaluate_policy, train_policy
 from ml.models import MLP, save_model
 from ml.trainer import Trainer
 
+_SUCCESS_FACTS = {
+    "wet-garden": "wet_soil",
+    "stack-blocks": "tower_built",
+    "light-candle": "lit_candle",
+}
+
 
 def _success_for(task_name: str) -> Callable[[State], bool]:
-    if task_name == "wet-garden":
-        return lambda state: "wet_soil" in state.facts
-    return lambda state: "tower_built" in state.facts
+    fact = _SUCCESS_FACTS[task_name]
+    return lambda state: fact in state.facts
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     hasher = FeatureHasher(64)
     policy_summary: dict[str, dict[str, float]] = {}
     brain_summary: dict[str, dict[str, float]] = {}
+    generalisation_summary: dict[str, dict[str, float]] = {}
     experiences: list[Transition] = []
 
     for task in TASKS:
@@ -65,6 +71,25 @@ def main(argv: list[str] | None = None) -> int:
         }
         experiences.extend(brain.memory.items)
 
+        if args.save_dir:
+            args.save_dir.mkdir(parents=True, exist_ok=True)
+            agent.save(args.save_dir / f"policy_{task.name}.npz")
+
+    # Generalisation: train a fresh brain on the novel, held-out task and check
+    # that the same learning machinery works without task-specific tuning.
+    for task in HELD_OUT_TASKS:
+        success = _success_for(task.name)
+        brain = CognitiveBrain(task, success, seed=0)
+        brain_report = brain.learn(episodes=args.episodes)
+        generalisation_summary[task.name] = {
+            "initial_error": brain_report.initial_error,
+            "final_error": brain_report.final_error,
+            "error_improvement": brain_report.error_improvement,
+            "policy_success_rate": brain_report.policy_success_rate,
+        }
+        if args.save_dir:
+            brain.policy.save(args.save_dir / f"policy_{task.name}.npz")
+
     # Supervised classifier trained on the consolidated experience.
     dataset = build_classification_dataset(experiences, hasher)
     train, val = train_val_split(dataset, val_fraction=0.25, seed=1)
@@ -87,7 +112,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(
             json.dumps(
-                {"policies": policy_summary, "brains": brain_summary, "supervised": supervised},
+                {
+                    "policies": policy_summary,
+                    "brains": brain_summary,
+                    "generalisation": generalisation_summary,
+                    "supervised": supervised,
+                },
                 indent=2,
                 ensure_ascii=False,
             )
@@ -105,6 +135,12 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"  {name:14s} error {stats['initial_error']:.4f}->{stats['final_error']:.4f} "
             f"improvement={stats['error_improvement']:+.4f} "
+            f"policy={stats['policy_success_rate']:.2f}"
+        )
+    print("Generalisation (novel held-out tasks):")
+    for name, stats in generalisation_summary.items():
+        print(
+            f"  {name:14s} error {stats['initial_error']:.4f}->{stats['final_error']:.4f} "
             f"policy={stats['policy_success_rate']:.2f}"
         )
     print(
