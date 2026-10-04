@@ -1,0 +1,29 @@
+[build-system]
+requires = []
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fayd-al-ruh"
+version = "2.1.0"
+description = "An evidence-aware symbolic cognitive architecture."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-ra --strict-config --strict-markers --basetemp=.pytest-tmp"
+markers = [
+    "integration: verifies contracts between cognitive layers",
+    "end_to_end: verifies a complete cognitive loop",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["core", "storage", "tests"]
+
+[tool.ruff.lint]
+# Start by blocking correctness errors. Style rules are introduced gradually
+# so the new CI gate can remain green while legacy files are modernised.
+select = ["F"]

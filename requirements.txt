@@ -1,0 +1,8 @@
+# Runtime dependencies
+numpy
+networkx
+pydantic
+requests
+
+# Test dependency
+pytest
