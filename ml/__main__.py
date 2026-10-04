@@ -24,7 +24,10 @@ from ml.trainer import Trainer
 _SUCCESS_FACTS = {
     "wet-garden": "wet_soil",
     "stack-blocks": "tower_built",
+    "plant-seed": "sprout",
+    "boil-water": "tea_ready",
     "light-candle": "lit_candle",
+    "recharge-lamp": "lamp_on",
 }
 
 
