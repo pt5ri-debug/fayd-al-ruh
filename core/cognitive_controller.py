@@ -66,6 +66,7 @@ from core.reasoning_trace import ReasoningTrace
 from core.model_interface import CognitiveModel, ModelRequest, ModelResponse
 from core.safe_learning import LearningSandbox
 from core.cognitive_context import ContextRegistry
+from core.provenance import ProvenanceLedger, ProvenanceRecord, ProvenanceStage
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,7 @@ class CognitiveController:
         self.explanation_engine = ExplanationEngine()
         self.learning_sandbox = LearningSandbox()
         self.contexts = ContextRegistry()
+        self.provenance = ProvenanceLedger()
 
     def reason(
         self,
@@ -233,12 +235,54 @@ class CognitiveController:
         self.state.add_belief(belief)
         cycle = self.learner.learn_from_prediction(belief, prediction_error, action)
         self.contexts.add_learning_target(prediction_error.id, belief.id)
+
+        context = self.contexts.for_prediction(prediction_error.prediction_id)
+        context_id = context.id if context is not None else None
+        self._record_provenance(
+            ProvenanceRecord.from_artifact(
+                prediction_error,
+                ProvenanceStage.PREDICTION_ERROR,
+                source="outcome",
+                context_id=context_id,
+                parent_ids=[prediction_error.prediction_id],
+            )
+        )
+        self._record_provenance(
+            ProvenanceRecord.from_artifact(
+                belief,
+                ProvenanceStage.LEARNING,
+                context_id=context_id,
+                parent_ids=[prediction_error.id],
+                metadata={"action": action} if action is not None else None,
+            )
+        )
         return cycle
 
     def add_causal_link(self, link: CausalLink) -> None:
         """Add an evidenced causal claim and retain its originating contexts."""
         self.causal_graph.add_link(link)
-        self.contexts.add_causal_link(link)
+        contexts = self.contexts.add_causal_link(link)
+        context_id = contexts[0].id if contexts else None
+        self._record_provenance(
+            ProvenanceRecord.from_artifact(
+                link,
+                ProvenanceStage.CAUSAL_LINK,
+                context_id=context_id,
+                evidence_ids=list(link.evidence_ids),
+            )
+        )
+
+    def _record_provenance(self, record: ProvenanceRecord) -> None:
+        """Attach a central provenance record; never overwrite existing data."""
+        self.provenance.record(record)
+
+    def provenance_for(self, entity_id: str) -> ProvenanceRecord | None:
+        """Return the latest provenance record for an entity, if any."""
+        return self.provenance.get(entity_id)
+
+    def provenance_history(self, entity_id: str) -> list[ProvenanceRecord]:
+        """Return the full provenance chain for an entity."""
+        return self.provenance.history(entity_id)
 
     def validate_contexts(self) -> list[str]:
         """Verify that context references still resolve after cross-layer transitions."""
@@ -332,6 +376,7 @@ class CognitiveController:
             self.state,
             self.contexts,
             self.causal_graph,
+            self.provenance,
         )
 
     def restore_snapshot(self, name: str, persistence: Persistence) -> bool:
@@ -344,6 +389,7 @@ class CognitiveController:
         self.state = restored.state
         self.contexts = restored.contexts
         self.causal_graph = restored.causal_graph
+        self.provenance = restored.provenance
         self.loop = CognitiveLoop(self.graph, self.memory, self.state)
         return True
 
@@ -371,6 +417,33 @@ class CognitiveController:
             raise RuntimeError("Cognitive loop produced unregistered evidence.")
         context = self.contexts.start(observation, evidence, belief.id)
 
+        self._record_provenance(
+            ProvenanceRecord.from_artifact(
+                observation,
+                ProvenanceStage.OBSERVATION,
+                context_id=context.id,
+                evidence_ids=[evidence.id],
+            )
+        )
+        self._record_provenance(
+            ProvenanceRecord.from_artifact(
+                evidence,
+                ProvenanceStage.EVIDENCE,
+                context_id=context.id,
+                evidence_ids=[evidence.id],
+                parent_ids=[observation.id],
+            )
+        )
+        self._record_provenance(
+            ProvenanceRecord.from_artifact(
+                belief,
+                ProvenanceStage.BELIEF,
+                context_id=context.id,
+                evidence_ids=[evidence.id],
+                parent_ids=[evidence.id],
+            )
+        )
+
         trace = CognitiveTrace(
             observation_id=observation.id,
         )
@@ -394,6 +467,16 @@ class CognitiveController:
                 prediction.id
             )
             self.contexts.add_prediction(observation.id, prediction.id)
+            self._record_provenance(
+                ProvenanceRecord.from_artifact(
+                    prediction,
+                    ProvenanceStage.PREDICTION,
+                    source=observation.source,
+                    context_id=context.id,
+                    evidence_ids=[evidence.id],
+                    parent_ids=[belief.id],
+                )
+            )
 
         self.state.add_trace(
             trace
