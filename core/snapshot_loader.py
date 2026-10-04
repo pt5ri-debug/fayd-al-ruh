@@ -13,11 +13,15 @@ from core.evidence import Evidence
 from core.knowledge_graph import KnowledgeGraph
 from core.memory import CognitiveMemory
 from core.observation import Observation
+from core.pattern_detector import Pattern
 from core.prediction import Prediction
 from core.prediction_error import PredictionError
 from core.provenance import ProvenanceLedger
 from core.relation import Relation
-from core.snapshot import Snapshot
+from core.snapshot import SNAPSHOT_SCHEMA_VERSION, Snapshot
+from core.snapshot_migrations import migrate_payload
+from core.cognitive_trace import CognitiveTrace
+from core.hypothesis import Hypothesis
 
 
 @dataclass(frozen=True)
@@ -28,29 +32,63 @@ class RestoredSnapshot:
     contexts: ContextRegistry
     causal_graph: CausalGraph
     provenance: ProvenanceLedger
+    version: int = SNAPSHOT_SCHEMA_VERSION
+    migrations_applied: tuple[int, ...] = ()
 
 
 class SnapshotLoader:
-    """Restores data-only snapshots into verified cognitive objects."""
+    """Restores data-only snapshots into verified cognitive objects.
+
+    Loading is a three-stage safe rebuild: (1) validate the record shape,
+    (2) upgrade older payloads through registered migrations, and (3) rebuild
+    every object and check referential integrity before returning. A snapshot
+    that cannot be fully rebuilt is rejected rather than partially loaded.
+    """
 
     def restore(self, record: dict) -> RestoredSnapshot:
+        payload, version = self._read_record(record)
+        payload, migrations_applied = self._upgrade(payload, version)
+        return self._rebuild(payload, migrations_applied)
+
+    def _read_record(self, record: dict) -> tuple[dict, int]:
         payload = record.get("payload")
         checksum = record.get("checksum")
         if not isinstance(payload, dict) or not isinstance(checksum, str):
             raise ValueError("Invalid snapshot record.")
-        snapshot = Snapshot(record.get("name", "restored"), payload, checksum)
+        snapshot = Snapshot(record.get("name", "restored"), payload, checksum, record.get("version", 1))
         if not snapshot.verify():
             raise ValueError("Snapshot checksum verification failed.")
+        return payload, snapshot.version
+
+    def _upgrade(self, payload: dict, version: int) -> tuple[dict, tuple[int, ...]]:
+        applied = tuple(range(version, SNAPSHOT_SCHEMA_VERSION))
+        return migrate_payload(payload, version), applied
+
+    def _rebuild(self, payload: dict, migrations_applied: tuple[int, ...]) -> RestoredSnapshot:
+        self._validate_payload(payload)
         graph = self._restore_graph(payload.get("graph", {}))
         memory = self._restore_memory(payload.get("memory", {}))
         state = self._restore_state(payload.get("state", {}), graph)
         contexts = ContextRegistry.restore(payload.get("contexts", {}))
         causal_graph = self._restore_causal_graph(payload.get("causal_graph", {}))
         provenance = ProvenanceLedger.restore(payload.get("provenance", {}))
-        errors = contexts.validate(graph, state, causal_graph)
+
+        errors = graph.validate()
+        errors += contexts.validate(graph, state, causal_graph)
         if errors:
-            raise ValueError("Invalid restored context: " + "; ".join(errors))
-        return RestoredSnapshot(graph, memory, state, contexts, causal_graph, provenance)
+            raise ValueError("Invalid restored snapshot: " + "; ".join(errors))
+
+        return RestoredSnapshot(
+            graph, memory, state, contexts, causal_graph, provenance,
+            SNAPSHOT_SCHEMA_VERSION, migrations_applied,
+        )
+
+    @staticmethod
+    def _validate_payload(payload: dict) -> None:
+        for section in ("graph", "memory", "state", "contexts", "causal_graph", "provenance"):
+            value = payload.get(section, {})
+            if not isinstance(value, dict):
+                raise ValueError(f"Snapshot section '{section}' must be an object.")
 
     def _restore_causal_graph(self, data: dict) -> CausalGraph:
         graph = CausalGraph()
@@ -102,12 +140,28 @@ class SnapshotLoader:
         state = CognitiveState(cycle_count=data.get("cycle_count", 0))
         for belief in graph.beliefs.values():
             state.add_belief(belief)
+        for item in data.get("patterns", {}).values():
+            state.add_pattern(Pattern(
+                item["key"], item["occurrences"], item["confidence"], item.get("memory_ids", []),
+            ))
+        for item in data.get("hypotheses", {}).values():
+            state.add_hypothesis(Hypothesis(
+                item["statement"], item["confidence"], item["source_pattern"], item["id"],
+                self._time(item["created_at"]),
+            ))
         for item in data.get("predictions", {}).values():
             prediction = Prediction(item["statement"], item["confidence"], item["hypothesis_id"], item["id"], self._time(item["created_at"]), item.get("fulfilled"))
             state.add_prediction(prediction)
         for item in data.get("prediction_errors", []):
             state.add_prediction_error(PredictionError(
                 item["prediction_id"], item["expected_confidence"], item["actual_result"], item["error"], item["id"],
+            ))
+        for item in data.get("traces", {}).values():
+            state.add_trace(CognitiveTrace(
+                item["observation_id"], item["id"], item.get("pattern_keys", []),
+                item.get("hypothesis_ids", []), item.get("prediction_ids", []),
+                item.get("prediction_error_ids", []), item.get("belief_id"),
+                self._time(item["created_at"]),
             ))
         return state
 

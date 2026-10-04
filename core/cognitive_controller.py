@@ -67,6 +67,7 @@ from core.model_interface import CognitiveModel, ModelRequest, ModelResponse
 from core.safe_learning import LearningSandbox
 from core.cognitive_context import ContextRegistry
 from core.provenance import ProvenanceLedger, ProvenanceRecord, ProvenanceStage
+from core.retention_policy import RetentionPolicy
 
 
 @dataclass(frozen=True)
@@ -224,6 +225,10 @@ class CognitiveController:
     def apply_memory_decay(self, rate: float = .01):
         """Apply the forgetting curve to stored experiences."""
         return self.memory.apply_decay(rate)
+
+    def prune_memory(self, policy: RetentionPolicy | None = None):
+        """Apply a long-term retention policy and evict items that fall outside it."""
+        return self.memory.apply_retention(policy or RetentionPolicy())
 
     def learn_from_prediction_error(
         self,

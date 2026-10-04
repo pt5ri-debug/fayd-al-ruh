@@ -239,6 +239,12 @@ class CognitiveMemory:
         """Apply the forgetting curve to every stored episode."""
         return [self.decay.apply(episode, rate) for episode in self.episodic_memory.episodes.values()]
 
+    def apply_retention(self, policy):
+        """Evict long-term items that fall outside a retention policy."""
+        from core.retention_policy import prune
+
+        return prune(self, policy)
+
     @staticmethod
     def _text_for(content: Any) -> str:
         return str(getattr(content, "content", content))
