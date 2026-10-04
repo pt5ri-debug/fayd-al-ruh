@@ -1,0 +1,124 @@
+{
+  "calibration": [
+    {
+      "count": 2,
+      "empirical_accuracy": 0.0,
+      "lower": 0.1,
+      "mean_confidence": 0.125,
+      "upper": 0.2
+    },
+    {
+      "count": 2,
+      "empirical_accuracy": 0.075,
+      "lower": 0.2,
+      "mean_confidence": 0.238889,
+      "upper": 0.3
+    },
+    {
+      "count": 1,
+      "empirical_accuracy": 0.85,
+      "lower": 0.7,
+      "mean_confidence": 0.72973,
+      "upper": 0.8
+    },
+    {
+      "count": 1,
+      "empirical_accuracy": 1.0,
+      "lower": 0.8,
+      "mean_confidence": 0.85,
+      "upper": 0.9
+    },
+    {
+      "count": 1,
+      "empirical_accuracy": 1.0,
+      "lower": 0.9,
+      "mean_confidence": 0.9,
+      "upper": 1.0
+    }
+  ],
+  "domain_scores": {
+    "causal": 1.0,
+    "memory": 1.0,
+    "planning": 1.0,
+    "reasoning": 1.0,
+    "uncertainty": 0.864565
+  },
+  "metrics": {
+    "brier_score": 0.019399,
+    "calibration_error": 0.135435,
+    "causal_chain_accuracy": 1.0,
+    "causal_explanation_quality": 1.0,
+    "contradiction_rate": 1.0,
+    "decision_explanation_quality": 1.0,
+    "overall": 0.980652,
+    "planning_success_rate": 1.0,
+    "prediction_accuracy": 1.0,
+    "reliability": 0.018848,
+    "resolution": 0.206862,
+    "retrieval_accuracy": 1.0,
+    "retrieval_mrr": 1.0
+  },
+  "scenarios": [
+    {
+      "checks": {
+        "retrieval_accuracy": 1.0,
+        "retrieval_mrr": 1.0
+      },
+      "domain": "memory",
+      "id": "memory-recall",
+      "passed": true
+    },
+    {
+      "checks": {
+        "brier_score": 0.021,
+        "calibration_error": 0.14,
+        "prediction_accuracy": 1.0
+      },
+      "domain": "reasoning",
+      "id": "reasoning-prediction",
+      "passed": true
+    },
+    {
+      "checks": {
+        "causal_chain_accuracy": 1.0,
+        "causal_explanation_quality": 1.0
+      },
+      "domain": "causal",
+      "id": "causal-chain",
+      "passed": true
+    },
+    {
+      "checks": {
+        "planning_success_rate": 1.0
+      },
+      "domain": "planning",
+      "id": "planning-reach-goal",
+      "passed": true
+    },
+    {
+      "checks": {
+        "uncertainty_error": 0.124024
+      },
+      "domain": "uncertainty",
+      "id": "uncertainty-calibration",
+      "passed": true
+    },
+    {
+      "checks": {
+        "consistency_match": 1.0
+      },
+      "domain": "reasoning",
+      "id": "consistency-contradiction",
+      "passed": true
+    },
+    {
+      "checks": {
+        "decision_explanation_quality": 1.0
+      },
+      "domain": "planning",
+      "id": "decision-explanation",
+      "passed": true
+    }
+  ],
+  "version": 1
+}

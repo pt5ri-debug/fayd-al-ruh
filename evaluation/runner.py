@@ -1,0 +1,355 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from core.action import Action
+from core.belief import Belief
+from core.belief_revision import BeliefRevisionEngine
+from core.causal_link import CausalLink
+from core.cognitive_controller import CognitiveController
+from core.evidence import Evidence
+from core.goal import Goal
+from core.observation import Observation
+from core.state import State
+from evaluation.metrics import (
+    CalibrationBin,
+    brier_summary,
+    calibration_bins,
+    clamp,
+    expected_calibration_error,
+    mean,
+)
+from evaluation.scenarios import (
+    Domain,
+    Scenario,
+    SCENARIOS,
+    DecisionActionSpec,
+)
+
+
+@dataclass(frozen=True)
+class ScenarioResult:
+    scenario_id: str
+    domain: str
+    passed: bool
+    checks: dict[str, float] = field(default_factory=dict)
+    details: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EvaluationMetrics:
+    # Prediction quality
+    prediction_accuracy: float
+    brier_score: float
+    calibration_error: float
+    reliability: float
+    resolution: float
+    # Consistency
+    contradiction_rate: float
+    # Retrieval
+    retrieval_accuracy: float
+    retrieval_mrr: float
+    # Planning
+    planning_success_rate: float
+    # Explanation
+    decision_explanation_quality: float
+    # Causal
+    causal_chain_accuracy: float
+    causal_explanation_quality: float
+    # Aggregate
+    overall: float
+
+
+@dataclass(frozen=True)
+class EvaluationReport:
+    metrics: EvaluationMetrics
+    scenarios: tuple[ScenarioResult, ...]
+    domain_scores: dict[str, float]
+    calibration: tuple[CalibrationBin, ...] = ()
+
+
+def _actions(specs: tuple[DecisionActionSpec, ...]) -> list[Action]:
+    return [
+        Action(spec.name, spec.preconditions, spec.add_effects, spec.remove_effects, spec.cost)
+        for spec in specs
+    ]
+
+
+def _run_memory(scenario: Scenario) -> ScenarioResult:
+    controller = CognitiveController()
+    for index, spec in enumerate(scenario.observations):
+        controller.memory.store(
+            f"{scenario.id}-obs-{index}",
+            "observation",
+            Observation(spec.content, spec.source, spec.confidence),
+            importance=spec.confidence,
+        )
+
+    hits = 0
+    reciprocal_ranks: list[float] = []
+    for expectation in scenario.retrieval:
+        recalls = controller.memory.recall(
+            expectation.query, item_types=("observation",), limit=5
+        )
+        texts = [str(getattr(recall.item.content, "content", recall.item.content)) for recall in recalls]
+        rank = texts.index(expectation.expected_top) + 1 if expectation.expected_top in texts else 0
+        if rank == 1:
+            hits += 1
+        reciprocal_ranks.append(1.0 / rank if rank else 0.0)
+
+    total = len(scenario.retrieval)
+    accuracy = hits / total if total else 0.0
+    mrr = mean(reciprocal_ranks)
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=accuracy == 1.0,
+        checks={"retrieval_accuracy": round(accuracy, 6), "retrieval_mrr": round(mrr, 6)},
+        details={"expected": str(total), "top1_hits": str(hits)},
+    )
+
+
+def _run_consistency(scenario: Scenario) -> ScenarioResult:
+    controller = CognitiveController()
+    for spec in scenario.beliefs:
+        controller.state.add_belief(Belief(spec.statement, spec.confidence))
+    report = controller.check_consistency()
+    detected = len(report.conflicts)
+    matched = 1.0 if detected == scenario.expected_conflicts else 0.0
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=matched == 1.0,
+        checks={"consistency_match": matched},
+        details={"detected": str(detected), "expected": str(scenario.expected_conflicts)},
+    )
+
+
+def _run_causal(scenario: Scenario) -> ScenarioResult:
+    controller = CognitiveController()
+    chain_hits = 0
+    explanation_scores: list[float] = []
+
+    for spec in scenario.causal:
+        controller.add_causal_link(CausalLink(spec.cause, spec.effect, spec.confidence))
+
+    for spec in scenario.causal:
+        chain = controller.explain_cause(spec.cause, spec.effect)
+        if chain is not None and chain.effect == spec.effect and chain.cause == spec.cause:
+            chain_hits += 1
+            explanation_scores.append(1.0 if chain.confidence > 0 else 0.0)
+        else:
+            explanation_scores.append(0.0)
+
+    total = len(scenario.causal)
+    accuracy = chain_hits / total if total else 0.0
+    quality = mean(explanation_scores)
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=accuracy == 1.0,
+        checks={
+            "causal_chain_accuracy": round(accuracy, 6),
+            "causal_explanation_quality": round(quality, 6),
+        },
+        details={"chains_found": str(chain_hits), "expected": str(total)},
+    )
+
+
+def _run_planning(scenario: Scenario) -> ScenarioResult:
+    controller = CognitiveController()
+    successes = 0
+    for spec in scenario.plans:
+        goal = Goal(spec.goal, spec.desired_facts)
+        plan = controller.planner.create_plan(
+            State(spec.initial_facts), goal, _actions(spec.actions), max_depth=spec.max_depth
+        )
+        if plan is not None and plan.predicted_final_state.satisfies(spec.desired_facts):
+            successes += 1
+    total = len(scenario.plans)
+    rate = successes / total if total else 0.0
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=rate == 1.0,
+        checks={"planning_success_rate": round(rate, 6)},
+        details={"plans_solved": str(successes), "expected": str(total)},
+    )
+
+
+def _run_decisions(scenario: Scenario) -> ScenarioResult:
+    controller = CognitiveController()
+    scores: list[float] = []
+    for spec in scenario.decisions:
+        state = State(spec.initial_facts)
+        goal = Goal(spec.goal, spec.desired_facts)
+        trace = controller.decide(state, goal, _actions(spec.actions))
+        selected_correct = trace.selected is not None and trace.selected.action.name == spec.expected_selected
+        explanation = controller.explain(spec.goal, decision_trace=trace)
+        explained = bool(explanation.decision) and spec.expected_selected in " ".join(explanation.decision)
+        scores.append(0.5 * float(selected_correct) + 0.5 * float(explained))
+    quality = mean(scores)
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=quality == 1.0,
+        checks={"decision_explanation_quality": round(quality, 6)},
+        details={"decisions": str(len(scenario.decisions))},
+    )
+
+
+def _run_uncertainty(scenario: Scenario) -> ScenarioResult:
+    engine = BeliefRevisionEngine()
+    errors: list[float] = []
+    for spec in scenario.uncertainties:
+        belief = Belief(spec.statement, spec.prior_confidence)
+        evidence_items = [
+            Evidence(item.content, item.source, item.supports, item.confidence)
+            for item in spec.evidence
+        ]
+        revision = engine.revise(belief, evidence_items)
+        errors.append(abs(revision.revised.confidence - spec.true_probability))
+    calibration_error = mean(errors)
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=calibration_error <= 0.35,
+        checks={"uncertainty_error": round(calibration_error, 6)},
+        details={"cases": str(len(scenario.uncertainties))},
+    )
+
+
+def _run_reasoning(scenario: Scenario) -> ScenarioResult:
+    forecasts = [
+        (spec.confidence, 1.0 if spec.outcome >= 0.5 else 0.0)
+        for spec in scenario.predictions
+    ]
+    summary = brier_summary(forecasts)
+    calibration_error = expected_calibration_error(forecasts)
+    hits = sum(
+        (spec.confidence >= 0.5) == (spec.outcome >= 0.5)
+        for spec in scenario.predictions
+    )
+    accuracy = hits / len(scenario.predictions) if scenario.predictions else 0.0
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=calibration_error <= 0.25,
+        checks={
+            "prediction_accuracy": round(accuracy, 6),
+            "brier_score": summary.brier,
+            "calibration_error": calibration_error,
+        },
+        details={"forecasts": str(summary.count)},
+    )
+
+
+_RUNNERS = {
+    Domain.MEMORY: _run_memory,
+    Domain.REASONING: _run_reasoning,
+    Domain.CAUSAL: _run_causal,
+    Domain.PLANNING: _run_planning,
+    Domain.UNCERTAINTY: _run_uncertainty,
+}
+
+
+def run_scenario(scenario: Scenario) -> ScenarioResult:
+    if scenario.decisions:
+        return _run_decisions(scenario)
+    if scenario.expected_conflicts or (scenario.beliefs and not scenario.observations and not scenario.predictions):
+        return _run_consistency(scenario)
+    return _RUNNERS[scenario.domain](scenario)
+
+
+def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
+    results = tuple(run_scenario(scenario) for scenario in scenarios)
+
+    # Prediction forecasts: explicit reasoning predictions plus uncertainty revisions.
+    reasoning_forecasts: list[tuple[float, float]] = []
+    uncertainty_forecasts: list[tuple[float, float]] = []
+    for scenario in scenarios:
+        for prediction in scenario.predictions:
+            reasoning_forecasts.append((prediction.confidence, 1.0 if prediction.outcome >= 0.5 else 0.0))
+        if scenario.uncertainties:
+            engine = BeliefRevisionEngine()
+            for uncertainty in scenario.uncertainties:
+                belief = Belief(uncertainty.statement, uncertainty.prior_confidence)
+                evidence_items = [
+                    Evidence(item.content, item.source, item.supports, item.confidence)
+                    for item in uncertainty.evidence
+                ]
+                revision = engine.revise(belief, evidence_items)
+                uncertainty_forecasts.append((revision.revised.confidence, uncertainty.true_probability))
+
+    all_forecasts = reasoning_forecasts + uncertainty_forecasts
+    summary = brier_summary(all_forecasts)
+    calibration_error = expected_calibration_error(all_forecasts)
+
+    accuracy = (
+        sum((confidence >= 0.5) == (outcome >= 0.5) for confidence, outcome in all_forecasts) / len(all_forecasts)
+        if all_forecasts
+        else 0.0
+    )
+
+    def domain_metric(domain: Domain, key: str) -> float:
+        values = [
+            result.checks[key]
+            for result in results
+            if result.domain == domain.value and key in result.checks
+        ]
+        return mean(values)
+
+    retrieval_accuracy = domain_metric(Domain.MEMORY, "retrieval_accuracy")
+    retrieval_mrr = domain_metric(Domain.MEMORY, "retrieval_mrr")
+    planning_success = domain_metric(Domain.PLANNING, "planning_success_rate")
+    decision_quality = domain_metric(Domain.PLANNING, "decision_explanation_quality")
+    causal_accuracy = domain_metric(Domain.CAUSAL, "causal_chain_accuracy")
+    causal_quality = domain_metric(Domain.CAUSAL, "causal_explanation_quality")
+    consistency_values = [
+        result.checks["consistency_match"]
+        for result in results
+        if "consistency_match" in result.checks
+    ]
+    contradiction_rate = mean(consistency_values)
+
+    calibrated = clamp(1.0 - calibration_error)
+    overall = mean([
+        accuracy,
+        calibrated,
+        contradiction_rate,
+        retrieval_accuracy,
+        planning_success,
+        decision_quality,
+        causal_accuracy,
+    ])
+
+    metrics = EvaluationMetrics(
+        prediction_accuracy=round(accuracy, 6),
+        brier_score=summary.brier,
+        calibration_error=calibration_error,
+        reliability=summary.reliability,
+        resolution=summary.resolution,
+        contradiction_rate=round(contradiction_rate, 6),
+        retrieval_accuracy=round(retrieval_accuracy, 6),
+        retrieval_mrr=round(retrieval_mrr, 6),
+        planning_success_rate=round(planning_success, 6),
+        decision_explanation_quality=round(decision_quality, 6),
+        causal_chain_accuracy=round(causal_accuracy, 6),
+        causal_explanation_quality=round(causal_quality, 6),
+        overall=round(overall, 6),
+    )
+
+    domain_scores = {
+        Domain.MEMORY.value: round(retrieval_accuracy, 6),
+        Domain.REASONING.value: round(accuracy, 6),
+        Domain.CAUSAL.value: round(causal_accuracy, 6),
+        Domain.PLANNING.value: round(planning_success, 6),
+        Domain.UNCERTAINTY.value: round(calibrated, 6),
+    }
+
+    return EvaluationReport(
+        metrics=metrics,
+        scenarios=results,
+        domain_scores=domain_scores,
+        calibration=tuple(calibration_bins(all_forecasts)),
+    )
