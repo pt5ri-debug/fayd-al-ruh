@@ -6,9 +6,13 @@ from core.temporal_event import TemporalEvent
 from core.temporal_pattern import TemporalPattern
 from core.temporal_relation import TemporalRelation
 from core.time_prediction import TimePrediction
+from core.timeline import Timeline
 
 
 class TemporalReasoner:
+    def __init__(self) -> None:
+        self.timeline = Timeline()
+
     def relate(self, first: TemporalEvent, second: TemporalEvent) -> TemporalRelation:
         if first.start == second.start and first.finish == second.finish:
             return TemporalRelation.SIMULTANEOUS

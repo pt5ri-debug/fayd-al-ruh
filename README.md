@@ -1,74 +1,62 @@
-اسم المشروع:
-Fayd Al-Ruh
+# Fayd Al-Ruh
 
-Fayd Al-Ruh v2.0
-Knowledge Graph 2.0
+مشروع Fayd Al-Ruh هو **معمارية معرفية رمزية واعية بالأدلة** (evidence-aware symbolic
+cognitive architecture). يحوّل الرسم المعرفي من مخزن للكيانات والعلاقات إلى نموذج
+معرفي قابل للتفسير والتطور: كل معرفة تحمل دليلها، ودرجة الثقة، ومصدرها، وتاريخها،
+وحالتها (مؤقتة أم مستقرة).
 
-هدف الإصدار:
+> المشروع لا يدّعي وعياً أو ذكاءً بشرياً عاماً. هو طبقات عملية قابلة للتطوير،
+> وكل استنتاج فيه قابل للتفسير والمراجعة.
 
-تحويل الـ Knowledge Graph من مخزن للكيانات والعلاقات إلى نموذج معرفي قابل للتفسير والتطور.
+## المبادئ الأساسية
 
-سنضيف إلى كل معرفة:
+لكل اعتقاد في النظام:
 
-ماذا أعرف؟
-↓
-لماذا أعتقد ذلك؟
-↓
-متى عرفته؟
-↓
-ما درجة ثقتي؟
-↓
-ما الأدلة؟
-↓
-هل توجد أدلة تعارضه؟
-↓
-هل المعرفة مؤقتة أم مستقرة؟
-1. البنية الجديدة
+- ماذا أعرف؟ — `core/belief.py`
+- لماذا أعتقد ذلك؟ — `core/evidence.py`, `core/evidence_processor.py`
+- متى عرفته ومن أين؟ — `core/cognitive_context.py`
+- ما درجة ثقتي؟ — `core/confidence_model.py`, `core/uncertainty.py`
+- هل توجد أدلة تعارضه؟ — `core/contradiction_detector.py`, `core/belief_conflict.py`
+- هل المعرفة مؤقتة أم مستقرة؟ — `core/belief.py` (`BeliefStatus`)
 
-سنقسمها إلى:
+## البنية
 
-core/
-│
-├── entity.py
-├── relation.py
-├── knowledge_graph.py
-│
-├── evidence.py
-├── belief.py
-└── provenance.py
+```
+core/        النواة المعرفية: الاستدلال، السببية، الذاكرة، التعلم، التخطيط، التفسير
+storage/     محوّلات التخزين (JSON وSQLite وGraph)
+ai/          عميل Ollama محلي اختياري
+tests/       اختبارات العقود والتكامل والدورات الكاملة
+main.py      عرض محلي آمن لدورة معرفية كاملة
+```
 
-وأهم إضافة في v2.0 هي:
+## التشغيل
 
-Evidence
+```bash
+pip install -r requirements.txt
+python main.py
+```
 
-الدليل.
+## الاختبارات
 
-Belief
+```bash
+python -m pytest -q
+```
 
-الاعتقاد الناتج من الأدلة.
+## ربط نموذج لغوي حقيقي
 
-Provenance
+النموذج يُمرَّر من التطبيق ولا تُحفظ مفاتيح API داخل المشروع:
 
-تاريخ ومصدر وكيفية تكوين المعرفة.
+```python
+from core.model_interface import CallableModel
 
-2. العلاقة في v2.0
+model = CallableModel("my-model", lambda request: client.generate(request))
+response = controller.reason(model, request)
+```
 
-في الإصدار الأول كانت العلاقة:
+الغلاف يعيد نصاً فقط؛ أما الأدوات والإجراءات الخارجية فتبقى تحت تحكم التطبيق والمستخدم.
 
-Robot → SEES → Ball
+## الحالة
 
-لكن الإصدار 2.0 سيجعلها:
-
-Robot
-   │
-   │ SEES
-   ▼
-Ball
-
-Confidence: 0.94
-Evidence: EVID-001
-Created: ...
-Source: sensory_observation
-Status: active
-
-وهذا فارق جوهري.
+- الإصدار: 2.1.0
+- بايثون: 3.12 فأحدث
+- الترخيص: MIT — راجع `LICENSE.txt`

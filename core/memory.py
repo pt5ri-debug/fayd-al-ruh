@@ -9,6 +9,8 @@ from core.semantic_memory import SemanticMemoryIndex
 from core.episodic_memory import EpisodicMemory
 from core.memory_associator import MemoryAssociator
 from core.memory_consolidator import MemoryConsolidator
+from core.memory_decay import MemoryDecay
+from core.memory_retriever import MemoryRetriever
 from core.procedural_memory import ProceduralMemory
 from core.working_memory import WorkingMemory
 
@@ -60,6 +62,8 @@ class CognitiveMemory:
         self.procedural_memory = ProceduralMemory()
         self.associator = MemoryAssociator()
         self.consolidator = MemoryConsolidator()
+        self.retriever = MemoryRetriever()
+        self.decay = MemoryDecay()
 
     def store(
         self,
@@ -220,6 +224,20 @@ class CognitiveMemory:
             recall.item.access_count += 1
 
         return selected
+
+    def recall_episodes(self, query: str, limit: int = 5):
+        """Retrieve episodic experiences through the semantic retriever."""
+        return self.retriever.retrieve(
+            query,
+            self.episodic_memory,
+            self.semantic_index,
+            self.associator,
+            limit=limit,
+        )
+
+    def apply_decay(self, rate: float = .01):
+        """Apply the forgetting curve to every stored episode."""
+        return [self.decay.apply(episode, rate) for episode in self.episodic_memory.episodes.values()]
 
     @staticmethod
     def _text_for(content: Any) -> str:

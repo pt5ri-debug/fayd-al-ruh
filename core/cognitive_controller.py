@@ -212,6 +212,19 @@ class CognitiveController:
         gaps = self.curiosity.discover(self.state.beliefs.values())
         return self.question_generator.generate(gaps, limit=limit)
 
+    def open_inquiries(self, limit: int = 5):
+        """Turn current information gaps into trackable, answerable inquiries."""
+        gaps = self.curiosity.discover(self.state.beliefs.values())
+        return self.question_generator.open_inquiries(gaps, limit=limit)
+
+    def recall_episodes(self, query: str, limit: int = 5):
+        """Retrieve past experiences through semantic relevance and association."""
+        return self.memory.recall_episodes(query, limit=limit)
+
+    def apply_memory_decay(self, rate: float = .01):
+        """Apply the forgetting curve to stored experiences."""
+        return self.memory.apply_decay(rate)
+
     def learn_from_prediction_error(
         self,
         belief: Belief,
