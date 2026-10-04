@@ -1,0 +1,9 @@
+from __future__ import annotations
+
+from typing import Protocol, Any
+
+
+class Persistence(Protocol):
+    def save(self, namespace: str, key: str, value: Any) -> None: ...
+    def load(self, namespace: str, key: str) -> Any | None: ...
+    def list_keys(self, namespace: str) -> list[str]: ...
