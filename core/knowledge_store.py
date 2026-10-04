@@ -45,6 +45,7 @@ class KnowledgeStore:
             "name": name,
             "payload": snapshot.payload,
             "checksum": snapshot.checksum,
+            "version": snapshot.version,
             "created_at": snapshot.created_at.isoformat(),
         })
         return snapshot
