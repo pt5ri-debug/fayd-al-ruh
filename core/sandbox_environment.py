@@ -94,6 +94,10 @@ class SandboxEnvironment:
     def terminated(self) -> str:
         return self._terminated
 
+    @property
+    def step_count(self) -> int:
+        return len(self._steps)
+
     def _close(self, reason: str) -> None:
         if self._terminated == "running":
             self._terminated = reason

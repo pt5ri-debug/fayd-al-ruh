@@ -1,5 +1,6 @@
 # Runtime dependencies
 requests==2.34.2
+numpy>=2.0
 
 # Test and quality dependencies
 pytest==9.1.1

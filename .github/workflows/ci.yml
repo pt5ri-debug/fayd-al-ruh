@@ -37,3 +37,6 @@ jobs:
 
       - name: Evaluate against baseline (regression gate)
         run: python -m evaluation
+
+      - name: Train the ML pipeline (smoke check)
+        run: python -m ml --episodes 60 --json > /dev/null
