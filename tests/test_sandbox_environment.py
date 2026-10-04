@@ -58,6 +58,72 @@ def test_sandbox_exports_replayable_trace():
     assert replayed.final_state.facts == environment.state.facts
 
 
+_NEW_TASK_SOLUTIONS = {
+    "plant-seed": (
+        "sprout",
+        [
+            Action("till", frozenset({"hard_soil"}), frozenset({"tilled_soil"}),
+                   frozenset({"hard_soil"})),
+            Action("plant", frozenset({"tilled_soil", "seed_available"}),
+                   frozenset({"seed_planted"}), frozenset({"seed_available"})),
+            Action("water", frozenset({"seed_planted"}), frozenset({"seed_watered"})),
+            Action("wait", frozenset({"seed_watered"}), frozenset({"sprout"}),
+                   frozenset({"seed_watered"})),
+        ],
+    ),
+    "boil-water": (
+        "tea_ready",
+        [
+            Action("fill", frozenset({"empty_pot", "water_tap"}), frozenset({"pot_filled"}),
+                   frozenset({"empty_pot"})),
+            Action("heat", frozenset({"pot_filled", "stove_on"}),
+                   frozenset({"water_boiling"}), frozenset({"pot_filled"})),
+            Action("steep", frozenset({"water_boiling", "tea_available"}),
+                   frozenset({"tea_ready"})),
+        ],
+    ),
+    "recharge-lamp": (
+        "lamp_on",
+        [
+            Action("open", frozenset({"panel_closed"}), frozenset({"panel_open"}),
+                   frozenset({"panel_closed"})),
+            Action("swap", frozenset({"panel_open", "spare_cell"}),
+                   frozenset({"cell_replaced"}), frozenset({"spare_cell"})),
+            Action("switch", frozenset({"cell_replaced"}), frozenset({"lamp_on"}),
+                   frozenset({"cell_replaced"})),
+        ],
+    ),
+}
+
+
+@pytest.mark.parametrize("task_name", sorted(_NEW_TASK_SOLUTIONS))
+def test_new_tasks_have_a_valid_solution_path(task_name):
+    goal_fact, plan = _NEW_TASK_SOLUTIONS[task_name]
+    task = task_by_name(task_name)
+    environment = SandboxEnvironment(task)
+
+    result = environment.run(plan, lambda state: goal_fact in state.facts)
+
+    assert result.success
+    assert result.terminated == "success"
+    assert result.violations == ()
+    assert goal_fact in result.final_state.facts
+    assert len(result.steps) <= task.max_steps
+
+
+@pytest.mark.parametrize("task_name", sorted(_NEW_TASK_SOLUTIONS))
+def test_new_tasks_reject_actions_outside_allow_list(task_name):
+    task = task_by_name(task_name)
+    environment = SandboxEnvironment(task)
+    intruder = Action("detonate", add_effects=frozenset({"sprout", "tea_ready", "lamp_on"}))
+
+    result = environment.run([intruder], lambda state: False)
+
+    assert not result.success
+    assert result.accepted_steps == 0
+    assert "not allowed" in result.violations[0]
+
+
 def test_task_rejects_duplicate_action_names():
     from core.sandbox_environment import SandboxTask
     from core.symbolic_simulation import ActionSpec

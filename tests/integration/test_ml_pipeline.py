@@ -20,7 +20,10 @@ def _success_for(task_name: str):
     facts = {
         "wet-garden": "wet_soil",
         "stack-blocks": "tower_built",
+        "plant-seed": "sprout",
+        "boil-water": "tea_ready",
         "light-candle": "lit_candle",
+        "recharge-lamp": "lamp_on",
     }
     fact = facts[task_name]
     return lambda state: fact in state.facts
@@ -70,19 +73,20 @@ def test_supervised_classifier_generalises_on_experience():
 
 
 def test_generalisation_on_novel_task_uses_the_same_machinery():
-    """A brand-new task trains with no task-specific tuning and still succeeds."""
-    task = HELD_OUT_TASKS[0]
-    success = _success_for(task.name)
+    """Brand-new tasks train with no task-specific tuning and still succeed."""
     hasher = FeatureHasher(64)
 
-    agent, report = train_policy(task, success, episodes=150, hasher=hasher)
-    assert report.success_rate_window == 1.0
-    assert evaluate_policy(task, success, agent, episodes=20, hasher=hasher) == 1.0
+    for task in HELD_OUT_TASKS:
+        success = _success_for(task.name)
 
-    brain = CognitiveBrain(task, success, seed=0)
-    brain_report = brain.learn(episodes=120)
-    assert brain_report.policy_success_rate == 1.0
-    assert brain_report.final_error <= brain_report.initial_error
+        agent, report = train_policy(task, success, episodes=200, hasher=hasher)
+        assert report.success_rate_window == 1.0
+        assert evaluate_policy(task, success, agent, episodes=20, hasher=hasher) == 1.0
+
+        brain = CognitiveBrain(task, success, seed=0)
+        brain_report = brain.learn(episodes=150)
+        assert brain_report.policy_success_rate == 1.0
+        assert brain_report.final_error <= brain_report.initial_error
 
 
 def test_policy_survives_save_and_load(tmp_path):
