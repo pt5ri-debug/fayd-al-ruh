@@ -1,3 +1,5 @@
+import numpy as np
+
 from ml.cognitive_brain import CognitiveBrain
 from ml.dataset import FeatureHasher
 from ml.learner import QLearningAgent, evaluate_policy, train_policy
@@ -86,3 +88,65 @@ def test_cognitive_brain_stays_numerically_stable_over_long_training():
     assert all(error < 1e6 for error in report.error_curve)
     assert report.final_error <= report.initial_error
     assert brain.min_learning_rate <= brain.learning_rate <= brain.max_learning_rate
+
+
+def test_replay_buffer_actually_shapes_the_world_model():
+    """Replay must change the weights, not just log experience."""
+    task = task_by_name("wet-garden")
+    brain = CognitiveBrain(task, _wet_success, seed=0, replay_batch_size=16)
+    brain.run_episode()
+    before = brain.world_model.W.copy()
+
+    assert len(brain.memory) > 0
+    error = brain.replay()
+
+    assert error >= 0.0
+    assert not np.allclose(before, brain.world_model.W)
+
+
+def test_replay_is_a_noop_when_disabled():
+    task = task_by_name("wet-garden")
+    brain = CognitiveBrain(task, _wet_success, seed=0, replay_batch_size=0)
+    brain.run_episode()
+    before = brain.world_model.W.copy()
+
+    assert brain.replay() == 0.0
+    assert np.allclose(before, brain.world_model.W)
+
+
+def test_brain_persists_and_continues_learning(tmp_path):
+    task = task_by_name("wet-garden")
+    brain = CognitiveBrain(task, _wet_success, seed=0, replay_batch_size=8)
+    brain.learn(episodes=30)
+
+    brain.save(tmp_path)
+    restored = CognitiveBrain.load(tmp_path, task, _wet_success)
+
+    assert restored.episodes_trained == brain.episodes_trained
+    assert len(restored.memory) == len(brain.memory)
+    assert np.allclose(restored.world_model.W, brain.world_model.W)
+
+    restored.learn(episodes=20)
+    assert restored.episodes_trained == brain.episodes_trained + 20
+
+
+def test_replay_speeds_up_world_model_convergence():
+    """Consolidating memory should reach a low error in fewer episodes."""
+    task = task_by_name("wet-garden")
+
+    def episodes_to(threshold: float, replay: int, seeds=(0, 1, 2)) -> float:
+        reached = []
+        for seed in seeds:
+            brain = CognitiveBrain(task, _wet_success, seed=seed, replay_batch_size=replay)
+            episode = 120
+            for index in range(1, 121):
+                brain.run_episode()
+                brain.episodes_trained += 1
+                if brain.reflect().recent_error < threshold:
+                    episode = index
+                    break
+            reached.append(episode)
+        return sum(reached) / len(reached)
+
+    threshold = 0.001
+    assert episodes_to(threshold, replay=32) < episodes_to(threshold, replay=0)

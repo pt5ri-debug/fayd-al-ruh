@@ -67,3 +67,27 @@ def test_train_val_split_partitions_dataset():
 
     assert len(train) + len(val) == len(dataset)
     assert len(val) == 5
+
+
+def test_replay_buffer_sample_draws_from_memory():
+    import random
+
+    buffer = ReplayBuffer(capacity=10)
+    for index in range(5):
+        buffer.add(Transition(("a",), index, 0.0, ("b",), False))
+
+    batch = buffer.sample(8, rng=random.Random(0))
+
+    assert len(batch) == 8
+    assert all(isinstance(item, Transition) for item in batch)
+
+
+def test_replay_buffer_sample_handles_empty_and_invalid():
+    import pytest
+
+    buffer = ReplayBuffer(capacity=10)
+    assert buffer.sample(4) == []
+
+    buffer.add(Transition(("a",), 0, 0.0, ("b",), False))
+    with pytest.raises(ValueError):
+        buffer.sample(0)

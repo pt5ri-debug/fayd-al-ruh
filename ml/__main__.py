@@ -37,8 +37,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the ML learning pipeline.")
     parser.add_argument("--episodes", type=int, default=300, help="brain training episodes")
     parser.add_argument("--save-dir", type=Path, default=None, help="directory for artifacts")
+    parser.add_argument(
+        "--replay-batch",
+        type=int,
+        default=32,
+        help="past experiences re-learned per episode (0 disables replay)",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue learning from a previously saved brain (requires --save-dir)",
+    )
     parser.add_argument("--json", action="store_true", help="print a JSON summary")
     args = parser.parse_args(argv)
+
+    if args.resume and args.save_dir is None:
+        parser.error("--resume requires --save-dir pointing at a saved brain")
 
     hasher = FeatureHasher(64)
     policy_summary: dict[str, dict[str, float]] = {}
@@ -59,7 +73,14 @@ def main(argv: list[str] | None = None) -> int:
         }
 
         # Tier 2: predictive-coding brain with memory + metacognition.
-        brain = CognitiveBrain(task, success, seed=0)
+        # The replay buffer is now load-bearing: each episode re-learns from
+        # stored transitions, so experience is consolidated, not just logged.
+        brain_dir = args.save_dir / f"brain_{task.name}" if args.save_dir else None
+        if args.resume and brain_dir is not None and (brain_dir / "brain.json").exists():
+            brain = CognitiveBrain.load(brain_dir, task, success)
+            brain.replay_batch_size = args.replay_batch
+        else:
+            brain = CognitiveBrain(task, success, seed=0, replay_batch_size=args.replay_batch)
         brain_report = brain.learn(episodes=args.episodes)
         brain_summary[task.name] = {
             "initial_error": brain_report.initial_error,
@@ -68,18 +89,21 @@ def main(argv: list[str] | None = None) -> int:
             "policy_success_rate": brain_report.policy_success_rate,
             "memory_size": float(brain_report.memory_size),
             "self_tuned_learning_rate": brain_report.learning_rate,
+            "episodes_trained": float(brain.episodes_trained),
         }
         experiences.extend(brain.memory.items)
 
         if args.save_dir:
             args.save_dir.mkdir(parents=True, exist_ok=True)
             agent.save(args.save_dir / f"policy_{task.name}.npz")
+            if brain_dir is not None:
+                brain.save(brain_dir)
 
     # Generalisation: train a fresh brain on the novel, held-out task and check
     # that the same learning machinery works without task-specific tuning.
     for task in HELD_OUT_TASKS:
         success = _success_for(task.name)
-        brain = CognitiveBrain(task, success, seed=0)
+        brain = CognitiveBrain(task, success, seed=0, replay_batch_size=args.replay_batch)
         brain_report = brain.learn(episodes=args.episodes)
         generalisation_summary[task.name] = {
             "initial_error": brain_report.initial_error,
@@ -89,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         if args.save_dir:
             brain.policy.save(args.save_dir / f"policy_{task.name}.npz")
+            brain.save(args.save_dir / f"brain_{task.name}")
 
     # Supervised classifier trained on the consolidated experience.
     dataset = build_classification_dataset(experiences, hasher)

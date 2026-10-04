@@ -9,6 +9,7 @@ features across runs and machines.
 from __future__ import annotations
 
 import hashlib
+import random
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -112,6 +113,15 @@ class ReplayBuffer:
     @property
     def items(self) -> tuple[Transition, ...]:
         return tuple(self._items)
+
+    def sample(self, batch_size: int, *, rng: random.Random | None = None) -> list[Transition]:
+        """Draw a random mini-batch (with replacement) for off-policy updates."""
+        if batch_size < 1:
+            raise ValueError("batch_size must be at least 1.")
+        if not self._items:
+            return []
+        chooser = rng or random
+        return [chooser.choice(self._items) for _ in range(batch_size)]
 
     def clear(self) -> None:
         self._items.clear()

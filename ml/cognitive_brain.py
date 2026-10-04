@@ -16,8 +16,12 @@ replayable, and safe.
 
 from __future__ import annotations
 
+import json
+import random
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import cast
 
 import numpy as np
 
@@ -27,7 +31,7 @@ from core.sandbox_environment import SandboxEnvironment, SandboxTask
 from core.state import State
 from ml.dataset import FeatureHasher, ReplayBuffer, Transition
 from ml.learner import QLearningAgent, state_tokens
-from ml.models import LinearRegressor
+from ml.models import LinearRegressor, load_model, save_model
 
 
 def _action_vector(action_index: int, num_actions: int) -> np.ndarray:
@@ -77,6 +81,8 @@ class CognitiveBrain:
         max_learning_rate: float = 0.1,
         min_learning_rate: float = 0.005,
         max_grad_norm: float = 1.0,
+        replay_batch_size: int = 0,
+        replay_updates: int = 1,
     ) -> None:
         self.task = task
         self.success = success
@@ -91,7 +97,13 @@ class CognitiveBrain:
         self.max_learning_rate = max_learning_rate
         self.min_learning_rate = min_learning_rate
         self.max_grad_norm = max_grad_norm
+        # When set, each episode replays this many random past transitions and
+        # re-learns from them, so stored experience actually shapes the weights.
+        self.replay_batch_size = replay_batch_size
+        self.replay_updates = replay_updates
+        self._rng = random.Random(seed)
         self._errors: deque[float] = deque(maxlen=50)
+        self.episodes_trained = 0
 
     # --- perception -----------------------------------------------------
     def perceive(self, state: State) -> np.ndarray:
@@ -120,6 +132,39 @@ class CognitiveBrain:
         for param, grad in zip(self.world_model.parameters(), grads):
             param -= self.learning_rate * scale * grad
         self._errors.append(error)
+        return error
+
+    def replay_batch(self, batch: list[Transition]) -> float:
+        """Re-learn the world model from a batch of stored experiences.
+
+        This is the step that makes the replay buffer load-bearing: the same
+        transitions are revisited after the policy has improved, so early
+        experience is consolidated rather than merely logged.
+        """
+        if not batch:
+            return 0.0
+        inputs = np.stack(
+            [self._input(self.perceive(State(frozenset(t.state_tokens))), t.action) for t in batch]
+        )
+        targets = np.stack([self.perceive(State(frozenset(t.next_tokens))) for t in batch])
+        errors = np.mean((self.world_model.forward(inputs) - targets) ** 2, axis=1)
+        grads = self.world_model.backward(inputs, targets)
+        total_norm = float(np.sqrt(sum(float(np.sum(g * g)) for g in grads)))
+        scale = 1.0 if total_norm <= self.max_grad_norm else self.max_grad_norm / (total_norm + 1e-12)
+        for param, grad in zip(self.world_model.parameters(), grads):
+            param -= self.learning_rate * scale * grad
+        error = float(np.mean(errors))
+        self._errors.append(error)
+        return error
+
+    def replay(self) -> float:
+        """Replay a random batch from memory; a no-op when replay is disabled."""
+        if self.replay_batch_size < 1 or not self.memory.items:
+            return 0.0
+        batch = self.memory.sample(self.replay_batch_size, rng=self._rng)
+        error = 0.0
+        for _ in range(max(1, self.replay_updates)):
+            error = self.replay_batch(batch)
         return error
 
     # --- reflection (metacognition) ------------------------------------
@@ -198,15 +243,55 @@ class CognitiveBrain:
                 break
         if train_policy:
             self.policy.decay_epsilon()
+            self.replay()
         return total_reward, achieved, steps
 
+    # --- persistence (continuous learning across sessions) -------------
+    def save(self, directory: str | Path) -> Path:
+        """Persist the world model, the policy, the memory, and the counters."""
+        target = Path(directory)
+        target.mkdir(parents=True, exist_ok=True)
+        save_model(self.world_model, target / "world_model.npz")
+        self.policy.save(target / "policy.npz")
+        metadata = {
+            "task": self.task.name,
+            "episodes_trained": self.episodes_trained,
+            "learning_rate": self.learning_rate,
+            "epsilon": self.policy.epsilon,
+            "feature_size": self.hasher.size,
+            "num_actions": self.num_actions,
+            "memory": self.memory.to_dicts(),
+        }
+        (target / "brain.json").write_text(
+            json.dumps(metadata, ensure_ascii=False), encoding="utf-8"
+        )
+        return target
+
+    @classmethod
+    def load(cls, directory: str | Path, task: SandboxTask, success) -> "CognitiveBrain":
+        """Restore a saved brain so learning can continue where it stopped."""
+        source = Path(directory)
+        metadata = json.loads((source / "brain.json").read_text(encoding="utf-8"))
+        brain = cls(
+            task,
+            success,
+            feature_size=int(metadata["feature_size"]),
+            learning_rate=float(metadata["learning_rate"]),
+        )
+        brain.world_model = cast(LinearRegressor, load_model(source / "world_model.npz"))
+        brain.policy = QLearningAgent.load(source / "policy.npz")
+        brain.learning_rate = float(metadata["learning_rate"])
+        brain.episodes_trained = int(metadata["episodes_trained"])
+        brain.memory.load_dicts(metadata.get("memory", []))
+        return brain
+
     def learn(self, *, episodes: int = 200) -> BrainReport:
-        """Run a full learning session and summarise the trajectory."""
         if episodes < 1:
             raise ValueError("episodes must be at least 1.")
         error_curve: list[float] = []
         for _ in range(episodes):
             self.run_episode()
+            self.episodes_trained += 1
             error_curve.append(self.reflect().recent_error)
 
         # Held-out greedy evaluation after learning.
