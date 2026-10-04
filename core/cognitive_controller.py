@@ -64,6 +64,8 @@ from core.explanation_engine import ExplanationEngine
 from core.explanation import Explanation
 from core.reasoning_trace import ReasoningTrace
 from core.model_interface import CognitiveModel, ModelRequest, ModelResponse
+from core.structured_output import MODEL_OUTPUT_SCHEMA
+from core.llm_reasoner import LLMReasoner, ModelAnalysis
 from core.safe_learning import LearningSandbox
 from core.cognitive_context import ContextRegistry
 from core.provenance import ProvenanceLedger, ProvenanceRecord, ProvenanceStage
@@ -171,6 +173,9 @@ class CognitiveController:
         The controller adds current episodic context but never grants the
         model autonomous tools or system access.
         """
+        return model.generate(self._enrich_request(request))
+
+    def _enrich_request(self, request: ModelRequest) -> ModelRequest:
         context = tuple(
             item.item.content
             for item in self.memory.recall(
@@ -180,12 +185,33 @@ class CognitiveController:
             )
             if isinstance(item.item.content, str)
         )
-        enriched = ModelRequest(
+        return ModelRequest(
             inputs=request.inputs,
             system_instruction=request.system_instruction,
             context=tuple(request.context) + context,
+            response_schema=request.response_schema,
         )
-        return model.generate(enriched)
+
+    def analyze_with_model(
+        self,
+        model: CognitiveModel,
+        request: ModelRequest,
+        belief: Belief | None = None,
+    ) -> ModelAnalysis:
+        """Force structured model output and register it through validation layers.
+
+        The model is prompted for a strict JSON schema (concepts, evidence,
+        hypotheses, questions, plans). Results are validated and registered by
+        :class:`LLMReasoner`; the model cannot mutate belief confidence/status
+        or execute tools.
+        """
+        structured_request = ModelRequest(
+            inputs=request.inputs,
+            system_instruction=request.system_instruction,
+            context=request.context,
+            response_schema=MODEL_OUTPUT_SCHEMA,
+        )
+        return LLMReasoner(self).analyze(model, structured_request, belief)
 
     def assess_quality(self) -> QualityAssessment:
         return self.quality_suite.assess(self.graph, self.memory, self.state)
