@@ -127,6 +127,14 @@ def test_structured_examples_are_valid_schema_json():
         assert not proposal.is_empty
 
 
+def test_corpus_covers_the_declared_petroleum_domain():
+    text = build_corpus(repeats=1, structured_repeats=1)
+    assert "المكمن" in text
+    assert "النفاذية" in text
+    assert "reservoir" in text
+    assert "المسامية" in " ".join(structured_examples())
+
+
 def test_schema_decoder_always_returns_parseable_json():
     model = TransformerLM(_SMALL, seed=0)
     decoder = StructuredDecoder(model)
