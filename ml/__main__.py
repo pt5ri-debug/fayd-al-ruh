@@ -13,10 +13,19 @@ import json
 from pathlib import Path
 from typing import Callable
 
+from core.interaction_reward import (
+    InteractionRewardModel,
+    outcomes_from_evaluation_corpus,
+)
 from core.sandbox_tasks import HELD_OUT_TASKS, TASKS
 from core.state import State
 from ml.cognitive_brain import CognitiveBrain
 from ml.dataset import FeatureHasher, Transition, build_classification_dataset, train_val_split
+from ml.interaction_learner import (
+    evaluate_interaction_policy,
+    recorded_action_outcomes,
+    train_interaction_policy,
+)
 from ml.learner import evaluate_policy, train_policy
 from ml.models import MLP, save_model
 from ml.trainer import Trainer
@@ -51,6 +60,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="continue learning from a previously saved brain (requires --save-dir)",
     )
+    parser.add_argument(
+        "--real-reward",
+        action="store_true",
+        help="also train a policy whose reward is learned from observed interaction",
+    )
     parser.add_argument("--json", action="store_true", help="print a JSON summary")
     args = parser.parse_args(argv)
 
@@ -61,7 +75,15 @@ def main(argv: list[str] | None = None) -> int:
     policy_summary: dict[str, dict[str, float]] = {}
     brain_summary: dict[str, dict[str, float]] = {}
     generalisation_summary: dict[str, dict[str, float]] = {}
+    interaction_summary: dict[str, dict[str, float]] = {}
     experiences: list[Transition] = []
+
+    # Reward learned from observed interaction, kept separate from the sandbox
+    # proxy. It is built once from recorded outcomes and shared by every task.
+    reward_model = InteractionRewardModel()
+    reward_model.record_many(outcomes_from_evaluation_corpus())
+    for task in (*TASKS, *HELD_OUT_TASKS):
+        reward_model.record_many(recorded_action_outcomes(task))
 
     for task in TASKS:
         success = _success_for(task.name)
@@ -118,6 +140,28 @@ def main(argv: list[str] | None = None) -> int:
             brain.policy.save(args.save_dir / f"policy_{task.name}.npz")
             brain.save(args.save_dir / f"brain_{task.name}")
 
+    # Reward from observed interaction: train the same Q-learning agent on every
+    # task, but let the reward come from the learned outcome model rather than
+    # the sandbox success predicate. Success is then measured against the real
+    # goal, so a weaker reward source shows up honestly.
+    if args.real_reward:
+        for task in (*TASKS, *HELD_OUT_TASKS):
+            goal = _success_for(task.name)
+            agent, report = train_interaction_policy(
+                task, reward_model, goal, episodes=args.episodes, hasher=hasher
+            )
+            held_out = evaluate_interaction_policy(
+                task, reward_model, goal, agent, episodes=20, hasher=hasher
+            )
+            interaction_summary[task.name] = {
+                "success_rate": report.success_rate,
+                "held_out_success_rate": held_out,
+                "final_epsilon": report.final_epsilon,
+            }
+            if args.save_dir:
+                args.save_dir.mkdir(parents=True, exist_ok=True)
+                agent.save(args.save_dir / f"interaction_policy_{task.name}.npz")
+
     # Supervised classifier trained on the consolidated experience.
     dataset = build_classification_dataset(experiences, hasher)
     train, val = train_val_split(dataset, val_fraction=0.25, seed=1)
@@ -144,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
                     "policies": policy_summary,
                     "brains": brain_summary,
                     "generalisation": generalisation_summary,
+                    "interaction_reward_model": reward_model.summary(),
+                    "interaction_policies": interaction_summary,
                     "supervised": supervised,
                 },
                 indent=2,
@@ -176,6 +222,21 @@ def main(argv: list[str] | None = None) -> int:
         f"train_acc={supervised['train_accuracy']:.2f} "
         f"val_acc={supervised['val_accuracy']:.2f} brier={supervised['val_brier']:.3f}"
     )
+    if args.real_reward and interaction_summary:
+        diagnostics = reward_model.summary()
+        print("Interaction reward (learned from observed outcomes, no sandbox predicate):")
+        print(
+            f"  outcomes={int(diagnostics['outcomes_recorded'])} "
+            f"forecasts={int(diagnostics['forecasts_recorded'])} "
+            f"contexts={int(diagnostics['contexts'])} "
+            f"ece={diagnostics['expected_calibration_error']:.3f} "
+            f"brier={diagnostics['brier_score']:.3f}"
+        )
+        for name, stats in interaction_summary.items():
+            print(
+                f"  {name:14s} train={stats['success_rate']:.2f} "
+                f"held-out={stats['held_out_success_rate']:.2f}"
+            )
     return 0
 
 
