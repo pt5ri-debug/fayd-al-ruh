@@ -3,8 +3,9 @@
 Keeping the corpus in the repository is what makes the model self-contained: no
 download, no external dataset. It is small and domain-focused -- Arabic and
 English sentences about the project's own world (water, light, soil, tools,
-evidence, beliefs) -- so the trained model produces coherent text about the
-things this program reasons about, rather than pretending to be general.
+evidence, beliefs) and about its declared domain, petroleum engineering -- so
+the trained model produces coherent text about the things this program reasons
+about, rather than pretending to be general.
 """
 
 from __future__ import annotations
@@ -70,20 +71,71 @@ def _sentences() -> list[str]:
     return ar + en
 
 
+def _petroleum_sentences() -> list[str]:
+    """Domain sentences: the project declares a petroleum-engineering identity."""
+    ar = [
+        "المكمن يحتوي على الهيدروكربون.",
+        "الماء يملأ مسام الصخر.",
+        "المسامية تقيس الفراغات في الصخر.",
+        "النفاذية تقيس سهولة مرور السائل.",
+        "الضغط يدفع النفط إلى البئر.",
+        "البئر يخترق الطبقة الحاملة.",
+        "الحفر يصل إلى المكمن.",
+        "الاسمنت يعزل البئر عن الطبقات.",
+        "السجل يقيس المسامية والنفاذية.",
+        "الانتاج يتوقف عندما ينخفض الضغط.",
+        "الهيدروكربون يوجد في الطبقة المسامية.",
+        "الطبقة الحاملة تجمع النفط والغاز.",
+        "رفع الضغط يرفع معدل الانتاج.",
+        "انخفاض الضغط يقلل الانتاج.",
+        "الماء يظهر مع النفط في بعض الابار.",
+        "الصخر الكتيم يمنع حركة السائل.",
+        "قراءة السجل تكشف نوع الصخر.",
+        "التشقق يزيد نفاذية الطبقة.",
+        "العينة تكشف مسامية الصخر.",
+        "الحرارة ترفع لزوجة النفط.",
+    ]
+    en = [
+        "A reservoir contains hydrocarbons.",
+        "Water fills the pores of the rock.",
+        "Porosity measures the voids in rock.",
+        "Permeability measures how easily fluid flows.",
+        "Pressure drives oil toward the well.",
+        "A well penetrates the reservoir layer.",
+        "Drilling reaches the reservoir.",
+        "Cement seals the well from other layers.",
+        "A well log measures porosity and permeability.",
+        "Production declines when pressure drops.",
+        "Hydrocarbons sit in porous rock.",
+        "The formation holds oil and gas.",
+        "Higher pressure raises the flow rate.",
+        "Lower pressure reduces production.",
+        "Water appears with oil in some wells.",
+        "An impermeable rock blocks fluid flow.",
+        "A log reading reveals the rock type.",
+        "Fractures increase formation permeability.",
+        "A core sample reveals rock porosity.",
+        "Heat raises the viscosity of oil.",
+    ]
+    return ar + en
+
+
 def build_corpus(*, repeats: int = 40, structured_repeats: int = 60) -> str:
     """Return the training text, repeated so the small model can fit it.
 
-    Two blocks are concatenated: prose about the project's world, and JSON
-    objects in the shape ``MODEL_OUTPUT_SCHEMA`` expects. The JSON block teaches
-    the model the field names and Arabic values used by schema-guided decoding.
+    Three blocks are concatenated: general prose about the project's world,
+    petroleum-engineering prose matching the declared identity, and JSON objects
+    in the shape ``MODEL_OUTPUT_SCHEMA`` expects. The JSON block teaches the
+    model the field names and Arabic values used by schema-guided decoding.
     """
     if repeats < 1:
         raise ValueError("repeats must be at least 1.")
     if structured_repeats < 1:
         raise ValueError("structured_repeats must be at least 1.")
     prose = " ".join(_sentences())
+    petroleum = " ".join(_petroleum_sentences())
     structured = " ".join(structured_examples())
-    return (prose + " ") * repeats + (structured + " ") * structured_repeats
+    return (prose + " ") * repeats + (petroleum + " ") * repeats + (structured + " ") * structured_repeats
 
 
 def structured_examples() -> list[str]:
@@ -124,6 +176,20 @@ def structured_examples() -> list[str]:
         '"questions": [{"text": "هل يكفي دليل واحد", "topic": "المعرفة", "priority": 0.7}], '
         '"plans": [{"goal": "التحقق من الفرضية", "priority": 0.9, '
         '"steps": [{"description": "اجمع الادلة"}, {"description": "قارن النتائج"}]}]}',
+        '{"concepts": [{"label": "المكمن", "aliases": ["الخزان"]}], '
+        '"evidence": [{"description": "الضغط مرتفع في البئر", "source": "قياس الضغط", '
+        '"supports": true, "strength": 0.8}], '
+        '"hypotheses": [{"statement": "الضغط يدفع النفط نحو البئر", "confidence": 0.7}], '
+        '"questions": [{"text": "ما معدل هبوط الضغط", "topic": "المكمن", "priority": 0.8}], '
+        '"plans": [{"goal": "تقييم انتاجية المكمن", "priority": 0.9, '
+        '"steps": [{"description": "اقرأ سجل البئر"}, {"description": "احسب المسامية والنفاذية"}]}]}',
+        '{"concepts": [{"label": "النفاذية", "aliases": ["قابلية التدفق"]}], '
+        '"evidence": [{"description": "العينة صخرية مسامية", "source": "تحليل العينة", '
+        '"supports": true, "strength": 0.7}], '
+        '"hypotheses": [{"statement": "المسامية ترفع النفاذية", "confidence": 0.6}], '
+        '"questions": [{"text": "كيف تؤثر التشققات في التدفق", "topic": "الطبقة", "priority": 0.6}], '
+        '"plans": [{"goal": "تحسين الانتاج", "priority": 0.8, '
+        '"steps": [{"description": "افحص التشققات"}, {"description": "ارفع الضغط"}]}]}',
     ]
 
 

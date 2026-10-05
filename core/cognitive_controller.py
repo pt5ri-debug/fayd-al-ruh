@@ -49,6 +49,7 @@ from core.experiment import Experiment
 from core.experiment_result import ExperimentResult
 from core.experiment_runner import ExperimentRunner
 from core.ontology import Ontology
+from core.domain_knowledge import domain_summary, seed_ontology
 from core.semantic_parser import SemanticParser
 from core.meaning_model import MeaningModel
 from core.language_reasoner import LanguageReasoner
@@ -152,6 +153,7 @@ class CognitiveController:
         self.decision_engine = DecisionEngine()
         self.experiment_runner = ExperimentRunner()
         self.ontology = Ontology()
+        seed_ontology(self.ontology)
         self.semantic_parser = SemanticParser()
         self.meaning_model = MeaningModel()
         self.language_reasoner = LanguageReasoner()
@@ -188,7 +190,7 @@ class CognitiveController:
         return ModelRequest(
             inputs=request.inputs,
             system_instruction=request.system_instruction,
-            context=tuple(request.context) + context,
+            context=tuple(request.context) + context + (domain_summary(self.metacognition.self_model),),
             response_schema=request.response_schema,
         )
 
@@ -382,6 +384,11 @@ class CognitiveController:
 
     def introspect(self) -> MetacognitiveReport:
         return self.metacognition.assess(self.state)
+
+    @property
+    def identity(self) -> str:
+        """The declared domain identity this system reasons from."""
+        return domain_summary(self.metacognition.self_model)
 
     def explain_belief(self, belief_id: str) -> BeliefExplanation:
         belief = self.graph.get_belief(belief_id)
