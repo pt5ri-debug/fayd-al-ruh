@@ -142,3 +142,26 @@ def test_analysis_integrates_with_cognitive_cycle():
 
     assert cycle.loop_result.evidence_id is not None
     assert controller.validate_contexts() == []
+
+
+def test_in_project_language_model_flows_through_the_same_validation():
+    """The internal transformer proposes through LLMReasoner, not around it."""
+    from ai.local_model import DEFAULT_CHECKPOINT, LocalLanguageModel
+
+    if not DEFAULT_CHECKPOINT.exists():
+        pytest.skip("no committed in-project checkpoint")
+
+    model = LocalLanguageModel(temperature=0.7, seed=0)
+    controller = CognitiveController()
+    analysis = controller.analyze_with_model(
+        model,
+        ModelRequest((MultimodalInput("text", "حلل: الماء يجعل التربة رطبة"),)),
+    )
+
+    # Whatever the model proposed, it arrived through the validated layers.
+    assert analysis.response.model_name.startswith("fayd-local-llm")
+    assert controller.graph.validate() == []
+    assert all(
+        record.source.startswith("model:")
+        for record in controller.provenance.for_stage(ProvenanceStage.MODEL_PROPOSAL)
+    )

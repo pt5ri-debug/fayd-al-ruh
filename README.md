@@ -85,9 +85,13 @@ python -m ml --episodes 40 --model-based --seeds 3
 - `ml/llm/tokenizer.py`: ترميز على مستوى البايت (آمن للعربية، بلا تدريب).
 - `ml/llm/transformer.py`: محوّل decoder-only (انتباه سببي متعدد الرؤوس، GELU،
   LayerNorm) مع backprop يدوي وAdam — تحقّقنا من التدرجات عددياً.
-- `ml/llm/corpus.py`: متن تدريب صغير داخل المستودع (عربي/إنجليزي حول عالم المشروع).
+- `ml/llm/corpus.py`: متن تدريب داخل المستودع (عربي/إنجليزي حول عالم المشروع،
+  مع أمثلة JSON بنسق المخطط).
 - `ml/llm/generator.py` و`ai/local_model.py`: توليد نص، وتكييف مع واجهة
   `CognitiveModel` فيحلّ محل Ollama في أي مكان يُقبل فيه نموذج.
+- `ml/llm/schema.py`: فك ترميز موجَّه بالمخطط. البنية تُثبَّت من
+  `MODEL_OUTPUT_SCHEMA`، والنموذج يقترح محتوى الأوراق فقط، فيعود JSON صالحاً
+  دائماً ويخضع بعدها لتحقق `LLMReasoner`.
 
 ```bash
 python -m ml.llm                       # تدريب نقطة التحقق الافتراضية وحفظها
@@ -102,6 +106,14 @@ from ai.local_model import LocalLanguageModel
 
 model = LocalLanguageModel(temperature=0.0)   # يقرأ نقطة التحقق المُلتزَمة
 response = controller.reason(model, request)
+```
+
+ربطه بمسار القرار: عندما يحمل الطلب `response_schema`، يقترح النموذج مفاهيم
+وفرضيات وأسئلة وخططاً، ثم يتحقق منها `LLMReasoner` ولا يستطيع تعديل الاعتقادات
+ولا تنفيذ أدوات:
+
+```python
+analysis = controller.analyze_with_model(model, request)   # نفس مسار التحقق
 ```
 
 > تنويه صريح: هذا محوّل حقيقي لكنه صغير، مُدرَّب على متن صغير داخل المستودع.

@@ -171,9 +171,12 @@ python -m ml --episodes 40 --model-based --seeds 3
 - `tokenizer.py`: ترميز بايتي (257 رمزاً) آمن للعربية بلا تدريب، وكل نص يعود كما هو.
 - `transformer.py`: محوّل decoder-only (انتباه سببي متعدد الرؤوس + GELU + LayerNorm)
   مع backprop يدوي وAdam. تحقّقنا من صحة التدرجات مقابل تقدير عددي.
-- `corpus.py`: متن تدريب صغير داخل المستودع (عربي/إنجليزي حول عالم المشروع).
+- `corpus.py`: متن تدريب داخل المستودع (عربي/إنجليزي حول عالم المشروع، مع
+  أمثلة JSON بنسق `MODEL_OUTPUT_SCHEMA`).
 - `generator.py` + `ai/local_model.py`: توليد نص مُبَذّر قابل للتكرار، وتكييف مع
   واجهة `CognitiveModel`، فيحلّ محل Ollama في أي مسار يقبل نموذجاً.
+- `schema.py`: فك ترميز موجَّه بالمخطط. يثبّت البنية من المخطط ويترك للنموذج
+  اقتراح محتوى الأوراق فقط، فيخرج JSON صالح دائماً.
 
 ```bash
 python -m ml.llm --steps 4000 --generate "الماء"
@@ -187,6 +190,21 @@ from ai.local_model import LocalLanguageModel
 model = LocalLanguageModel(temperature=0.0)
 response = controller.reason(model, request)
 ```
+
+### ربط النموذج اللغوي الداخلي بمسار القرار
+
+عندما يحمل الطلب `response_schema` (مسار الاقتراح المهيكل)، يوجّه
+`LocalLanguageModel` التوليد إلى `StructuredDecoder`: تُثبَّت بنية JSON من
+`MODEL_OUTPUT_SCHEMA`، ويقترح النموذج محتوى الأوراق (مفاهيم، أدلة، فرضيات،
+أسئلة، خطط). المخرج يمرّ عبر `controller.analyze_with_model`، فيتحقق منه
+`LLMReasoner` و`parse_structured_output` نفسهما الذي يتحقق من أي نموذج خارجي:
+
+```python
+analysis = controller.analyze_with_model(model, request)
+```
+
+النموذج يقترح فقط: لا يعدّل الاعتقادات ولا حالتها، ولا ينفّذ أدوات، ولا يعلّم
+خطوة مكتملة. أي مفتاح ممنوع (`beliefs`, `tool_calls`, ...) يُرفض.
 
 > تنويه صريح: محوّل حقيقي لكنه صغير (3 طبقات، عرض 96) ومُدرَّب على متن صغير.
 > يُنتج نصاً متماسكاً حول عالم المشروع، وليس نموذجاً عاماً بحجم النماذج الحدودية.
