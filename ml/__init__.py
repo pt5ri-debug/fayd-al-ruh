@@ -9,6 +9,8 @@ symbolic substrate:
 - ``trainer``   : a training loop with metrics, early stopping, and persistence
 - ``learner``   : symbolic reinforcement learning over the sandbox tasks
 - ``interaction_learner`` : the same RL agent, rewarded by observed outcomes
+- ``world_model`` : a symbolic world model learned from observed transitions
+- ``model_based_planner`` : planning and Dyna-Q imagination over that learned model
 - ``cognitive_brain`` : a predictive-coding loop wiring the above into one brain
 
 Everything here is deterministic and dependency-light (numpy only), so it runs
@@ -23,5 +25,7 @@ __all__ = [
     "trainer",
     "learner",
     "interaction_learner",
+    "world_model",
+    "model_based_planner",
     "cognitive_brain",
 ]
