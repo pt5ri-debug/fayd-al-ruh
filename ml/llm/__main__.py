@@ -27,15 +27,18 @@ def build_model(*, seed: int = 0, config: TransformerConfig | None = None) -> Tr
 
 def train_and_save(
     *,
-    steps: int = 600,
+    steps: int = 4000,
     repeats: int = 40,
+    structured_repeats: int = 60,
     seed: int = 0,
     checkpoint: Path = CHECKPOINT,
     config: TransformerConfig | None = None,
     log_every: int = 100,
 ) -> TransformerLM:
     tokenizer = ByteTokenizer()
-    stream = tokenizer.encode(build_corpus(repeats=repeats), bos=False)
+    stream = tokenizer.encode(
+        build_corpus(repeats=repeats, structured_repeats=structured_repeats), bos=False
+    )
     model = build_model(seed=seed, config=config)
     report = train_language_model(
         model,
@@ -58,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Train the in-project language model.")
     parser.add_argument("--steps", type=int, default=4000)
     parser.add_argument("--repeats", type=int, default=40)
+    parser.add_argument("--structured-repeats", type=int, default=60)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--checkpoint", type=Path, default=CHECKPOINT)
     parser.add_argument("--generate", type=str, default=None)
@@ -67,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     model = train_and_save(
         steps=args.steps,
         repeats=args.repeats,
+        structured_repeats=args.structured_repeats,
         seed=args.seed,
         checkpoint=args.checkpoint,
     )

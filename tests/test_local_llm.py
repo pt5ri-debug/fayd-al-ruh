@@ -9,8 +9,10 @@ import pytest
 
 from ai.local_model import DEFAULT_CHECKPOINT, LocalLanguageModel
 from core.model_interface import ModelRequest
-from ml.llm.corpus import build_corpus
+from core.structured_output import MODEL_OUTPUT_SCHEMA, parse_structured_output
+from ml.llm.corpus import build_corpus, structured_examples
 from ml.llm.generator import LocalGenerator
+from ml.llm.schema import StructuredDecoder
 from ml.llm.tokenizer import BOS_ID, ByteTokenizer
 from ml.llm.transformer import TransformerConfig, TransformerLM, train_language_model
 
@@ -18,7 +20,7 @@ _SMALL = TransformerConfig(n_layer=1, n_head=2, n_embd=16, block_size=16)
 
 
 def _token_stream() -> list[int]:
-    return ByteTokenizer().encode(build_corpus(repeats=2), bos=False)
+    return ByteTokenizer().encode(build_corpus(repeats=2, structured_repeats=2), bos=False)
 
 
 def test_tokenizer_round_trips_arabic_and_english():
@@ -117,3 +119,41 @@ def test_committed_checkpoint_loads_and_generates():
     model = LocalLanguageModel(temperature=0.0, max_new_tokens=16)
     response = model.generate(ModelRequest(inputs=(), system_instruction="", context=("الماء",)))
     assert response.text
+
+
+def test_structured_examples_are_valid_schema_json():
+    for example in structured_examples():
+        proposal = parse_structured_output(example)
+        assert not proposal.is_empty
+
+
+def test_schema_decoder_always_returns_parseable_json():
+    model = TransformerLM(_SMALL, seed=0)
+    decoder = StructuredDecoder(model)
+
+    for seed in range(2):
+        text = decoder.decode("حلل: الماء", seed=seed, max_string_bytes=4)
+        proposal = parse_structured_output(text)
+        assert isinstance(proposal.concepts, list)
+
+
+def test_schema_decoder_is_deterministic_for_a_seed():
+    model = TransformerLM(_SMALL, seed=0)
+    decoder = StructuredDecoder(model)
+    assert decoder.decode("حلل", seed=3, max_string_bytes=4) == decoder.decode(
+        "حلل", seed=3, max_string_bytes=4
+    )
+
+
+@pytest.mark.skipif(not DEFAULT_CHECKPOINT.exists(), reason="no committed checkpoint")
+def test_local_model_serves_structured_schema():
+    model = LocalLanguageModel(temperature=0.7, seed=0, max_string_bytes=6)
+    request = ModelRequest(
+        inputs=(),
+        system_instruction="اقترح",
+        context=("الماء يجعل التربة رطبة",),
+        response_schema=MODEL_OUTPUT_SCHEMA,
+    )
+    response = model.generate(request)
+    proposal = parse_structured_output(response.text)
+    assert isinstance(proposal.plans, list)

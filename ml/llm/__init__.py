@@ -8,6 +8,7 @@ repository on a small bundled corpus, and exposed through the project's
 from __future__ import annotations
 
 from ml.llm.generator import LocalGenerator
+from ml.llm.schema import StructuredDecoder
 from ml.llm.tokenizer import BOS_ID, VOCAB_SIZE, ByteTokenizer
 from ml.llm.transformer import TransformerConfig, TransformerLM, train_language_model
 
@@ -16,6 +17,7 @@ __all__ = [
     "VOCAB_SIZE",
     "ByteTokenizer",
     "LocalGenerator",
+    "StructuredDecoder",
     "TransformerConfig",
     "TransformerLM",
     "train_language_model",
