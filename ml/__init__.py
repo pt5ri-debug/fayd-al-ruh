@@ -11,6 +11,7 @@ symbolic substrate:
 - ``interaction_learner`` : the same RL agent, rewarded by observed outcomes
 - ``world_model`` : a symbolic world model learned from observed transitions
 - ``model_based_planner`` : planning and Dyna-Q imagination over that learned model
+- ``llm`` : an in-project byte-level transformer language model (numpy only)
 - ``cognitive_brain`` : a predictive-coding loop wiring the above into one brain
 
 Everything here is deterministic and dependency-light (numpy only), so it runs
@@ -27,5 +28,6 @@ __all__ = [
     "interaction_learner",
     "world_model",
     "model_based_planner",
+    "llm",
     "cognitive_brain",
 ]
