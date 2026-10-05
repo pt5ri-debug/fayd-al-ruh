@@ -163,6 +163,34 @@ python -m ml --episodes 40 --model-based --seeds 3
 نفس آليات التعلّم تحلّهما بلا ضبط خاص بالمهمة. اختبار التكامل يمرّ الآن على كل
 مهام التعميم، لا الأولى فقط.
 
+### النموذج اللغوي الداخلي
+
+المشروع يحمل نموذجاً لغوياً خاصاً به في `ml/llm/`، مكتوباً من الصفر بـ`numpy`
+ومُدرَّباً داخل المستودع، فلا يحتاج خدمة خارجية ولا مفاتيح API:
+
+- `tokenizer.py`: ترميز بايتي (257 رمزاً) آمن للعربية بلا تدريب، وكل نص يعود كما هو.
+- `transformer.py`: محوّل decoder-only (انتباه سببي متعدد الرؤوس + GELU + LayerNorm)
+  مع backprop يدوي وAdam. تحقّقنا من صحة التدرجات مقابل تقدير عددي.
+- `corpus.py`: متن تدريب صغير داخل المستودع (عربي/إنجليزي حول عالم المشروع).
+- `generator.py` + `ai/local_model.py`: توليد نص مُبَذّر قابل للتكرار، وتكييف مع
+  واجهة `CognitiveModel`، فيحلّ محل Ollama في أي مسار يقبل نموذجاً.
+
+```bash
+python -m ml.llm --steps 4000 --generate "الماء"
+```
+
+نقطة التحقق محفوظة في `ml/llm/checkpoints/fayd-llm.npz` ومُلتزَمة في المستودع،
+فيحصل أي مستخدم على نموذج لغوي عامل فوراً بلا تدريب. الاستخدام:
+
+```python
+from ai.local_model import LocalLanguageModel
+model = LocalLanguageModel(temperature=0.0)
+response = controller.reason(model, request)
+```
+
+> تنويه صريح: محوّل حقيقي لكنه صغير (3 طبقات، عرض 96) ومُدرَّب على متن صغير.
+> يُنتج نصاً متماسكاً حول عالم المشروع، وليس نموذجاً عاماً بحجم النماذج الحدودية.
+
 ### ربط نموذج لغوي حقيقي بالإجراءات
 
 `core/model_advisor.py` (`ModelActionAdvisor`) يغلّف أي `CallableModel` كسياسة:
