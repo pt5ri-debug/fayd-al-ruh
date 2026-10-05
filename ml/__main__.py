@@ -27,6 +27,7 @@ from ml.interaction_learner import (
     train_interaction_policy,
 )
 from ml.learner import evaluate_policy, train_policy
+from ml.model_based_planner import train_model_based_policy
 from ml.models import MLP, save_model
 from ml.trainer import Trainer
 
@@ -65,6 +66,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also train a policy whose reward is learned from observed interaction",
     )
+    parser.add_argument(
+        "--model-based",
+        action="store_true",
+        help="also compare model-free vs Dyna-Q (learning from a learned world model)",
+    )
+    parser.add_argument(
+        "--planning-steps",
+        type=int,
+        default=10,
+        help="imagined updates per real step for Dyna-Q (--model-based)",
+    )
+    parser.add_argument(
+        "--seeds",
+        type=int,
+        default=3,
+        help="seeds averaged for the model-based comparison (--model-based)",
+    )
     parser.add_argument("--json", action="store_true", help="print a JSON summary")
     args = parser.parse_args(argv)
 
@@ -76,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     brain_summary: dict[str, dict[str, float]] = {}
     generalisation_summary: dict[str, dict[str, float]] = {}
     interaction_summary: dict[str, dict[str, float]] = {}
+    model_based_summary: dict[str, dict[str, float]] = {}
     experiences: list[Transition] = []
 
     # Reward learned from observed interaction, kept separate from the sandbox
@@ -162,6 +181,41 @@ def main(argv: list[str] | None = None) -> int:
                 args.save_dir.mkdir(parents=True, exist_ok=True)
                 agent.save(args.save_dir / f"interaction_policy_{task.name}.npz")
 
+    # Model-based planning: compare model-free Q-learning with Dyna-Q, which
+    # also learns from imagined transitions in a *learned* world model. The
+    # budget is kept small on purpose -- that is where a model should pay off.
+    if args.model_based:
+        comparison_episodes = max(1, min(args.episodes, 40))
+        seeds = max(1, args.seeds)
+        for task in (*TASKS, *HELD_OUT_TASKS):
+            goal = _success_for(task.name)
+            free_total = 0.0
+            dyna_total = 0.0
+            dyna_first = 0
+            planned: tuple[str, ...] = ()
+            for seed in range(seeds):
+                _, free_report = train_policy(
+                    task, goal, episodes=comparison_episodes, hasher=hasher, seed=seed
+                )
+                _, _, dyna_report = train_model_based_policy(
+                    task,
+                    goal,
+                    episodes=comparison_episodes,
+                    planning_steps=args.planning_steps,
+                    seed=seed,
+                )
+                free_total += free_report.success_rate_window
+                dyna_total += dyna_report.success_rate
+                dyna_first += dyna_report.first_success_episode
+                planned = dyna_report.planned_solution
+            model_based_summary[task.name] = {
+                "episodes": float(comparison_episodes),
+                "model_free_success": round(free_total / seeds, 6),
+                "dyna_q_success": round(dyna_total / seeds, 6),
+                "dyna_q_first_success_episode": round(dyna_first / seeds, 3),
+                "planned_solution_steps": float(len(planned)),
+            }
+
     # Supervised classifier trained on the consolidated experience.
     dataset = build_classification_dataset(experiences, hasher)
     train, val = train_val_split(dataset, val_fraction=0.25, seed=1)
@@ -190,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
                     "generalisation": generalisation_summary,
                     "interaction_reward_model": reward_model.summary(),
                     "interaction_policies": interaction_summary,
+                    "model_based": model_based_summary,
                     "supervised": supervised,
                 },
                 indent=2,
@@ -236,6 +291,16 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"  {name:14s} train={stats['success_rate']:.2f} "
                 f"held-out={stats['held_out_success_rate']:.2f}"
+            )
+    if args.model_based and model_based_summary:
+        print("Model-based planning (Dyna-Q learns from a learned world model):")
+        for name, stats in model_based_summary.items():
+            print(
+                f"  {name:14s} episodes={int(stats['episodes'])} "
+                f"model-free={stats['model_free_success']:.2f} "
+                f"dyna-q={stats['dyna_q_success']:.2f} "
+                f"first-success={stats['dyna_q_first_success_episode']:.1f} "
+                f"planned-steps={int(stats['planned_solution_steps'])}"
             )
     return 0
 
