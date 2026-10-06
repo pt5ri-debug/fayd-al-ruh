@@ -68,10 +68,15 @@ controller.ontology.find_concepts("reservoir")   # مكمن، طبقة، مسا�
   يصل إلى ملاحظة المكمن، واستعلام عن الحفر يصل إلى ملاحظة البئر، رغم **عدم اشتراك
   أي كلمة** بين الاستعلام والملاحظة — عبر السير على الروابط المشتقّة
   (`core/ontology_retrieval.py`).
+- **تعلّم الأنطولوجيا** (`petroleum-ontology-learning`): ملاحظة حقلية تجسّر ثلاثة
+  مفاهيم معروفة، فتُسجَّل بينها علاقات `associated_with` ضعيفة الثقة، بينما يبقى
+  الزوج المزروع صريحاً دون تكرار أو كتابة فوق
+  (`core/ontology_learner.py`).
 
-تُقاس خمسة مقاييس بترولية في الأساس: `petroleum_causal_accuracy`،
+تُقاس ستة مقاييس بترولية في الأساس: `petroleum_causal_accuracy`،
 `petroleum_retrieval_accuracy`، `petroleum_ontology_accuracy`،
-`petroleum_inference_accuracy`، و`petroleum_multihop_retrieval_accuracy`،
+`petroleum_inference_accuracy`، `petroleum_multihop_retrieval_accuracy`،
+و`petroleum_ontology_learning_accuracy`،
 إضافة إلى `domain_scores["petroleum"]`.
 فتصبح الهوية قابلة للقياس ومنع التراجع في CI.
 
@@ -109,6 +114,25 @@ controller.ontology.find_concepts("reservoir")   # مكمن، طبقة، مسا�
 مثال: استعلام عن «السجل» يصل إلى ملاحظة عن المكمن عبر `السجل measures المكمن`
 المشتقّة، رغم عدم اشتراك أي كلمة. يقيس هذا السيناريو `petroleum-multihop-retrieval`
 ويحميه مقياس `petroleum_multihop_retrieval_accuracy`.
+
+## تعلّم الأنطولوجيا من التجربة
+
+الأنطولوجيا لا تبقى حبيسة بذرتها. `core/ontology_learner.py` يجعلها تتوسّع من
+الملاحظات: عندما تُجسَّر مفاهيم معروفة في نص واحد، تُسجَّل بينها علاقة
+`associated_with` ضعيفة الثقة، فيصير المعنى المكتسب قابلاً للاسترجاع لاحقاً.
+
+- `OntologyLearner.observe(text)`: يسجّل علاقة ضعيفة بين كل زوج من المفاهيم
+  المعروفة الواردة في النص.
+- `learn_from_observations(texts)`: يدمج عدة ملاحظات في تقرير واحد.
+- `controller.learn_ontology_from_observation(text)`: يعلّم الأنطولوجيا ثم يُبطل
+  ذاكرة الاسترجاع المؤقتة، فترى عمليات الاسترجاع التالية الروابط الجديدة.
+
+التعلّم يحفظ الأمانة المعرفية بثلاثة قيود: لا يُنشئ مفاهيم من نص خام (بل يربط
+المعروف فقط)، وثقته أدنى من العلاقات المزروعة (فلا يطغى على المعرفة المنظَّمة)،
+ولا يمسّ زوجاً له علاقة صريحة أصلاً (فلا يكرّر أو يكتب فوق ما هو معروف). ويبقى
+متميّزاً عن الاستدلال: العلاقة المتعلَّمة **تُخزَّن**، أما المشتقّة فتبقى تُحسب ولا
+تُخزَّن. يقيس هذا `petroleum-ontology-learning` ويحميه مقياس
+`petroleum_ontology_learning_accuracy`.
 
 ## البنية
 

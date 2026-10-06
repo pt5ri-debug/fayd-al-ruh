@@ -62,6 +62,7 @@ class EvaluationMetrics:
     petroleum_ontology_accuracy: float
     petroleum_inference_accuracy: float
     petroleum_multihop_retrieval_accuracy: float
+    petroleum_ontology_learning_accuracy: float
     # Aggregate
     overall: float
 
@@ -415,12 +416,58 @@ def _run_petroleum_multihop_retrieval(scenario: Scenario) -> ScenarioResult:
     )
 
 
+def _run_petroleum_ontology_learning(scenario: Scenario) -> ScenarioResult:
+    """Petroleum scenario: observations teach weak relations without overwriting the seed."""
+    controller = CognitiveController()
+    expected_total = 0
+    expected_hits = 0
+    forbidden_violations = 0
+    learned_relations = 0
+    for spec in scenario.ontology_learning:
+        learning = controller.learn_ontology_from_observation(spec.text)
+        learned_relations += len(learning.added)
+        for source_label, target_label in spec.expected_links:
+            expected_total += 1
+            if _has_relation(controller, source_label, target_label, "associated_with"):
+                expected_hits += 1
+        for source_label, target_label in spec.forbidden_links:
+            if _has_relation(controller, source_label, target_label, "associated_with"):
+                forbidden_violations += 1
+
+    learning_accuracy = expected_hits / expected_total if expected_total else 0.0
+    passed = learning_accuracy == 1.0 and forbidden_violations == 0 and learned_relations > 0
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=passed,
+        checks={
+            "ontology_learning_accuracy": round(learning_accuracy, 6),
+            "ontology_learning_forbidden": float(forbidden_violations),
+        },
+        details={"learned_relations": str(learned_relations)},
+    )
+
+
+def _has_relation(controller: CognitiveController, source_label: str, target_label: str, relation_type: str) -> bool:
+    sources = controller.ontology.find_concepts(source_label)
+    targets = controller.ontology.find_concepts(target_label)
+    if not sources or not targets:
+        return False
+    target_ids = {concept.id for concept in targets}
+    return any(
+        relation.relation_type == relation_type and relation.target_id in target_ids
+        for relation in controller.ontology.outgoing(sources[0].id)
+    )
+
+
 def run_scenario(scenario: Scenario) -> ScenarioResult:
     if scenario.decisions:
         return _run_decisions(scenario)
     if scenario.expected_conflicts or (scenario.beliefs and not scenario.observations and not scenario.predictions):
         return _run_consistency(scenario)
     if scenario.domain == Domain.PETROLEUM:
+        if scenario.ontology_learning:
+            return _run_petroleum_ontology_learning(scenario)
         if scenario.ontology_retrieval:
             return _run_petroleum_multihop_retrieval(scenario)
         if scenario.retrieval:
@@ -488,12 +535,14 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     petroleum_ontology = domain_metric(Domain.PETROLEUM, "ontology_accuracy")
     petroleum_inference = domain_metric(Domain.PETROLEUM, "ontology_inference_accuracy")
     petroleum_multihop = domain_metric(Domain.PETROLEUM, "ontology_retrieval_accuracy")
+    petroleum_learning = domain_metric(Domain.PETROLEUM, "ontology_learning_accuracy")
     petroleum_score = mean([
         petroleum_causal,
         petroleum_retrieval,
         petroleum_ontology,
         petroleum_inference,
         petroleum_multihop,
+        petroleum_learning,
     ])
 
     calibrated = clamp(1.0 - calibration_error)
@@ -510,6 +559,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_ontology,
         petroleum_inference,
         petroleum_multihop,
+        petroleum_learning,
     ])
 
     metrics = EvaluationMetrics(
@@ -530,6 +580,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_ontology_accuracy=round(petroleum_ontology, 6),
         petroleum_inference_accuracy=round(petroleum_inference, 6),
         petroleum_multihop_retrieval_accuracy=round(petroleum_multihop, 6),
+        petroleum_ontology_learning_accuracy=round(petroleum_learning, 6),
         overall=round(overall, 6),
     )
 

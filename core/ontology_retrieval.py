@@ -63,6 +63,10 @@ class OntologyGuidedRetriever:
             if any(term in folded for term in concept.terms)
         }
 
+    def invalidate(self) -> None:
+        """Drop the cached adjacency after the ontology's relations change."""
+        self._adjacency = None
+
     def reachable(self, seeds: set[str]) -> dict[str, tuple[int, float]]:
         """Map each concept reachable from ``seeds`` to (hops, weight)."""
         adjacency = self._edges()

@@ -9,7 +9,7 @@ from evaluation.benchmark import (
     report_to_dict,
 )
 from evaluation.metrics import metric_names
-from evaluation.runner import EvaluationMetrics, EvaluationReport, run_suite
+from evaluation.runner import EvaluationMetrics, EvaluationReport, run_scenario, run_suite
 from evaluation.scenarios import SCENARIOS, Domain, scenario_ids
 
 
@@ -36,6 +36,7 @@ def test_petroleum_scenarios_cover_causal_retrieval_and_ontology():
     assert any(scenario.ontology_relations for scenario in petroleum.values())
     assert any(scenario.ontology_inferences for scenario in petroleum.values())
     assert any(scenario.ontology_retrieval for scenario in petroleum.values())
+    assert any(scenario.ontology_learning for scenario in petroleum.values())
     assert any(scenario.uncertainties for scenario in petroleum.values())
     assert any(scenario.plans for scenario in petroleum.values())
 
@@ -95,6 +96,34 @@ def test_petroleum_multihop_expectations_are_lexically_disjoint():
 def test_petroleum_multihop_retrieval_metric_is_reported():
     report = run_suite()
     assert report.metrics.petroleum_multihop_retrieval_accuracy == 1.0
+
+
+def test_petroleum_ontology_learning_scenario_exists_and_passes():
+    scenarios = [s for s in SCENARIOS if s.ontology_learning]
+    assert scenarios, "expected a petroleum ontology-learning scenario"
+    for scenario in scenarios:
+        assert scenario.domain == Domain.PETROLEUM
+        result = run_scenario(scenario)
+        assert result.passed
+        assert result.checks["ontology_learning_accuracy"] == 1.0
+        assert result.checks["ontology_learning_forbidden"] == 0.0
+
+
+def test_petroleum_ontology_learning_metric_is_reported():
+    report = run_suite()
+    assert report.metrics.petroleum_ontology_learning_accuracy == 1.0
+
+
+def test_controller_learns_ontology_relations_from_observations():
+    from core.cognitive_controller import CognitiveController
+
+    controller = CognitiveController()
+    stored_before = len(controller.ontology.relations)
+    learning = controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
+
+    assert learning.changed
+    assert len(controller.ontology.relations) > stored_before
+    assert controller.ontology_learner.confidence < 1.0
 
 
 def test_petroleum_ontology_relations_are_seeded():

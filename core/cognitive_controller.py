@@ -51,6 +51,7 @@ from core.experiment_runner import ExperimentRunner
 from core.ontology import Ontology
 from core.ontology_reasoner import OntologyInference, OntologyReasoner
 from core.ontology_retrieval import OntologyGuidedRetriever
+from core.ontology_learner import OntologyLearner, OntologyLearning
 from core.domain_knowledge import domain_summary, seed_ontology
 from core.semantic_parser import SemanticParser
 from core.meaning_model import MeaningModel
@@ -158,6 +159,7 @@ class CognitiveController:
         seed_ontology(self.ontology)
         self.ontology_reasoner = OntologyReasoner()
         self.ontology_retriever = OntologyGuidedRetriever(self.ontology, self.ontology_reasoner)
+        self.ontology_learner = OntologyLearner(self.ontology)
         self.semantic_parser = SemanticParser()
         self.meaning_model = MeaningModel()
         self.language_reasoner = LanguageReasoner()
@@ -444,6 +446,21 @@ class CognitiveController:
                 )
             )
         return recalls
+
+    def learn_ontology_from_observation(self, text: str) -> OntologyLearning:
+        """Extend the ontology with weak relations from an observed text.
+
+        Records an ``associated_with`` relation between every pair of known
+        concepts grounded in ``text``, unless the pair already has an explicit
+        relation. Learning uses only concepts the ontology already holds, so no
+        meaning is invented, and the weak relation never overrides seeded
+        knowledge. The retriever cache is invalidated so later recall sees the
+        new links.
+        """
+        learning = self.ontology_learner.observe(text)
+        if learning.changed:
+            self.ontology_retriever.invalidate()
+        return learning
 
     def explain_belief(self, belief_id: str) -> BeliefExplanation:
         belief = self.graph.get_belief(belief_id)
