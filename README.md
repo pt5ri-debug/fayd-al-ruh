@@ -60,10 +60,32 @@ controller.ontology.find_concepts("reservoir")   # مكمن، طبقة، مسا�
   الحقل ويبقى معايراً.
 - **هوية** (`petroleum-identity`): يتحقق أن الأنطولوجيا المزروعة تحمل إطار المجال
   المعلن (مثل `المكمن contained_in الطبقة`، `الاسمنت seals البئر`).
+- **استدلال فوق الأنطولوجيا** (`petroleum-ontology-inference`): يتحقق أن علاقات
+  تُستنتَج ولا تُخزَّن، عبر قواعد تركيب شفّافة (`core/ontology_reasoner.py`):
+  تعدّي `contained_in`، و`البئر penetrates الطبقة`، و`المكمن has_property المسامية`،
+  و`السجل measures المكمن` (تركيب `measures` مع `has_property`).
 
 تُقاس ثلاثة مقاييس بترولية في الأساس: `petroleum_causal_accuracy`،
-`petroleum_retrieval_accuracy`، و`petroleum_ontology_accuracy`، إضافة إلى
-`domain_scores["petroleum"]`. فتصبح الهوية قابلة للقياس ومنع التراجع في CI.
+`petroleum_retrieval_accuracy`، `petroleum_ontology_accuracy`،
+و`petroleum_inference_accuracy`، إضافة إلى `domain_scores["petroleum"]`.
+فتصبح الهوية قابلة للقياس ومنع التراجع في CI.
+
+## الاستدلال فوق الأنطولوجيا
+
+الأنطولوجيا المزروعة ليست بيانات ساكنة. `core/ontology_reasoner.py` يشتقّ علاقات
+تتبع من العلاقات المخزّنة عبر قواعد تركيب شفّافة (`RelationRule`):
+
+- `containment_transitive`: تعدّي `contained_in`.
+- `penetrates_through_containment`: `البئر penetrates المكمن` + `المكمن contained_in الطبقة`
+  ⇒ `البئر penetrates الطبقة`.
+- `containment_inherits_property`: `المكمن contained_in الطبقة` + `الطبقة has_property المسامية`
+  ⇒ `المكمن has_property المسامية`.
+- `measure_property_of_host`: `السجل measures المسامية` + `الطبقة has_property المسامية`
+  ⇒ `السجل measures الطبقة`، ثم `السجل measures المكمن`.
+
+العلاقات المشتقّة **لا تُدسّ في الأنطولوجيا**؛ تُعاد كـ `OntologyInference` مع خطوات
+التركيب (`steps`) وثقة مُضاعَفة، فتبقى مميّزة عن العلاقات الصريحة القابلة للمراجعة.
+تُتاح عبر `controller.infer_ontology_relation(...)` و`controller.derive_ontology_relations()`.
 
 ## البنية
 

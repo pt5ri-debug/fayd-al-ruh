@@ -111,6 +111,8 @@ class Scenario:
     uncertainties: tuple[UncertaintySpec, ...] = ()
     # Expected seeded ontology relations as (source_label, relation_type, target_label).
     ontology_relations: tuple[tuple[str, str, str], ...] = ()
+    # Relations that must be derivable (not stored) as (source_label, relation_type, target_label).
+    ontology_inferences: tuple[tuple[str, str, str], ...] = ()
 
 
 def _scenario_memory() -> Scenario:
@@ -357,6 +359,25 @@ def _scenario_petroleum_identity() -> Scenario:
     )
 
 
+def _scenario_petroleum_ontology_inference() -> Scenario:
+    """Petroleum domain: relations follow from the seeded ontology without being stored."""
+    return Scenario(
+        id="petroleum-ontology-inference",
+        domain=Domain.PETROLEUM,
+        description="Transitive containment and property/tool composition are derived, not stored.",
+        ontology_inferences=(
+            # A well penetrating a reservoir also penetrates the formation holding it.
+            ("البئر", "penetrates", "الطبقة"),
+            # Fluids held in a reservoir are also held in the reservoir's formation.
+            ("الهيدروكربون", "exists_in", "الطبقة"),
+            # A reservoir inherits the properties of its containing formation.
+            ("المكمن", "has_property", "المسامية"),
+            # A tool measuring a property also measures the reservoir that has it.
+            ("السجل", "measures", "المكمن"),
+        ),
+    )
+
+
 SCENARIOS: tuple[Scenario, ...] = (
     _scenario_memory(),
     _scenario_reasoning(),
@@ -370,6 +391,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     _scenario_petroleum_planning(),
     _scenario_petroleum_uncertainty(),
     _scenario_petroleum_identity(),
+    _scenario_petroleum_ontology_inference(),
 )
 
 

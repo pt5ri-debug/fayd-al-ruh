@@ -134,4 +134,35 @@ def test_controller_creates_cognitive_trace():
 
     assert len(trace.hypothesis_ids) == 1
 
-    assert len(trace.prediction_ids) == 1    
+    assert len(trace.prediction_ids) == 1
+
+
+def test_controller_infers_ontology_relation_with_steps():
+    controller = CognitiveController()
+
+    inference = controller.infer_ontology_relation("البئر", "الطبقة", "penetrates")
+
+    assert inference is not None
+    assert inference.derived is True
+    assert inference.steps
+    assert 0.0 < inference.confidence < 1.0
+
+
+def test_controller_returns_none_for_unknown_ontology_relation():
+    controller = CognitiveController()
+
+    assert controller.infer_ontology_relation("الماء", "الضغط", "measures") is None
+    assert controller.infer_ontology_relation("لا_يوجد", "الطبقة", "penetrates") is None
+
+
+def test_controller_derived_relations_stay_out_of_the_graph():
+    controller = CognitiveController()
+
+    stored = {
+        (relation.source_id, relation.target_id, relation.relation_type)
+        for relation in controller.ontology.relations.values()
+    }
+
+    for inference in controller.derive_ontology_relations():
+        key = (inference.source_id, inference.target_id, inference.relation_type)
+        assert key not in stored
