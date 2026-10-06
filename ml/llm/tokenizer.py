@@ -40,4 +40,64 @@ def sample(logits, temperature: float, rng) -> int:
     return int(rng.choice(len(probs), p=probs))
 
 
-__all__ = ["BOS_ID", "VOCAB_SIZE", "ByteTokenizer", "sample"]
+TOKENIZER_KINDS = ("byte", "bpe")
+
+
+def train_tokenizer(kind: str, text: str, *, vocab_size: int = 1024):
+    """Build the requested tokenizer kind over ``text``.
+
+    ``byte`` needs no training and ignores ``vocab_size``; ``bpe`` learns merges
+    up to ``vocab_size``. Both expose ``encode``/``decode``/``vocab_size``.
+    """
+    if kind == "byte":
+        return ByteTokenizer()
+    if kind == "bpe":
+        from ml.llm.bpe import BPETokenizer
+
+        return BPETokenizer.train(text, vocab_size=vocab_size)
+    raise ValueError(f"Unknown tokenizer kind {kind!r}; expected one of {TOKENIZER_KINDS}.")
+
+
+def save_tokenizer(tokenizer, path) -> None:
+    """Persist a tokenizer so generation can rebuild it from the checkpoint dir.
+
+    Byte tokenizers write a tiny marker (there is nothing to learn); BPE
+    tokenizers delegate to their own JSON format.
+    """
+    from pathlib import Path
+
+    target = Path(path)
+    if hasattr(tokenizer, "save"):
+        tokenizer.save(target)
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('{"kind": "byte", "merges": []}', encoding="utf-8")
+
+
+def load_tokenizer(path):
+    """Load the tokenizer saved by :func:`save_tokenizer`, else a byte tokenizer."""
+    import json
+    from pathlib import Path
+
+    source = Path(path)
+    if not source.exists():
+        return ByteTokenizer()
+    data = json.loads(source.read_text(encoding="utf-8"))
+    if data.get("kind", "bpe") == "byte":
+        return ByteTokenizer()
+    from ml.llm.bpe import BPETokenizer
+
+    merges = [(int(left), int(right)) for left, right in data.get("merges", [])]
+    return BPETokenizer(merges)
+
+
+__all__ = [
+    "BOS_ID",
+    "VOCAB_SIZE",
+    "ByteTokenizer",
+    "TOKENIZER_KINDS",
+    "load_tokenizer",
+    "sample",
+    "save_tokenizer",
+    "train_tokenizer",
+]

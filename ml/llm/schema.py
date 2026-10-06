@@ -15,46 +15,52 @@ import json
 
 import numpy as np
 
-from ml.llm.tokenizer import BOS_ID, sample
+from ml.llm.tokenizer import BOS_ID, ByteTokenizer, sample
 from ml.llm.transformer import TransformerLM
 
-_STRING_STOP = frozenset({ord('"'), ord("\n"), ord("\r"), ord("\t")})
+_STRING_STOP = frozenset({'"', "\n", "\r", "\t"})
 _NUMBERS = ("0.4", "0.5", "0.6", "0.7", "0.8", "0.9")
 _BOOLEANS = ("true", "false")
 
 
 class StructuredDecoder:
-    """Fills the schema's leaf values from the model, keeping the JSON valid."""
+    """Fills the schema's leaf values from the model, keeping the JSON valid.
 
-    def __init__(self, model: TransformerLM) -> None:
+    Works with any tokenizer exposing ``encode``/``decode``: the running buffer
+    is text, re-encoded before each step, so a multi-byte UTF-8 character is
+    never split and the same code path serves the byte and BPE tokenizers.
+    """
+
+    def __init__(self, model: TransformerLM, tokenizer=None) -> None:
         self.model = model
+        self.tokenizer = tokenizer or ByteTokenizer()
 
-    def _logits(self, prefix: bytes) -> np.ndarray:
-        window = prefix[-self.model.config.block_size :]
-        tokens = np.frombuffer(window, dtype=np.uint8).astype(np.int64)
-        return self.model.forward(tokens)[0, -1]
+    def _logits(self, prefix: str) -> np.ndarray:
+        tokens = self.tokenizer.encode(prefix, bos=False)
+        window = tokens[-self.model.config.block_size :]
+        return self.model.forward(np.array(window, dtype=np.int64))[0, -1]
 
-    def _string(self, prefix: bytes, rng, temperature: float, max_bytes: int) -> str:
-        """Sample a string leaf; stops at a closing quote or control character.
-
-        The prefix stays raw bytes, so a multi-byte UTF-8 character is never
-        split by decoding: partial sequences keep their context.
-        """
-        start = len(prefix)
-        raw = bytearray(prefix)
-        for _ in range(max_bytes):
-            token = sample(self._logits(bytes(raw)), temperature, rng)
-            if token == BOS_ID or token in _STRING_STOP:
+    def _string(self, prefix: str, rng, temperature: float, max_tokens: int) -> str:
+        """Sample a string leaf; stops at a closing quote or control character."""
+        raw = prefix
+        for _ in range(max_tokens):
+            token = sample(self._logits(raw), temperature, rng)
+            if token == BOS_ID:
                 break
-            raw.append(token)
-        return bytes(raw[start:]).decode("utf-8", errors="ignore").strip()
+            text = self.tokenizer.decode([token])
+            if not text or any(character in _STRING_STOP for character in text):
+                break
+            raw += text
+        return raw[len(prefix):].strip()
 
-    def _choice(self, prefix: bytes, options: tuple[str, ...], rng) -> str:
+    def _choice(self, prefix: str, options: tuple[str, ...], rng) -> str:
         """Pick one literal, restricted to the options the schema allows."""
         probs = self._logits(prefix)
         probs = np.exp(probs - probs.max())
         probs /= probs.sum()
-        scores = np.array([probs[ord(option[0])] for option in options])
+        scores = np.array(
+            [probs[self.tokenizer.encode(option, bos=False)[0]] for option in options]
+        )
         total = float(scores.sum())
         if total <= 1e-12:
             return options[0]
@@ -70,46 +76,46 @@ class StructuredDecoder:
     ) -> str:
         """Return a JSON object string whose leaves were proposed by the model."""
         rng = np.random.default_rng(seed) if seed is not None else np.random.default_rng()
-        buf = (prompt.rstrip() + '\n{"concepts": [{"label": "').encode("utf-8")
+        buf = prompt.rstrip() + '\n{"concepts": [{"label": "'
         label = self._string(buf, rng, temperature, max_string_bytes)
 
-        buf += label.encode("utf-8") + b'", "aliases": []}], "evidence": [{"description": "'
+        buf += label + '", "aliases": []}], "evidence": [{"description": "'
         description = self._string(buf, rng, temperature, max_string_bytes)
 
-        buf += description.encode("utf-8") + b'", "source": "'
+        buf += description + '", "source": "'
         source = self._string(buf, rng, temperature, max_string_bytes)
 
-        buf += source.encode("utf-8") + b'", "supports": '
+        buf += source + '", "supports": '
         supports = self._choice(buf, _BOOLEANS, rng)
 
-        buf += supports.encode("utf-8") + b', "strength": '
+        buf += supports + ', "strength": '
         strength = self._choice(buf, _NUMBERS, rng)
 
-        buf += strength.encode("utf-8") + b'}], "hypotheses": [{"statement": "'
+        buf += strength + '}], "hypotheses": [{"statement": "'
         statement = self._string(buf, rng, temperature, max_string_bytes)
 
-        buf += statement.encode("utf-8") + b'", "confidence": '
+        buf += statement + '", "confidence": '
         confidence = self._choice(buf, _NUMBERS, rng)
 
-        buf += confidence.encode("utf-8") + b'}], "questions": [{"text": "'
+        buf += confidence + '}], "questions": [{"text": "'
         question = self._string(buf, rng, temperature, max_string_bytes)
 
-        buf += question.encode("utf-8") + b'", "topic": "'
+        buf += question + '", "topic": "'
         topic = self._string(buf, rng, temperature, max_string_bytes)
 
-        buf += topic.encode("utf-8") + b'", "priority": '
+        buf += topic + '", "priority": '
         priority = self._choice(buf, _NUMBERS, rng)
 
-        buf += priority.encode("utf-8") + b'}], "plans": [{"goal": "'
+        buf += priority + '}], "plans": [{"goal": "'
         goal = self._string(buf, rng, temperature, max_string_bytes)
 
-        buf += goal.encode("utf-8") + b'", "priority": '
+        buf += goal + '", "priority": '
         plan_priority = self._choice(buf, _NUMBERS, rng)
 
-        buf += plan_priority.encode("utf-8") + b', "steps": [{"description": "'
+        buf += plan_priority + ', "steps": [{"description": "'
         first_step = self._string(buf, rng, temperature, max_string_bytes)
 
-        buf += first_step.encode("utf-8") + b'"}, {"description": "'
+        buf += first_step + '"}, {"description": "'
         second_step = self._string(buf, rng, temperature, max_string_bytes)
 
         steps = [

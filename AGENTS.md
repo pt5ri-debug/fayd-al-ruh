@@ -28,6 +28,33 @@ mind. User-facing docs and text are in Arabic.
   regenerate with `python -m cli release`.
 - `ml/llm/corpus.py` builds the language-model text, including sentences generated
   from every discipline and course (`curriculum_sentences`).
+- `ml/llm/bpe.py` — byte-level BPE tokenizer trained in-project. `ml/llm/tokenizer.py`
+  has `train_tokenizer(kind, text, vocab_size)` / `save_tokenizer` / `load_tokenizer`;
+  the trainer writes `<checkpoint>.tokenizer.json` and `LocalLanguageModel` loads it
+  automatically. BPE compresses the corpus ~5x vs raw bytes. `--tokenizer-kind byte`
+  restores the old byte behaviour.
+- `core/conversation.py` — multi-turn memory (sessions, roles, bounded window,
+  `JsonStore` persistence). `core/documents.py` — citable documents + knowledge
+  corpus from the seeds. `core/rag.py` — fuses lexical coverage (Arabic-normalised),
+  hashed semantic, and multi-hop ontology signals into `RetrievedPassage` with
+  citations. `core/assistant.py` — `GroundedAssistant` / `build_default_assistant`;
+  answers with citations, extractive fallback with no model, and a groundedness gate
+  that rejects ungrounded model output. CLI: `python -m ai.ask` / `python -m cli ask`.
+- `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
+  (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. CLI:
+  `python -m ai.voice` / `python -m cli voice`.
+- `core/tools.py` — deny-by-default tool sandbox: allow-list, root confinement,
+  read-only mode, capability + human-approval gates, built-in file/search/calculator
+  tools returning `ToolResult`. `core/tool_agent.py` — `ToolPlan`/`ToolAgent`
+  coordination with a full trace. CLI: `python -m ai.agent_demo` / `python -m cli agent`.
+- `core/knowledge_update.py` — folds confirmed statements into the document store
+  with provenance and decay (`KnowledgeUpdater`). `core/continuous_learning.py` —
+  `ContinuousLearner` (explicit feedback only) + `RegressionMonitor` for baseline
+  comparisons. CLI: `python -m ai.learn_demo` / `python -m cli learn`.
+- `core/vision.py` — optional multimodal perception: dependency-free `ImageBuffer`
+  (PPM P6), measurable `ImageFeatures`, `HeuristicVisionEncoder`, and a
+  `MultimodalAssistant` that grounds an image description in the RAG store. A real
+  encoder can implement the `VisionEncoder` protocol without touching the assistant.
 - `core/version.py` is the single source of the version string.
 - `evaluation/` â€” regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
@@ -45,3 +72,21 @@ mind. User-facing docs and text are in Arabic.
 - Keep seeds declarative tuples (`CourseKnowledge` / `DisciplineKnowledge`);
   coverage helpers report what an ontology actually carries.
 - Add a test per new seed or CLI action; keep the evaluation gate green.
+
+## Jarvis roadmap (delivered)
+
+Layers added on top of the core, each dependency-free and testable on a fresh
+clone, each optional so the base system still runs without it:
+
+- Phase 1 — BPE subword tokenizer, conversation memory, RAG documents/retriever,
+  grounded assistant with citations and an extractive fallback.
+- Phase 2 — speech I/O contracts + voice loop (`core/speech.py`).
+- Phase 3 — sandboxed real tools + tool-agent coordination (`core/tools.py`,
+  `core/tool_agent.py`).
+- Phase 4 — continuous learning from explicit feedback + regression monitor
+  (`core/knowledge_update.py`, `core/continuous_learning.py`).
+- Phase 5 — optional multimodal perception (`core/vision.py`).
+
+Every phase keeps the four hard gates green and never lets the model widen its own
+authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
+regression monitor each can refuse a change.

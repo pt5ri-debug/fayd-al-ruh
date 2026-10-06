@@ -90,6 +90,26 @@ def run_selfcheck(argv: Sequence[str] = ()) -> int:
     return 0
 
 
+def run_ask(argv: Sequence[str] = ()) -> int:
+    """Ask the grounded, citation-backed petroleum assistant."""
+    return _run_module("ai.ask", argv)
+
+
+def run_voice(argv: Sequence[str] = ()) -> int:
+    """Run one voice turn through the assistant (transcript in, WAV out)."""
+    return _run_module("ai.voice", argv)
+
+
+def run_agent(argv: Sequence[str] = ()) -> int:
+    """Run a tool plan inside the safety sandbox."""
+    return _run_module("ai.agent_demo", argv)
+
+
+def run_learn(argv: Sequence[str] = ()) -> int:
+    """Demonstrate continuous learning and the regression gate."""
+    return _run_module("ai.learn_demo", argv)
+
+
 def run_curriculum(argv: Sequence[str] = ()) -> int:
     """Show the seeded petroleum-engineering curriculum and its coverage."""
     if argv:
@@ -135,6 +155,10 @@ def run_curriculum(argv: Sequence[str] = ()) -> int:
 
 
 MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
+    ("اسأل المساعد الموثّق (Ask the grounded assistant)", run_ask, ()),
+    ("جولة صوتية واحدة (Voice turn)", run_voice, ("--write-wav", "voice-turn.wav", "الماء")),
+    ("عرض أدوات الوكيل في صندوق الأمان (Tool agent demo)", run_agent, ()),
+    ("عرض التعلّم المستمر وبوابة الانحدار (Continuous learning)", run_learn, ()),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--episodes", "60")),
     ("Train the language model", run_llm, ("--steps", "200")),
@@ -205,6 +229,10 @@ def menu_loop(reader: Callable[[str], str] = input) -> int:
 
 __all__ = [
     "MENU",
+    "run_ask",
+    "run_voice",
+    "run_agent",
+    "run_learn",
     "run_demo",
     "run_ml",
     "run_llm",
@@ -212,6 +240,7 @@ __all__ = [
     "run_curriculum",
     "run_release",
     "run_evaluation",
+    "run_selfcheck",
     "run_choice",
     "menu_loop",
     "describe_paths",
