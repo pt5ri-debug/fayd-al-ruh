@@ -72,3 +72,21 @@ mind. User-facing docs and text are in Arabic.
 - Keep seeds declarative tuples (`CourseKnowledge` / `DisciplineKnowledge`);
   coverage helpers report what an ontology actually carries.
 - Add a test per new seed or CLI action; keep the evaluation gate green.
+
+## Jarvis roadmap (delivered)
+
+Layers added on top of the core, each dependency-free and testable on a fresh
+clone, each optional so the base system still runs without it:
+
+- Phase 1 — BPE subword tokenizer, conversation memory, RAG documents/retriever,
+  grounded assistant with citations and an extractive fallback.
+- Phase 2 — speech I/O contracts + voice loop (`core/speech.py`).
+- Phase 3 — sandboxed real tools + tool-agent coordination (`core/tools.py`,
+  `core/tool_agent.py`).
+- Phase 4 — continuous learning from explicit feedback + regression monitor
+  (`core/knowledge_update.py`, `core/continuous_learning.py`).
+- Phase 5 — optional multimodal perception (`core/vision.py`).
+
+Every phase keeps the four hard gates green and never lets the model widen its own
+authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
+regression monitor each can refuse a change.
