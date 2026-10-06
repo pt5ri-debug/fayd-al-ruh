@@ -40,7 +40,26 @@ _COMMANDS = {
 }
 
 
+def _use_utf8_console() -> None:
+    """Make stdout/stderr tolerate Arabic on legacy terminals (e.g. Windows cp1252).
+
+    The project prints Arabic labels, but a frozen Windows build inherits a
+    code-page encoding that cannot represent them, which would crash the
+    portable bundle. Reconfiguring to UTF-8 with a safe fallback keeps output
+    readable instead of raising ``UnicodeEncodeError``.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _use_utf8_console()
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
         return menu_loop()

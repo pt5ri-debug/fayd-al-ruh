@@ -156,3 +156,19 @@ def test_cli_petroleum_command_dispatches(monkeypatch) -> None:
     monkeypatch.setitem(cli_entry._COMMANDS, "petroleum", fake)
     assert cli_entry.main(["petroleum", "--episodes", "5"]) == 0
     assert calls == [["--episodes", "5"]]
+
+
+def test_utf8_console_guard_allows_arabic_on_legacy_encoding(monkeypatch) -> None:
+    import io
+
+    import cli.__main__ as cli_entry
+
+    buffer = io.BytesIO()
+    legacy = io.TextIOWrapper(buffer, encoding="cp1252", errors="strict")
+    monkeypatch.setattr(cli_entry.sys, "stdout", legacy)
+
+    cli_entry._use_utf8_console()
+    legacy.write("هندسة الحفر\n")
+    legacy.flush()
+
+    assert buffer.getvalue().decode("utf-8").strip() == "هندسة الحفر"
