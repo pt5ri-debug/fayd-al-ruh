@@ -11,10 +11,10 @@ def _mini_ontology() -> Ontology:
     concepts = {
         label: Concept(label, aliases)
         for label, aliases in (
-            ("pressure", frozenset({"الضغط"})),
-            ("permeability", frozenset({"النفاذية"})),
-            ("formation", frozenset({"الطبقة"})),
-            ("reservoir", frozenset({"المكمن"})),
+            ("pressure", frozenset({"pressure"})),
+            ("permeability", frozenset({"permeability"})),
+            ("formation", frozenset({"formation"})),
+            ("reservoir", frozenset({"reservoir"})),
         )
     }
     for concept in concepts.values():
@@ -214,21 +214,21 @@ def test_controller_learning_extends_recall_through_the_new_relation():
 
     controller = CognitiveController()
     controller.memory.store(
-        "obs-permeability",
+        "obs-pressure",
         "observation",
-        Observation("permeability controls flow.", "study", 0.9),
+        Observation("pressure controls flow.", "study", 0.9),
         importance=0.9,
     )
 
-    # Before learning, "pressure" has no path to the permeability item.
-    assert controller.recall_with_ontology("pressure") == []
+    # Before learning, "permeability" has no path to the pressure item.
+    assert controller.recall_with_ontology("permeability") == []
 
-    learning = controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
+    learning = controller.learn_ontology_from_observation("pressure accompanies permeability")
     assert learning.changed
 
-    recalls = controller.recall_with_ontology("pressure")
+    recalls = controller.recall_with_ontology("permeability")
     texts = [str(getattr(recall.item.content, "content", recall.item.content)) for recall in recalls]
-    assert texts and texts[0] == "permeability controls flow."
+    assert texts and texts[0] == "pressure controls flow."
 
 
 def test_controller_learning_leaves_derived_relations_separate():
@@ -238,7 +238,7 @@ def test_controller_learning_leaves_derived_relations_separate():
     stored_before = len(controller.ontology.relations)
     derived_before = len(controller.derive_ontology_relations())
 
-    controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
+    controller.learn_ontology_from_observation("pressure accompanies permeability")
 
     # The learned relation is stored; the derived set is unchanged and still derived.
     assert len(controller.ontology.relations) > stored_before
@@ -252,13 +252,13 @@ def test_controller_decay_removes_the_recall_path_it_learned():
 
     controller = CognitiveController()
     controller.memory.store(
-        "obs-permeability",
+        "obs-pressure",
         "observation",
-        Observation("permeability controls flow.", "study", 0.9),
+        Observation("pressure controls flow.", "study", 0.9),
         importance=0.9,
     )
-    controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
-    assert controller.recall_with_ontology("pressure")
+    controller.learn_ontology_from_observation("pressure accompanies permeability")
+    assert controller.recall_with_ontology("permeability")
 
     # Three decays of 0.1 exhaust the 0.3 learned link and drop it.
     controller.decay_ontology_learning(amount=0.1)
@@ -266,17 +266,17 @@ def test_controller_decay_removes_the_recall_path_it_learned():
     decay = controller.decay_ontology_learning(amount=0.1)
 
     assert decay.removed
-    assert controller.recall_with_ontology("pressure") == []
+    assert controller.recall_with_ontology("permeability") == []
 
 
 def test_controller_reinforce_raises_learned_confidence():
     from core.cognitive_controller import CognitiveController
 
     controller = CognitiveController()
-    controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
+    controller.learn_ontology_from_observation("pressure accompanies permeability")
     before = controller.ontology_learner.confidence
 
-    after = controller.reinforce_ontology_relation("الضغط", "النفاذية")
+    after = controller.reinforce_ontology_relation("pressure", "permeability")
 
     assert after == pytest.approx(before + controller.ontology_learner.reinforcement)
 

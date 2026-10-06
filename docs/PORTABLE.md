@@ -1,94 +1,100 @@
-# الوضع المحمول (Portable)
+# Portable Mode
 
-الهدف: تشغيل Fayd Al-Ruh على جهاز **بلا Python وبلا برامج وسيطة** — لا CUDA، ولا
-FFmpeg، ولا خدمة خارجية — مثل DeepFaceLab. وفي الوقت نفسه يبقى التطوير داخل
-المستودع كما هو دون أي تغيير.
+The goal: run Fayd Al-Ruh on a machine **without Python and without any
+intermediate software** — no CUDA, no FFmpeg, no external service — like
+DeepFaceLab. At the same time, in-repo development stays exactly as it is, with
+no changes.
 
-## لماذا هذا ممكن أصلاً
+## Why this is possible at all
 
-المشروع بايثون صافٍ. الاعتماديات وقت التشغيل `numpy` و`requests` فقط، والنموذج
-اللغوي مكتوب من الصفر بـ`numpy` مع نقطة تحقّق ملتزمة في المستودع. لا يوجد أي إطار
-تعلّم ثقيل يحتاج مكتبات نظام.
+The project is pure Python. The runtime dependencies are only `numpy` and
+`requests`, and the language model is written from scratch in `numpy` with a
+checkpoint committed in the repository. There is no heavy learning framework
+that needs system libraries.
 
-## البناء
+## Build
 
 ```bash
 pip install -r requirements.txt
-pip install pyinstaller          # أداة بناء فقط
-python scripts/build.py --clean  # الناتج: dist/fayd-al-ruh/
+pip install pyinstaller          # build tool only
+python scripts/build.py --clean  # output: dist/fayd-al-ruh/
 ```
 
-النتيجة مجلد واحد `dist/fayd-al-ruh/` يحتوي:
+The result is a single folder `dist/fayd-al-ruh/` containing:
 
 ```
-fayd-al-ruh      (أو fayd-al-ruh.exe على ويندوز)
+fayd-al-ruh      (or fayd-al-ruh.exe on Windows)
 run.sh / run.bat
-_internal/       (بايثون + numpy + النموذج المرفق)
+_internal/       (Python + numpy + the bundled model)
 ```
 
-انسخ المجلد إلى أي جهاز وشغّله:
+Copy the folder to any machine and run it:
 
 ```bash
-./run.sh            # أو انقر run.bat على ويندوز
+./run.sh            # or double-click run.bat on Windows
 ./fayd-al-ruh paths
 ```
 
-> على ويندوز: النقر المزدوج على `run.bat` يفتح القائمة، وعند الانتهاء تبقى
-> النافذة مفتوحة حتى تقرأ أي رسالة خطأ (`Press any key to close`). المشغّل يجرّب
-> أولاً `py -3` ثم `python`، وإن لم يجد بايثون يشرح ذلك بدل أن يغلق فوراً.
+> On Windows: double-clicking `run.bat` opens the menu, and when it finishes the
+> window stays open so you can read any error message (`Press any key to close`).
+> The launcher tries `py -3` first, then `python`, and if it finds no Python it
+> explains that instead of closing immediately.
 
-## أين تُقرأ الأصول وأين تُكتب البيانات
+## Where assets are read and where data is written
 
-يفصل `core/paths.py` بين نوعين من المسارات:
+`core/paths.py` separates two kinds of paths:
 
-- **الأصول (قراءة فقط):** في البناء المحمول داخل الحزمة (`sys._MEIPASS`)، وتشمل
-  نقطة تحقّق النموذج اللغوي `ml/llm/checkpoints/fayd-llm.npz`.
-- **البيانات (كتابة):** بجانب التنفيذي في مجلد `data/`. هذا ما يجعل النسخ إلى
-  ذاكرة USB يحافظ على الحالة (المصنّفات، السياسات، النموذج المُعاد تدريبه).
+- **Assets (read-only):** in the portable build, inside the package
+  (`sys._MEIPASS`), including the language-model checkpoint
+  `ml/llm/checkpoints/fayd-llm.npz`.
+- **Data (write):** beside the executable in a `data/` folder. This is what lets
+  a copy to a USB stick keep its state (classifiers, policies, the retrained
+  model).
 
-الترتيب في `default_checkpoint()`: يُفضّل نقطة تحقّق في مجلد البيانات (مُدرَّبة
-محلياً)، وإلا يعود إلى المرفقة داخل الحزمة.
+The order in `default_checkpoint()`: a checkpoint in the data folder is preferred
+(trained locally), otherwise it falls back to the one bundled in the package.
 
-للتوجيه يدوياً:
+To point it manually:
 
 ```bash
 FAYD_DATA_DIR=/path/to/data ./fayd-al-ruh paths
 ```
 
-| السياق | الأصول | البيانات |
+| Context | Assets | Data |
 |---|---|---|
-| من المصدر | جذر المستودع | جذر المستودع |
-| محمول | `_internal/` | بجانب التنفيذي (`data/`) |
+| From source | repository root | repository root |
+| Portable | `_internal/` | beside the executable (`data/`) |
 
-## الواجهة الموحّدة
+## The unified interface
 
-`python -m cli` و`run.sh` يستدعيان نفس المنطق:
+`python -m cli` and `run.sh` call the same logic:
 
-| الأمر | ماذا يفعل |
+| Command | What it does |
 |---|---|
-| `python -m cli` | قائمة مرقّمة تفاعلية |
-| `python -m cli demo` | عرض الدورة المعرفية المحلية |
-| `python -m cli ml --episodes 60` | مسار التعلّم الآلي |
-| `python -m cli llm --steps 4000` | تدريب النموذج اللغوي الداخلي |
-| `python -m cli eval` | مجموعة التقييم العلمي |
-| `python -m cli paths` | أين تُقرأ الأصول وتُكتب البيانات |
-| `python -m cli selfcheck` | التأكد من تحميل النموذج المرفق |
+| `python -m cli` | interactive numbered menu |
+| `python -m cli demo` | local cognitive-cycle demo |
+| `python -m cli ml --episodes 60` | machine-learning pipeline |
+| `python -m cli llm --steps 4000` | train the in-project language model |
+| `python -m cli eval` | the scientific evaluation suite |
+| `python -m cli paths` | where assets are read and data is written |
+| `python -m cli selfcheck` | verify the bundled model loads |
 
-## التوزيع عبر CI
+## Distribution via CI
 
-`.github/workflows/ci.yml` فيه مهمة `portable` تبني الحزمة على
-Ubuntu/Windows/macOS عند كل تغيير، وتُشغّل فحص دخان (`paths` ثم `demo` ثم
-`selfcheck`). وعند دفع وسم `v*` تُرفع الحزم المضغوطة تلقائياً على صفحة الإصدار
-في GitHub.
+`.github/workflows/ci.yml` has a `portable` job that builds the package on
+Ubuntu/Windows/macOS on every change and runs a smoke check (`paths`, then
+`demo`, then `selfcheck`). When a `v*` tag is pushed, the archives are uploaded
+automatically to the GitHub release page.
 
-## ملاحظات
+## Notes
 
-- عند التشغيل **من المصدر** يجب تثبيت الاعتماديات مرة واحدة:
-  `python -m pip install -r requirements.txt`. إن نسيتها، يعرض المشغّل
-  `Missing dependency: 'numpy'` مع أمر التثبيت بدل تتبّع طويل.
-- الحزمة المحمولة لا تحتاج ذلك: الاعتماديات مضمّنة داخلها.
-- PyInstaller **أداة بناء** ولا تُضاف إلى `requirements.txt`، فلا يثقل CI ولا
-  المستخدم النهائي.
-- الحزمة المبنية على نظام واحد تعمل على ذلك النظام فقط. لبناء `.exe` استخدم
-  ويندوز أو مهمة CI على `windows-latest`.
-- `data/` مُدرَج في `.gitignore`، فلا تدخل بيانات التشغيل إلى المستودع.
+- When running **from source**, install the dependencies once:
+  `python -m pip install -r requirements.txt`. If you forget, the launcher shows
+  `Missing dependency: 'numpy'` with the install command instead of a long
+  traceback.
+- The portable package does not need that: the dependencies are bundled inside.
+- PyInstaller is a **build tool** and is not added to `requirements.txt`, so it
+  does not burden CI or the end user.
+- A package built on one system runs only on that system. To build a `.exe`, use
+  Windows or a CI job on `windows-latest`.
+- `data/` is listed in `.gitignore`, so runtime data never enters the repository.

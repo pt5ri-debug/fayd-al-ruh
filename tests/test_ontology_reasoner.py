@@ -24,8 +24,8 @@ def test_chain_rule_derives_transitive_containment():
     reasoner = OntologyReasoner()
     inference = reasoner.infer(
         ontology,
-        _id(ontology, "البئر"),
-        _id(ontology, "الطبقة"),
+        _id(ontology, "well"),
+        _id(ontology, "formation"),
         "penetrates",
     )
     assert inference is not None
@@ -39,8 +39,8 @@ def test_shared_target_rule_derives_tool_over_property_host():
     reasoner = OntologyReasoner()
     inference = reasoner.infer(
         ontology,
-        _id(ontology, "السجل"),
-        _id(ontology, "المكمن"),
+        _id(ontology, "well_log"),
+        _id(ontology, "reservoir"),
         "measures",
     )
     assert inference is not None
@@ -53,8 +53,8 @@ def test_explicit_relation_is_returned_as_not_derived():
     reasoner = OntologyReasoner()
     inference = reasoner.infer(
         ontology,
-        _id(ontology, "المكمن"),
-        _id(ontology, "الطبقة"),
+        _id(ontology, "reservoir"),
+        _id(ontology, "formation"),
         "contained_in",
     )
     assert inference is not None
@@ -89,8 +89,8 @@ def test_unknown_relation_returns_none():
     reasoner = OntologyReasoner()
     assert reasoner.infer(
         ontology,
-        _id(ontology, "الماء"),
-        _id(ontology, "الضغط"),
+        _id(ontology, "water"),
+        _id(ontology, "pressure"),
         "measures",
     ) is None
 

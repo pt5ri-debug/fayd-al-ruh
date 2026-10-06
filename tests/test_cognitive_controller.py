@@ -140,7 +140,7 @@ def test_controller_creates_cognitive_trace():
 def test_controller_infers_ontology_relation_with_steps():
     controller = CognitiveController()
 
-    inference = controller.infer_ontology_relation("البئر", "الطبقة", "penetrates")
+    inference = controller.infer_ontology_relation("well", "formation", "penetrates")
 
     assert inference is not None
     assert inference.derived is True
@@ -151,8 +151,8 @@ def test_controller_infers_ontology_relation_with_steps():
 def test_controller_returns_none_for_unknown_ontology_relation():
     controller = CognitiveController()
 
-    assert controller.infer_ontology_relation("الماء", "الضغط", "measures") is None
-    assert controller.infer_ontology_relation("لا_يوجد", "الطبقة", "penetrates") is None
+    assert controller.infer_ontology_relation("water", "pressure", "measures") is None
+    assert controller.infer_ontology_relation("missing", "formation", "penetrates") is None
 
 
 def test_controller_derived_relations_stay_out_of_the_graph():

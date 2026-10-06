@@ -25,25 +25,25 @@ def run_demo(root: Path | None = None) -> int:
     )
     sandbox = build_sandbox(sandbox_root, read_only=False)
     plan = plan_from_calls(
-        "اكتب ملاحظة بترولية، ثم تحقّق منها وابحث فيها",
+        "Write a petroleum note, verify it, and search for it",
         (
-            ToolCall("write_file", {"relative": "notes/well.txt", "content": "النفاذية عالية"}),
+            ToolCall("write_file", {"relative": "notes/well.txt", "content": "Permeability is high"}),
             ToolCall("read_file", {"relative": "notes/well.txt"}),
             ToolCall("list_dir", {"relative": "notes"}),
-            ToolCall("search", {"query": "النفاذية", "relative": "."}),
+            ToolCall("search", {"query": "permeability", "relative": "."}),
             ToolCall("calculator", {"expression": "2 * (3 + 4)"}),
         ),
-        reasons=("كتابة", "قراءة", "عرض", "بحث", "حساب"),
+        reasons=("write", "read", "list", "search", "compute"),
     )
     run = ToolAgent(sandbox).run(plan)
-    print(f"الهدف: {run.goal}")
+    print(f"Goal: {run.goal}")
     for step in run.steps:
-        status = "ok " if step.result.ok else "خطأ"
+        status = "ok " if step.result.ok else "ERR"
         detail = step.result.output if step.result.ok else step.result.error
         print(f"  [{status}] {step.call.tool} ({step.reason}): {detail}")
-    print(f"النتيجة: {'نجح' if run.succeeded else 'فشل'}")
+    print(f"Result: {'succeeded' if run.succeeded else 'failed'}")
     if created:
-        print(f"(صندوق مؤقت: {sandbox_root})")
+        print(f"(temporary sandbox: {sandbox_root})")
     return 0 if run.succeeded else 1
 
 

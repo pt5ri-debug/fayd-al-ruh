@@ -36,10 +36,10 @@ def test_registry_registers_and_rejects_duplicates():
 
 def test_read_and_write_inside_the_root(tmp_path):
     sandbox = _sandbox(tmp_path, read_only=False)
-    write = sandbox.run("write_file", relative="notes/a.txt", content="مرحبا")
+    write = sandbox.run("write_file", relative="notes/a.txt", content="hello")
     assert write.ok
     read = sandbox.run("read_file", relative="notes/a.txt")
-    assert read.ok and read.output == "مرحبا"
+    assert read.ok and read.output == "hello"
 
 
 def test_read_only_sandbox_refuses_mutation(tmp_path):
@@ -51,16 +51,16 @@ def test_read_only_sandbox_refuses_mutation(tmp_path):
 
 def test_list_and_search(tmp_path):
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "a.txt").write_text("النفاذية مهمة\n", encoding="utf-8")
+    (tmp_path / "data" / "a.txt").write_text("permeability matters\n", encoding="utf-8")
     sandbox = _sandbox(tmp_path, read_only=True)
 
     listing = sandbox.run("list_dir", relative="data")
     assert listing.ok and "a.txt" in listing.output
 
-    found = sandbox.run("search", query="النفاذية", relative=".")
+    found = sandbox.run("search", query="permeability", relative=".")
     assert found.ok and "a.txt:1" in found.output
 
-    missing = sandbox.run("search", query="لا يوجد", relative=".")
+    missing = sandbox.run("search", query="not present", relative=".")
     assert missing.ok and missing.output == "(no matches)"
 
 
@@ -167,14 +167,14 @@ def test_agent_runs_a_plan_and_records_steps(tmp_path):
     plan = plan_from_calls(
         "write then read",
         (
-            ToolCall("write_file", {"relative": "a.txt", "content": "نص"}),
+            ToolCall("write_file", {"relative": "a.txt", "content": "text"}),
             ToolCall("read_file", {"relative": "a.txt"}),
         ),
         reasons=("create", "verify"),
     )
     run = ToolAgent(sandbox).run(plan)
     assert run.succeeded
-    assert run.outputs == ("Wrote 4 bytes to a.txt", "نص")
+    assert run.outputs == ("Wrote 4 bytes to a.txt", "text")
     assert run.steps[0].reason == "create"
 
 

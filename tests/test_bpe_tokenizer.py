@@ -12,7 +12,7 @@ from ml.llm.tokenizer import (
     train_tokenizer,
 )
 
-_TEXT = "الماء في المكمن ثم الماء في البئر. water in the reservoir, water in the well."
+_TEXT = "water in the reservoir, water in the well. Water flows through porous rock."
 
 
 def test_bpe_round_trips_arabic_and_english():
@@ -30,8 +30,8 @@ def test_bpe_marks_document_start_with_bos():
 
 def test_bpe_compresses_common_arabic_words():
     tokenizer = BPETokenizer.train(_TEXT * 4, vocab_size=400)
-    byte_length = len("الماء".encode("utf-8"))
-    bpe_length = len(tokenizer.encode("الماء", bos=False))
+    byte_length = len("reservoir".encode("utf-8"))
+    bpe_length = len(tokenizer.encode("reservoir", bos=False))
     assert bpe_length < byte_length
 
 

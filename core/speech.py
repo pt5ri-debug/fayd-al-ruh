@@ -212,14 +212,14 @@ class AudioModel:
     def __init__(self, model: CognitiveModel) -> None:
         self.model = model
 
-    def describe(self, clip: AudioClip, *, instruction: str = "صف الإشارة الصوتية.") -> str:
+    def describe(self, clip: AudioClip, *, instruction: str = "Describe the audio signal.") -> str:
         request = ModelRequest(
             inputs=(),
             system_instruction=instruction,
             context=(
-                f"مقطع صوتي: المدة {clip.duration_seconds:.2f} ثانية، "
-                f"معدل {clip.sample_rate} هرتز، "
-                f"{'صامت' if clip.is_silent else 'يحتوي إشارة'}.",
+                f"Audio clip: duration {clip.duration_seconds:.2f} s, "
+                f"sample rate {clip.sample_rate} Hz, "
+                f"{'silent' if clip.is_silent else 'contains a signal'}.",
             ),
         )
         return self.model.generate(request).text

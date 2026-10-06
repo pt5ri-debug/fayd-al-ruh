@@ -127,15 +127,15 @@ class DocumentStore:
 
 
 def _discipline_document(discipline) -> Document:
-    lines = [f"تخصص {discipline.label}."]
+    lines = [f"Discipline {discipline.label}."]
     for label, aliases in discipline.concepts:
-        aliases_text = f" (يعرف أيضا بـ {', '.join(aliases)})" if aliases else ""
-        lines.append(f"مفهوم {label}{aliases_text}.")
+        aliases_text = f" (also known as {', '.join(aliases)})" if aliases else ""
+        lines.append(f"Concept {label}{aliases_text}.")
     for source, target, relation, _confidence in discipline.relations:
         lines.append(f"{source} {relation} {target}.")
     return Document(
         doc_id=f"discipline:{discipline.key}",
-        title=f"تخصص: {discipline.label}",
+        title=f"Discipline: {discipline.label}",
         text="\n".join(lines),
         source="domain_knowledge",
         metadata={"kind": "discipline", "key": discipline.key},
@@ -143,15 +143,15 @@ def _discipline_document(discipline) -> Document:
 
 
 def _course_document(course) -> Document:
-    lines = [f"مقرر {course.label} ضمن {course.category}."]
+    lines = [f"Course {course.label} in {course.category}."]
     for label, aliases in course.concepts:
-        aliases_text = f" (يعرف أيضا بـ {', '.join(aliases)})" if aliases else ""
-        lines.append(f"مفهوم {label}{aliases_text}.")
+        aliases_text = f" (also known as {', '.join(aliases)})" if aliases else ""
+        lines.append(f"Concept {label}{aliases_text}.")
     for source, target, relation, _confidence in course.relations:
         lines.append(f"{source} {relation} {target}.")
     return Document(
         doc_id=f"course:{course.key}",
-        title=f"مقرر: {course.label}",
+        title=f"Course: {course.label}",
         text="\n".join(lines),
         source="curriculum_knowledge",
         metadata={"kind": "course", "key": course.key, "category": course.category},

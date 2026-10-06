@@ -154,11 +154,11 @@ def test_useful_recall_reinforces_the_link_that_produced_it():
     from core.observation import Observation
 
     controller = CognitiveController()
-    controller.learn_ontology_from_observation("ارتفاع الضغط يرافقه تحسن في النفاذية")
+    controller.learn_ontology_from_observation("rising pressure accompanies improved permeability")
     controller.memory.store(
-        "obs-permeability", "observation", Observation("permeability controls flow.", "study", 0.9), importance=0.9
+        "obs-pressure", "observation", Observation("pressure controls flow.", "study", 0.9), importance=0.9
     )
-    recall = next(r for r in controller.recall_with_ontology("pressure") if r.linked_relation)
+    recall = next(r for r in controller.recall_with_ontology("permeability") if r.linked_relation)
     before = controller.ontology_learner.relation_by_triple(*recall.linked_relation).confidence
 
     feedback = controller.feedback_ontology_recall(recall, useful=True, amount=0.1)
@@ -173,27 +173,27 @@ def test_unhelpful_recall_decays_the_link_until_the_path_is_gone():
     from core.observation import Observation
 
     controller = CognitiveController()
-    controller.learn_ontology_from_observation("ارتفاع الضغط يرافقه تحسن في النفاذية")
+    controller.learn_ontology_from_observation("rising pressure accompanies improved permeability")
     controller.memory.store(
-        "obs-permeability", "observation", Observation("permeability controls flow.", "study", 0.9), importance=0.9
+        "obs-pressure", "observation", Observation("pressure controls flow.", "study", 0.9), importance=0.9
     )
-    recall = next(r for r in controller.recall_with_ontology("pressure") if r.linked_relation)
+    recall = next(r for r in controller.recall_with_ontology("permeability") if r.linked_relation)
 
     feedback = controller.feedback_ontology_recall(recall, useful=False, amount=0.5)
 
     assert feedback.removed
-    assert controller.recall_with_ontology("pressure") == []
+    assert controller.recall_with_ontology("permeability") == []
 
 
 def test_repetition_raises_learned_confidence_below_the_ceiling():
     from core.cognitive_controller import CognitiveController
 
     controller = CognitiveController()
-    controller.learn_ontology_from_observation("ارتفاع الضغط في الطبقة يرافقه تحسن في النفاذية")
+    controller.learn_ontology_from_observation("rising pressure in the formation accompanies improved permeability")
     initial = controller.ontology_learner.confidence
 
     for _ in range(5):
-        controller.learn_ontology_from_observation("ارتفاع الضغط في الطبقة يرافقه تحسن في النفاذية")
+        controller.learn_ontology_from_observation("rising pressure in the formation accompanies improved permeability")
 
     learned = [
         relation.confidence
@@ -210,7 +210,7 @@ def test_controller_learns_ontology_relations_from_observations():
 
     controller = CognitiveController()
     stored_before = len(controller.ontology.relations)
-    learning = controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
+    learning = controller.learn_ontology_from_observation("pressure accompanies permeability")
 
     assert learning.changed
     assert len(controller.ontology.relations) > stored_before

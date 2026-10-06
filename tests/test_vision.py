@@ -77,8 +77,8 @@ def test_features_detect_edges_and_orientation():
 
 def test_heuristic_encoder_describes_measurables():
     description = HeuristicVisionEncoder().describe(ImageBuffer.solid(8, 4, (200, 200, 200)))
-    assert "8×4" in description
-    assert "أفقية" in description
+    assert "8x4" in description
+    assert "Landscape" in description
 
 
 def test_load_vision_encoder_rejects_unknown():
@@ -90,7 +90,7 @@ def test_load_vision_encoder_rejects_unknown():
 def test_multimodal_assistant_answers_with_description():
     multimodal = MultimodalAssistant(_assistant())
     image = ImageBuffer.solid(6, 6, (120, 120, 120))
-    result = multimodal.ask_about_image("صف الصورة", image)
+    result = multimodal.ask_about_image("describe the image", image)
     assert result.description
     assert result.answer
-    assert "صف الصورة" in result.question
+    assert "describe the image" in result.question

@@ -17,8 +17,8 @@ def test_seed_ontology_adds_petroleum_concepts_and_relations():
     seed_ontology(ontology)
 
     assert ontology.find_concepts("reservoir")
-    assert ontology.find_concepts("مكمن")
-    reservoir = ontology.find_concepts("المكمن")[0]
+    assert ontology.find_concepts("formation")
+    reservoir = ontology.find_concepts("reservoir")[0]
     targets = {relation.relation_type for relation in ontology.outgoing(reservoir.id)}
     assert "contained_in" in targets
 
@@ -80,17 +80,17 @@ def test_discipline_coverage_reports_missing_concepts_honestly():
     assert all(counts["relations"] == 0 for counts in coverage.values())
 
 
-def test_discipline_labels_are_arabic_and_align_with_keys():
+def test_discipline_labels_are_english_and_align_with_keys():
     labels = discipline_labels()
 
     assert set(labels) == set(discipline_keys())
     assert "drilling" in labels
-    assert labels["reservoir"] == "هندسة المكامن"
+    assert labels["reservoir"] == "Reservoir Engineering"
 
 
 def test_domain_summary_lists_disciplines():
     summary = domain_summary(SelfModel())
 
     assert "Disciplines:" in summary
-    assert "هندسة الحفر" in summary
+    assert "Drilling Engineering" in summary
 

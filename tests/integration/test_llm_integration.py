@@ -155,7 +155,7 @@ def test_in_project_language_model_flows_through_the_same_validation():
     controller = CognitiveController()
     analysis = controller.analyze_with_model(
         model,
-        ModelRequest((MultimodalInput("text", "حلل: الماء يجعل التربة رطبة"),)),
+        ModelRequest((MultimodalInput("text", "analyze: water makes the soil wet"),)),
     )
 
     # Whatever the model proposed, it arrived through the validated layers.

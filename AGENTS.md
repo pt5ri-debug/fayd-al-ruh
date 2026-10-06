@@ -1,7 +1,8 @@
 # AGENTS.md — Fayd Al-Ruh
 
 Evidence-aware symbolic cognitive architecture framed as a petroleum-engineering
-mind. User-facing docs and text are in Arabic.
+mind. English is the primary language for the code, menus, answers, and docs;
+Arabic is kept as secondary aliases where useful.
 
 ## Workflow (hard rules)
 
@@ -67,8 +68,9 @@ mind. User-facing docs and text are in Arabic.
 
 ## Conventions
 
-- Concepts are Arabic labels; relations are English verbs (`is_a`, `measures`,
-  `contains`, `drives`, ...). Seeded confidence is modest and revisable.
+- Concept labels and relations are English (`reservoir`, `is_a`, `measures`,
+  `contains`, `drives`, ...); Arabic terms are kept as secondary aliases.
+- Seeded confidence is modest and revisable.
 - Keep seeds declarative tuples (`CourseKnowledge` / `DisciplineKnowledge`);
   coverage helpers report what an ontology actually carries.
 - Add a test per new seed or CLI action; keep the evaluation gate green.

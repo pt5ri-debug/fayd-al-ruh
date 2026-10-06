@@ -59,7 +59,7 @@ def test_audio_clip_wav_round_trip(tmp_path):
 
 
 def test_silent_synthesizer_sizes_to_text():
-    clip = SilentSynthesizer().synthesize("نص عربي")
+    clip = SilentSynthesizer().synthesize("some text")
     assert clip.is_silent
     assert clip.duration_seconds > 0
     with pytest.raises(ValueError):
@@ -67,13 +67,13 @@ def test_silent_synthesizer_sizes_to_text():
 
 
 def test_transcript_recognizer_returns_supplied_text():
-    assert TranscriptRecognizer("مرحبا").transcribe(AudioClip.silence(0.1)) == "مرحبا"
+    assert TranscriptRecognizer("hello").transcribe(AudioClip.silence(0.1)) == "hello"
     with pytest.raises(ValueError):
         TranscriptRecognizer().transcribe(AudioClip.silence(0.1))
 
 
 def test_loaders_fall_back_and_reject_unknown_engines():
-    assert isinstance(load_recognizer("transcript", transcript="نص"), TranscriptRecognizer)
+    assert isinstance(load_recognizer("transcript", transcript="text"), TranscriptRecognizer)
     assert isinstance(load_synthesizer("silent"), SilentSynthesizer)
     with pytest.raises(ValueError):
         load_recognizer("whisper")
@@ -84,19 +84,19 @@ def test_loaders_fall_back_and_reject_unknown_engines():
 def test_voice_assistant_runs_the_full_loop():
     voice = VoiceAssistant(
         _assistant(),
-        recognizer=TranscriptRecognizer("ما علاقة المسامية بالنفاذية؟"),
+        recognizer=TranscriptRecognizer("What is the relationship between porosity and permeability?"),
         synthesizer=SilentSynthesizer(),
     )
     turn = voice.respond_to_speech(AudioClip.silence(0.2))
-    assert turn.heard == "ما علاقة المسامية بالنفاذية؟"
+    assert turn.heard == "What is the relationship between porosity and permeability?"
     assert turn.answer_text
     assert turn.citations
     assert turn.spoken.is_silent
 
 
 def test_voice_assistant_keeps_conversation():
-    voice = VoiceAssistant(_assistant(), recognizer=TranscriptRecognizer("النفاذية"))
-    conversation = voice.assistant.memory.start(title="صوت")
+    voice = VoiceAssistant(_assistant(), recognizer=TranscriptRecognizer("permeability"))
+    conversation = voice.assistant.memory.start(title="voice")
     voice.respond_to_speech(AudioClip.silence(0.1), conversation=conversation)
     assert len(conversation.messages) == 2
 
@@ -112,7 +112,7 @@ def test_audio_model_describes_a_clip():
         def generate(self, request):
             from core.model_interface import ModelResponse
 
-            return ModelResponse(text="وصف", confidence=0.5, model_name="echo")
+            return ModelResponse(text="description", confidence=0.5, model_name="echo")
 
     description = AudioModel(_Echo()).describe(AudioClip.silence(0.5))
-    assert description == "وصف"
+    assert description == "description"

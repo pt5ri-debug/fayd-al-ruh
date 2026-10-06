@@ -1,7 +1,7 @@
 """Ask the grounded assistant a question from the command line.
 
-    python -m cli ask "ما علاقة المسامية بالنفاذية؟"
-    python -m ai.ask --no-model "ما هو السجل البئري؟"
+    python -m cli ask "What is the relationship between porosity and permeability?"
+    python -m ai.ask --no-model "What is a well log?"
     python -m ai.ask            # interactive, multi-turn
 
 The answer always carries the sources it was built from. When a trained
@@ -47,11 +47,11 @@ def _print_answer(answer: AssistantAnswer, *, as_json: bool) -> None:
         return
     print(answer.text)
     if answer.citations:
-        print("\nالمصادر:")
+        print("\nSources:")
         for citation in answer.citations:
             print(f"  - {citation}")
-    print(f"\nالثقة: {answer.confidence:.2f}  "
-          f"({'نموذج لغوي' if answer.used_model else 'استخلاص من المصادر'})")
+    print(f"\nConfidence: {answer.confidence:.2f}  "
+          f"({'language model' if answer.used_model else 'extracted from sources'})")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -70,15 +70,15 @@ def main(argv: list[str] | None = None) -> int:
         _print_answer(assistant.ask(question, limit=args.limit), as_json=args.json)
         return 0
 
-    print("مساعد فايد الروح — اكتب سؤالك، أو 'خروج' للإنهاء.")
-    conversation = assistant.memory.start(title="جلسة طرفية")
+    print("Fayd Al-Ruh assistant - type your question, or 'exit' to finish.")
+    conversation = assistant.memory.start(title="Terminal session")
     while True:
         try:
-            question = input("سؤال: ").strip()
+            question = input("Question: ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return 0
-        if question in {"خروج", "exit", "quit", ""}:
+        if question in {"exit", "quit", ""}:
             return 0
         _print_answer(assistant.ask(question, conversation=conversation, limit=args.limit), as_json=args.json)
 

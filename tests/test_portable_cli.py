@@ -225,7 +225,7 @@ def test_cli_release_command_dispatches(monkeypatch) -> None:
     assert calls == [["--episodes", "5"]]
 
 
-def test_utf8_console_guard_allows_arabic_on_legacy_encoding(monkeypatch) -> None:
+def test_utf8_console_guard_allows_non_ascii_on_legacy_encoding(monkeypatch) -> None:
     import io
 
     import cli.__main__ as cli_entry
@@ -235,10 +235,10 @@ def test_utf8_console_guard_allows_arabic_on_legacy_encoding(monkeypatch) -> Non
     monkeypatch.setattr(cli_entry.sys, "stdout", legacy)
 
     cli_entry._use_utf8_console()
-    legacy.write("هندسة الحفر\n")
+    legacy.write("café — naïve\n")
     legacy.flush()
 
-    assert buffer.getvalue().decode("utf-8").strip() == "هندسة الحفر"
+    assert buffer.getvalue().decode("utf-8").strip() == "café — naïve"
 
 
 def test_cli_curriculum_command_dispatches(monkeypatch) -> None:
@@ -260,6 +260,6 @@ def test_curriculum_action_reports_the_whole_degree(capsys) -> None:
 
     assert run_curriculum() == 0
     out = capsys.readouterr().out
-    assert "المقررات: 34" in out
-    assert "هندسة_المكامن" in out
-    assert "تخصصات_البترول" in out
+    assert "Courses: 34" in out
+    assert "Reservoir Engineering" in out
+    assert "Petroleum Disciplines" in out

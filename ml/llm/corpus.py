@@ -1,8 +1,8 @@
 """The in-project training corpus for the language model.
 
 Keeping the corpus in the repository is what makes the model self-contained: no
-download, no external dataset. It is small and domain-focused -- Arabic and
-English sentences about the project's own world (water, light, soil, tools,
+download, no external dataset. It is small and domain-focused -- English
+sentences about the project's own world (water, light, soil, tools,
 evidence, beliefs) and about its declared domain, petroleum engineering -- so
 the trained model produces coherent text about the things this program reasons
 about, rather than pretending to be general.
@@ -14,38 +14,6 @@ import unicodedata
 
 
 def _sentences() -> list[str]:
-    ar = [
-        "الماء يجعل التربة رطبة.",
-        "التربة الرطبة تساعد النبات على النمو.",
-        "الضوء يضيء الشمعة.",
-        "المطر يسقي الحديقة.",
-        "الشمس تدفئ الغرفة.",
-        "الريح تحرك الأوراق.",
-        "البرودة تحفظ الطعام.",
-        "الحرارة تبخر الماء.",
-        "الوقت يغيّر كل شيء ببطء.",
-        "البذرة تحتاج إلى تربة وماء وضوء.",
-        "المعرفة تُبنى من الأدلة لا من الظن.",
-        "الاعتقاد يتغير عندما تظهر أدلة جديدة.",
-        "الشك طريق إلى الفهم الأفضل.",
-        "التجربة تكشف ما لا تكشفه الفكرة وحدها.",
-        "السبب والنتيجة يظهران مع التكرار.",
-        "التعلم يعني تصحيح الخطأ خطوة بخطوة.",
-        "الذاكرة تحفظ ما جرى وتعيد ترتيبه.",
-        "التفكير يربط الملاحظة بالنتيجة.",
-        "الفضول يدفع العقل إلى السؤال.",
-        "الصبر جزء من كل تجربة ناجحة.",
-        "الأداة توسع ما تستطيع اليد فعله.",
-        "الملاحظة الدقيقة تسبق الاستنتاج.",
-        "الخطأ فرصة لتصحيح النموذج الداخلي.",
-        "النموذج الجيد يتنبأ بما سيحدث.",
-        "الهدف الواضح يوجه الإجراء التالي.",
-        "الإجراء يغيّر الحالة إلى حالة جديدة.",
-        "التخطيط يعني اختيار خطوات قبل التنفيذ.",
-        "المكافأة تخبر الوكيل ما الذي نجح.",
-        "الخبرة تُختصر في قاعدة تُستخدم لاحقاً.",
-        "التكرار يقوي ما كان ضعيفاً.",
-    ]
     en = [
         "Water makes the soil wet.",
         "Light lights the candle.",
@@ -68,33 +36,11 @@ def _sentences() -> list[str]:
         "A tool extends what a hand can do.",
         "Practice makes the weak strong.",
     ]
-    return ar + en
+    return en
 
 
 def _petroleum_sentences() -> list[str]:
     """Domain sentences: the project declares a petroleum-engineering identity."""
-    ar = [
-        "المكمن يحتوي على الهيدروكربون.",
-        "الماء يملأ مسام الصخر.",
-        "المسامية تقيس الفراغات في الصخر.",
-        "النفاذية تقيس سهولة مرور السائل.",
-        "الضغط يدفع النفط إلى البئر.",
-        "البئر يخترق الطبقة الحاملة.",
-        "الحفر يصل إلى المكمن.",
-        "الاسمنت يعزل البئر عن الطبقات.",
-        "السجل يقيس المسامية والنفاذية.",
-        "الانتاج يتوقف عندما ينخفض الضغط.",
-        "الهيدروكربون يوجد في الطبقة المسامية.",
-        "الطبقة الحاملة تجمع النفط والغاز.",
-        "رفع الضغط يرفع معدل الانتاج.",
-        "انخفاض الضغط يقلل الانتاج.",
-        "الماء يظهر مع النفط في بعض الابار.",
-        "الصخر الكتيم يمنع حركة السائل.",
-        "قراءة السجل تكشف نوع الصخر.",
-        "التشقق يزيد نفاذية الطبقة.",
-        "العينة تكشف مسامية الصخر.",
-        "الحرارة ترفع لزوجة النفط.",
-    ]
     en = [
         "A reservoir contains hydrocarbons.",
         "Water fills the pores of the rock.",
@@ -117,7 +63,7 @@ def _petroleum_sentences() -> list[str]:
         "A core sample reveals rock porosity.",
         "Heat raises the viscosity of oil.",
     ]
-    return ar + en
+    return en
 
 
 def curriculum_sentences() -> list[str]:
@@ -126,7 +72,7 @@ def curriculum_sentences() -> list[str]:
     Every discipline and every course contributes a sentence for each of its
     concepts and one for each of its relations, so the language model is trained
     on the same knowledge the ontology carries rather than a hand-written
-    sample. Arabic sentences read naturally; relation sentences use a compact
+    sample. Relation sentences use a compact
     "A <relation> B" shape so the type vocabulary is visible to the model.
     """
     from core.curriculum_knowledge import courses
@@ -135,16 +81,16 @@ def curriculum_sentences() -> list[str]:
     sentences: list[str] = []
     for discipline in disciplines():
         for label, aliases in discipline.concepts:
-            sentences.append(f"{label} مفهوم من {discipline.label}.")
+            sentences.append(f"{label} is a concept from {discipline.label}.")
             if aliases:
-                sentences.append(f"{label} ويعرف أيضا بـ {aliases[0]}.")
+                sentences.append(f"{label} is also known as {aliases[0]}.")
         for source, target, relation, _confidence in discipline.relations:
             sentences.append(f"{source} {relation} {target}.")
     for course in courses():
         for label, aliases in course.concepts:
-            sentences.append(f"{label} مفهوم من {course.label}.")
+            sentences.append(f"{label} is a concept from {course.label}.")
             if aliases:
-                sentences.append(f"{label} ويعرف أيضا بـ {aliases[0]}.")
+                sentences.append(f"{label} is also known as {aliases[0]}.")
         for source, target, relation, _confidence in course.relations:
             sentences.append(f"{source} {relation} {target}.")
     return sentences
@@ -157,7 +103,7 @@ def build_corpus(*, repeats: int = 40, structured_repeats: int = 60) -> str:
     petroleum-engineering prose matching the declared identity, prose generated
     from the whole seeded curriculum (every discipline and course), and JSON
     objects in the shape ``MODEL_OUTPUT_SCHEMA`` expects. The JSON block teaches
-    the model the field names and Arabic values used by schema-guided decoding.
+    the model the field names and English values used by schema-guided decoding.
     """
     if repeats < 1:
         raise ValueError("repeats must be at least 1.")
@@ -176,62 +122,62 @@ def build_corpus(*, repeats: int = 40, structured_repeats: int = 60) -> str:
 
 
 def structured_examples() -> list[str]:
-    """JSON objects matching ``MODEL_OUTPUT_SCHEMA`` with Arabic content."""
+    """JSON objects matching ``MODEL_OUTPUT_SCHEMA`` with English content."""
     return [
-        '{"concepts": [{"label": "الماء", "aliases": ["السائل"]}], '
-        '"evidence": [{"description": "التربة رطبة", "source": "الملاحظة", '
+        '{"concepts": [{"label": "water", "aliases": ["liquid"]}], '
+        '"evidence": [{"description": "the soil is wet", "source": "observation", '
         '"supports": true, "strength": 0.8}], '
-        '"hypotheses": [{"statement": "الماء يجعل التربة رطبة", "confidence": 0.7}], '
-        '"questions": [{"text": "هل يجف الماء بالحرارة", "topic": "السببية", "priority": 0.6}], '
-        '"plans": [{"goal": "اسقاء النبات", "priority": 0.9, '
-        '"steps": [{"description": "افحص التربة"}, {"description": "اسكب الماء"}]}]}',
-        '{"concepts": [{"label": "الضوء", "aliases": ["النور"]}], '
-        '"evidence": [{"description": "الشمعة مضاءة", "source": "الرؤية", '
+        '"hypotheses": [{"statement": "water makes the soil wet", "confidence": 0.7}], '
+        '"questions": [{"text": "does water dry with heat", "topic": "causality", "priority": 0.6}], '
+        '"plans": [{"goal": "water the plant", "priority": 0.9, '
+        '"steps": [{"description": "check the soil"}, {"description": "pour the water"}]}]}',
+        '{"concepts": [{"label": "light", "aliases": ["illumination"]}], '
+        '"evidence": [{"description": "the candle is lit", "source": "vision", '
         '"supports": true, "strength": 0.9}], '
-        '"hypotheses": [{"statement": "الضوء يضيء الشمعة", "confidence": 0.8}], '
-        '"questions": [{"text": "ما مصدر الضوء", "topic": "السببية", "priority": 0.5}], '
-        '"plans": [{"goal": "اشعال الشمعة", "priority": 0.8, '
-        '"steps": [{"description": "احضر عود الثقاب"}, {"description": "اضرم النار"}]}]}',
-        '{"concepts": [{"label": "الحرارة", "aliases": ["الدفء"]}], '
-        '"evidence": [{"description": "الماء يغلي", "source": "الملاحظة", '
+        '"hypotheses": [{"statement": "light illuminates the candle", "confidence": 0.8}], '
+        '"questions": [{"text": "what is the source of light", "topic": "causality", "priority": 0.5}], '
+        '"plans": [{"goal": "light the candle", "priority": 0.8, '
+        '"steps": [{"description": "get a match"}, {"description": "strike the fire"}]}]}',
+        '{"concepts": [{"label": "heat", "aliases": ["warmth"]}], '
+        '"evidence": [{"description": "the water boils", "source": "observation", '
         '"supports": true, "strength": 0.7}], '
-        '"hypotheses": [{"statement": "الحرارة تبخر الماء", "confidence": 0.6}], '
-        '"questions": [{"text": "متى يغلي الماء", "topic": "الفيزياء", "priority": 0.4}], '
-        '"plans": [{"goal": "غلي الماء", "priority": 0.7, '
-        '"steps": [{"description": "ضع الاناء على النار"}, {"description": "انتظر الفقاعات"}]}]}',
-        '{"concepts": [{"label": "البذرة", "aliases": ["النواة"]}], '
-        '"evidence": [{"description": "البذرة في التربة", "source": "الملاحظة", '
+        '"hypotheses": [{"statement": "heat evaporates water", "confidence": 0.6}], '
+        '"questions": [{"text": "when does water boil", "topic": "physics", "priority": 0.4}], '
+        '"plans": [{"goal": "boil the water", "priority": 0.7, '
+        '"steps": [{"description": "put the pot on the fire"}, {"description": "wait for the bubbles"}]}]}',
+        '{"concepts": [{"label": "seed", "aliases": ["kernel"]}], '
+        '"evidence": [{"description": "the seed is in the soil", "source": "observation", '
         '"supports": true, "strength": 0.6}], '
-        '"hypotheses": [{"statement": "البذرة تنمو بالماء والضوء", "confidence": 0.7}], '
-        '"questions": [{"text": "كم تحتاج البذرة لتنمو", "topic": "الزراعة", "priority": 0.5}], '
-        '"plans": [{"goal": "زراعة البذرة", "priority": 0.8, '
-        '"steps": [{"description": "احفر حفرة"}, {"description": "ضع البذرة واسقها"}]}]}',
-        '{"concepts": [{"label": "الدليل", "aliases": ["البرهان"]}], '
-        '"evidence": [{"description": "التجربة تكررت", "source": "السجل", '
+        '"hypotheses": [{"statement": "the seed grows with water and light", "confidence": 0.7}], '
+        '"questions": [{"text": "how much does the seed need to grow", "topic": "agriculture", "priority": 0.5}], '
+        '"plans": [{"goal": "plant the seed", "priority": 0.8, '
+        '"steps": [{"description": "dig a hole"}, {"description": "place the seed and water it"}]}]}',
+        '{"concepts": [{"label": "evidence", "aliases": ["proof"]}], '
+        '"evidence": [{"description": "the experiment repeated", "source": "log", '
         '"supports": true, "strength": 0.8}], '
-        '"hypotheses": [{"statement": "التكرار يقوي الاعتقاد", "confidence": 0.6}], '
-        '"questions": [{"text": "هل يكفي دليل واحد", "topic": "المعرفة", "priority": 0.7}], '
-        '"plans": [{"goal": "التحقق من الفرضية", "priority": 0.9, '
-        '"steps": [{"description": "اجمع الادلة"}, {"description": "قارن النتائج"}]}]}',
-        '{"concepts": [{"label": "المكمن", "aliases": ["الخزان"]}], '
-        '"evidence": [{"description": "الضغط مرتفع في البئر", "source": "قياس الضغط", '
+        '"hypotheses": [{"statement": "repetition strengthens belief", "confidence": 0.6}], '
+        '"questions": [{"text": "is one piece of evidence enough", "topic": "knowledge", "priority": 0.7}], '
+        '"plans": [{"goal": "verify the hypothesis", "priority": 0.9, '
+        '"steps": [{"description": "collect the evidence"}, {"description": "compare the results"}]}]}',
+        '{"concepts": [{"label": "reservoir", "aliases": ["container"]}], '
+        '"evidence": [{"description": "the pressure is high in the well", "source": "pressure survey", '
         '"supports": true, "strength": 0.8}], '
-        '"hypotheses": [{"statement": "الضغط يدفع النفط نحو البئر", "confidence": 0.7}], '
-        '"questions": [{"text": "ما معدل هبوط الضغط", "topic": "المكمن", "priority": 0.8}], '
-        '"plans": [{"goal": "تقييم انتاجية المكمن", "priority": 0.9, '
-        '"steps": [{"description": "اقرأ سجل البئر"}, {"description": "احسب المسامية والنفاذية"}]}]}',
-        '{"concepts": [{"label": "النفاذية", "aliases": ["قابلية التدفق"]}], '
-        '"evidence": [{"description": "العينة صخرية مسامية", "source": "تحليل العينة", '
+        '"hypotheses": [{"statement": "pressure drives oil toward the well", "confidence": 0.7}], '
+        '"questions": [{"text": "what is the pressure decline rate", "topic": "reservoir", "priority": 0.8}], '
+        '"plans": [{"goal": "evaluate reservoir productivity", "priority": 0.9, '
+        '"steps": [{"description": "read the well log"}, {"description": "compute porosity and permeability"}]}]}',
+        '{"concepts": [{"label": "permeability", "aliases": ["flow capacity"]}], '
+        '"evidence": [{"description": "the sample is porous rock", "source": "core analysis", '
         '"supports": true, "strength": 0.7}], '
-        '"hypotheses": [{"statement": "المسامية ترفع النفاذية", "confidence": 0.6}], '
-        '"questions": [{"text": "كيف تؤثر التشققات في التدفق", "topic": "الطبقة", "priority": 0.6}], '
-        '"plans": [{"goal": "تحسين الانتاج", "priority": 0.8, '
-        '"steps": [{"description": "افحص التشققات"}, {"description": "ارفع الضغط"}]}]}',
+        '"hypotheses": [{"statement": "porosity raises permeability", "confidence": 0.6}], '
+        '"questions": [{"text": "how do fractures affect flow", "topic": "formation", "priority": 0.6}], '
+        '"plans": [{"goal": "improve production", "priority": 0.8, '
+        '"steps": [{"description": "inspect the fractures"}, {"description": "raise the pressure"}]}]}',
     ]
 
 
 def normalise(text: str) -> str:
-    """Unicode-normalise text so the byte model sees consistent Arabic forms."""
+    """Unicode-normalise text so the byte model sees consistent forms."""
     return unicodedata.normalize("NFC", text)
 
 

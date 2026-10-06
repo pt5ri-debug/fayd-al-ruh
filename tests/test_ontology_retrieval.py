@@ -113,7 +113,7 @@ def test_controller_recall_follows_derived_relations():
     controller.memory.store("obs-reservoir", "observation", Observation(reservoir, "study", 0.9), importance=0.9)
     controller.memory.store("obs-other", "observation", Observation(unrelated, "hse", 0.5), importance=0.5)
 
-    # "log" shares no word with the reservoir item; it is reached via السجل measures المكمن.
+    # "log" shares no word with the reservoir item; it is reached via well_log measures reservoir.
     recalls = controller.recall_with_ontology("log interpretation", limit=5)
 
     texts = [str(getattr(recall.item.content, "content", recall.item.content)) for recall in recalls]
@@ -148,12 +148,12 @@ def test_recall_exposes_linked_relation_and_seed_relation_is_not_credited():
     from core.observation import Observation
 
     controller = CognitiveController()
-    controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
+    controller.learn_ontology_from_observation("pressure accompanies permeability")
     controller.memory.store(
-        "obs-permeability", "observation", Observation("permeability controls flow.", "study", 0.9), importance=0.9
+        "obs-pressure", "observation", Observation("pressure controls flow.", "study", 0.9), importance=0.9
     )
 
-    recalls = controller.recall_with_ontology("pressure", limit=5)
+    recalls = controller.recall_with_ontology("permeability", limit=5)
     linked = [recall for recall in recalls if recall.linked_relation is not None]
     assert linked, "expected a recall reached through a learned link"
     assert linked[0].linked_relation[1] == controller.ontology_learner.relation_type
@@ -191,13 +191,13 @@ def test_feedback_weakens_and_drops_an_unhelpful_learned_link():
     from core.observation import Observation
 
     controller = CognitiveController()
-    controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
+    controller.learn_ontology_from_observation("pressure accompanies permeability")
     controller.memory.store(
-        "obs-permeability", "observation", Observation("permeability controls flow.", "study", 0.9), importance=0.9
+        "obs-pressure", "observation", Observation("pressure controls flow.", "study", 0.9), importance=0.9
     )
-    recall = next(r for r in controller.recall_with_ontology("pressure", limit=5) if r.linked_relation)
+    recall = next(r for r in controller.recall_with_ontology("permeability", limit=5) if r.linked_relation)
 
     feedback = controller.feedback_ontology_recall(recall, useful=False, amount=0.5)
 
     assert feedback is not None and feedback.removed
-    assert controller.recall_with_ontology("pressure") == []
+    assert controller.recall_with_ontology("permeability") == []

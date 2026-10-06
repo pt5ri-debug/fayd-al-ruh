@@ -40,7 +40,7 @@ def test_curriculum_sentences_include_relations():
 
 def test_build_corpus_contains_the_curriculum_block():
     corpus = build_corpus(repeats=1, structured_repeats=1)
-    assert "مفهوم من" in corpus
+    assert "is a concept from" in corpus
     # The corpus is larger than the hand-written prose alone.
     assert len(corpus) > len(" ".join(curriculum_sentences()))
 
@@ -101,4 +101,4 @@ def test_format_manifest_handles_a_manifest_without_training_results():
         }
     )
     assert "9.9.9" in summary
-    assert "تغطية المنهج" in summary
+    assert "Curriculum coverage" in summary

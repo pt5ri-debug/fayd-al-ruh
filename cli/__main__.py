@@ -2,8 +2,8 @@
 
 Usage:
     python -m cli                     # interactive numbered menu
-    python -m cli ask "سؤالك"          # grounded assistant (cited answers)
-    python -m cli voice "سؤالك"        # one voice turn
+    python -m cli ask "your question"   # grounded assistant (cited answers)
+    python -m cli voice "your question" # one voice turn
     python -m cli agent               # tool-agent demo in the safety sandbox
     python -m cli learn               # continuous learning + regression gate
     python -m cli paths               # show asset/data locations

@@ -1,137 +1,191 @@
 # Advanced cognitive architecture
 
-هذا المشروع الآن يوفّر طبقات عملية قابلة للتطوير، وليست ادعاءً بامتلاك وعي أو ذكاء بشري عام.
+This project now provides practical, extensible layers — not a claim to possess
+consciousness or general human intelligence.
 
-## المكوّنات
+## Components
 
-- `core/model_interface.py`: عقد موحّد لربط أي نموذج لغوي أو متعدد الوسائط. يمرَّر العميل من التطبيق ولا تُحفظ مفاتيح API داخل المشروع.
-- `core/semantic_memory.py`: فهرس دلالي محلي حتمي (cosine similarity). يمكن تبديل دالة `hashed_embedding` بمزوّد embeddings حقيقي لاحقاً.
-- `core/memory.py`: ذاكرة عرضية مع استرجاع يجمع الصلة اللفظية والدلالية والأهمية.
-- `core/goals.py`: أهداف وخطط بتبعيات صريحة؛ المخطط لا ينفّذ خطواته تلقائياً.
-- `core/safe_learning.py`: تشغيل محاكاة مسجّلة فقط؛ لا يوجد وصول إلى shell أو الشبكة أو الملفات.
-- `core/evaluation_suite.py`: قياس اتساق الرسم المعرفي، استخدام الذاكرة، ومعايرة التنبؤات.
-- `core/ontology_reasoner.py`: استدلال شفّاف فوق الأنطولوجيا بقواعد تركيب (`RelationRule`)؛ يشتقّ علاقات (تعدّي `contained_in`، `measures`+`has_property`) دون دسّها في الرسم.
-- `core/ontology_retrieval.py`: استرجاع يعبر الروابط بدل مطابقة الكلمات؛ يسير على العلاقات الصريحة والمشتقّة محدوداً بخفض هندسي لكل خطوة، ويعيد الرابط الذي أوصل إلى كل نتيجة.
-- `core/ontology_learner.py`: يوسّع الأنطولوجيا من الملاحظات بعلاقات `associated_with` ضعيفة بين المفاهيم المتجسّرة معاً، ويُقوّيها بالتكرار ويُحلّلها بالإهمال ضمن سقف أدنى من المزروع، ويُمنح الفضل أو اللوم للرابط بحسب نتيجة الاسترجاع، دون إنشاء مفاهيم أو الكتابة فوق علاقة صريحة.
-- `evaluation/`: حزمة تقييم علمية قابلة للقياس — سيناريوهات ثابتة، مقاييس، مقارنة إصدارات، ومنع التراجع في الأداء.
+- `core/model_interface.py`: a unified contract for connecting any language or
+  multimodal model. The client is passed by the application and no API keys are
+  stored inside the project.
+- `core/semantic_memory.py`: a deterministic local semantic index (cosine
+  similarity). `hashed_embedding` can be swapped for a real embeddings provider
+  later.
+- `core/memory.py`: episodic memory with retrieval that fuses lexical relevance,
+  semantic relevance, and importance.
+- `core/goals.py`: goals and plans with explicit dependencies; the planner never
+  executes its own steps.
+- `core/safe_learning.py`: runs recorded simulations only; no access to a shell,
+  the network, or files.
+- `core/evaluation_suite.py`: measures knowledge-graph consistency, memory use,
+  and forecast calibration.
+- `core/ontology_reasoner.py`: transparent inference over the ontology with
+  composition rules (`RelationRule`); derives relations (transitive
+  `contained_in`, `measures`+`has_property`) without stuffing them into the graph.
+- `core/ontology_retrieval.py`: retrieval that crosses links instead of matching
+  words; walks explicit and derived relations with a hop decay per step, and
+  returns the link that reached each result.
+- `core/ontology_learner.py`: grows the ontology from observations with weak
+  `associated_with` relations between co-bridged concepts, reinforces them by
+  repetition, decays them by disuse below the seed ceiling, and credits or blames
+  a link by the outcome of the recall — without creating concepts or overwriting
+  an explicit relation.
+- `evaluation/`: a measurable scientific evaluation package — fixed scenarios,
+  metrics, version comparison, and regression gating.
 
-## بيئات تشغيل الوكيل التدريجية
+## Progressive agent runtimes
 
-يتدرّج تشغيل الوكيل من الأبسط والأكثر أماناً إلى الأغنى، دون فتح تنفيذ أدوات خارجية قبل اكتمال الضوابط:
+Agent execution moves from the simplest and safest to the richest, without
+opening external tool execution before the guards are complete:
 
-- **المستوى 1 — محاكاة رمزية قابلة لإعادة التشغيل** (`core/symbolic_simulation.py`): انتقالات حالة نقية؛ كل تشغيل يُنتج `SimulationTrace` قابلاً للتسلسل، ويمكن إعادة تشغيله (`replay`) لإعادة بناء الحالة النهائية حرفياً.
-- **المستوى 2 — بيئات sandbox ذات مهام واضحة** (`core/sandbox_environment.py` + `core/sandbox_tasks.py`): كل مهمة تُعلن قائمة إجراءات مسموحة وشرط نجاح وميزانية خطوات؛ أي إجراء خارج القائمة يُرفض ويُسجّل كانتهاك، وتُصدَّر خطواتها كأثر قابل لإعادة التشغيل.
-- **المستوى 3 — أدوات خارجية (مُقفلة افتراضياً)** (`core/progressive_environment.py` + `core/sandbox_runtime.py`): لا تُفتح إلا بعد توفر ثلاثة ضوابط معاً:
-  1. **سياسة صلاحيات** (`core/permissions.py`): قائمة سماح؛ الأدوات الخارجية مرفوضة افتراضياً.
-  2. **سجل تدقيق** (`core/audit_log.py`): سجل إضافي فقط (append-only) لكل قرار سماح/رفض.
-  3. **موافقة بشرية** (`core/human_approval.py`): لا يمكن للمُقدِّم أن يوافق على طلبه، والموافقة تنتهي بمهلة.
+- **Level 1 — replayable symbolic simulation** (`core/symbolic_simulation.py`):
+  pure state transitions; each run yields a serialisable `SimulationTrace`, and
+  `replay` can reconstruct the final state literally.
+- **Level 2 — sandbox environments with explicit tasks**
+  (`core/sandbox_environment.py` + `core/sandbox_tasks.py`): each task declares
+  an allowed action list, a success condition, and a step budget; any action
+  outside the list is refused and logged as a violation, and its steps are
+  exported as a replayable trace.
+- **Level 3 — external tools (locked by default)**
+  (`core/progressive_environment.py` + `core/sandbox_runtime.py`): opened only
+  once three guards are present together:
+  1. **Permission policy** (`core/permissions.py`): an allow-list; external tools
+     are refused by default.
+  2. **Audit log** (`core/audit_log.py`): an append-only record of every
+     allow/deny decision.
+  3. **Human approval** (`core/human_approval.py`): the requester cannot approve
+     their own request, and approval expires after a timeout.
 
-كل تشغيل يمر عبر `GovernedRuntime` الذي يفرض الصلاحية ثم الموافقة (للأدوات الخارجية فقط) ثم يسجّل في التدقيق، ويرفض التنفيذ إن غاب أي ضابط.
+Every run passes through `GovernedRuntime`, which enforces permission, then
+approval (for external tools only), then logs to the audit trail, and refuses
+execution if any guard is missing.
 
-## التعلّم الآلي (ml/)
+## Machine learning (ml/)
 
-المشروع كان يضبط ثقة الاعتقادات بقواعد يدوية فقط. الآن أُضيفت طبقة تعلّم إحصائي حقيقية فوق الركيزة الرمزية، اعتماداً على `numpy` فقط:
+The project used to set belief confidence with hand-written rules only. Now a
+real statistical learning layer sits on top of the symbolic substrate, using
+`numpy` only:
 
-- `ml/dataset.py`: مخزن الخبرات (replay buffer)، ترميز ميزات حتمي بالتجزئة، تقسيم تدريب/تحقق.
-- `ml/models.py`: مصنّف softmax، وشبكة MLP بانتشار خلفي، وانحدار خطي (نموذج عالم)، ومُحسِّن Adam، وحفظ/تحميل `.npz`.
-- `ml/trainer.py`: حلقة تدريب بدفعات صغيرة، معايير (دقة، Brier)، إيقاف مبكر، واستعادة أفضل الأوزان.
-- `ml/learner.py`: تعلّم معزّز رمزي (Q-learning خطي مع epsilon-greedy) فوق مهام sandbox.
-- `ml/cognitive_brain.py`: حلقة ترميز تنبؤي (perception → prediction → learning → memory → reflection) مع معايرة ذاتية لمعدل التعلّم.
+- `ml/dataset.py`: an experience store (replay buffer), deterministic hashed
+  feature encoding, train/validation split.
+- `ml/models.py`: a softmax classifier, a back-propagation MLP, linear
+  regression (world model), an Adam optimiser, and `.npz` save/load.
+- `ml/trainer.py`: a mini-batch training loop with metrics (accuracy, Brier),
+  early stopping, and best-weight restore.
+- `ml/learner.py`: symbolic reinforcement learning (linear Q-learning with
+  epsilon-greedy) over sandbox tasks.
+- `ml/cognitive_brain.py`: a predictive-coding loop (perception -> prediction ->
+  learning -> memory -> reflection) with self-calibrating learning rate.
 
-### المسار التدريجي نحو عقل متعلّم
+### The progressive path toward a learning mind
 
-1. **المستوى 1 — تعلّم معزّز رمزي**: وكيل يبدأ جاهلاً ويتقن المهام عبر المكافأة (نجاح 100% على المهمتين).
-2. **المستوى 2 — دماغ ترميز تنبؤي**: يتعلّم نموذج عالم يتنبأ بالحالة التالية، ويقلّل خطأ التنبؤ، ويكدّس الخبرات في الذاكرة، ويضبط معدل تعلّمه ذاتياً (تعلّم كيف يتعلّم).
-3. **المستوى 3 — تصنيف إشرافي**: مصنّف يتعلّم من الخبرات المكدّسة ويُقاس على تحقق منفصل.
+1. **Level 1 — symbolic reinforcement learning**: an agent starts ignorant and
+   masters the tasks through reward (100% success on both tasks).
+2. **Level 2 — predictive-coding brain**: learns a world model that predicts the
+   next state, reduces prediction error, stacks experiences in memory, and
+   self-tunes its learning rate (learning how to learn).
+3. **Level 3 — supervised classification**: a classifier learns from the
+   stacked experiences and is measured on a separate validation set.
 
-### التشغيل
+### Running
 
 ```bash
-python -m ml                 # تدريب السياسات + الدماغ + المصنّف وطباعة تقرير
-python -m ml --episodes 400  # جلسة تعلّم أطول
-python -m ml --json          # ملخص JSON
+python -m ml                 # train policies + brain + classifier, print a report
+python -m ml --episodes 400  # a longer learning session
+python -m ml --json          # JSON summary
 python -m ml --save-dir ml/artifacts
 ```
 
-### دمج التعلّم في حلقة الوكيل
+### Wiring learning into the agent loop
 
-السياسة المتعلّمة تُدمج في الحلقة الحقيقية عبر بروتوكول `core/action_policy.py`
-(`ActionPolicy`)، ووسيط `ml/policy_adapter.py` (`LearnedActionPolicy`). هكذا لا
-يعتمد `core` على numpy، ولا تعرف طبقة التعلّم تفاصيل القرار الداخلية:
+The learned policy is wired into the real loop through the
+`core/action_policy.py` protocol (`ActionPolicy`) and the
+`ml/policy_adapter.py` adapter (`LearnedActionPolicy`). This way `core` does not
+depend on numpy, and the learning layer does not know the internal decision
+details:
 
-- `Agent` و`AgentLoop.run_once` يقبلان `policy` اختيارياً؛ عند غيابه يبقى السلوك
-  الأصلي كما هو.
-- السياسة تختار فقط من بين الإجراءات المعروضة من المتصل، والإجراء المختار يمرّ
-  عبر نفس المُنفّذ وفحوص الشروط المسبقة، فلا يمكنها اختراع تأثيرات جديدة.
+- `Agent` and `AgentLoop.run_once` accept an optional `policy`; when absent, the
+  original behaviour stays exactly as it was.
+- The policy only chooses among the actions offered by the caller, and the chosen
+  action passes through the same executor and precondition checks, so it cannot
+  invent new effects.
 
-### الذاكرة وإعادة التشغيل والتعلّم المستمر
+### Memory, replay, and continuous learning
 
-مخزن إعادة التشغيل صار **فعّالاً** لا مجرد سجل: بعد كل حلقة يعيد الدماغ تعلّم
-نموذج العالم من دفعة عشوائية من الخبرات المخزّنة (`CognitiveBrain.replay`).
-القياس على مهمة `wet-garden` (متوسط 3 بذور) يبيّن أن الذاكرة تُسرّع الوصول إلى
-خطأ منخفض:
+The replay buffer became **active** rather than a mere log: after each episode
+the brain re-learns the world model from a random batch of stored experiences
+(`CognitiveBrain.replay`). Measurement on the `wet-garden` task (mean of 3 seeds)
+shows that memory speeds up reaching a low error:
 
-| عتبة الخطأ | بدون إعادة تشغيل | مع إعادة تشغيل (32) |
+| Error threshold | Without replay | With replay (32) |
 |---|---|---|
-| 0.002 | 9.7 حلقة | 6.3 حلقة |
-| 0.001 | 15.0 حلقة | 8.0 حلقة |
-| 0.0005 | 18.7 حلقة | 11.0 حلقة |
+| 0.002 | 9.7 episodes | 6.3 episodes |
+| 0.001 | 15.0 episodes | 8.0 episodes |
+| 0.0005 | 18.7 episodes | 11.0 episodes |
 
-ويمكن الآن **إيقاف الجلسة والاستئناف**: `CognitiveBrain.save/load` يحفظ نموذج
-العالم والسياسة والذاكرة وعدّاد الحلقات، فيُكمل التدريب من حيث توقّف:
-
-```bash
-python -m ml --episodes 300 --save-dir ml/artifacts            # جلسة أولى
-python -m ml --episodes 300 --save-dir ml/artifacts --resume   # تكملة
-python -m ml --replay-batch 0                                   # تعطيل إعادة التشغيل
-```
-
-### مكافأة من تفاعل حقيقي بدل شرط الرمل
-
-شرط نجاح المهمة (`_success_facts`) مكافأة **بديلة**: يقول «الواقع المطلوب موجود»،
-لا «الاختيار نجح». أُضيف مصدر مكافأة مبني على النتائج **المرصودة** فعلاً:
-
-- `core/interaction_reward.py`: `InteractionRewardModel` يتعلّم جدول معايرة
-  (ثقة → نسبة نجاح مرصودة) وجدول قيم إجرائية سياقية (سياق → إجراء → نسبة نجاح).
-  مصدران حقيقيان: **متن التقييم** (`evaluation.scenarios`، حيث كل تنبؤ يحمل نتيجته
-  المرصودة) و**المراجعة البشرية** عبر `outcomes_from_reviews`.
-- `ml/interaction_learner.py`: بيئة `reset/step` مكافأتها هي نسبة نجاح الإجراء
-  المتعلَّمة، **لا** شرط المهمة. تُمنح المكافأة فقط عندما يُغيّر الإجراء الحالة
-  فعلاً (رصد مباشر لا يحتاج شرط نجاح)، فيتعلّم النظام ألّا يكرّر إجراءً لم يُغيّر شيئاً.
-
-نفس وكيل `QLearningAgent` يتدرّب دون تغيير؛ يتغيّر **مصدر المكافأة** فقط:
+Sessions can now be **paused and resumed**: `CognitiveBrain.save/load` stores the
+world model, policy, memory, and episode counter, so training continues where it
+stopped:
 
 ```bash
-python -m ml --episodes 400 --real-reward   # مكافأة مرصودة + مقارنة مع شرط الرمل
+python -m ml --episodes 300 --save-dir ml/artifacts            # first session
+python -m ml --episodes 300 --save-dir ml/artifacts --resume   # continue
+python -m ml --replay-batch 0                                   # disable replay
 ```
 
-النتيجة على المهام الست كلها (بما فيها مهام التعميم): نجاح `≥ 0.98`، وقياس
-المعايرة للمكافأة المتعلَّمة يظهر في المخرج (`ece`, `brier`) بدل إخفائه.
+### Reward from real interaction instead of a sandbox condition
 
-### التخطيط بنموذج عالم متعلَّم (Dyna-Q)
+The task success condition (`_success_facts`) is a **proxy** reward: it says "the
+desired fact is present", not "the choice worked". A reward source built on
+**observed** outcomes was added:
 
-سابقاً: التخطيط في `core/planner.py` رمزي بحت (يقرأ انتقالات مكتوبة يدوياً)،
-ونموذج العالم المتعلَّم في الدماغ يُستخدم لخطأ التنبؤ فقط، والقرار بلا نموذج.
+- `core/interaction_reward.py`: `InteractionRewardModel` learns a calibration
+  table (confidence -> observed success rate) and a contextual action-value table
+  (context -> action -> success rate). Two real sources: the **evaluation corpus**
+  (`evaluation.scenarios`, where every prediction carries its observed outcome)
+  and **human review** via `outcomes_from_reviews`.
+- `ml/interaction_learner.py`: a `reset/step` environment whose reward is the
+  learned action success rate, **not** the task condition. Reward is granted only
+  when the action actually changes the state (direct observation needs no success
+  condition), so the system learns not to repeat an action that changed nothing.
 
-الآن النموذج المتعلَّم صار **قابلًا للاستخدام في القرار**:
+The same `QLearningAgent` trains unchanged; only the **reward source** changes:
 
-- `ml/world_model.py`: `SymbolicWorldModel` يتعلّم تأثير كل إجراء من الانتقالات
-  **المرصودة** فقط (لا يقرأ التأثيرات المعلنة). يُخزَّن تحت الحالة الدقيقة وتحت
-  (الإجراء، شروطه المتحققة) للتعميم، ويعيد `unknown` لما لم يُرَ قط، ويتعلّم
-  أيضاً أن الإجراء لا يفعل شيئاً حيث لا يفعل شيئاً.
+```bash
+python -m ml --episodes 400 --real-reward   # observed reward + comparison with the sandbox condition
+```
+
+The result on all six tasks (including held-out ones): success `>= 0.98`, and the
+calibration measurement for the learned reward appears in the output (`ece`,
+`brier`) instead of being hidden.
+
+### Planning with a learned world model (Dyna-Q)
+
+Before: planning in `core/planner.py` was purely symbolic (reading hand-written
+transitions), and the brain's learned world model was used for prediction error
+only, with decisions made without a model.
+
+Now the learned model is **usable in decisions**:
+
+- `ml/world_model.py`: `SymbolicWorldModel` learns each action's effect from
+  **observed** transitions only (it does not read declared effects). It stores
+  under the exact state and under (action, satisfied preconditions) for
+  generalisation, returns `unknown` for anything never seen, and also learns that
+  an action does nothing where it does nothing.
 - `ml/model_based_planner.py`:
-  - `plan_with_world_model`: بحث داخل النموذج **المتعلَّم** — يعيد حل كل مهمة.
-  - `DynaQAgent`: يتعلّم من الانتقالات **الحقيقية والمتخيَّلة** معاً (Dyna-Q).
+  - `plan_with_world_model`: search inside the **learned** model — solves every task.
+  - `DynaQAgent`: learns from **real and imagined** transitions together (Dyna-Q).
 
-النجاح يُقاس دائماً بالهدف الحقيقي؛ النموذج يختار ويتخيّل فقط، ولا يقرّر معنى النجاح:
+Success is always measured by the real goal; the model only chooses and imagines,
+it never decides the meaning of success:
 
 ```bash
 python -m ml --episodes 40 --model-based --seeds 3
 ```
 
-المقارنة عند ميزانية صغيرة (متوسط 3 بذور، 40 حلقة):
+Comparison at a small budget (mean of 3 seeds, 40 episodes):
 
-| المهمة | بلا نموذج | Dyna-Q |
+| Task | Without a model | Dyna-Q |
 |---|---|---|
 | `wet-garden` | 1.00 | 1.00 |
 | `stack-blocks` | 1.00 | 0.96 |
@@ -140,53 +194,60 @@ python -m ml --episodes 40 --model-based --seeds 3
 | `light-candle` | 1.00 | 1.00 |
 | `recharge-lamp` | 0.83 | **0.96** |
 
-المكسب يتركّز في المهام متعددة الخطوات؛ وفي المهام السهلة يتشبّع الوكيل بلا نموذج
-أصلاً فلا فرق. نعرض الصورة كاملة (بما فيها التراجع الطفيف في `stack-blocks`) بدل
-الانتقاء.
+The gain concentrates in multi-step tasks; on easy tasks the agent without a
+model already saturates, so there is no difference. We show the whole picture
+(including the slight regression on `stack-blocks`) rather than cherry-picking.
 
-### كتالوج مهام الرمل
+### Sandbox task catalogue
 
-| المهمة | الدور | سلسلة الحل | ميزانية الخطوات |
+| Task | Role | Solution chain | Step budget |
 |---|---|---|---|
-| `wet-garden` | تدريب | `water` | 4 |
-| `stack-blocks` | تدريب | `pick` → `place` | 4 |
-| `plant-seed` | تدريب | `till` → `plant` → `water` → `wait` | 6 |
-| `boil-water` | تدريب (فيه إجراء انحرافي `stir`) | `fill` → `heat` → `steep` | 6 |
-| `light-candle` | تعميم (held-out) | `strike` → `light` | 4 |
-| `recharge-lamp` | تعميم (held-out) | `open` → `swap` → `switch` | 6 |
+| `wet-garden` | training | `water` | 4 |
+| `stack-blocks` | training | `pick` -> `place` | 4 |
+| `plant-seed` | training | `till` -> `plant` -> `water` -> `wait` | 6 |
+| `boil-water` | training (has a decoy action `stir`) | `fill` -> `heat` -> `steep` | 6 |
+| `light-candle` | held-out | `strike` -> `light` | 4 |
+| `recharge-lamp` | held-out | `open` -> `swap` -> `switch` | 6 |
 
-المهام التدريبية الجديدة أطول (4 خطوات) وفيها إجراءات انحرافية، فتُجبر السياسة على
-التعلّم عبر مدى أطول بدل حل خطوة واحدة. ومهام التعميم الإضافية (`recharge-lamp`)
-تختبر أن نفس الآلية تعمل بلا ضبط خاص.
+The new training tasks are longer (4 steps) and include decoy actions, forcing
+the policy to learn over a longer horizon instead of solving a single step. The
+extra held-out tasks (`recharge-lamp`) test that the same machinery works without
+special tuning.
 
-### التعميم على مهام جديدة
+### Generalising to new tasks
 
-أُضيفت مهمتان إلى `core/sandbox_tasks.py` كـ`HELD_OUT_TASKS` (`light-candle`
-و`recharge-lamp`): لا يتدرّب عليهما الوكيل في مسار التدريب الأساسي، ثم نتحقق أن
-نفس آليات التعلّم تحلّهما بلا ضبط خاص بالمهمة. اختبار التكامل يمرّ الآن على كل
-مهام التعميم، لا الأولى فقط.
+Two tasks were added to `core/sandbox_tasks.py` as `HELD_OUT_TASKS`
+(`light-candle` and `recharge-lamp`): the agent never trains on them in the base
+training path, then we verify that the same learning machinery solves them with
+no task-specific tuning. The integration test now runs on all held-out tasks,
+not just the first.
 
-### النموذج اللغوي الداخلي
+### The in-project language model
 
-المشروع يحمل نموذجاً لغوياً خاصاً به في `ml/llm/`، مكتوباً من الصفر بـ`numpy`
-ومُدرَّباً داخل المستودع، فلا يحتاج خدمة خارجية ولا مفاتيح API:
+The project carries its own language model in `ml/llm/`, written from scratch in
+`numpy` and trained inside the repository, so it needs no external service and no
+API keys:
 
-- `tokenizer.py`: ترميز بايتي (257 رمزاً) آمن للعربية بلا تدريب، وكل نص يعود كما هو.
-- `transformer.py`: محوّل decoder-only (انتباه سببي متعدد الرؤوس + GELU + LayerNorm)
-  مع backprop يدوي وAdam. تحقّقنا من صحة التدرجات مقابل تقدير عددي.
-- `corpus.py`: متن تدريب داخل المستودع (عربي/إنجليزي حول عالم المشروع، وعن هندسة
-  البترول، مع أمثلة JSON بنسق `MODEL_OUTPUT_SCHEMA`).
-- `generator.py` + `ai/local_model.py`: توليد نص مُبَذّر قابل للتكرار، وتكييف مع
-  واجهة `CognitiveModel`، فيحلّ محل Ollama في أي مسار يقبل نموذجاً.
-- `schema.py`: فك ترميز موجَّه بالمخطط. يثبّت البنية من المخطط ويترك للنموذج
-  اقتراح محتوى الأوراق فقط، فيخرج JSON صالح دائماً.
+- `tokenizer.py`: byte-level encoding (257 tokens) that is safe for any script
+  with no training, and every text round-trips exactly.
+- `transformer.py`: a decoder-only transformer (multi-head causal attention +
+  GELU + LayerNorm) with manual backprop and Adam. We verified the gradients
+  against a numerical estimate.
+- `corpus.py`: in-repo training text (English about the project's world and about
+  petroleum engineering, with JSON examples in the `MODEL_OUTPUT_SCHEMA` format).
+- `generator.py` + `ai/local_model.py`: reproducible seeded text generation, and
+  adaptation to the `CognitiveModel` interface, so it replaces Ollama anywhere a
+  model is accepted.
+- `schema.py`: schema-guided decoding. It fixes the structure from the schema and
+  lets the model suggest only leaf content, so the output is always valid JSON.
 
 ```bash
-python -m ml.llm --steps 4000 --generate "الماء"
+python -m ml.llm --steps 4000 --generate "water"
 ```
 
-نقطة التحقق محفوظة في `ml/llm/checkpoints/fayd-llm.npz` ومُلتزَمة في المستودع،
-فيحصل أي مستخدم على نموذج لغوي عامل فوراً بلا تدريب. الاستخدام:
+The checkpoint is saved at `ml/llm/checkpoints/fayd-llm.npz` and committed in the
+repository, so any user gets a working language model immediately without
+training. Usage:
 
 ```python
 from ai.local_model import LocalLanguageModel
@@ -194,83 +255,125 @@ model = LocalLanguageModel(temperature=0.0)
 response = controller.reason(model, request)
 ```
 
-### ربط النموذج اللغوي الداخلي بمسار القرار
+### Wiring the in-project language model into the decision path
 
-عندما يحمل الطلب `response_schema` (مسار الاقتراح المهيكل)، يوجّه
-`LocalLanguageModel` التوليد إلى `StructuredDecoder`: تُثبَّت بنية JSON من
-`MODEL_OUTPUT_SCHEMA`، ويقترح النموذج محتوى الأوراق (مفاهيم، أدلة، فرضيات،
-أسئلة، خطط). المخرج يمرّ عبر `controller.analyze_with_model`، فيتحقق منه
-`LLMReasoner` و`parse_structured_output` نفسهما الذي يتحقق من أي نموذج خارجي:
+When the request carries a `response_schema` (the structured-suggestion path),
+`LocalLanguageModel` directs generation to `StructuredDecoder`: the JSON
+structure is fixed from `MODEL_OUTPUT_SCHEMA`, and the model suggests leaf
+content (concepts, evidence, hypotheses, questions, plans). The output passes
+through `controller.analyze_with_model`, so the same `LLMReasoner` and
+`parse_structured_output` that validate any external model validate it too:
 
 ```python
 analysis = controller.analyze_with_model(model, request)
 ```
 
-النموذج يقترح فقط: لا يعدّل الاعتقادات ولا حالتها، ولا ينفّذ أدوات، ولا يعلّم
-خطوة مكتملة. أي مفتاح ممنوع (`beliefs`, `tool_calls`, ...) يُرفض.
+The model only suggests: it does not modify beliefs or their state, does not run
+tools, and does not mark a step complete. Any forbidden key (`beliefs`,
+`tool_calls`, ...) is rejected.
 
-> تنويه صريح: محوّل حقيقي لكنه صغير (3 طبقات، عرض 96) ومُدرَّب على متن صغير.
-> يُنتج نصاً متماسكاً حول عالم المشروع، وليس نموذجاً عاماً بحجم النماذج الحدودية.
+> Explicit disclaimer: a real transformer but a small one (3 layers, width 96)
+> trained on a small corpus. It produces coherent text about the project's
+> world, not a general model at frontier-model scale.
 
-### هوية المجال: عقل مهندس بترول
+### Domain identity: a petroleum-engineering mind
 
-المشروع يعرّف نفسه صراحةً كـ**عقل مهندس بترول** (`core/self_model.py`)، ومعرفته
-الأولية للمجال في `core/domain_knowledge.py`:
+The project explicitly defines itself as a **petroleum-engineering mind**
+(`core/self_model.py`), with its initial domain knowledge in
+`core/domain_knowledge.py`:
 
-- `SelfModel`: الاسم، والهوية (`petroleum engineering mind`)، والمجال، والقدرات،
-  والحدود، ومجالات الخبرة (المكامن، الحفر، الانتاج، البتروفيزياء، السجلات...).
-- `seed_ontology`: يزرع 13 مفهوماً و13 علاقة بترولية (مثل `المكمن contained_in الطبقة`،
-  `الضغط drives الانتاج`) بثقة متواضعة قابلة للمراجعة، بشكل **خامل التكرار** فلا يتكرر
-  عند إعادة التشغيل أو الاستعادة.
-- `CognitiveController`: يزرع الأنطولوجيا عند الإقلاع، ويضيف `domain_summary`
-  (إطار الهوية ومجالات الخبرة) إلى سياق كل طلب نموذج، ويكشف الهوية عبر `controller.identity`.
+- `SelfModel`: the name, identity (`petroleum engineering mind`), domain,
+  capabilities, limits, and areas of expertise (reservoirs, drilling, production,
+  petrophysics, logs...).
+- `seed_ontology`: seeds 13 petroleum concepts and 13 relations (such as
+  `reservoir contained_in formation`, `pressure drives production`) with modest,
+  revisable confidence, **idempotently**, so it does not duplicate on restart or
+  restore.
+- `CognitiveController`: seeds the ontology at startup, adds `domain_summary`
+  (the identity frame and expertise areas) to every model request's context, and
+  exposes the identity via `controller.identity`.
 
 ```python
 controller = CognitiveController()
-controller.identity                                  # إطار الهوية
-controller.ontology.find_concepts("permeability")    # نفاذية
+controller.identity                                  # the identity frame
+controller.ontology.find_concepts("permeability")    # permeability
 ```
 
-> تنويه صريح: الهوية **إطار مجال**، لا ادّعاء وعي. البذرة صغيرة وقابلة للفحص، ولا
-> تُغيّر اعتقاداً تلقائياً، ولا تُغني عن بيانات الحقل أو حكم مهندس معتمد. كل علاقة
-> بذرة قابلة للتصحيح بالأدلة مثل أي معرفة أخرى.
+> Explicit disclaimer: the identity is a **domain frame**, not a claim to
+> consciousness. The seed is small and auditable, it never changes a belief
+> automatically, and it does not replace field data or the judgement of a
+> certified engineer. Every seed relation is revisable with evidence like any
+> other knowledge.
 
-### ربط نموذج لغوي حقيقي بالإجراءات
+### Wiring a real language model to actions
 
-`core/model_advisor.py` (`ModelActionAdvisor`) يغلّف أي `CallableModel` كسياسة:
-يرسل الحقائق الحالية وقائمة الإجراءات المسموحة فقط، ويقبل ردّ النموذج فقط إن
-سمّى إجراءً من القائمة، وإلا يرجع `None` فيبقى القرار للمتصل. فشل النموذج لا
-يكسر الحلقة أبداً.
+`core/model_advisor.py` (`ModelActionAdvisor`) wraps any `CallableModel` as a
+policy: it sends the current facts and the allowed action list only, and accepts
+the model's reply only if it names an action from the list; otherwise it returns
+`None` so the decision stays with the caller. A model failure never breaks the
+loop.
 
-> تنويه صريح: هذا يمنح المشروع **قدرة تعلّم قابلة للقياس** (تحسّن في الأداء، تقليل خطأ التنبؤ، معايرة ذاتية)، وليس وعياً بشرياً. الوعي الذاتي الحقيقي ليس هدفاً يمكن تحقيقه ببناء برمجي، والمقاربة هنا مستوحاة من مبادئ التعلّم البيولوجي المعروفة (الترميز التنبؤي، الذاكرة، ما وراء المعرفة).
+> Explicit disclaimer: this gives the project a **measurable learning
+> capability** (improved performance, reduced prediction error, self-calibration),
+> not human consciousness. True self-awareness is not a goal achievable by a
+> software construction, and the approach here is inspired by known principles of
+> biological learning (predictive coding, memory, metacognition).
 
-## ربط نموذج حقيقي
+## Connecting a real model
 
-أنشئ `CallableModel` يغلّف عميل النموذج الذي تختاره، ثم مرّره إلى `CognitiveController.reason`. يجب أن يعيد الغلاف نصاً فقط؛ أما الأدوات والإجراءات الخارجية فتبقى تحت تحكم التطبيق والمستخدم.
+Create a `CallableModel` that wraps the model client of your choice, then pass it
+to `CognitiveController.reason`. The wrapper must return text only; tools and
+external actions stay under the control of the application and the user.
 
 ```python
 model = CallableModel("my-model", lambda request: client.generate(request))
 response = controller.reason(model, request)
 ```
 
-## التقييم العلمي القابل للقياس
+## Measurable scientific evaluation
 
-حزمة `evaluation/` تشغّل سيناريوهات ثابتة عبر ستة مجالات، وتقيس أداء النظام، وتقارن الإصدارات لمنع التراجع:
+The `evaluation/` package runs fixed scenarios across six domains, measures
+system performance, and compares versions to prevent regression:
 
-- **السيناريوهات** (`evaluation/scenarios.py`): حالات ثابتة للذاكرة، الاستدلال، السببية، التخطيط، وعدم اليقين (بما فيها كشف التناقض وتفسير القرار)، ومجال **البترول** (`Domain.PETROLEUM`) بعشرة سيناريوهات: سببية، بتروفيزياء/استرجاع، تخطيط إكمال بئر/معالجة هبوط، عدم يقين «هل ينخفض الانتاج؟»، تحقق من علاقات الأنطولوجيا المزروعة، واستدلال فوق الأنطولوجيا (علاقات مشتقّة غير مخزّنة)، واسترجاع متعدد الخطوات يعبر الروابط المشتقّة دون اشتراك كلمات، وتعلّم الأنطولوجيا من ملاحظة حقلية (علاقات ضعيفة جديدة مع حفظ الزوج المزروع)، وترجيح الروابط بالتجربة (تقوية بالتكرار وتحلّل بالإهمال ضمن سقف)، والتعلّم من نتيجة الاسترجاع (فضل للرابط النافع ولوم لغيره).
-- **المقاييس** (`evaluation/metrics.py`): دقة التنبؤ، Brier score مع تفكيك Murphy، خطأ المعايرة (ECE)، واتساق التناقض.
-- **المشغّل** (`evaluation/runner.py`): ينفّذ السيناريوهات عبر `CognitiveController` ويجمع: دقة التنبؤ، calibration، معدل التناقض، جودة الاسترجاع (accuracy وMRR)، نجاح التخطيط، تفسير القرار، دقة/جودة التفسير السببي، ومقاييس البترول الثمانية (`petroleum_causal_accuracy`، `petroleum_retrieval_accuracy`، `petroleum_ontology_accuracy`، `petroleum_inference_accuracy`، `petroleum_multihop_retrieval_accuracy`، `petroleum_ontology_learning_accuracy`، `petroleum_ontology_reinforcement_accuracy`، `petroleum_ontology_feedback_accuracy`).
-- **بوابة التراجع** (`evaluation/benchmark.py` + `baseline.json`): تقارن مقاييس الإصدار الحالي بالأساس المخزّن وترفض أي تراجع (مع هامش `--tolerance` اختياري).
+- **Scenarios** (`evaluation/scenarios.py`): fixed cases for memory, reasoning,
+  causality, planning, and uncertainty (including contradiction detection and
+  decision explanation), plus the **petroleum** domain (`Domain.PETROLEUM`) with
+  ten scenarios: causality, petrophysics/retrieval, well-completion /
+  production-decline planning, the "is production declining?" uncertainty, a
+  check of the seeded ontology relations, inference over the ontology (derived
+  relations not stored), multi-hop retrieval that crosses derived links with no
+  shared words, ontology learning from a field observation (new weak relations
+  while preserving the seeded pair), link weighting by experience (reinforcement
+  by repetition and decay by disuse within a ceiling), and learning from a
+  recall's outcome (credit for a useful link, blame otherwise).
+- **Metrics** (`evaluation/metrics.py`): prediction accuracy, Brier score with
+  the Murphy decomposition, calibration error (ECE), and contradiction
+  consistency.
+- **Runner** (`evaluation/runner.py`): executes the scenarios through
+  `CognitiveController` and assembles: prediction accuracy, calibration,
+  contradiction rate, retrieval quality (accuracy and MRR), planning success,
+  decision explanation, causal accuracy/quality, and the eight petroleum metrics
+  (`petroleum_causal_accuracy`, `petroleum_retrieval_accuracy`,
+  `petroleum_ontology_accuracy`, `petroleum_inference_accuracy`,
+  `petroleum_multihop_retrieval_accuracy`,
+  `petroleum_ontology_learning_accuracy`,
+  `petroleum_ontology_reinforcement_accuracy`,
+  `petroleum_ontology_feedback_accuracy`).
+- **Regression gate** (`evaluation/benchmark.py` + `baseline.json`): compares the
+  current version's metrics against the stored baseline and refuses any
+  regression (with an optional `--tolerance` margin).
 
 ```bash
-python -m evaluation                    # تشغيل + مقارنة بالأساس (يفشل عند التراجع)
-python -m evaluation --json             # تقرير JSON كامل
-python -m evaluation --update-baseline  # تحديث الأساس بعد تحسّن مقصود
-python -m evaluation --tolerance 0.01   # السماح بهامش ضوضاء
+python -m evaluation                    # run + compare against baseline (fails on regression)
+python -m evaluation --json             # full JSON report
+python -m evaluation --update-baseline  # update the baseline after an intended improvement
+python -m evaluation --tolerance 0.01   # allow a noise margin
 ```
 
-تُشغَّل البوابة تلقائياً في CI بعد الاختبارات، فيتعذّر دمج أي تغيير يُضعف الأداء دون تحديث مقصود للأساس.
+The gate runs automatically in CI after the tests, so no change that weakens
+performance can be merged without an intended baseline update.
 
-## التحقق
+## Verification
 
-شغّل `python main.py` لعرض دورة محلية آمنة. وعند تثبيت متطلبات المشروع، شغّل `python -m pytest -q`.
+Run `python main.py` for a safe local cycle. With the project requirements
+installed, run `python -m pytest -q`.

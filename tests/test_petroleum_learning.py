@@ -96,4 +96,4 @@ def test_format_report_names_tasks_and_disciplines():
     text = format_report(report)
     assert "drill-well" in text
     assert "Overall held-out success" in text
-    assert "هندسة الحفر" in text
+    assert "Drilling Engineering" in text
