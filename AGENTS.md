@@ -51,6 +51,10 @@ mind. User-facing docs and text are in Arabic.
   with provenance and decay (`KnowledgeUpdater`). `core/continuous_learning.py` —
   `ContinuousLearner` (explicit feedback only) + `RegressionMonitor` for baseline
   comparisons. CLI: `python -m ai.learn_demo` / `python -m cli learn`.
+- `core/vision.py` — optional multimodal perception: dependency-free `ImageBuffer`
+  (PPM P6), measurable `ImageFeatures`, `HeuristicVisionEncoder`, and a
+  `MultimodalAssistant` that grounds an image description in the RAG store. A real
+  encoder can implement the `VisionEncoder` protocol without touching the assistant.
 - `core/version.py` is the single source of the version string.
 - `evaluation/` â€” regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
