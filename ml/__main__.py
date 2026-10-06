@@ -49,7 +49,12 @@ def _success_for(task_name: str) -> Callable[[State], bool]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the ML learning pipeline.")
     parser.add_argument("--episodes", type=int, default=300, help="brain training episodes")
-    parser.add_argument("--save-dir", type=Path, default=None, help="directory for artifacts")
+    parser.add_argument(
+        "--save-dir",
+        type=Path,
+        default=None,
+        help="directory for artifacts (default: a portable data folder)",
+    )
     parser.add_argument(
         "--replay-batch",
         type=int,

@@ -10,13 +10,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.model_interface import CallableModel, ModelRequest, ModelResponse
+from core.paths import default_checkpoint
 from ml.llm.generator import LocalGenerator
 from ml.llm.schema import StructuredDecoder
 from ml.llm.transformer import TransformerLM
 
-DEFAULT_CHECKPOINT = (
-    Path(__file__).resolve().parents[1] / "ml" / "llm" / "checkpoints" / "fayd-llm.npz"
-)
+DEFAULT_CHECKPOINT = default_checkpoint()
 
 
 class LocalLanguageModel(CallableModel):

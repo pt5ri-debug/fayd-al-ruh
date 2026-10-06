@@ -21,7 +21,7 @@ markers = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["core", "storage", "tests", "ai", "evaluation", "ml"]
+src = ["core", "storage", "tests", "ai", "evaluation", "ml", "cli", "scripts"]
 
 [tool.ruff.lint]
 # Start by blocking correctness errors. Style rules are introduced gradually
@@ -30,7 +30,12 @@ select = ["F"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["core", "storage", "ai", "evaluation", "ml", "tests", "main.py"]
+files = ["core", "storage", "ai", "evaluation", "ml", "cli", "scripts", "tests", "main.py"]
 warn_unused_configs = true
 warn_redundant_casts = true
 no_implicit_optional = true
+
+# PyInstaller is a build-time tool without published type stubs.
+[[tool.mypy.overrides]]
+module = ["PyInstaller"]
+ignore_missing_imports = true
