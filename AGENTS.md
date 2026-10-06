@@ -21,7 +21,14 @@ mind. User-facing docs and text are in Arabic.
     `seed_curriculum`, `curriculum_coverage`, `curriculum_coverage_score`.
     Both seeds run in `CognitiveController.__init__` and share nodes (idempotent).
 - `ml/` — learning. `ml/petroleum.py` trains the Q-policy + predictive brain on
-  the discipline tasks in `core/petroleum_tasks.py`.
+  the discipline tasks in `core/petroleum_tasks.py`. `ml/release.py` trains every
+  layer (base pipeline, petroleum tasks, language model) and writes
+  `ml/artifacts/release_manifest.json`. Trained artifacts in `ml/artifacts/` and
+  `ml/llm/checkpoints/fayd-llm.npz` are committed on purpose for a release;
+  regenerate with `python -m cli release`.
+- `ml/llm/corpus.py` builds the language-model text, including sentences generated
+  from every discipline and course (`curriculum_sentences`).
+- `core/version.py` is the single source of the version string.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
   Update the baseline with `python -m evaluation --update-baseline`.

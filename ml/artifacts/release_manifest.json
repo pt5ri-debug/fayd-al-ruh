@@ -1,0 +1,303 @@
+{
+  "artifacts": {
+    "checkpoint": "/workspace/project/fayd-al-ruh/ml/llm/checkpoints/fayd-llm.npz",
+    "save_dir": "/workspace/project/fayd-al-ruh/ml/artifacts"
+  },
+  "base": {
+    "brains": {
+      "boil-water": {
+        "episodes_trained": 120.0,
+        "error_improvement": 0.009639716519714807,
+        "final_error": 0.0005325139803380852,
+        "initial_error": 0.010172230500052892,
+        "memory_size": 649.0,
+        "policy_success_rate": 1.0,
+        "self_tuned_learning_rate": 0.1
+      },
+      "plant-seed": {
+        "episodes_trained": 120.0,
+        "error_improvement": 0.01070226691070342,
+        "final_error": 0.0004977052394091359,
+        "initial_error": 0.011199972150112555,
+        "memory_size": 683.0,
+        "policy_success_rate": 1.0,
+        "self_tuned_learning_rate": 0.09007003115996491
+      },
+      "stack-blocks": {
+        "episodes_trained": 120.0,
+        "error_improvement": 0.012970741834785868,
+        "final_error": 0.00026991728438745786,
+        "initial_error": 0.013240659119173326,
+        "memory_size": 327.0,
+        "policy_success_rate": 1.0,
+        "self_tuned_learning_rate": 0.01437491582256305
+      },
+      "wet-garden": {
+        "episodes_trained": 120.0,
+        "error_improvement": 0.014039169376772043,
+        "final_error": 6.771791555253781e-06,
+        "initial_error": 0.014045941168327298,
+        "memory_size": 169.0,
+        "policy_success_rate": 1.0,
+        "self_tuned_learning_rate": 0.005876448813374413
+      }
+    },
+    "generalisation": {
+      "light-candle": {
+        "error_improvement": 0.012734336766257934,
+        "final_error": 0.0003364604399751966,
+        "initial_error": 0.013070797206233132,
+        "policy_success_rate": 1.0
+      },
+      "recharge-lamp": {
+        "error_improvement": 0.010540373514628523,
+        "final_error": 0.000650397209729006,
+        "initial_error": 0.011190770724357528,
+        "policy_success_rate": 1.0
+      }
+    },
+    "interaction_policies": {},
+    "interaction_reward_model": {
+      "brier_score": 0.021,
+      "contexts": 7.0,
+      "expected_calibration_error": 0.14,
+      "forecasts_recorded": 5.0,
+      "outcomes_recorded": 23.0
+    },
+    "model_based": {},
+    "policies": {
+      "boil-water": {
+        "final_epsilon": 0.05,
+        "held_out_success_rate": 1.0,
+        "train_success_rate": 1.0
+      },
+      "plant-seed": {
+        "final_epsilon": 0.05,
+        "held_out_success_rate": 1.0,
+        "train_success_rate": 1.0
+      },
+      "stack-blocks": {
+        "final_epsilon": 0.05,
+        "held_out_success_rate": 1.0,
+        "train_success_rate": 1.0
+      },
+      "wet-garden": {
+        "final_epsilon": 0.05,
+        "held_out_success_rate": 1.0,
+        "train_success_rate": 1.0
+      }
+    },
+    "supervised": {
+      "epochs": 30.0,
+      "samples": 1828.0,
+      "stopped_early": 1.0,
+      "train_accuracy": 0.9547775346462436,
+      "val_accuracy": 0.973741794310722,
+      "val_brier": 0.04916085891372162
+    }
+  },
+  "config": {
+    "episodes": 120,
+    "include_base": true,
+    "llm_repeats": 40,
+    "llm_steps": 4000,
+    "llm_structured_repeats": 60,
+    "replay_batch": 32,
+    "seed": 0
+  },
+  "corpus": {
+    "characters": 1665920,
+    "curriculum_sentences": 868,
+    "repeats": 40,
+    "structured_examples": 7,
+    "structured_repeats": 60
+  },
+  "git_revision": "85f9c11",
+  "knowledge": {
+    "course_concepts": 243,
+    "course_relations": 247,
+    "courses": 34,
+    "curriculum_coverage": 1.0,
+    "discipline_concepts": 45,
+    "discipline_relations": 45,
+    "disciplines": 14,
+    "ontology_concepts": 338,
+    "ontology_relations": 304
+  },
+  "language_model": {
+    "checkpoint": "/workspace/project/fayd-al-ruh/ml/llm/checkpoints/fayd-llm.npz",
+    "parameters": 391200,
+    "steps": 4000
+  },
+  "petroleum": {
+    "discipline_success": {
+      "artificial_lift": 1.0,
+      "cementing": 1.0,
+      "completions": 1.0,
+      "drilling": 1.0,
+      "economics": 1.0,
+      "eor": 1.0,
+      "hse": 1.0,
+      "petrophysics": 1.0,
+      "production": 1.0,
+      "reservoir": 1.0,
+      "stimulation": 1.0,
+      "well_control": 1.0,
+      "well_logging": 1.0,
+      "well_testing": 1.0
+    },
+    "generalisation_success": {
+      "flow_assurance": 1.0,
+      "geoscience": 1.0
+    },
+    "overall_success": 1.0,
+    "tasks": [
+      {
+        "brain_final_error": 0.000361,
+        "brain_initial_error": 0.012215,
+        "brain_policy_success": 1.0,
+        "discipline": "reservoir",
+        "held_out_success": 1.0,
+        "name": "reservoir-appraisal",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000382,
+        "brain_initial_error": 0.012083,
+        "brain_policy_success": 1.0,
+        "discipline": "drilling",
+        "held_out_success": 1.0,
+        "name": "drill-well",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000346,
+        "brain_initial_error": 0.011366,
+        "brain_policy_success": 1.0,
+        "discipline": "production",
+        "held_out_success": 1.0,
+        "name": "restore-production",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000408,
+        "brain_initial_error": 0.012121,
+        "brain_policy_success": 1.0,
+        "discipline": "petrophysics",
+        "held_out_success": 1.0,
+        "name": "core-analysis",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000384,
+        "brain_initial_error": 0.012322,
+        "brain_policy_success": 1.0,
+        "discipline": "well_logging",
+        "held_out_success": 1.0,
+        "name": "log-interpretation",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000407,
+        "brain_initial_error": 0.011967,
+        "brain_policy_success": 1.0,
+        "discipline": "completions",
+        "held_out_success": 1.0,
+        "name": "complete-well",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000347,
+        "brain_initial_error": 0.01178,
+        "brain_policy_success": 1.0,
+        "discipline": "eor",
+        "held_out_success": 1.0,
+        "name": "enhanced-recovery",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000621,
+        "brain_initial_error": 0.016639,
+        "brain_policy_success": 1.0,
+        "discipline": "well_testing",
+        "held_out_success": 1.0,
+        "name": "pressure-transient-test",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000416,
+        "brain_initial_error": 0.011883,
+        "brain_policy_success": 1.0,
+        "discipline": "artificial_lift",
+        "held_out_success": 1.0,
+        "name": "install-gas-lift",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000349,
+        "brain_initial_error": 0.012294,
+        "brain_policy_success": 1.0,
+        "discipline": "stimulation",
+        "held_out_success": 1.0,
+        "name": "matrix-acidizing",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000388,
+        "brain_initial_error": 0.011945,
+        "brain_policy_success": 1.0,
+        "discipline": "cementing",
+        "held_out_success": 1.0,
+        "name": "primary-cementing",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000364,
+        "brain_initial_error": 0.012331,
+        "brain_policy_success": 1.0,
+        "discipline": "well_control",
+        "held_out_success": 1.0,
+        "name": "control-kick",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000348,
+        "brain_initial_error": 0.012602,
+        "brain_policy_success": 1.0,
+        "discipline": "economics",
+        "held_out_success": 1.0,
+        "name": "field-economics",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000355,
+        "brain_initial_error": 0.011892,
+        "brain_policy_success": 1.0,
+        "discipline": "hse",
+        "held_out_success": 1.0,
+        "name": "well-integrity-check",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.00038,
+        "brain_initial_error": 0.012033,
+        "brain_policy_success": 1.0,
+        "discipline": "geoscience",
+        "held_out_success": 1.0,
+        "name": "seismic-interpretation",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000379,
+        "brain_initial_error": 0.012899,
+        "brain_policy_success": 1.0,
+        "discipline": "flow_assurance",
+        "held_out_success": 1.0,
+        "name": "flow-assurance",
+        "train_success": 1.0
+      }
+    ]
+  },
+  "trained_at": "2026-10-06T18:18:32.820460+00:00",
+  "version": "2.1.0"
+}

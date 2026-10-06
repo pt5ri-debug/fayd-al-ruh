@@ -120,13 +120,44 @@ def _petroleum_sentences() -> list[str]:
     return ar + en
 
 
+def curriculum_sentences() -> list[str]:
+    """Training prose generated from the whole seeded degree.
+
+    Every discipline and every course contributes a sentence for each of its
+    concepts and one for each of its relations, so the language model is trained
+    on the same knowledge the ontology carries rather than a hand-written
+    sample. Arabic sentences read naturally; relation sentences use a compact
+    "A <relation> B" shape so the type vocabulary is visible to the model.
+    """
+    from core.curriculum_knowledge import courses
+    from core.domain_knowledge import disciplines
+
+    sentences: list[str] = []
+    for discipline in disciplines():
+        for label, aliases in discipline.concepts:
+            sentences.append(f"{label} مفهوم من {discipline.label}.")
+            if aliases:
+                sentences.append(f"{label} ويعرف أيضا بـ {aliases[0]}.")
+        for source, target, relation, _confidence in discipline.relations:
+            sentences.append(f"{source} {relation} {target}.")
+    for course in courses():
+        for label, aliases in course.concepts:
+            sentences.append(f"{label} مفهوم من {course.label}.")
+            if aliases:
+                sentences.append(f"{label} ويعرف أيضا بـ {aliases[0]}.")
+        for source, target, relation, _confidence in course.relations:
+            sentences.append(f"{source} {relation} {target}.")
+    return sentences
+
+
 def build_corpus(*, repeats: int = 40, structured_repeats: int = 60) -> str:
     """Return the training text, repeated so the small model can fit it.
 
-    Three blocks are concatenated: general prose about the project's world,
-    petroleum-engineering prose matching the declared identity, and JSON objects
-    in the shape ``MODEL_OUTPUT_SCHEMA`` expects. The JSON block teaches the
-    model the field names and Arabic values used by schema-guided decoding.
+    Four blocks are concatenated: general prose about the project's world,
+    petroleum-engineering prose matching the declared identity, prose generated
+    from the whole seeded curriculum (every discipline and course), and JSON
+    objects in the shape ``MODEL_OUTPUT_SCHEMA`` expects. The JSON block teaches
+    the model the field names and Arabic values used by schema-guided decoding.
     """
     if repeats < 1:
         raise ValueError("repeats must be at least 1.")
@@ -134,8 +165,14 @@ def build_corpus(*, repeats: int = 40, structured_repeats: int = 60) -> str:
         raise ValueError("structured_repeats must be at least 1.")
     prose = " ".join(_sentences())
     petroleum = " ".join(_petroleum_sentences())
+    curriculum = " ".join(curriculum_sentences())
     structured = " ".join(structured_examples())
-    return (prose + " ") * repeats + (petroleum + " ") * repeats + (structured + " ") * structured_repeats
+    return (
+        (prose + " ") * repeats
+        + (petroleum + " ") * repeats
+        + (curriculum + " ") * repeats
+        + (structured + " ") * structured_repeats
+    )
 
 
 def structured_examples() -> list[str]:
@@ -198,4 +235,4 @@ def normalise(text: str) -> str:
     return unicodedata.normalize("NFC", text)
 
 
-__all__ = ["build_corpus", "normalise"]
+__all__ = ["build_corpus", "curriculum_sentences", "normalise"]
