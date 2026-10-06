@@ -22,6 +22,16 @@ def _run_module(module_name: str, argv: Sequence[str]) -> int:
     return int(main(list(argv)))
 
 
+def missing_dependency_message(error: ModuleNotFoundError) -> str:
+    """An actionable message for a missing third-party import."""
+    name = (error.name or "").split(".")[0]
+    lines = [f"Missing dependency: {name!r}."]
+    if name in {"numpy", "requests"}:
+        lines.append("Install the runtime requirements first:")
+        lines.append("    python -m pip install -r requirements.txt")
+    return "\n".join(lines)
+
+
 def run_demo(argv: Sequence[str] = ()) -> int:
     """Run the small local cognitive-loop demonstration."""
     if argv:
@@ -98,7 +108,11 @@ def run_choice(choice: str) -> int:
         print(f"Choice out of range: {choice!r}")
         return 1
     _title, action, args = MENU[index]
-    return action(args)
+    try:
+        return action(args)
+    except ModuleNotFoundError as error:
+        print(missing_dependency_message(error))
+        return 1
 
 
 def _print_menu() -> None:
@@ -135,4 +149,5 @@ __all__ = [
     "run_choice",
     "menu_loop",
     "describe_paths",
+    "missing_dependency_message",
 ]

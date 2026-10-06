@@ -84,3 +84,28 @@ def test_run_ml_respects_explicit_save_dir(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(menu, "_run_module", fake_run_module)
     menu.run_ml(["--save-dir", str(tmp_path / "explicit")])
     assert captured["argv"].count("--save-dir") == 1
+
+
+def test_missing_dependency_message_for_numpy() -> None:
+    error = ModuleNotFoundError("No module named 'numpy'", name="numpy")
+    message = menu.missing_dependency_message(error)
+    assert "numpy" in message
+    assert "pip install -r requirements.txt" in message
+
+
+def test_missing_dependency_message_for_other_module() -> None:
+    error = ModuleNotFoundError("No module named 'x'", name="some_pkg")
+    message = menu.missing_dependency_message(error)
+    assert "some_pkg" in message
+    assert "requirements.txt" not in message
+
+
+def test_run_choice_reports_missing_dependency(monkeypatch, capsys) -> None:
+    def boom(argv: Sequence[str]) -> int:
+        raise ModuleNotFoundError("No module named 'numpy'", name="numpy")
+
+    monkeypatch.setattr(menu, "MENU", (("Boom", boom, ()),))
+    assert menu.run_choice("1") == 1
+    out = capsys.readouterr().out
+    assert "Missing dependency: 'numpy'" in out
+    assert "pip install -r requirements.txt" in out
