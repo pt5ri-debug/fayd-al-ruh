@@ -26,6 +26,7 @@ from evaluation.scenarios import (
     DecisionActionSpec,
 )
 from ml.petroleum import petroleum_learning_accuracy
+from core.curriculum_knowledge import curriculum_coverage_score
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,8 @@ class EvaluationMetrics:
     petroleum_ontology_feedback_accuracy: float
     # Petroleum learning across disciplines (trained tasks, held-out success)
     petroleum_learning_accuracy: float
+    # Curriculum: fraction of the seeded degree the ontology carries
+    curriculum_coverage: float
     # Aggregate
     overall: float
 
@@ -669,6 +672,10 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # retrieval score, so it regresses if any discipline stops being learnable.
     petroleum_task_learning = petroleum_learning_accuracy()
 
+    # Curriculum: how much of the seeded degree (every course's concepts and
+    # relations) the live ontology actually carries.
+    curriculum_coverage_value = curriculum_coverage_score(CognitiveController().ontology)
+
     petroleum_score = mean([
         petroleum_causal,
         petroleum_retrieval,
@@ -699,6 +706,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_reinforcement,
         petroleum_feedback,
         petroleum_task_learning,
+        curriculum_coverage_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -723,6 +731,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_ontology_reinforcement_accuracy=round(petroleum_reinforcement, 6),
         petroleum_ontology_feedback_accuracy=round(petroleum_feedback, 6),
         petroleum_learning_accuracy=round(petroleum_task_learning, 6),
+        curriculum_coverage=round(curriculum_coverage_value, 6),
         overall=round(overall, 6),
     )
 

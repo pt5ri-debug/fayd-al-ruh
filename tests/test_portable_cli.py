@@ -172,3 +172,27 @@ def test_utf8_console_guard_allows_arabic_on_legacy_encoding(monkeypatch) -> Non
     legacy.flush()
 
     assert buffer.getvalue().decode("utf-8").strip() == "هندسة الحفر"
+
+
+def test_cli_curriculum_command_dispatches(monkeypatch) -> None:
+    calls: list[Sequence[str]] = []
+
+    def fake(argv: Sequence[str]) -> int:
+        calls.append(argv)
+        return 0
+
+    import cli.__main__ as cli_entry
+
+    monkeypatch.setitem(cli_entry._COMMANDS, "curriculum", fake)
+    assert cli_entry.main(["curriculum"]) == 0
+    assert calls == [[]]
+
+
+def test_curriculum_action_reports_the_whole_degree(capsys) -> None:
+    from cli.menu import run_curriculum
+
+    assert run_curriculum() == 0
+    out = capsys.readouterr().out
+    assert "المقررات: 34" in out
+    assert "هندسة_المكامن" in out
+    assert "تخصصات_البترول" in out

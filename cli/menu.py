@@ -82,11 +82,56 @@ def run_selfcheck(argv: Sequence[str] = ()) -> int:
     return 0
 
 
+def run_curriculum(argv: Sequence[str] = ()) -> int:
+    """Show the seeded petroleum-engineering curriculum and its coverage."""
+    if argv:
+        print("The curriculum view takes no arguments.")
+        return 1
+    from collections import defaultdict
+
+    from core.curriculum_knowledge import (
+        course_categories,
+        course_labels,
+        curriculum_coverage,
+        seed_curriculum,
+    )
+    from core.domain_knowledge import seed_ontology
+    from core.ontology import Ontology
+
+    ontology = Ontology()
+    seed_ontology(ontology)
+    seed_curriculum(ontology)
+    coverage = curriculum_coverage(ontology)
+    labels = course_labels()
+    categories = course_categories()
+
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for key, counts in coverage.items():
+        grouped[categories[key]].append(
+            f"  {labels[key]:32s} "
+            f"concepts={counts['concepts']}/{counts['expected_concepts']} "
+            f"relations={counts['relations']}/{counts['expected_relations']}"
+        )
+
+    print("منهج هندسة البترول المزروع (seeded curriculum)")
+    for category in ("أساسيات", "علوم_الأرض", "هندسة_أساسية", "تخصصات_البترول"):
+        if category in grouped:
+            print(f"\n[{category}]")
+            print("\n".join(grouped[category]))
+    print(
+        f"\nالمقررات: {len(coverage)}  "
+        f"المفاهيم: {len(ontology.concepts)}  "
+        f"العلاقات: {len(ontology.relations)}"
+    )
+    return 0
+
+
 MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--episodes", "60")),
     ("Train the language model", run_llm, ("--steps", "200")),
     ("Train petroleum-engineering tasks", run_petroleum, ("--episodes", "120")),
+    ("Show the petroleum-engineering curriculum", run_curriculum, ()),
     ("Run the evaluation suite", run_evaluation, ()),
     ("Self-check the install", run_selfcheck, ()),
 )
@@ -155,6 +200,7 @@ __all__ = [
     "run_ml",
     "run_llm",
     "run_petroleum",
+    "run_curriculum",
     "run_evaluation",
     "run_choice",
     "menu_loop",
