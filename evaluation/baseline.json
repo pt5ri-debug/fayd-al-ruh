@@ -8,14 +8,14 @@
       "upper": 0.2
     },
     {
-      "count": 2,
-      "empirical_accuracy": 0.075,
+      "count": 3,
+      "empirical_accuracy": 0.1,
       "lower": 0.2,
-      "mean_confidence": 0.238889,
+      "mean_confidence": 0.249349,
       "upper": 0.3
     },
     {
-      "count": 1,
+      "count": 2,
       "empirical_accuracy": 0.85,
       "lower": 0.7,
       "mean_confidence": 0.72973,
@@ -39,22 +39,26 @@
   "domain_scores": {
     "causal": 1.0,
     "memory": 1.0,
+    "petroleum": 1.0,
     "planning": 1.0,
     "reasoning": 1.0,
-    "uncertainty": 0.864565
+    "uncertainty": 0.867935
   },
   "metrics": {
-    "brier_score": 0.019399,
-    "calibration_error": 0.135435,
+    "brier_score": 0.018302,
+    "calibration_error": 0.132065,
     "causal_chain_accuracy": 1.0,
     "causal_explanation_quality": 1.0,
     "contradiction_rate": 1.0,
     "decision_explanation_quality": 1.0,
-    "overall": 0.980652,
+    "overall": 0.986793,
+    "petroleum_causal_accuracy": 1.0,
+    "petroleum_ontology_accuracy": 1.0,
+    "petroleum_retrieval_accuracy": 1.0,
     "planning_success_rate": 1.0,
     "prediction_accuracy": 1.0,
-    "reliability": 0.018848,
-    "resolution": 0.206862,
+    "reliability": 0.017733,
+    "resolution": 0.18858,
     "retrieval_accuracy": 1.0,
     "retrieval_mrr": 1.0
   },
@@ -117,6 +121,49 @@
       },
       "domain": "planning",
       "id": "decision-explanation",
+      "passed": true
+    },
+    {
+      "checks": {
+        "causal_chain_accuracy": 1.0,
+        "causal_explanation_quality": 1.0
+      },
+      "domain": "petroleum",
+      "id": "petroleum-causal",
+      "passed": true
+    },
+    {
+      "checks": {
+        "ontology_accuracy": 1.0,
+        "retrieval_accuracy": 1.0,
+        "retrieval_mrr": 1.0
+      },
+      "domain": "petroleum",
+      "id": "petroleum-petrophysics",
+      "passed": true
+    },
+    {
+      "checks": {
+        "planning_success_rate": 1.0
+      },
+      "domain": "planning",
+      "id": "petroleum-planning",
+      "passed": true
+    },
+    {
+      "checks": {
+        "uncertainty_error": 0.12027
+      },
+      "domain": "uncertainty",
+      "id": "petroleum-uncertainty",
+      "passed": true
+    },
+    {
+      "checks": {
+        "ontology_accuracy": 1.0
+      },
+      "domain": "petroleum",
+      "id": "petroleum-identity",
       "passed": true
     }
   ],

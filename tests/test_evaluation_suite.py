@@ -19,6 +19,49 @@ def test_scenarios_cover_every_domain():
     assert len(scenario_ids()) == len(set(scenario_ids()))
 
 
+def test_petroleum_scenarios_exist_and_pass():
+    petroleum = [scenario for scenario in SCENARIOS if scenario.id.startswith("petroleum-")]
+    assert petroleum, "expected at least one petroleum scenario"
+    report = run_suite()
+    results = {result.scenario_id: result for result in report.scenarios}
+    for scenario in petroleum:
+        assert scenario.id in results
+        assert results[scenario.id].passed, scenario.id
+
+
+def test_petroleum_scenarios_cover_causal_retrieval_and_ontology():
+    petroleum = {scenario.id: scenario for scenario in SCENARIOS if scenario.id.startswith("petroleum-")}
+    assert any(scenario.causal for scenario in petroleum.values())
+    assert any(scenario.retrieval for scenario in petroleum.values())
+    assert any(scenario.ontology_relations for scenario in petroleum.values())
+    assert any(scenario.uncertainties for scenario in petroleum.values())
+    assert any(scenario.plans for scenario in petroleum.values())
+
+
+def test_petroleum_ontology_relations_are_seeded():
+    from core.cognitive_controller import CognitiveController
+
+    controller = CognitiveController()
+    for scenario in SCENARIOS:
+        if not scenario.id.startswith("petroleum-"):
+            continue
+        for source_label, relation_type, target_label in scenario.ontology_relations:
+            sources = controller.ontology.find_concepts(source_label)
+            targets = controller.ontology.find_concepts(target_label)
+            assert sources and targets, (source_label, target_label)
+            target_ids = {concept.id for concept in targets}
+            assert any(
+                relation.relation_type == relation_type and relation.target_id in target_ids
+                for relation in controller.ontology.outgoing(sources[0].id)
+            ), (source_label, relation_type, target_label)
+
+
+def test_petroleum_domain_score_is_reported():
+    report = run_suite()
+    assert Domain.PETROLEUM.value in report.domain_scores
+    assert 0.0 <= report.domain_scores[Domain.PETROLEUM.value] <= 1.0
+
+
 def test_metric_specs_cover_every_metric():
     assert set(spec.name for spec in METRIC_SPECS) == set(metric_names(EvaluationMetrics))
 

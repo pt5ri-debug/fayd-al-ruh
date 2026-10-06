@@ -34,6 +34,9 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("decision_explanation_quality", True, label="Decision explanation quality"),
     MetricSpec("causal_chain_accuracy", True, label="Causal chain accuracy"),
     MetricSpec("causal_explanation_quality", True, label="Causal explanation quality"),
+    MetricSpec("petroleum_causal_accuracy", True, label="Petroleum causal accuracy"),
+    MetricSpec("petroleum_retrieval_accuracy", True, label="Petroleum retrieval accuracy"),
+    MetricSpec("petroleum_ontology_accuracy", True, label="Petroleum ontology accuracy"),
     MetricSpec("overall", True, label="Overall"),
 )
 
