@@ -40,6 +40,9 @@ mind. User-facing docs and text are in Arabic.
   citations. `core/assistant.py` — `GroundedAssistant` / `build_default_assistant`;
   answers with citations, extractive fallback with no model, and a groundedness gate
   that rejects ungrounded model output. CLI: `python -m ai.ask` / `python -m cli ask`.
+- `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
+  (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. CLI:
+  `python -m ai.voice` / `python -m cli voice`.
 - `core/version.py` is the single source of the version string.
 - `evaluation/` â€” regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
