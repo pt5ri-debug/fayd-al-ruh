@@ -210,22 +210,22 @@ def train_release(
 
 
 def format_manifest(manifest: Manifest) -> str:
-    """A short, Arabic-friendly summary of a release manifest."""
+    """A short summary of a release manifest."""
     knowledge = manifest["knowledge"]
     config = manifest["config"]
     lines = [
-        f"إصدار Fayd Al-Ruh {manifest['version']}",
-        f"  وقت التدريب: {manifest['trained_at']}",
-        f"  المراجعة: {manifest.get('git_revision') or '—'}",
-        f"  التخصصات: {knowledge['disciplines']}  المقررات: {knowledge['courses']}",
-        f"  مفاهيم المنهج: {knowledge['course_concepts']}  "
-        f"علاقات المنهج: {knowledge['course_relations']}",
-        f"  تغطية المنهج: {knowledge['curriculum_coverage']:.4f}",
-        f"  حلقات التدريب: {config['episodes']}  خطوات اللغة: {config['llm_steps']}",
+        f"Fayd Al-Ruh release {manifest['version']}",
+        f"  Trained at: {manifest['trained_at']}",
+        f"  Revision: {manifest.get('git_revision') or '—'}",
+        f"  Disciplines: {knowledge['disciplines']}  Courses: {knowledge['courses']}",
+        f"  Curriculum concepts: {knowledge['course_concepts']}  "
+        f"Curriculum relations: {knowledge['course_relations']}",
+        f"  Curriculum coverage: {knowledge['curriculum_coverage']:.4f}",
+        f"  Training episodes: {config['episodes']}  Language steps: {config['llm_steps']}",
     ]
     petroleum = manifest.get("petroleum")
     if isinstance(petroleum, dict):
-        lines.append(f"  نجاح المهام البترولية: {petroleum['overall_success']:.4f}")
+        lines.append(f"  Petroleum task success: {petroleum['overall_success']:.4f}")
     return "\n".join(lines)
 
 

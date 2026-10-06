@@ -77,7 +77,7 @@ class Message:
 class Conversation:
     """An ordered, bounded exchange with a stable id and title."""
 
-    title: str = "محادثة"
+    title: str = "Conversation"
     max_turns: int = 20
     id: str = field(default_factory=lambda: f"CNV-{uuid4().hex[:8]}")
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -129,9 +129,9 @@ class Conversation:
             if not include_system and message.role is Role.SYSTEM:
                 continue
             prefix = {
-                Role.SYSTEM: "تعليمات",
-                Role.USER: "المستخدم",
-                Role.ASSISTANT: "المساعد",
+                Role.SYSTEM: "Instructions",
+                Role.USER: "User",
+                Role.ASSISTANT: "Assistant",
             }[message.role]
             lines.append(f"{prefix}: {message.text}")
         return "\n".join(lines)
@@ -164,7 +164,7 @@ class ConversationMemory:
         self._conversations: dict[str, Conversation] = {}
         self._store = store
 
-    def start(self, title: str = "محادثة", *, max_turns: int = 20) -> Conversation:
+    def start(self, title: str = "Conversation", *, max_turns: int = 20) -> Conversation:
         conversation = Conversation(title=title, max_turns=max_turns)
         self._conversations[conversation.id] = conversation
         return conversation

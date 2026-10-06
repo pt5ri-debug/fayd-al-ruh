@@ -158,28 +158,28 @@ class HeuristicVisionEncoder:
     def describe(self, image: ImageBuffer) -> str:
         features = extract_features(image)
         orientation = (
-            "أفقية" if features.is_landscape else "عمودية" if features.is_portrait else "مربّعة"
+            "landscape" if features.is_landscape else "portrait" if features.is_portrait else "square"
         )
         tone = (
-            "داكنة"
+            "dark"
             if features.brightness < 0.35
-            else "فاتحة"
+            else "bright"
             if features.brightness > 0.7
-            else "متوسطة الإضاءة"
+            else "medium-lit"
         )
         detail = (
-            "تفاصيل كثيرة"
+            "high detail"
             if features.edge_density > 0.25
-            else "تفاصيل قليلة"
+            else "low detail"
             if features.edge_density < 0.05
-            else "تفاصيل متوسطة"
+            else "medium detail"
         )
         return (
-            f"صورة {orientation} بأبعاد {features.width}×{features.height} "
-            f"(نسبة {features.aspect_ratio}). "
-            f"الإضاءة {tone} (سطوع {features.brightness:.2f})، "
-            f"التشبّع {features.saturation:.2f}، "
-            f"و{detail} (كثافة الحدود {features.edge_density:.2f})."
+            f"{orientation.capitalize()} image {features.width}x{features.height} "
+            f"(aspect {features.aspect_ratio}). "
+            f"Lighting is {tone} (brightness {features.brightness:.2f}), "
+            f"saturation {features.saturation:.2f}, "
+            f"and {detail} (edge density {features.edge_density:.2f})."
         )
 
 
@@ -214,7 +214,7 @@ class MultimodalAssistant:
 
     def ask_about_image(self, question: str, image: ImageBuffer, *, limit: int = 4) -> ImageAnswer:
         description = self.describe(image)
-        grounded_question = f"{question}\nوصف الصورة: {description}"
+        grounded_question = f"{question}\nImage description: {description}"
         result = self.assistant.ask(grounded_question, limit=limit)
         return ImageAnswer(
             question=question,

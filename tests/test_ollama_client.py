@@ -17,7 +17,7 @@ def test_qwen_connection():
     client = OllamaClient()
 
     response = client.generate(
-        "أجب بجملة واحدة فقط: ما هو الذكاء الاصطناعي؟"
+        "Answer in one sentence only: what is artificial intelligence?"
     )
 
     print("\nQWEN RESPONSE:")

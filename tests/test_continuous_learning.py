@@ -27,17 +27,17 @@ def test_update_adds_a_citable_statement():
     store = _store()
     updater = KnowledgeUpdater(store)
     outcome = updater.apply(
-        KnowledgeUpdate("المسامية تقيس حجم الفراغات في الصخر.", source="book", strength=0.6)
+        KnowledgeUpdate("Porosity measures the void volume in the rock.", source="book", strength=0.6)
     )
     assert outcome.action == "added"
     assert store.get(outcome.doc_id) is not None
-    assert store.get(outcome.doc_id).text == "المسامية تقيس حجم الفراغات في الصخر."
+    assert store.get(outcome.doc_id).text == "Porosity measures the void volume in the rock."
 
 
 def test_update_reinforces_on_repeat():
     updater = KnowledgeUpdater(_store())
-    first = updater.apply(KnowledgeUpdate("المسامية تقيس الفراغات.", source="a", strength=0.5))
-    second = updater.apply(KnowledgeUpdate("المسامية تقيس الفراغات.", source="b", strength=0.5))
+    first = updater.apply(KnowledgeUpdate("Porosity measures the voids.", source="a", strength=0.5))
+    second = updater.apply(KnowledgeUpdate("Porosity measures the voids.", source="b", strength=0.5))
     assert first.action == "added"
     assert second.action == "reinforced"
     assert second.confidence > first.confidence
@@ -54,7 +54,7 @@ def test_update_rejects_off_topic_statement():
 
 def test_update_records_provenance():
     updater = KnowledgeUpdater(_store())
-    outcome = updater.apply(KnowledgeUpdate("النفاذية تقيس سهولة التدفق.", source="paper"))
+    outcome = updater.apply(KnowledgeUpdate("Permeability measures how easily fluid flows.", source="paper"))
     record = updater.ledger.get(outcome.doc_id)
     assert record is not None
     assert record.stage is ProvenanceStage.LEARNING
@@ -65,7 +65,7 @@ def test_decay_stale_weakens_and_drops():
     store = _store()
     updater = KnowledgeUpdater(store, max_age=timedelta(days=30))
     outcome = updater.apply(
-        KnowledgeUpdate("النفاذية تقيس سهولة التدفق.", source="x", strength=0.2)
+        KnowledgeUpdate("Permeability measures how easily fluid flows.", source="x", strength=0.2)
     )
     later = datetime.now(timezone.utc) + timedelta(days=400)
     decayed = updater.decay_stale(now=later)
@@ -75,16 +75,16 @@ def test_decay_stale_weakens_and_drops():
 
 def test_decay_keeps_fresh_statements():
     updater = KnowledgeUpdater(_store(), max_age=timedelta(days=365))
-    outcome = updater.apply(KnowledgeUpdate("النفاذية تقيس سهولة التدفق.", source="x"))
+    outcome = updater.apply(KnowledgeUpdate("Permeability measures how easily fluid flows.", source="x"))
     assert updater.decay_stale() == []
     assert updater.strength(outcome.doc_id) > 0
 
 
 def test_supersede_replaces_and_links_provenance():
     updater = KnowledgeUpdater(_store())
-    old = updater.apply(KnowledgeUpdate("النفاذية تقيس سهولة التدفق.", source="old"))
+    old = updater.apply(KnowledgeUpdate("Permeability measures how easily fluid flows.", source="old"))
     new = updater.supersede(
-        old.doc_id, KnowledgeUpdate("النفاذية تقيس سهولة التدفق عبر الصخر.", source="new")
+        old.doc_id, KnowledgeUpdate("Permeability measures how easily fluid flows through rock.", source="new")
     )
     assert new.action == "superseded"
     assert updater.store.get(old.doc_id) is None
@@ -96,9 +96,9 @@ def test_update_validates_input():
     with pytest.raises(ValueError):
         KnowledgeUpdate("", source="x")
     with pytest.raises(ValueError):
-        KnowledgeUpdate("نص", source="")
+        KnowledgeUpdate("text", source="")
     with pytest.raises(ValueError):
-        KnowledgeUpdate("نص", source="x", strength=1.5)
+        KnowledgeUpdate("text", source="x", strength=1.5)
 
 
 # --- regression monitor ---------------------------------------------------
@@ -136,8 +136,8 @@ def test_learner_records_reward_and_grows_corpus_on_confirmation():
     learner = ContinuousLearner(updater)
     step = learner.learn(
         Feedback(
-            question="ما علاقة المسامية بالنفاذية؟",
-            answer="المسامية تقيس الفراغات وترتبط بالنفاذية.",
+            question="What is the relationship between porosity and permeability?",
+            answer="Porosity measures the voids and relates to permeability.",
             confirmed=True,
             confidence=0.8,
         )
@@ -151,10 +151,10 @@ def test_learner_learns_from_a_correction():
     learner = ContinuousLearner(updater)
     step = learner.learn(
         Feedback(
-            question="ما هي النفاذية؟",
-            answer="جواب خاطئ.",
+            question="What is permeability?",
+            answer="A wrong answer.",
             confirmed=False,
-            correction="النفاذية تقيس سهولة تدفق الموائع.",
+            correction="Permeability measures how easily fluids flow.",
             confidence=0.4,
         )
     )
@@ -168,14 +168,14 @@ def test_learner_rewards_are_bounded_and_summarised():
     for confirmed in (True, True, False):
         learner.learn(
             Feedback(
-                question="النفاذية",
-                answer="النفاذية تقيس التدفق.",
+                question="permeability",
+                answer="Permeability measures flow.",
                 confirmed=confirmed,
-                correction="" if confirmed else "النفاذية تقيس سهولة التدفق.",
+                correction="" if confirmed else "Permeability measures how easily fluid flows.",
                 confidence=0.7,
             )
         )
-    reward = learner.reward_for("النفاذية")
+    reward = learner.reward_for("permeability")
     assert 0.0 <= reward <= 1.0
     summary = learner.summary()
     assert summary["learning_steps"] == 3.0

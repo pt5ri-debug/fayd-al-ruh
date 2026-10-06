@@ -6,7 +6,7 @@ and follows explicit *and derived* relations outward from the query's concepts,
 so an item that mentions a merely related concept becomes reachable.
 
 Example: a query about a well log reaches a reservoir item, even though the two
-share no words, because ``السجل measures المكمن`` is derived by
+share no words, because ``well_log measures reservoir`` is derived by
 ``core.ontology_reasoner`` and the item grounds the reservoir concept.
 """
 

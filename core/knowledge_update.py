@@ -130,7 +130,7 @@ class KnowledgeUpdater:
         confidence = min(self.ceiling, update.strength)
         self.store.add_text(
             doc_id,
-            f"معلومة متعلَّمة: {update.topic}",
+            f"Learned statement: {update.topic}",
             update.statement,
             source=f"learned/{update.source}",
             metadata={"topic": update.topic, "confidence": f"{confidence:.4f}"},

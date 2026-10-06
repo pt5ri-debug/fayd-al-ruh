@@ -1,6 +1,6 @@
 """A grounded, evidence-aware domain assistant.
 
-This is the user-facing layer of the project: it answers a question in Arabic,
+This is the user-facing layer of the project: it answers a question in English,
 retrieves the passages that support the answer, and returns an answer that
 *cites* those passages. It composes the pieces that already exist rather than
 duplicating them:
@@ -28,8 +28,9 @@ from core.model_interface import CognitiveModel, ModelRequest
 from core.rag import RagRetriever, RetrievedPassage
 
 SYSTEM_INSTRUCTION = (
-    "أنت مساعد خبير في هندسة البترول. أجب بالاعتماد فقط على المقاطع المرجعية "
-    "المعطاة، واذكر مصادرك، وقل صراحة إن لم تكفِ المعلومات."
+    "You are a petroleum-engineering expert assistant. Answer using only the "
+    "reference passages provided, cite your sources, and say plainly when the "
+    "information is insufficient."
 )
 
 
@@ -158,12 +159,12 @@ def _confidence(passages: list[RetrievedPassage]) -> float:
 def _extractive_answer(question: str, passages: list[RetrievedPassage]) -> str:
     """A citation-only answer used when no model is available."""
     if not passages:
-        return f"لا توجد معلومات كافية للإجابة عن: {question}"
-    lines = [f"بحسب المصادر المتاحة عن «{question}»:"]
+        return f"Not enough information to answer: {question}"
+    lines = [f'According to the available sources for "{question}":']
     for passage in passages:
         first_lines = [line for line in passage.text.splitlines() if line.strip()][:3]
         lines.append(f"- {passage.title}: " + " ".join(first_lines))
-    lines.append("المصادر: " + "؛ ".join(passage.citation for passage in passages))
+    lines.append("Sources: " + "; ".join(passage.citation for passage in passages))
     return "\n".join(lines)
 
 

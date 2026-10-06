@@ -84,7 +84,7 @@ def run_selfcheck(argv: Sequence[str] = ()) -> int:
     from ai.local_model import LocalLanguageModel
 
     model = LocalLanguageModel(temperature=0.0)
-    response = model.generator.generate("الماء", max_new_tokens=24)
+    response = model.generator.generate("water", max_new_tokens=24)
     print(f"Checkpoint: {default_checkpoint()}")
     print(f"Sample    : {response.strip()[:120]}")
     return 0
@@ -141,24 +141,24 @@ def run_curriculum(argv: Sequence[str] = ()) -> int:
             f"relations={counts['relations']}/{counts['expected_relations']}"
         )
 
-    print("منهج هندسة البترول المزروع (seeded curriculum)")
-    for category in ("أساسيات", "علوم_الأرض", "هندسة_أساسية", "تخصصات_البترول"):
+    print("Seeded petroleum-engineering curriculum")
+    for category in ("Foundations", "Earth Sciences", "Engineering Science", "Petroleum Disciplines"):
         if category in grouped:
             print(f"\n[{category}]")
             print("\n".join(grouped[category]))
     print(
-        f"\nالمقررات: {len(coverage)}  "
-        f"المفاهيم: {len(ontology.concepts)}  "
-        f"العلاقات: {len(ontology.relations)}"
+        f"\nCourses: {len(coverage)}  "
+        f"Concepts: {len(ontology.concepts)}  "
+        f"Relations: {len(ontology.relations)}"
     )
     return 0
 
 
 MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
-    ("اسأل المساعد الموثّق (Ask the grounded assistant)", run_ask, ()),
-    ("جولة صوتية واحدة (Voice turn)", run_voice, ("--write-wav", "voice-turn.wav", "الماء")),
-    ("عرض أدوات الوكيل في صندوق الأمان (Tool agent demo)", run_agent, ()),
-    ("عرض التعلّم المستمر وبوابة الانحدار (Continuous learning)", run_learn, ()),
+    ("Ask the grounded assistant", run_ask, ()),
+    ("One voice turn", run_voice, ("--write-wav", "voice-turn.wav", "water")),
+    ("Tool agent demo (sandbox)", run_agent, ()),
+    ("Continuous learning and regression gate", run_learn, ()),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--episodes", "60")),
     ("Train the language model", run_llm, ("--steps", "200")),

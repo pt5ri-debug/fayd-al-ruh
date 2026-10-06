@@ -198,8 +198,8 @@ def train_petroleum(
 
 
 def format_report(report: PetroleumReport) -> str:
-    """A readable, Arabic-labelled summary of the petroleum learning run."""
-    lines = ["تدريب مهام هندسة البترول (Petroleum engineering learning)", ""]
+    """A readable summary of the petroleum learning run."""
+    lines = ["Petroleum engineering learning", ""]
     lines.append("Per task (policy + predictive-coding brain):")
     for outcome in report.outcomes:
         lines.append(

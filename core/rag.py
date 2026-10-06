@@ -32,6 +32,13 @@ _TOKEN_RE = re.compile(r"\w+", flags=re.UNICODE)
 _DIACRITICS_RE = re.compile(r"[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed]")
 _STOPWORDS = frozenset(
     {
+        # English (primary)
+        "a", "an", "the", "what", "how", "is", "are", "of", "to", "in", "on",
+        "for", "and", "or", "with", "between", "does", "do", "why", "when",
+        "which", "that", "this", "these", "those", "it", "its", "as", "by",
+        "from", "at", "be", "can", "will", "would", "should", "there", "their",
+        "about", "into", "than", "then", "not", "no", "yes", "if", "so", "such",
+        # Arabic (retained so bilingual aliases still normalise cleanly)
         "ما", "ماذا", "كيف", "هل", "من", "في", "على", "إلى", "عن", "هو", "هي",
         "التي", "الذي", "و", "أو", "علاقة", "بين", "مع", "ثم", "قد", "لا", "إن",
         "هذا", "هذه", "ذلك", "تلك", "أي", "كل", "بعض",

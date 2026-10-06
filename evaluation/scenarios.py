@@ -341,9 +341,9 @@ def _scenario_petroleum_petrophysics() -> Scenario:
             ),
         ),
         ontology_relations=(
-            ("السجل", "measures", "المسامية"),
-            ("السجل", "measures", "النفاذية"),
-            ("الضغط", "drives", "الانتاج"),
+            ("well_log", "measures", "porosity"),
+            ("well_log", "measures", "permeability"),
+            ("pressure", "drives", "production"),
         ),
     )
 
@@ -415,10 +415,10 @@ def _scenario_petroleum_identity() -> Scenario:
         domain=Domain.PETROLEUM,
         description="The seeded ontology exposes the petroleum relations the identity claims.",
         ontology_relations=(
-            ("المكمن", "contained_in", "الطبقة"),
-            ("الهيدروكربون", "exists_in", "المكمن"),
-            ("البئر", "penetrates", "المكمن"),
-            ("الاسمنت", "seals", "البئر"),
+            ("reservoir", "contained_in", "formation"),
+            ("hydrocarbon", "exists_in", "reservoir"),
+            ("well", "penetrates", "reservoir"),
+            ("cement", "seals", "well"),
         ),
     )
 
@@ -431,13 +431,13 @@ def _scenario_petroleum_ontology_inference() -> Scenario:
         description="Transitive containment and property/tool composition are derived, not stored.",
         ontology_inferences=(
             # A well penetrating a reservoir also penetrates the formation holding it.
-            ("البئر", "penetrates", "الطبقة"),
+            ("well", "penetrates", "formation"),
             # Fluids held in a reservoir are also held in the reservoir's formation.
-            ("الهيدروكربون", "exists_in", "الطبقة"),
+            ("hydrocarbon", "exists_in", "formation"),
             # A reservoir inherits the properties of its containing formation.
-            ("المكمن", "has_property", "المسامية"),
+            ("reservoir", "has_property", "porosity"),
             # A tool measuring a property also measures the reservoir that has it.
-            ("السجل", "measures", "المكمن"),
+            ("well_log", "measures", "reservoir"),
         ),
     )
 
@@ -447,7 +447,7 @@ def _scenario_petroleum_multihop_retrieval() -> Scenario:
 
     Each marked expectation targets an observation that shares no word with the
     query; it is only reachable by walking the seeded (and derived) relations,
-    e.g. ``السجل measures المكمن`` reaching a reservoir observation from a log query.
+    e.g. ``well_log measures reservoir`` reaching a reservoir observation from a log query.
     """
     return Scenario(
         id="petroleum-multihop-retrieval",
@@ -466,13 +466,13 @@ def _scenario_petroleum_multihop_retrieval() -> Scenario:
             ),
         ),
         ontology_retrieval=(
-            # "log" -> السجل measures المكمن -> reservoir observation (no shared word).
+            # "log" -> well_log measures reservoir -> reservoir observation (no shared word).
             RetrievalExpectation(
                 "log interpretation",
                 "The reservoir holds hydrocarbons in the formation.",
                 requires_ontology=True,
             ),
-            # "drilling" -> الحفر creates البئر -> well observation (no shared word).
+            # "drilling" -> drilling creates well -> well observation (no shared word).
             RetrievalExpectation(
                 "drilling operations",
                 "The well was secured with steel casing.",
@@ -486,8 +486,8 @@ def _scenario_petroleum_ontology_learning() -> Scenario:
     """Petroleum domain: the ontology grows from observations, not only its seed.
 
     A single field observation grounds three known concepts. The pairs with no
-    explicit relation (الضغط, النفاذية) and (الضغط, الطبقة) must be learned as weak
-    ``associated_with`` links, while the already-seeded (الطبقة, النفاذية) must be
+    explicit relation (pressure, permeability) and (pressure, formation) must be learned as weak
+    ``associated_with`` links, while the already-seeded (formation, permeability) must be
     left untouched so experience never overwrites curated knowledge.
     """
     return Scenario(
@@ -496,9 +496,9 @@ def _scenario_petroleum_ontology_learning() -> Scenario:
         description="Co-occurring concepts teach weak relations; seeded pairs stay untouched.",
         ontology_learning=(
             OntologyLearningSpec(
-                text="ارتفاع الضغط في الطبقة يرافقه تحسن في النفاذية",
-                expected_links=(("الضغط", "النفاذية"), ("الضغط", "الطبقة")),
-                forbidden_links=(("الطبقة", "النفاذية"),),
+                text="rising pressure in the formation accompanies improved permeability",
+                expected_links=(("permeability", "pressure"), ("formation", "pressure")),
+                forbidden_links=(("formation", "permeability"),),
             ),
         ),
     )
@@ -518,13 +518,13 @@ def _scenario_petroleum_ontology_reinforcement() -> Scenario:
         description="Repetition strengthens learned links; disuse decays them without touching the seed.",
         ontology_reinforcement=(
             OntologyReinforcementSpec(
-                text="ارتفاع الضغط في الطبقة يرافقه تحسن في النفاذية",
+                text="rising pressure in the formation accompanies improved permeability",
                 repeats=5,
                 min_confidence=0.5,
                 ceiling=0.6,
             ),
             OntologyReinforcementSpec(
-                text="تغير المكمن يؤثر على الاسمنت",
+                text="a change in the reservoir affects the cement",
                 repeats=1,
                 min_confidence=0.3,
                 ceiling=0.6,
@@ -538,8 +538,8 @@ def _scenario_petroleum_ontology_reinforcement() -> Scenario:
 def _scenario_petroleum_ontology_feedback() -> Scenario:
     """Petroleum domain: the outcome of a recall reshapes the link that produced it.
 
-    A learned link connects الضغط to النفاذية, so a query about الضغط reaches an item
-    that only mentions النفاذية. A useful outcome reinforces that link, while an
+    A learned link connects pressure to permeability, so a query about permeability reaches
+    an item that only mentions pressure. A useful outcome reinforces that link, while an
     unhelpful one weakens and finally drops it — so retrieval is shaped by results,
     and a seeded relation behind a recall is never credited.
     """
@@ -549,18 +549,18 @@ def _scenario_petroleum_ontology_feedback() -> Scenario:
         description="Useful recalls strengthen the learned link behind them; unhelpful ones weaken it.",
         ontology_feedback=(
             OntologyFeedbackSpec(
-                text="ارتفاع الضغط يرافقه تحسن في النفاذية",
-                probe="pressure",
-                item_text="permeability controls flow.",
+                text="rising pressure accompanies improved permeability",
+                probe="permeability",
+                item_text="pressure controls flow.",
                 useful=True,
                 amount=0.1,
                 expected_outcome="reinforced",
                 expect_recall_after=True,
             ),
             OntologyFeedbackSpec(
-                text="ارتفاع الضغط يرافقه تحسن في النفاذية",
-                probe="pressure",
-                item_text="permeability controls flow.",
+                text="rising pressure accompanies improved permeability",
+                probe="permeability",
+                item_text="pressure controls flow.",
                 useful=False,
                 amount=0.5,
                 expected_outcome="removed",

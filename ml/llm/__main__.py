@@ -2,7 +2,7 @@
 
     python -m ml.llm                 # train and save the default checkpoint
     python -m ml.llm --steps 800     # train longer
-    python -m ml.llm --generate "الماء"   # train, then sample a continuation
+    python -m ml.llm --generate "water"  # train, then sample a continuation
 
 The checkpoint is written into ``ml/llm/checkpoints`` and committed, so the
 project has a working language model without any external service.

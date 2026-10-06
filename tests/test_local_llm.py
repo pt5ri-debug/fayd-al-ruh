@@ -23,9 +23,9 @@ def _token_stream() -> list[int]:
     return ByteTokenizer().encode(build_corpus(repeats=2, structured_repeats=2), bos=False)
 
 
-def test_tokenizer_round_trips_arabic_and_english():
+def test_tokenizer_round_trips_english_and_punctuation():
     tokenizer = ByteTokenizer()
-    for text in ("الماء يجعل التربة رطبة.", "Water makes the soil wet.", "x"):
+    for text in ("Water makes the soil wet.", "The reservoir holds oil.", "x"):
         ids = tokenizer.encode(text)
         assert ids[0] == BOS_ID
         assert tokenizer.decode(ids) == text
@@ -87,11 +87,11 @@ def test_generator_is_deterministic_for_a_seed():
     train_language_model(model, _token_stream(), steps=20, batch_size=4, seed=0)
     generator = LocalGenerator(model)
 
-    first = generator.generate("الماء", max_new_tokens=10, seed=7)
-    second = generator.generate("الماء", max_new_tokens=10, seed=7)
+    first = generator.generate("water", max_new_tokens=10, seed=7)
+    second = generator.generate("water", max_new_tokens=10, seed=7)
 
     assert first == second
-    assert first.startswith("الماء")
+    assert first.startswith("water")
 
 
 def test_local_language_model_serves_the_cognitive_interface(tmp_path):
@@ -100,9 +100,9 @@ def test_local_language_model_serves_the_cognitive_interface(tmp_path):
     checkpoint = tmp_path / "llm.npz"
     model.save(checkpoint)
 
-    cognitive_model = LocalLanguageModel(checkpoint, max_new_tokens=8, temperature=0.0)
+    cognitive_model = LocalLanguageModel(checkpoint, max_new_tokens=8, temperature=0.7, seed=0)
     response = cognitive_model.generate(
-        ModelRequest(inputs=(), system_instruction="", context=("الماء",))
+        ModelRequest(inputs=(), system_instruction="", context=("water",))
     )
 
     assert response.model_name.startswith("fayd-local-llm")
@@ -117,7 +117,7 @@ def test_missing_checkpoint_is_reported_clearly(tmp_path):
 @pytest.mark.skipif(not DEFAULT_CHECKPOINT.exists(), reason="no committed checkpoint")
 def test_committed_checkpoint_loads_and_generates():
     model = LocalLanguageModel(temperature=0.0, max_new_tokens=16)
-    response = model.generate(ModelRequest(inputs=(), system_instruction="", context=("الماء",)))
+    response = model.generate(ModelRequest(inputs=(), system_instruction="", context=("water",)))
     assert response.text
 
 
@@ -129,10 +129,10 @@ def test_structured_examples_are_valid_schema_json():
 
 def test_corpus_covers_the_declared_petroleum_domain():
     text = build_corpus(repeats=1, structured_repeats=1)
-    assert "المكمن" in text
-    assert "النفاذية" in text
     assert "reservoir" in text
-    assert "المسامية" in " ".join(structured_examples())
+    assert "permeability" in text
+    assert "reservoir" in text
+    assert "porosity" in " ".join(structured_examples())
 
 
 def test_schema_decoder_always_returns_parseable_json():
@@ -140,7 +140,7 @@ def test_schema_decoder_always_returns_parseable_json():
     decoder = StructuredDecoder(model)
 
     for seed in range(2):
-        text = decoder.decode("حلل: الماء", seed=seed, max_string_bytes=4)
+        text = decoder.decode("analyze: water", seed=seed, max_string_bytes=4)
         proposal = parse_structured_output(text)
         assert isinstance(proposal.concepts, list)
 
@@ -148,8 +148,8 @@ def test_schema_decoder_always_returns_parseable_json():
 def test_schema_decoder_is_deterministic_for_a_seed():
     model = TransformerLM(_SMALL, seed=0)
     decoder = StructuredDecoder(model)
-    assert decoder.decode("حلل", seed=3, max_string_bytes=4) == decoder.decode(
-        "حلل", seed=3, max_string_bytes=4
+    assert decoder.decode("analyze", seed=3, max_string_bytes=4) == decoder.decode(
+        "analyze", seed=3, max_string_bytes=4
     )
 
 
@@ -158,8 +158,8 @@ def test_local_model_serves_structured_schema():
     model = LocalLanguageModel(temperature=0.7, seed=0, max_string_bytes=6)
     request = ModelRequest(
         inputs=(),
-        system_instruction="اقترح",
-        context=("الماء يجعل التربة رطبة",),
+        system_instruction="propose",
+        context=("water makes the soil wet",),
         response_schema=MODEL_OUTPUT_SCHEMA,
     )
     response = model.generate(request)

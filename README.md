@@ -1,119 +1,136 @@
 # Fayd Al-Ruh
 
-مشروع Fayd Al-Ruh هو **معمارية معرفية رمزية واعية بالأدلة** (evidence-aware symbolic
-cognitive architecture). يحوّل الرسم المعرفي من مخزن للكيانات والعلاقات إلى نموذج
-معرفي قابل للتفسير والتطور: كل معرفة تحمل دليلها، ودرجة الثقة، ومصدرها، وتاريخها،
-وحالتها (مؤقتة أم مستقرة).
+Fayd Al-Ruh is an **evidence-aware symbolic cognitive architecture**. It turns
+the knowledge graph from a store of entities and relations into an explainable,
+evolving cognitive model: every piece of knowledge carries its evidence, its
+confidence, its source, its history, and its status (provisional or stable).
 
-المشروع يعرّف نفسه كـ**عقل مهندس بترول** (`core/self_model.py`): يستدلّ في **كل
-تخصصات هندسة البترول** — المكامن، الحفر، الإنتاج، البتروفيزياء، تسجيلات الآبار،
-إكمال الآبار، الاستخلاص المعزّز، اختبار الآبار، الرفع الصناعي، تحفيز الآبار،
-إسمنت الآبار، التحكم في الآبار، اقتصاديات البترول، والسلامة والصحة والبيئة — من
-الأدلة لا من الظن. الهوية إطار مجال، لا ادّعاء وعي. المعرفة الأولية للمجال بذرة
-قابلة للفحص في `core/domain_knowledge.py`، منظّمة حسب التخصص، وتُزرع في أنطولوجيا
-المشروع عند الإقلاع. وفوقها **منهج كامل** في `core/curriculum_knowledge.py` يجمع
-المعرفة البذرية التي يتلقّاها طالب كلية هندسة البترول خلال دراسته، مقرّراً مقرّراً.
+The project defines itself as a **petroleum-engineering mind**
+(`core/self_model.py`): it reasons across **all petroleum-engineering
+disciplines** — reservoirs, drilling, production, petrophysics, well logging,
+well completion, enhanced recovery, well testing, artificial lift, well
+stimulation, well cementing, well control, petroleum economics, and health,
+safety and environment — from evidence, not from guesswork. The identity is a
+domain frame, not a claim to consciousness. The initial domain knowledge is an
+auditable seed in `core/domain_knowledge.py`, organised by discipline, and is
+seeded into the project ontology at startup. On top of it sits a **full
+curriculum** in `core/curriculum_knowledge.py` that gathers the seed knowledge a
+petroleum-engineering student receives during their studies, course by course.
 
-> المشروع لا يدّعي وعياً أو ذكاءً بشرياً عاماً. هو طبقات عملية قابلة للتطوير،
-> وكل استنتاج فيه قابل للتفسير والمراجعة.
+> The project does not claim consciousness or general human intelligence. It is
+> a set of practical, extensible layers, and every inference in it is
+> explainable and reviewable.
 
-## المبادئ الأساسية
+## Core principles
 
-لكل اعتقاد في النظام:
+For every belief in the system:
 
-- ماذا أعرف؟ — `core/belief.py`
-- لماذا أعتقد ذلك؟ — `core/evidence.py`, `core/evidence_processor.py`
-- متى عرفته ومن أين؟ — `core/cognitive_context.py`
-- ما درجة ثقتي؟ — `core/confidence_model.py`, `core/uncertainty.py`
-- هل توجد أدلة تعارضه؟ — `core/contradiction_detector.py`, `core/belief_conflict.py`
-- هل المعرفة مؤقتة أم مستقرة؟ — `core/belief.py` (`BeliefStatus`)
+- What do I know? — `core/belief.py`
+- Why do I believe it? — `core/evidence.py`, `core/evidence_processor.py`
+- When did I learn it and from where? — `core/cognitive_context.py`
+- How confident am I? — `core/confidence_model.py`, `core/uncertainty.py`
+- Is there evidence against it? — `core/contradiction_detector.py`, `core/belief_conflict.py`
+- Is the knowledge provisional or stable? — `core/belief.py` (`BeliefStatus`)
 
-## هوية المجال: عقل مهندس بترول
+## Domain identity: a petroleum-engineering mind
 
-المشروع يعرّف نفسه في `core/self_model.py`، والمعرفة الأولية للمجال في
-`core/domain_knowledge.py`:
+The project defines itself in `core/self_model.py`, and the initial domain
+knowledge lives in `core/domain_knowledge.py`:
 
 ```python
 from core.cognitive_controller import CognitiveController
 
 controller = CognitiveController()
-controller.identity          # إطار الهوية الذي يُمرَّر مع كل طلب نموذج
-controller.ontology.find_concepts("reservoir")   # مكمن، طبقة، مسامية، نفاذية...
+controller.identity          # the identity frame passed with every model request
+controller.ontology.find_concepts("reservoir")   # reservoir, formation, porosity, permeability...
 ```
 
-- `SelfModel`: الاسم والهوية والمجال والقدرات والحدود ومجالات الخبرة.
-- `seed_ontology`: يزرع مفاهيم البترول وعلاقاتها **حسب التخصص** (مثل
-  `المكمن contained_in الطبقة`، `الدفع_المائي maintains ضغط_المكمن`) بثقة متواضعة
-  قابلة للمراجعة، بشكل **خامل التكرار** (idempotent).
-- `discipline_coverage`: يبلّغ عن مدى تغطية كل تخصص (مفاهيم وعلاقات) في أنطولوجيا
-  قائمة، فيُقاس اتساع الإطار بدل ادّعائه.
-- `CognitiveController`: يزرع الأنطولوجيا عند الإقلاع، ويضيف إطار الهوية إلى سياق كل
-  طلب نموذج، ويكشفه عبر `controller.identity`.
+- `SelfModel`: the name, identity, domain, capabilities, limits, and areas of
+  expertise.
+- `seed_ontology`: seeds the petroleum concepts and relations **by discipline**
+  (such as `reservoir contained_in formation`, `water_drive maintains
+  reservoir_pressure`) with modest, revisable confidence, **idempotently**.
+- `discipline_coverage`: reports how much of each discipline (concepts and
+  relations) is present in an existing ontology, so the breadth of the frame is
+  measured instead of merely claimed.
+- `CognitiveController`: seeds the ontology at startup, adds the identity frame
+  to every model request's context, and exposes it via `controller.identity`.
 
-هذا إطار مجال فقط: لا يمنح النظام وعياً، ولا يغيّر الاعتقادات تلقائياً، وكل علاقة
-بذرة قابلة للتصحيح بالأدلة مثل أي معرفة أخرى.
+This is a domain frame only: it does not grant the system consciousness, does not
+change beliefs automatically, and every seed relation is correctable with
+evidence like any other knowledge.
 
-## قياس الهوية: مجموعة تقييم بترولية
+## Measuring the identity: a petroleum evaluation suite
 
-الهوية ليست ادّعاءً غير قابل للفحص؛ حزمة `evaluation/` تقيسها. أُضيف مجال
-`Domain.PETROLEUM` مع خمسة سيناريوهات ثابتة:
+The identity is not an unverifiable claim; the `evaluation/` package measures it.
+The `Domain.PETROLEUM` domain was added with fixed scenarios:
 
-- **سببية** (`petroleum-causal`): سلسلة `ضغط ← انتاج ← عائد` تُكتشَف وتُفسَّر.
-- **استدلال/بتروفيزياء** (`petroleum-petrophysics`): استرجاع قراءات السجل النووي
-  وربطها بمفاهيم الأنطولوجيا المزروعة (`السجل measures المسامية/النفاذية`).
-- **تخطيط** (`petroleum-planning`): تسلسل «اكمل البئر» (تغليف ثم اسمنت) وتسلسل
-  «عالج هبوط الانتاج» (حقن ماء ثم تحفيز).
-- **عدم يقين** (`petroleum-uncertainty`): «هل ينخفض الانتاج؟» يُراجَع من أدلة
-  الحقل ويبقى معايراً.
-- **هوية** (`petroleum-identity`): يتحقق أن الأنطولوجيا المزروعة تحمل إطار المجال
-  المعلن (مثل `المكمن contained_in الطبقة`، `الاسمنت seals البئر`).
-- **استدلال فوق الأنطولوجيا** (`petroleum-ontology-inference`): يتحقق أن علاقات
-  تُستنتَج ولا تُخزَّن، عبر قواعد تركيب شفّافة (`core/ontology_reasoner.py`):
-  تعدّي `contained_in`، و`البئر penetrates الطبقة`، و`المكمن has_property المسامية`،
-  و`السجل measures المكمن` (تركيب `measures` مع `has_property`).
-- **استرجاع متعدد الخطوات** (`petroleum-multihop-retrieval`): استعلام عن السجل
-  يصل إلى ملاحظة المكمن، واستعلام عن الحفر يصل إلى ملاحظة البئر، رغم **عدم اشتراك
-  أي كلمة** بين الاستعلام والملاحظة — عبر السير على الروابط المشتقّة
-  (`core/ontology_retrieval.py`).
-- **تعلّم الأنطولوجيا** (`petroleum-ontology-learning`): ملاحظة حقلية تجسّر ثلاثة
-  مفاهيم معروفة، فتُسجَّل بينها علاقات `associated_with` ضعيفة الثقة، بينما يبقى
-  الزوج المزروع صريحاً دون تكرار أو كتابة فوق
-  (`core/ontology_learner.py`).
-- **ترجيح الروابط بالتجربة** (`petroleum-ontology-reinforcement`): ملاحظة متكرّرة
-  تُقوّي روابطها المتعلَّمة خطوة بخطوة حتى سقف أدنى من المزروع، وملاحظة تُهمَل
-  تتحلّل روابطها حتى تزول — دون المساس بالعلاقات المزروعة.
-- **التعلّم من نتيجة الاسترجاع** (`petroleum-ontology-feedback`): استرجاع نافع
-  يُقوّي الرابط المتعلَّم الذي أوصل إليه، واسترجاع غير مفيد يُضعفه حتى يزول — فيُشكَّل
-  الرسم بنتائج أفعاله لا بملاحظاته فقط.
+- **Causality** (`petroleum-causal`): the chain `pressure -> production ->
+  revenue` is discovered and explained.
+- **Reasoning/petrophysics** (`petroleum-petrophysics`): retrieves well-log
+  readings and links them to the seeded ontology concepts (`well_log measures
+  porosity/permeability`).
+- **Planning** (`petroleum-planning`): the sequence "complete the well" (casing
+  then cement) and the sequence "treat the production decline" (water injection
+  then stimulation).
+- **Uncertainty** (`petroleum-uncertainty`): "is production declining?" is
+  revised from field evidence and stays calibrated.
+- **Identity** (`petroleum-identity`): verifies that the seeded ontology carries
+  the declared domain frame (such as `reservoir contained_in formation`, `cement
+  seals well`).
+- **Inference over the ontology** (`petroleum-ontology-inference`): verifies that
+  relations are derived and not stored, through transparent composition rules
+  (`core/ontology_reasoner.py`): transitive `contained_in`, `well penetrates
+  formation`, `reservoir has_property porosity`, and `well_log measures
+  reservoir` (composition of `measures` with `has_property`).
+- **Multi-hop retrieval** (`petroleum-multihop-retrieval`): a query about a log
+  reaches a reservoir observation, and a query about drilling reaches a well
+  observation, despite **sharing no word** between query and observation — by
+  walking the derived links (`core/ontology_retrieval.py`).
+- **Ontology learning** (`petroleum-ontology-learning`): a field observation
+  bridges three known concepts, so weak `associated_with` relations are recorded
+  between them, while the seeded pair stays explicit without duplication or
+  overwriting (`core/ontology_learner.py`).
+- **Link weighting by experience** (`petroleum-ontology-reinforcement`): a
+  repeated observation strengthens its learned links step by step up to a ceiling
+  below the seed, and a neglected observation decays its links until they vanish
+  — without touching the seeded relations.
+- **Learning from a recall's outcome** (`petroleum-ontology-feedback`): a useful
+  recall strengthens the learned link that produced it, and an unhelpful recall
+  weakens it until it vanishes — so the graph is shaped by the outcomes of its
+  actions, not only by its observations.
 
-تُقاس تسعة مقاييس بترولية في الأساس: `petroleum_causal_accuracy`،
-`petroleum_retrieval_accuracy`، `petroleum_ontology_accuracy`،
-`petroleum_inference_accuracy`، `petroleum_multihop_retrieval_accuracy`،
-`petroleum_ontology_learning_accuracy`، `petroleum_ontology_reinforcement_accuracy`،
-`petroleum_ontology_feedback_accuracy`، و`petroleum_learning_accuracy`،
-إضافة إلى `domain_scores["petroleum"]` و`curriculum_coverage` (تغطية المنهج الكامل).
-فتصبح الهوية قابلة للقياس ومنع التراجع في CI.
+Nine petroleum metrics are measured in the baseline: `petroleum_causal_accuracy`,
+`petroleum_retrieval_accuracy`, `petroleum_ontology_accuracy`,
+`petroleum_inference_accuracy`, `petroleum_multihop_retrieval_accuracy`,
+`petroleum_ontology_learning_accuracy`,
+`petroleum_ontology_reinforcement_accuracy`,
+`petroleum_ontology_feedback_accuracy`, and `petroleum_learning_accuracy`, plus
+`domain_scores["petroleum"]` and `curriculum_coverage` (full curriculum coverage).
+The identity thus becomes measurable and protected against regression in CI.
 
-## المنهج الدراسي: كلية هندسة البترول كاملة
+## The curriculum: a complete petroleum-engineering college
 
-فوق إطار المجال، يوفّر `core/curriculum_knowledge.py` **المنهج** — المعرفة البذرية
-التي يتلقّاها طالب كلية هندسة البترول خلال فترة دراسته، مرتّبة حسب المقرّر الذي
-يدرّسها. ليس كتاباً دراسياً، بل خريطة مكثّفة واعية بالأدلة للبرنامج: كل مقرّر يساهم
-بمفاهيمه وعلاقاته بثقة متواضعة قابلة للمراجعة.
+On top of the domain frame, `core/curriculum_knowledge.py` provides the
+**curriculum** — the seed knowledge a petroleum-engineering student receives
+during their studies, organised by the course that teaches it. It is not a
+textbook, but a compact, evidence-aware map of the programme: each course
+contributes its concepts and relations with modest, revisable confidence.
 
-يغطّي المنهج **34 مقرّراً** في أربع كتل:
+The curriculum covers **34 courses** in four blocks:
 
-- **أساسيات** (6 مقرّرات): الرياضيات، الفيزياء، الكيمياء، الإحصاء وتحليل البيانات،
-  الحوسبة والبرمجة، الطرق العددية.
-- **علوم الأرض** (5 مقرّرات): الجيولوجيا العامة، الجيولوجيا البنيوية، علم الرسوبيات،
-  جيولوجيا البترول، الجيوفيزياء.
-- **هندسة أساسية** (4 مقرّرات): ميكانيكا الموائع، الديناميكا الحرارية، مقاومة المواد،
-  ميكانيكا الصخور.
-- **تخصصات البترول** (19 مقرّراً): البتروفيزياء، خصائص سوائل المكمن، هندسة المكامن،
-  هندسة الحفر، هندسة الإنتاج، تسجيلات الآبار، إكمال الآبار، إسمنت الآبار، تحفيز
-  الآبار، الرفع الصناعي، اختبار الآبار، الاستخلاص المعزّز، التحكم في الآبار، المنشآت
-  والنقل والتخزين، الحفر البحري، اقتصاديات البترول، إدارة المشاريع، السلامة والصحة
-  والبيئة، والأخلاقيات والمهنية.
+- **Foundations** (6 courses): mathematics, physics, chemistry, statistics and
+  data analysis, computing and programming, numerical methods.
+- **Geoscience** (5 courses): general geology, structural geology, sedimentology,
+  petroleum geology, geophysics.
+- **Engineering science** (4 courses): fluid mechanics, thermodynamics, mechanics
+  of materials, rock mechanics.
+- **Petroleum disciplines** (19 courses): petrophysics, reservoir fluid
+  properties, reservoir engineering, drilling engineering, production
+  engineering, well logging, well completion, well cementing, well stimulation,
+  artificial lift, well testing, enhanced recovery, well control, facilities,
+  transport and storage, offshore drilling, petroleum economics, project
+  management, health, safety and environment, and ethics and professionalism.
 
 ```python
 from core.cognitive_controller import CognitiveController
@@ -126,414 +143,476 @@ for key, counts in coverage.items():
     print(labels[key], counts["concepts"], counts["relations"])
 ```
 
-- `seed_curriculum`: يزرع مقرّرات المنهج ومفاهيمها وعلاقاتها، **خامل التكرار**
-  (idempotent)، ويشارك العُقد مع بذرة المجال (لا يكرّر `المكمن` أو `المسامية`).
-- `curriculum_coverage`: يبلّغ عن تغطية كل مقرّر (مفاهيم وعلاقات) في أنطولوجيا قائمة.
-- `curriculum_coverage_score`: رقم واحد على كامل المنهج، يُدمج في حزمة التقييم كمقياس
-  `curriculum_coverage`، فلا يمرّ تراجع في أي جزء من المنهج دون أن يظهر.
+- `seed_curriculum`: seeds the curriculum courses, concepts, and relations,
+  **idempotently**, and shares nodes with the domain seed (it does not duplicate
+  `reservoir` or `porosity`).
+- `curriculum_coverage`: reports the coverage of each course (concepts and
+  relations) in an existing ontology.
+- `curriculum_coverage_score`: a single number over the whole curriculum, merged
+  into the evaluation package as the `curriculum_coverage` metric, so no
+  regression in any part of the curriculum goes unseen.
 
-للعرض من سطر الأوامر:
+To display it from the command line:
 
 ```bash
-python -m cli curriculum    # يعرض المقرّرات وتغطيتها حسب الكتلة
+python -m cli curriculum    # show courses and their coverage by block
 ```
 
-يُزرع المنهج تلقائياً عند إقلاع `CognitiveController`، فيصبح **جزءاً لا يتجزّأ** من
-معرفة المشروع: أي استدلال أو استرجاع يعمل فوقه دون أي إعداد إضافي.
+The curriculum is seeded automatically at `CognitiveController` startup, so it
+becomes an **inseparable part** of the project's knowledge: any reasoning or
+retrieval works on top of it with no extra setup.
 
-## تعلّم مهام هندسة البترول
+## Learning petroleum-engineering tasks
 
-الهوية لا تكفي للقياس: يلزم أن *يتعلّم* النظام مهام كل تخصص. يوفّر
-`core/petroleum_tasks.py` كتالوج مهام هندسية — مهمة أو أكثر لكل تخصص — وكل مهمة
-سلسلة إجراءات قصيرة صريحة تنتهي بإنجاز حقيقي: تقدير احتياطي، حفر بئر، استعادة
-إنتاج، تحليل لب صخري، تفسير سجل، إكمال بئر، استخلاص معزّز، اختبار ضغط، تركيب رفع
-بالغاز، تحمض مصفوفة، إسمنت أولي، السيطرة على رشح غاز، حساب صافي قيمة حالية،
-والتحقق من سلامة بئر.
+Identity alone is not enough to measure: the system must also *learn* the tasks
+of each discipline. `core/petroleum_tasks.py` provides a catalogue of engineering
+tasks — one or more per discipline — and each task is a short, explicit action
+chain ending in a real accomplishment: reserve estimation, drilling a well,
+restoring production, core analysis, log interpretation, completing a well,
+enhanced recovery, pressure testing, installing gas lift, matrix acidizing,
+primary cementing, controlling a gas kick, computing net present value, and
+verifying well integrity.
 
-`ml/petroleum.py` يدرّب — على هذه المهام — نفس الطبقتين المستخدمتين في `python -m ml`:
-سياسة Q-learning رمزية، والدماغ التنبّؤي (predictive coding). لكل تخصص يُبلَّغ عن
-نسبة نجاحه، مع قسم تعميم على تخصصين **لم يُدرَّبا قط** (`geoscience`،
-`flow_assurance`) للتحقق من أن الآلة نفسها تعمل على ما لم تره.
+`ml/petroleum.py` trains — on these tasks — the same two layers used in
+`python -m ml`: a symbolic Q-learning policy and the predictive-coding brain. For
+each discipline it reports its success rate, with a generalisation section on two
+disciplines **never trained on** (`geoscience`, `flow_assurance`) to verify that
+the same machinery works on what it has not seen.
 
 ```bash
-python -m cli petroleum --episodes 120    # تدريب كل تخصصات هندسة البترول
-python -m cli petroleum --json            # ملخّص آلي
+python -m cli petroleum --episodes 120    # train every petroleum-engineering discipline
+python -m cli petroleum --json            # machine-readable summary
 ```
 
-يُشغَّل هذا أيضاً من قائمة المشغّل (الخيار «Train petroleum-engineering tasks»)،
-ويُقاس عبر `petroleum_learning_accuracy` في حزمة التقييم.
+This also runs from the operator menu (the "Train petroleum-engineering tasks"
+option) and is measured via `petroleum_learning_accuracy` in the evaluation
+package.
 
-## تدريب الإصدار: تخزين كل بيانات التدريب في المشروع
+## Release training: storing every training artifact inside the project
 
-قبل إطلاق الإصدار، يجمع أمر واحد **كل طبقات التعلّم** ويثبّت نواتجها داخل المشروع:
+Before releasing, a single command gathers **every learning layer** and pins its
+outputs inside the project:
 
 ```bash
-python -m cli release                       # يدرّب كل شيء ويكتب المانيفست
+python -m cli release                       # train everything and write the manifest
 python -m cli release --episodes 120 --llm-steps 4000
-python -m ml.release --manifest-only        # يعيد كتابة المانيفست دون إعادة تدريب
+python -m ml.release --manifest-only        # rewrite the manifest without retraining
 ```
 
-`ml/release.py` يشغّل بالترتيب:
+`ml/release.py` runs, in order:
 
-1. **المسار المعرفي الأساسي** (`python -m ml`): سياسات، دماغ تنبّؤي، مصنّف خبرة.
-2. **مهام هندسة البترول** (`ml/petroleum.py`): كل التخصصات + التعميم.
-3. **النموذج اللغوي الداخلي** (`ml/llm`): يُدرَّب على متن يشمل كامل المنهج.
+1. **The base cognitive pipeline** (`python -m ml`): policies, predictive brain,
+   experience classifier.
+2. **Petroleum-engineering tasks** (`ml/petroleum.py`): every discipline +
+   generalisation.
+3. **The in-project language model** (`ml/llm`): trained on a corpus that
+   includes the whole curriculum.
 
-ثم يكتب **مانيفست** في `ml/artifacts/release_manifest.json` يسجّل:
+It then writes a **manifest** at `ml/artifacts/release_manifest.json` recording:
 
-- إصدار المشروع (`core/version.py`)، ووقت التدريب، ومراجعة git.
-- **المعرفة** التي دُرِّب عليها: عدد التخصصات والمقررات والمفاهيم والعلاقات،
-  وتغطية المنهج (١٫٠).
-- **الكوربوس**: عدد جُمل المنهج والأمثلة المبنية والرموز.
-- **الإعداد**: الحلقات، خطوات اللغة، البذرة، وحجم إعادة التشغيل.
-- **النتائج**: نجاح المهام البترولية، وعدد معاملات النموذج اللغوي.
+- The project version (`core/version.py`), the training time, and the git revision.
+- **The knowledge** trained on: number of disciplines, courses, concepts, and
+  relations, and the curriculum coverage (1.0).
+- **The corpus**: number of curriculum sentences, built examples, and characters.
+- **The configuration**: episodes, language steps, seed, and replay size.
+- **The results**: petroleum task success, and the language-model parameter count.
 
-كل النواتج تُحفظ داخل المشروع: `ml/artifacts/` (السياسات والأدمغة والمصنّف
-و`petroleum/`) و`ml/llm/checkpoints/fayd-llm.npz`. تُلتزَم هذه الملفات في git
-عمداً للإصدار، فيحمل المستودع حالةً مُدرَّبة جاهزة لا تحتاج إعادة تدريب على جهاز
-المستخدم. التدريب حتمي لبذرة ثابتة، فيمكن إعادة إنتاج المانيفست والتحقق منه.
+All outputs are stored inside the project: `ml/artifacts/` (policies, brains,
+classifier, and `petroleum/`) and `ml/llm/checkpoints/fayd-llm.npz`. These files
+are committed to git on purpose for a release, so the repository carries a
+ready-trained state that needs no retraining on the user's machine. Training is
+deterministic for a fixed seed, so the manifest can be reproduced and verified.
 
-## الاستدلال فوق الأنطولوجيا
+## Inference over the ontology
 
-الأنطولوجيا المزروعة ليست بيانات ساكنة. `core/ontology_reasoner.py` يشتقّ علاقات
-تتبع من العلاقات المخزّنة عبر قواعد تركيب شفّافة (`RelationRule`):
+The seeded ontology is not static data. `core/ontology_reasoner.py` derives
+relations that follow from stored relations through transparent composition rules
+(`RelationRule`):
 
-- `containment_transitive`: تعدّي `contained_in`.
-- `penetrates_through_containment`: `البئر penetrates المكمن` + `المكمن contained_in الطبقة`
-  ⇒ `البئر penetrates الطبقة`.
-- `containment_inherits_property`: `المكمن contained_in الطبقة` + `الطبقة has_property المسامية`
-  ⇒ `المكمن has_property المسامية`.
-- `measure_property_of_host`: `السجل measures المسامية` + `الطبقة has_property المسامية`
-  ⇒ `السجل measures الطبقة`، ثم `السجل measures المكمن`.
+- `containment_transitive`: transitivity of `contained_in`.
+- `penetrates_through_containment`: `well penetrates reservoir` + `reservoir
+  contained_in formation` => `well penetrates formation`.
+- `containment_inherits_property`: `reservoir contained_in formation` +
+  `formation has_property porosity` => `reservoir has_property porosity`.
+- `measure_property_of_host`: `well_log measures porosity` + `formation
+  has_property porosity` => `well_log measures formation`, then `well_log
+  measures reservoir`.
 
-العلاقات المشتقّة **لا تُدسّ في الأنطولوجيا**؛ تُعاد كـ `OntologyInference` مع خطوات
-التركيب (`steps`) وثقة مُضاعَفة، فتبقى مميّزة عن العلاقات الصريحة القابلة للمراجعة.
-تُتاح عبر `controller.infer_ontology_relation(...)` و`controller.derive_ontology_relations()`.
+Derived relations are **not stuffed into the ontology**; they are returned as
+`OntologyInference` with the composition steps (`steps`) and a multiplied
+confidence, so they stay distinct from explicit, reviewable relations. They are
+available via `controller.infer_ontology_relation(...)` and
+`controller.derive_ontology_relations()`.
 
-## الاسترجاع المتصل بالأنطولوجيا
+## Ontology-connected retrieval
 
-الاسترجاع العادي (كلمات + بصمة دلالية) يصل فقط إلى العناصر التي تشترك مع الاستعلام
-في كلمات. `core/ontology_retrieval.py` يجعل الاسترجاع يعبر الروابط بدلاً من ذلك:
-يُجسّر كل عنصر إلى مفاهيم الأنطولوجيا، ثم يسير على العلاقات الصريحة **والمشتقّة**
-باتجاهها المعلن لمسافة محدودة، فيصل إلى عنصر يذكر مفهوماً ذا صلة فقط.
+Ordinary retrieval (words + semantic fingerprint) only reaches items that share
+words with the query. `core/ontology_retrieval.py` makes retrieval cross links
+instead: it bridges each item to the ontology concepts, then walks the explicit
+**and derived** relations in their declared direction for a bounded distance,
+reaching an item that mentions only a related concept.
 
-- `OntologyGuidedRetriever.concepts_in(text)`: المفاهيم التي ترد مصطلحاتها في النص.
-- `reachable(seeds)`: المشي بعرض أول محدود (`max_hops`) مع خفض هندسي (`hop_decay`)
-  لكل خطوة، فالمطابقة المباشرة تسبق ذات الخطوة الواحدة.
-- `rank(items, query, base_scores)`: يرتّب العناصر بأفضل ما بين درجتها الأساسية
-  ودرجتها العلائقية، فلا يخسر الاسترجاع العادي شيئاً.
-- `controller.recall_with_ontology(query)`: يدمج الاسترجاع العادي مع هذا الترتيب.
+- `OntologyGuidedRetriever.concepts_in(text)`: the concepts whose terms appear in
+  the text.
+- `reachable(seeds)`: bounded breadth-first walk (`max_hops`) with a geometric
+  decay (`hop_decay`) per step, so a direct match precedes a one-hop match.
+- `rank(items, query, base_scores)`: ranks items by the best of their base score
+  and their relational score, so ordinary retrieval loses nothing.
+- `controller.recall_with_ontology(query)`: fuses ordinary retrieval with this
+  ranking.
 
-مثال: استعلام عن «السجل» يصل إلى ملاحظة عن المكمن عبر `السجل measures المكمن`
-المشتقّة، رغم عدم اشتراك أي كلمة. يقيس هذا السيناريو `petroleum-multihop-retrieval`
-ويحميه مقياس `petroleum_multihop_retrieval_accuracy`.
+Example: a query about "well_log" reaches an observation about the reservoir via
+the derived `well_log measures reservoir`, despite sharing no word. This is what
+the `petroleum-multihop-retrieval` scenario measures and the
+`petroleum_multihop_retrieval_accuracy` metric protects.
 
-## تعلّم الأنطولوجيا من التجربة
+## Ontology learning from experience
 
-الأنطولوجيا لا تبقى حبيسة بذرتها. `core/ontology_learner.py` يجعلها تتوسّع من
-الملاحظات: عندما تُجسَّر مفاهيم معروفة في نص واحد، تُسجَّل بينها علاقة
-`associated_with` ضعيفة الثقة، فيصير المعنى المكتسب قابلاً للاسترجاع لاحقاً.
+The ontology does not stay confined to its seed. `core/ontology_learner.py` makes
+it expand from observations: when known concepts are bridged in a single text, a
+weak `associated_with` relation is recorded between them, so the acquired meaning
+becomes retrievable later.
 
-- `OntologyLearner.observe(text)`: يسجّل علاقة ضعيفة بين كل زوج من المفاهيم
-  المعروفة الواردة في النص، ويُقوّي أي علاقة متعلَّمة يكرّرها.
-- `learn_from_observations(texts)`: يدمج عدة ملاحظات في تقرير واحد.
-- `controller.learn_ontology_from_observation(text)`: يعلّم الأنطولوجيا ثم يُبطل
-  ذاكرة الاسترجاع المؤقتة، فترى عمليات الاسترجاع التالية الروابط الجديدة.
+- `OntologyLearner.observe(text)`: records a weak relation between every pair of
+  known concepts present in the text, and reinforces any learned relation it
+  repeats.
+- `learn_from_observations(texts)`: merges several observations into one report.
+- `controller.learn_ontology_from_observation(text)`: teaches the ontology and
+  then invalidates the retrieval cache, so subsequent retrieval operations see
+  the new links.
 
-التعلّم يحفظ الأمانة المعرفية بثلاثة قيود: لا يُنشئ مفاهيم من نص خام (بل يربط
-المعروف فقط)، وثقته أدنى من العلاقات المزروعة (فلا يطغى على المعرفة المنظَّمة)،
-ولا يمسّ زوجاً له علاقة صريحة أصلاً (فلا يكرّر أو يكتب فوق ما هو معروف). ويبقى
-متميّزاً عن الاستدلال: العلاقة المتعلَّمة **تُخزَّن**، أما المشتقّة فتبقى تُحسب ولا
-تُخزَّن. يقيس هذا `petroleum-ontology-learning` ويحميه مقياس
-`petroleum_ontology_learning_accuracy`.
+Learning preserves cognitive honesty with three constraints: it does not create
+concepts from raw text (it only links known ones), its confidence is lower than
+the seeded relations (so it never overrides organised knowledge), and it never
+touches a pair that already has an explicit relation (so it neither duplicates
+nor overwrites what is known). It stays distinct from inference: a learned
+relation is **stored**, while a derived one stays computed and not stored. This
+is what `petroleum-ontology-learning` measures and the
+`petroleum_ontology_learning_accuracy` metric protects.
 
-## ترجيح الروابط بالتجربة
+## Link weighting by experience
 
-التجربة لا تضيف روابط فقط، بل تُثقّلها. `core/ontology_learner.py` يجعل ثقة كل
-رابط متعلَّم تتبع الاستخدام:
+Experience does not only add links, it weights them. `core/ontology_learner.py`
+makes each learned link's confidence follow usage:
 
-- **التكرار يُقوّي**: كل ملاحظة تُجسّر الزوج نفسه ترفع ثقته خطوة
-  (`reinforcement`)، فتزداد ثقة ما يتكرّر في التجربة.
-- **السقف يحمي المزروع**: لا تتجاوز الثقة المتعلَّمة `ceiling` (أدنى من العلاقات
-  المزروعة)، فلا تنافس المعرفة المنظَّمة أبداً.
-- **الإهمال يُحلّل**: `decay()` يُضعف كل الروابط المتعلَّمة خطوة خطوة، وما يهبط
-  إلى الصفر يُحذَف، فلا تبقى ارتباطات عابرة.
-- **المزروع ثابت**: التحلّل لا يمسّ إلا `associated_with`، والعلاقات المزروعة تبقى
-  كما هي.
+- **Repetition reinforces**: each observation that bridges the same pair raises
+  its confidence step by step (`reinforcement`), so what repeats in experience
+  gains confidence.
+- **The ceiling protects the seed**: learned confidence never exceeds `ceiling`
+  (below the seeded relations), so it never competes with organised knowledge.
+- **Disuse decays**: `decay()` weakens every learned link step by step, and what
+  falls to zero is deleted, so no transient associations remain.
+- **The seed is fixed**: decay touches only `associated_with`, and the seeded
+  relations stay as they are.
 
-تُتاح عبر `controller.reinforce_ontology_relation(...)` و
-`controller.decay_ontology_learning(...)`. يقيس هذا `petroleum-ontology-reinforcement`
-ويحميه مقياس `petroleum_ontology_reinforcement_accuracy`.
+Available via `controller.reinforce_ontology_relation(...)` and
+`controller.decay_ontology_learning(...)`. This is what
+`petroleum-ontology-reinforcement` measures and the
+`petroleum_ontology_reinforcement_accuracy` metric protects.
 
-## التعلّم من نتيجة الاسترجاع
+## Learning from a recall's outcome
 
-الرسم لا يتعلّم من الملاحظات فقط، بل من **نتائج أفعاله**. `recall_with_ontology`
-يعيد مع كل نتيجة الرابط المتعلَّم الذي أوصل إليها في `linked_relation`، فيصبح
-بالإمكان منح الفضل أو اللوم للرابط الذي أنتج الاستدعاء:
+The graph does not learn only from observations, but from the **outcomes of its
+actions**. `recall_with_ontology` returns, with each result, the learned link
+that reached it in `linked_relation`, so the link that produced the recall can be
+credited or blamed:
 
-- **استرجاع نافع**: `feedback_ontology_recall(recall, useful=True)` يُقوّي الرابط
-  المتعلَّم الذي أوصل، فيزداد وزن ما يثبت نفعه.
-- **استرجاع غير مفيد**: `useful=False` يُضعف الرابط، وإن زال حُذف فاختفت مسار
-  الاستدعاء الذي لم يُفد.
-- **لا لوم للمزروع**: الاستدعاءات المباشرة أو العابرة لعلاقة مزروعة (`linked_relation`
-  بلا رابط متعلَّم) لا تُقوّى ولا تُضعَف.
+- **Useful recall**: `feedback_ontology_recall(recall, useful=True)` strengthens
+  the learned link that reached it, so what proves useful gains weight.
+- **Unhelpful recall**: `useful=False` weakens the link, and if it vanishes it is
+  deleted, so the recall path that did not help disappears.
+- **No blame for the seed**: direct recalls or those crossing a seeded relation
+  (`linked_relation` with no learned link) are neither strengthened nor weakened.
 
-هكذا يُشكَّل الرسم بنتائج الاسترجاع لا ببنيته فقط. يقيس هذا
-`petroleum-ontology-feedback` ويحميه مقياس `petroleum_ontology_feedback_accuracy`.
+This is how the graph is shaped by the outcomes of retrieval, not only by its
+structure. This is what `petroleum-ontology-feedback` measures and the
+`petroleum_ontology_feedback_accuracy` metric protects.
 
-## البنية
+## Layout
 
 ```
-core/        النواة المعرفية: الاستدلال، السببية، الذاكرة، التعلم، التخطيط، التفسير
-             (self_model.py وdomain_knowledge.py: هوية «عقل مهندس بترول» وبذرة مجالها)
-storage/     محوّلات التخزين (JSON وSQLite وGraph)
-ai/          النموذج اللغوي الداخلي (transformer) وعميل Ollama اختياري
-tests/       اختبارات العقود والتكامل والدورات الكاملة
-main.py      عرض محلي آمن لدورة معرفية كاملة
+core/        the cognitive core: reasoning, causality, memory, learning, planning, explanation
+             (self_model.py and domain_knowledge.py: the "petroleum-engineering mind" identity and its domain seed)
+storage/     storage adapters (JSON, SQLite, Graph)
+ai/          the in-project language model (transformer) and an optional Ollama client
+tests/       contract, integration, and full-cycle tests
+main.py      a safe local demo of a full cognitive cycle
 ```
 
-## المساعد الموثّق (RAG + ذاكرة محادثة)
+## The grounded assistant (RAG + conversation memory)
 
-المساعد يجيب عن سؤال بالعربية، ويستدعي المقاطع التي تدعم الجواب، **ويذكر مصادرها**.
-يجمع مكوّنات المشروع القائمة بدل تكرارها:
+The assistant answers a question in English, retrieves the passages that support
+the answer, **and cites its sources**. It combines the project's existing
+components instead of duplicating them:
 
-- `core/conversation.py` — ذاكرة محادثة متعددة الأدوار: جلسات، أدوار، نافذة
-  سياق محدودة، وحفظ في `storage.json_store.JsonStore`.
-- `core/documents.py` — مستندات قابلة للاستشهاد، ومستودع مستندات، وتحويل بذرة
-  التخصصات والمقررات إلى نصوص قابلة للاقتباس.
-- `core/rag.py` — دمج ثلاث إشارات في ترتيب واحد: تغطية مصطلحات الاستعلام
-  (مع تطبيع عربي خفيف)، تشابه دلالي مجزّأ، وقرب أنطولوجي متعدد القفزات.
-- `core/assistant.py` — `GroundedAssistant`: يستدعي، ثم يجيب، ثم يرفق
-  الاستشهادات؛ وإن تعذّر نموذج لغوي أجاب **استخلاصياً** من المقاطع.
+- `core/conversation.py` — multi-turn conversation memory: sessions, roles, a
+  bounded context window, and persistence in `storage.json_store.JsonStore`.
+- `core/documents.py` — citable documents, a document store, and conversion of the
+  discipline and course seed into quotable text.
+- `core/rag.py` — fuses three signals into one ranking: query-term coverage (with
+  light normalisation), hashed semantic similarity, and multi-hop ontological
+  proximity.
+- `core/assistant.py` — `GroundedAssistant`: retrieves, then answers, then
+  attaches citations; if no language model is available it answers
+  **extractively** from the passages.
 
-ضمانتان مقصودتان: النموذج اللغوي يستقبل نصّاً مُهيّأً فقط (لا يلمس الرسم المعرفي
-ولا ينفّذ أدوات)، وإن تعذّر نموذج يبقى المساعد نافعاً بلا خدمة خارجية. وإن بدا
-جواب النموذج غير مستند إلى المقاطع، يُرفض ويُستبدل بالجواب الاستخلاصي.
+Two deliberate guarantees: the language model receives only a rendered prompt (it
+never touches the knowledge graph or runs tools), and if no model is available
+the assistant stays useful with no external service. If the model's answer looks
+ungrounded in the passages, it is rejected and replaced by the extractive answer.
 
 ```bash
-python -m cli ask "ما علاقة المسامية بالنفاذية؟"
-python -m ai.ask --no-model "ما هو السجل البئري؟"   # استخلاص فقط
-python -m ai.ask                                    # جلسة متعددة الأدوار
+python -m cli ask "What is the relationship between porosity and permeability?"
+python -m ai.ask --no-model "What is a well log?"   # extractive only
+python -m ai.ask                                    # multi-turn session
 ```
 
-## المُرمِّز دون-الكلماتي (BPE)
+## The subword tokenizer (BPE)
 
-النموذج اللغوي الداخلي كان يعالج كل بايت UTF-8 كرمز مستقل، فتكلف الكلمة العربية
-عدة رموز. أضفنا مُرمِّز BPE بايتياً يُدرَّب داخل المشروع (`ml/llm/bpe.py`):
-يدمج أزواج البايتات المتكررة، فتصبح الكلمات العربية الشائعة والمصطلحات الإنجليزية
-وعلامات الترقيم رموزاً مفردة. على متن المشروع يضغط النص نحو **5×** (من ‎64٬206‎
-بايت إلى ‎12٬908‎ رمزاً)، أي سياق فعّال أطول بخمس مرات. المرمّز اختياري:
-`--tokenizer-kind byte` يعيد السلوك القديم.
+The in-project language model used to treat every UTF-8 byte as a separate token,
+so a common word cost several tokens. We added a byte-level BPE tokenizer trained
+inside the project (`ml/llm/bpe.py`): it merges frequent byte pairs, so common
+words and English terms and punctuation become single tokens. On the project
+corpus it compresses the text by about **5x** (from 64,206 bytes to 12,908
+tokens), i.e. an effective context five times longer. The tokenizer is optional:
+`--tokenizer-kind byte` restores the old behaviour.
 
 ```bash
 python -m ml.llm --tokenizer-kind bpe --vocab-size 1024 --steps 4000
 ```
 
-## الصوت والمحادثة (Voice)
+## Voice and conversation
 
-الصوت واجهة أمامية للمساعد، لا طبقة استدلال جديدة. العقود في `core/speech.py`:
+Voice is a front end for the assistant, not a new reasoning layer. The contracts
+are in `core/speech.py`:
 
-- `SpeechRecognizer` (ASR): يحوّل مقطعاً صوتياً إلى نص.
-- `SpeechSynthesizer` (TTS): يحوّل النص إلى صوت.
-- `AudioClip`: مخزن PCM بسيط بلا اعتماديات، فيمكن اختبار المسار كاملاً بلا
-  عتاد صوتي ولا حزمة خارجية.
+- `SpeechRecognizer` (ASR): turns an audio clip into text.
+- `SpeechSynthesizer` (TTS): turns text into audio.
+- `AudioClip`: a simple PCM store with no dependencies, so the whole path can be
+  tested with no audio hardware and no external package.
 
-تُحمَّل المحرّكات بالاسم عند الحاجة (`piper`، `whisper` ...). وإن لم تُثبَّت أي
-حزمة، يبقى المشروع قادراً على تشغيل *حلقة نصية* كاملة: المُعرّف يعيد نصاً مُدخلاً،
-والمُولّد ينتج مقطعاً صامتاً حقيقياً بصيغة WAV. هكذا يُختبر مسار الصوت كاملاً على
-نسخة جديدة، ويُركَّب محرّك ASR/TTS حقيقي لاحقاً دون لمس النواة.
+Engines are loaded by name on demand (`piper`, `whisper`...). If no package is
+installed, the project can still run a complete *text loop*: the recognizer
+returns supplied text, and the synthesizer produces a real silent WAV clip. This
+way the whole voice path is tested on a fresh clone, and a real ASR/TTS engine
+can be plugged in later without touching the core.
 
 ```bash
-python -m cli voice "ما علاقة المسامية بالنفاذية؟"        # جولة صوتية
-python -m ai.voice --write-wav out.wav "النفاذية"          # وكتابة WAV
+python -m cli voice "What is the relationship between porosity and permeability?"  # a voice turn
+python -m ai.voice --write-wav out.wav "permeability"                              # and write a WAV
 ```
 
-## الأدوات والوكلاء (Tools & Agents)
+## Tools and agents
 
-النواة تستدلّ لكنها لا *تفعل* شيئاً خارج الذاكرة. `core/tools.py` يمنحها أدوات
-حقيقية — قراءة ملف، كتابة ملف، عرض مجلد، بحث نصي، حساب — وصندوق أمان يمرّ عبره
-**كل** نداء، وفق أربع قواعد:
+The core reasons but does not *do* anything outside memory. `core/tools.py`
+gives it real tools — read a file, write a file, list a folder, search text,
+calculate — and a safety sandbox that **every** call passes through, under four
+rules:
 
-1. **قائمة سماح** صريحة: لا أداة إلا ما نصّت عليه السياسة.
-2. **حصر الجذر**: كل مسار يُحلّ تحت جذر واحد؛ أي مسار يخرج منه (`..`، مسار مطلق
-   في مكان آخر، رابط رمزي خارجي) يُرفض.
-3. **فصل القراءة عن الكتابة**: سياسة القراءة فقط ترفض كل أداة معدِّلة.
-4. **بوابات القدرة والموافقة**: `PermissionPolicy` يقرّر منح القدرة، والأدوات
-   الخارجية تحتاج موافقة بشرية حيّة (`HumanApprovalGate`).
+1. **Explicit allow-list**: no tool except what the policy names.
+2. **Root confinement**: every path resolves under a single root; any path that
+   leaves it (`..`, an absolute path elsewhere, an external symlink) is refused.
+3. **Read/write separation**: a read-only policy refuses every mutating tool.
+4. **Capability and approval gates**: `PermissionPolicy` decides whether to grant
+   a capability, and external tools need live human approval
+   (`HumanApprovalGate`).
 
-الأدوات تعيد `ToolResult` ولا ترفع استثناءً إلى المستدعي، فيستطيع الوكيل أن يواصل
-ويسجّل ما جرى. و`core/tool_agent.py` يضيف التنسيق: `ToolPlan` (سلسلة نداءات) ينفّذها
-`ToolAgent` عبر الصندوق، ويتوقّف عند أول فشل، ويسجّل أثراً كاملاً قابلاً للفحص.
-الخطة تُعلَن من المستدعي؛ وإن اقترحها النموذج فلا يستطيع توسيع صلاحيته، لأن
-الصندوق وحده يقرّر ما يُنفَّذ.
+Tools return a `ToolResult` and never raise to the caller, so the agent can
+continue and log what happened. `core/tool_agent.py` adds coordination:
+`ToolPlan` (a sequence of calls) is executed by `ToolAgent` through the sandbox,
+stops at the first failure, and records a full auditable trace. The plan is
+declared by the caller; if the model proposes it, it cannot widen its own
+authority, because the sandbox alone decides what runs.
 
 ```bash
-python -m ai.agent_demo          # خطة كاملة داخل صندوق مؤقت
+python -m ai.agent_demo          # a full plan inside a temporary sandbox
 python -m cli agent
 ```
 
-## التعلّم المستمر (Continuous learning)
+## Continuous learning
 
-بعد أن يعمل النظام، لا بد أن يتحسّن من التفاعل الحقيقي بلا فقدان أمانته:
+Once the system runs, it must improve from real interaction without losing its
+honesty:
 
-- `core/interaction_reward.py` يتعلّم المكافأة من نتائج حقيقية (لا من شرط مكتوب).
-- `core/knowledge_update.py` يدمج عبارة مؤكَّدة في المصدر القابل للاستشهاد، مع
-  تتبّع المنشأ (`ProvenanceLedger`) وتقادم صريح: عبارة قديمة تتلاشى، وعبارة يعارضها
-  أقوى تُستبدل ولا تُبقى صامتة.
-- `core/continuous_learning.py` يربط الاثنين: `ContinuousLearner` يتعلّم من تلقيم
-  صريح (`Feedback`) فقط — لا من مخرجات النموذج نفسه — و`RegressionMonitor` يقارن
-  لقطة المقاييس الجديدة بالأساس ويُبلغ عن أي انحدار.
+- `core/interaction_reward.py` learns reward from real outcomes (not from a
+  written condition).
+- `core/knowledge_update.py` folds a confirmed statement into the citable source,
+  with provenance tracking (`ProvenanceLedger`) and explicit decay: an old
+  statement fades, and a statement contradicted by a stronger one is replaced and
+  not silently kept.
+- `core/continuous_learning.py` links the two: `ContinuousLearner` learns only
+  from explicit feedback (`Feedback`) — never from the model's own output — and
+  `RegressionMonitor` compares a new metric snapshot against the baseline and
+  reports any regression.
 
-قاعدتان تحفظان الأمانة: التعلّم لا يحدث إلا من تلقيم صريح (تأكيد أو تصحيح)، والعبارة
-لا تدخل المصدر إلا إذا شاركت مصطلحات مع ما نعرفه أصلاً. وفحص الانحدار هو شبكة الأمان:
-يمكنه دائماً رفض التغيير.
+Two rules preserve honesty: learning happens only from explicit feedback
+(confirmation or correction), and a statement enters the source only if it shares
+terms with what we already know. The regression check is the safety net: it can
+always refuse a change.
 
 ```bash
 python -m ai.learn_demo
 python -m cli learn
 ```
 
-## الإدراك متعدد الوسائط (اختياري)
+## Multimodal perception (optional)
 
-الإدراك إضافة اختيارية، لا شرط: النواة والمساعد يعملان بلا صورة، وعند توفّر صورة
-تُحوَّل إلى وصف نصي قصير صادق يدخل المسار الموثّق نفسه. `core/vision.py` لا يدّعي
-تعرّف أجسام لا يراها؛ بل يقيس خصائص قابلة للقياس (الأبعاد، السطوع، التشبّع، كثافة
-الحدود) ويرفق الوصف كمستند قابل للاستشهاد. الصيغة PPM (`P6`) بسيطة بلا اعتماديات،
-فيُختبر المسار كاملاً على نسخة جديدة، ويمكن تركيب مُرمِّز رؤية حقيقي خلف عقد
-`VisionEncoder` دون لمس المساعد.
+Perception is an optional add-on, not a requirement: the core and the assistant
+work with no image, and when an image is available it is turned into a short,
+honest textual description that enters the same grounded path. `core/vision.py`
+does not claim to recognise objects it cannot see; it measures measurable
+features (dimensions, brightness, saturation, edge density) and attaches the
+description as a citable document. The PPM format (`P6`) is simple and
+dependency-free, so the whole path is tested on a fresh clone, and a real vision
+encoder can be plugged in behind the `VisionEncoder` contract without touching
+the assistant.
 
-## التشغيل
+## Running
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-أو عبر الواجهة الموحّدة (نفس السلوك، وتعمل أيضاً في البناء المحمول):
+Or through the unified interface (same behaviour, and it also works in the
+portable build):
 
 ```bash
-python -m cli            # قائمة مرقّمة تفاعلية
-python -m cli demo       # عرض محلي
+python -m cli            # interactive numbered menu
+python -m cli demo       # local demo
 python -m cli ml --episodes 60
 python -m cli llm --steps 4000
 python -m cli eval
-python -m cli ask "ما علاقة المسامية بالنفاذية؟"   # مساعد موثّق بالمصادر
-python -m cli paths      # أين تُقرأ الأصول وتُكتب البيانات
-python -m cli selfcheck  # التأكد من تحميل النموذج اللغوي المرفق
+python -m cli ask "What is the relationship between porosity and permeability?"   # source-grounded assistant
+python -m cli paths      # where assets are read and data is written
+python -m cli selfcheck  # verify the bundled language model loads
 ```
 
-## الوضع المحمول (Portable)
+## Portable mode
 
-يمكن بناء حزمة تعمل على جهاز بلا Python وبلا أي برامج وسيطة (لا CUDA ولا خدمة
-خارجية)، مثل DeepFaceLab:
+A package can be built to run on a machine with no Python and no intermediate
+software (no CUDA, no external service), like DeepFaceLab:
 
 ```bash
-pip install pyinstaller      # أداة بناء فقط، ليست اعتمادية وقت تشغيل
-python scripts/build.py      # الناتج في dist/fayd-al-ruh/
+pip install pyinstaller      # a build tool only, not a runtime dependency
+python scripts/build.py      # output in dist/fayd-al-ruh/
 ```
 
-- `fayd-al-ruh.spec`: إعداد PyInstaller؛ يُضمّن نقطة تحقّق النموذج اللغوي.
-- `scripts/build.py`: يبني الحزمة ثم ينسخ `run.sh` و`run.bat` بجانبها.
-- `run.sh` / `run.bat`: مشغّل واحد. يفضّل التنفيذي المبني إن وُجد، وإلا شغّل
-  المصدر عبر `python -m cli` — فتبقى بيئة التطوير كما هي.
+- `fayd-al-ruh.spec`: the PyInstaller configuration; it bundles the language-model
+  checkpoint.
+- `scripts/build.py`: builds the package and then copies `run.sh` and `run.bat`
+  beside it.
+- `run.sh` / `run.bat`: a single launcher. It prefers the built executable if
+  present, otherwise it runs the source via `python -m cli` — so the development
+  environment stays as it is.
 
-البيانات في الوضع المحمول تُكتب **بجانب التنفيذي** (`data/`)، فيمكن نسخ المجلد
-إلى ذاكرة USB والحفاظ على الحالة. ويمكن توجيهها بـ`FAYD_DATA_DIR`.
+In portable mode, data is written **beside the executable** (`data/`), so the
+folder can be copied to a USB stick and keep its state. It can be redirected with
+`FAYD_DATA_DIR`.
 
-| السياق | الأصول (للقراءة) | البيانات (للكتابة) |
+| Context | Assets (read) | Data (write) |
 |---|---|---|
-| تشغيل من المصدر | جذر المستودع | جذر المستودع (`ml/artifacts`, `ml/llm/checkpoints`) |
-| بناء محمول | داخل الحزمة (`_internal`) | بجانب التنفيذي (`data/`) |
+| From source | repository root | repository root (`ml/artifacts`, `ml/llm/checkpoints`) |
+| Portable build | inside the package (`_internal`) | beside the executable (`data/`) |
 
-التفاصيل في `docs/PORTABLE.md`.
+Details in `docs/PORTABLE.md`.
 
-## الاختبارات
+## Tests
 
 ```bash
 python -m pytest -q
 ```
 
-## التعلّم من التفاعل
+## Learning from interaction
 
-المكافأة في بيئات الرمل شرط نجاح مكتوب يدوياً (مكافأة بديلة). وللتعلّم من نتائج
-مرصودة فعلاً:
+The reward in sandbox environments is a hand-written success condition (a proxy
+reward). To learn from actually observed outcomes:
 
 ```bash
 python -m ml --episodes 400 --real-reward
 ```
 
-- `core/interaction_reward.py`: يتعلّم `InteractionRewardModel` معايرة (ثقة →
-  نسبة نجاح مرصودة) وقيم إجراءات سياقية، من متن التقييم (`evaluation.scenarios`)
-  ومن مراجعة بشرية (`outcomes_from_reviews`).
-- `ml/interaction_learner.py`: نفس وكيل Q-learning، لكن مكافأته النسبة المرصودة
-  للإجراء، لا شرط المهمة؛ وتُمنح فقط عندما يُغيّر الإجراء الحالة فعلاً.
+- `core/interaction_reward.py`: `InteractionRewardModel` learns a calibration
+  (confidence -> observed success rate) and contextual action values, from the
+  evaluation corpus (`evaluation.scenarios`) and from human review
+  (`outcomes_from_reviews`).
+- `ml/interaction_learner.py`: the same Q-learning agent, but its reward is the
+  observed rate of the action, not the task condition; and it is granted only
+  when the action actually changes the state.
 
-المخرج يعرض `outcomes/forecasts/ece/brier` ومعدل نجاح كل مهمة، فتبقى جودة المكافأة
-المتعلَّمة قابلة للفحص بدل إخفائها.
+The output shows `outcomes/forecasts/ece/brier` and each task's success rate, so
+the quality of the learned reward stays auditable instead of hidden.
 
-## التخطيط بنموذج متعلَّم
+## Planning with a learned model
 
-يُتعلَّم نموذج عالم رمزي من الانتقالات المرصودة، ثم يُستخدم للتخطيط وللتعلّم
-بالتخيّل (Dyna-Q)، مع قياس النجاح دائماً بالهدف الحقيقي:
+A symbolic world model is learned from observed transitions, then used for
+planning and for learning by imagination (Dyna-Q), always measuring success by
+the real goal:
 
 ```bash
 python -m ml --episodes 40 --model-based --seeds 3
 ```
 
-- `ml/world_model.py`: `SymbolicWorldModel` يستنتج تأثيرات الإجراءات من الرصد
-  فقط، ويعيد `unknown` لما لم يُرَ قط.
-- `ml/model_based_planner.py`: `plan_with_world_model` (بحث داخل النموذج المتعلَّم)
-  و`DynaQAgent` (تعلّم من انتقالات حقيقية ومتخيَّلة).
+- `ml/world_model.py`: `SymbolicWorldModel` infers action effects from
+  observation only, and returns `unknown` for anything never seen.
+- `ml/model_based_planner.py`: `plan_with_world_model` (search inside the learned
+  model) and `DynaQAgent` (learning from real and imagined transitions).
 
-المقارنة عند 40 حلقة (متوسط 3 بذور): المكسب يظهر في المهام متعددة الخطوات —
-`plant-seed` 0.42→0.71، `boil-water` 0.67→0.92، `recharge-lamp` 0.83→0.96.
+Comparison at 40 episodes (mean of 3 seeds): the gain appears in multi-step
+tasks — `plant-seed` 0.42->0.71, `boil-water` 0.67->0.92, `recharge-lamp`
+0.83->0.96.
 
-## النموذج اللغوي الداخلي
+## The in-project language model
 
-المشروع يحتوي نموذجاً لغوياً خاصاً به، مكتوباً من الصفر بـ`numpy`، ومُدرَّباً داخل
-المستودع، فلا حاجة إلى خدمة خارجية ولا مفاتيح API.
+The project contains its own language model, written from scratch in `numpy` and
+trained inside the repository, so no external service and no API keys are needed.
 
-- `ml/llm/tokenizer.py`: ترميز على مستوى البايت (آمن للعربية، بلا تدريب).
-- `ml/llm/transformer.py`: محوّل decoder-only (انتباه سببي متعدد الرؤوس، GELU،
-  LayerNorm) مع backprop يدوي وAdam — تحقّقنا من التدرجات عددياً.
-- `ml/llm/corpus.py`: متن تدريب داخل المستودع (عربي/إنجليزي حول عالم المشروع،
-  وعن هندسة البترول، و**متن مُولَّد من كامل المنهج** — جملة لكل مفهوم وعلاقة في
-  التخصصات والمقررات، مع أمثلة JSON بنسق المخطط).
-- `ml/llm/generator.py` و`ai/local_model.py`: توليد نص، وتكييف مع واجهة
-  `CognitiveModel` فيحلّ محل Ollama في أي مكان يُقبل فيه نموذج.
-- `ml/llm/schema.py`: فك ترميز موجَّه بالمخطط. البنية تُثبَّت من
-  `MODEL_OUTPUT_SCHEMA`، والنموذج يقترح محتوى الأوراق فقط، فيعود JSON صالحاً
-  دائماً ويخضع بعدها لتحقق `LLMReasoner`.
+- `ml/llm/tokenizer.py`: byte-level encoding (safe for any script, no training).
+- `ml/llm/transformer.py`: a decoder-only transformer (multi-head causal
+  attention, GELU, LayerNorm) with manual backprop and Adam — we verified the
+  gradients numerically.
+- `ml/llm/corpus.py`: an in-repo training corpus (English about the project's
+  world and about petroleum engineering, and a **corpus generated from the whole
+  curriculum** — a sentence for every concept and relation in the disciplines and
+  courses, with JSON examples in the schema format).
+- `ml/llm/generator.py` and `ai/local_model.py`: text generation, and adaptation
+  to the `CognitiveModel` interface so it replaces Ollama anywhere a model is
+  accepted.
+- `ml/llm/schema.py`: schema-guided decoding. The structure is fixed from
+  `MODEL_OUTPUT_SCHEMA`, and the model suggests only leaf content, so it always
+  returns valid JSON and is then validated by `LLMReasoner`.
 
 ```bash
-python -m ml.llm                       # تدريب نقطة التحقق الافتراضية وحفظها
-python -m ml.llm --steps 4000          # تدريب أطول
-python -m ml.llm --generate "الماء"    # تدريب ثم توليد تكملة
+python -m ml.llm                       # train and save the default checkpoint
+python -m ml.llm --steps 4000          # train longer
+python -m ml.llm --generate "water"    # train, then sample a continuation
 ```
 
-استخدامه كنموذج معرفي:
+Using it as a cognitive model:
 
 ```python
 from ai.local_model import LocalLanguageModel
 
-model = LocalLanguageModel(temperature=0.0)   # يقرأ نقطة التحقق المُلتزَمة
+model = LocalLanguageModel(temperature=0.0)   # reads the committed checkpoint
 response = controller.reason(model, request)
 ```
 
-ربطه بمسار القرار: عندما يحمل الطلب `response_schema`، يقترح النموذج مفاهيم
-وفرضيات وأسئلة وخططاً، ثم يتحقق منها `LLMReasoner` ولا يستطيع تعديل الاعتقادات
-ولا تنفيذ أدوات:
+Wiring it into the decision path: when the request carries a `response_schema`,
+the model suggests concepts, hypotheses, questions, and plans, and then
+`LLMReasoner` validates them; it cannot modify beliefs or run tools:
 
 ```python
-analysis = controller.analyze_with_model(model, request)   # نفس مسار التحقق
+analysis = controller.analyze_with_model(model, request)   # the same validation path
 ```
 
-> تنويه صريح: هذا محوّل حقيقي لكنه صغير، مُدرَّب على متن صغير داخل المستودع.
-> يُنتج نصاً متماسكاً حول عالم المشروع، وليس نموذجاً عاماً بحجم النماذج الحدودية.
+> Explicit disclaimer: this is a real transformer but a small one, trained on a
+> small in-repo corpus. It produces coherent text about the project's world, not
+> a general model at frontier-model scale.
 
-## ربط نموذج لغوي حقيقي
+## Connecting a real language model
 
-النموذج يُمرَّر من التطبيق ولا تُحفظ مفاتيح API داخل المشروع:
+The model is passed by the application and no API keys are stored inside the
+project:
 
 ```python
 from core.model_interface import CallableModel
@@ -542,12 +621,14 @@ model = CallableModel("my-model", lambda request: client.generate(request))
 response = controller.reason(model, request)
 ```
 
-الغلاف يعيد نصاً فقط؛ أما الأدوات والإجراءات الخارجية فتبقى تحت تحكم التطبيق والمستخدم.
+The wrapper returns text only; tools and external actions stay under the control
+of the application and the user.
 
-## الحالة
+## Status
 
-- الإصدار: 2.1.0
-- بايثون: 3.12 فأحدث
-- الترخيص: MIT — راجع `LICENSE.txt`
-- الإصدار مُدرَّب وجاهز: كل النواتج داخل `ml/artifacts/` و`ml/llm/checkpoints/`،
-  ويصفها `ml/artifacts/release_manifest.json`. أعِد إنتاجها بـ`python -m cli release`.
+- Version: 2.1.0
+- Python: 3.12 or newer
+- License: MIT — see `LICENSE.txt`
+- The release is trained and ready: all outputs are inside `ml/artifacts/` and
+  `ml/llm/checkpoints/`, described by `ml/artifacts/release_manifest.json`.
+  Reproduce them with `python -m cli release`.

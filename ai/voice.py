@@ -1,7 +1,7 @@
 """Run one voice turn through the assistant.
 
-    python -m ai.voice "ما علاقة المسامية بالنفاذية؟"
-    python -m ai.voice --write-wav out.wav "النفاذية"
+    python -m ai.voice "What is the relationship between porosity and permeability?"
+    python -m ai.voice --write-wav out.wav "permeability"
 
 This is a text-driven voice loop: the transcript stands in for a live microphone
 and the synthesized clip is a real 16-bit WAV. It exercises the exact pipeline a
@@ -38,16 +38,16 @@ def main(argv: list[str] | None = None) -> int:
     voice = VoiceAssistant(build_default_assistant(), recognizer=recognizer, synthesizer=synthesizer)
 
     turn = voice.respond_to_speech(AudioClip.silence(0.5))
-    print(f"سمعت: {turn.heard}")
-    print(f"الجواب: {turn.answer_text}")
+    print(f"Heard: {turn.heard}")
+    print(f"Answer: {turn.answer_text}")
     if turn.citations:
-        print("المصادر:")
+        print("Sources:")
         for citation in turn.citations:
             print(f"  - {citation}")
-    print(f"مدة الصوت: {turn.spoken.duration_seconds:.2f} ثانية عند {SAMPLE_RATE} هرتز")
+    print(f"Audio duration: {turn.spoken.duration_seconds:.2f} s at {SAMPLE_RATE} Hz")
     if args.write_wav is not None:
         turn.spoken.write_wav(args.write_wav)
-        print(f"كُتب الملف الصوتي: {args.write_wav}")
+        print(f"Wrote audio file: {args.write_wav}")
     return 0
 
 
