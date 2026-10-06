@@ -1,0 +1,40 @@
+# AGENTS.md — Fayd Al-Ruh
+
+Evidence-aware symbolic cognitive architecture framed as a petroleum-engineering
+mind. User-facing docs and text are in Arabic.
+
+## Workflow (hard rules)
+
+- ALWAYS work on a feature branch; never commit to `main`.
+- Before finishing: `python -m pytest -q`, `python -m ruff check .`, `python -m mypy`,
+  `python -m evaluation` (must print PASS, no regression).
+- Push branches and open PRs with the `create_pr` tool. Merge only on the user's
+  explicit approval ("نعم قم بالدمج").
+
+## Layout
+
+- `core/` — cognitive architecture. Key seeds:
+  - `core/domain_knowledge.py` — the petroleum *frame*: 14 disciplines, concepts
+    + relations, `seed_ontology`, `discipline_coverage`, `discipline_labels`.
+  - `core/curriculum_knowledge.py` — the *curriculum*: 34 courses across
+    foundations / geoscience / engineering science / petroleum disciplines,
+    `seed_curriculum`, `curriculum_coverage`, `curriculum_coverage_score`.
+    Both seeds run in `CognitiveController.__init__` and share nodes (idempotent).
+- `ml/` — learning. `ml/petroleum.py` trains the Q-policy + predictive brain on
+  the discipline tasks in `core/petroleum_tasks.py`.
+- `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
+  `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
+  Update the baseline with `python -m evaluation --update-baseline`.
+- `cli/` — portable front end. `menu.py` holds actions + `MENU`; `__main__.py`
+  dispatches commands and reconfigures stdout/stderr to UTF-8 (Arabic-safe on
+  legacy Windows consoles).
+- `fayd-al-ruh.spec` — PyInstaller; uses `collect_submodules` for `ml`,
+  `evaluation`, `ai`, `storage` (and `core` is bundled as an imported package).
+
+## Conventions
+
+- Concepts are Arabic labels; relations are English verbs (`is_a`, `measures`,
+  `contains`, `drives`, ...). Seeded confidence is modest and revisable.
+- Keep seeds declarative tuples (`CourseKnowledge` / `DisciplineKnowledge`);
+  coverage helpers report what an ontology actually carries.
+- Add a test per new seed or CLI action; keep the evaluation gate green.

@@ -53,6 +53,7 @@ from core.ontology_reasoner import OntologyInference, OntologyReasoner
 from core.ontology_retrieval import OntologyGuidedRetriever
 from core.ontology_learner import OntologyDecay, OntologyFeedback, OntologyLearner, OntologyLearning
 from core.domain_knowledge import domain_summary, seed_ontology
+from core.curriculum_knowledge import seed_curriculum
 from core.semantic_parser import SemanticParser
 from core.meaning_model import MeaningModel
 from core.language_reasoner import LanguageReasoner
@@ -157,6 +158,7 @@ class CognitiveController:
         self.experiment_runner = ExperimentRunner()
         self.ontology = Ontology()
         seed_ontology(self.ontology)
+        seed_curriculum(self.ontology)
         self.ontology_reasoner = OntologyReasoner()
         self.ontology_retriever = OntologyGuidedRetriever(self.ontology, self.ontology_reasoner)
         self.ontology_learner = OntologyLearner(self.ontology)

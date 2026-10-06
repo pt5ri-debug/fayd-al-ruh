@@ -7,6 +7,7 @@ Usage:
     python -m cli ml --episodes 60    # ML pipeline
     python -m cli llm --steps 200     # language-model trainer
     python -m cli petroleum           # petroleum-engineering task training
+    python -m cli curriculum          # show the seeded degree curriculum
     python -m cli eval                # evaluation suite
 
 The commands mirror the modules developers already use, so nothing about the
@@ -21,6 +22,7 @@ from cli.menu import (
     describe_paths,
     menu_loop,
     missing_dependency_message,
+    run_curriculum,
     run_demo,
     run_evaluation,
     run_llm,
@@ -34,6 +36,7 @@ _COMMANDS = {
     "ml": run_ml,
     "llm": run_llm,
     "petroleum": run_petroleum,
+    "curriculum": run_curriculum,
     "eval": run_evaluation,
     "evaluation": run_evaluation,
     "selfcheck": run_selfcheck,
