@@ -47,6 +47,10 @@ mind. User-facing docs and text are in Arabic.
   read-only mode, capability + human-approval gates, built-in file/search/calculator
   tools returning `ToolResult`. `core/tool_agent.py` — `ToolPlan`/`ToolAgent`
   coordination with a full trace. CLI: `python -m ai.agent_demo` / `python -m cli agent`.
+- `core/knowledge_update.py` — folds confirmed statements into the document store
+  with provenance and decay (`KnowledgeUpdater`). `core/continuous_learning.py` —
+  `ContinuousLearner` (explicit feedback only) + `RegressionMonitor` for baseline
+  comparisons. CLI: `python -m ai.learn_demo` / `python -m cli learn`.
 - `core/version.py` is the single source of the version string.
 - `evaluation/` â€” regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.

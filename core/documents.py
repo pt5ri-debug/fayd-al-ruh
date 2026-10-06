@@ -87,6 +87,10 @@ class DocumentStore:
     def get(self, doc_id: str) -> Document | None:
         return self._documents.get(doc_id)
 
+    def remove(self, doc_id: str) -> Document | None:
+        """Remove a document from memory; returns it when present."""
+        return self._documents.pop(doc_id, None)
+
     def documents(self) -> tuple[Document, ...]:
         return tuple(self._documents.values())
 

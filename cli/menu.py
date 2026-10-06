@@ -105,6 +105,11 @@ def run_agent(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.agent_demo", argv)
 
 
+def run_learn(argv: Sequence[str] = ()) -> int:
+    """Demonstrate continuous learning and the regression gate."""
+    return _run_module("ai.learn_demo", argv)
+
+
 def run_curriculum(argv: Sequence[str] = ()) -> int:
     """Show the seeded petroleum-engineering curriculum and its coverage."""
     if argv:
@@ -153,6 +158,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("اسأل المساعد الموثّق (Ask the grounded assistant)", run_ask, ()),
     ("جولة صوتية واحدة (Voice turn)", run_voice, ("--write-wav", "voice-turn.wav", "الماء")),
     ("عرض أدوات الوكيل في صندوق الأمان (Tool agent demo)", run_agent, ()),
+    ("عرض التعلّم المستمر وبوابة الانحدار (Continuous learning)", run_learn, ()),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--episodes", "60")),
     ("Train the language model", run_llm, ("--steps", "200")),
@@ -226,6 +232,7 @@ __all__ = [
     "run_ask",
     "run_voice",
     "run_agent",
+    "run_learn",
     "run_demo",
     "run_ml",
     "run_llm",
