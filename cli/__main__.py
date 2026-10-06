@@ -19,6 +19,7 @@ import sys
 from cli.menu import (
     describe_paths,
     menu_loop,
+    missing_dependency_message,
     run_demo,
     run_evaluation,
     run_llm,
@@ -52,7 +53,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Unknown command: {command!r}\n")
         print(__doc__)
         return 1
-    return action(rest)
+    try:
+        return action(rest)
+    except ModuleNotFoundError as error:
+        print(missing_dependency_message(error))
+        return 1
 
 
 if __name__ == "__main__":
