@@ -35,6 +35,7 @@ def test_petroleum_scenarios_cover_causal_retrieval_and_ontology():
     assert any(scenario.retrieval for scenario in petroleum.values())
     assert any(scenario.ontology_relations for scenario in petroleum.values())
     assert any(scenario.ontology_inferences for scenario in petroleum.values())
+    assert any(scenario.ontology_retrieval for scenario in petroleum.values())
     assert any(scenario.uncertainties for scenario in petroleum.values())
     assert any(scenario.plans for scenario in petroleum.values())
 
@@ -76,6 +77,24 @@ def test_controller_exposes_derived_ontology_relations():
     derived = controller.derive_ontology_relations()
     assert derived
     assert all(inference.derived for inference in derived)
+
+
+def test_petroleum_multihop_expectations_are_lexically_disjoint():
+    from core.memory import CognitiveMemory
+
+    memory = CognitiveMemory()
+    scenarios = [s for s in SCENARIOS if s.ontology_retrieval]
+    assert scenarios, "expected a petroleum multi-hop retrieval scenario"
+    for scenario in scenarios:
+        for expectation in scenario.ontology_retrieval:
+            assert expectation.requires_ontology
+            shared = memory._tokens(expectation.query) & memory._tokens(expectation.expected_top)
+            assert not shared, (expectation.query, expectation.expected_top, shared)
+
+
+def test_petroleum_multihop_retrieval_metric_is_reported():
+    report = run_suite()
+    assert report.metrics.petroleum_multihop_retrieval_accuracy == 1.0
 
 
 def test_petroleum_ontology_relations_are_seeded():

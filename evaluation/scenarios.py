@@ -33,6 +33,7 @@ class BeliefSpec:
 class RetrievalExpectation:
     query: str
     expected_top: str
+    requires_ontology: bool = False
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,8 @@ class Scenario:
     ontology_relations: tuple[tuple[str, str, str], ...] = ()
     # Relations that must be derivable (not stored) as (source_label, relation_type, target_label).
     ontology_inferences: tuple[tuple[str, str, str], ...] = ()
+    # Expectations reachable only by walking ontology relations (no shared word).
+    ontology_retrieval: tuple[RetrievalExpectation, ...] = ()
 
 
 def _scenario_memory() -> Scenario:
@@ -378,6 +381,46 @@ def _scenario_petroleum_ontology_inference() -> Scenario:
     )
 
 
+def _scenario_petroleum_multihop_retrieval() -> Scenario:
+    """Petroleum domain: retrieval follows derived relations across hops.
+
+    Each marked expectation targets an observation that shares no word with the
+    query; it is only reachable by walking the seeded (and derived) relations,
+    e.g. ``السجل measures المكمن`` reaching a reservoir observation from a log query.
+    """
+    return Scenario(
+        id="petroleum-multihop-retrieval",
+        domain=Domain.PETROLEUM,
+        description="Log and drilling queries reach reservoir/well observations through ontology hops.",
+        observations=(
+            ObservationSpec("The reservoir holds hydrocarbons in the formation.", "reservoir_study", 0.9),
+            ObservationSpec("The well was secured with steel casing.", "completion_report", 0.9),
+            ObservationSpec("The rig crew completed a routine safety briefing.", "hse_log", 0.5),
+        ),
+        retrieval=(
+            # A lexical hit the ordinary retriever already reaches (control).
+            RetrievalExpectation(
+                "safety briefing",
+                "The rig crew completed a routine safety briefing.",
+            ),
+        ),
+        ontology_retrieval=(
+            # "log" -> السجل measures المكمن -> reservoir observation (no shared word).
+            RetrievalExpectation(
+                "log interpretation",
+                "The reservoir holds hydrocarbons in the formation.",
+                requires_ontology=True,
+            ),
+            # "drilling" -> الحفر creates البئر -> well observation (no shared word).
+            RetrievalExpectation(
+                "drilling operations",
+                "The well was secured with steel casing.",
+                requires_ontology=True,
+            ),
+        ),
+    )
+
+
 SCENARIOS: tuple[Scenario, ...] = (
     _scenario_memory(),
     _scenario_reasoning(),
@@ -392,6 +435,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     _scenario_petroleum_uncertainty(),
     _scenario_petroleum_identity(),
     _scenario_petroleum_ontology_inference(),
+    _scenario_petroleum_multihop_retrieval(),
 )
 
 

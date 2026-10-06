@@ -61,6 +61,7 @@ class EvaluationMetrics:
     petroleum_retrieval_accuracy: float
     petroleum_ontology_accuracy: float
     petroleum_inference_accuracy: float
+    petroleum_multihop_retrieval_accuracy: float
     # Aggregate
     overall: float
 
@@ -140,6 +141,28 @@ def _ontology_inference_accuracy(controller: CognitiveController, scenario: Scen
         if inference is not None and inference.derived and inference.steps:
             matched += 1
     return matched / len(scenario.ontology_inferences)
+
+
+def _ontology_retrieval_accuracy(controller: CognitiveController, scenario: Scenario) -> float:
+    """Fraction of expectations reached only by following ontology relations.
+
+    Each marked expectation must be lexically disjoint from its query and then
+    hit at rank 1 by ontology-guided recall, proving the relation walk adds
+    reach rather than echoing the lexical result.
+    """
+    if not scenario.ontology_retrieval:
+        return 0.0
+    hits = 0
+    for expectation in scenario.ontology_retrieval:
+        query_tokens = controller.memory._tokens(expectation.query)
+        expected_tokens = controller.memory._tokens(expectation.expected_top)
+        if query_tokens & expected_tokens:
+            continue
+        guided = controller.recall_with_ontology(expectation.query, limit=5)
+        guided_texts = [str(getattr(recall.item.content, "content", recall.item.content)) for recall in guided]
+        if guided_texts and guided_texts[0] == expectation.expected_top:
+            hits += 1
+    return hits / len(scenario.ontology_retrieval)
 
 
 def _run_memory(scenario: Scenario) -> ScenarioResult:
@@ -366,12 +389,40 @@ _RUNNERS = {
 }
 
 
+def _run_petroleum_multihop_retrieval(scenario: Scenario) -> ScenarioResult:
+    """Petroleum scenario: retrieval follows derived relations, not shared words."""
+    controller = CognitiveController()
+    for index, spec in enumerate(scenario.observations):
+        controller.memory.store(
+            f"{scenario.id}-obs-{index}",
+            "observation",
+            Observation(spec.content, spec.source, spec.confidence),
+            importance=spec.confidence,
+        )
+
+    lexical_accuracy, _, _ = _retrieval_scores(controller, scenario)
+    ontology_accuracy = _ontology_retrieval_accuracy(controller, scenario)
+    passed = lexical_accuracy == 1.0 and ontology_accuracy == 1.0
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=passed,
+        checks={
+            "retrieval_accuracy": round(lexical_accuracy, 6),
+            "ontology_retrieval_accuracy": round(ontology_accuracy, 6),
+        },
+        details={"ontology_expectations": str(len(scenario.ontology_retrieval))},
+    )
+
+
 def run_scenario(scenario: Scenario) -> ScenarioResult:
     if scenario.decisions:
         return _run_decisions(scenario)
     if scenario.expected_conflicts or (scenario.beliefs and not scenario.observations and not scenario.predictions):
         return _run_consistency(scenario)
     if scenario.domain == Domain.PETROLEUM:
+        if scenario.ontology_retrieval:
+            return _run_petroleum_multihop_retrieval(scenario)
         if scenario.retrieval:
             return _run_petroleum_retrieval(scenario)
         if scenario.ontology_inferences:
@@ -436,7 +487,14 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     petroleum_retrieval = domain_metric(Domain.PETROLEUM, "retrieval_accuracy")
     petroleum_ontology = domain_metric(Domain.PETROLEUM, "ontology_accuracy")
     petroleum_inference = domain_metric(Domain.PETROLEUM, "ontology_inference_accuracy")
-    petroleum_score = mean([petroleum_causal, petroleum_retrieval, petroleum_ontology, petroleum_inference])
+    petroleum_multihop = domain_metric(Domain.PETROLEUM, "ontology_retrieval_accuracy")
+    petroleum_score = mean([
+        petroleum_causal,
+        petroleum_retrieval,
+        petroleum_ontology,
+        petroleum_inference,
+        petroleum_multihop,
+    ])
 
     calibrated = clamp(1.0 - calibration_error)
     overall = mean([
@@ -451,6 +509,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_retrieval,
         petroleum_ontology,
         petroleum_inference,
+        petroleum_multihop,
     ])
 
     metrics = EvaluationMetrics(
@@ -470,6 +529,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_retrieval_accuracy=round(petroleum_retrieval, 6),
         petroleum_ontology_accuracy=round(petroleum_ontology, 6),
         petroleum_inference_accuracy=round(petroleum_inference, 6),
+        petroleum_multihop_retrieval_accuracy=round(petroleum_multihop, 6),
         overall=round(overall, 6),
     )
 

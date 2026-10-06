@@ -64,10 +64,15 @@ controller.ontology.find_concepts("reservoir")   # مكمن، طبقة، مسا�
   تُستنتَج ولا تُخزَّن، عبر قواعد تركيب شفّافة (`core/ontology_reasoner.py`):
   تعدّي `contained_in`، و`البئر penetrates الطبقة`، و`المكمن has_property المسامية`،
   و`السجل measures المكمن` (تركيب `measures` مع `has_property`).
+- **استرجاع متعدد الخطوات** (`petroleum-multihop-retrieval`): استعلام عن السجل
+  يصل إلى ملاحظة المكمن، واستعلام عن الحفر يصل إلى ملاحظة البئر، رغم **عدم اشتراك
+  أي كلمة** بين الاستعلام والملاحظة — عبر السير على الروابط المشتقّة
+  (`core/ontology_retrieval.py`).
 
-تُقاس ثلاثة مقاييس بترولية في الأساس: `petroleum_causal_accuracy`،
+تُقاس خمسة مقاييس بترولية في الأساس: `petroleum_causal_accuracy`،
 `petroleum_retrieval_accuracy`، `petroleum_ontology_accuracy`،
-و`petroleum_inference_accuracy`، إضافة إلى `domain_scores["petroleum"]`.
+`petroleum_inference_accuracy`، و`petroleum_multihop_retrieval_accuracy`،
+إضافة إلى `domain_scores["petroleum"]`.
 فتصبح الهوية قابلة للقياس ومنع التراجع في CI.
 
 ## الاستدلال فوق الأنطولوجيا
@@ -86,6 +91,24 @@ controller.ontology.find_concepts("reservoir")   # مكمن، طبقة، مسا�
 العلاقات المشتقّة **لا تُدسّ في الأنطولوجيا**؛ تُعاد كـ `OntologyInference` مع خطوات
 التركيب (`steps`) وثقة مُضاعَفة، فتبقى مميّزة عن العلاقات الصريحة القابلة للمراجعة.
 تُتاح عبر `controller.infer_ontology_relation(...)` و`controller.derive_ontology_relations()`.
+
+## الاسترجاع المتصل بالأنطولوجيا
+
+الاسترجاع العادي (كلمات + بصمة دلالية) يصل فقط إلى العناصر التي تشترك مع الاستعلام
+في كلمات. `core/ontology_retrieval.py` يجعل الاسترجاع يعبر الروابط بدلاً من ذلك:
+يُجسّر كل عنصر إلى مفاهيم الأنطولوجيا، ثم يسير على العلاقات الصريحة **والمشتقّة**
+باتجاهها المعلن لمسافة محدودة، فيصل إلى عنصر يذكر مفهوماً ذا صلة فقط.
+
+- `OntologyGuidedRetriever.concepts_in(text)`: المفاهيم التي ترد مصطلحاتها في النص.
+- `reachable(seeds)`: المشي بعرض أول محدود (`max_hops`) مع خفض هندسي (`hop_decay`)
+  لكل خطوة، فالمطابقة المباشرة تسبق ذات الخطوة الواحدة.
+- `rank(items, query, base_scores)`: يرتّب العناصر بأفضل ما بين درجتها الأساسية
+  ودرجتها العلائقية، فلا يخسر الاسترجاع العادي شيئاً.
+- `controller.recall_with_ontology(query)`: يدمج الاسترجاع العادي مع هذا الترتيب.
+
+مثال: استعلام عن «السجل» يصل إلى ملاحظة عن المكمن عبر `السجل measures المكمن`
+المشتقّة، رغم عدم اشتراك أي كلمة. يقيس هذا السيناريو `petroleum-multihop-retrieval`
+ويحميه مقياس `petroleum_multihop_retrieval_accuracy`.
 
 ## البنية
 
