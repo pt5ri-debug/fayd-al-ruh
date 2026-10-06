@@ -1,5 +1,12 @@
 from core.cognitive_controller import CognitiveController
-from core.domain_knowledge import domain_summary, seed_ontology
+from core.domain_knowledge import (
+    discipline_coverage,
+    discipline_keys,
+    discipline_labels,
+    disciplines,
+    domain_summary,
+    seed_ontology,
+)
 from core.model_interface import CallableModel, ModelRequest, MultimodalInput
 from core.ontology import Ontology
 from core.self_model import SelfModel
@@ -23,7 +30,9 @@ def test_seed_ontology_is_idempotent():
 
     assert len(second) == len(first)
     assert len(ontology.concepts) == len(first)
-    assert len(ontology.relations) == 13
+    # 13 foundation relations plus every discipline's own relations.
+    expected_relations = 13 + sum(len(discipline.relations) for discipline in disciplines())
+    assert len(ontology.relations) == expected_relations
 
 
 def test_controller_starts_with_petroleum_frame():
@@ -49,3 +58,39 @@ def test_identity_frame_is_injected_into_model_requests():
     controller.reason(model, ModelRequest((MultimodalInput("text", "analyze the well"),)))
 
     assert any("petroleum engineering" in item for item in received[0].context)
+
+
+def test_seed_covers_every_petroleum_discipline():
+    ontology = Ontology()
+    seed_ontology(ontology)
+
+    coverage = discipline_coverage(ontology)
+    assert set(coverage) == set(discipline_keys())
+    assert len(coverage) >= 13
+    for key, counts in coverage.items():
+        assert counts["concepts"] == counts["expected_concepts"], key
+        assert counts["relations"] == counts["expected_relations"], key
+
+
+def test_discipline_coverage_reports_missing_concepts_honestly():
+    ontology = Ontology()
+
+    coverage = discipline_coverage(ontology)
+    assert all(counts["concepts"] == 0 for counts in coverage.values())
+    assert all(counts["relations"] == 0 for counts in coverage.values())
+
+
+def test_discipline_labels_are_arabic_and_align_with_keys():
+    labels = discipline_labels()
+
+    assert set(labels) == set(discipline_keys())
+    assert "drilling" in labels
+    assert labels["reservoir"] == "هندسة المكامن"
+
+
+def test_domain_summary_lists_disciplines():
+    summary = domain_summary(SelfModel())
+
+    assert "Disciplines:" in summary
+    assert "هندسة الحفر" in summary
+

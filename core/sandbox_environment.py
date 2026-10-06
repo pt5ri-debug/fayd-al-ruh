@@ -30,6 +30,7 @@ class SandboxTask:
     allowed_actions: tuple[ActionSpec, ...]
     initial_facts: frozenset[str] = frozenset()
     max_steps: int = 32
+    discipline: str = "general"
 
     def __post_init__(self) -> None:
         if not self.name.strip():

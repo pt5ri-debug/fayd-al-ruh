@@ -55,6 +55,14 @@ def run_llm(argv: Sequence[str] = ()) -> int:
     return _run_module("ml.llm.__main__", argv)
 
 
+def run_petroleum(argv: Sequence[str] = ()) -> int:
+    """Train the policy and brain on every petroleum-engineering discipline."""
+    args = list(argv)
+    if "--save-dir" not in args:
+        args += ["--save-dir", str(artifacts_dir() / "petroleum")]
+    return _run_module("ml.petroleum", args)
+
+
 def run_evaluation(argv: Sequence[str] = ()) -> int:
     """Run the scientific evaluation suite."""
     return _run_module("evaluation.__main__", argv)
@@ -78,6 +86,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--episodes", "60")),
     ("Train the language model", run_llm, ("--steps", "200")),
+    ("Train petroleum-engineering tasks", run_petroleum, ("--episodes", "120")),
     ("Run the evaluation suite", run_evaluation, ()),
     ("Self-check the install", run_selfcheck, ()),
 )
@@ -145,6 +154,7 @@ __all__ = [
     "run_demo",
     "run_ml",
     "run_llm",
+    "run_petroleum",
     "run_evaluation",
     "run_choice",
     "menu_loop",
