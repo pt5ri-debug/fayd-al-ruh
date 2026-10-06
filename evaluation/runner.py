@@ -63,6 +63,7 @@ class EvaluationMetrics:
     petroleum_inference_accuracy: float
     petroleum_multihop_retrieval_accuracy: float
     petroleum_ontology_learning_accuracy: float
+    petroleum_ontology_reinforcement_accuracy: float
     # Aggregate
     overall: float
 
@@ -448,6 +449,60 @@ def _run_petroleum_ontology_learning(scenario: Scenario) -> ScenarioResult:
     )
 
 
+def _run_petroleum_ontology_reinforcement(scenario: Scenario) -> ScenarioResult:
+    """Petroleum scenario: repetition strengthens learned links, disuse decays them."""
+    checks_ok = 0
+    total_checks = 0
+    max_confidence = 0.0
+    removed_total = 0
+
+    for spec in scenario.ontology_reinforcement:
+        controller = CognitiveController()
+        total_checks += 1
+        for _ in range(spec.repeats):
+            controller.learn_ontology_from_observation(spec.text)
+
+        learned = _learned_relations(controller)
+        strongest = max((relation.confidence for relation in learned), default=0.0)
+        max_confidence = max(max_confidence, strongest)
+        ceiling_ok = all(relation.confidence <= spec.ceiling for relation in learned)
+        reached = strongest >= spec.min_confidence
+        if reached and ceiling_ok:
+            checks_ok += 1
+
+        if spec.decay_rounds:
+            total_checks += 1
+            for _ in range(spec.decay_rounds):
+                decay = controller.decay_ontology_learning()
+            removed_total += len(decay.removed)
+            no_learned_left = not _learned_relations(controller)
+            if spec.expect_removed and no_learned_left:
+                checks_ok += 1
+
+    accuracy = checks_ok / total_checks if total_checks else 0.0
+    passed = accuracy == 1.0
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=passed,
+        checks={
+            "ontology_reinforcement_accuracy": round(accuracy, 6),
+            "ontology_reinforcement_max_confidence": round(max_confidence, 6),
+            "ontology_reinforcement_removed": float(removed_total),
+        },
+        details={"checks_ok": str(checks_ok), "checks_total": str(total_checks)},
+    )
+
+
+def _learned_relations(controller: CognitiveController) -> list:
+    relation_type = controller.ontology_learner.relation_type
+    return [
+        relation
+        for relation in controller.ontology.relations.values()
+        if relation.relation_type == relation_type
+    ]
+
+
 def _has_relation(controller: CognitiveController, source_label: str, target_label: str, relation_type: str) -> bool:
     sources = controller.ontology.find_concepts(source_label)
     targets = controller.ontology.find_concepts(target_label)
@@ -466,6 +521,8 @@ def run_scenario(scenario: Scenario) -> ScenarioResult:
     if scenario.expected_conflicts or (scenario.beliefs and not scenario.observations and not scenario.predictions):
         return _run_consistency(scenario)
     if scenario.domain == Domain.PETROLEUM:
+        if scenario.ontology_reinforcement:
+            return _run_petroleum_ontology_reinforcement(scenario)
         if scenario.ontology_learning:
             return _run_petroleum_ontology_learning(scenario)
         if scenario.ontology_retrieval:
@@ -536,6 +593,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     petroleum_inference = domain_metric(Domain.PETROLEUM, "ontology_inference_accuracy")
     petroleum_multihop = domain_metric(Domain.PETROLEUM, "ontology_retrieval_accuracy")
     petroleum_learning = domain_metric(Domain.PETROLEUM, "ontology_learning_accuracy")
+    petroleum_reinforcement = domain_metric(Domain.PETROLEUM, "ontology_reinforcement_accuracy")
     petroleum_score = mean([
         petroleum_causal,
         petroleum_retrieval,
@@ -543,6 +601,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_inference,
         petroleum_multihop,
         petroleum_learning,
+        petroleum_reinforcement,
     ])
 
     calibrated = clamp(1.0 - calibration_error)
@@ -560,6 +619,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_inference,
         petroleum_multihop,
         petroleum_learning,
+        petroleum_reinforcement,
     ])
 
     metrics = EvaluationMetrics(
@@ -581,6 +641,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_inference_accuracy=round(petroleum_inference, 6),
         petroleum_multihop_retrieval_accuracy=round(petroleum_multihop, 6),
         petroleum_ontology_learning_accuracy=round(petroleum_learning, 6),
+        petroleum_ontology_reinforcement_accuracy=round(petroleum_reinforcement, 6),
         overall=round(overall, 6),
     )
 

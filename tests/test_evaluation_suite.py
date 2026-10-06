@@ -37,6 +37,7 @@ def test_petroleum_scenarios_cover_causal_retrieval_and_ontology():
     assert any(scenario.ontology_inferences for scenario in petroleum.values())
     assert any(scenario.ontology_retrieval for scenario in petroleum.values())
     assert any(scenario.ontology_learning for scenario in petroleum.values())
+    assert any(scenario.ontology_reinforcement for scenario in petroleum.values())
     assert any(scenario.uncertainties for scenario in petroleum.values())
     assert any(scenario.plans for scenario in petroleum.values())
 
@@ -112,6 +113,42 @@ def test_petroleum_ontology_learning_scenario_exists_and_passes():
 def test_petroleum_ontology_learning_metric_is_reported():
     report = run_suite()
     assert report.metrics.petroleum_ontology_learning_accuracy == 1.0
+
+
+def test_petroleum_ontology_reinforcement_scenario_exists_and_passes():
+    scenarios = [s for s in SCENARIOS if s.ontology_reinforcement]
+    assert scenarios, "expected a petroleum ontology-reinforcement scenario"
+    for scenario in scenarios:
+        assert scenario.domain == Domain.PETROLEUM
+        result = run_scenario(scenario)
+        assert result.passed
+        assert result.checks["ontology_reinforcement_accuracy"] == 1.0
+        assert result.checks["ontology_reinforcement_removed"] > 0
+
+
+def test_petroleum_ontology_reinforcement_metric_is_reported():
+    report = run_suite()
+    assert report.metrics.petroleum_ontology_reinforcement_accuracy == 1.0
+
+
+def test_repetition_raises_learned_confidence_below_the_ceiling():
+    from core.cognitive_controller import CognitiveController
+
+    controller = CognitiveController()
+    controller.learn_ontology_from_observation("ارتفاع الضغط في الطبقة يرافقه تحسن في النفاذية")
+    initial = controller.ontology_learner.confidence
+
+    for _ in range(5):
+        controller.learn_ontology_from_observation("ارتفاع الضغط في الطبقة يرافقه تحسن في النفاذية")
+
+    learned = [
+        relation.confidence
+        for relation in controller.ontology.relations.values()
+        if relation.relation_type == controller.ontology_learner.relation_type
+    ]
+    assert learned
+    assert max(learned) > initial
+    assert max(learned) <= controller.ontology_learner.ceiling
 
 
 def test_controller_learns_ontology_relations_from_observations():

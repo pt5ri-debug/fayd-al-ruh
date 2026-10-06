@@ -72,11 +72,14 @@ controller.ontology.find_concepts("reservoir")   # مكمن، طبقة، مسا�
   مفاهيم معروفة، فتُسجَّل بينها علاقات `associated_with` ضعيفة الثقة، بينما يبقى
   الزوج المزروع صريحاً دون تكرار أو كتابة فوق
   (`core/ontology_learner.py`).
+- **ترجيح الروابط بالتجربة** (`petroleum-ontology-reinforcement`): ملاحظة متكرّرة
+  تُقوّي روابطها المتعلَّمة خطوة بخطوة حتى سقف أدنى من المزروع، وملاحظة تُهمَل
+  تتحلّل روابطها حتى تزول — دون المساس بالعلاقات المزروعة.
 
-تُقاس ستة مقاييس بترولية في الأساس: `petroleum_causal_accuracy`،
+تُقاس سبعة مقاييس بترولية في الأساس: `petroleum_causal_accuracy`،
 `petroleum_retrieval_accuracy`، `petroleum_ontology_accuracy`،
 `petroleum_inference_accuracy`، `petroleum_multihop_retrieval_accuracy`،
-و`petroleum_ontology_learning_accuracy`،
+`petroleum_ontology_learning_accuracy`، و`petroleum_ontology_reinforcement_accuracy`،
 إضافة إلى `domain_scores["petroleum"]`.
 فتصبح الهوية قابلة للقياس ومنع التراجع في CI.
 
@@ -122,7 +125,7 @@ controller.ontology.find_concepts("reservoir")   # مكمن، طبقة، مسا�
 `associated_with` ضعيفة الثقة، فيصير المعنى المكتسب قابلاً للاسترجاع لاحقاً.
 
 - `OntologyLearner.observe(text)`: يسجّل علاقة ضعيفة بين كل زوج من المفاهيم
-  المعروفة الواردة في النص.
+  المعروفة الواردة في النص، ويُقوّي أي علاقة متعلَّمة يكرّرها.
 - `learn_from_observations(texts)`: يدمج عدة ملاحظات في تقرير واحد.
 - `controller.learn_ontology_from_observation(text)`: يعلّم الأنطولوجيا ثم يُبطل
   ذاكرة الاسترجاع المؤقتة، فترى عمليات الاسترجاع التالية الروابط الجديدة.
@@ -133,6 +136,24 @@ controller.ontology.find_concepts("reservoir")   # مكمن، طبقة، مسا�
 متميّزاً عن الاستدلال: العلاقة المتعلَّمة **تُخزَّن**، أما المشتقّة فتبقى تُحسب ولا
 تُخزَّن. يقيس هذا `petroleum-ontology-learning` ويحميه مقياس
 `petroleum_ontology_learning_accuracy`.
+
+## ترجيح الروابط بالتجربة
+
+التجربة لا تضيف روابط فقط، بل تُثقّلها. `core/ontology_learner.py` يجعل ثقة كل
+رابط متعلَّم تتبع الاستخدام:
+
+- **التكرار يُقوّي**: كل ملاحظة تُجسّر الزوج نفسه ترفع ثقته خطوة
+  (`reinforcement`)، فتزداد ثقة ما يتكرّر في التجربة.
+- **السقف يحمي المزروع**: لا تتجاوز الثقة المتعلَّمة `ceiling` (أدنى من العلاقات
+  المزروعة)، فلا تنافس المعرفة المنظَّمة أبداً.
+- **الإهمال يُحلّل**: `decay()` يُضعف كل الروابط المتعلَّمة خطوة خطوة، وما يهبط
+  إلى الصفر يُحذَف، فلا تبقى ارتباطات عابرة.
+- **المزروع ثابت**: التحلّل لا يمسّ إلا `associated_with`، والعلاقات المزروعة تبقى
+  كما هي.
+
+تُتاح عبر `controller.reinforce_ontology_relation(...)` و
+`controller.decay_ontology_learning(...)`. يقيس هذا `petroleum-ontology-reinforcement`
+ويحميه مقياس `petroleum_ontology_reinforcement_accuracy`.
 
 ## البنية
 
