@@ -34,10 +34,11 @@ from core.curriculum_knowledge import (
     seed_curriculum,
 )
 from core.domain_knowledge import discipline_keys, disciplines, seed_ontology
+from core.petroleum_corpus import corpus_coverage_score, entries as corpus_entries, seed_petroleum_corpus
 from core.ontology import Ontology
 from core.paths import artifacts_dir, checkpoints_dir, default_checkpoint
 from core.version import __version__
-from ml.llm.corpus import build_corpus, curriculum_sentences, structured_examples
+from ml.llm.corpus import build_corpus, corpus_sentences, curriculum_sentences, structured_examples
 from ml.llm.__main__ import train_and_save
 from ml.llm.tokenizer import TOKENIZER_KINDS
 from ml.petroleum import train_petroleum
@@ -83,6 +84,7 @@ def knowledge_summary() -> Manifest:
     ontology = Ontology()
     seed_ontology(ontology)
     seed_curriculum(ontology)
+    seed_petroleum_corpus(ontology)
     return {
         "disciplines": len(discipline_keys()),
         "courses": len(course_keys()),
@@ -90,9 +92,11 @@ def knowledge_summary() -> Manifest:
         "course_concepts": sum(len(c.concepts) for c in courses()),
         "discipline_relations": sum(len(d.relations) for d in disciplines()),
         "course_relations": sum(len(c.relations) for c in courses()),
+        "corpus_entries": len(corpus_entries()),
         "ontology_concepts": len(ontology.concepts),
         "ontology_relations": len(ontology.relations),
         "curriculum_coverage": round(curriculum_coverage_score(ontology), 6),
+        "corpus_coverage": round(corpus_coverage_score(ontology), 6),
     }
 
 
@@ -103,6 +107,7 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
     )
     return {
         "curriculum_sentences": len(curriculum_sentences()),
+        "corpus_sentences": len(corpus_sentences()),
         "structured_examples": len(structured_examples()),
         "characters": len(text),
         "repeats": config.llm_repeats,

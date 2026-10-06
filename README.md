@@ -162,6 +162,58 @@ The curriculum is seeded automatically at `CognitiveController` startup, so it
 becomes an **inseparable part** of the project's knowledge: any reasoning or
 retrieval works on top of it with no extra setup.
 
+## The corpus: the knowledge content behind the curriculum
+
+The frame and the curriculum say *which* concepts exist and how they relate. The
+**corpus** in `core/petroleum_corpus.py` says what they *mean*: definitions,
+formulas, procedures, standards, and bilingual glossary terms, organised by
+discipline. It is the content layer that makes the project's petroleum identity
+concrete, and it is seeded into all three knowledge consumers:
+
+- the **ontology**, via `seed_petroleum_corpus` (idempotent, and it shares nodes
+  with the frame and the curriculum, so all three form one graph);
+- the **citable documents**, via `corpus_documents`, so a retrieved answer can
+  quote the corpus and point back to it;
+- the **language-model training text**, via `corpus_sentences`, so the model is
+  trained on the same knowledge the graph carries.
+
+The corpus currently covers **31 entries across all 14 disciplines**, including
+reservoir rock properties and drive mechanisms, volumetric reserves and material
+balance, formation evaluation and saturation-height, the logging suite and its
+interpretation workflow, drilling fluids and casing design, directional drilling,
+production optimisation and artificial lift, completions, hydraulic fracturing
+and matrix acidizing, primary cementing, well control, enhanced oil recovery,
+pressure-transient testing, project economics and field development planning,
+well integrity, process safety, offshore operations, surface facilities, project
+management, professional ethics, reservoir fluid properties, rock mechanics, and
+flow in porous media.
+
+```python
+from core.cognitive_controller import CognitiveController
+from core.petroleum_corpus import corpus_coverage, corpus_coverage_score
+
+controller = CognitiveController()
+coverage = corpus_coverage(controller.ontology)
+print(corpus_coverage_score(controller.ontology))  # 1.0
+```
+
+- `seed_petroleum_corpus`: plants the corpus concepts and relations
+  **idempotently**, reusing nodes the frame and the curriculum already created.
+- `corpus_documents`: turns each entry into a `Document`, so the corpus is part
+  of the retrieval corpus and every claim drawn from it is citable.
+- `corpus_sentences`: generates the training prose merged into the
+  language-model corpus (`ml/llm/corpus.py`).
+- `corpus_coverage` / `corpus_coverage_score`: per-discipline and whole-corpus
+  coverage, recorded in the release manifest (`ml/release.py`) so losing any part
+  of the content shows up as a regression.
+
+To display it from the command line (the curriculum view now lists corpus
+coverage too):
+
+```bash
+python -m cli curriculum    # show courses, then corpus coverage by discipline
+```
+
 ## Learning petroleum-engineering tasks
 
 Identity alone is not enough to measure: the system must also *learn* the tasks

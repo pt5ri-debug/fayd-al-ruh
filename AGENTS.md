@@ -20,15 +20,22 @@ Arabic is kept as secondary aliases where useful.
   - `core/curriculum_knowledge.py` — the *curriculum*: 34 courses across
     foundations / geoscience / engineering science / petroleum disciplines,
     `seed_curriculum`, `curriculum_coverage`, `curriculum_coverage_score`.
-    Both seeds run in `CognitiveController.__init__` and share nodes (idempotent).
+  - `core/petroleum_corpus.py` — the knowledge *content*: 31 entries across all
+    14 disciplines with definitions, relations, formulas, procedures, standards,
+    and glossary; `seed_petroleum_corpus`, `corpus_documents`,
+    `corpus_sentences`, `corpus_coverage`, `corpus_coverage_score`.
+    All three seeds run in `CognitiveController.__init__` and share nodes
+    (idempotent), so frame + curriculum + corpus form one graph.
 - `ml/` — learning. `ml/petroleum.py` trains the Q-policy + predictive brain on
   the discipline tasks in `core/petroleum_tasks.py`. `ml/release.py` trains every
   layer (base pipeline, petroleum tasks, language model) and writes
-  `ml/artifacts/release_manifest.json`. Trained artifacts in `ml/artifacts/` and
+  `ml/artifacts/release_manifest.json` (with `knowledge.curriculum_coverage` and
+  `knowledge.corpus_coverage`). Trained artifacts in `ml/artifacts/` and
   `ml/llm/checkpoints/fayd-llm.npz` are committed on purpose for a release;
   regenerate with `python -m cli release`.
 - `ml/llm/corpus.py` builds the language-model text, including sentences generated
-  from every discipline and course (`curriculum_sentences`).
+  from every discipline and course (`curriculum_sentences`) and from the petroleum
+  corpus (`corpus_sentences`).
 - `ml/llm/bpe.py` — byte-level BPE tokenizer trained in-project. `ml/llm/tokenizer.py`
   has `train_tokenizer(kind, text, vocab_size)` / `save_tokenizer` / `load_tokenizer`;
   the trainer writes `<checkpoint>.tokenizer.json` and `LocalLanguageModel` loads it
@@ -36,7 +43,8 @@ Arabic is kept as secondary aliases where useful.
   restores the old byte behaviour.
 - `core/conversation.py` — multi-turn memory (sessions, roles, bounded window,
   `JsonStore` persistence). `core/documents.py` — citable documents + knowledge
-  corpus from the seeds. `core/rag.py` — fuses lexical coverage (Arabic-normalised),
+  corpus from the seeds (disciplines, courses, and the petroleum corpus).
+  `core/rag.py` — fuses lexical coverage (Arabic-normalised),
   hashed semantic, and multi-hop ontology signals into `RetrievedPassage` with
   citations. `core/assistant.py` — `GroundedAssistant` / `build_default_assistant`;
   answers with citations, extractive fallback with no model, and a groundedness gate
