@@ -51,8 +51,15 @@ def build(*, clean_first: bool = False) -> Path:
 
     for name in LAUNCHERS:
         source = PROJECT_ROOT / name
-        if source.exists():
-            shutil.copy2(source, BUNDLE / name)
+        if not source.exists():
+            continue
+        target = BUNDLE / name
+        if name.endswith(".bat"):
+            # Windows batch files need CRLF regardless of the build machine.
+            text = source.read_text(encoding="utf-8").replace("\r\n", "\n")
+            target.write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
+        else:
+            shutil.copy2(source, target)
 
     return BUNDLE
 

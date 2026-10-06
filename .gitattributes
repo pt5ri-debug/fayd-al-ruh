@@ -1,0 +1,9 @@
+# Keep Windows batch files with CRLF so labels and commands run correctly
+# regardless of the machine that clones the repository.
+*.bat text eol=crlf
+
+# Shell scripts should keep LF.
+*.sh text eol=lf
+
+# The checkpoint is binary data.
+*.npz binary
