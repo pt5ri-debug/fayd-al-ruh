@@ -2,6 +2,10 @@
 
 Usage:
     python -m cli                     # interactive numbered menu
+    python -m cli ask "سؤالك"          # grounded assistant (cited answers)
+    python -m cli voice "سؤالك"        # one voice turn
+    python -m cli agent               # tool-agent demo in the safety sandbox
+    python -m cli learn               # continuous learning + regression gate
     python -m cli paths               # show asset/data locations
     python -m cli demo                # local cognitive demo
     python -m cli ml --episodes 60    # ML pipeline
@@ -23,17 +27,25 @@ from cli.menu import (
     describe_paths,
     menu_loop,
     missing_dependency_message,
+    run_agent,
+    run_ask,
     run_curriculum,
     run_demo,
     run_evaluation,
+    run_learn,
     run_llm,
     run_ml,
     run_petroleum,
     run_release,
     run_selfcheck,
+    run_voice,
 )
 
 _COMMANDS = {
+    "ask": run_ask,
+    "voice": run_voice,
+    "agent": run_agent,
+    "learn": run_learn,
     "demo": run_demo,
     "ml": run_ml,
     "llm": run_llm,
