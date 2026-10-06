@@ -193,6 +193,43 @@ pip install -r requirements.txt
 python main.py
 ```
 
+أو عبر الواجهة الموحّدة (نفس السلوك، وتعمل أيضاً في البناء المحمول):
+
+```bash
+python -m cli            # قائمة مرقّمة تفاعلية
+python -m cli demo       # عرض محلي
+python -m cli ml --episodes 60
+python -m cli llm --steps 4000
+python -m cli eval
+python -m cli paths      # أين تُقرأ الأصول وتُكتب البيانات
+python -m cli selfcheck  # التأكد من تحميل النموذج اللغوي المرفق
+```
+
+## الوضع المحمول (Portable)
+
+يمكن بناء حزمة تعمل على جهاز بلا Python وبلا أي برامج وسيطة (لا CUDA ولا خدمة
+خارجية)، مثل DeepFaceLab:
+
+```bash
+pip install pyinstaller      # أداة بناء فقط، ليست اعتمادية وقت تشغيل
+python scripts/build.py      # الناتج في dist/fayd-al-ruh/
+```
+
+- `fayd-al-ruh.spec`: إعداد PyInstaller؛ يُضمّن نقطة تحقّق النموذج اللغوي.
+- `scripts/build.py`: يبني الحزمة ثم ينسخ `run.sh` و`run.bat` بجانبها.
+- `run.sh` / `run.bat`: مشغّل واحد. يفضّل التنفيذي المبني إن وُجد، وإلا شغّل
+  المصدر عبر `python -m cli` — فتبقى بيئة التطوير كما هي.
+
+البيانات في الوضع المحمول تُكتب **بجانب التنفيذي** (`data/`)، فيمكن نسخ المجلد
+إلى ذاكرة USB والحفاظ على الحالة. ويمكن توجيهها بـ`FAYD_DATA_DIR`.
+
+| السياق | الأصول (للقراءة) | البيانات (للكتابة) |
+|---|---|---|
+| تشغيل من المصدر | جذر المستودع | جذر المستودع (`ml/artifacts`, `ml/llm/checkpoints`) |
+| بناء محمول | داخل الحزمة (`_internal`) | بجانب التنفيذي (`data/`) |
+
+التفاصيل في `docs/PORTABLE.md`.
+
 ## الاختبارات
 
 ```bash

@@ -13,12 +13,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from core.paths import checkpoints_dir
 from ml.llm.corpus import build_corpus
 from ml.llm.generator import LocalGenerator
 from ml.llm.tokenizer import ByteTokenizer
 from ml.llm.transformer import TransformerConfig, TransformerLM, train_language_model
 
-CHECKPOINT = Path(__file__).resolve().parent / "checkpoints" / "fayd-llm.npz"
+CHECKPOINT = checkpoints_dir() / "fayd-llm.npz"
 
 
 def build_model(*, seed: int = 0, config: TransformerConfig | None = None) -> TransformerLM:
