@@ -6,6 +6,7 @@ Usage:
     python -m cli voice "your question" # one voice turn
     python -m cli agent               # tool-agent demo in the safety sandbox
     python -m cli learn               # continuous learning + regression gate
+    python -m cli web "question"      # web answer, cited and trust-scored (governed)
     python -m cli paths               # show asset/data locations
     python -m cli demo                # local cognitive demo
     python -m cli ml --episodes 60    # ML pipeline
@@ -39,6 +40,7 @@ from cli.menu import (
     run_release,
     run_selfcheck,
     run_voice,
+    run_web,
 )
 
 _COMMANDS = {
@@ -46,6 +48,7 @@ _COMMANDS = {
     "voice": run_voice,
     "agent": run_agent,
     "learn": run_learn,
+    "web": run_web,
     "demo": run_demo,
     "ml": run_ml,
     "llm": run_llm,

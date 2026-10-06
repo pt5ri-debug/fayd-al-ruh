@@ -110,6 +110,11 @@ def run_learn(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.learn_demo", argv)
 
 
+def run_web(argv: Sequence[str] = ()) -> int:
+    """Answer from the web, rate trust, and learn trusted answers."""
+    return _run_module("ai.web_verify", argv)
+
+
 def run_curriculum(argv: Sequence[str] = ()) -> int:
     """Show the seeded petroleum-engineering curriculum and its coverage."""
     if argv:
@@ -159,6 +164,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("One voice turn", run_voice, ("--write-wav", "voice-turn.wav", "water")),
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Continuous learning and regression gate", run_learn, ()),
+    ("Ask the web and verify the answer", run_web, ("--approve", "What is the relationship between porosity and permeability?")),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--episodes", "60")),
     ("Train the language model", run_llm, ("--steps", "200")),
@@ -233,6 +239,7 @@ __all__ = [
     "run_voice",
     "run_agent",
     "run_learn",
+    "run_web",
     "run_demo",
     "run_ml",
     "run_llm",
