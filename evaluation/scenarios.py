@@ -95,6 +95,20 @@ class UncertaintySpec:
 
 
 @dataclass(frozen=True)
+class OntologyLearningSpec:
+    """An observed text and the concept links it should (not) teach.
+
+    ``expected_links`` are concept-label pairs the observation must connect with
+    a new weak relation. ``forbidden_links`` are pairs that must stay untouched,
+    e.g. because an explicit relation already states them.
+    """
+
+    text: str
+    expected_links: tuple[tuple[str, str], ...] = ()
+    forbidden_links: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class Scenario:
     """A single, fixed evaluation case."""
 
@@ -116,6 +130,8 @@ class Scenario:
     ontology_inferences: tuple[tuple[str, str, str], ...] = ()
     # Expectations reachable only by walking ontology relations (no shared word).
     ontology_retrieval: tuple[RetrievalExpectation, ...] = ()
+    # Observations that should teach the ontology new weak relations.
+    ontology_learning: tuple[OntologyLearningSpec, ...] = ()
 
 
 def _scenario_memory() -> Scenario:
@@ -421,6 +437,28 @@ def _scenario_petroleum_multihop_retrieval() -> Scenario:
     )
 
 
+def _scenario_petroleum_ontology_learning() -> Scenario:
+    """Petroleum domain: the ontology grows from observations, not only its seed.
+
+    A single field observation grounds three known concepts. The pairs with no
+    explicit relation (الضغط, النفاذية) and (الضغط, الطبقة) must be learned as weak
+    ``associated_with`` links, while the already-seeded (الطبقة, النفاذية) must be
+    left untouched so experience never overwrites curated knowledge.
+    """
+    return Scenario(
+        id="petroleum-ontology-learning",
+        domain=Domain.PETROLEUM,
+        description="Co-occurring concepts teach weak relations; seeded pairs stay untouched.",
+        ontology_learning=(
+            OntologyLearningSpec(
+                text="ارتفاع الضغط في الطبقة يرافقه تحسن في النفاذية",
+                expected_links=(("الضغط", "النفاذية"), ("الضغط", "الطبقة")),
+                forbidden_links=(("الطبقة", "النفاذية"),),
+            ),
+        ),
+    )
+
+
 SCENARIOS: tuple[Scenario, ...] = (
     _scenario_memory(),
     _scenario_reasoning(),
@@ -436,6 +474,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     _scenario_petroleum_identity(),
     _scenario_petroleum_ontology_inference(),
     _scenario_petroleum_multihop_retrieval(),
+    _scenario_petroleum_ontology_learning(),
 )
 
 
