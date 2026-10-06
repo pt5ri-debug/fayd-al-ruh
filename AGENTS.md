@@ -15,13 +15,14 @@ Arabic is kept as secondary aliases where useful.
 ## Layout
 
 - `core/` — cognitive architecture. Key seeds:
-  - `core/domain_knowledge.py` — the petroleum *frame*: 14 disciplines, concepts
+  - `core/domain_knowledge.py` — the petroleum *frame*: 17 disciplines, concepts
     + relations, `seed_ontology`, `discipline_coverage`, `discipline_labels`.
-  - `core/curriculum_knowledge.py` — the *curriculum*: 34 courses across
-    foundations / geoscience / engineering science / petroleum disciplines,
-    `seed_curriculum`, `curriculum_coverage`, `curriculum_coverage_score`.
-  - `core/petroleum_corpus.py` — the knowledge *content*: 31 entries across all
-    14 disciplines with definitions, relations, formulas, procedures, standards,
+  - `core/curriculum_knowledge.py` — the *curriculum*: 48 courses across
+    foundations / earth sciences / engineering science / petroleum disciplines
+    (including an advanced block), `seed_curriculum`, `curriculum_coverage`,
+    `curriculum_coverage_score`.
+  - `core/petroleum_corpus.py` — the knowledge *content*: 48 entries across 18
+    disciplines with definitions, relations, formulas, procedures, standards,
     and glossary; `seed_petroleum_corpus`, `corpus_documents`,
     `corpus_sentences`, `corpus_coverage`, `corpus_coverage_score`.
     All three seeds run in `CognitiveController.__init__` and share nodes

@@ -9,8 +9,9 @@ The project defines itself as a **petroleum-engineering mind**
 (`core/self_model.py`): it reasons across **all petroleum-engineering
 disciplines** — reservoirs, drilling, production, petrophysics, well logging,
 well completion, enhanced recovery, well testing, artificial lift, well
-stimulation, well cementing, well control, petroleum economics, and health,
-safety and environment — from evidence, not from guesswork. The identity is a
+stimulation, well cementing, well control, petroleum economics, health, safety
+and environment, facilities engineering, process safety, and unconventional
+resources — from evidence, not from guesswork. The identity is a
 domain frame, not a claim to consciousness. The initial domain knowledge is an
 auditable seed in `core/domain_knowledge.py`, organised by discipline, and is
 seeded into the project ontology at startup. On top of it sits a **full
@@ -117,20 +118,26 @@ during their studies, organised by the course that teaches it. It is not a
 textbook, but a compact, evidence-aware map of the programme: each course
 contributes its concepts and relations with modest, revisable confidence.
 
-The curriculum covers **34 courses** in four blocks:
+The curriculum covers **48 courses** in four blocks:
 
 - **Foundations** (6 courses): mathematics, physics, chemistry, statistics and
   data analysis, computing and programming, numerical methods.
-- **Geoscience** (5 courses): general geology, structural geology, sedimentology,
-  petroleum geology, geophysics.
-- **Engineering science** (4 courses): fluid mechanics, thermodynamics, mechanics
-  of materials, rock mechanics.
-- **Petroleum disciplines** (19 courses): petrophysics, reservoir fluid
+- **Earth sciences** (7 courses): general geology, structural geology,
+  sedimentology, petroleum geology, geophysics, basin analysis and petroleum
+  systems, seismic interpretation.
+- **Engineering science** (6 courses): fluid mechanics, thermodynamics, mechanics
+  of materials, rock mechanics, petroleum geomechanics, multiphase flow.
+- **Petroleum disciplines** (29 courses): petrophysics, reservoir fluid
   properties, reservoir engineering, drilling engineering, production
   engineering, well logging, well completion, well cementing, well stimulation,
   artificial lift, well testing, enhanced recovery, well control, facilities,
   transport and storage, offshore drilling, petroleum economics, project
-  management, health, safety and environment, and ethics and professionalism.
+  management, health, safety and environment, ethics and professionalism, plus
+  the advanced block: reservoir simulation and modelling, advanced enhanced oil
+  recovery, unconventional resources engineering, subsea and deepwater
+  engineering, flow assurance, process safety engineering, petroleum data
+  analytics and machine learning, carbon capture and storage, well plugging and
+  decommissioning, and integrated field management.
 
 ```python
 from core.cognitive_controller import CognitiveController
@@ -177,7 +184,7 @@ concrete, and it is seeded into all three knowledge consumers:
 - the **language-model training text**, via `corpus_sentences`, so the model is
   trained on the same knowledge the graph carries.
 
-The corpus currently covers **31 entries across all 14 disciplines**, including
+The corpus currently covers **48 entries across all 18 disciplines**, including
 reservoir rock properties and drive mechanisms, volumetric reserves and material
 balance, formation evaluation and saturation-height, the logging suite and its
 interpretation workflow, drilling fluids and casing design, directional drilling,
@@ -186,7 +193,14 @@ and matrix acidizing, primary cementing, well control, enhanced oil recovery,
 pressure-transient testing, project economics and field development planning,
 well integrity, process safety, offshore operations, surface facilities, project
 management, professional ethics, reservoir fluid properties, rock mechanics, and
-flow in porous media.
+flow in porous media. A second, advanced block adds the frontiers of field
+engineering: the petroleum system and seismic interpretation, surface facilities
+and gas processing/LNG, process safety management, unconventional resources,
+reservoir simulation and modelling, advanced EOR, waterflood management,
+integrated field development planning, geomechanics and wellbore stability, flow
+assurance, multiphase flow, subsea and deepwater production, data analytics and
+machine learning, carbon capture and storage, and well plugging and
+decommissioning.
 
 ```python
 from core.cognitive_controller import CognitiveController
@@ -222,8 +236,9 @@ tasks — one or more per discipline — and each task is a short, explicit acti
 chain ending in a real accomplishment: reserve estimation, drilling a well,
 restoring production, core analysis, log interpretation, completing a well,
 enhanced recovery, pressure testing, installing gas lift, matrix acidizing,
-primary cementing, controlling a gas kick, computing net present value, and
-verifying well integrity.
+primary cementing, controlling a gas kick, computing net present value,
+verifying well integrity, gas processing, a process-safety review, and
+completing a shale well.
 
 `ml/petroleum.py` trains — on these tasks — the same two layers used in
 `python -m ml`: a symbolic Q-learning policy and the predictive-coding brain. For

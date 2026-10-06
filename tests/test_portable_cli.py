@@ -257,9 +257,12 @@ def test_cli_curriculum_command_dispatches(monkeypatch) -> None:
 
 def test_curriculum_action_reports_the_whole_degree(capsys) -> None:
     from cli.menu import run_curriculum
+    from core.curriculum_knowledge import course_keys
+    from core.petroleum_corpus import corpus_disciplines
 
     assert run_curriculum() == 0
     out = capsys.readouterr().out
-    assert "Courses: 34" in out
+    assert f"Courses: {len(course_keys())}" in out
     assert "Reservoir Engineering" in out
     assert "Petroleum Disciplines" in out
+    assert f"Corpus entries: {len(corpus_disciplines())} disciplines" in out

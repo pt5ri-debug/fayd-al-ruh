@@ -9,9 +9,10 @@ relations carry a modest confidence and can be revised like any other belief.
 The seed is organized by petroleum-engineering discipline so the frame spans the
 whole field -- reservoir, drilling, production, petrophysics, well logging,
 completions, enhanced recovery, well testing, artificial lift, stimulation,
-cementing, well control, economics, and HSE. Each discipline contributes its own
-concepts and relations; ``discipline_coverage`` reports how much of that frame an
-ontology currently carries.
+cementing, well control, economics, HSE, plus the newer frontiers of facilities
+engineering, process safety, and unconventional resources. Each discipline
+contributes its own concepts and relations; ``discipline_coverage`` reports how
+much of that frame an ontology currently carries.
 """
 
 from __future__ import annotations
@@ -277,6 +278,60 @@ _DISCIPLINES: tuple[DisciplineKnowledge, ...] = (
             ("well_integrity", "cement", "requires", 0.7),
             ("pressure_barrier", "gas_kick", "prevents", 0.7),
             ("inspection", "well_integrity", "verifies", 0.6),
+        ),
+    ),
+    DisciplineKnowledge(
+        key="facilities",
+        label="Facilities Engineering",
+        concepts=(
+            ("separator", ("separator", "three-phase separator")),
+            ("pipeline", ("pipeline", "flowline")),
+            ("gas_processing", ("gas processing", "gas plant")),
+            ("pump", ("pump", "pumping system")),
+            ("storage_tank", ("storage tank", "tank farm")),
+        ),
+        relations=(
+            ("separator", "production", "processes", 0.7),
+            ("pipeline", "hydrocarbon", "transports", 0.7),
+            ("gas_processing", "hydrocarbon", "treats", 0.6),
+            ("pump", "pipeline", "pressurizes", 0.6),
+            ("storage_tank", "hydrocarbon", "stores", 0.6),
+        ),
+    ),
+    DisciplineKnowledge(
+        key="process_safety",
+        label="Process Safety",
+        concepts=(
+            ("process_safety_event", ("process safety event", "loss of containment")),
+            ("layers_of_protection", ("layers of protection", "protection layers")),
+            ("hazard_analysis", ("hazard analysis", "HAZOP")),
+            ("safety_case", ("safety case", "safety management system")),
+            ("barrier_management", ("barrier management", "barrier health")),
+        ),
+        relations=(
+            ("hazard_analysis", "process_safety_event", "prevents", 0.7),
+            ("layers_of_protection", "process_safety_event", "mitigates", 0.7),
+            ("barrier_management", "layers_of_protection", "maintains", 0.6),
+            ("safety_case", "hazard_analysis", "documents", 0.6),
+            ("process_safety_event", "well_integrity", "threatens", 0.6),
+        ),
+    ),
+    DisciplineKnowledge(
+        key="unconventional",
+        label="Unconventional Resources",
+        concepts=(
+            ("shale_play", ("shale play", "shale")),
+            ("horizontal_lateral", ("horizontal lateral", "lateral")),
+            ("multi_stage_fracturing", ("multi-stage fracturing", "multi-stage frac")),
+            ("tight_gas", ("tight gas", "tight reservoir")),
+            ("sweet_spot", ("sweet spot", "landing zone")),
+        ),
+        relations=(
+            ("shale_play", "reservoir", "hosts", 0.6),
+            ("horizontal_lateral", "shale_play", "drains", 0.7),
+            ("multi_stage_fracturing", "horizontal_lateral", "stimulates", 0.7),
+            ("sweet_spot", "horizontal_lateral", "guides", 0.6),
+            ("tight_gas", "shale_play", "produced_from", 0.6),
         ),
     ),
 )

@@ -311,8 +311,15 @@ controller.ontology.find_concepts("permeability")    # permeability
 The frame and the curriculum declare *which* concepts exist; the corpus in
 `core/petroleum_corpus.py` holds what they *mean*. Each `CorpusEntry` carries a
 definition plus concepts, relations, formulas, procedures, standards, and
-bilingual glossary terms, organised by discipline. It is seeded into every
-knowledge consumer so the content is inseparable from the project:
+bilingual glossary terms, organised by discipline. It currently holds **48
+entries across 18 disciplines**, spanning the core petroleum disciplines and an
+advanced block of field-engineering frontiers: petroleum systems and seismic
+interpretation, gas processing and LNG, process safety management, unconventional
+resources, reservoir simulation, advanced EOR and waterflood management,
+integrated field development, geomechanics, flow assurance, multiphase flow,
+subsea and deepwater production, data analytics, carbon capture and storage, and
+well decommissioning. It is seeded into every knowledge consumer so the content
+is inseparable from the project:
 
 - `seed_petroleum_corpus(ontology)`: plants the concepts and relations
   **idempotently**, reusing nodes the frame and the curriculum already created,
