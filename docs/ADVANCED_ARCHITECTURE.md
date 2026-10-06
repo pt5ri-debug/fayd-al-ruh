@@ -339,9 +339,12 @@ folded into the corpus only when it is trusted.
 
 - `core/web_source.py`:
   - `WebResult` is one source (URL, title, snippet, credibility).
-  - `WebSearchProvider` is the contract; `StaticSearchProvider` is deterministic
-    and offline (tests, demo), and `HttpSearchProvider` is a JSON client for a
-    caller-supplied endpoint (the application owns the URL and any key).
+  - `WebSearchProvider` is the contract; `WikipediaSearchProvider` is keyless and
+    reaches the real internet by default, `StaticSearchProvider` is deterministic
+    and offline (tests, no-network fallback), and `HttpSearchProvider` is a JSON
+    client for a caller-supplied endpoint (the application owns the URL and key).
+    `FallbackSearchProvider` tries the internet first and drops back to the
+    offline corpus on failure or an empty result.
   - `WebSearchService` consults a `PermissionPolicy` and a `HumanApprovalGate`
     before it runs, and records every decision in the `AuditLog`; a provider
     failure is contained and never crashes the caller.
@@ -360,13 +363,15 @@ folded into the corpus only when it is trusted.
 
 ```bash
 python -m cli web --approve "What is the relationship between porosity and permeability?"
+python -m cli web --approve            # prompts: type your own question
 python -m cli web "What is a gamma ray log?"          # denied by default
 python -m ai.web_verify --json --approve "What is a gas kick?"
 ```
 
 `FAYD_SEARCH_ENDPOINT` (and optionally `FAYD_SEARCH_API_KEY`) point the command
-at a real search API; with none set it uses a small offline corpus, so the whole
-path is testable on a fresh clone with no network and no key.
+at a real search API; with none set it uses the keyless Wikipedia API and drops
+back to a small offline corpus when there is no network, so the whole path is
+testable on a fresh clone.
 
 ## Measurable scientific evaluation
 

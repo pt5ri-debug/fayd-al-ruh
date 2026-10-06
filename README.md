@@ -462,12 +462,13 @@ internet — but only under the same governance as every other external action, 
 only when the answer is trustworthy enough:
 
 1. **Search the web** (`core/web_source.py`): a `WebSearchService` runs a
-   `WebSearchProvider` (an offline `StaticSearchProvider`, or an
-   `HttpSearchProvider` pointed at a caller-supplied endpoint). Search is an
-   **external tool**, so it is denied by default; it runs only when a
-   `PermissionPolicy` grants the capability, the tool name is on the allow-list,
-   and a live `HumanApprovalGate` approval exists. Every decision is written to
-   the append-only `AuditLog`.
+   `WebSearchProvider`. By default it reaches the **real internet** through the
+   keyless `WikipediaSearchProvider`, and falls back to an offline
+   `StaticSearchProvider` when there is no network; an `HttpSearchProvider` points
+   at your own endpoint. Search is an **external tool**, so it is denied by
+   default; it runs only when a `PermissionPolicy` grants the capability, the tool
+   name is on the allow-list, and a live `HumanApprovalGate` approval exists.
+   Every decision is written to the append-only `AuditLog`.
 2. **Cite the sources** (`core/web_verifier.py`): each result keeps its URL,
    title, snippet, and a transparent credibility estimate over the domain suffix
    (government, standards bodies, and academic hosts rank above generic blogs).
@@ -483,15 +484,21 @@ only when the answer is trustworthy enough:
 
 ```bash
 python -m cli web --approve "What is the relationship between porosity and permeability?"
+python -m cli web --approve            # prompts: type your own question
 python -m cli web "What is a gamma ray log?"          # denied by default
 python -m cli web --endpoint https://api.example.com/search "What is a gas kick?"
 python -m ai.web_verify --json --approve "What is a gas kick?"
 ```
 
+In the interactive menu, option **5) Ask the web and verify the answer** grants the
+capability and then asks you to type the question, so you are never stuck with a
+fixed example question.
+
 Set `FAYD_SEARCH_ENDPOINT` (and optionally `FAYD_SEARCH_API_KEY`) to point the
 command at a real search API; the application owns the URL and the key, and none
-is stored in the project. With no endpoint the command uses a small offline
-corpus, so the whole path works on a fresh clone with no network.
+is stored in the project. With no endpoint it uses the keyless Wikipedia API, and
+drops back to a small offline corpus when there is no network — so the whole path
+works on a fresh clone.
 
 ## Multimodal perception (optional)
 

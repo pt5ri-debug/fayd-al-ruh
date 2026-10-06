@@ -229,3 +229,127 @@ def test_assessment_requires_scores_in_range():
             trust=0.0,
             learned=False,
         )
+
+
+# --- internet providers ---------------------------------------------------
+
+
+def test_wikipedia_provider_parses_search_results(monkeypatch):
+    payload = {
+        "query": {
+            "search": [
+                {"title": "Gas kick", "snippet": "<span>gas</span> kick", "pageid": 123},
+                {"title": "Blowout", "snippet": "loss of <b>well</b> control"},
+            ]
+        }
+    }
+
+    class _Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return payload
+
+    import requests
+
+    captured: dict[str, object] = {}
+
+    def _fake_get(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return _Response()
+
+    monkeypatch.setattr(requests, "get", _fake_get)
+    from core.web_source import WikipediaSearchProvider
+
+    results = WikipediaSearchProvider().search("gas kick", limit=2)
+
+    assert [result.title for result in results] == ["Gas kick", "Blowout"]
+    assert results[0].snippet == "gas kick"  # HTML tags stripped
+    assert results[0].url.endswith("curid=123")
+    assert "User-Agent" in captured["headers"]  # Wikipedia requires a UA
+
+
+def test_fallback_provider_uses_backup_on_failure_and_on_empty():
+    from core.web_source import FallbackSearchProvider, StaticSearchProvider
+
+    class _Broken:
+        name = "broken"
+
+        def search(self, query: str, *, limit: int = 5):
+            raise RuntimeError("offline")
+
+    class _Empty:
+        name = "empty"
+
+        def search(self, query: str, *, limit: int = 5):
+            return ()
+
+    backup = StaticSearchProvider((_RELATED,))
+    assert FallbackSearchProvider(_Broken(), backup).search("porosity permeability") == (_RELATED,)
+    assert FallbackSearchProvider(_Empty(), backup).search("porosity permeability") == (_RELATED,)
+
+
+def test_web_cli_prompts_for_the_question(monkeypatch):
+    import builtins
+
+    import ai.web_verify as web_verify
+
+    monkeypatch.setattr(builtins, "input", lambda prompt="": "What is a gas kick?")
+    captured: dict[str, str] = {}
+
+    class _FakeVerifier:
+        def verify(self, question, **kwargs):
+            captured["question"] = question
+            return web_verify.WebAssessment(
+                question=question,
+                answer="",
+                citations=(),
+                sources=(),
+                internal_passages=(),
+                credibility=0.0,
+                agreement=0.0,
+                support=0.0,
+                trust=0.0,
+                learned=False,
+            )
+
+    monkeypatch.setattr(web_verify, "build_web_verifier", lambda **kwargs: _FakeVerifier())
+    code = web_verify.main(["--approve"])
+
+    assert code == 0
+    assert captured["question"] == "What is a gas kick?"
+
+
+def test_web_cli_uses_fallback_internet_provider_by_default(monkeypatch):
+    import ai.web_verify as web_verify
+
+    captured: dict[str, object] = {}
+
+    class _FakeVerifier:
+        def verify(self, question, **kwargs):
+            return web_verify.WebAssessment(
+                question=question,
+                answer="",
+                citations=(),
+                sources=(),
+                internal_passages=(),
+                credibility=0.0,
+                agreement=0.0,
+                support=0.0,
+                trust=0.0,
+                learned=False,
+            )
+
+    def _fake_build(*, provider, **kwargs):
+        captured["provider"] = provider
+        return _FakeVerifier()
+
+    monkeypatch.setattr(web_verify, "build_web_verifier", _fake_build)
+    web_verify.main(["question"])
+
+    from core.web_source import FallbackSearchProvider
+
+    assert isinstance(captured["provider"], FallbackSearchProvider)
+    assert captured["provider"].primary.name == "wikipedia"

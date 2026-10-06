@@ -156,6 +156,105 @@ class HttpSearchProvider:
         return tuple(results)
 
 
+class WikipediaSearchProvider:
+    """A keyless provider over the Wikipedia search API.
+
+    It needs no API key, so the project can answer from the real internet out of
+    the box. Any network failure raises and is contained by
+    :class:`WebSearchService`, which lets the caller fall back to an offline
+    provider.
+    """
+
+    name = "wikipedia"
+    _API = "https://en.wikipedia.org/w/api.php"
+    # Wikipedia blocks requests without a descriptive User-Agent.
+    _USER_AGENT = "FaydAlRuh/2.2 (educational; +https://github.com/pt5ri-debug/fayd-al-ruh)"
+
+    def __init__(self, *, timeout: float = 15.0) -> None:
+        self.timeout = timeout
+
+    def search(self, query: str, *, limit: int = 5) -> tuple[WebResult, ...]:
+        if not query.strip():
+            raise ValueError("Search query cannot be empty.")
+        import requests
+
+        response = requests.get(
+            self._API,
+            params={
+                "action": "query",
+                "list": "search",
+                "srsearch": query,
+                "format": "json",
+                "srlimit": str(limit),
+            },
+            headers={"Accept": "application/json", "User-Agent": self._USER_AGENT},
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        raw_results = payload.get("query", {}).get("search", []) if isinstance(payload, dict) else []
+        results: list[WebResult] = []
+        for item in raw_results[:limit]:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title", "")).strip()
+            if not title:
+                continue
+            page_id = item.get("pageid")
+            url = (
+                f"https://en.wikipedia.org/?curid={page_id}"
+                if page_id is not None
+                else f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
+            )
+            results.append(
+                WebResult(
+                    url=url,
+                    title=title,
+                    snippet=_strip_html(str(item.get("snippet", ""))),
+                    credibility=estimate_credibility(url),
+                    provider=self.name,
+                )
+            )
+        return tuple(results)
+
+
+def _strip_html(text: str) -> str:
+    """Remove the HTML tags Wikipedia wraps around highlighted search terms."""
+    out: list[str] = []
+    in_tag = False
+    for char in text:
+        if char == "<":
+            in_tag = True
+        elif char == ">":
+            in_tag = False
+        elif not in_tag:
+            out.append(char)
+    return "".join(out).replace("&quot;", '"').replace("&amp;", "&").strip()
+
+
+class FallbackSearchProvider:
+    """Try a primary provider, then a backup if it fails or finds nothing.
+
+    Used to reach the real internet first and drop back to the offline corpus
+    when there is no network, so the governed path always has something to work
+    with.
+    """
+
+    def __init__(self, primary: WebSearchProvider, backup: WebSearchProvider) -> None:
+        self.primary = primary
+        self.backup = backup
+        self.name = f"{primary.name}+{backup.name}"
+
+    def search(self, query: str, *, limit: int = 5) -> tuple[WebResult, ...]:
+        try:
+            results = self.primary.search(query, limit=limit)
+        except Exception:
+            results = ()
+        if results:
+            return results
+        return self.backup.search(query, limit=limit)
+
+
 @dataclass(frozen=True)
 class SearchOutcome:
     """What one governed search did."""
@@ -252,11 +351,13 @@ class WebSearchService:
 
 
 __all__ = [
+    "FallbackSearchProvider",
     "HttpSearchProvider",
     "SearchOutcome",
     "StaticSearchProvider",
     "WebResult",
     "WebSearchProvider",
     "WebSearchService",
+    "WikipediaSearchProvider",
     "estimate_credibility",
 ]

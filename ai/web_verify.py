@@ -2,13 +2,18 @@
 
     python -m cli web "What is the relationship between porosity and permeability?"
     python -m cli web --approve "What is a gamma ray log?"
+    python -m cli web --approve            # prompts for your question
     python -m cli web --endpoint https://api.example.com/search "What is a gas kick?"
 
 Search is an external tool, so it is **denied by default**: the command prints
 the permission reason until ``--approve`` grants the capability and records a
-human approval, exactly like the rest of the governed-tool path. Without a live
-endpoint the command runs against a small offline corpus of sources, so the
-whole path is testable on a fresh clone with no network and no API key.
+human approval, exactly like the rest of the governed-tool path.
+
+By default the search reaches the real internet through the keyless Wikipedia
+API. If there is no network (or the request fails), it falls back to a small
+offline corpus, so the whole path still works on a fresh clone. Pass
+``--endpoint`` (or set ``FAYD_SEARCH_ENDPOINT``) to use your own search API; the
+application owns that URL and any key, and none is stored in the project.
 
 An answer is folded into the project's corpus only when its trust clears the
 threshold, and the command says plainly when it did not.
@@ -22,7 +27,14 @@ import os
 
 from core.human_approval import HumanApprovalGate
 from core.permissions import Capability, PermissionPolicy
-from core.web_source import HttpSearchProvider, StaticSearchProvider, WebResult
+from core.web_source import (
+    FallbackSearchProvider,
+    HttpSearchProvider,
+    StaticSearchProvider,
+    WebResult,
+    WebSearchProvider,
+    WikipediaSearchProvider,
+)
 from core.web_verifier import WebAssessment, build_web_verifier
 
 _ENDPOINT_ENV = "FAYD_SEARCH_ENDPOINT"
@@ -85,10 +97,10 @@ def _approvals(approved: bool) -> HumanApprovalGate:
     return gate
 
 
-def _provider(endpoint: str | None):
+def _provider(endpoint: str | None) -> WebSearchProvider:
     if endpoint:
         return HttpSearchProvider(endpoint, api_key=os.environ.get(_API_KEY_ENV))
-    return StaticSearchProvider(_DEMO_RESULTS)
+    return FallbackSearchProvider(WikipediaSearchProvider(), StaticSearchProvider(_DEMO_RESULTS))
 
 
 def _print_assessment(assessment: WebAssessment, *, as_json: bool) -> None:
@@ -135,10 +147,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
-    if not args.question:
-        parser.error("a question is required")
+    if args.question:
+        question = " ".join(args.question)
+    else:
+        prompted = _prompt_question()
+        if prompted is None:
+            return 0
+        question = prompted
 
-    question = " ".join(args.question)
     verifier = build_web_verifier(
         provider=_provider(args.endpoint),
         trust_threshold=args.threshold,
@@ -148,6 +164,18 @@ def main(argv: list[str] | None = None) -> int:
     assessment = verifier.verify(question)
     _print_assessment(assessment, as_json=args.json)
     return 0
+
+
+def _prompt_question() -> str | None:
+    """Read a question from the terminal, or None to finish."""
+    try:
+        question = input("Question: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+    if question in {"exit", "quit", ""}:
+        return None
+    return question
 
 
 if __name__ == "__main__":

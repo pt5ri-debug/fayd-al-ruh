@@ -52,14 +52,17 @@ Arabic is kept as secondary aliases where useful.
   with provenance and decay (`KnowledgeUpdater`). `core/continuous_learning.py` —
   `ContinuousLearner` (explicit feedback only) + `RegressionMonitor` for baseline
   comparisons. CLI: `python -m ai.learn_demo` / `python -m cli learn`.
-- `core/web_source.py` — governed web search: `WebSearchProvider` contract with an
-  offline `StaticSearchProvider` and an `HttpSearchProvider`; `WebSearchService`
-  runs only through the permission/approval/audit gates (denied by default) and
+- `core/web_source.py` — governed web search: `WebSearchProvider` contract with a
+  keyless `WikipediaSearchProvider` (real internet, used by default), an offline
+  `StaticSearchProvider`, an `HttpSearchProvider`, and a `FallbackSearchProvider`
+  that drops to offline when the network is unavailable; `WebSearchService` runs
+  only through the permission/approval/audit gates (denied by default) and
   `estimate_credibility` scores a source by its domain. `core/web_verifier.py`
   `WebVerifier.verify` searches, cites sources, compares them with the internal
   corpus, and learns an answer via `KnowledgeUpdater` only when its trust clears
   the threshold and it does not contradict known knowledge. CLI:
-  `python -m ai.web_verify` / `python -m cli web`.
+  `python -m ai.web_verify` / `python -m cli web` (pass `--approve` to grant the
+  external capability; omit the question to be prompted for your own).
 - `core/vision.py` — optional multimodal perception: dependency-free `ImageBuffer`
   (PPM P6), measurable `ImageFeatures`, `HeuristicVisionEncoder`, and a
   `MultimodalAssistant` that grounds an image description in the RAG store. A real
