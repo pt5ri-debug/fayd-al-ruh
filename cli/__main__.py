@@ -6,6 +6,7 @@ Usage:
     python -m cli demo                # local cognitive demo
     python -m cli ml --episodes 60    # ML pipeline
     python -m cli llm --steps 200     # language-model trainer
+    python -m cli petroleum           # petroleum-engineering task training
     python -m cli eval                # evaluation suite
 
 The commands mirror the modules developers already use, so nothing about the
@@ -24,6 +25,7 @@ from cli.menu import (
     run_evaluation,
     run_llm,
     run_ml,
+    run_petroleum,
     run_selfcheck,
 )
 
@@ -31,6 +33,7 @@ _COMMANDS = {
     "demo": run_demo,
     "ml": run_ml,
     "llm": run_llm,
+    "petroleum": run_petroleum,
     "eval": run_evaluation,
     "evaluation": run_evaluation,
     "selfcheck": run_selfcheck,

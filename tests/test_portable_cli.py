@@ -109,3 +109,50 @@ def test_run_choice_reports_missing_dependency(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert "Missing dependency: 'numpy'" in out
     assert "pip install -r requirements.txt" in out
+
+
+def test_run_petroleum_adds_default_save_dir(monkeypatch, tmp_path) -> None:
+    captured: dict[str, Sequence[str]] = {}
+
+    def fake_run_module(name: str, argv: Sequence[str]) -> int:
+        captured["name"] = name
+        captured["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(menu, "_run_module", fake_run_module)
+    monkeypatch.setattr(menu, "artifacts_dir", lambda: tmp_path / "artifacts")
+
+    menu.run_petroleum(["--episodes", "5"])
+    assert captured["name"] == "ml.petroleum"
+    assert captured["argv"] == [
+        "--episodes",
+        "5",
+        "--save-dir",
+        str(tmp_path / "artifacts" / "petroleum"),
+    ]
+
+
+def test_run_petroleum_respects_explicit_save_dir(monkeypatch, tmp_path) -> None:
+    captured: dict[str, Sequence[str]] = {}
+
+    def fake_run_module(name: str, argv: Sequence[str]) -> int:
+        captured["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(menu, "_run_module", fake_run_module)
+    menu.run_petroleum(["--save-dir", str(tmp_path / "explicit")])
+    assert captured["argv"].count("--save-dir") == 1
+
+
+def test_cli_petroleum_command_dispatches(monkeypatch) -> None:
+    calls: list[Sequence[str]] = []
+
+    def fake(argv: Sequence[str]) -> int:
+        calls.append(argv)
+        return 0
+
+    import cli.__main__ as cli_entry
+
+    monkeypatch.setitem(cli_entry._COMMANDS, "petroleum", fake)
+    assert cli_entry.main(["petroleum", "--episodes", "5"]) == 0
+    assert calls == [["--episodes", "5"]]

@@ -25,6 +25,7 @@ from evaluation.scenarios import (
     SCENARIOS,
     DecisionActionSpec,
 )
+from ml.petroleum import petroleum_learning_accuracy
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,8 @@ class EvaluationMetrics:
     petroleum_ontology_learning_accuracy: float
     petroleum_ontology_reinforcement_accuracy: float
     petroleum_ontology_feedback_accuracy: float
+    # Petroleum learning across disciplines (trained tasks, held-out success)
+    petroleum_learning_accuracy: float
     # Aggregate
     overall: float
 
@@ -657,18 +660,25 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     petroleum_ontology = domain_metric(Domain.PETROLEUM, "ontology_accuracy")
     petroleum_inference = domain_metric(Domain.PETROLEUM, "ontology_inference_accuracy")
     petroleum_multihop = domain_metric(Domain.PETROLEUM, "ontology_retrieval_accuracy")
-    petroleum_learning = domain_metric(Domain.PETROLEUM, "ontology_learning_accuracy")
+    petroleum_ontology_learning = domain_metric(Domain.PETROLEUM, "ontology_learning_accuracy")
     petroleum_reinforcement = domain_metric(Domain.PETROLEUM, "ontology_reinforcement_accuracy")
     petroleum_feedback = domain_metric(Domain.PETROLEUM, "ontology_feedback_accuracy")
+
+    # Petroleum learning: train the policy + brain on every discipline's task and
+    # take the mean held-out success. This is a real learning metric, not a
+    # retrieval score, so it regresses if any discipline stops being learnable.
+    petroleum_task_learning = petroleum_learning_accuracy()
+
     petroleum_score = mean([
         petroleum_causal,
         petroleum_retrieval,
         petroleum_ontology,
         petroleum_inference,
         petroleum_multihop,
-        petroleum_learning,
+        petroleum_ontology_learning,
         petroleum_reinforcement,
         petroleum_feedback,
+        petroleum_task_learning,
     ])
 
     calibrated = clamp(1.0 - calibration_error)
@@ -685,9 +695,10 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_ontology,
         petroleum_inference,
         petroleum_multihop,
-        petroleum_learning,
+        petroleum_ontology_learning,
         petroleum_reinforcement,
         petroleum_feedback,
+        petroleum_task_learning,
     ])
 
     metrics = EvaluationMetrics(
@@ -708,9 +719,10 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_ontology_accuracy=round(petroleum_ontology, 6),
         petroleum_inference_accuracy=round(petroleum_inference, 6),
         petroleum_multihop_retrieval_accuracy=round(petroleum_multihop, 6),
-        petroleum_ontology_learning_accuracy=round(petroleum_learning, 6),
+        petroleum_ontology_learning_accuracy=round(petroleum_ontology_learning, 6),
         petroleum_ontology_reinforcement_accuracy=round(petroleum_reinforcement, 6),
         petroleum_ontology_feedback_accuracy=round(petroleum_feedback, 6),
+        petroleum_learning_accuracy=round(petroleum_task_learning, 6),
         overall=round(overall, 6),
     )
 
