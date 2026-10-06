@@ -51,7 +51,7 @@ from core.experiment_runner import ExperimentRunner
 from core.ontology import Ontology
 from core.ontology_reasoner import OntologyInference, OntologyReasoner
 from core.ontology_retrieval import OntologyGuidedRetriever
-from core.ontology_learner import OntologyLearner, OntologyLearning
+from core.ontology_learner import OntologyDecay, OntologyLearner, OntologyLearning
 from core.domain_knowledge import domain_summary, seed_ontology
 from core.semantic_parser import SemanticParser
 from core.meaning_model import MeaningModel
@@ -461,6 +461,23 @@ class CognitiveController:
         if learning.changed:
             self.ontology_retriever.invalidate()
         return learning
+
+    def decay_ontology_learning(self, amount: float | None = None) -> OntologyDecay:
+        """Weaken learned ontology relations through disuse, dropping any that fade out.
+
+        Seeded relations are untouched: only ``associated_with`` links learned from
+        observations decay. The retriever cache is invalidated when anything changes.
+        """
+        decay = self.ontology_learner.decay(amount)
+        if decay.changed:
+            self.ontology_retriever.invalidate()
+        return decay
+
+    def reinforce_ontology_relation(self, source_label: str, target_label: str, amount: float | None = None) -> float:
+        """Strengthen a learned relation between two concepts after successful use."""
+        confidence = self.ontology_learner.reinforce(source_label, target_label, amount)
+        self.ontology_retriever.invalidate()
+        return confidence
 
     def explain_belief(self, belief_id: str) -> BeliefExplanation:
         belief = self.graph.get_belief(belief_id)

@@ -109,6 +109,26 @@ class OntologyLearningSpec:
 
 
 @dataclass(frozen=True)
+class OntologyReinforcementSpec:
+    """A repeated observation and how experience should reshape its learned links.
+
+    The text is observed ``repeats`` times, so each pair it teaches is reinforced
+    step by step. ``min_confidence`` is the confidence the strongest learned link
+    must reach, and ``ceiling`` bounds every learned link so experience never
+    rivals the seed. ``decay_rounds`` decays are then applied: if
+    ``expect_removed`` is set, the learned links must fade away entirely while the
+    seeded relations stay untouched.
+    """
+
+    text: str
+    repeats: int = 1
+    min_confidence: float = 0.0
+    ceiling: float = 1.0
+    decay_rounds: int = 0
+    expect_removed: bool = True
+
+
+@dataclass(frozen=True)
 class Scenario:
     """A single, fixed evaluation case."""
 
@@ -132,6 +152,8 @@ class Scenario:
     ontology_retrieval: tuple[RetrievalExpectation, ...] = ()
     # Observations that should teach the ontology new weak relations.
     ontology_learning: tuple[OntologyLearningSpec, ...] = ()
+    # Repeated observations that should reinforce/decay learned relations.
+    ontology_reinforcement: tuple[OntologyReinforcementSpec, ...] = ()
 
 
 def _scenario_memory() -> Scenario:
@@ -459,6 +481,37 @@ def _scenario_petroleum_ontology_learning() -> Scenario:
     )
 
 
+def _scenario_petroleum_ontology_reinforcement() -> Scenario:
+    """Petroleum domain: experience weights the links it learns.
+
+    The same field observation is repeated, so the links it teaches should be
+    reinforced step by step up to a bounded confidence below the seed. A second
+    observation is then left to decay: its learned links must fade away entirely
+    while the seeded relations stay untouched.
+    """
+    return Scenario(
+        id="petroleum-ontology-reinforcement",
+        domain=Domain.PETROLEUM,
+        description="Repetition strengthens learned links; disuse decays them without touching the seed.",
+        ontology_reinforcement=(
+            OntologyReinforcementSpec(
+                text="ارتفاع الضغط في الطبقة يرافقه تحسن في النفاذية",
+                repeats=5,
+                min_confidence=0.5,
+                ceiling=0.6,
+            ),
+            OntologyReinforcementSpec(
+                text="تغير المكمن يؤثر على الاسمنت",
+                repeats=1,
+                min_confidence=0.3,
+                ceiling=0.6,
+                decay_rounds=6,
+                expect_removed=True,
+            ),
+        ),
+    )
+
+
 SCENARIOS: tuple[Scenario, ...] = (
     _scenario_memory(),
     _scenario_reasoning(),
@@ -475,6 +528,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     _scenario_petroleum_ontology_inference(),
     _scenario_petroleum_multihop_retrieval(),
     _scenario_petroleum_ontology_learning(),
+    _scenario_petroleum_ontology_reinforcement(),
 )
 
 

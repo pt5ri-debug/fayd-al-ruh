@@ -22,6 +22,19 @@ class Ontology:
             raise ValueError("Semantic relations must reference known concepts.")
         self.relations[relation.id] = relation
 
+    def replace_relation(self, relation: SemanticRelation) -> None:
+        """Overwrite an existing relation in place, e.g. to adjust its confidence."""
+        if relation.id not in self.relations:
+            raise KeyError(f"Unknown semantic relation: {relation.id}")
+        if relation.source_id not in self.concepts or relation.target_id not in self.concepts:
+            raise ValueError("Semantic relations must reference known concepts.")
+        self.relations[relation.id] = relation
+
+    def remove_relation(self, relation_id: str) -> None:
+        if relation_id not in self.relations:
+            raise KeyError(f"Unknown semantic relation: {relation_id}")
+        del self.relations[relation_id]
+
     def find_concepts(self, term: str) -> list[Concept]:
         token = term.casefold().strip()
         return [concept for concept in self.concepts.values() if token in concept.terms]

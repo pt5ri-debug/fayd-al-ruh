@@ -54,7 +54,7 @@ def test_observe_skips_pairs_that_already_have_an_explicit_relation():
     )
 
 
-def test_observe_is_idempotent():
+def test_observe_reinforces_repeated_pairs_instead_of_duplicating():
     ontology = _mini_ontology()
     learner = OntologyLearner(ontology)
     first = learner.observe("pressure permeability formation")
@@ -62,7 +62,98 @@ def test_observe_is_idempotent():
 
     assert first.added
     assert second.added == ()
-    assert second.skipped > 0
+    assert second.reinforced
+    # formation<->permeability is seeded and still skipped.
+    assert second.skipped == 1
+    # Each repeated pair moved up one reinforcement step from the initial 0.3.
+    assert all(confidence == pytest.approx(0.35) for _s, _t, confidence in second.reinforced)
+
+
+def test_reinforcement_is_capped_below_the_seeded_relations():
+    ontology = _mini_ontology()
+    learner = OntologyLearner(ontology, confidence=0.3, ceiling=0.5, reinforcement=0.1)
+    for _ in range(10):
+        learner.observe("pressure permeability formation")
+
+    learned = [
+        relation.confidence
+        for relation in ontology.relations.values()
+        if relation.relation_type == "associated_with"
+    ]
+    assert learned
+    assert max(learned) == pytest.approx(0.5)
+
+
+def test_decay_weakens_then_removes_learned_relations():
+    ontology = _mini_ontology()
+    learner = OntologyLearner(ontology, confidence=0.3, reinforcement=0.1)
+    learner.observe("pressure permeability formation")
+    learned_before = {
+        relation.id for relation in ontology.relations.values() if relation.relation_type == "associated_with"
+    }
+    assert learned_before
+
+    first = learner.decay()
+    assert first.decayed
+    assert not first.removed
+    assert all(confidence == pytest.approx(0.2) for _s, _t, confidence in first.decayed)
+
+    learner.decay()
+    second = learner.decay()
+    assert second.removed
+    assert all(
+        relation.relation_type != "associated_with"
+        for relation in ontology.relations.values()
+    )
+
+
+def test_decay_leaves_seeded_relations_untouched():
+    ontology = _mini_ontology()
+    learner = OntologyLearner(ontology)
+    seeded_before = {
+        relation.id: relation.confidence
+        for relation in ontology.relations.values()
+        if relation.relation_type != "associated_with"
+    }
+    learner.observe("pressure permeability")
+    learner.decay()
+    learner.decay()
+    learner.decay()
+
+    seeded_after = {
+        relation.id: relation.confidence
+        for relation in ontology.relations.values()
+        if relation.relation_type != "associated_with"
+    }
+    assert seeded_after == seeded_before
+
+
+def test_reinforce_by_label_requires_a_learned_relation():
+    ontology = _mini_ontology()
+    learner = OntologyLearner(ontology)
+    learner.observe("pressure permeability")
+
+    assert learner.reinforce("pressure", "permeability") == pytest.approx(0.35)
+    with pytest.raises(KeyError):
+        learner.reinforce("pressure", "reservoir")
+    with pytest.raises(KeyError):
+        learner.reinforce("unknown", "permeability")
+
+
+def test_reinforcement_and_decay_amounts_are_validated():
+    learner = OntologyLearner(_mini_ontology())
+    learner.observe("pressure permeability")
+    with pytest.raises(ValueError):
+        learner.reinforce("pressure", "permeability", amount=0.0)
+    with pytest.raises(ValueError):
+        learner.decay(amount=0.0)
+
+
+def test_ceiling_and_reinforcement_are_validated():
+    with pytest.raises(ValueError):
+        OntologyLearner(_mini_ontology(), confidence=0.3, ceiling=0.2)
+    with pytest.raises(ValueError):
+        OntologyLearner(_mini_ontology(), reinforcement=0.0)
 
 
 def test_observe_rejects_empty_text():
@@ -153,3 +244,38 @@ def test_controller_learning_leaves_derived_relations_separate():
     assert len(controller.ontology.relations) > stored_before
     assert all(inference.derived for inference in controller.derive_ontology_relations())
     assert len(controller.derive_ontology_relations()) == derived_before
+
+
+def test_controller_decay_removes_the_recall_path_it_learned():
+    from core.cognitive_controller import CognitiveController
+    from core.observation import Observation
+
+    controller = CognitiveController()
+    controller.memory.store(
+        "obs-permeability",
+        "observation",
+        Observation("permeability controls flow.", "study", 0.9),
+        importance=0.9,
+    )
+    controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
+    assert controller.recall_with_ontology("pressure")
+
+    # Three decays of 0.1 exhaust the 0.3 learned link and drop it.
+    controller.decay_ontology_learning(amount=0.1)
+    controller.decay_ontology_learning(amount=0.1)
+    decay = controller.decay_ontology_learning(amount=0.1)
+
+    assert decay.removed
+    assert controller.recall_with_ontology("pressure") == []
+
+
+def test_controller_reinforce_raises_learned_confidence():
+    from core.cognitive_controller import CognitiveController
+
+    controller = CognitiveController()
+    controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
+    before = controller.ontology_learner.confidence
+
+    after = controller.reinforce_ontology_relation("الضغط", "النفاذية")
+
+    assert after == pytest.approx(before + controller.ontology_learner.reinforcement)
