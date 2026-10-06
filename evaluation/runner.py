@@ -56,6 +56,10 @@ class EvaluationMetrics:
     # Causal
     causal_chain_accuracy: float
     causal_explanation_quality: float
+    # Petroleum domain
+    petroleum_causal_accuracy: float
+    petroleum_retrieval_accuracy: float
+    petroleum_ontology_accuracy: float
     # Aggregate
     overall: float
 
@@ -75,16 +79,7 @@ def _actions(specs: tuple[DecisionActionSpec, ...]) -> list[Action]:
     ]
 
 
-def _run_memory(scenario: Scenario) -> ScenarioResult:
-    controller = CognitiveController()
-    for index, spec in enumerate(scenario.observations):
-        controller.memory.store(
-            f"{scenario.id}-obs-{index}",
-            "observation",
-            Observation(spec.content, spec.source, spec.confidence),
-            importance=spec.confidence,
-        )
-
+def _retrieval_scores(controller: CognitiveController, scenario: Scenario) -> tuple[float, float, int]:
     hits = 0
     reciprocal_ranks: list[float] = []
     for expectation in scenario.retrieval:
@@ -96,16 +91,46 @@ def _run_memory(scenario: Scenario) -> ScenarioResult:
         if rank == 1:
             hits += 1
         reciprocal_ranks.append(1.0 / rank if rank else 0.0)
-
     total = len(scenario.retrieval)
-    accuracy = hits / total if total else 0.0
-    mrr = mean(reciprocal_ranks)
+    return (hits / total if total else 0.0), mean(reciprocal_ranks), hits
+
+
+def _ontology_accuracy(controller: CognitiveController, scenario: Scenario) -> float:
+    """Fraction of expected seeded relations present in the controller ontology."""
+    if not scenario.ontology_relations:
+        return 0.0
+    matched = 0
+    for source_label, relation_type, target_label in scenario.ontology_relations:
+        sources = controller.ontology.find_concepts(source_label)
+        targets = controller.ontology.find_concepts(target_label)
+        if not sources or not targets:
+            continue
+        target_ids = {concept.id for concept in targets}
+        if any(
+            relation.relation_type == relation_type and relation.target_id in target_ids
+            for relation in controller.ontology.outgoing(sources[0].id)
+        ):
+            matched += 1
+    return matched / len(scenario.ontology_relations)
+
+
+def _run_memory(scenario: Scenario) -> ScenarioResult:
+    controller = CognitiveController()
+    for index, spec in enumerate(scenario.observations):
+        controller.memory.store(
+            f"{scenario.id}-obs-{index}",
+            "observation",
+            Observation(spec.content, spec.source, spec.confidence),
+            importance=spec.confidence,
+        )
+
+    accuracy, mrr, hits = _retrieval_scores(controller, scenario)
     return ScenarioResult(
         scenario.id,
         scenario.domain.value,
         passed=accuracy == 1.0,
         checks={"retrieval_accuracy": round(accuracy, 6), "retrieval_mrr": round(mrr, 6)},
-        details={"expected": str(total), "top1_hits": str(hits)},
+        details={"expected": str(len(scenario.retrieval)), "top1_hits": str(hits)},
     )
 
 
@@ -244,12 +269,53 @@ def _run_reasoning(scenario: Scenario) -> ScenarioResult:
     )
 
 
+def _run_petroleum_retrieval(scenario: Scenario) -> ScenarioResult:
+    """Petroleum scenario mixing log retrieval and seeded-ontology grounding."""
+    controller = CognitiveController()
+    for index, spec in enumerate(scenario.observations):
+        controller.memory.store(
+            f"{scenario.id}-obs-{index}",
+            "observation",
+            Observation(spec.content, spec.source, spec.confidence),
+            importance=spec.confidence,
+        )
+
+    retrieval_accuracy, mrr, hits = _retrieval_scores(controller, scenario)
+    ontology_accuracy = _ontology_accuracy(controller, scenario)
+    passed = retrieval_accuracy == 1.0 and ontology_accuracy == 1.0
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=passed,
+        checks={
+            "retrieval_accuracy": round(retrieval_accuracy, 6),
+            "retrieval_mrr": round(mrr, 6),
+            "ontology_accuracy": round(ontology_accuracy, 6),
+        },
+        details={"top1_hits": str(hits), "ontology_relations": str(len(scenario.ontology_relations))},
+    )
+
+
+def _run_petroleum_ontology(scenario: Scenario) -> ScenarioResult:
+    """Petroleum scenario asserting the seeded ontology carries the identity frame."""
+    controller = CognitiveController()
+    ontology_accuracy = _ontology_accuracy(controller, scenario)
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=ontology_accuracy == 1.0,
+        checks={"ontology_accuracy": round(ontology_accuracy, 6)},
+        details={"expected_relations": str(len(scenario.ontology_relations))},
+    )
+
+
 _RUNNERS = {
     Domain.MEMORY: _run_memory,
     Domain.REASONING: _run_reasoning,
     Domain.CAUSAL: _run_causal,
     Domain.PLANNING: _run_planning,
     Domain.UNCERTAINTY: _run_uncertainty,
+    Domain.PETROLEUM: _run_causal,
 }
 
 
@@ -258,6 +324,11 @@ def run_scenario(scenario: Scenario) -> ScenarioResult:
         return _run_decisions(scenario)
     if scenario.expected_conflicts or (scenario.beliefs and not scenario.observations and not scenario.predictions):
         return _run_consistency(scenario)
+    if scenario.domain == Domain.PETROLEUM:
+        if scenario.retrieval:
+            return _run_petroleum_retrieval(scenario)
+        if scenario.ontology_relations:
+            return _run_petroleum_ontology(scenario)
     return _RUNNERS[scenario.domain](scenario)
 
 
@@ -312,6 +383,11 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     ]
     contradiction_rate = mean(consistency_values)
 
+    petroleum_causal = domain_metric(Domain.PETROLEUM, "causal_chain_accuracy")
+    petroleum_retrieval = domain_metric(Domain.PETROLEUM, "retrieval_accuracy")
+    petroleum_ontology = domain_metric(Domain.PETROLEUM, "ontology_accuracy")
+    petroleum_score = mean([petroleum_causal, petroleum_retrieval, petroleum_ontology])
+
     calibrated = clamp(1.0 - calibration_error)
     overall = mean([
         accuracy,
@@ -321,6 +397,9 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         planning_success,
         decision_quality,
         causal_accuracy,
+        petroleum_causal,
+        petroleum_retrieval,
+        petroleum_ontology,
     ])
 
     metrics = EvaluationMetrics(
@@ -336,6 +415,9 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         decision_explanation_quality=round(decision_quality, 6),
         causal_chain_accuracy=round(causal_accuracy, 6),
         causal_explanation_quality=round(causal_quality, 6),
+        petroleum_causal_accuracy=round(petroleum_causal, 6),
+        petroleum_retrieval_accuracy=round(petroleum_retrieval, 6),
+        petroleum_ontology_accuracy=round(petroleum_ontology, 6),
         overall=round(overall, 6),
     )
 
@@ -345,6 +427,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         Domain.CAUSAL.value: round(causal_accuracy, 6),
         Domain.PLANNING.value: round(planning_success, 6),
         Domain.UNCERTAINTY.value: round(calibrated, 6),
+        Domain.PETROLEUM.value: round(petroleum_score, 6),
     }
 
     return EvaluationReport(

@@ -12,6 +12,7 @@ class Domain(str, Enum):
     CAUSAL = "causal"
     PLANNING = "planning"
     UNCERTAINTY = "uncertainty"
+    PETROLEUM = "petroleum"
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,8 @@ class Scenario:
     decisions: tuple[DecisionSpec, ...] = ()
     plans: tuple[PlanSpec, ...] = ()
     uncertainties: tuple[UncertaintySpec, ...] = ()
+    # Expected seeded ontology relations as (source_label, relation_type, target_label).
+    ontology_relations: tuple[tuple[str, str, str], ...] = ()
 
 
 def _scenario_memory() -> Scenario:
@@ -236,6 +239,124 @@ def _scenario_decisions() -> Scenario:
     )
 
 
+def _scenario_petroleum_causal() -> Scenario:
+    """Petroleum domain: pressure -> production -> revenue and permeability -> flow."""
+    return Scenario(
+        id="petroleum-causal",
+        domain=Domain.PETROLEUM,
+        description="A discovered pressure->production->revenue chain is explained in-domain.",
+        causal=(
+            CausalSpec("pressure", "production", 0.9, ("pressure", "production", "pressure", "production")),
+            CausalSpec("production", "revenue", 0.8),
+        ),
+    )
+
+
+def _scenario_petroleum_petrophysics() -> Scenario:
+    """Petroleum domain: well-log readings ground the seeded petrophysics concepts."""
+    return Scenario(
+        id="petroleum-petrophysics",
+        domain=Domain.PETROLEUM,
+        description="Log-derived readings retrieve the seeded porosity/permeability concepts.",
+        observations=(
+            ObservationSpec("The well log shows high porosity in the reservoir.", "well_log", 0.9),
+            ObservationSpec("A core sample reveals high permeability in the sandstone.", "core_lab", 0.9),
+            ObservationSpec("Cement seals the well from the upper formation.", "cementing_report", 0.8),
+        ),
+        beliefs=(BeliefSpec("The formation is porous and permeable.", 0.5),),
+        retrieval=(
+            RetrievalExpectation(
+                "well log porosity reservoir",
+                "The well log shows high porosity in the reservoir.",
+            ),
+            RetrievalExpectation(
+                "core sample permeability sandstone",
+                "A core sample reveals high permeability in the sandstone.",
+            ),
+        ),
+        ontology_relations=(
+            ("السجل", "measures", "المسامية"),
+            ("السجل", "measures", "النفاذية"),
+            ("الضغط", "drives", "الانتاج"),
+        ),
+    )
+
+
+def _scenario_petroleum_planning() -> Scenario:
+    """Petroleum domain: complete a well and treat a production decline."""
+    return Scenario(
+        id="petroleum-planning",
+        domain=Domain.PLANNING,
+        description="A drilling/completion sequence and a production treatment both reach their goals.",
+        plans=(
+            PlanSpec(
+                goal="Complete the well.",
+                initial_facts=frozenset({"well_drilled"}),
+                desired_facts=frozenset({"well_completed"}),
+                actions=(
+                    DecisionActionSpec("run_casing", frozenset({"well_drilled"}), frozenset({"casing_set"}), cost=1.0),
+                    DecisionActionSpec("cement", frozenset({"casing_set"}), frozenset({"well_completed"}), cost=1.0),
+                    DecisionActionSpec("wait", frozenset({"well_drilled"}), frozenset(), cost=0.1),
+                ),
+            ),
+            PlanSpec(
+                goal="Treat the production decline.",
+                initial_facts=frozenset({"pressure_declining"}),
+                desired_facts=frozenset({"production_restored"}),
+                actions=(
+                    DecisionActionSpec("water_injection", frozenset({"pressure_declining"}), frozenset({"pressure_supported"}), cost=1.5),
+                    DecisionActionSpec("well_stimulation", frozenset({"pressure_supported"}), frozenset({"production_restored"}), cost=1.5),
+                    DecisionActionSpec("do_nothing", frozenset({"pressure_declining"}), frozenset(), cost=0.0),
+                ),
+            ),
+        ),
+    )
+
+
+def _scenario_petroleum_uncertainty() -> Scenario:
+    """Petroleum domain: is production declining, revised from field evidence?"""
+    return Scenario(
+        id="petroleum-uncertainty",
+        domain=Domain.UNCERTAINTY,
+        description="Beliefs about production decline are revised from field evidence and stay calibrated.",
+        uncertainties=(
+            UncertaintySpec(
+                "Production is declining.",
+                0.5,
+                (
+                    ObservationSpec("Wellhead pressure dropped this month.", "pressure_gauge", 0.9, True),
+                    ObservationSpec("Oil rate fell below the forecast.", "flow_meter", 0.8, True),
+                ),
+                0.85,
+            ),
+            UncertaintySpec(
+                "Production is stable.",
+                0.5,
+                (
+                    ObservationSpec("Oil rate held above the forecast.", "flow_meter", 0.9, False),
+                    ObservationSpec("Wellhead pressure stayed constant.", "pressure_gauge", 0.8, False),
+                ),
+                0.15,
+            ),
+        ),
+    )
+
+
+def _scenario_petroleum_identity() -> Scenario:
+    """Petroleum domain: the seeded ontology carries the declared domain frame."""
+    return Scenario(
+        id="petroleum-identity",
+        domain=Domain.PETROLEUM,
+        description="The seeded ontology exposes the petroleum relations the identity claims.",
+        ontology_relations=(
+            ("المكمن", "contained_in", "الطبقة"),
+            ("الهيدروكربون", "exists_in", "المكمن"),
+            ("البئر", "penetrates", "المكمن"),
+            ("الاسمنت", "seals", "البئر"),
+        ),
+    )
+
+
 SCENARIOS: tuple[Scenario, ...] = (
     _scenario_memory(),
     _scenario_reasoning(),
@@ -244,6 +365,11 @@ SCENARIOS: tuple[Scenario, ...] = (
     _scenario_uncertainty(),
     _scenario_consistency(),
     _scenario_decisions(),
+    _scenario_petroleum_causal(),
+    _scenario_petroleum_petrophysics(),
+    _scenario_petroleum_planning(),
+    _scenario_petroleum_uncertainty(),
+    _scenario_petroleum_identity(),
 )
 
 
