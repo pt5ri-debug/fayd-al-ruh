@@ -90,6 +90,11 @@ def run_selfcheck(argv: Sequence[str] = ()) -> int:
     return 0
 
 
+def run_ask(argv: Sequence[str] = ()) -> int:
+    """Ask the grounded, citation-backed petroleum assistant."""
+    return _run_module("ai.ask", argv)
+
+
 def run_curriculum(argv: Sequence[str] = ()) -> int:
     """Show the seeded petroleum-engineering curriculum and its coverage."""
     if argv:
@@ -135,6 +140,7 @@ def run_curriculum(argv: Sequence[str] = ()) -> int:
 
 
 MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
+    ("اسأل المساعد الموثّق (Ask the grounded assistant)", run_ask, ()),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--episodes", "60")),
     ("Train the language model", run_llm, ("--steps", "200")),
@@ -205,6 +211,7 @@ def menu_loop(reader: Callable[[str], str] = input) -> int:
 
 __all__ = [
     "MENU",
+    "run_ask",
     "run_demo",
     "run_ml",
     "run_llm",
@@ -212,6 +219,7 @@ __all__ = [
     "run_curriculum",
     "run_release",
     "run_evaluation",
+    "run_selfcheck",
     "run_choice",
     "menu_loop",
     "describe_paths",

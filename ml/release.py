@@ -39,6 +39,7 @@ from core.paths import artifacts_dir, checkpoints_dir, default_checkpoint
 from core.version import __version__
 from ml.llm.corpus import build_corpus, curriculum_sentences, structured_examples
 from ml.llm.__main__ import train_and_save
+from ml.llm.tokenizer import TOKENIZER_KINDS
 from ml.petroleum import train_petroleum
 
 RELEASE_MANIFEST_NAME = "release_manifest.json"
@@ -59,6 +60,8 @@ class TrainingConfig:
     seed: int = 0
     replay_batch: int = 32
     include_base: bool = True
+    tokenizer_kind: str = "bpe"
+    tokenizer_vocab_size: int = 1024
 
 
 def _git_revision() -> str:
@@ -104,6 +107,8 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
         "characters": len(text),
         "repeats": config.llm_repeats,
         "structured_repeats": config.llm_structured_repeats,
+        "tokenizer_kind": config.tokenizer_kind,
+        "tokenizer_vocab_size": config.tokenizer_vocab_size,
     }
 
 
@@ -150,6 +155,8 @@ def train_release(
             "seed": config.seed,
             "replay_batch": config.replay_batch,
             "include_base": config.include_base,
+            "tokenizer_kind": config.tokenizer_kind,
+            "tokenizer_vocab_size": config.tokenizer_vocab_size,
         },
         "knowledge": knowledge_summary(),
         "corpus": corpus_summary(config),
@@ -179,11 +186,15 @@ def train_release(
         structured_repeats=config.llm_structured_repeats,
         seed=config.seed,
         checkpoint=checkpoint,
+        tokenizer_kind=config.tokenizer_kind,
+        vocab_size=config.tokenizer_vocab_size,
     )
     manifest["language_model"] = {
         "steps": config.llm_steps,
         "parameters": int(sum(p.size for p in model.parameters())),
         "checkpoint": str(checkpoint),
+        "tokenizer": config.tokenizer_kind,
+        "tokenizer_vocab_size": config.tokenizer_vocab_size,
     }
 
     if write_manifest:
@@ -228,6 +239,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--skip-base", action="store_true", help="skip the base ML pipeline")
     parser.add_argument(
+        "--tokenizer-kind",
+        choices=TOKENIZER_KINDS,
+        default="bpe",
+        help="language-model tokenizer: byte or subword BPE",
+    )
+    parser.add_argument("--vocab-size", type=int, default=1024)
+    parser.add_argument(
         "--manifest-only",
         action="store_true",
         help="do not retrain; only rewrite the manifest from current knowledge",
@@ -241,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         replay_batch=args.replay_batch,
         include_base=not args.skip_base,
+        tokenizer_kind=args.tokenizer_kind,
+        tokenizer_vocab_size=args.vocab_size,
     )
 
     if args.manifest_only:
@@ -257,6 +277,8 @@ def main(argv: list[str] | None = None) -> int:
                 "seed": config.seed,
                 "replay_batch": config.replay_batch,
                 "include_base": config.include_base,
+                "tokenizer_kind": config.tokenizer_kind,
+                "tokenizer_vocab_size": config.tokenizer_vocab_size,
             },
             "knowledge": knowledge_summary(),
             "corpus": corpus_summary(config),
