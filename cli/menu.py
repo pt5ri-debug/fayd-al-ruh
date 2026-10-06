@@ -164,7 +164,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("One voice turn", run_voice, ("--write-wav", "voice-turn.wav", "water")),
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Continuous learning and regression gate", run_learn, ()),
-    ("Ask the web and verify the answer", run_web, ("--approve", "What is the relationship between porosity and permeability?")),
+    ("Ask the web and verify the answer", run_web, ("--approve",)),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--episodes", "60")),
     ("Train the language model", run_llm, ("--steps", "200")),

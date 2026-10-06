@@ -232,7 +232,7 @@ def _assess_source(
     matched = tuple(sorted(snippet_terms & internal_terms))
     relevant = snippet_terms & query_terms
     support = len(relevant) / len(query_terms) if query_terms else 0.0
-    contradicts = _negates(result.snippet, snippet_terms, internal_terms)
+    contradicts = _negates(result.snippet, query_terms & internal_terms)
     return SourceAssessment(
         result=result,
         support=round(min(1.0, support), 6),
@@ -241,20 +241,33 @@ def _assess_source(
     )
 
 
-_NEGATORS = ("not", "no", "never", "false", "cannot", "isn't", "doesn't")
+_NEGATORS = ("not", "no", "never", "false", "cannot")
 
 
-def _negates(snippet: str, snippet_terms: set[str], internal_terms: set[str]) -> bool:
-    """A weak contradiction signal: the snippet negates a term the project knows.
+def _words(text: str) -> list[str]:
+    cleaned = "".join(char if char.isalnum() else " " for char in text.casefold())
+    return cleaned.split()
+
+
+def _negates(snippet: str, subject_terms: set[str]) -> bool:
+    """A weak contradiction signal: a negator sits next to the question's subject.
 
     Negators are stopwords and are stripped from content terms, so the raw
-    snippet text is checked directly; a negation counts only when the sentence
-    also mentions something the project already knows.
+    snippet is tokenised directly. Matching only against terms that are both in
+    the question and already known keeps this from firing on the ordinary "no" /
+    "not" that fills any English page: a contradiction has to be about what was
+    asked.
     """
-    lowered = snippet.casefold()
-    if not any(negator in lowered.split() for negator in _NEGATORS):
+    if not subject_terms:
         return False
-    return bool(snippet_terms & internal_terms)
+    words = _words(snippet)
+    for index, word in enumerate(words):
+        if word not in _NEGATORS:
+            continue
+        window = words[max(0, index - 2) : index] + words[index + 1 : index + 3]
+        if any(candidate in subject_terms for candidate in window):
+            return True
+    return False
 
 
 def _agreement(sources: tuple[SourceAssessment, ...]) -> float:
