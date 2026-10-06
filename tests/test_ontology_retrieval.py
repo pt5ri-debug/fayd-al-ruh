@@ -46,8 +46,9 @@ def test_reachable_follows_explicit_edges_with_hop_decay():
 
     reachable = retriever.reachable({log_id})
 
-    assert reachable[log_id] == (0, 1.0)
+    assert reachable[log_id] == (0, 1.0, None)
     assert reachable[reservoir_id][0] == 1
+    assert reachable[reservoir_id][2] is not None
     assert reachable[formation_id][0] == 2
     assert reachable[formation_id][1] == pytest.approx(0.25)
 
@@ -129,3 +130,74 @@ def test_controller_ontology_recall_returns_empty_for_unrelated_query():
     controller.memory.store("obs-other", "observation", Observation("A routine safety briefing.", "hse", 0.5))
 
     assert controller.recall_with_ontology("quarterly budget meeting") == []
+
+
+def test_rank_reports_the_relation_that_linked_the_item():
+    retriever = OntologyGuidedRetriever(_mini_ontology(), OntologyReasoner(rules=()))
+    reservoir_id = _id_of(retriever.ontology, "reservoir")
+
+    ranked = retriever.rank({"formation": "The formation is deep."}, "well log", limit=1)
+
+    assert ranked[0].link is not None
+    assert ranked[0].link[0] == reservoir_id
+    assert ranked[0].link[1] == "contained_in"
+
+
+def test_recall_exposes_linked_relation_and_seed_relation_is_not_credited():
+    from core.cognitive_controller import CognitiveController
+    from core.observation import Observation
+
+    controller = CognitiveController()
+    controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
+    controller.memory.store(
+        "obs-permeability", "observation", Observation("permeability controls flow.", "study", 0.9), importance=0.9
+    )
+
+    recalls = controller.recall_with_ontology("pressure", limit=5)
+    linked = [recall for recall in recalls if recall.linked_relation is not None]
+    assert linked, "expected a recall reached through a learned link"
+    assert linked[0].linked_relation[1] == controller.ontology_learner.relation_type
+
+    before = controller.ontology_learner.relation_by_triple(*linked[0].linked_relation)
+    assert before is not None
+    feedback = controller.feedback_ontology_recall(linked[0], useful=True)
+    assert feedback is not None and feedback.outcome == "reinforced"
+    assert feedback.confidence > before.confidence
+
+
+def test_feedback_ignores_direct_and_seeded_recalls():
+    from core.cognitive_controller import CognitiveController
+    from core.observation import Observation
+    from core.memory import MemoryRecall
+
+    controller = CognitiveController()
+    controller.memory.store("obs", "observation", Observation("well log reads high.", "study", 0.9))
+
+    direct = controller.recall_with_ontology("well log", limit=1)[0]
+    assert direct.linked_relation is None
+    assert controller.feedback_ontology_recall(direct, useful=True) is None
+
+    seeded = MemoryRecall(
+        item=controller.memory.get("obs"),
+        relevance=0.5,
+        activation=0.5,
+        linked_relation=("SEM-seed", "measures", "SEM-target"),
+    )
+    assert controller.feedback_ontology_recall(seeded, useful=True) is None
+
+
+def test_feedback_weakens_and_drops_an_unhelpful_learned_link():
+    from core.cognitive_controller import CognitiveController
+    from core.observation import Observation
+
+    controller = CognitiveController()
+    controller.learn_ontology_from_observation("الضغط يرافقه النفاذية")
+    controller.memory.store(
+        "obs-permeability", "observation", Observation("permeability controls flow.", "study", 0.9), importance=0.9
+    )
+    recall = next(r for r in controller.recall_with_ontology("pressure", limit=5) if r.linked_relation)
+
+    feedback = controller.feedback_ontology_recall(recall, useful=False, amount=0.5)
+
+    assert feedback is not None and feedback.removed
+    assert controller.recall_with_ontology("pressure") == []

@@ -129,6 +129,27 @@ class OntologyReinforcementSpec:
 
 
 @dataclass(frozen=True)
+class OntologyFeedbackSpec:
+    """A recall whose outcome should reshape the learned link behind it.
+
+    A learned relation is established from ``text``, then a memory item is stored
+    that only a related concept (``probe``) can reach. The link is credited or
+    blamed through ``useful`` feedback, and ``expected_outcome`` records what must
+    happen: ``reinforced`` raises the link's confidence, ``weakened``/``removed``
+    lower or drop it. ``expect_recall_after`` says whether the item must still be
+    reachable through the link once feedback has been applied.
+    """
+
+    text: str
+    probe: str
+    item_text: str
+    useful: bool
+    amount: float
+    expected_outcome: str
+    expect_recall_after: bool = True
+
+
+@dataclass(frozen=True)
 class Scenario:
     """A single, fixed evaluation case."""
 
@@ -154,6 +175,8 @@ class Scenario:
     ontology_learning: tuple[OntologyLearningSpec, ...] = ()
     # Repeated observations that should reinforce/decay learned relations.
     ontology_reinforcement: tuple[OntologyReinforcementSpec, ...] = ()
+    # Recalls whose outcomes should credit/blame the learned link behind them.
+    ontology_feedback: tuple[OntologyFeedbackSpec, ...] = ()
 
 
 def _scenario_memory() -> Scenario:
@@ -512,6 +535,41 @@ def _scenario_petroleum_ontology_reinforcement() -> Scenario:
     )
 
 
+def _scenario_petroleum_ontology_feedback() -> Scenario:
+    """Petroleum domain: the outcome of a recall reshapes the link that produced it.
+
+    A learned link connects الضغط to النفاذية, so a query about الضغط reaches an item
+    that only mentions النفاذية. A useful outcome reinforces that link, while an
+    unhelpful one weakens and finally drops it — so retrieval is shaped by results,
+    and a seeded relation behind a recall is never credited.
+    """
+    return Scenario(
+        id="petroleum-ontology-feedback",
+        domain=Domain.PETROLEUM,
+        description="Useful recalls strengthen the learned link behind them; unhelpful ones weaken it.",
+        ontology_feedback=(
+            OntologyFeedbackSpec(
+                text="ارتفاع الضغط يرافقه تحسن في النفاذية",
+                probe="pressure",
+                item_text="permeability controls flow.",
+                useful=True,
+                amount=0.1,
+                expected_outcome="reinforced",
+                expect_recall_after=True,
+            ),
+            OntologyFeedbackSpec(
+                text="ارتفاع الضغط يرافقه تحسن في النفاذية",
+                probe="pressure",
+                item_text="permeability controls flow.",
+                useful=False,
+                amount=0.5,
+                expected_outcome="removed",
+                expect_recall_after=False,
+            ),
+        ),
+    )
+
+
 SCENARIOS: tuple[Scenario, ...] = (
     _scenario_memory(),
     _scenario_reasoning(),
@@ -529,6 +587,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     _scenario_petroleum_multihop_retrieval(),
     _scenario_petroleum_ontology_learning(),
     _scenario_petroleum_ontology_reinforcement(),
+    _scenario_petroleum_ontology_feedback(),
 )
 
 

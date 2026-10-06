@@ -75,11 +75,15 @@ controller.ontology.find_concepts("reservoir")   # مكمن، طبقة، مسا�
 - **ترجيح الروابط بالتجربة** (`petroleum-ontology-reinforcement`): ملاحظة متكرّرة
   تُقوّي روابطها المتعلَّمة خطوة بخطوة حتى سقف أدنى من المزروع، وملاحظة تُهمَل
   تتحلّل روابطها حتى تزول — دون المساس بالعلاقات المزروعة.
+- **التعلّم من نتيجة الاسترجاع** (`petroleum-ontology-feedback`): استرجاع نافع
+  يُقوّي الرابط المتعلَّم الذي أوصل إليه، واسترجاع غير مفيد يُضعفه حتى يزول — فيُشكَّل
+  الرسم بنتائج أفعاله لا بملاحظاته فقط.
 
-تُقاس سبعة مقاييس بترولية في الأساس: `petroleum_causal_accuracy`،
+تُقاس ثمانية مقاييس بترولية في الأساس: `petroleum_causal_accuracy`،
 `petroleum_retrieval_accuracy`، `petroleum_ontology_accuracy`،
 `petroleum_inference_accuracy`، `petroleum_multihop_retrieval_accuracy`،
-`petroleum_ontology_learning_accuracy`، و`petroleum_ontology_reinforcement_accuracy`،
+`petroleum_ontology_learning_accuracy`، `petroleum_ontology_reinforcement_accuracy`،
+و`petroleum_ontology_feedback_accuracy`،
 إضافة إلى `domain_scores["petroleum"]`.
 فتصبح الهوية قابلة للقياس ومنع التراجع في CI.
 
@@ -154,6 +158,22 @@ controller.ontology.find_concepts("reservoir")   # مكمن، طبقة، مسا�
 تُتاح عبر `controller.reinforce_ontology_relation(...)` و
 `controller.decay_ontology_learning(...)`. يقيس هذا `petroleum-ontology-reinforcement`
 ويحميه مقياس `petroleum_ontology_reinforcement_accuracy`.
+
+## التعلّم من نتيجة الاسترجاع
+
+الرسم لا يتعلّم من الملاحظات فقط، بل من **نتائج أفعاله**. `recall_with_ontology`
+يعيد مع كل نتيجة الرابط المتعلَّم الذي أوصل إليها في `linked_relation`، فيصبح
+بالإمكان منح الفضل أو اللوم للرابط الذي أنتج الاستدعاء:
+
+- **استرجاع نافع**: `feedback_ontology_recall(recall, useful=True)` يُقوّي الرابط
+  المتعلَّم الذي أوصل، فيزداد وزن ما يثبت نفعه.
+- **استرجاع غير مفيد**: `useful=False` يُضعف الرابط، وإن زال حُذف فاختفت مسار
+  الاستدعاء الذي لم يُفد.
+- **لا لوم للمزروع**: الاستدعاءات المباشرة أو العابرة لعلاقة مزروعة (`linked_relation`
+  بلا رابط متعلَّم) لا تُقوّى ولا تُضعَف.
+
+هكذا يُشكَّل الرسم بنتائج الاسترجاع لا ببنيته فقط. يقيس هذا
+`petroleum-ontology-feedback` ويحميه مقياس `petroleum_ontology_feedback_accuracy`.
 
 ## البنية
 

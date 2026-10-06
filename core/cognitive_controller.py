@@ -51,7 +51,7 @@ from core.experiment_runner import ExperimentRunner
 from core.ontology import Ontology
 from core.ontology_reasoner import OntologyInference, OntologyReasoner
 from core.ontology_retrieval import OntologyGuidedRetriever
-from core.ontology_learner import OntologyDecay, OntologyLearner, OntologyLearning
+from core.ontology_learner import OntologyDecay, OntologyFeedback, OntologyLearner, OntologyLearning
 from core.domain_knowledge import domain_summary, seed_ontology
 from core.semantic_parser import SemanticParser
 from core.meaning_model import MeaningModel
@@ -443,6 +443,7 @@ class CognitiveController:
                     relevance=round(max(base.get(match.item_id, 0.0), match.score), 6),
                     activation=round(match.score, 6),
                     semantic_similarity=round(match.score, 6),
+                    linked_relation=match.link,
                 )
             )
         return recalls
@@ -478,6 +479,30 @@ class CognitiveController:
         confidence = self.ontology_learner.reinforce(source_label, target_label, amount)
         self.ontology_retriever.invalidate()
         return confidence
+
+    def feedback_ontology_recall(
+        self,
+        recall: MemoryRecall,
+        *,
+        useful: bool,
+        amount: float | None = None,
+    ) -> OntologyFeedback | None:
+        """Credit or blame the learned link that produced a recall.
+
+        A recall reached through a learned relation is reinforced when it turned
+        out useful and weakened when it did not, so the graph is shaped by the
+        outcomes of its own retrievals. Recalls with no learned link (direct or
+        seeded) are left untouched, and seeded relations are never reshaped.
+        """
+        if recall.linked_relation is None:
+            return None
+        source_id, relation_type, target_id = recall.linked_relation
+        relation = self.ontology_learner.relation_by_triple(source_id, relation_type, target_id)
+        if relation is None or relation.relation_type != self.ontology_learner.relation_type:
+            return None
+        feedback = self.ontology_learner.apply_feedback(relation.id, useful=useful, amount=amount)
+        self.ontology_retriever.invalidate()
+        return feedback
 
     def explain_belief(self, belief_id: str) -> BeliefExplanation:
         belief = self.graph.get_belief(belief_id)

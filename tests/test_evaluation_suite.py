@@ -38,6 +38,7 @@ def test_petroleum_scenarios_cover_causal_retrieval_and_ontology():
     assert any(scenario.ontology_retrieval for scenario in petroleum.values())
     assert any(scenario.ontology_learning for scenario in petroleum.values())
     assert any(scenario.ontology_reinforcement for scenario in petroleum.values())
+    assert any(scenario.ontology_feedback for scenario in petroleum.values())
     assert any(scenario.uncertainties for scenario in petroleum.values())
     assert any(scenario.plans for scenario in petroleum.values())
 
@@ -129,6 +130,59 @@ def test_petroleum_ontology_reinforcement_scenario_exists_and_passes():
 def test_petroleum_ontology_reinforcement_metric_is_reported():
     report = run_suite()
     assert report.metrics.petroleum_ontology_reinforcement_accuracy == 1.0
+
+
+def test_petroleum_ontology_feedback_scenario_exists_and_passes():
+    scenarios = [s for s in SCENARIOS if s.ontology_feedback]
+    assert scenarios, "expected a petroleum ontology-feedback scenario"
+    for scenario in scenarios:
+        assert scenario.domain == Domain.PETROLEUM
+        result = run_scenario(scenario)
+        assert result.passed
+        assert result.checks["ontology_feedback_accuracy"] == 1.0
+        assert result.checks["ontology_feedback_reinforced"] > 0
+        assert result.checks["ontology_feedback_removed"] > 0
+
+
+def test_petroleum_ontology_feedback_metric_is_reported():
+    report = run_suite()
+    assert report.metrics.petroleum_ontology_feedback_accuracy == 1.0
+
+
+def test_useful_recall_reinforces_the_link_that_produced_it():
+    from core.cognitive_controller import CognitiveController
+    from core.observation import Observation
+
+    controller = CognitiveController()
+    controller.learn_ontology_from_observation("ارتفاع الضغط يرافقه تحسن في النفاذية")
+    controller.memory.store(
+        "obs-permeability", "observation", Observation("permeability controls flow.", "study", 0.9), importance=0.9
+    )
+    recall = next(r for r in controller.recall_with_ontology("pressure") if r.linked_relation)
+    before = controller.ontology_learner.relation_by_triple(*recall.linked_relation).confidence
+
+    feedback = controller.feedback_ontology_recall(recall, useful=True, amount=0.1)
+
+    assert feedback.outcome == "reinforced"
+    assert feedback.confidence > before
+    assert feedback.confidence <= controller.ontology_learner.ceiling
+
+
+def test_unhelpful_recall_decays_the_link_until_the_path_is_gone():
+    from core.cognitive_controller import CognitiveController
+    from core.observation import Observation
+
+    controller = CognitiveController()
+    controller.learn_ontology_from_observation("ارتفاع الضغط يرافقه تحسن في النفاذية")
+    controller.memory.store(
+        "obs-permeability", "observation", Observation("permeability controls flow.", "study", 0.9), importance=0.9
+    )
+    recall = next(r for r in controller.recall_with_ontology("pressure") if r.linked_relation)
+
+    feedback = controller.feedback_ontology_recall(recall, useful=False, amount=0.5)
+
+    assert feedback.removed
+    assert controller.recall_with_ontology("pressure") == []
 
 
 def test_repetition_raises_learned_confidence_below_the_ceiling():

@@ -64,6 +64,7 @@ class EvaluationMetrics:
     petroleum_multihop_retrieval_accuracy: float
     petroleum_ontology_learning_accuracy: float
     petroleum_ontology_reinforcement_accuracy: float
+    petroleum_ontology_feedback_accuracy: float
     # Aggregate
     overall: float
 
@@ -503,6 +504,68 @@ def _learned_relations(controller: CognitiveController) -> list:
     ]
 
 
+def _run_petroleum_ontology_feedback(scenario: Scenario) -> ScenarioResult:
+    """Petroleum scenario: a recall's outcome credits or blames the learned link behind it."""
+    checks_ok = 0
+    total_checks = 0
+    reinforced_total = 0
+    removed_total = 0
+
+    for spec in scenario.ontology_feedback:
+        controller = CognitiveController()
+        controller.learn_ontology_from_observation(spec.text)
+        controller.memory.store(
+            "obs-feedback",
+            "observation",
+            Observation(spec.item_text, "study", 0.9),
+            importance=0.9,
+        )
+
+        recalls = controller.recall_with_ontology(spec.probe, limit=5)
+        linked = [recall for recall in recalls if recall.linked_relation is not None]
+        total_checks += 2
+        if not linked or linked[0].linked_relation is None:
+            continue
+        source_id, relation_type, target_id = linked[0].linked_relation
+        relation = controller.ontology_learner.relation_by_triple(source_id, relation_type, target_id)
+        if relation is None:
+            continue
+        before = relation.confidence
+
+        feedback = controller.feedback_ontology_recall(linked[0], useful=spec.useful, amount=spec.amount)
+        if feedback is None:
+            continue
+
+        outcome_ok = feedback.outcome == spec.expected_outcome
+        if spec.useful:
+            outcome_ok = outcome_ok and feedback.confidence > before
+            reinforced_total += 1
+        else:
+            outcome_ok = outcome_ok and feedback.confidence < before
+        if outcome_ok:
+            checks_ok += 1
+
+        if feedback.removed:
+            removed_total += 1
+        reachable = bool(controller.recall_with_ontology(spec.probe, limit=5))
+        if reachable == spec.expect_recall_after:
+            checks_ok += 1
+
+    accuracy = checks_ok / total_checks if total_checks else 0.0
+    passed = accuracy == 1.0
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=passed,
+        checks={
+            "ontology_feedback_accuracy": round(accuracy, 6),
+            "ontology_feedback_reinforced": float(reinforced_total),
+            "ontology_feedback_removed": float(removed_total),
+        },
+        details={"checks_ok": str(checks_ok), "checks_total": str(total_checks)},
+    )
+
+
 def _has_relation(controller: CognitiveController, source_label: str, target_label: str, relation_type: str) -> bool:
     sources = controller.ontology.find_concepts(source_label)
     targets = controller.ontology.find_concepts(target_label)
@@ -521,6 +584,8 @@ def run_scenario(scenario: Scenario) -> ScenarioResult:
     if scenario.expected_conflicts or (scenario.beliefs and not scenario.observations and not scenario.predictions):
         return _run_consistency(scenario)
     if scenario.domain == Domain.PETROLEUM:
+        if scenario.ontology_feedback:
+            return _run_petroleum_ontology_feedback(scenario)
         if scenario.ontology_reinforcement:
             return _run_petroleum_ontology_reinforcement(scenario)
         if scenario.ontology_learning:
@@ -594,6 +659,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     petroleum_multihop = domain_metric(Domain.PETROLEUM, "ontology_retrieval_accuracy")
     petroleum_learning = domain_metric(Domain.PETROLEUM, "ontology_learning_accuracy")
     petroleum_reinforcement = domain_metric(Domain.PETROLEUM, "ontology_reinforcement_accuracy")
+    petroleum_feedback = domain_metric(Domain.PETROLEUM, "ontology_feedback_accuracy")
     petroleum_score = mean([
         petroleum_causal,
         petroleum_retrieval,
@@ -602,6 +668,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_multihop,
         petroleum_learning,
         petroleum_reinforcement,
+        petroleum_feedback,
     ])
 
     calibrated = clamp(1.0 - calibration_error)
@@ -620,6 +687,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_multihop,
         petroleum_learning,
         petroleum_reinforcement,
+        petroleum_feedback,
     ])
 
     metrics = EvaluationMetrics(
@@ -642,6 +710,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_multihop_retrieval_accuracy=round(petroleum_multihop, 6),
         petroleum_ontology_learning_accuracy=round(petroleum_learning, 6),
         petroleum_ontology_reinforcement_accuracy=round(petroleum_reinforcement, 6),
+        petroleum_ontology_feedback_accuracy=round(petroleum_feedback, 6),
         overall=round(overall, 6),
     )
 

@@ -27,6 +27,8 @@ class OntologyMatch:
     score: float
     hops: int
     concepts: tuple[str, ...]
+    link: tuple[str, str, str] | None = None
+    """The relation that connected the item, as (source_id, relation_type, target_id)."""
 
 
 class OntologyGuidedRetriever:
@@ -52,7 +54,7 @@ class OntologyGuidedRetriever:
         self.reasoner = reasoner or OntologyReasoner()
         self.max_hops = max_hops
         self.hop_decay = hop_decay
-        self._adjacency: dict[str, list[tuple[str, float]]] | None = None
+        self._adjacency: dict[str, list[tuple[str, float, tuple[str, str, str]]]] | None = None
 
     def concepts_in(self, text: str) -> set[str]:
         """Return the concept IDs whose terms occur in the text."""
@@ -67,18 +69,25 @@ class OntologyGuidedRetriever:
         """Drop the cached adjacency after the ontology's relations change."""
         self._adjacency = None
 
-    def reachable(self, seeds: set[str]) -> dict[str, tuple[int, float]]:
-        """Map each concept reachable from ``seeds`` to (hops, weight)."""
+    def reachable(self, seeds: set[str]) -> dict[str, tuple[int, float, tuple[str, str, str] | None]]:
+        """Map each concept reachable from ``seeds`` to (hops, weight, linking relation).
+
+        ``link`` is ``None`` for the seed concepts themselves; for a concept reached
+        in one hop it is the relation that connected it, which lets a caller credit
+        the exact link that made an item reachable.
+        """
         adjacency = self._edges()
-        best: dict[str, tuple[int, float]] = {seed: (0, 1.0) for seed in seeds}
+        best: dict[str, tuple[int, float, tuple[str, str, str] | None]] = {
+            seed: (0, 1.0, None) for seed in seeds
+        }
         frontier = list(seeds)
         for hop in range(1, self.max_hops + 1):
             next_frontier: list[str] = []
             for node in frontier:
-                for target, _confidence in adjacency.get(node, ()):
+                for target, _confidence, link in adjacency.get(node, ()):
                     if target in best:
                         continue
-                    best[target] = (hop, self.hop_decay ** hop)
+                    best[target] = (hop, self.hop_decay ** hop, link)
                     next_frontier.append(target)
             if not next_frontier:
                 break
@@ -105,12 +114,14 @@ class OntologyGuidedRetriever:
             item_concepts = self.concepts_in(text)
             ontology_score = 0.0
             best_hops = -1
+            best_link: tuple[str, str, str] | None = None
             for concept_id in item_concepts:
                 if concept_id in reachable:
-                    hops, weight = reachable[concept_id]
+                    hops, weight, link = reachable[concept_id]
                     if weight > ontology_score:
                         ontology_score = weight
                         best_hops = hops
+                        best_link = link
             score = max(base_scores.get(item_id, 0.0), ontology_score)
             if score <= 0.0:
                 continue
@@ -120,19 +131,22 @@ class OntologyGuidedRetriever:
                     score=round(score, 6),
                     hops=best_hops,
                     concepts=tuple(sorted(item_concepts)),
+                    link=best_link if best_hops > 0 else None,
                 )
             )
 
         matches.sort(key=lambda match: (-match.score, match.item_id))
         return matches[:limit]
 
-    def _edges(self) -> dict[str, list[tuple[str, float]]]:
+    def _edges(self) -> dict[str, list[tuple[str, float, tuple[str, str, str]]]]:
         if self._adjacency is None:
-            edges: dict[str, list[tuple[str, float]]] = {}
+            edges: dict[str, list[tuple[str, float, tuple[str, str, str]]]] = {}
             for relation in self.ontology.relations.values():
-                edges.setdefault(relation.source_id, []).append((relation.target_id, relation.confidence))
+                link = (relation.source_id, relation.relation_type, relation.target_id)
+                edges.setdefault(relation.source_id, []).append((relation.target_id, relation.confidence, link))
             for inference in self.reasoner.derive(self.ontology):
-                edges.setdefault(inference.source_id, []).append((inference.target_id, inference.confidence))
+                link = (inference.source_id, inference.relation_type, inference.target_id)
+                edges.setdefault(inference.source_id, []).append((inference.target_id, inference.confidence, link))
             self._adjacency = edges
         return self._adjacency
 
