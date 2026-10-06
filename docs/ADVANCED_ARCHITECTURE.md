@@ -330,6 +330,44 @@ model = CallableModel("my-model", lambda request: client.generate(request))
 response = controller.reason(model, request)
 ```
 
+## Answering from the web under governance
+
+The system can answer a question it does not know by searching the internet, but
+never blindly: search is an external tool, so it passes the same permission,
+approval, and audit gates as every other governed action, and a web answer is
+folded into the corpus only when it is trusted.
+
+- `core/web_source.py`:
+  - `WebResult` is one source (URL, title, snippet, credibility).
+  - `WebSearchProvider` is the contract; `StaticSearchProvider` is deterministic
+    and offline (tests, demo), and `HttpSearchProvider` is a JSON client for a
+    caller-supplied endpoint (the application owns the URL and any key).
+  - `WebSearchService` consults a `PermissionPolicy` and a `HumanApprovalGate`
+    before it runs, and records every decision in the `AuditLog`; a provider
+    failure is contained and never crashes the caller.
+  - `estimate_credibility` is a transparent heuristic over the domain suffix
+    (government, standards bodies, and academic hosts rank above generic blogs).
+- `core/web_verifier.py`:
+  - `WebVerifier.verify` retrieves the project's own passages, fetches web
+    sources, and rates the answer with a transparent trust score that blends
+    **source credibility**, **source-to-source agreement**, and **internal
+    support** (how much of the web content the project already knows).
+  - Every source keeps its own support score and matched terms, and a source that
+    negates a known term is flagged as contradictory.
+  - The answer is learned into the citable corpus via `KnowledgeUpdater` (with
+    provenance and decay) only when its trust clears the threshold, it does not
+    contradict internal knowledge, and it connects to something already known.
+
+```bash
+python -m cli web --approve "What is the relationship between porosity and permeability?"
+python -m cli web "What is a gamma ray log?"          # denied by default
+python -m ai.web_verify --json --approve "What is a gas kick?"
+```
+
+`FAYD_SEARCH_ENDPOINT` (and optionally `FAYD_SEARCH_API_KEY`) point the command
+at a real search API; with none set it uses a small offline corpus, so the whole
+path is testable on a fresh clone with no network and no key.
+
 ## Measurable scientific evaluation
 
 The `evaluation/` package runs fixed scenarios across six domains, measures

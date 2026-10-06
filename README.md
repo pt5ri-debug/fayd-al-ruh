@@ -455,6 +455,44 @@ python -m ai.learn_demo
 python -m cli learn
 ```
 
+## Answering from the web, with trust checks
+
+The project can also answer a question it does not already know by searching the
+internet — but only under the same governance as every other external action, and
+only when the answer is trustworthy enough:
+
+1. **Search the web** (`core/web_source.py`): a `WebSearchService` runs a
+   `WebSearchProvider` (an offline `StaticSearchProvider`, or an
+   `HttpSearchProvider` pointed at a caller-supplied endpoint). Search is an
+   **external tool**, so it is denied by default; it runs only when a
+   `PermissionPolicy` grants the capability, the tool name is on the allow-list,
+   and a live `HumanApprovalGate` approval exists. Every decision is written to
+   the append-only `AuditLog`.
+2. **Cite the sources** (`core/web_verifier.py`): each result keeps its URL,
+   title, snippet, and a transparent credibility estimate over the domain suffix
+   (government, standards bodies, and academic hosts rank above generic blogs).
+3. **Compare with internal knowledge**: the verifier retrieves the project's own
+   passages for the question and measures how much the web content overlaps them
+   (`support`), and whether any source contradicts what is already known.
+4. **Rate the answer**: a transparent trust score blends source credibility,
+   source-to-source agreement, and internal support.
+5. **Learn only when trusted**: the answer is folded into the citable corpus via
+   `KnowledgeUpdater` (with provenance and decay) only when its trust clears the
+   threshold, it does not contradict internal knowledge, and it connects to
+   something already known.
+
+```bash
+python -m cli web --approve "What is the relationship between porosity and permeability?"
+python -m cli web "What is a gamma ray log?"          # denied by default
+python -m cli web --endpoint https://api.example.com/search "What is a gas kick?"
+python -m ai.web_verify --json --approve "What is a gas kick?"
+```
+
+Set `FAYD_SEARCH_ENDPOINT` (and optionally `FAYD_SEARCH_API_KEY`) to point the
+command at a real search API; the application owns the URL and the key, and none
+is stored in the project. With no endpoint the command uses a small offline
+corpus, so the whole path works on a fresh clone with no network.
+
 ## Multimodal perception (optional)
 
 Perception is an optional add-on, not a requirement: the core and the assistant
@@ -484,6 +522,7 @@ python -m cli ml --episodes 60
 python -m cli llm --steps 4000
 python -m cli eval
 python -m cli ask "What is the relationship between porosity and permeability?"   # source-grounded assistant
+python -m cli web --approve "What is a gas kick?"   # web answer, cited and trust-scored
 python -m cli paths      # where assets are read and data is written
 python -m cli selfcheck  # verify the bundled language model loads
 ```
