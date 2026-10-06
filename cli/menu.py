@@ -63,6 +63,14 @@ def run_petroleum(argv: Sequence[str] = ()) -> int:
     return _run_module("ml.petroleum", args)
 
 
+def run_release(argv: Sequence[str] = ()) -> int:
+    """Train every learning layer and store all artifacts for a release."""
+    args = list(argv)
+    if "--save-dir" not in args:
+        args += ["--save-dir", str(artifacts_dir())]
+    return _run_module("ml.release", args)
+
+
 def run_evaluation(argv: Sequence[str] = ()) -> int:
     """Run the scientific evaluation suite."""
     return _run_module("evaluation.__main__", argv)
@@ -132,6 +140,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Train the language model", run_llm, ("--steps", "200")),
     ("Train petroleum-engineering tasks", run_petroleum, ("--episodes", "120")),
     ("Show the petroleum-engineering curriculum", run_curriculum, ()),
+    ("Train everything for a release", run_release, ("--episodes", "120", "--llm-steps", "4000")),
     ("Run the evaluation suite", run_evaluation, ()),
     ("Self-check the install", run_selfcheck, ()),
 )
@@ -201,6 +210,7 @@ __all__ = [
     "run_llm",
     "run_petroleum",
     "run_curriculum",
+    "run_release",
     "run_evaluation",
     "run_choice",
     "menu_loop",

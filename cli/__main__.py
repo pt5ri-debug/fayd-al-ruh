@@ -8,6 +8,7 @@ Usage:
     python -m cli llm --steps 200     # language-model trainer
     python -m cli petroleum           # petroleum-engineering task training
     python -m cli curriculum          # show the seeded degree curriculum
+    python -m cli release             # train everything for a release
     python -m cli eval                # evaluation suite
 
 The commands mirror the modules developers already use, so nothing about the
@@ -28,6 +29,7 @@ from cli.menu import (
     run_llm,
     run_ml,
     run_petroleum,
+    run_release,
     run_selfcheck,
 )
 
@@ -37,6 +39,7 @@ _COMMANDS = {
     "llm": run_llm,
     "petroleum": run_petroleum,
     "curriculum": run_curriculum,
+    "release": run_release,
     "eval": run_evaluation,
     "evaluation": run_evaluation,
     "selfcheck": run_selfcheck,

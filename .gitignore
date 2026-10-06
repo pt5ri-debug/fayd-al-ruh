@@ -34,5 +34,7 @@ env/
 # Local environment files
 .env
 
-# Learned ML artifacts (reproducible with `python -m ml --save-dir ml/artifacts`)
-ml/artifacts/
+# Learned ML artifacts. For releases these are committed on purpose so a clone
+# ships the trained state (see `python -m ml.release`); the manifest records how
+# they were produced. Regenerate with `python -m ml.release`.
+!ml/artifacts/
