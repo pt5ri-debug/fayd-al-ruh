@@ -41,6 +41,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("petroleum_multihop_retrieval_accuracy", True, label="Petroleum ontology-guided retrieval accuracy"),
     MetricSpec("petroleum_ontology_learning_accuracy", True, label="Petroleum ontology learning accuracy"),
     MetricSpec("petroleum_ontology_reinforcement_accuracy", True, label="Petroleum ontology reinforcement accuracy"),
+    MetricSpec("petroleum_ontology_feedback_accuracy", True, label="Petroleum ontology feedback accuracy"),
     MetricSpec("overall", True, label="Overall"),
 )
 

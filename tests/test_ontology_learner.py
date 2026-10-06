@@ -279,3 +279,53 @@ def test_controller_reinforce_raises_learned_confidence():
     after = controller.reinforce_ontology_relation("الضغط", "النفاذية")
 
     assert after == pytest.approx(before + controller.ontology_learner.reinforcement)
+
+
+def test_strengthen_and_weaken_relation_by_id():
+    ontology = _mini_ontology()
+    learner = OntologyLearner(ontology)
+    learning = learner.observe("pressure permeability")
+    source, relation_type, target = learning.added[0]
+    relation = learner.relation_by_triple(
+        ontology.find_concepts(source)[0].id, relation_type, ontology.find_concepts(target)[0].id
+    )
+    assert relation is not None
+
+    strengthened = learner.strengthen_relation(relation.id, amount=0.1)
+    assert strengthened == pytest.approx(0.4)
+
+    removed = learner.weaken_relation(relation.id, amount=0.4)
+    assert removed is True
+    assert learner.relation(relation.id) is None
+
+
+def test_strengthen_relation_rejects_seeded_relations():
+    ontology = _mini_ontology()
+    learner = OntologyLearner(ontology)
+    seeded = next(iter(ontology.relations.values()))
+
+    with pytest.raises(KeyError):
+        learner.strengthen_relation(seeded.id)
+    with pytest.raises(KeyError):
+        learner.weaken_relation("SEM-missing")
+
+
+def test_apply_feedback_reinforces_or_weakens_a_learned_link():
+    ontology = _mini_ontology()
+    learner = OntologyLearner(ontology)
+    learning = learner.observe("pressure permeability")
+    source, relation_type, target = learning.added[0]
+    relation = learner.relation_by_triple(
+        ontology.find_concepts(source)[0].id, relation_type, ontology.find_concepts(target)[0].id
+    )
+    assert relation is not None
+
+    good = learner.apply_feedback(relation.id, useful=True, amount=0.1)
+    assert good.outcome == "reinforced"
+    assert good.confidence == pytest.approx(0.4)
+    assert not good.removed
+
+    bad = learner.apply_feedback(relation.id, useful=False, amount=0.5)
+    assert bad.outcome == "removed"
+    assert bad.removed
+    assert learner.relation(relation.id) is None

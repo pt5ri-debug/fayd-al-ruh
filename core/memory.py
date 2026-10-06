@@ -44,6 +44,8 @@ class MemoryRecall:
     relevance: float
     activation: float
     semantic_similarity: float = 0.0
+    linked_relation: tuple[str, str, str] | None = None
+    """Ontology relation that made the item reachable, as (source_id, type, target_id)."""
 
 
 class CognitiveMemory:

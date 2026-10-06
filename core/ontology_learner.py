@@ -58,6 +58,22 @@ class OntologyDecay:
         return bool(self.decayed or self.removed)
 
 
+@dataclass(frozen=True)
+class OntologyFeedback:
+    """How a recall's outcome reshaped the learned link that produced it."""
+
+    relation_id: str
+    source: str
+    target: str
+    outcome: str
+    confidence: float
+    removed: bool = False
+
+    @property
+    def changed(self) -> bool:
+        return True
+
+
 class OntologyLearner:
     """Extend the ontology from co-occurring concepts and weight links by use."""
 
@@ -190,6 +206,79 @@ class OntologyLearner:
         self.ontology.replace_relation(replace(relation, confidence=new_confidence))
         return new_confidence
 
+    def strengthen_relation(self, relation_id: str, amount: float | None = None) -> float:
+        """Reinforce a learned relation by id after a successful use.
+
+        Raises ``KeyError`` for an unknown relation or a seeded (non-learned) one.
+        """
+        relation = self.ontology.relations.get(relation_id)
+        if relation is None:
+            raise KeyError(f"Unknown semantic relation: {relation_id}")
+        if relation.relation_type != self.relation_type:
+            raise KeyError(f"Relation {relation_id} is not a learned relation.")
+        return self._strengthen(relation, amount)
+
+    def weaken_relation(self, relation_id: str, amount: float | None = None) -> bool:
+        """Weaken a learned relation by id; drop it when it fades to zero.
+
+        Returns ``True`` if the relation was removed, ``False`` if it was merely
+        weakened. Raises ``KeyError`` for an unknown or seeded relation.
+        """
+        relation = self.ontology.relations.get(relation_id)
+        if relation is None:
+            raise KeyError(f"Unknown semantic relation: {relation_id}")
+        if relation.relation_type != self.relation_type:
+            raise KeyError(f"Relation {relation_id} is not a learned relation.")
+        step = self.reinforcement if amount is None else amount
+        if step <= 0.0:
+            raise ValueError("Weakening amount must be positive.")
+        new_confidence = round(relation.confidence - step, 6)
+        if new_confidence <= 0.0:
+            self.ontology.remove_relation(relation.id)
+            return True
+        self.ontology.replace_relation(replace(relation, confidence=new_confidence))
+        return False
+
+    def relation(self, relation_id: str) -> SemanticRelation | None:
+        """Return a relation by id, or ``None`` if it does not exist."""
+        return self.ontology.relations.get(relation_id)
+
+    def relation_by_triple(
+        self, source_id: str, relation_type: str, target_id: str
+    ) -> SemanticRelation | None:
+        """Return the relation matching an exact (source, type, target) triple."""
+        for relation in self.ontology.relations.values():
+            if (
+                relation.source_id == source_id
+                and relation.relation_type == relation_type
+                and relation.target_id == target_id
+            ):
+                return relation
+        return None
+
+    def apply_feedback(
+        self, relation_id: str, *, useful: bool, amount: float | None = None
+    ) -> OntologyFeedback:
+        """Credit or blame a learned relation for the outcome of a recall.
+
+        A useful recall reinforces the link that produced it; an unhelpful one
+        weakens it, and the link is dropped if it fades to nothing. Only learned
+        relations can be reshaped this way.
+        """
+        relation = self.ontology.relations.get(relation_id)
+        if relation is None:
+            raise KeyError(f"Unknown semantic relation: {relation_id}")
+        source = self._label(relation.source_id)
+        target = self._label(relation.target_id)
+        if useful:
+            confidence = self.strengthen_relation(relation_id, amount)
+            return OntologyFeedback(relation_id, source, target, "reinforced", confidence)
+        removed = self.weaken_relation(relation_id, amount)
+        confidence = 0.0 if removed else self.ontology.relations[relation_id].confidence
+        return OntologyFeedback(
+            relation_id, source, target, "removed" if removed else "weakened", confidence, removed
+        )
+
     def _has_explicit(self, source_id: str, target_id: str) -> bool:
         pair = {(source_id, target_id), (target_id, source_id)}
         return any(
@@ -209,4 +298,4 @@ class OntologyLearner:
         return concept.label if concept is not None else concept_id
 
 
-__all__ = ["OntologyLearner", "OntologyLearning", "OntologyDecay"]
+__all__ = ["OntologyLearner", "OntologyLearning", "OntologyDecay", "OntologyFeedback"]
