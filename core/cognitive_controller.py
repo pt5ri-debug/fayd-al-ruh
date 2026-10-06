@@ -49,6 +49,7 @@ from core.experiment import Experiment
 from core.experiment_result import ExperimentResult
 from core.experiment_runner import ExperimentRunner
 from core.ontology import Ontology
+from core.ontology_reasoner import OntologyInference, OntologyReasoner
 from core.domain_knowledge import domain_summary, seed_ontology
 from core.semantic_parser import SemanticParser
 from core.meaning_model import MeaningModel
@@ -154,6 +155,7 @@ class CognitiveController:
         self.experiment_runner = ExperimentRunner()
         self.ontology = Ontology()
         seed_ontology(self.ontology)
+        self.ontology_reasoner = OntologyReasoner()
         self.semantic_parser = SemanticParser()
         self.meaning_model = MeaningModel()
         self.language_reasoner = LanguageReasoner()
@@ -389,6 +391,23 @@ class CognitiveController:
     def identity(self) -> str:
         """The declared domain identity this system reasons from."""
         return domain_summary(self.metacognition.self_model)
+
+    def infer_ontology_relation(self, source_label: str, target_label: str, relation_type: str) -> OntologyInference | None:
+        """Return an explicit or derived relation between two named concepts.
+
+        The relation need not be stored: ``OntologyReasoner`` composes the seeded
+        relations to derive it, and the result carries its composing steps and a
+        propagated confidence. Derived relations are never asserted into the graph.
+        """
+        sources = self.ontology.find_concepts(source_label)
+        targets = self.ontology.find_concepts(target_label)
+        if not sources or not targets:
+            return None
+        return self.ontology_reasoner.infer(self.ontology, sources[0].id, targets[0].id, relation_type)
+
+    def derive_ontology_relations(self) -> tuple[OntologyInference, ...]:
+        """Return every relation the seeded ontology entails but does not store."""
+        return self.ontology_reasoner.derive(self.ontology)
 
     def explain_belief(self, belief_id: str) -> BeliefExplanation:
         belief = self.graph.get_belief(belief_id)

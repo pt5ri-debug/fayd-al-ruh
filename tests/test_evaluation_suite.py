@@ -34,8 +34,48 @@ def test_petroleum_scenarios_cover_causal_retrieval_and_ontology():
     assert any(scenario.causal for scenario in petroleum.values())
     assert any(scenario.retrieval for scenario in petroleum.values())
     assert any(scenario.ontology_relations for scenario in petroleum.values())
+    assert any(scenario.ontology_inferences for scenario in petroleum.values())
     assert any(scenario.uncertainties for scenario in petroleum.values())
     assert any(scenario.plans for scenario in petroleum.values())
+
+
+def test_petroleum_ontology_inferences_are_derived_not_stored():
+    from core.cognitive_controller import CognitiveController
+
+    controller = CognitiveController()
+    stored = {
+        (relation.source_id, relation.target_id, relation.relation_type)
+        for relation in controller.ontology.relations.values()
+    }
+    inferences = [
+        scenario
+        for scenario in SCENARIOS
+        if scenario.id.startswith("petroleum-") and scenario.ontology_inferences
+    ]
+    assert inferences, "expected a petroleum ontology-inference scenario"
+    checked = 0
+    for scenario in inferences:
+        for source_label, relation_type, target_label in scenario.ontology_inferences:
+            sources = controller.ontology.find_concepts(source_label)
+            targets = controller.ontology.find_concepts(target_label)
+            assert sources and targets, (source_label, target_label)
+            key = (sources[0].id, targets[0].id, relation_type)
+            assert key not in stored, f"{source_label} {relation_type} {target_label} should not be stored"
+            inference = controller.infer_ontology_relation(source_label, target_label, relation_type)
+            assert inference is not None
+            assert inference.derived is True
+            assert inference.steps
+            checked += 1
+    assert checked >= 4
+
+
+def test_controller_exposes_derived_ontology_relations():
+    from core.cognitive_controller import CognitiveController
+
+    controller = CognitiveController()
+    derived = controller.derive_ontology_relations()
+    assert derived
+    assert all(inference.derived for inference in derived)
 
 
 def test_petroleum_ontology_relations_are_seeded():
