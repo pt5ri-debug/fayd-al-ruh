@@ -130,10 +130,12 @@ def run_curriculum(argv: Sequence[str] = ()) -> int:
     )
     from core.domain_knowledge import seed_ontology
     from core.ontology import Ontology
+    from core.petroleum_corpus import corpus_coverage, seed_petroleum_corpus
 
     ontology = Ontology()
     seed_ontology(ontology)
     seed_curriculum(ontology)
+    seed_petroleum_corpus(ontology)
     coverage = curriculum_coverage(ontology)
     labels = course_labels()
     categories = course_categories()
@@ -151,10 +153,28 @@ def run_curriculum(argv: Sequence[str] = ()) -> int:
         if category in grouped:
             print(f"\n[{category}]")
             print("\n".join(grouped[category]))
+
+    corpus = corpus_coverage(ontology)
+    corpus_concepts = sum(counts["concepts"] for counts in corpus.values())
+    corpus_concepts_expected = sum(counts["expected_concepts"] for counts in corpus.values())
+    corpus_relations = sum(counts["relations"] for counts in corpus.values())
+    corpus_relations_expected = sum(counts["expected_relations"] for counts in corpus.values())
+    print("\n[Petroleum corpus]")
+    for key, counts in corpus.items():
+        print(
+            f"  {key:22s} "
+            f"concepts={counts['concepts']}/{counts['expected_concepts']} "
+            f"relations={counts['relations']}/{counts['expected_relations']}"
+        )
     print(
         f"\nCourses: {len(coverage)}  "
         f"Concepts: {len(ontology.concepts)}  "
         f"Relations: {len(ontology.relations)}"
+    )
+    print(
+        f"Corpus entries: {len(corpus)} disciplines  "
+        f"concepts={corpus_concepts}/{corpus_concepts_expected}  "
+        f"relations={corpus_relations}/{corpus_relations_expected}"
     )
     return 0
 

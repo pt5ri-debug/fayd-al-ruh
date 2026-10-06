@@ -6,7 +6,8 @@ import json
 
 from core.curriculum_knowledge import course_keys, courses
 from core.domain_knowledge import discipline_keys, disciplines
-from ml.llm.corpus import build_corpus, curriculum_sentences
+from core.petroleum_corpus import entries as corpus_entries
+from ml.llm.corpus import build_corpus, corpus_sentences, curriculum_sentences
 from ml.release import (
     RELEASE_MANIFEST_NAME,
     TrainingConfig,
@@ -45,11 +46,28 @@ def test_build_corpus_contains_the_curriculum_block():
     assert len(corpus) > len(" ".join(curriculum_sentences()))
 
 
+def test_corpus_sentences_cover_every_corpus_entry():
+    text = " ".join(corpus_sentences())
+    for entry in corpus_entries():
+        assert entry.title in text
+        for label, _aliases in entry.concepts:
+            assert label in text
+
+
+def test_build_corpus_contains_the_corpus_block():
+    corpus = build_corpus(repeats=1, structured_repeats=1)
+    assert "belongs to" in corpus
+    # The generated blocks make the corpus larger than any single block alone.
+    assert len(corpus) > len(" ".join(corpus_sentences()))
+
+
 def test_knowledge_summary_reports_full_coverage():
     summary = knowledge_summary()
     assert summary["disciplines"] == len(discipline_keys())
     assert summary["courses"] == len(course_keys())
     assert summary["curriculum_coverage"] == 1.0
+    assert summary["corpus_entries"] == len(corpus_entries())
+    assert summary["corpus_coverage"] == 1.0
     assert summary["ontology_concepts"] > 0
     assert summary["ontology_relations"] > 0
 
@@ -58,6 +76,7 @@ def test_corpus_summary_counts_match_the_generator():
     config = TrainingConfig(llm_repeats=2, llm_structured_repeats=2)
     summary = corpus_summary(config)
     assert summary["curriculum_sentences"] == len(curriculum_sentences())
+    assert summary["corpus_sentences"] == len(corpus_sentences())
     assert summary["characters"] > 0
 
 
@@ -78,6 +97,7 @@ def test_train_release_writes_every_artifact_and_a_manifest(tmp_path):
     assert manifest["language_model"]["steps"] == 5
     assert manifest["petroleum"]["overall_success"] >= 0.0
     assert manifest["knowledge"]["curriculum_coverage"] == 1.0
+    assert manifest["knowledge"]["corpus_coverage"] == 1.0
 
     stored = json.loads((tmp_path / RELEASE_MANIFEST_NAME).read_text(encoding="utf-8"))
     assert stored["version"] == manifest["version"]

@@ -234,7 +234,8 @@ API keys:
   GELU + LayerNorm) with manual backprop and Adam. We verified the gradients
   against a numerical estimate.
 - `corpus.py`: in-repo training text (English about the project's world and about
-  petroleum engineering, with JSON examples in the `MODEL_OUTPUT_SCHEMA` format).
+  petroleum engineering, plus the seeded petroleum corpus and the curriculum, with
+  JSON examples in the `MODEL_OUTPUT_SCHEMA` format).
 - `generator.py` + `ai/local_model.py`: reproducible seeded text generation, and
   adaptation to the `CognitiveModel` interface, so it replaces Ollama anywhere a
   model is accepted.
@@ -304,6 +305,33 @@ controller.ontology.find_concepts("permeability")    # permeability
 > automatically, and it does not replace field data or the judgement of a
 > certified engineer. Every seed relation is revisable with evidence like any
 > other knowledge.
+
+### The knowledge content: the petroleum corpus
+
+The frame and the curriculum declare *which* concepts exist; the corpus in
+`core/petroleum_corpus.py` holds what they *mean*. Each `CorpusEntry` carries a
+definition plus concepts, relations, formulas, procedures, standards, and
+bilingual glossary terms, organised by discipline. It is seeded into every
+knowledge consumer so the content is inseparable from the project:
+
+- `seed_petroleum_corpus(ontology)`: plants the concepts and relations
+  **idempotently**, reusing nodes the frame and the curriculum already created,
+  so the three seed layers form one graph.
+- `corpus_documents()`: turns each entry into a `Document`, so the corpus is part
+  of the retrieval store (`core/documents.py`) and any claim drawn from it is
+  citable as `[petroleum_corpus:corpus:<key>]`.
+- `corpus_sentences()`: generates training prose merged into the language-model
+  corpus (`ml/llm/corpus.py`), so the model learns the same content.
+- `corpus_coverage()` / `corpus_coverage_score()`: per-discipline and whole-corpus
+  coverage, recorded in the release manifest (`ml/release.py`) as
+  `knowledge.corpus_coverage`, so losing any part of the content is a regression.
+
+```python
+from core.petroleum_corpus import corpus_coverage, corpus_coverage_score, seed_petroleum_corpus
+
+seed_petroleum_corpus(controller.ontology)          # idempotent
+corpus_coverage_score(controller.ontology)          # 1.0
+```
 
 ### Wiring a real language model to actions
 

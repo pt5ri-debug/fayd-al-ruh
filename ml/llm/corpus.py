@@ -99,11 +99,13 @@ def curriculum_sentences() -> list[str]:
 def build_corpus(*, repeats: int = 40, structured_repeats: int = 60) -> str:
     """Return the training text, repeated so the small model can fit it.
 
-    Four blocks are concatenated: general prose about the project's world,
+    Five blocks are concatenated: general prose about the project's world,
     petroleum-engineering prose matching the declared identity, prose generated
-    from the whole seeded curriculum (every discipline and course), and JSON
-    objects in the shape ``MODEL_OUTPUT_SCHEMA`` expects. The JSON block teaches
-    the model the field names and English values used by schema-guided decoding.
+    from the whole seeded curriculum (every discipline and course), prose and
+    formulas from the seeded petroleum corpus (the knowledge content behind the
+    curriculum), and JSON objects in the shape ``MODEL_OUTPUT_SCHEMA`` expects.
+    The JSON block teaches the model the field names and English values used by
+    schema-guided decoding.
     """
     if repeats < 1:
         raise ValueError("repeats must be at least 1.")
@@ -112,13 +114,22 @@ def build_corpus(*, repeats: int = 40, structured_repeats: int = 60) -> str:
     prose = " ".join(_sentences())
     petroleum = " ".join(_petroleum_sentences())
     curriculum = " ".join(curriculum_sentences())
+    corpus = " ".join(corpus_sentences())
     structured = " ".join(structured_examples())
     return (
         (prose + " ") * repeats
         + (petroleum + " ") * repeats
         + (curriculum + " ") * repeats
+        + (corpus + " ") * repeats
         + (structured + " ") * structured_repeats
     )
+
+
+def corpus_sentences() -> list[str]:
+    """Training prose generated from the seeded petroleum corpus."""
+    from core.petroleum_corpus import corpus_sentences as _corpus_sentences
+
+    return _corpus_sentences()
 
 
 def structured_examples() -> list[str]:
@@ -181,4 +192,4 @@ def normalise(text: str) -> str:
     return unicodedata.normalize("NFC", text)
 
 
-__all__ = ["build_corpus", "curriculum_sentences", "normalise"]
+__all__ = ["build_corpus", "corpus_sentences", "curriculum_sentences", "normalise"]

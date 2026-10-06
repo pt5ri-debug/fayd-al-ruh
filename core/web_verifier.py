@@ -346,12 +346,14 @@ def build_web_verifier(
     from core.domain_knowledge import seed_ontology
     from core.knowledge_update import KnowledgeUpdater
     from core.ontology import Ontology
+    from core.petroleum_corpus import seed_petroleum_corpus
     from core.rag import RagRetriever
     from core.web_source import StaticSearchProvider, WebSearchService
 
     ontology = Ontology()
     seed_ontology(ontology)
     seed_curriculum(ontology)
+    seed_petroleum_corpus(ontology)
     store = build_document_store()
     retriever = RagRetriever(store, ontology=ontology)
     search = WebSearchService(

@@ -178,10 +178,12 @@ def build_default_assistant(
     from core.documents import build_document_store
     from core.domain_knowledge import seed_ontology
     from core.ontology import Ontology
+    from core.petroleum_corpus import seed_petroleum_corpus
 
     ontology = Ontology()
     seed_ontology(ontology)
     seed_curriculum(ontology)
+    seed_petroleum_corpus(ontology)
     retriever = RagRetriever(build_document_store(), ontology=ontology)
     return GroundedAssistant(retriever, model=model, memory=memory)
 

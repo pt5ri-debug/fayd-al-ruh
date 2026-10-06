@@ -17,6 +17,7 @@ from typing import Any, Iterable
 
 from core.curriculum_knowledge import courses
 from core.domain_knowledge import disciplines
+from core.petroleum_corpus import corpus_documents
 from storage.json_store import JsonStore
 
 _NAMESPACE = "documents"
@@ -159,9 +160,10 @@ def _course_document(course) -> Document:
 
 
 def build_knowledge_documents() -> list[Document]:
-    """Turn the seeded disciplines and courses into citable documents."""
+    """Turn the seeded disciplines, courses, and corpus into citable documents."""
     documents = [_discipline_document(discipline) for discipline in disciplines()]
     documents.extend(_course_document(course) for course in courses())
+    documents.extend(corpus_documents())
     return documents
 
 

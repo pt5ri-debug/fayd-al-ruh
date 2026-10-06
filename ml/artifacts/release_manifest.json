@@ -103,17 +103,24 @@
     "llm_steps": 4000,
     "llm_structured_repeats": 60,
     "replay_batch": 32,
-    "seed": 0
+    "seed": 0,
+    "tokenizer_kind": "bpe",
+    "tokenizer_vocab_size": 1024
   },
   "corpus": {
-    "characters": 1665920,
+    "characters": 3316140,
+    "corpus_sentences": 501,
     "curriculum_sentences": 868,
     "repeats": 40,
     "structured_examples": 7,
-    "structured_repeats": 60
+    "structured_repeats": 60,
+    "tokenizer_kind": "bpe",
+    "tokenizer_vocab_size": 1024
   },
-  "git_revision": "85f9c11",
+  "git_revision": "ecb791c",
   "knowledge": {
+    "corpus_coverage": 1.0,
+    "corpus_entries": 31,
     "course_concepts": 243,
     "course_relations": 247,
     "courses": 34,
@@ -121,13 +128,15 @@
     "discipline_concepts": 45,
     "discipline_relations": 45,
     "disciplines": 14,
-    "ontology_concepts": 338,
-    "ontology_relations": 304
+    "ontology_concepts": 412,
+    "ontology_relations": 386
   },
   "language_model": {
     "checkpoint": "/workspace/project/fayd-al-ruh/ml/llm/checkpoints/fayd-llm.npz",
-    "parameters": 391200,
-    "steps": 4000
+    "parameters": 538464,
+    "steps": 4000,
+    "tokenizer": "bpe",
+    "tokenizer_vocab_size": 1024
   },
   "petroleum": {
     "discipline_success": {
@@ -298,6 +307,6 @@
       }
     ]
   },
-  "trained_at": "2026-10-06T18:18:32.820460+00:00",
+  "trained_at": "2026-10-06T21:54:21.843898+00:00",
   "version": "2.2.0"
 }
