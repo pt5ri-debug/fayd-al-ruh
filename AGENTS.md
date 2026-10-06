@@ -43,6 +43,10 @@ mind. User-facing docs and text are in Arabic.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. CLI:
   `python -m ai.voice` / `python -m cli voice`.
+- `core/tools.py` — deny-by-default tool sandbox: allow-list, root confinement,
+  read-only mode, capability + human-approval gates, built-in file/search/calculator
+  tools returning `ToolResult`. `core/tool_agent.py` — `ToolPlan`/`ToolAgent`
+  coordination with a full trace. CLI: `python -m ai.agent_demo` / `python -m cli agent`.
 - `core/version.py` is the single source of the version string.
 - `evaluation/` â€” regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
