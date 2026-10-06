@@ -51,9 +51,10 @@
     "causal_explanation_quality": 1.0,
     "contradiction_rate": 1.0,
     "decision_explanation_quality": 1.0,
-    "overall": 0.987994,
+    "overall": 0.988995,
     "petroleum_causal_accuracy": 1.0,
     "petroleum_inference_accuracy": 1.0,
+    "petroleum_multihop_retrieval_accuracy": 1.0,
     "petroleum_ontology_accuracy": 1.0,
     "petroleum_retrieval_accuracy": 1.0,
     "planning_success_rate": 1.0,
@@ -173,6 +174,15 @@
       },
       "domain": "petroleum",
       "id": "petroleum-ontology-inference",
+      "passed": true
+    },
+    {
+      "checks": {
+        "ontology_retrieval_accuracy": 1.0,
+        "retrieval_accuracy": 1.0
+      },
+      "domain": "petroleum",
+      "id": "petroleum-multihop-retrieval",
       "passed": true
     }
   ],

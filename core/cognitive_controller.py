@@ -16,7 +16,7 @@ from core.cognitive_state import CognitiveState
 from core.evidence_processor import EvidencePolarity
 from core.knowledge_graph import KnowledgeGraph
 from core.learning_metrics import LearningMetrics
-from core.memory import CognitiveMemory
+from core.memory import CognitiveMemory, MemoryRecall
 from core.observation import Observation
 from core.state_history import StateHistory
 from core.cognitive_trace import CognitiveTrace
@@ -50,6 +50,7 @@ from core.experiment_result import ExperimentResult
 from core.experiment_runner import ExperimentRunner
 from core.ontology import Ontology
 from core.ontology_reasoner import OntologyInference, OntologyReasoner
+from core.ontology_retrieval import OntologyGuidedRetriever
 from core.domain_knowledge import domain_summary, seed_ontology
 from core.semantic_parser import SemanticParser
 from core.meaning_model import MeaningModel
@@ -156,6 +157,7 @@ class CognitiveController:
         self.ontology = Ontology()
         seed_ontology(self.ontology)
         self.ontology_reasoner = OntologyReasoner()
+        self.ontology_retriever = OntologyGuidedRetriever(self.ontology, self.ontology_reasoner)
         self.semantic_parser = SemanticParser()
         self.meaning_model = MeaningModel()
         self.language_reasoner = LanguageReasoner()
@@ -408,6 +410,40 @@ class CognitiveController:
     def derive_ontology_relations(self) -> tuple[OntologyInference, ...]:
         """Return every relation the seeded ontology entails but does not store."""
         return self.ontology_reasoner.derive(self.ontology)
+
+    def recall_with_ontology(self, query: str, *, item_types: tuple[str, ...] = ("observation",), limit: int = 5) -> list[MemoryRecall]:
+        """Recall memory items that connect to the query through ontology relations.
+
+        Combines ordinary lexical/semantic recall with a bounded walk over the
+        seeded (and derived) relations, so an item grounding a merely related
+        concept is reachable even without a shared word. The returned recalls
+        carry the relational score in ``semantic_similarity``.
+        """
+        allowed = set(item_types)
+        items = {
+            item.item_id: self.memory._text_for(item.content)
+            for item in self.memory._items.values()
+            if item.item_type in allowed
+        }
+        base = {
+            recall.item.item_id: recall.relevance
+            for recall in self.memory.recall(query, item_types=item_types, limit=max(limit * 4, self.memory.size))
+        }
+        matches = self.ontology_retriever.rank(items, query, base_scores=base, limit=limit)
+        recalls: list[MemoryRecall] = []
+        for match in matches:
+            item = self.memory.get(match.item_id)
+            if item is None:
+                continue
+            recalls.append(
+                MemoryRecall(
+                    item=item,
+                    relevance=round(max(base.get(match.item_id, 0.0), match.score), 6),
+                    activation=round(match.score, 6),
+                    semantic_similarity=round(match.score, 6),
+                )
+            )
+        return recalls
 
     def explain_belief(self, belief_id: str) -> BeliefExplanation:
         belief = self.graph.get_belief(belief_id)
