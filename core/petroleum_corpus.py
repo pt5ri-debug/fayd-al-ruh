@@ -1031,6 +1031,574 @@ _ENTRIES: tuple[CorpusEntry, ...] = (
         ),
         standards=("Ethics follow the SPE Code of Professional Conduct.",),
     ),
+    # ------------------------------------------------------------------ geoscience
+    CorpusEntry(
+        key="petroleum_system",
+        discipline="geoscience",
+        title="The petroleum system",
+        definition=(
+            "A petroleum system links a source rock that generates hydrocarbons to "
+            "the accumulation that traps them. Organic matter buried and heated "
+            "matures into oil and then gas along a geothermal gradient. The "
+            "generated fluids migrate along carrier beds and faults until a trap "
+            "and a sealing cap rock stop them. The system is only complete when "
+            "all the elements are present and the timing places migration after "
+            "trap formation; missing any one element leaves a dry prospect."
+        ),
+        concepts=(
+            ("burial_history", ("burial history", "subsidence")),
+            ("hydrocarbon_charge", ("hydrocarbon charge", "charge")),
+            ("play_fairway", ("play fairway",)),
+            ("prospect", ("prospect", "lead")),
+        ),
+        facts=(
+            ("burial_history", "thermal_maturation", "controls", 0.7),
+            ("geothermal_gradient", "thermal_maturation", "drives", 0.7),
+            ("hydrocarbon_charge", "trap", "fills", 0.7),
+            ("play_fairway", "prospect", "contains", 0.6),
+            ("sedimentary_basin", "play_fairway", "hosts", 0.6),
+        ),
+        procedures=(
+            "Map source, reservoir, seal, and trap elements across the basin.",
+            "Rank prospects by charge risk before drilling.",
+        ),
+        glossary=(("petroleum system", "النظام النفطي"), ("play fairway", "نطاق اللعب")),
+    ),
+    CorpusEntry(
+        key="seismic_interpretation",
+        discipline="geoscience",
+        title="Seismic interpretation",
+        definition=(
+            "Seismic interpretation turns reflection data into a structural and "
+            "stratigraphic model of the subsurface. Interpreters pick horizons that "
+            "follow continuous reflections and faults that offset them, then map "
+            "closure to define a trap. Seismic attributes such as amplitude and "
+            "inversion products highlight lithology and fluid changes, so an "
+            "amplitude anomaly can indicate hydrocarbon. Every interpretation "
+            "carries uncertainty that is carried into the volumetric estimate."
+        ),
+        concepts=(
+            ("seismic_attribute", ("seismic attribute",)),
+            ("horizon", ("horizon",)),
+            ("fault_interpretation", ("fault interpretation",)),
+            ("amplitude_anomaly", ("amplitude anomaly", "bright spot")),
+            ("inversion_model", ("seismic inversion", "inversion")),
+        ),
+        facts=(
+            ("seismic_section", "horizon", "reveals", 0.6),
+            ("fault_interpretation", "trap", "defines", 0.6),
+            ("amplitude_anomaly", "hydrocarbon", "indicates", 0.5),
+            ("inversion_model", "seismic_attribute", "uses", 0.6),
+            ("seismic_attribute", "seismic_section", "derived_from", 0.6),
+        ),
+        procedures=(
+            "Pick horizons and faults on the migrated volume.",
+            "Map depth closure and integrate attributes with well control.",
+        ),
+    ),
+    # ------------------------------------------------------------------ facilities
+    CorpusEntry(
+        key="surface_facilities",
+        discipline="facilities",
+        title="Surface production facilities",
+        definition=(
+            "Surface facilities separate, treat, and move what the wells produce. "
+            "A separator drops pressure so oil, gas, and water split into phases; "
+            "the gas is dehydrated and sweetened, the oil is stabilised, and the "
+            "water is treated before disposal or reinjection. Pumps and compressors "
+            "move the streams, and pipelines or tankers export them. Facilities "
+            "design follows the production profile, so early, plateau, and decline "
+            "rates all set equipment sizes."
+        ),
+        concepts=(
+            ("separator", ("separator", "three-phase separator")),
+            ("pipeline", ("pipeline", "flowline")),
+            ("gas_processing", ("gas processing", "gas plant")),
+            ("pump", ("pump", "pumping system")),
+            ("storage_tank", ("storage tank", "tank farm")),
+        ),
+        facts=(
+            ("separator", "production", "processes", 0.7),
+            ("pipeline", "hydrocarbon", "transports", 0.7),
+            ("gas_processing", "hydrocarbon", "treats", 0.6),
+            ("pump", "pipeline", "pressurizes", 0.6),
+            ("storage_tank", "hydrocarbon", "stores", 0.6),
+        ),
+        procedures=(
+            "Size separators and pumps from the forecast production profile.",
+            "Specify gas treating to meet export and sales specifications.",
+        ),
+        glossary=(("separator", "فاصل"), ("pipeline", "خط أنابيب")),
+    ),
+    CorpusEntry(
+        key="gas_processing_and_lng",
+        discipline="facilities",
+        title="Gas processing and LNG",
+        definition=(
+            "Gas processing removes the impurities and heavy hydrocarbons that "
+            "would otherwise corrode pipelines or fail sales specifications. "
+            "Dehydration removes water, sweetening removes hydrogen sulphide and "
+            "carbon dioxide, and a dew-point unit strips condensate. Where a market "
+            "is far away, the gas is liquefied to shrink its volume for shipping as "
+            "LNG. Each step is a trade between recovery, energy use, and product "
+            "value."
+        ),
+        concepts=(
+            ("dehydration", ("dehydration", "glycol dehydration")),
+            ("sweetening", ("sweetening", "amine treating")),
+            ("nGL_recovery", ("NGL recovery", "natural gas liquids")),
+            ("liquefaction", ("liquefaction", "LNG train")),
+        ),
+        facts=(
+            ("dehydration", "hydrate", "prevents", 0.7),
+            ("sweetening", "gas", "purifies", 0.7),
+            ("nGL_recovery", "gas", "strips", 0.6),
+            ("liquefaction", "gas", "condenses", 0.6),
+        ),
+        procedures=(
+            "Dehydrate and sweeten the gas to pipeline specification.",
+            "Recover NGL and, for distant markets, liquefy the residue.",
+        ),
+    ),
+    # ------------------------------------------------------------- process_safety
+    CorpusEntry(
+        key="process_safety_management",
+        discipline="process_safety",
+        title="Process safety management",
+        definition=(
+            "Process safety management prevents the loss of containment that turns "
+            "a hydrocarbon release into a fire, explosion, or toxic event. It "
+            "identifies hazards with a HAZOP or similar study, then layers "
+            "protection so that no single failure causes harm: the design, the "
+            "safety instrumented system, alarms, and emergency response. Barriers "
+            "are monitored so their health is known, and a safety case documents "
+            "the argument that the risk is tolerable. A process safety event is "
+            "investigated to find the failed barrier, not just the failed person."
+        ),
+        concepts=(
+            ("process_safety_event", ("process safety event", "loss of containment")),
+            ("layers_of_protection", ("layers of protection", "protection layers")),
+            ("hazard_analysis", ("hazard analysis", "HAZOP")),
+            ("safety_case", ("safety case",)),
+            ("barrier_management", ("barrier management", "barrier health")),
+        ),
+        facts=(
+            ("hazard_analysis", "process_safety_event", "prevents", 0.7),
+            ("layers_of_protection", "process_safety_event", "mitigates", 0.7),
+            ("barrier_management", "layers_of_protection", "maintains", 0.6),
+            ("safety_case", "hazard_analysis", "documents", 0.6),
+            ("process_safety_event", "well_integrity", "threatens", 0.6),
+        ),
+        procedures=(
+            "Run a HAZOP and record every layer of protection.",
+            "Track barrier health and investigate each loss of containment.",
+        ),
+        standards=("Process safety follows API RP 754 for event reporting.",),
+    ),
+    # ------------------------------------------------------------ unconventional
+    CorpusEntry(
+        key="unconventional_resources",
+        discipline="unconventional",
+        title="Unconventional resources",
+        definition=(
+            "Unconventional reservoirs hold hydrocarbons in rock so tight that the "
+            "well must create permeability. Shale and tight-gas plays are developed "
+            "with long horizontal laterals placed in a sweet spot and completed "
+            "with many hydraulic-fracture stages. Proppant keeps the fractures "
+            "conductive, and the stimulated rock volume, not the wellbore alone, "
+            "drains the oil or gas. Because every stage is expensive, economics "
+            "hinge on landing-zone quality and fracture design."
+        ),
+        concepts=(
+            ("shale_play", ("shale play", "shale")),
+            ("horizontal_lateral", ("horizontal lateral", "lateral")),
+            ("multi_stage_fracturing", ("multi-stage fracturing", "multi-stage frac")),
+            ("tight_gas", ("tight gas", "tight reservoir")),
+            ("sweet_spot", ("sweet spot", "landing zone")),
+        ),
+        facts=(
+            ("shale_play", "reservoir", "hosts", 0.6),
+            ("horizontal_lateral", "shale_play", "drains", 0.7),
+            ("multi_stage_fracturing", "horizontal_lateral", "stimulates", 0.7),
+            ("sweet_spot", "horizontal_lateral", "guides", 0.6),
+            ("tight_gas", "shale_play", "produced_from", 0.6),
+        ),
+        procedures=(
+            "Identify the sweet spot from logs, core, and seismic.",
+            "Drill a long lateral and complete it in many fracture stages.",
+        ),
+        glossary=(("unconventional", "غير تقليدي"), ("sweet spot", "المنطقة المثلى")),
+    ),
+    # ---------------------------------------------- advanced reservoir engineering
+    CorpusEntry(
+        key="reservoir_simulation_modelling",
+        discipline="reservoir",
+        title="Reservoir simulation and modelling",
+        definition=(
+            "A reservoir simulator solves the flow equations on a grid to predict "
+            "how a field will perform under a development plan. A compositional "
+            "model tracks individual components through an equation of state when "
+            "the fluids are volatile; a black-oil model is enough for simpler "
+            "cases. The model is calibrated by history matching, adjusting "
+            "properties until the simulated pressures and rates match measured "
+            "history. Because a fine grid is too costly, upscaling coarsens it "
+            "while preserving the flow behaviour."
+        ),
+        concepts=(
+            ("history_matching", ("history matching",)),
+            ("grid_discretization", ("grid discretization", "gridding")),
+            ("upscaling", ("upscaling",)),
+            ("equation_of_state", ("equation of state",)),
+            ("compositional_model", ("compositional model",)),
+            ("simulator", ("reservoir simulator", "simulator")),
+        ),
+        facts=(
+            ("compositional_model", "equation_of_state", "uses", 0.7),
+            ("history_matching", "simulator", "calibrates", 0.7),
+            ("upscaling", "grid_discretization", "precedes", 0.6),
+            ("simulator", "reservoir_simulation", "is_a", 0.7),
+        ),
+        procedures=(
+            "Build the static model and initialise fluids.",
+            "History-match, then run forecasts for each development plan.",
+        ),
+    ),
+    CorpusEntry(
+        key="advanced_eor_methods",
+        discipline="eor",
+        title="Advanced enhanced oil recovery",
+        definition=(
+            "Advanced EOR methods attack the two things waterflooding cannot fix: "
+            "an unfavourable mobility ratio and oil trapped by capillary forces. "
+            "Polymer flooding thickens the water to improve the mobility ratio and "
+            "sweep; surfactant flooding lowers interfacial tension to mobilise "
+            "residual oil; miscible gas mixes with the oil and displaces it. "
+            "Conformance control seals thief zones so the injected fluid reaches "
+            "the oil. Each method is screened against the reservoir before a pilot."
+        ),
+        concepts=(
+            ("polymer_flooding", ("polymer flooding",)),
+            ("surfactant_flooding", ("surfactant flooding",)),
+            ("miscible_gas_injection", ("miscible gas injection",)),
+            ("thermal_recovery", ("thermal recovery", "steam flooding")),
+            ("mobility_ratio", ("mobility ratio",)),
+            ("residual_oil_saturation", ("residual oil saturation",)),
+            ("conformance_control", ("conformance control",)),
+        ),
+        facts=(
+            ("polymer_flooding", "mobility_ratio", "improves", 0.7),
+            ("surfactant_flooding", "residual_oil_saturation", "reduces", 0.7),
+            ("miscible_gas_injection", "oil", "mixes_with", 0.6),
+            ("thermal_recovery", "heavy_oil", "recovers", 0.6),
+            ("conformance_control", "mobility_ratio", "manages", 0.6),
+        ),
+        formulas=(
+            ("Mobility ratio", "M = (k_w / mu_w) / (k_o / mu_o)"),
+            ("Capillary number", "Nc = v * mu / sigma"),
+        ),
+        procedures=(
+            "Screen the method against fluid and reservoir properties.",
+            "Run a single-well or pattern pilot before field-wide expansion.",
+        ),
+    ),
+    CorpusEntry(
+        key="waterflood_management",
+        discipline="reservoir",
+        title="Waterflood management",
+        definition=(
+            "A waterflood maintains reservoir pressure and sweeps oil toward "
+            "producers by injecting water through a pattern of wells. Its success "
+            "is measured by sweep efficiency: how much of the reservoir the water "
+            "actually contacts. Injection above fracture pressure can channel "
+            "water straight to a producer, so injection pressure and rate are "
+            "controlled. Surveillance of rates, pressures, and water cut tells the "
+            "engineer when to adjust the pattern or add conformance work."
+        ),
+        concepts=(
+            ("injection_pattern", ("injection pattern", "flood pattern")),
+            ("sweep_efficiency", ("sweep efficiency",)),
+            ("water_cut", ("water cut",)),
+            ("voidage_replacement", ("voidage replacement",)),
+        ),
+        facts=(
+            ("injection_pattern", "sweep_efficiency", "controls", 0.7),
+            ("waterflood", "reservoir_pressure", "maintains", 0.7),
+            ("water_cut", "sweep_efficiency", "indicates", 0.6),
+            ("voidage_replacement", "reservoir_pressure", "balances", 0.6),
+        ),
+        procedures=(
+            "Set the pattern and keep voidage replacement near one.",
+            "Track water cut and adjust injection to protect sweep.",
+        ),
+    ),
+    CorpusEntry(
+        key="field_development_planning_advanced",
+        discipline="economics",
+        title="Integrated field development planning",
+        definition=(
+            "An integrated field development plan turns subsurface, wells, "
+            "facilities, and economics into one decision. An integrated asset "
+            "model couples reservoir, network, and facilities so a change in one is "
+            "seen in the others. Teams generate options, test them through decision "
+            "gates, and rank them by value, usually net present value under "
+            "uncertainty. The plan is a living document: new data reopens the "
+            "choices, so opportunities are identified and re-ranked as the field "
+            "matures."
+        ),
+        concepts=(
+            ("integrated_asset_model", ("integrated asset model",)),
+            ("production_forecast", ("production forecast",)),
+            ("opportunity_identification", ("opportunity identification",)),
+            ("value_optimization", ("value optimization", "value optimisation")),
+            ("decision_gate", ("decision gate", "stage gate")),
+        ),
+        facts=(
+            ("integrated_asset_model", "production_forecast", "produces", 0.7),
+            ("opportunity_identification", "value_optimization", "enables", 0.6),
+            ("decision_gate", "value_optimization", "governs", 0.6),
+            ("production_forecast", "decision", "informs", 0.6),
+            ("value_optimization", "net_present_value", "maximizes", 0.6),
+        ),
+        procedures=(
+            "Couple subsurface, network, and facilities in one model.",
+            "Rank options by value and pass them through decision gates.",
+        ),
+    ),
+    CorpusEntry(
+        key="geomechanics_and_wellbore_stability",
+        discipline="drilling",
+        title="Geomechanics and wellbore stability",
+        definition=(
+            "Geomechanics describes the stresses in the rock and how the well "
+            "interacts with them. The in-situ stress state, described by a "
+            "magnitude and an orientation, sets the mud weight window between pore "
+            "pressure and fracture gradient. Drill outside that window and the "
+            "borehole collapses or the formation fractures. The same stresses "
+            "control sand production and the geometry of a hydraulic fracture, so "
+            "geomechanics links drilling, completion, and production."
+        ),
+        concepts=(
+            ("in_situ_stress", ("in situ stress", "stress state")),
+            ("fracture_gradient", ("fracture gradient",)),
+            ("wellbore_stability", ("wellbore stability",)),
+            ("sand_production", ("sand production",)),
+            ("stress_orientation", ("stress orientation",)),
+        ),
+        facts=(
+            ("in_situ_stress", "wellbore_stability", "governs", 0.7),
+            ("fracture_gradient", "hydraulic_fracturing", "limits", 0.6),
+            ("sand_production", "wellbore_stability", "threatens", 0.6),
+            ("stress_orientation", "in_situ_stress", "describes", 0.6),
+            ("wellbore_stability", "drilling", "constrains", 0.6),
+        ),
+        formulas=(
+            ("Mud weight window", "Ppore < MW * 0.052 * TVD < FracGrad * TVD"),
+        ),
+        procedures=(
+            "Build a stress model from logs, core, and leak-off tests.",
+            "Set mud weight inside the stability window and design perforations.",
+        ),
+    ),
+    CorpusEntry(
+        key="flow_assurance",
+        discipline="production",
+        title="Flow assurance",
+        definition=(
+            "Flow assurance keeps fluids moving from the reservoir to the export "
+            "point. As pressure and temperature fall along the flowline, gas and "
+            "water can form hydrates that plug the line, wax and asphaltene can "
+            "deposit on the wall, and scale can choke a valve. Insulation, chemical "
+            "inhibitors, and pigging manage these risks, and slugging is controlled "
+            "so the receiving facilities are not overwhelmed. Flow assurance is "
+            "designed in early because a blockage offshore is very costly to clear."
+        ),
+        concepts=(
+            ("hydrate", ("hydrate", "gas hydrate")),
+            ("wax_deposition", ("wax deposition", "wax")),
+            ("asphaltene", ("asphaltene",)),
+            ("scale_deposition", ("scale deposition", "scale")),
+            ("slugging", ("slugging", "slug flow")),
+            ("thermal_insulation", ("thermal insulation",)),
+        ),
+        facts=(
+            ("hydrate", "flow_restriction", "causes", 0.7),
+            ("wax_deposition", "flow_restriction", "causes", 0.7),
+            ("asphaltene", "flow_restriction", "causes", 0.6),
+            ("scale_deposition", "flow_restriction", "causes", 0.6),
+            ("thermal_insulation", "hydrate", "prevents", 0.6),
+            ("slugging", "flow_restriction", "causes", 0.5),
+        ),
+        procedures=(
+            "Model pressure and temperature along the flowline.",
+            "Prevent hydrates and wax with insulation, chemicals, and pigging.",
+        ),
+    ),
+    CorpusEntry(
+        key="multiphase_flow",
+        discipline="production",
+        title="Multiphase flow",
+        definition=(
+            "Multiphase flow is the simultaneous movement of oil, gas, and water in "
+            "a pipe or wellbore. The flow regime, from bubble to slug to annular, "
+            "depends on rates, inclination, and fluid properties, and it sets the "
+            "pressure gradient and liquid holdup. Because the phases travel at "
+            "different velocities, a slip velocity develops between them. Engineers "
+            "read the regime from a flow pattern map and use it to size lines and "
+            "design artificial lift."
+        ),
+        concepts=(
+            ("flow_regime", ("flow regime",)),
+            ("slip_velocity", ("slip velocity",)),
+            ("pressure_gradient", ("pressure gradient",)),
+            ("holdup", ("liquid holdup", "holdup")),
+            ("flow_pattern_map", ("flow pattern map",)),
+        ),
+        facts=(
+            ("flow_regime", "pressure_gradient", "determines", 0.6),
+            ("holdup", "slip_velocity", "caused_by", 0.6),
+            ("flow_pattern_map", "flow_regime", "predicts", 0.6),
+            ("multiphase_flow", "pressure_gradient", "has", 0.6),
+            ("gas", "liquid", "flow_together_as", 0.5),
+        ),
+        procedures=(
+            "Determine the flow regime from rates and inclination.",
+            "Use the regime to size the line and select lift.",
+        ),
+    ),
+    CorpusEntry(
+        key="subsea_and_deepwater",
+        discipline="production",
+        title="Subsea and deepwater production",
+        definition=(
+            "In deepwater the wellhead sits on the seabed and the produced fluids "
+            "travel to a host through flowlines and a riser. A subsea tree controls "
+            "the well, an umbilical supplies power and chemicals, and a manifold "
+            "gathers several wells. The host is a floating production unit or a "
+            "platform, and it processes and exports the production. Subsea systems "
+            "are chosen when a surface platform is impractical, at the cost of "
+            "intervention being far harder and more expensive."
+        ),
+        concepts=(
+            ("subsea_well", ("subsea well",)),
+            ("subsea_tree", ("subsea tree", "christmas tree")),
+            ("production_riser", ("production riser",)),
+            ("umbilical", ("umbilical",)),
+            ("floating_production", ("floating production", "FPSO")),
+            ("subsea_manifold", ("subsea manifold",)),
+        ),
+        facts=(
+            ("subsea_well", "subsea_tree", "controlled_by", 0.7),
+            ("subsea_tree", "subsea_manifold", "connects_to", 0.6),
+            ("production_riser", "floating_production", "links_to", 0.7),
+            ("umbilical", "subsea_tree", "controls", 0.6),
+            ("floating_production", "hydrocarbon", "processes", 0.6),
+        ),
+        procedures=(
+            "Gather wells at a manifold and flow them to the host.",
+            "Design the riser and umbilical for the water depth.",
+        ),
+    ),
+    CorpusEntry(
+        key="data_analytics_and_ml",
+        discipline="production",
+        title="Petroleum data analytics and machine learning",
+        definition=(
+            "Data analytics turns the large volume of production, drilling, and "
+            "sensor data into decisions. A machine-learning model learns a mapping "
+            "from engineered features to an outcome, trained on historical data and "
+            "checked on a validation split so it is not merely memorising. Decline "
+            "curve analysis forecasts production from history, and predictive "
+            "maintenance watches pump vibration to service equipment before it "
+            "fails. The model supports the engineer; it never replaces the physics "
+            "or the judgement behind the decision."
+        ),
+        concepts=(
+            ("feature_engineering", ("feature engineering",)),
+            ("machine_learning_model", ("machine learning model", "ML model")),
+            ("training_data", ("training data",)),
+            ("validation_split", ("validation split", "holdout")),
+            ("predictive_maintenance", ("predictive maintenance",)),
+            ("decline_curve_analysis", ("decline curve analysis",)),
+        ),
+        facts=(
+            ("feature_engineering", "machine_learning_model", "feeds", 0.7),
+            ("training_data", "machine_learning_model", "trains", 0.7),
+            ("validation_split", "machine_learning_model", "evaluates", 0.6),
+            ("decline_curve_analysis", "production", "forecasts", 0.6),
+            ("predictive_maintenance", "pump", "protects", 0.6),
+        ),
+        procedures=(
+            "Engineer features and split the data into train and validation.",
+            "Train, validate, and monitor the model before trusting its output.",
+        ),
+    ),
+    CorpusEntry(
+        key="carbon_capture_and_storage",
+        discipline="hse",
+        title="Carbon capture, utilisation and storage",
+        definition=(
+            "Carbon capture and storage keeps carbon dioxide out of the atmosphere "
+            "by injecting it into a deep geological storage complex. The CO2 is "
+            "captured from a plant, compressed, and injected into a porous rock "
+            "sealed by an intact caprock. A plume migrates within the storage "
+            "complex and is tracked by monitoring wells, while leakage risk is "
+            "managed by verifying caprock integrity. The same CO2 can be used to "
+            "recover more oil before it is stored permanently."
+        ),
+        concepts=(
+            ("co2_capture", ("CO2 capture", "carbon capture")),
+            ("co2_plume", ("CO2 plume",)),
+            ("storage_complex", ("storage complex", "storage site")),
+            ("monitoring_well", ("monitoring well",)),
+            ("leakage_risk", ("leakage risk",)),
+            ("caprock_integrity", ("caprock integrity",)),
+        ),
+        facts=(
+            ("co2_capture", "storage_complex", "feeds", 0.7),
+            ("co2_plume", "storage_complex", "migrates_within", 0.6),
+            ("monitoring_well", "leakage_risk", "detects", 0.6),
+            ("caprock_integrity", "leakage_risk", "prevents", 0.7),
+            ("co2_plume", "enhanced_oil_recovery", "supports", 0.5),
+        ),
+        procedures=(
+            "Characterise the storage complex and prove caprock integrity.",
+            "Inject, monitor the plume, and verify no leakage.",
+        ),
+        standards=("Storage follows the ISO 27916 and EU CCS directives.",),
+    ),
+    CorpusEntry(
+        key="well_decommissioning",
+        discipline="cementing",
+        title="Well plugging and decommissioning",
+        definition=(
+            "When a well reaches the end of its life it is plugged and abandoned so "
+            "it can never leak. Cement plugs are placed across each permeable zone "
+            "and across the surface, and each plug is verified to form a permanent "
+            "barrier. The barriers must isolate every flow path, including the "
+            "annulus, and they are tested before the well is signed over. Offshore, "
+            "decommissioning ends with the removal or towing away of the platform, "
+            "under a regulatory plan."
+        ),
+        concepts=(
+            ("plug_and_abandonment", ("plug and abandonment", "P&A")),
+            ("abandonment_barrier", ("abandonment barrier",)),
+            ("cement_plug", ("cement plug",)),
+            ("platform_removal", ("platform removal",)),
+            ("permanent_barrier", ("permanent barrier",)),
+        ),
+        facts=(
+            ("plug_and_abandonment", "abandonment_barrier", "requires", 0.7),
+            ("cement_plug", "abandonment_barrier", "forms", 0.7),
+            ("abandonment_barrier", "well_integrity", "ensures", 0.7),
+            ("platform_removal", "offshore", "concludes", 0.6),
+            ("permanent_barrier", "abandonment_barrier", "is_a", 0.7),
+        ),
+        procedures=(
+            "Set and verify a cement plug across every flow path.",
+            "Test the barriers, then remove or tow the platform.",
+        ),
+        standards=("Plugging follows NORSOK D-010 and local regulations.",),
+    ),
 )
 
 

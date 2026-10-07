@@ -250,6 +250,54 @@ def _well_integrity_task() -> SandboxTask:
     )
 
 
+def _gas_processing_task() -> SandboxTask:
+    return SandboxTask(
+        name="gas-processing",
+        description="Treat gas: dehydrate, sweeten, recover NGL.",
+        discipline="facilities",
+        allowed_actions=(
+            _step("dehydrate_gas", "wet_gas", "gas_dehydrated"),
+            _step("sweeten_gas", "gas_dehydrated", "gas_sweetened"),
+            _step("recover_ngl", "gas_sweetened", "ngl_recovered"),
+            _step("sample_stream", "wet_gas", "stream_sampled"),
+        ),
+        initial_facts=frozenset({"wet_gas"}),
+        max_steps=5,
+    )
+
+
+def _process_safety_task() -> SandboxTask:
+    return SandboxTask(
+        name="process-safety-review",
+        description="Manage process safety: run a HAZOP, define barriers, verify protection.",
+        discipline="process_safety",
+        allowed_actions=(
+            _step("run_hazop", "operating_plant", "hazards_identified"),
+            _step("define_barriers", "hazards_identified", "barriers_defined"),
+            _step("verify_layers", "barriers_defined", "protection_verified"),
+            _step("review_procedures", "operating_plant", "procedures_reviewed"),
+        ),
+        initial_facts=frozenset({"operating_plant"}),
+        max_steps=5,
+    )
+
+
+def _unconventional_completion_task() -> SandboxTask:
+    return SandboxTask(
+        name="complete-shale-well",
+        description="Complete a shale well: land the lateral, pump stages, place proppant.",
+        discipline="unconventional",
+        allowed_actions=(
+            _step("identify_sweet_spot", "lateral_drilled", "landing_confirmed"),
+            _step("pump_fracture_stages", "landing_confirmed", "stages_pumped"),
+            _step("place_proppant", "stages_pumped", "proppant_placed"),
+            _step("take_core", "lateral_drilled", "core_taken"),
+        ),
+        initial_facts=frozenset({"lateral_drilled"}),
+        max_steps=5,
+    )
+
+
 def _seismic_interpretation_task() -> SandboxTask:
     """Held-out: geoscience, never trained on."""
     return SandboxTask(
@@ -299,6 +347,9 @@ PETROLEUM_TASKS: tuple[SandboxTask, ...] = (
     _control_kick_task(),
     _field_economics_task(),
     _well_integrity_task(),
+    _gas_processing_task(),
+    _process_safety_task(),
+    _unconventional_completion_task(),
 )
 
 # Disciplines the learning agents never train on; used to measure generalisation.
@@ -323,6 +374,9 @@ PETROLEUM_SUCCESS_FACTS: dict[str, str] = {
     "control-kick": "well_stable",
     "field-economics": "npv_computed",
     "well-integrity-check": "integrity_certified",
+    "gas-processing": "ngl_recovered",
+    "process-safety-review": "protection_verified",
+    "complete-shale-well": "proppant_placed",
     "seismic-interpretation": "prospect_located",
     "flow-assurance": "flow_assured",
 }
