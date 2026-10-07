@@ -122,6 +122,12 @@ class Conversation:
                 return message
         return None
 
+    def last_assistant_message(self) -> Message | None:
+        for message in reversed(self._messages):
+            if message.role is Role.ASSISTANT:
+                return message
+        return None
+
     def render(self, *, include_system: bool = True) -> str:
         """Render the window as a plain transcript for a model prompt."""
         lines: list[str] = []

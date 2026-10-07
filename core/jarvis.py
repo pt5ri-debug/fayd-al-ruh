@@ -23,9 +23,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from core.command_router import NaturalLanguageRouter, RouteKind
+from core.conversation import Conversation, ConversationMemory
+from core.jarvis_controls import ControlIntent, JarvisControls
 from core.speech import AudioClip, Speaker, VoiceAssistant
 from core.tool_agent import AgentRun, ToolAgent
 from core.wake_word import AudioSpeechGate, WakeWordDetector
+
+HELP_TEXT = (
+    "Conversation controls: say 'stop' to mute my voice, 'speak' to turn it back "
+    "on, 'repeat' to hear the last answer again, 'new conversation' to start over, "
+    "or 'help' for this list. Anything else, ask me a question or give me a command."
+)
 
 
 @dataclass
@@ -36,11 +44,13 @@ class JarvisTurn:
     response: str
     woke: bool
     routed: str
+    intent: str = ""
     answer_text: str = ""
     agent_run: AgentRun | None = None
     citations: tuple[str, ...] = field(default_factory=tuple)
     spoken: AudioClip | None = None
     playback_error: str = ""
+    conversation_id: str = ""
 
 
 class JarvisMode:
@@ -56,6 +66,9 @@ class JarvisMode:
         wake: WakeWordDetector | None = None,
         gate: AudioSpeechGate | None = None,
         speaker: Speaker | None = None,
+        memory: ConversationMemory | None = None,
+        controls: JarvisControls | None = None,
+        mute: bool = False,
     ) -> None:
         self.assistant = assistant
         self.router = router
@@ -64,6 +77,22 @@ class JarvisMode:
         self.wake = wake or WakeWordDetector()
         self.gate = gate or AudioSpeechGate()
         self.speaker = speaker
+        self.memory = memory or ConversationMemory()
+        self.controls = controls or JarvisControls()
+        self.mute = mute
+        self._conversation: Conversation | None = None
+
+    @property
+    def conversation(self) -> Conversation:
+        """The current session, created on first use so follow-ups keep context."""
+        if self._conversation is None:
+            self._conversation = self.memory.start("Jarvis session")
+        return self._conversation
+
+    def reset_conversation(self) -> Conversation:
+        """Start a new memory session, leaving earlier turns behind."""
+        self._conversation = self.memory.start("Jarvis session")
+        return self._conversation
 
     def handle(self, utterance: str, *, require_wake: bool = False, speak: bool = True) -> JarvisTurn:
         """Process one utterance end to end and return the recorded turn."""
@@ -83,10 +112,18 @@ class JarvisMode:
                 )
             text = match.remainder or text
 
+        control = self.controls.match(text)
+        if control is not None:
+            return self._handle_control(control.intent, utterance, speak=speak)
+
         routed = self.router.route(text)
         if routed.kind is RouteKind.TOOL and routed.plan is not None:
             run = self.agent.run(routed.plan)
             response = self._describe_run(run)
+            conversation = self.conversation
+            conversation.add_user(text)
+            conversation.add_assistant(response)
+            self.memory.save(conversation)
             return JarvisTurn(
                 heard=utterance.strip(),
                 response=response,
@@ -94,9 +131,11 @@ class JarvisMode:
                 routed="tool",
                 agent_run=run,
                 spoken=self._speak(response, speak),
+                conversation_id=conversation.id,
             )
 
-        answer = self.assistant.ask(text)
+        conversation = self.conversation
+        answer = self.assistant.ask(text, conversation=conversation)
         return JarvisTurn(
             heard=utterance.strip(),
             response=answer.text,
@@ -105,6 +144,7 @@ class JarvisMode:
             answer_text=answer.text,
             citations=answer.citations,
             spoken=self._speak(answer.text, speak),
+            conversation_id=conversation.id,
         )
 
     def handle_audio(self, clip: AudioClip, *, require_wake: bool = True, speak: bool = True) -> JarvisTurn:
@@ -114,8 +154,51 @@ class JarvisMode:
         heard = self.voice.recognizer.transcribe(clip)
         return self.handle(heard, require_wake=require_wake, speak=speak)
 
+    def _handle_control(self, intent: ControlIntent, utterance: str, *, speak: bool) -> JarvisTurn:
+        """Act on a conversation-level control without touching the sandbox."""
+        if intent is ControlIntent.MUTE:
+            self.mute = True
+            return self._control_turn(utterance, intent, "Muted. Say 'speak' when you want my voice back.", None)
+        if intent is ControlIntent.SPEAK:
+            self.mute = False
+            response = "Voice on."
+            return self._control_turn(utterance, intent, response, self._speak(response, speak))
+        if intent is ControlIntent.REPEAT:
+            last = self.conversation.last_assistant_message()
+            if last is None:
+                return self._control_turn(utterance, intent, "There is nothing to repeat yet.", None)
+            return self._control_turn(
+                utterance, intent, last.text, self._speak(last.text, speak), citations=last.citations
+            )
+        if intent is ControlIntent.RESET:
+            self.reset_conversation()
+            response = "Started a new conversation."
+            return self._control_turn(utterance, intent, response, self._speak(response, speak))
+        # HELP
+        return self._control_turn(utterance, intent, HELP_TEXT, self._speak(HELP_TEXT, speak))
+
+    def _control_turn(
+        self,
+        utterance: str,
+        intent: ControlIntent,
+        response: str,
+        spoken: AudioClip | None,
+        *,
+        citations: tuple[str, ...] = (),
+    ) -> JarvisTurn:
+        return JarvisTurn(
+            heard=utterance.strip(),
+            response=response,
+            woke=True,
+            routed="control",
+            intent=intent.value,
+            citations=citations,
+            spoken=spoken,
+            conversation_id=self.conversation.id,
+        )
+
     def _speak(self, text: str, speak: bool) -> AudioClip | None:
-        if not speak:
+        if not speak or self.mute:
             return None
         return self.voice.synthesizer.synthesize(text)
 
@@ -145,4 +228,4 @@ class JarvisMode:
         return f"I could not do that: {failed.result.error}"
 
 
-__all__ = ["JarvisMode", "JarvisTurn"]
+__all__ = ["HELP_TEXT", "JarvisMode", "JarvisTurn"]

@@ -4,6 +4,11 @@
     python -m cli jarvis "list the files in notes/"    # one turn, run a sandboxed tool
     python -m cli jarvis                               # interactive text loop (type 'quit' to exit)
 
+Jarvis keeps one conversation session per run, so follow-up questions stay in
+context. A few spoken controls work alongside questions and tool commands:
+"stop" mutes the voice, "speak" turns it back on, "repeat" replays the last
+answer, "new conversation" starts over, and "help" lists them.
+
 Voice is opt-in through the system: pass ``--play`` to speak answers through the
 speakers, ``--tts auto`` to pick an installed engine (``espeak``/``say``/...),
 ``--asr auto`` to transcribe from ``whisper`` when it is present, and ``--mic``
@@ -19,7 +24,9 @@ from pathlib import Path
 
 from core.assistant import build_default_assistant
 from core.command_router import NaturalLanguageRouter
+from core.conversation import ConversationMemory
 from core.jarvis import JarvisMode, JarvisTurn
+from core.jarvis_controls import JarvisControls
 from core.paths import data_dir
 from core.preferences import UserPreferences
 from core.speech import (
@@ -55,6 +62,9 @@ def _build_mode(args: argparse.Namespace) -> JarvisMode:
         voice=voice,
         wake=wake,
         speaker=Speaker() if args.play else None,
+        memory=ConversationMemory(),
+        controls=JarvisControls(),
+        mute=not preferences.record.speak,
     )
 
 
@@ -66,6 +76,7 @@ def _print_turn(turn: JarvisTurn, *, as_json: bool) -> None:
             "heard": turn.heard,
             "woke": turn.woke,
             "routed": turn.routed,
+            "intent": turn.intent,
             "response": turn.response,
             "citations": list(turn.citations),
         }
@@ -82,6 +93,10 @@ def _print_turn(turn: JarvisTurn, *, as_json: bool) -> None:
         return
     if turn.routed == "silence":
         print("(no speech detected)")
+        return
+    if turn.routed == "control":
+        print(f"Control: {turn.intent}")
+        print(f"Jarvis : {turn.response}")
         return
     print(f"Heard  : {turn.heard}")
     print(f"Routed : {turn.routed}")

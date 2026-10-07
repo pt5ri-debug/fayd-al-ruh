@@ -140,3 +140,81 @@ def test_play_without_speaker_or_audio_is_a_noop(tmp_path):
     assert mode.play(mode.handle("what is porosity?")) == ""  # no speaker attached
     mode.speaker = _RecordingSpeaker()
     assert mode.play(mode.handle("what is porosity?", speak=False)) == ""  # no clip
+
+
+def test_follow_up_turns_share_one_conversation(tmp_path):
+    mode = _mode(tmp_path)
+    first = mode.handle("what is porosity?")
+    second = mode.handle("what is permeability?")
+    assert first.conversation_id
+    assert first.conversation_id == second.conversation_id
+    assert first.conversation_id == mode.conversation.id
+    # user+assistant for each of the two turns
+    assert len(mode.conversation.messages) == 4
+
+
+def test_tool_turns_are_recorded_in_the_conversation(tmp_path):
+    mode = _mode(tmp_path)
+    mode.handle("calculate 2 * (3 + 4)")
+    roles = [message.role.value for message in mode.conversation.messages]
+    assert roles == ["user", "assistant"]
+    assert "14" in mode.conversation.last_assistant_message().text
+
+
+def test_stop_mutes_the_voice(tmp_path):
+    mode = _mode(tmp_path)
+    turn = mode.handle("stop")
+    assert turn.routed == "control"
+    assert turn.intent == "mute"
+    assert mode.mute is True
+    assert turn.spoken is None
+    assert mode.handle("what is porosity?", speak=True).spoken is None
+
+
+def test_speak_turns_the_voice_back_on(tmp_path):
+    mode = _mode(tmp_path)
+    mode.handle("stop")
+    turn = mode.handle("speak")
+    assert turn.intent == "speak"
+    assert mode.mute is False
+    assert turn.spoken is not None
+
+
+def test_repeat_replays_the_last_answer_with_citations(tmp_path):
+    mode = _mode(tmp_path)
+    answer = mode.handle("what is porosity?")
+    turn = mode.handle("repeat that")
+    assert turn.intent == "repeat"
+    assert turn.response == answer.answer_text
+    assert turn.citations == answer.citations
+
+
+def test_repeat_before_any_answer_is_honest(tmp_path):
+    mode = _mode(tmp_path)
+    turn = mode.handle("repeat")
+    assert turn.intent == "repeat"
+    assert "nothing to repeat" in turn.response
+
+
+def test_new_conversation_starts_over(tmp_path):
+    mode = _mode(tmp_path)
+    first = mode.handle("what is porosity?").conversation_id
+    turn = mode.handle("new conversation")
+    assert turn.intent == "reset"
+    assert mode.conversation.id != first
+    assert len(mode.conversation.messages) == 0
+
+
+def test_help_lists_the_controls(tmp_path):
+    mode = _mode(tmp_path)
+    turn = mode.handle("help")
+    assert turn.intent == "help"
+    assert "stop" in turn.response
+    assert "repeat" in turn.response
+    assert turn.spoken is not None
+
+
+def test_controls_do_not_run_in_the_sandbox(tmp_path):
+    mode = _mode(tmp_path)
+    turn = mode.handle("stop")
+    assert turn.agent_run is None
