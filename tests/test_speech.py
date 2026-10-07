@@ -13,9 +13,15 @@ from core.rag import RagRetriever
 from core.speech import (
     AudioClip,
     AudioModel,
+    CommandSynthesizer,
+    MicrophoneRecorder,
     SilentSynthesizer,
+    Speaker,
     TranscriptRecognizer,
     VoiceAssistant,
+    WhisperRecognizer,
+    discover_recognizer_name,
+    discover_synthesizer_name,
     load_recognizer,
     load_synthesizer,
 )
@@ -116,3 +122,69 @@ def test_audio_model_describes_a_clip():
 
     description = AudioModel(_Echo()).describe(AudioClip.silence(0.5))
     assert description == "description"
+
+
+# --- system engines -------------------------------------------------------
+
+
+def test_discovery_returns_a_known_engine_name():
+    assert discover_synthesizer_name() in {"silent", "espeak-ng", "espeak", "flite", "say"}
+    assert discover_recognizer_name() in {"transcript", "whisper"}
+
+
+def test_auto_loader_always_returns_a_usable_engine():
+    synth = load_synthesizer("auto")
+    recog = load_recognizer("auto", transcript="hello")
+    assert synth.name in {"silent", "espeak-ng", "espeak", "flite", "say"}
+    assert recog.name in {"transcript", "whisper"}
+    assert synth.synthesize("hello").duration_seconds > 0
+
+
+def test_auto_loader_falls_back_and_named_engine_raises():
+    # 'auto' never fails: it picks the best available engine or a safe stand-in.
+    assert load_synthesizer("auto").name in {"silent", "espeak-ng", "espeak", "flite", "say"}
+    assert load_recognizer("auto", transcript="hi").name in {"transcript", "whisper"}
+    # an explicitly named, uninstalled engine raises rather than faking audio.
+    with pytest.raises(ValueError):
+        load_synthesizer("definitely-not-installed")
+    with pytest.raises(ValueError):
+        load_recognizer("definitely-not-installed")
+
+
+def test_command_synthesizer_falls_back_when_engine_fails():
+    def _builder(executable, text, path):
+        return ["definitely-not-a-real-program", text]
+
+    synth = CommandSynthesizer("fake", "definitely-not-a-real-program", _builder)
+    clip = synth.synthesize("hello world")
+    assert clip.is_silent  # honest fallback, never fabricated audio
+
+
+def test_command_synthesizer_rejects_empty_text():
+    synth = CommandSynthesizer("fake", "espeak", lambda e, t, p: [e, t])
+    with pytest.raises(ValueError):
+        synth.synthesize("   ")
+
+
+def test_whisper_recognizer_reports_failure_without_inventing_speech():
+    recognizer = WhisperRecognizer("definitely-not-a-real-program")
+    with pytest.raises(ValueError):
+        recognizer.transcribe(AudioClip.silence(0.5))
+
+
+def test_microphone_recorder_reports_availability_honestly():
+    recorder = MicrophoneRecorder()
+    assert recorder.available() == (recorder.recorder is not None)
+
+
+def test_speaker_reports_availability_honestly():
+    speaker = Speaker()
+    assert speaker.available() == (speaker.player is not None)
+
+
+def test_speaker_raises_when_no_player_is_available(monkeypatch):
+    import core.speech as speech
+
+    monkeypatch.setattr(speech.shutil, "which", lambda name: None)
+    with pytest.raises(ValueError):
+        Speaker().play(AudioClip.silence(0.1))

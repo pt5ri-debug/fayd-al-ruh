@@ -60,6 +60,40 @@ Every run passes through `GovernedRuntime`, which enforces permission, then
 approval (for external tools only), then logs to the audit trail, and refuses
 execution if any guard is missing.
 
+## Jarvis mode
+
+Jarvis mode is the user-facing loop that composes the layers above; it is a
+front end, not a new reasoning core. It keeps every guard in force and adds
+nothing the sandbox does not already permit.
+
+- `core/wake_word.py`: `WakeWordDetector` matches an English or Arabic wake
+  phrase (longest phrase wins, so "hey jarvis" is consumed whole);
+  `AudioSpeechGate` rejects silence and clips that are too short or too quiet to
+  be speech. Both are pure and testable without a microphone.
+- `core/command_router.py`: `NaturalLanguageRouter` maps a clear sentence to a
+  `ToolPlan` (calculate, search, list, read, write) and leaves everything else to
+  the grounded assistant. Every candidate tool must already be on the sandbox
+  allow-list, and a write intent is only routed when the sandbox is writable, so
+  a sentence can never widen the agent's authority.
+- `core/speech.py`: `CommandSynthesizer` drives an installed system TTS engine
+  (`espeak-ng`, `espeak`, `flite`, `say`) through a fixed argv and falls back to a
+  silent clip on any failure; `WhisperRecognizer` drives `whisper` when present;
+  `MicrophoneRecorder` uses `arecord`/`sox`; `Speaker` plays a clip through
+  `aplay`/`afplay`/`sox`. `load_synthesizer("auto")` / `load_recognizer("auto")`
+  pick the best installed engine; a named engine that is missing raises rather
+  than faking audio. `JarvisMode.play` is best-effort and reports, rather than
+  raises, when no player is present.
+- `core/preferences.py`: `UserPreferences` persists the user's name, language,
+  spoken-answer preference, and wake word with `JsonStore`; it only changes on an
+  explicit `update`.
+- `core/jarvis.py`: `JarvisMode` runs listen → route → answer/act → speak and
+  returns a `JarvisTurn` recording what was heard, how it was routed, the answer
+  or agent run, and the spoken clip.
+
+The loop is deliberately honest: when it does not confidently understand a
+sentence it answers from knowledge instead of guessing a tool call, and when a
+step is refused it says so rather than inventing a result.
+
 ## Machine learning (ml/)
 
 The project used to set belief confidence with hand-written rules only. Now a

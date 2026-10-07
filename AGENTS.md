@@ -108,6 +108,11 @@ clone, each optional so the base system still runs without it:
 - Phase 4 — continuous learning from explicit feedback + regression monitor
   (`core/knowledge_update.py`, `core/continuous_learning.py`).
 - Phase 5 — optional multimodal perception (`core/vision.py`).
+- Phase 6 — Jarvis mode: wake-word gate (`core/wake_word.py`), natural-language
+  command routing to sandboxed tools (`core/command_router.py`), persistent user
+  preferences (`core/preferences.py`), real system speech engines
+  (`core/speech.py`), and the unified listen/route/answer/act/speak loop
+  (`core/jarvis.py`, `ai/jarvis.py`, `python -m cli jarvis`).
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
