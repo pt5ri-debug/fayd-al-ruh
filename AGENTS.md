@@ -81,6 +81,12 @@ Arabic is kept as secondary aliases where useful.
   the threshold and it does not contradict known knowledge. CLI:
   `python -m ai.web_verify` / `python -m cli web` (pass `--approve` to grant the
   external capability; omit the question to be prompted for your own).
+  The conversation loop uses the same engine: `GroundedAssistant` takes optional
+  `web`/`web_enabled`/`web_threshold`/`on_learn` and, when its top internal
+  passage is weak, searches, compares, and learns a trusted answer into the store
+  it retrieves from (immediately retrievable). `build_default_assistant` wires a
+  default internet verifier when `web_enabled=True`. Jarvis toggles it with the
+  `web on`/`web off` control; the CLI exposes `--no-web` and `--web-threshold`.
 - `core/vision.py` — optional multimodal perception: dependency-free `ImageBuffer`
   (PPM P6), measurable `ImageFeatures`, `HeuristicVisionEncoder`, and a
   `MultimodalAssistant` that grounds an image description in the RAG store. A real

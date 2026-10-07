@@ -345,3 +345,71 @@ def test_last_exchange_tracks_the_answered_pair():
     assert conversation.last_exchange() == ("what is porosity?", "Porosity is the void fraction.")
     conversation.add_user("and permeability?")
     assert conversation.last_exchange() is None
+
+
+# --- internet controls ----------------------------------------------------
+
+
+def _web_mode(tmp_path, *, documents=None, weak_evidence=0.9, on_learn=None):
+    """A mode whose assistant has a (static) web verifier wired in."""
+    from core.web_source import StaticSearchProvider, WebResult
+    from core.web_verifier import approved_gate, build_web_verifier, granted_permissions
+
+    documents = documents or build_document_store()
+    ontology = Ontology()
+    seed_ontology(ontology)
+    seed_curriculum(ontology)
+    assistant = GroundedAssistant(RagRetriever(documents, ontology=ontology))
+    web = build_web_verifier(
+        provider=StaticSearchProvider(
+            (
+                WebResult(
+                    "https://www.spe.org/archie",
+                    "Archie water saturation",
+                    "The Archie equation estimates water saturation from resistivity in the "
+                    "reservoir rock using porosity and the formation water resistivity.",
+                    0.9,
+                ),
+            )
+        ),
+        permissions=granted_permissions(),
+        approvals=approved_gate(),
+        retriever=assistant.retriever,
+        trust_threshold=0.5,
+    )
+    assistant.web = web
+    assistant.web_enabled = True
+    assistant.weak_evidence = weak_evidence
+    if on_learn is not None:
+        assistant._on_learn = on_learn
+    sandbox = build_sandbox(tmp_path)
+    return JarvisMode(assistant, router=NaturalLanguageRouter(sandbox))
+
+
+def test_web_control_toggles_the_assistant(tmp_path):
+    mode = _web_mode(tmp_path)
+    off = mode.handle("web off")
+    assert off.intent == "web"
+    assert mode.assistant.web_enabled is False
+    assert "off" in off.response.casefold()
+
+    on = mode.handle("web on")
+    assert mode.assistant.web_enabled is True
+    assert "on" in on.response.casefold()
+
+
+def test_web_control_is_honest_without_a_verifier(tmp_path):
+    mode = _mode(tmp_path)
+    turn = mode.handle("web on")
+    assert turn.intent == "web"
+    assert "not configured" in turn.response
+
+
+def test_jarvis_reports_a_web_learned_answer(tmp_path):
+    documents = build_document_store()
+    mode = _web_mode(tmp_path, documents=documents, on_learn=documents.save)
+    turn = mode.handle("Explain the Archie equation for water saturation in reservoir rock.")
+
+    assert turn.used_web
+    assert turn.learned
+    assert "web" in turn.response.casefold()

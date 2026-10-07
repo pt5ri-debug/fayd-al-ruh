@@ -30,8 +30,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.knowledge_update import KnowledgeUpdate, KnowledgeUpdater, UpdateOutcome
+from core.permissions import Capability, PermissionPolicy
+from core.human_approval import HumanApprovalGate
 from core.rag import RetrievedPassage, _query_terms
-from core.web_source import SearchOutcome, WebResult
+from core.web_source import SearchOutcome, WebResult, WebSearchProvider
 
 # Trust weights: source quality dominates, agreement and internal support refine.
 _WEIGHT_CREDIBILITY = 0.4
@@ -335,14 +337,19 @@ def build_web_verifier(
     trust_threshold: float = 0.6,
     approvals=None,
     permissions=None,
+    documents=None,
+    retriever=None,
+    min_support: float = 0.2,
 ) -> WebVerifier:
     """Assemble the web-verification stack over the project's own knowledge.
 
     Search stays denied unless ``permissions`` grants the external capability
     and ``approvals`` holds a live approval, so a plain call is offline-safe.
+    Pass ``retriever`` (or ``documents``) to share one corpus with a caller --
+    the assistant does this, so a learned statement is immediately retrievable.
     """
-    from core.documents import build_document_store
     from core.curriculum_knowledge import seed_curriculum
+    from core.documents import build_document_store
     from core.domain_knowledge import seed_ontology
     from core.knowledge_update import KnowledgeUpdater
     from core.ontology import Ontology
@@ -350,12 +357,20 @@ def build_web_verifier(
     from core.rag import RagRetriever
     from core.web_source import StaticSearchProvider, WebSearchService
 
-    ontology = Ontology()
-    seed_ontology(ontology)
-    seed_curriculum(ontology)
-    seed_petroleum_corpus(ontology)
-    store = build_document_store()
-    retriever = RagRetriever(store, ontology=ontology)
+    store = documents
+    if retriever is not None:
+        store = retriever.documents
+    elif documents is None:
+        ontology = Ontology()
+        seed_ontology(ontology)
+        seed_curriculum(ontology)
+        seed_petroleum_corpus(ontology)
+        store = build_document_store()
+        retriever = RagRetriever(store, ontology=ontology)
+    if store is None:
+        raise ValueError("build_web_verifier needs a documents store or a retriever.")
+    if retriever is None:
+        retriever = RagRetriever(store)
     search = WebSearchService(
         provider or StaticSearchProvider(),
         permissions=permissions,
@@ -367,12 +382,45 @@ def build_web_verifier(
         search,
         updater=updater,
         trust_threshold=trust_threshold,
+        min_support=min_support,
     )
+
+
+def granted_permissions() -> PermissionPolicy:
+    """The permission policy that lets the ``web_search`` external tool run."""
+    return PermissionPolicy(
+        allowed=frozenset(
+            {
+                Capability.SYMBOLIC_SIMULATION,
+                Capability.SANDBOX_TASK,
+                Capability.EXTERNAL_TOOL,
+            }
+        ),
+        allowed_external_tools=frozenset({"web_search"}),
+    )
+
+
+def approved_gate() -> HumanApprovalGate:
+    """A live approval for ``web_search``, signed by the local user."""
+    gate = HumanApprovalGate()
+    request = gate.request("web_search", requested_by="conversation-loop")
+    request.approve("local-user")
+    return gate
+
+
+def internet_provider() -> WebSearchProvider:
+    """The default keyless internet provider, falling back to an empty static one."""
+    from core.web_source import FallbackSearchProvider, StaticSearchProvider, WikipediaSearchProvider
+
+    return FallbackSearchProvider(WikipediaSearchProvider(), StaticSearchProvider())
 
 
 __all__ = [
     "SourceAssessment",
     "WebAssessment",
     "WebVerifier",
+    "approved_gate",
     "build_web_verifier",
+    "granted_permissions",
+    "internet_provider",
 ]

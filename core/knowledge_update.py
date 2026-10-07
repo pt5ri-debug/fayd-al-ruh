@@ -22,6 +22,7 @@ and reversible: the ledger holds the full history of each statement.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
@@ -96,8 +97,13 @@ class KnowledgeUpdater:
         return self._strengths.get(doc_id, 0.5)
 
     def _doc_id_for(self, statement: str) -> str:
-        digest = abs(hash(tuple(sorted(_query_terms(statement))))) % (16**8)
-        return f"learned:{digest:08x}"
+        # A keyed digest over the statement's content terms, not the built-in
+        # ``hash``: that one is salted per process, so the same statement would
+        # get a different id on every run and learned knowledge could never be
+        # deduplicated or decayed after a restart.
+        key = " ".join(sorted(_query_terms(statement)))
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+        return f"learned:{digest}"
 
     def _vocabulary(self) -> set[str]:
         terms: set[str] = set()

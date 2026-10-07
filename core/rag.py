@@ -117,7 +117,11 @@ class RagRetriever:
         )
 
     def index_document(self, document: Document) -> None:
-        self.documents.add(document)
+        # Idempotent: re-indexing a document already in the store refreshes its
+        # vector instead of raising (learned statements are re-indexed on every
+        # refresh, and some stores call add() themselves).
+        if self.documents.get(document.doc_id) is None:
+            self.documents.add(document)
         self._index.add(document.doc_id, f"{document.title} {document.text}")
         if self._retriever is not None:
             self._retriever.invalidate()

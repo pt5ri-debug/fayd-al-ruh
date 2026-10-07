@@ -34,10 +34,20 @@ from core.wake_word import AudioSpeechGate, WakeWordDetector
 HELP_TEXT = (
     "Conversation controls: say 'stop' to mute my voice, 'speak' to turn it back "
     "on, 'repeat' to hear the last answer again, 'new conversation' to start over, "
-    "'save' to persist this session, 'sessions' to list saved ones, 'that's right' "
-    "to confirm my last answer, 'that's wrong, it's ...' to correct it, or 'help' "
-    "for this list. Anything else, ask me a question or give me a command."
+    "'save' to persist this session, 'sessions' to list saved ones, 'web on' or "
+    "'web off' to toggle internet lookups, 'that's right' to confirm my last "
+    "answer, 'that's wrong, it's ...' to correct it, or 'help' for this list. "
+    "Anything else, ask me a question or give me a command."
 )
+
+
+def _web_note(used_web: bool, learned: bool) -> str:
+    """The provenance line appended to a web-augmented answer."""
+    if used_web and learned:
+        return "Note: I searched the web, compared it with what I knew, and added the new knowledge."
+    if used_web:
+        return "Note: I answered this partly from the web, not only from what I knew."
+    return "Note: I recorded a new fact in my own knowledge."
 
 
 @dataclass
@@ -55,6 +65,8 @@ class JarvisTurn:
     spoken: AudioClip | None = None
     playback_error: str = ""
     conversation_id: str = ""
+    used_web: bool = False
+    learned: bool = False
 
 
 class JarvisMode:
@@ -171,15 +183,22 @@ class JarvisMode:
 
         conversation = self.conversation
         answer = self.assistant.ask(text, conversation=conversation)
+        response = answer.text
+        used_web = bool(getattr(answer, "used_web", False))
+        learned = bool(getattr(answer, "learned", False))
+        if used_web or learned:
+            response = f"{response}\n\n{_web_note(used_web, learned)}"
         return JarvisTurn(
             heard=utterance.strip(),
-            response=answer.text,
+            response=response,
             woke=woke,
             routed="answer",
-            answer_text=answer.text,
+            answer_text=response,
             citations=answer.citations,
-            spoken=self._speak(answer.text, speak),
+            spoken=self._speak(response, speak),
             conversation_id=conversation.id,
+            used_web=used_web,
+            learned=learned,
         )
 
     def handle_audio(self, clip: AudioClip, *, require_wake: bool = True, speak: bool = True) -> JarvisTurn:
@@ -219,6 +238,9 @@ class JarvisMode:
                 response = "No saved sessions yet."
             else:
                 response = "Saved sessions: " + ", ".join(ids)
+            return self._control_turn(utterance, intent, response, self._speak(response, speak))
+        if intent is ControlIntent.WEB:
+            response = self._handle_web_control(control)
             return self._control_turn(utterance, intent, response, self._speak(response, speak))
         if intent is ControlIntent.CONFIRM:
             response = self._handle_feedback(control.utterance, confirmed=True)
@@ -271,6 +293,18 @@ class JarvisMode:
                 f"statement ({outcome.reason})."
             )
         return "Thank you -- I recorded your feedback."
+
+    def _handle_web_control(self, control: JarvisControl) -> str:
+        """Turn the assistant's internet lookups on or off, honestly."""
+        assistant = self.assistant
+        if getattr(assistant, "web", None) is None:
+            return "Internet lookups are not configured in this session."
+        tokens = control.phrase.split()
+        enable = not ("off" in tokens or control.phrase == "offline")
+        assistant.web_enabled = enable
+        if enable:
+            return "Internet lookups are on: I will search, compare, and learn trusted answers."
+        return "Internet lookups are off: I will answer only from what I already know."
 
     def _record_exchange(self, feedback: str, statement: str) -> None:
         """Append the feedback turn, refreshing the retriever when one is wired."""

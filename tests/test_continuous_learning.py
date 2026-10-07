@@ -43,6 +43,18 @@ def test_update_reinforces_on_repeat():
     assert second.confidence > first.confidence
 
 
+def test_doc_id_is_stable_across_instances():
+    # A random per-process hash would give the same statement a different id on
+    # every run, so persisted knowledge could never be reinforced or decayed.
+    first = KnowledgeUpdater(_store()).apply(
+        KnowledgeUpdate("Porosity measures the void volume in the rock.", source="a")
+    )
+    second = KnowledgeUpdater(_store()).apply(
+        KnowledgeUpdate("Porosity measures the void volume in the rock.", source="b")
+    )
+    assert first.doc_id == second.doc_id
+
+
 def test_update_rejects_off_topic_statement():
     updater = KnowledgeUpdater(_store())
     outcome = updater.apply(

@@ -638,6 +638,26 @@ In the interactive menu, option **5) Ask the web and verify the answer** grants 
 capability and then asks you to type the question, so you are never stuck with a
 fixed example question.
 
+### The conversation loop learns from the web too
+
+Jarvis itself uses this same engine. When a question's top internal passage is
+weak (score below a transparent threshold, `0.35` by default), the assistant
+searches the web, compares the result with what it already knows, and folds a
+trusted answer into the store it retrieves from — so the very next retrieval
+already knows it. A strong internal hit never triggers a search, and an
+off-topic web answer is shown but never learned. The toggle is a normal control.
+
+```bash
+python -m cli jarvis "what is the Klinkenberg correction?"     # answers from the web when unsure
+python -m cli jarvis --web-threshold 0.5 "..."                 # search more eagerly
+python -m cli jarvis --no-web "what is porosity?"              # internal knowledge only
+```
+
+Say **web off** / **web on** (or **offline**) in a session to toggle lookups.
+The assistant does not decide this on its own: the search stays denied unless the
+permission policy grants the external capability and a live approval exists, the
+same gate as `cli web`.
+
 Set `FAYD_SEARCH_ENDPOINT` (and optionally `FAYD_SEARCH_API_KEY`) to point the
 command at a real search API; the application owns the URL and the key, and none
 is stored in the project. With no endpoint it uses the keyless Wikipedia API, and
