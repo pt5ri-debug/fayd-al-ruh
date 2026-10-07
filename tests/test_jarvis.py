@@ -36,6 +36,18 @@ def _mode(tmp_path, **sandbox_kwargs):
     )
 
 
+def _mode_with_memory(tmp_path, memory):
+    sandbox = build_sandbox(tmp_path, read_only=False)
+    assistant = _assistant()
+    return JarvisMode(
+        assistant,
+        router=NaturalLanguageRouter(sandbox),
+        agent=ToolAgent(sandbox),
+        voice=VoiceAssistant(assistant, recognizer=TranscriptRecognizer(), synthesizer=SilentSynthesizer()),
+        memory=memory,
+    )
+
+
 def test_question_is_answered_with_citations(tmp_path):
     turn = _mode(tmp_path).handle("what is porosity?")
     assert turn.routed == "answer"
@@ -218,3 +230,43 @@ def test_controls_do_not_run_in_the_sandbox(tmp_path):
     mode = _mode(tmp_path)
     turn = mode.handle("stop")
     assert turn.agent_run is None
+
+
+def test_save_without_a_store_is_honest(tmp_path):
+    mode = _mode(tmp_path)
+    mode.handle("what is porosity?")
+    turn = mode.handle("save")
+    assert turn.intent == "save"
+    assert "not persistent" in turn.response
+
+
+def test_sessions_lists_nothing_without_a_store(tmp_path):
+    mode = _mode(tmp_path)
+    assert mode.list_sessions() == ()
+    assert "No saved sessions" in mode.handle("sessions").response
+
+
+def test_session_round_trip_with_a_persistent_store(tmp_path):
+    from core.conversation import ConversationMemory
+    from storage.json_store import JsonStore
+
+    store_root = tmp_path / "state"
+    memory = ConversationMemory(JsonStore(store_root / "jarvis"))
+    mode = _mode_with_memory(tmp_path, memory)
+    mode.handle("what is porosity?")
+    saved_id = mode.save_session()
+    assert mode.memory.persistent
+    assert saved_id.endswith(mode.conversation.id + ".")
+    assert mode.list_sessions() == (mode.conversation.id,)
+
+    # A fresh mode over the same store resumes the saved session and context.
+    resumed = _mode_with_memory(tmp_path, ConversationMemory(JsonStore(store_root / "jarvis")))
+    assert resumed.conversation.id != mode.conversation.id
+    assert resumed.resume_session(mode.conversation.id) is True
+    assert resumed.conversation.last_assistant_message() is not None
+    assert resumed.handle("repeat").response == mode.conversation.last_assistant_message().text
+
+
+def test_resume_unknown_session_reports_false(tmp_path):
+    mode = _mode(tmp_path)
+    assert mode.resume_session("CNV-doesnotexist") is False

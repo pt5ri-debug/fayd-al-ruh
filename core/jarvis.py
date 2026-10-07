@@ -32,7 +32,8 @@ from core.wake_word import AudioSpeechGate, WakeWordDetector
 HELP_TEXT = (
     "Conversation controls: say 'stop' to mute my voice, 'speak' to turn it back "
     "on, 'repeat' to hear the last answer again, 'new conversation' to start over, "
-    "or 'help' for this list. Anything else, ask me a question or give me a command."
+    "'save' to persist this session, 'sessions' to list saved ones, or 'help' for "
+    "this list. Anything else, ask me a question or give me a command."
 )
 
 
@@ -93,6 +94,35 @@ class JarvisMode:
         """Start a new memory session, leaving earlier turns behind."""
         self._conversation = self.memory.start("Jarvis session")
         return self._conversation
+
+    def save_session(self) -> str:
+        """Persist the current session. Returns a status line.
+
+        Saving is a no-op when the memory has no store, and it reports a write
+        failure instead of raising, so a read-only data directory cannot crash a
+        spoken turn.
+        """
+        if not self.memory.persistent:
+            return "This session is not persistent (no store is configured)."
+        try:
+            self.memory.save(self.conversation)
+        except OSError as error:
+            return f"Could not save this conversation: {error}"
+        return f"Saved this conversation as {self.conversation.id}."
+
+    def resume_session(self, conversation_id: str) -> bool:
+        """Make a saved session current. Returns whether it was found."""
+        conversation = self.memory.load(conversation_id)
+        if conversation is None:
+            return False
+        self._conversation = conversation
+        return True
+
+    def list_sessions(self) -> tuple[str, ...]:
+        """The ids of sessions saved with a persistent store."""
+        if not self.memory.persistent:
+            return ()
+        return tuple(self.memory.list_saved())
 
     def handle(self, utterance: str, *, require_wake: bool = False, speak: bool = True) -> JarvisTurn:
         """Process one utterance end to end and return the recorded turn."""
@@ -173,6 +203,16 @@ class JarvisMode:
         if intent is ControlIntent.RESET:
             self.reset_conversation()
             response = "Started a new conversation."
+            return self._control_turn(utterance, intent, response, self._speak(response, speak))
+        if intent is ControlIntent.SAVE:
+            response = self.save_session()
+            return self._control_turn(utterance, intent, response, self._speak(response, speak))
+        if intent is ControlIntent.SESSIONS:
+            ids = self.list_sessions()
+            if not ids:
+                response = "No saved sessions yet."
+            else:
+                response = "Saved sessions: " + ", ".join(ids)
             return self._control_turn(utterance, intent, response, self._speak(response, speak))
         # HELP
         return self._control_turn(utterance, intent, HELP_TEXT, self._speak(HELP_TEXT, speak))

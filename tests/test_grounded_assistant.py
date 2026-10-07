@@ -76,6 +76,8 @@ def test_conversation_memory_persists_to_a_store(tmp_path):
     assert loaded is not None
     assert loaded.messages[0].text == "hello"
     assert conversation.id in reopened.list_saved()
+    assert reopened.persistent is True
+    assert ConversationMemory().persistent is False
 
 
 def test_message_from_primitive_keeps_role():

@@ -7,7 +7,12 @@
 Jarvis keeps one conversation session per run, so follow-up questions stay in
 context. A few spoken controls work alongside questions and tool commands:
 "stop" mutes the voice, "speak" turns it back on, "repeat" replays the last
-answer, "new conversation" starts over, and "help" lists them.
+answer, "new conversation" starts over, "save" persists the session, "sessions"
+lists saved ones, and "help" lists them all.
+
+Sessions persist under the data directory. In the interactive loop, resume a
+saved session with ``--session <id>`` (it autosaves after every turn), or list
+what is stored with ``--list-sessions``.
 
 Voice is opt-in through the system: pass ``--play`` to speak answers through the
 speakers, ``--tts auto`` to pick an installed engine (``espeak``/``say``/...),
@@ -39,10 +44,19 @@ from core.speech import (
 from core.tool_agent import ToolAgent
 from core.tools import build_sandbox
 from core.wake_word import WakeWordDetector
+from storage.json_store import JsonStore
 
 
 def _default_sandbox_root() -> Path:
     return data_dir() / "jarvis-sandbox"
+
+
+def _memory() -> ConversationMemory:
+    """A persistent session store under the data directory, or in-memory if it fails."""
+    try:
+        return ConversationMemory(JsonStore(data_dir() / "jarvis"))
+    except (OSError, ValueError):
+        return ConversationMemory()
 
 
 def _build_mode(args: argparse.Namespace) -> JarvisMode:
@@ -62,7 +76,7 @@ def _build_mode(args: argparse.Namespace) -> JarvisMode:
         voice=voice,
         wake=wake,
         speaker=Speaker() if args.play else None,
-        memory=ConversationMemory(),
+        memory=_memory(),
         controls=JarvisControls(),
         mute=not preferences.record.speak,
     )
@@ -113,8 +127,9 @@ def _print_turn(turn: JarvisTurn, *, as_json: bool) -> None:
                 print(f"  - {citation}")
 
 
-def run_loop(mode: JarvisMode, *, as_json: bool, require_wake: bool, speak: bool) -> int:
-    print("Jarvis mode. Type a request, or 'quit' to exit.")
+def run_loop(mode: JarvisMode, *, as_json: bool, require_wake: bool, speak: bool, autosave: bool = False) -> int:
+    if not as_json:
+        print(f"Jarvis mode (session {mode.conversation.id}). Type a request, or 'quit' to exit.")
     while True:
         try:
             line = input("You: ")
@@ -125,6 +140,8 @@ def run_loop(mode: JarvisMode, *, as_json: bool, require_wake: bool, speak: bool
             return 0
         turn = mode.handle(line, require_wake=require_wake, speak=speak)
         _print_turn(turn, as_json=as_json)
+        if autosave:
+            mode.save_session()
         playback = mode.play(turn)
         if playback:
             print(f"(audio: {playback})")
@@ -141,14 +158,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--play", action="store_true", help="play spoken answers through the speakers")
     parser.add_argument("--mic", action="store_true", help="record one clip from the microphone")
     parser.add_argument("--write-wav", type=Path, default=None, help="write the spoken answer to a WAV file")
+    parser.add_argument("--session", default=None, help="resume a saved session by id, or start a new one")
+    parser.add_argument("--list-sessions", action="store_true", help="list saved sessions and exit")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = parser.parse_args(argv)
+
+    if args.list_sessions:
+        saved = _memory().list_saved()
+        if saved:
+            print("Saved sessions:")
+            for session_id in saved:
+                print(f"  - {session_id}")
+        else:
+            print("No saved sessions yet.")
+        return 0
 
     try:
         mode = _build_mode(args)
     except ValueError as error:
         print(f"Could not start Jarvis mode: {error}")
         return 1
+
+    if args.session:
+        if not mode.resume_session(args.session):
+            print(f"No saved session '{args.session}'. Starting a new one.")
+        elif not args.json:
+            print(f"Resumed session {mode.conversation.id}.")
     require_wake = args.wake
     speak = args.play or args.write_wav is not None
 
@@ -186,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.write_wav is not None:
         print("--write-wav needs a single request, not the interactive loop.")
         return 1
-    return run_loop(mode, as_json=args.json, require_wake=require_wake, speak=speak)
+    return run_loop(mode, as_json=args.json, require_wake=require_wake, speak=speak, autosave=args.session is not None)
 
 
 if __name__ == "__main__":

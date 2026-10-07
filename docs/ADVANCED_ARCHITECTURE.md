@@ -87,16 +87,18 @@ nothing the sandbox does not already permit.
   spoken-answer preference, and wake word with `JsonStore`; it only changes on an
   explicit `update`.
 - `core/jarvis_controls.py`: `JarvisControls` recognises a few conversation-level
-  commands — stop / speak / repeat / new conversation / help — as *exact* phrases
-  after normalisation (case, punctuation, and leading fillers are ignored), so
-  "stop" mutes but "how do I stop the pump?" stays a question. A control only
-  changes conversation state; it can never reach the sandbox.
+  commands — stop / speak / repeat / new conversation / save / sessions / help —
+  as *exact* phrases after normalisation (case, punctuation, and leading fillers
+  are ignored), so "stop" mutes but "how do I stop the pump?" stays a question. A
+  control only changes conversation state; it can never reach the sandbox.
 - `core/jarvis.py`: `JarvisMode` runs listen → route → answer/act → speak and
   returns a `JarvisTurn` recording what was heard, how it was routed, the answer
   or agent run, and the spoken clip. It keeps one `Conversation` per run — so a
   follow-up like "and how is it measured?" is answered in context, and tool turns
   are recorded too — and holds a mute state that gates synthesis. `repeat` replays
-  the last assistant message; `new conversation` starts a fresh session.
+  the last assistant message; `new conversation` starts a fresh session. When the
+  memory has a `JsonStore`, `save_session` / `resume_session` / `list_sessions`
+  make sessions durable, so a conversation survives a restart.
 
 The loop is deliberately honest: when it does not confidently understand a
 sentence it answers from knowledge instead of guessing a tool call, and when a
