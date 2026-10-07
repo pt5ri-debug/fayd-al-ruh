@@ -33,6 +33,7 @@ class ControlIntent(str, Enum):
     RESET = "reset"
     SAVE = "save"
     SESSIONS = "sessions"
+    WEB = "web"
     CONFIRM = "confirm"
     CORRECT = "correct"
     HELP = "help"
@@ -66,6 +67,11 @@ _PHRASES: dict[ControlIntent, tuple[str, ...]] = {
     ControlIntent.SESSIONS: (
         "sessions", "list sessions", "saved conversations", "show sessions",
         "الجلسات", "اعرض الجلسات", "قائمة الجلسات", "المحادثات المحفوظة",
+    ),
+    ControlIntent.WEB: (
+        "web", "web on", "web off", "use the web", "use the internet", "go online",
+        "online", "offline", "search the web", "internet on", "internet off",
+        "البحث في الإنترنت", "استخدم الإنترنت", "الإنترنت", "اتصل بالإنترنت",
     ),
     ControlIntent.CONFIRM: (
         "that's right", "thats right", "that is right", "that's correct", "thats correct",

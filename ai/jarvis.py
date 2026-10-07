@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from core.assistant import build_default_assistant
+from core.assistant import build_default_assistant, _WEAK_EVIDENCE
 from core.command_router import NaturalLanguageRouter
 from core.continuous_learning import ContinuousLearner
 from core.conversation import ConversationMemory
@@ -62,14 +62,31 @@ def _memory() -> ConversationMemory:
         return ConversationMemory()
 
 
+def _documents():
+    """A persistent knowledge store under the data directory, or in-memory.
+
+    Learned statements are written here (through the assistant's on-learn hook)
+    and reloaded at startup, so knowledge Jarvis gains today is still there
+    tomorrow. On a read-only data directory it silently falls back to memory.
+    """
+    try:
+        documents = build_document_store(store=JsonStore(data_dir() / "documents"))
+        documents.load_all()
+        return documents
+    except (OSError, ValueError):
+        return build_document_store()
+
+
 def _build_mode(args: argparse.Namespace) -> JarvisMode:
     root = Path(args.root).expanduser() if args.root else _default_sandbox_root()
     sandbox = build_sandbox(root, read_only=not args.read_write)
-    # One shared document store backs both the assistant's retrieval and the
-    # learner's updates, so a confirmed or corrected answer is visible to the
-    # very next retrieval, not just a later process.
-    documents = build_document_store()
-    assistant = build_default_assistant(documents=documents)
+    documents = _documents()
+    assistant = build_default_assistant(
+        documents=documents,
+        web_enabled=not args.no_web,
+        web_threshold=args.web_threshold if args.web_threshold is not None else _WEAK_EVIDENCE,
+        on_learn=documents.save,
+    )
     learner = ContinuousLearner(KnowledgeUpdater(documents))
     router = NaturalLanguageRouter(sandbox)
     preferences = UserPreferences(data_dir())
@@ -102,6 +119,8 @@ def _print_turn(turn: JarvisTurn, *, as_json: bool) -> None:
             "intent": turn.intent,
             "response": turn.response,
             "citations": list(turn.citations),
+            "used_web": turn.used_web,
+            "learned": turn.learned,
         }
         if turn.agent_run is not None:
             payload["steps"] = [
@@ -170,6 +189,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--session", default=None, help="resume a saved session by id, or start a new one")
     parser.add_argument("--list-sessions", action="store_true", help="list saved sessions and exit")
     parser.add_argument("--no-feedback", action="store_true", help="disable learning from confirm/correct controls")
+    parser.add_argument("--no-web", action="store_true", help="answer only from internal knowledge; do not search the internet")
+    parser.add_argument(
+        "--web-threshold",
+        type=float,
+        default=None,
+        help="top internal score below which Jarvis searches the web (0-1; higher searches more)",
+    )
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = parser.parse_args(argv)
 
