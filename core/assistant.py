@@ -36,8 +36,10 @@ SYSTEM_INSTRUCTION = (
 
 # Below this top-passage score the internal corpus is too thin to answer well,
 # so the assistant consults the web. The value is transparent and deliberately
-# inspectable; a strong internal hit (0.7+) never triggers a search.
-_WEAK_EVIDENCE = 0.35
+# inspectable; a strong internal hit (0.7+) never triggers a search. Set at 0.5
+# so unfamiliar petroleum terms -- which the ontology still associates above a
+# low bar -- actually reach the web instead of being answered from a weak match.
+_WEAK_EVIDENCE = 0.5
 
 
 @dataclass(frozen=True)

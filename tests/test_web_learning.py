@@ -65,6 +65,17 @@ def _augmented(store, results, *, trust_threshold=0.5, weak_evidence=0.5):
 # --- assistant consults the web only when internal evidence is weak -------
 
 
+def test_default_threshold_reaches_unfamiliar_petroleum_terms():
+    # Regression: the corpus's ontology associates an unknown petroleum term
+    # around 0.45, so the default must sit above that or the web is never used
+    # for exactly the questions it should answer.
+    from core.assistant import _WEAK_EVIDENCE
+
+    assert _WEAK_EVIDENCE == 0.5
+    assistant = build_default_assistant(documents=_store())
+    assert assistant.weak_evidence == 0.5
+
+
 def test_strong_internal_evidence_does_not_search():
     store = _store()
     provider_calls: list[str] = []

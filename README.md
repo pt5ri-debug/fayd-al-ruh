@@ -641,7 +641,7 @@ fixed example question.
 ### The conversation loop learns from the web too
 
 Jarvis itself uses this same engine. When a question's top internal passage is
-weak (score below a transparent threshold, `0.35` by default), the assistant
+weak (score below a transparent threshold, `0.5` by default), the assistant
 searches the web, compares the result with what it already knows, and folds a
 trusted answer into the store it retrieves from — so the very next retrieval
 already knows it. A strong internal hit never triggers a search, and an
