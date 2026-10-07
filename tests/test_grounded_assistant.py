@@ -25,7 +25,15 @@ def test_conversation_records_turns_with_roles():
 
     assert [message.role for message in conversation.messages] == [Role.USER, Role.ASSISTANT]
     assert conversation.last_user_message().text == "question"
+    assert conversation.last_assistant_message().text == "answer"
     assert conversation.messages[1].citations == ("[src:1] title",)
+
+
+def test_last_assistant_message_is_none_before_any_answer():
+    conversation = Conversation(title="empty")
+    assert conversation.last_assistant_message() is None
+    conversation.add_user("question")
+    assert conversation.last_assistant_message() is None
 
 
 def test_conversation_window_drops_oldest_turns():

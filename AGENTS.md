@@ -53,6 +53,11 @@ Arabic is kept as secondary aliases where useful.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. CLI:
   `python -m ai.voice` / `python -m cli voice`.
+- `core/jarvis.py` — the unified Jarvis loop over the assistant, the tool router,
+  and speech; it keeps one `Conversation` per run and a mute state.
+  `core/jarvis_controls.py` matches the conversation controls (stop/speak/repeat/
+  new conversation/help) exactly. `core/preferences.py` persists user preferences.
+  CLI: `python -m cli jarvis`.
 - `core/tools.py` — deny-by-default tool sandbox: allow-list, root confinement,
   read-only mode, capability + human-approval gates, built-in file/search/calculator
   tools returning `ToolResult`. `core/tool_agent.py` — `ToolPlan`/`ToolAgent`
@@ -113,6 +118,11 @@ clone, each optional so the base system still runs without it:
   preferences (`core/preferences.py`), real system speech engines
   (`core/speech.py`), and the unified listen/route/answer/act/speak loop
   (`core/jarvis.py`, `ai/jarvis.py`, `python -m cli jarvis`).
+- Phase 7 — conversational Jarvis: one conversation session per run so follow-ups
+  keep context (`core/jarvis.py` + `core/conversation.py`'s
+  `last_assistant_message`), plus conversation controls — stop / speak / repeat /
+  new conversation / help — matched exactly so a real question is never hijacked
+  (`core/jarvis_controls.py`), with a mute state that gates synthesis.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
