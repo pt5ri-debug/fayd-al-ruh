@@ -519,13 +519,17 @@ orchestrates what already exists, and every guarantee still holds.
   records tool turns in the same session.
 - `core/jarvis_controls.py` (`JarvisControls`) recognises a few conversation-level
   commands — `stop`, `speak`, `repeat`, `new conversation`, `save`, `sessions`,
-  `help` — as exact phrases, never hijacking a real question like "how do I stop
-  the pump?".
+  `that's right`, `that's wrong, it's ...`, `help` — as exact phrases, never
+  hijacking a real question like "how do I stop the pump?".
 - `core/preferences.py` (`UserPreferences`) remembers the user's name, language,
   spoken-answer preference, and wake word, persisted with `JsonStore`.
 - Sessions persist under the data directory: `--session <id>` resumes a saved
   conversation (autosaving after each turn), and `--list-sessions` shows what is
   stored.
+- Learning from explicit feedback: `that's right` confirms the last answer and
+  `that's wrong, it's ...` corrects it. The assistant and the learner share one
+  document store, so a corrected statement is visible to the very next answer.
+  Pass `--no-feedback` to disable it.
 
 ```bash
 python -m cli jarvis "what is permeability?"          # answer, with citations
@@ -551,6 +555,8 @@ You: stop                         # mute the voice until you say 'speak'
 You: new conversation             # start over
 You: save                         # persist this session
 You: sessions                     # list saved sessions
+You: that's right                 # confirm the last answer, record it
+You: that's wrong, it's ...       # correct the last answer with new wording
 You: help                         # list the controls
 ```
 
@@ -579,6 +585,14 @@ Two rules preserve honesty: learning happens only from explicit feedback
 (confirmation or correction), and a statement enters the source only if it shares
 terms with what we already know. The regression check is the safety net: it can
 always refuse a change.
+
+Jarvis mode carries this into the conversation itself. Saying `that's right`
+confirms the answer it just gave; `that's wrong, it's ...` replaces it with the
+wording you supply. `JarvisMode` hands the last exchange to the `ContinuousLearner`
+and re-indexes the retriever, so the correction is visible to the very next
+question in the same run. When no learner is configured, it says so plainly rather
+than recording feedback that could never change an answer — the `--no-feedback`
+flag turns the path off, and nothing is ever learned from the model's own output.
 
 ```bash
 python -m ai.learn_demo

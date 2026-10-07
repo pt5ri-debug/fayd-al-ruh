@@ -33,6 +33,8 @@ class ControlIntent(str, Enum):
     RESET = "reset"
     SAVE = "save"
     SESSIONS = "sessions"
+    CONFIRM = "confirm"
+    CORRECT = "correct"
     HELP = "help"
 
 
@@ -65,6 +67,12 @@ _PHRASES: dict[ControlIntent, tuple[str, ...]] = {
         "sessions", "list sessions", "saved conversations", "show sessions",
         "الجلسات", "اعرض الجلسات", "قائمة الجلسات", "المحادثات المحفوظة",
     ),
+    ControlIntent.CONFIRM: (
+        "that's right", "thats right", "that is right", "that's correct", "thats correct",
+        "that is correct", "correct", "right", "yes exactly", "exactly", "confirmed",
+        "confirm", "that's true", "thats true", "you are right", "spot on", "well done",
+        "صحيح", "هذا صحيح", "بالضبط", "أجل", "نعم صحيح", "مضبوط",
+    ),
     ControlIntent.HELP: (
         "help", "commands", "what can you do", "what can you do?", "list commands",
         "مساعدة", "ساعدني", "الأوامر", "الاوامر", "ماذا تستطيع",
@@ -95,6 +103,7 @@ class JarvisControl:
     intent: ControlIntent
     phrase: str
     utterance: str
+    correction: str = ""
 
 
 class JarvisControls:
@@ -104,7 +113,7 @@ class JarvisControls:
         source = phrases or _PHRASES
         # Store normalised phrases, longest first, so the most specific wins.
         self._phrases: tuple[tuple[ControlIntent, str], ...] = tuple(
-            (intent, phrase)
+            (intent, normalize_utterance(phrase))
             for intent in source
             for phrase in sorted(source[intent], key=len, reverse=True)
         )
@@ -118,7 +127,36 @@ class JarvisControls:
         for intent, phrase in self._phrases:
             if stripped == phrase:
                 return JarvisControl(intent=intent, phrase=phrase, utterance=utterance)
+        correction = _extract_correction(stripped)
+        if correction:
+            return JarvisControl(
+                intent=ControlIntent.CORRECT,
+                phrase="correction",
+                utterance=utterance,
+                correction=correction,
+            )
         return None
+
+
+def _extract_correction(normalized: str) -> str:
+    """Return the corrected wording when an utterance clearly supplies one.
+
+    Only a tight, explicit pattern matches ("that's wrong, it's X" / "no, it's X"
+    / "actually X"), so an ordinary disagreement without new content stays an
+    answer rather than being treated as a control.
+    """
+    for pattern in (
+        r"^(?:that s |thats |that is |it s |its |it is )?(?:wrong|incorrect|not right)"
+        r"[ ,]+(?:it s |its |it is )?(.+)$",
+        r"^no[ ,]+(?:it s |its |it is )(.+)$",
+        r"^actually[ ,]+(?:it s |its |it is )(.+)$",
+        r"^(?:لا|خطأ)[ ،]+بل (.+)$",
+        r"^بل (.+)$",
+    ):
+        found = re.search(pattern, normalized)
+        if found and found.group(1).strip():
+            return found.group(1).strip()
+    return ""
 
 
 def _strip_leading_filler(normalized: str) -> str:

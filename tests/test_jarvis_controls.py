@@ -36,12 +36,36 @@ from core.jarvis_controls import ControlIntent, JarvisControls, normalize_uttera
         ("احفظ", ControlIntent.SAVE),
         ("الجلسات", ControlIntent.SESSIONS),
         ("محادثة جديدة", ControlIntent.RESET),
+        ("that's right", ControlIntent.CONFIRM),
+        ("that is correct", ControlIntent.CONFIRM),
+        ("yes exactly", ControlIntent.CONFIRM),
+        ("you are right", ControlIntent.CONFIRM),
+        ("صحيح", ControlIntent.CONFIRM),
+        ("بالضبط", ControlIntent.CONFIRM),
     ],
 )
 def test_control_phrases_are_recognized(utterance, intent):
     match = JarvisControls().match(utterance)
     assert match is not None
     assert match.intent is intent
+
+
+@pytest.mark.parametrize(
+    "utterance,correction",
+    [
+        ("that's wrong, it's shale", "shale"),
+        ("that's wrong it's shale", "shale"),
+        ("no, it's sandstone", "sandstone"),
+        ("actually it is limestone", "limestone"),
+        ("that's incorrect, it is a gas cap", "a gas cap"),
+        ("بل shale", "shale"),
+    ],
+)
+def test_corrections_capture_the_new_wording(utterance, correction):
+    match = JarvisControls().match(utterance)
+    assert match is not None
+    assert match.intent is ControlIntent.CORRECT
+    assert match.correction == correction
 
 
 @pytest.mark.parametrize(
@@ -53,6 +77,8 @@ def test_control_phrases_are_recognized(utterance, intent):
         "help me understand permeability",
         "what is a new conversation model?",
         "speak about porosity",
+        "no, I mean the other one",
+        "actually I'm not sure",
         "",
         "   ",
     ],

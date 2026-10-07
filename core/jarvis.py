@@ -24,16 +24,19 @@ from dataclasses import dataclass, field
 
 from core.command_router import NaturalLanguageRouter, RouteKind
 from core.conversation import Conversation, ConversationMemory
-from core.jarvis_controls import ControlIntent, JarvisControls
+from core.continuous_learning import ContinuousLearner, Feedback
+from core.jarvis_controls import JarvisControl, ControlIntent, JarvisControls
 from core.speech import AudioClip, Speaker, VoiceAssistant
 from core.tool_agent import AgentRun, ToolAgent
 from core.wake_word import AudioSpeechGate, WakeWordDetector
 
+
 HELP_TEXT = (
     "Conversation controls: say 'stop' to mute my voice, 'speak' to turn it back "
     "on, 'repeat' to hear the last answer again, 'new conversation' to start over, "
-    "'save' to persist this session, 'sessions' to list saved ones, or 'help' for "
-    "this list. Anything else, ask me a question or give me a command."
+    "'save' to persist this session, 'sessions' to list saved ones, 'that's right' "
+    "to confirm my last answer, 'that's wrong, it's ...' to correct it, or 'help' "
+    "for this list. Anything else, ask me a question or give me a command."
 )
 
 
@@ -69,6 +72,7 @@ class JarvisMode:
         speaker: Speaker | None = None,
         memory: ConversationMemory | None = None,
         controls: JarvisControls | None = None,
+        learner: ContinuousLearner | None = None,
         mute: bool = False,
     ) -> None:
         self.assistant = assistant
@@ -80,6 +84,7 @@ class JarvisMode:
         self.speaker = speaker
         self.memory = memory or ConversationMemory()
         self.controls = controls or JarvisControls()
+        self.learner = learner
         self.mute = mute
         self._conversation: Conversation | None = None
 
@@ -144,7 +149,7 @@ class JarvisMode:
 
         control = self.controls.match(text)
         if control is not None:
-            return self._handle_control(control.intent, utterance, speak=speak)
+            return self._handle_control(control, utterance, speak=speak)
 
         routed = self.router.route(text)
         if routed.kind is RouteKind.TOOL and routed.plan is not None:
@@ -184,8 +189,9 @@ class JarvisMode:
         heard = self.voice.recognizer.transcribe(clip)
         return self.handle(heard, require_wake=require_wake, speak=speak)
 
-    def _handle_control(self, intent: ControlIntent, utterance: str, *, speak: bool) -> JarvisTurn:
+    def _handle_control(self, control: JarvisControl, utterance: str, *, speak: bool) -> JarvisTurn:
         """Act on a conversation-level control without touching the sandbox."""
+        intent = control.intent
         if intent is ControlIntent.MUTE:
             self.mute = True
             return self._control_turn(utterance, intent, "Muted. Say 'speak' when you want my voice back.", None)
@@ -214,8 +220,85 @@ class JarvisMode:
             else:
                 response = "Saved sessions: " + ", ".join(ids)
             return self._control_turn(utterance, intent, response, self._speak(response, speak))
+        if intent is ControlIntent.CONFIRM:
+            response = self._handle_feedback(control.utterance, confirmed=True)
+            return self._control_turn(utterance, intent, response, self._speak(response, speak))
+        if intent is ControlIntent.CORRECT:
+            response = self._handle_feedback(control.utterance, confirmed=False, correction=control.correction)
+            return self._control_turn(utterance, intent, response, self._speak(response, speak))
         # HELP
         return self._control_turn(utterance, intent, HELP_TEXT, self._speak(HELP_TEXT, speak))
+
+    def _handle_feedback(
+        self,
+        utterance: str,
+        *,
+        confirmed: bool,
+        correction: str = "",
+    ) -> str:
+        """Fold explicit feedback on the last answer into the corpus.
+
+        Teaching needs two things that come from outside the conversation: the
+        last exchange to attach the verdict to, and a learner whose store feeds
+        the assistant's own retrieval. When either is missing we say so plainly
+        rather than recording feedback that could never change an answer.
+        """
+        if self.learner is None:
+            return "Feedback is not enabled in this session, so I cannot record that."
+        exchange = self.conversation.last_exchange()
+        if exchange is None:
+            return "There is no recent answer to confirm or correct."
+        question, answer = exchange
+        statement = answer if confirmed else correction
+        try:
+            step = self.learner.learn(
+                Feedback(
+                    question=question,
+                    answer=answer,
+                    confirmed=confirmed,
+                    correction=correction,
+                )
+            )
+        except ValueError as error:
+            return f"Could not record that feedback: {error}"
+        self._record_exchange(utterance, statement)
+        outcome = step.update
+        if outcome is not None and outcome.action in {"added", "reinforced"}:
+            return f"Thank you -- I recorded that ({outcome.action}). I will use it next time."
+        if outcome is not None and outcome.action == "rejected":
+            return (
+                "Thank you -- I recorded your verdict, but I did not add the "
+                f"statement ({outcome.reason})."
+            )
+        return "Thank you -- I recorded your feedback."
+
+    def _record_exchange(self, feedback: str, statement: str) -> None:
+        """Append the feedback turn, refreshing the retriever when one is wired."""
+        conversation = self.conversation
+        conversation.add_user(feedback)
+        conversation.add_assistant(statement)
+        self._refresh_knowledge()
+        self.memory.save(conversation)
+
+    def _refresh_knowledge(self) -> None:
+        """Rebuild the assistant's retrieval index from its document store.
+
+        A new or changed document is only visible to retrieval after the
+        retriever re-indexes, so teaching would otherwise not affect the next
+        answer. Best-effort: a custom assistant without a retriever is left alone.
+        """
+        retriever = getattr(self.assistant, "retriever", None)
+        index_document = getattr(retriever, "index_document", None)
+        if index_document is None:
+            return
+        documents = getattr(getattr(retriever, "documents", None), "documents", None)
+        if not callable(documents):
+            return
+        for document in documents():
+            try:
+                index_document(document)
+            except (ValueError, KeyError):
+                continue
 
     def _control_turn(
         self,

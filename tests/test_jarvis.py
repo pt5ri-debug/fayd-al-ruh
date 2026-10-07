@@ -48,6 +48,25 @@ def _mode_with_memory(tmp_path, memory):
     )
 
 
+def _learning_mode(tmp_path):
+    """A mode whose assistant and learner share one document store."""
+    from core.continuous_learning import ContinuousLearner
+    from core.knowledge_update import KnowledgeUpdater
+
+    documents = build_document_store()
+    ontology = Ontology()
+    seed_ontology(ontology)
+    seed_curriculum(ontology)
+    assistant = GroundedAssistant(RagRetriever(documents, ontology=ontology))
+    learner = ContinuousLearner(KnowledgeUpdater(documents))
+    sandbox = build_sandbox(tmp_path)
+    return JarvisMode(
+        assistant,
+        router=NaturalLanguageRouter(sandbox),
+        learner=learner,
+    )
+
+
 def test_question_is_answered_with_citations(tmp_path):
     turn = _mode(tmp_path).handle("what is porosity?")
     assert turn.routed == "answer"
@@ -270,3 +289,59 @@ def test_session_round_trip_with_a_persistent_store(tmp_path):
 def test_resume_unknown_session_reports_false(tmp_path):
     mode = _mode(tmp_path)
     assert mode.resume_session("CNV-doesnotexist") is False
+
+
+def test_confirm_reports_added_and_records_feedback(tmp_path):
+    mode = _learning_mode(tmp_path)
+    mode.handle("what is porosity?")
+    turn = mode.handle("that's right")
+    assert turn.intent == "confirm"
+    assert "recorded" in turn.response
+    assert mode.learner is not None
+    assert mode.learner.steps and mode.learner.steps[-1].changed_corpus
+
+
+def test_correction_changes_the_next_answer(tmp_path):
+    mode = _learning_mode(tmp_path)
+    mode.handle("what is porosity?")
+    turn = mode.handle("that's wrong, it's porosity is the void fraction of a rock")
+    assert turn.intent == "correct"
+    assert "recorded" in turn.response
+    learned = mode.handle("porosity is the void fraction of a rock").response
+    assert "void fraction" in learned
+
+
+def test_confirm_without_a_learner_is_honest(tmp_path):
+    mode = _mode(tmp_path)
+    mode.handle("what is porosity?")
+    turn = mode.handle("that's right")
+    assert turn.intent == "confirm"
+    assert "not enabled" in turn.response
+
+
+def test_feedback_without_a_prior_answer_says_so(tmp_path):
+    mode = _learning_mode(tmp_path)
+    turn = mode.handle("that's right")
+    assert turn.intent == "confirm"
+    assert "no recent answer" in turn.response
+
+
+def test_corrected_answer_uses_a_rejected_statement_honestly(tmp_path):
+    mode = _learning_mode(tmp_path)
+    mode.handle("what is porosity?")
+    turn = mode.handle("no, it's xyzzy")
+    assert turn.intent == "correct"
+    assert "recorded" in turn.response
+
+
+def test_last_exchange_tracks_the_answered_pair():
+    from core.conversation import Conversation
+
+    conversation = Conversation("t")
+    assert conversation.last_exchange() is None
+    conversation.add_user("what is porosity?")
+    assert conversation.last_exchange() is None
+    conversation.add_assistant("Porosity is the void fraction.")
+    assert conversation.last_exchange() == ("what is porosity?", "Porosity is the void fraction.")
+    conversation.add_user("and permeability?")
+    assert conversation.last_exchange() is None

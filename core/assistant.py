@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.conversation import Conversation, ConversationMemory
+from core.documents import DocumentStore
 from core.model_interface import CognitiveModel, ModelRequest
 from core.rag import RagRetriever, RetrievedPassage
 
@@ -172,8 +173,13 @@ def build_default_assistant(
     *,
     model: CognitiveModel | None = None,
     memory: ConversationMemory | None = None,
+    documents: DocumentStore | None = None,
 ) -> GroundedAssistant:
-    """Assemble the assistant over the project's own knowledge corpus."""
+    """Assemble the assistant over the project's own knowledge corpus.
+
+    Pass ``documents`` to supply a (possibly persistent) store; the default is a
+    fresh in-memory store seeded from the bundled corpus.
+    """
     from core.curriculum_knowledge import seed_curriculum
     from core.documents import build_document_store
     from core.domain_knowledge import seed_ontology
@@ -184,7 +190,7 @@ def build_default_assistant(
     seed_ontology(ontology)
     seed_curriculum(ontology)
     seed_petroleum_corpus(ontology)
-    retriever = RagRetriever(build_document_store(), ontology=ontology)
+    retriever = RagRetriever(documents or build_document_store(), ontology=ontology)
     return GroundedAssistant(retriever, model=model, memory=memory)
 
 

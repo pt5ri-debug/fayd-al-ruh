@@ -57,8 +57,11 @@ Arabic is kept as secondary aliases where useful.
   and speech; it keeps one `Conversation` per run (persisted through the memory's
   `JsonStore` when one is configured) and a mute state.
   `core/jarvis_controls.py` matches the conversation controls (stop/speak/repeat/
-  new conversation/save/sessions/help) exactly. `core/preferences.py` persists user
-  preferences. CLI: `python -m cli jarvis` (`--session <id>`, `--list-sessions`).
+  new conversation/save/sessions/confirm/correct/help) exactly; a confirmation or
+  correction is folded into an optional `ContinuousLearner`, and the retriever is
+  re-indexed so the change is visible to the next answer.
+  `core/preferences.py` persists user preferences. CLI: `python -m cli jarvis`
+  (`--session <id>`, `--list-sessions`, `--no-feedback`).
 - `core/tools.py` — deny-by-default tool sandbox: allow-list, root confinement,
   read-only mode, capability + human-approval gates, built-in file/search/calculator
   tools returning `ToolResult`. `core/tool_agent.py` — `ToolPlan`/`ToolAgent`
@@ -129,6 +132,12 @@ clone, each optional so the base system still runs without it:
   `JarvisMode.save_session` / `resume_session` / `list_sessions` and the `save` /
   `sessions` controls expose it; the CLI adds `--session <id>` (autosaving) and
   `--list-sessions`.
+- Phase 9 — learn from explicit feedback in the loop: `JarvisMode` takes an
+  optional `ContinuousLearner` and handles the `that's right` (confirm) and
+  `that's wrong, it's ...` (correct) controls. Confirmations and corrections feed
+  the last exchange to the learner, and the retriever is re-indexed so a corrected
+  statement changes the very next answer. The `--no-feedback` flag disables it, and
+  a session with no learner refuses honestly instead of recording dead feedback.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
