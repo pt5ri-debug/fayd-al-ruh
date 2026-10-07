@@ -518,10 +518,14 @@ orchestrates what already exists, and every guarantee still holds.
   one conversation session per run, so follow-up questions stay in context, and it
   records tool turns in the same session.
 - `core/jarvis_controls.py` (`JarvisControls`) recognises a few conversation-level
-  commands — `stop`, `speak`, `repeat`, `new conversation`, `help` — as exact
-  phrases, never hijacking a real question like "how do I stop the pump?".
+  commands — `stop`, `speak`, `repeat`, `new conversation`, `save`, `sessions`,
+  `help` — as exact phrases, never hijacking a real question like "how do I stop
+  the pump?".
 - `core/preferences.py` (`UserPreferences`) remembers the user's name, language,
   spoken-answer preference, and wake word, persisted with `JsonStore`.
+- Sessions persist under the data directory: `--session <id>` resumes a saved
+  conversation (autosaving after each turn), and `--list-sessions` shows what is
+  stored.
 
 ```bash
 python -m cli jarvis "what is permeability?"          # answer, with citations
@@ -532,6 +536,8 @@ python -m cli jarvis --wake "hey jarvis what is porosity?"   # require the wake 
 python -m cli jarvis --tts auto --play "what is porosity?"   # synthesize and play the answer
 python -m cli jarvis --tts auto --write-wav out.wav "what is porosity?"  # save the spoken answer
 python -m cli jarvis                                  # interactive text loop
+python -m cli jarvis --list-sessions                  # show saved sessions
+python -m cli jarvis --session CNV-xxxxxxxx           # resume a saved session
 ```
 
 In the interactive loop, follow-up questions share one conversation, and the
@@ -543,6 +549,8 @@ You: and how is it measured?      # same conversation, context preserved
 You: repeat                       # replay the last answer with its citations
 You: stop                         # mute the voice until you say 'speak'
 You: new conversation             # start over
+You: save                         # persist this session
+You: sessions                     # list saved sessions
 You: help                         # list the controls
 ```
 

@@ -203,6 +203,11 @@ class ConversationMemory:
     def list_saved(self) -> list[str]:
         return self._store.list_keys(_NAMESPACE) if self._store is not None else []
 
+    @property
+    def persistent(self) -> bool:
+        """True when a store is configured, so sessions survive a restart."""
+        return self._store is not None
+
 
 __all__ = [
     "Conversation",

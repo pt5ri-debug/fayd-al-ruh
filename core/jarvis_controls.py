@@ -31,6 +31,8 @@ class ControlIntent(str, Enum):
     SPEAK = "speak"
     REPEAT = "repeat"
     RESET = "reset"
+    SAVE = "save"
+    SESSIONS = "sessions"
     HELP = "help"
 
 
@@ -54,6 +56,14 @@ _PHRASES: dict[ControlIntent, tuple[str, ...]] = {
         "new conversation", "reset", "reset conversation", "start over", "start again",
         "forget everything", "clear conversation", "forget this",
         "محادثة جديدة", "ابدأ من جديد", "ابدأ من جديد", "نسيت كل شيء", "مسح المحادثة",
+    ),
+    ControlIntent.SAVE: (
+        "save", "save conversation", "save session", "save this",
+        "احفظ", "احفظ المحادثة", "احفظ الجلسة",
+    ),
+    ControlIntent.SESSIONS: (
+        "sessions", "list sessions", "saved conversations", "show sessions",
+        "الجلسات", "اعرض الجلسات", "قائمة الجلسات", "المحادثات المحفوظة",
     ),
     ControlIntent.HELP: (
         "help", "commands", "what can you do", "what can you do?", "list commands",

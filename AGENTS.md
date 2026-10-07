@@ -54,10 +54,11 @@ Arabic is kept as secondary aliases where useful.
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. CLI:
   `python -m ai.voice` / `python -m cli voice`.
 - `core/jarvis.py` — the unified Jarvis loop over the assistant, the tool router,
-  and speech; it keeps one `Conversation` per run and a mute state.
+  and speech; it keeps one `Conversation` per run (persisted through the memory's
+  `JsonStore` when one is configured) and a mute state.
   `core/jarvis_controls.py` matches the conversation controls (stop/speak/repeat/
-  new conversation/help) exactly. `core/preferences.py` persists user preferences.
-  CLI: `python -m cli jarvis`.
+  new conversation/save/sessions/help) exactly. `core/preferences.py` persists user
+  preferences. CLI: `python -m cli jarvis` (`--session <id>`, `--list-sessions`).
 - `core/tools.py` — deny-by-default tool sandbox: allow-list, root confinement,
   read-only mode, capability + human-approval gates, built-in file/search/calculator
   tools returning `ToolResult`. `core/tool_agent.py` — `ToolPlan`/`ToolAgent`
@@ -123,6 +124,11 @@ clone, each optional so the base system still runs without it:
   `last_assistant_message`), plus conversation controls — stop / speak / repeat /
   new conversation / help — matched exactly so a real question is never hijacked
   (`core/jarvis_controls.py`), with a mute state that gates synthesis.
+- Phase 8 — persistent Jarvis sessions: the loop uses a `ConversationMemory`
+  backed by `JsonStore` under the data directory, so a session survives a restart.
+  `JarvisMode.save_session` / `resume_session` / `list_sessions` and the `save` /
+  `sessions` controls expose it; the CLI adds `--session <id>` (autosaving) and
+  `--list-sessions`.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
