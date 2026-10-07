@@ -105,6 +105,11 @@ def run_agent(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.agent_demo", argv)
 
 
+def run_jarvis(argv: Sequence[str] = ()) -> int:
+    """Run Jarvis mode: listen, understand, act, and speak."""
+    return _run_module("ai.jarvis", argv)
+
+
 def run_learn(argv: Sequence[str] = ()) -> int:
     """Demonstrate continuous learning and the regression gate."""
     return _run_module("ai.learn_demo", argv)
@@ -183,6 +188,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Ask the grounded assistant", run_ask, ()),
     ("One voice turn", run_voice, ("--write-wav", "voice-turn.wav", "water")),
     ("Tool agent demo (sandbox)", run_agent, ()),
+    ("Jarvis mode (listen, act, speak)", run_jarvis, ()),
     ("Continuous learning and regression gate", run_learn, ()),
     ("Ask the web and verify the answer", run_web, ("--approve",)),
     ("Run the local cognitive demo", run_demo, ()),
@@ -258,6 +264,7 @@ __all__ = [
     "run_ask",
     "run_voice",
     "run_agent",
+    "run_jarvis",
     "run_learn",
     "run_web",
     "run_demo",

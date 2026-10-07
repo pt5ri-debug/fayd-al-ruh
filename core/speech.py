@@ -17,6 +17,9 @@ conversation flow is exercised end to end on a fresh clone.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -123,6 +126,130 @@ class SilentSynthesizer:
         return AudioClip.silence(seconds)
 
 
+# System TTS engines tried in order: (name, executable, argv builder). Each
+# builder returns the argv that renders ``text`` to the WAV file ``path``. These
+# are ordinary programs already present on many desktops, so no pip package and
+# no network access is needed; when none exists the silent synthesizer is used.
+def _espeak_argv(executable: str, text: str, path: Path) -> list[str]:
+    return [executable, "-w", str(path), text]
+
+
+def _flite_argv(executable: str, text: str, path: Path) -> list[str]:
+    return [executable, "-t", text, "-o", str(path)]
+
+
+def _say_argv(executable: str, text: str, path: Path) -> list[str]:
+    # macOS: ``say -o file.wav`` renders a WAVE file.
+    return [executable, "-o", str(path), text]
+
+
+TTS_ENGINES: tuple[tuple[str, str, "object"], ...] = (
+    ("espeak-ng", "espeak-ng", _espeak_argv),
+    ("espeak", "espeak", _espeak_argv),
+    ("flite", "flite", _flite_argv),
+    ("say", "say", _say_argv),
+)
+
+
+def discover_synthesizer_name() -> str:
+    """Return the first system TTS engine available, or ``'silent'``."""
+    for name, executable, _builder in TTS_ENGINES:
+        if shutil.which(executable):
+            return name
+    return "silent"
+
+
+class CommandSynthesizer:
+    """A real TTS engine driven through a system command.
+
+    The engine is a normal program (``espeak``, ``say``, ...). We render to a
+    temporary WAV, read it back as an :class:`AudioClip`, and never require a pip
+    dependency. If the engine fails for any reason, synthesis falls back to a
+    silent clip so a voice turn can still complete.
+    """
+
+    def __init__(self, name: str, executable: str, builder) -> None:
+        self.name = name
+        self.executable = executable
+        self._builder = builder
+
+    def synthesize(self, text: str) -> AudioClip:
+        if not text.strip():
+            raise ValueError("Cannot synthesize empty text.")
+        with tempfile.TemporaryDirectory(prefix="fayd-tts-") as folder:
+            target = Path(folder) / "speech.wav"
+            argv = self._builder(self.executable, text, target)
+            try:
+                completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                    argv,
+                    capture_output=True,
+                    timeout=30,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return SilentSynthesizer().synthesize(text)
+            if completed.returncode != 0 or not target.exists():
+                return SilentSynthesizer().synthesize(text)
+            try:
+                return AudioClip.read_wav(target)
+            except (OSError, ValueError):
+                return SilentSynthesizer().synthesize(text)
+
+
+class WhisperRecognizer:
+    """A real ASR engine driven through the ``whisper`` command-line program.
+
+    ``whisper`` writes its transcript next to the audio file, so we render the
+    clip to a temporary WAV, run the command, and read the ``.txt`` it produces.
+    When the program is missing or fails, transcription raises ``ValueError`` so
+    the caller can fall back rather than inventing speech.
+    """
+
+    name = "whisper"
+
+    def __init__(self, executable: str = "whisper", *, model: str = "tiny") -> None:
+        self.executable = executable
+        self.model = model
+
+    def transcribe(self, clip: AudioClip) -> str:
+        with tempfile.TemporaryDirectory(prefix="fayd-asr-") as folder:
+            audio = Path(folder) / "speech.wav"
+            clip.write_wav(audio)
+            argv = [
+                self.executable,
+                str(audio),
+                "--model",
+                self.model,
+                "--output_format",
+                "txt",
+                "--output_dir",
+                folder,
+                "--fp16",
+                "False",
+            ]
+            try:
+                completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                    argv,
+                    capture_output=True,
+                    timeout=120,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as error:
+                raise ValueError(f"ASR engine {self.name!r} failed: {error}") from error
+            transcript = audio.with_suffix(".txt")
+            if completed.returncode != 0 or not transcript.exists():
+                raise ValueError(f"ASR engine {self.name!r} produced no transcript.")
+            text = transcript.read_text(encoding="utf-8", errors="replace").strip()
+            if not text:
+                raise ValueError(f"ASR engine {self.name!r} produced an empty transcript.")
+            return text
+
+
+def discover_recognizer_name() -> str:
+    """Return ``'whisper'`` when the program is installed, else ``'transcript'``."""
+    return "whisper" if shutil.which("whisper") else "transcript"
+
+
 class TranscriptRecognizer:
     """An ASR stand-in that echoes a supplied transcript.
 
@@ -141,24 +268,142 @@ class TranscriptRecognizer:
         return self.transcript
 
 
-def load_recognizer(name: str, **options) -> SpeechRecognizer:
-    """Load a named ASR engine, or fall back to the transcript recognizer."""
+def load_recognizer(name: str = "transcript", **options) -> SpeechRecognizer:
+    """Load a named ASR engine.
+
+    ``name='auto'`` picks ``whisper`` when it is installed, else the transcript
+    recognizer. An explicitly named engine that is unavailable raises, so a user
+    who asks for it gets a clear error instead of a silent substitute.
+    """
+    if name == "auto":
+        name = discover_recognizer_name()
     if name == "transcript":
         return TranscriptRecognizer(options.get("transcript", ""))
+    if name == "whisper":
+        executable = options.get("executable", "whisper")
+        if shutil.which(executable):
+            return WhisperRecognizer(executable, model=options.get("model", "tiny"))
+        raise ValueError(
+            "ASR engine 'whisper' is not installed. Use --asr auto or --asr transcript."
+        )
     raise ValueError(
         f"ASR engine {name!r} is not available in this build. "
         "Install a speech backend or use the transcript recognizer."
     )
 
 
-def load_synthesizer(name: str, **options) -> SpeechSynthesizer:
-    """Load a named TTS engine, or fall back to the silent synthesizer."""
+def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
+    """Load a named TTS engine.
+
+    ``name='auto'`` picks the first installed system engine (``espeak``,
+    ``say``, ...), else the silent synthesizer. An explicitly named engine that
+    is unavailable raises, so the caller never mistakes silence for speech.
+    """
+    if name == "auto":
+        name = discover_synthesizer_name()
     if name == "silent":
         return SilentSynthesizer()
+    for engine_name, executable, builder in TTS_ENGINES:
+        if name == engine_name:
+            if shutil.which(executable):
+                return CommandSynthesizer(engine_name, executable, builder)
+            raise ValueError(
+                f"TTS engine {name!r} is not installed. Use --tts auto or --tts silent."
+            )
     raise ValueError(
         f"TTS engine {name!r} is not available in this build. "
         "Install a speech backend or use the silent synthesizer."
     )
+
+
+class MicrophoneRecorder:
+    """Records a short clip from the system microphone, when a recorder exists.
+
+    Uses ``arecord`` (Linux/ALSA) or ``sox`` (cross-platform) if installed; when
+    neither exists, :meth:`available` is False and the caller should fall back to
+    the text loop. No pip package and no network access is involved.
+    """
+
+    def __init__(self, *, seconds: float = 4.0, sample_rate: int = SAMPLE_RATE) -> None:
+        self.seconds = seconds
+        self.sample_rate = sample_rate
+
+    @property
+    def recorder(self) -> str | None:
+        if shutil.which("arecord"):
+            return "arecord"
+        if shutil.which("sox"):
+            return "sox"
+        return None
+
+    def available(self) -> bool:
+        return self.recorder is not None
+
+    def record(self) -> AudioClip:
+        recorder = self.recorder
+        if recorder is None:
+            raise ValueError("No microphone recorder is available (install arecord or sox).")
+        with tempfile.TemporaryDirectory(prefix="fayd-mic-") as folder:
+            target = Path(folder) / "input.wav"
+            if recorder == "arecord":
+                argv = ["arecord", "-q", "-f", "S16_LE", "-r", str(self.sample_rate), "-d", str(int(self.seconds)), str(target)]
+            else:  # sox
+                argv = ["sox", "-d", "-r", str(self.sample_rate), "-c", "1", "-b", "16", str(target), "trim", "0", str(self.seconds)]
+            try:
+                completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                    argv, capture_output=True, timeout=int(self.seconds) + 10, check=False
+                )
+            except (OSError, subprocess.SubprocessError) as error:
+                raise ValueError(f"Microphone recorder {recorder!r} failed: {error}") from error
+            if completed.returncode != 0 or not target.exists():
+                raise ValueError(f"Microphone recorder {recorder!r} produced no audio.")
+            return AudioClip.read_wav(target)
+
+
+class Speaker:
+    """Plays a clip through the system speakers, when a player exists.
+
+    Uses ``aplay`` (Linux/ALSA), ``afplay`` (macOS), or ``sox``/``play`` if
+    installed. :meth:`available` reports honestly, and :meth:`play` raises when
+    no player exists so the caller can fall back to text. No pip package needed.
+    """
+
+    def __init__(self, *, sample_rate: int = SAMPLE_RATE) -> None:
+        self.sample_rate = sample_rate
+
+    @property
+    def player(self) -> str | None:
+        for executable in ("aplay", "afplay", "play", "sox"):
+            if shutil.which(executable):
+                return executable
+        return None
+
+    def available(self) -> bool:
+        return self.player is not None
+
+    def play(self, clip: AudioClip) -> None:
+        player = self.player
+        if player is None:
+            raise ValueError("No audio player is available (install aplay, afplay, or sox).")
+        with tempfile.TemporaryDirectory(prefix="fayd-play-") as folder:
+            target = Path(folder) / "speech.wav"
+            clip.write_wav(target)
+            if player == "aplay":
+                argv = ["aplay", "-q", str(target)]
+            elif player == "afplay":
+                argv = ["afplay", str(target)]
+            elif player == "play":
+                argv = ["play", "-q", str(target)]
+            else:  # sox
+                argv = ["sox", str(target), "-d"]
+            try:
+                completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                    argv, capture_output=True, timeout=120, check=False
+                )
+            except (OSError, subprocess.SubprocessError) as error:
+                raise ValueError(f"Audio player {player!r} failed: {error}") from error
+            if completed.returncode != 0:
+                raise ValueError(f"Audio player {player!r} failed to play the clip.")
 
 
 @dataclass
@@ -229,12 +474,18 @@ __all__ = [
     "SAMPLE_RATE",
     "AudioClip",
     "AudioModel",
+    "CommandSynthesizer",
+    "MicrophoneRecorder",
     "SilentSynthesizer",
+    "Speaker",
     "SpeechRecognizer",
     "SpeechSynthesizer",
     "TranscriptRecognizer",
     "VoiceAssistant",
     "VoiceTurn",
+    "WhisperRecognizer",
+    "discover_recognizer_name",
+    "discover_synthesizer_name",
     "load_recognizer",
     "load_synthesizer",
 ]

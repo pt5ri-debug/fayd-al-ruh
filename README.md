@@ -458,15 +458,20 @@ are in `core/speech.py`:
 - `AudioClip`: a simple PCM store with no dependencies, so the whole path can be
   tested with no audio hardware and no external package.
 
-Engines are loaded by name on demand (`piper`, `whisper`...). If no package is
-installed, the project can still run a complete *text loop*: the recognizer
+Engines are loaded by name on demand. Real engines are ordinary system programs,
+so no pip package and no network access is needed: TTS uses `espeak-ng`,
+`espeak`, `flite`, or macOS `say`; ASR uses `whisper` when it is installed. If
+none is present, the project can still run a complete *text loop*: the recognizer
 returns supplied text, and the synthesizer produces a real silent WAV clip. This
 way the whole voice path is tested on a fresh clone, and a real ASR/TTS engine
-can be plugged in later without touching the core.
+can be plugged in later without touching the core. Use `--tts auto` / `--asr auto`
+to pick the best installed engine, or name one explicitly (`--tts espeak`); an
+explicitly named engine that is missing raises rather than faking audio.
 
 ```bash
 python -m cli voice "What is the relationship between porosity and permeability?"  # a voice turn
 python -m ai.voice --write-wav out.wav "permeability"                              # and write a WAV
+python -m ai.voice --tts auto "permeability"                                       # speak with a real engine
 ```
 
 ## Tools and agents
@@ -495,6 +500,39 @@ authority, because the sandbox alone decides what runs.
 python -m ai.agent_demo          # a full plan inside a temporary sandbox
 python -m cli agent
 ```
+
+## Jarvis mode
+
+Jarvis mode is the layer the previous ones were building toward: one loop that
+*listens, understands, acts, and speaks*. It adds no new reasoning core; it
+orchestrates what already exists, and every guarantee still holds.
+
+- `core/wake_word.py` gates the loop: `WakeWordDetector` matches an English or
+  Arabic wake phrase ("jarvis", "hey jarvis", "يا جارفيس"), and
+  `AudioSpeechGate` rejects silence and clips too short or too quiet to be speech.
+- `core/command_router.py` (`NaturalLanguageRouter`) turns a clear sentence into a
+  sandboxed tool plan — calculate, search, list, read, write — and routes
+  everything else to the grounded assistant. A proposed tool call must already be
+  on the sandbox allow-list, so a sentence can never widen the agent's authority.
+- `core/jarvis.py` (`JarvisMode`) runs the loop and records every turn.
+- `core/preferences.py` (`UserPreferences`) remembers the user's name, language,
+  spoken-answer preference, and wake word, persisted with `JsonStore`.
+
+```bash
+python -m cli jarvis "what is permeability?"          # answer, with citations
+python -m cli jarvis "list the files in notes/"       # run a sandboxed tool
+python -m cli jarvis "calculate 2 * (3 + 4)"          # route to the calculator
+python -m cli jarvis --read-write "write to file notes/a.txt: permeability is high"
+python -m cli jarvis --wake "hey jarvis what is porosity?"   # require the wake word
+python -m cli jarvis --tts auto --play "what is porosity?"   # synthesize and play the answer
+python -m cli jarvis --tts auto --write-wav out.wav "what is porosity?"  # save the spoken answer
+python -m cli jarvis                                  # interactive text loop
+```
+
+With no speech engine installed, Jarvis still runs as a complete text loop — the
+same fallback philosophy as the rest of the project. `--mic` records from the
+system microphone when `arecord` or `sox` is available, and `--play` uses
+`aplay`/`afplay`/`sox` when one is installed.
 
 ## Continuous learning
 
@@ -596,6 +634,7 @@ python -m cli ml --episodes 60
 python -m cli llm --steps 4000
 python -m cli eval
 python -m cli ask "What is the relationship between porosity and permeability?"   # source-grounded assistant
+python -m cli jarvis "list the files in notes/"    # Jarvis mode: route, act, and answer
 python -m cli web --approve "What is a gas kick?"   # web answer, cited and trust-scored
 python -m cli paths      # where assets are read and data is written
 python -m cli selfcheck  # verify the bundled language model loads

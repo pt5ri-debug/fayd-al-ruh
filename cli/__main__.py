@@ -5,6 +5,7 @@ Usage:
     python -m cli ask "your question"   # grounded assistant (cited answers)
     python -m cli voice "your question" # one voice turn
     python -m cli agent               # tool-agent demo in the safety sandbox
+    python -m cli jarvis              # Jarvis mode: listen, understand, act, speak
     python -m cli learn               # continuous learning + regression gate
     python -m cli web "question"      # web answer, cited and trust-scored (governed)
     python -m cli paths               # show asset/data locations
@@ -33,6 +34,7 @@ from cli.menu import (
     run_curriculum,
     run_demo,
     run_evaluation,
+    run_jarvis,
     run_learn,
     run_llm,
     run_ml,
@@ -47,6 +49,7 @@ _COMMANDS = {
     "ask": run_ask,
     "voice": run_voice,
     "agent": run_agent,
+    "jarvis": run_jarvis,
     "learn": run_learn,
     "web": run_web,
     "demo": run_demo,
