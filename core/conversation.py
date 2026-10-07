@@ -128,6 +128,17 @@ class Conversation:
                 return message
         return None
 
+    def last_exchange(self) -> tuple[str, str] | None:
+        """The last (question, answer) pair, when the transcript ends on a reply.
+
+        This is the window an explicit "that's right" / "that's wrong" refers to:
+        a user turn the assistant just answered, with no turn in between.
+        """
+        messages = self._messages
+        if len(messages) >= 2 and messages[-1].role is Role.ASSISTANT and messages[-2].role is Role.USER:
+            return messages[-2].text, messages[-1].text
+        return None
+
     def render(self, *, include_system: bool = True) -> str:
         """Render the window as a plain transcript for a model prompt."""
         lines: list[str] = []

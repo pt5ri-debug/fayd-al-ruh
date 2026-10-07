@@ -87,10 +87,13 @@ nothing the sandbox does not already permit.
   spoken-answer preference, and wake word with `JsonStore`; it only changes on an
   explicit `update`.
 - `core/jarvis_controls.py`: `JarvisControls` recognises a few conversation-level
-  commands — stop / speak / repeat / new conversation / save / sessions / help —
-  as *exact* phrases after normalisation (case, punctuation, and leading fillers
-  are ignored), so "stop" mutes but "how do I stop the pump?" stays a question. A
-  control only changes conversation state; it can never reach the sandbox.
+  commands — stop / speak / repeat / new conversation / save / sessions / confirm /
+  correct / help — as *exact* phrases after normalisation (case, punctuation, and
+  leading fillers are ignored), so "stop" mutes but "how do I stop the pump?" stays
+  a question and a bare "no" stays an answer. Only a tightly-scoped correction
+  pattern ("that's wrong, it's X" / "actually it's X") captures new wording, so the
+  control cannot swallow an ordinary disagreement. A control only changes
+  conversation state or records feedback; it can never reach the sandbox.
 - `core/jarvis.py`: `JarvisMode` runs listen → route → answer/act → speak and
   returns a `JarvisTurn` recording what was heard, how it was routed, the answer
   or agent run, and the spoken clip. It keeps one `Conversation` per run — so a
@@ -99,6 +102,12 @@ nothing the sandbox does not already permit.
   the last assistant message; `new conversation` starts a fresh session. When the
   memory has a `JsonStore`, `save_session` / `resume_session` / `list_sessions`
   make sessions durable, so a conversation survives a restart.
+- Feedback in the loop: `JarvisMode` accepts an optional `ContinuousLearner` and
+  handles `that's right` (confirm) and `that's wrong, it's ...` (correct). It reads
+  the last `(question, answer)` pair from the conversation, feeds it to the learner
+  as explicit `Feedback`, and re-indexes the assistant's retriever so a corrected
+  statement changes the very next answer in the same run. With no learner it says
+  the path is disabled rather than record feedback that could not take effect.
 
 The loop is deliberately honest: when it does not confidently understand a
 sentence it answers from knowledge instead of guessing a tool call, and when a

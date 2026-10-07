@@ -29,9 +29,12 @@ from pathlib import Path
 
 from core.assistant import build_default_assistant
 from core.command_router import NaturalLanguageRouter
+from core.continuous_learning import ContinuousLearner
 from core.conversation import ConversationMemory
+from core.documents import build_document_store
 from core.jarvis import JarvisMode, JarvisTurn
 from core.jarvis_controls import JarvisControls
+from core.knowledge_update import KnowledgeUpdater
 from core.paths import data_dir
 from core.preferences import UserPreferences
 from core.speech import (
@@ -62,7 +65,12 @@ def _memory() -> ConversationMemory:
 def _build_mode(args: argparse.Namespace) -> JarvisMode:
     root = Path(args.root).expanduser() if args.root else _default_sandbox_root()
     sandbox = build_sandbox(root, read_only=not args.read_write)
-    assistant = build_default_assistant()
+    # One shared document store backs both the assistant's retrieval and the
+    # learner's updates, so a confirmed or corrected answer is visible to the
+    # very next retrieval, not just a later process.
+    documents = build_document_store()
+    assistant = build_default_assistant(documents=documents)
+    learner = ContinuousLearner(KnowledgeUpdater(documents))
     router = NaturalLanguageRouter(sandbox)
     preferences = UserPreferences(data_dir())
     wake = WakeWordDetector(phrases=(preferences.record.wake_word, "hey " + preferences.record.wake_word, "يا جارفيس"))
@@ -78,6 +86,7 @@ def _build_mode(args: argparse.Namespace) -> JarvisMode:
         speaker=Speaker() if args.play else None,
         memory=_memory(),
         controls=JarvisControls(),
+        learner=None if args.no_feedback else learner,
         mute=not preferences.record.speak,
     )
 
@@ -160,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--write-wav", type=Path, default=None, help="write the spoken answer to a WAV file")
     parser.add_argument("--session", default=None, help="resume a saved session by id, or start a new one")
     parser.add_argument("--list-sessions", action="store_true", help="list saved sessions and exit")
+    parser.add_argument("--no-feedback", action="store_true", help="disable learning from confirm/correct controls")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = parser.parse_args(argv)
 
