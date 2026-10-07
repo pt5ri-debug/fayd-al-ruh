@@ -108,28 +108,28 @@
     "tokenizer_vocab_size": 1024
   },
   "corpus": {
-    "characters": 3316140,
-    "corpus_sentences": 501,
-    "curriculum_sentences": 868,
+    "characters": 4871820,
+    "corpus_sentences": 836,
+    "curriculum_sentences": 1139,
     "repeats": 40,
     "structured_examples": 7,
     "structured_repeats": 60,
     "tokenizer_kind": "bpe",
     "tokenizer_vocab_size": 1024
   },
-  "git_revision": "ecb791c",
+  "git_revision": "b975726",
   "knowledge": {
     "corpus_coverage": 1.0,
-    "corpus_entries": 31,
-    "course_concepts": 243,
-    "course_relations": 247,
-    "courses": 34,
+    "corpus_entries": 48,
+    "course_concepts": 321,
+    "course_relations": 317,
+    "courses": 48,
     "curriculum_coverage": 1.0,
-    "discipline_concepts": 45,
-    "discipline_relations": 45,
-    "disciplines": 14,
-    "ontology_concepts": 412,
-    "ontology_relations": 386
+    "discipline_concepts": 60,
+    "discipline_relations": 60,
+    "disciplines": 17,
+    "ontology_concepts": 495,
+    "ontology_relations": 474
   },
   "language_model": {
     "checkpoint": "/workspace/project/fayd-al-ruh/ml/llm/checkpoints/fayd-llm.npz",
@@ -146,11 +146,14 @@
       "drilling": 1.0,
       "economics": 1.0,
       "eor": 1.0,
+      "facilities": 1.0,
       "hse": 1.0,
       "petrophysics": 1.0,
+      "process_safety": 1.0,
       "production": 1.0,
       "reservoir": 1.0,
       "stimulation": 1.0,
+      "unconventional": 1.0,
       "well_control": 1.0,
       "well_logging": 1.0,
       "well_testing": 1.0
@@ -288,6 +291,33 @@
         "train_success": 1.0
       },
       {
+        "brain_final_error": 0.000385,
+        "brain_initial_error": 0.012363,
+        "brain_policy_success": 1.0,
+        "discipline": "facilities",
+        "held_out_success": 1.0,
+        "name": "gas-processing",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000377,
+        "brain_initial_error": 0.012323,
+        "brain_policy_success": 1.0,
+        "discipline": "process_safety",
+        "held_out_success": 1.0,
+        "name": "process-safety-review",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000349,
+        "brain_initial_error": 0.012287,
+        "brain_policy_success": 1.0,
+        "discipline": "unconventional",
+        "held_out_success": 1.0,
+        "name": "complete-shale-well",
+        "train_success": 1.0
+      },
+      {
         "brain_final_error": 0.00038,
         "brain_initial_error": 0.012033,
         "brain_policy_success": 1.0,
@@ -307,6 +337,6 @@
       }
     ]
   },
-  "trained_at": "2026-10-06T21:54:21.843898+00:00",
+  "trained_at": "2026-10-06T23:11:15.615277+00:00",
   "version": "2.2.0"
 }
