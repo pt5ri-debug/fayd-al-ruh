@@ -216,13 +216,20 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
 def describe_paths() -> str:
     """A short report of where the build keeps its assets and data."""
     checkpoint = default_checkpoint()
-    return "\n".join(
-        (
-            f"Data folder     : {data_dir()}",
-            f"Artifacts folder: {artifacts_dir()}",
-            f"Checkpoint      : {checkpoint}",
-        )
-    )
+    lines = [
+        f"Data folder     : {data_dir()}",
+        f"Artifacts folder: {artifacts_dir()}",
+        f"Checkpoint      : {checkpoint}",
+    ]
+    from core.knowledge_base import KnowledgeBaseStore, default_knowledge_base_dir
+
+    kb_dir = default_knowledge_base_dir()
+    stats = KnowledgeBaseStore(kb_dir).stats()
+    if stats["shards"]:
+        lines.append(f"Knowledge base  : {kb_dir} ({stats['size_mb']:.1f} MB, {stats['chunks']} chunks)")
+    else:
+        lines.append("Knowledge base  : absent (run `python -m cli knowledge build`)")
+    return "\n".join(lines)
 
 
 def run_choice(choice: str) -> int:

@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from core.assistant import build_default_assistant
+from core.assistant import build_default_assistant, bulk_knowledge_available
 from core.speech import (
     SAMPLE_RATE,
     AudioClip,
@@ -35,7 +35,11 @@ def main(argv: list[str] | None = None) -> int:
     transcript = " ".join(args.text)
     recognizer = load_recognizer(args.asr, transcript=transcript)
     synthesizer = load_synthesizer(args.tts)
-    voice = VoiceAssistant(build_default_assistant(), recognizer=recognizer, synthesizer=synthesizer)
+    voice = VoiceAssistant(
+        build_default_assistant(bulk=bulk_knowledge_available()),
+        recognizer=recognizer,
+        synthesizer=synthesizer,
+    )
 
     turn = voice.respond_to_speech(AudioClip.silence(0.5))
     print(f"Heard: {turn.heard}")

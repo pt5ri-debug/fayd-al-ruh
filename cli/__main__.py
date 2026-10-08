@@ -11,6 +11,7 @@ Usage:
     python -m cli knowledge build     # build the bulk knowledge base (100 MB+)
     python -m cli knowledge stats     # show the bulk knowledge base size
     python -m cli knowledge search Q  # search the built knowledge base
+    python -m cli knowledge build-index # build the fast full-text index
     python -m cli paths               # show asset/data locations
     python -m cli demo                # local cognitive demo
     python -m cli ml --episodes 60    # ML pipeline

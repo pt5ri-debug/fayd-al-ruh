@@ -306,12 +306,29 @@ def _extractive_answer(question: str, passages: list[RetrievedPassage]) -> str:
 def _default_bulk_retriever() -> "BulkCorpusRetriever | None":
     """A streaming retriever over the built knowledge base, or ``None`` if absent."""
     from core.knowledge_base import default_knowledge_base_dir, iter_local_documents
+    from core.knowledge_index import KnowledgeTextIndex
     from core.rag import BulkCorpusRetriever
 
     store_dir = default_knowledge_base_dir()
     if not (store_dir / "manifest.json").exists() and not list(store_dir.glob("shard-*.jsonl")):
         return None
-    return BulkCorpusRetriever(lambda: iter_local_documents(store_dir))
+    index = KnowledgeTextIndex(store_dir)
+    return BulkCorpusRetriever(
+        lambda: iter_local_documents(store_dir),
+        index=index if index.exists() else None,
+    )
+
+
+def bulk_knowledge_available() -> bool:
+    """True when a built *and indexed* bulk knowledge base is present.
+
+    The index is required because an unindexed bulk scan takes tens of seconds
+    per query, which would stall an interactive voice/Jarvis turn.
+    """
+    from core.knowledge_base import default_knowledge_base_dir
+    from core.knowledge_index import KnowledgeTextIndex
+
+    return KnowledgeTextIndex(default_knowledge_base_dir()).exists()
 
 
 def build_default_assistant(
@@ -333,8 +350,10 @@ def build_default_assistant(
     the result with internal knowledge, and learns trusted answers into the same
     store (so they are retrievable immediately). With ``bulk`` the assistant
     also consults a built bulk knowledge base (``python -m cli knowledge build``)
-    as an additional, citation-carrying evidence source; the store is streamed,
-    never loaded whole.
+    as an additional, citation-carrying evidence source. When the fast full-text
+    index has been built (``python -m cli knowledge build-index``) queries are
+    served from it in milliseconds; otherwise they fall back to a streaming scan,
+    and the store is never loaded whole either way.
     """
     from core.curriculum_knowledge import seed_curriculum
     from core.documents import build_document_store
@@ -382,4 +401,5 @@ __all__ = [
     "SYSTEM_INSTRUCTION",
     "WebAugmentation",
     "build_default_assistant",
+    "bulk_knowledge_available",
 ]
