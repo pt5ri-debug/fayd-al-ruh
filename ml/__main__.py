@@ -294,9 +294,9 @@ def main(argv: list[str] | None = None) -> int:
         f"val_acc={supervised['val_accuracy']:.2f} brier={supervised['val_brier']:.3f}"
     )
     print(
-        f"General knowledge (link prediction): relations={int(general_knowledge['relations'])} "
-        f"concepts={int(general_knowledge['concepts'])} "
-        f"types={int(general_knowledge['relation_types'])} "
+        f"General knowledge (link prediction): relations={general_knowledge['relations']} "
+        f"concepts={general_knowledge['concepts']} "
+        f"types={general_knowledge['relation_types']} "
         f"held-out Hit@1={general_knowledge['hit_at_1']:.2f} "
         f"(random 0.25) mean-rank={general_knowledge['mean_rank']:.2f}"
     )

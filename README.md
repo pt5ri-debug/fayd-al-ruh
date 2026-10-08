@@ -618,6 +618,27 @@ same fallback philosophy as the rest of the project. `--mic` records from the
 system microphone when `arecord` or `sox` is available, and `--play` uses
 `aplay`/`afplay`/`sox` when one is installed.
 
+### Chatting in text (Jarvis without the voice)
+
+`chat` is the plain conversation entry point: the same grounded loop as Jarvis —
+one session, follow-up questions keep context, every answer cites its sources —
+but it stays in text. No microphone, no speaker, no wake word, so it behaves the
+same on a machine with no audio at all.
+
+```bash
+python -m cli chat                          # interactive conversation
+python -m cli chat "what is porosity?"      # one question, then exit
+python -m cli chat --no-web                 # answer only from what it knows
+python -m cli chat --session demo           # resume/autosave a named session
+python -m cli chat --list-sessions          # show saved conversations
+python -m cli chat --json "what is porosity?"   # machine-readable turn
+```
+
+The spoken controls still work as typed commands — `new conversation`, `save`,
+`sessions`, `repeat`, `web on`/`web off`, `that's right`, `that's wrong, it's ...`,
+and `help` — only the wording changes so it never mentions muting or replaying
+audio. Type `quit` to leave.
+
 ## Continuous learning
 
 Once the system runs, it must improve from real interaction without losing its
@@ -852,7 +873,7 @@ python -m cli web --endpoint https://api.example.com/search "What is a gas kick?
 python -m ai.web_verify --json --approve "What is a gas kick?"
 ```
 
-In the interactive menu, option **7) Ask the web and verify the answer** grants the
+In the interactive menu, option **8) Ask the web and verify the answer** grants the
 capability and then asks you to type the question, so you are never stuck with a
 fixed example question.
 
@@ -961,6 +982,7 @@ python -m cli llm --steps 4000
 python -m cli eval
 python -m cli jarvis "What is the relationship between porosity and permeability?"   # cited, source-grounded answer
 python -m cli jarvis "list the files in notes/"    # Jarvis mode: route, act, and answer
+python -m cli chat       # chat with the AI in text (Jarvis, no voice)
 python -m cli insight    # what the AI can do and what it has learned
 python -m cli web --approve "What is a gas kick?"   # web answer, cited and trust-scored
 python -m cli paths      # where assets are read and data is written

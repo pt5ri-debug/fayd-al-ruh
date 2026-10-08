@@ -27,6 +27,7 @@ import heapq
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from core.documents import Document, build_knowledge_documents
 
@@ -186,7 +187,7 @@ def knowledge_base_sample(
     max_chunks: int = 15000,
     march: frozenset[str] | None = None,
     min_hits: int = _KB_MATCH_HITS,
-    store_dir: object | None = None,
+    store_dir: str | Path | None = None,
 ) -> tuple[list[Document], int]:
     """A relevance-filtered, deterministic sample of the bulk knowledge base.
 

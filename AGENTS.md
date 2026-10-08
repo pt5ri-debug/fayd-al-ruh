@@ -49,8 +49,11 @@ Arabic is kept as secondary aliases where useful.
   hashed semantic, and multi-hop ontology signals into `RetrievedPassage` with
   citations. `core/assistant.py` — `GroundedAssistant` / `build_default_assistant`;
   answers with citations, extractive fallback with no model, and a groundedness gate
-  that rejects ungrounded model output. CLI: `python -m cli jarvis` (the single
-  text entry point; `python -m ai.voice` and `python -m ai.jarvis` also use it).
+  that rejects ungrounded model output. CLI: `python -m cli chat` (text-only
+  conversation) and `python -m cli jarvis` (listen/act/speak; `python -m ai.voice`
+  and `python -m ai.jarvis` also use it). Both build their session through
+  `ai/jarvis.py:build_session`, so the assistant, learner, and sandbox wiring
+  lives in one place.
 - `core/composition.py` — the deterministic composer: dependency-free rules that
   render evidence (retrieved passages, web sources, causal/reasoning/decision
   traces) into clean attributed prose. Shared by the assistant's extractive
