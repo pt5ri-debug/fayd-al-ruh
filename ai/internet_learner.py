@@ -107,6 +107,128 @@ def _print_report(report, *, as_json: bool) -> None:
     print(report.summary())
 
 
+class InteractiveLearner:
+    """Walk the science branches -> courses -> concepts, search, review, save.
+
+    At every level a number drills down, ``s`` searches everything at the
+    current level, ``b`` goes back one level, and ``q`` quits. A search always
+    runs as a dry run first and prints the results; only ``save`` writes them to
+    the project store, and it does so without searching again.
+    """
+
+    def __init__(self, learner, *, input_func=input, print_func=print) -> None:
+        self.learner = learner
+        self.input = input_func
+        self.print = print_func
+
+    def run(self) -> int:
+        from core.knowledge_navigator import science_branches
+
+        branches = science_branches()
+        while True:
+            labels = [
+                f"{branch.label} ({len(branch.courses)} courses, {branch.topic_count} topics)"
+                for branch in branches
+            ]
+            choice = self._pick("Science branches", labels, {"a": "search all topics", "q": "quit"})
+            if choice == "q":
+                return 0
+            if choice == "a":
+                self._review(_all_topics(branches), "all branches")
+                continue
+            branch = branches[choice]
+            result = self._branch_loop(branch)
+            if result == "quit":
+                return 0
+
+    def _branch_loop(self, branch):
+        while True:
+            labels = [
+                f"{course.label} ({len(course.topics)} topics)" for course in branch.courses
+            ]
+            choice = self._pick(
+                branch.label, labels, {"s": "search this branch", "b": "back", "q": "quit"}
+            )
+            if choice == "q":
+                return "quit"
+            if choice == "b":
+                return "back"
+            if choice == "s":
+                self._review(_branch_topics(branch), branch.label)
+                continue
+            course = branch.courses[choice]
+            result = self._course_loop(branch, course)
+            if result == "quit":
+                return "quit"
+
+    def _course_loop(self, branch, course):
+        while True:
+            labels = list(course.topics)
+            choice = self._pick(
+                f"{branch.label} > {course.label}",
+                labels,
+                {"s": "search this course", "b": "back", "q": "quit"},
+            )
+            if choice == "q":
+                return "quit"
+            if choice == "b":
+                return "back"
+            if choice == "s":
+                self._review(course.topics, course.label)
+                continue
+            self._review((course.topics[choice],), course.topics[choice])
+
+    def _review(self, topics, label) -> None:
+        topics = tuple(topic for topic in topics if topic.strip())
+        if not topics:
+            self.print("  (nothing to search here)")
+            return
+        self.print(f"\nSearching {len(topics)} topic(s): {label}")
+        report = self.learner.learn_topics(topics, limit=None, dry_run=True)
+        self.print(report.summary())
+        for outcome in report.outcomes:
+            accepted = set(outcome.added)
+            if not outcome.results:
+                continue
+            self.print(f"\n  {outcome.topic}:")
+            for result in outcome.results:
+                mark = "accepted" if result.url in accepted else "skipped"
+                self.print(f"    [{mark}] {result.title} <{result.url}>")
+                if result.snippet:
+                    self.print(f"        {result.snippet}")
+        if report.added_count == 0:
+            self.print("\n  Nothing to save.\n")
+            return
+        answer = self.input(f"  {report.added_count} statement(s) to save. [s]ave / [i]gnore: ")
+        if answer.strip().casefold() in {"s", "save", "y", "yes"}:
+            stored = self.learner.commit(report)
+            self.print(f"  Saved {stored} statement(s) to the project store.\n")
+        else:
+            self.print("  Ignored; nothing was saved.\n")
+
+    def _pick(self, title, labels, extra):
+        self.print(f"\n{title}:")
+        for index, label in enumerate(labels, 1):
+            self.print(f"  {index}) {label}")
+        for key, description in extra.items():
+            self.print(f"  {key}) {description}")
+        while True:
+            raw = self.input("Choose: ").strip().casefold()
+            if raw in extra:
+                return raw
+            if raw.isdigit() and 1 <= int(raw) <= len(labels):
+                return int(raw) - 1
+            self.print("  Invalid choice, try again.")
+
+
+def _all_topics(branches):
+    return [topic for branch in branches for course in branch.courses for topic in course.topics]
+
+
+def _branch_topics(branch):
+    return [topic for course in branch.courses for topic in course.topics]
+
+
 def main(argv: list[str] | None = None) -> int:
     from core.internet_learner import build_internet_learner, corpus_topics
 
@@ -116,6 +238,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--approve", action="store_true", help="grant the external search capability")
     parser.add_argument("--write", action="store_true", help="save accepted statements (default: dry run)")
     parser.add_argument("--list-topics", action="store_true", help="print the corpus-derived topics and exit")
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="pick science branches/courses/concepts with numbers, search, then save or ignore",
+    )
     parser.add_argument("--topics", nargs="*", default=None, help="explicit topics (default: from the corpus)")
     parser.add_argument(
         "--max-topics",
@@ -162,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
         min_credibility=args.min_credibility,
         per_topic=args.per_topic,
     )
+    if args.interactive:
+        return InteractiveLearner(learner).run()
     report = learner.learn_topics(topics, limit=limit, dry_run=not args.write)
     _print_report(report, as_json=args.json)
     return 0

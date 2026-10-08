@@ -141,3 +141,120 @@ def test_limit_caps_the_batch():
     learner = _learner(store, [_result(_TRUSTED_URL, _TRUSTED_SNIPPET)])
     report = learner.learn_topics(corpus_topics(), limit=2, dry_run=True)
     assert report.topics_considered == 2
+
+
+# --- science-branch navigator --------------------------------------------
+
+
+def test_science_branches_are_ordered_and_populated():
+    from core.knowledge_navigator import science_branches
+
+    branches = science_branches()
+    assert branches
+    assert branches[0].label == "Petroleum Disciplines"
+    labels = [branch.label for branch in branches]
+    assert labels.index("Petroleum Disciplines") < labels.index("Foundations")
+    assert all(branch.courses for branch in branches)
+    assert all(course.topics for branch in branches for course in branch.courses)
+
+
+def test_concept_topics_are_readable_phrases():
+    from core.knowledge_navigator import science_branches
+
+    topics = [
+        topic for branch in science_branches() for course in branch.courses for topic in course.topics
+    ]
+    assert topics
+    assert all("_" not in topic for topic in topics)
+    assert any(topic == "effective porosity" for topic in topics)
+
+
+# --- commit persists a preview without searching again --------------------
+
+
+class _CountingProvider(StaticSearchProvider):
+    def __init__(self, results):
+        super().__init__(tuple(results))
+        self.calls = 0
+
+    def search(self, query, *, limit=5):
+        self.calls += 1
+        return super().search(query, limit=limit)
+
+
+def test_commit_saves_previewed_statements_without_searching_again():
+    store = _store()
+    provider = _CountingProvider([_result(_TRUSTED_URL, _TRUSTED_SNIPPET)])
+    persisted: list[str] = []
+    learner = build_internet_learner(
+        provider=provider,
+        store=store,
+        permissions=granted_permissions(),
+        approvals=approved_gate(),
+        persist=lambda doc: persisted.append(doc.doc_id),
+    )
+    report = learner.learn_topics(["Permeability"], dry_run=True)
+    assert report.added_count == 1
+    calls_after_preview = provider.calls
+    assert len(store) == 1
+
+    stored = learner.commit(report)
+    assert stored == 1
+    assert len(store) == 2
+    assert provider.calls == calls_after_preview  # no second search
+    assert persisted and persisted[0].startswith("learned:")
+
+
+def test_commit_is_a_noop_for_a_non_dry_run_report():
+    store = _store()
+    learner = _learner(store, [_result(_TRUSTED_URL, _TRUSTED_SNIPPET)])
+    report = learner.learn_topics(["Permeability"], dry_run=False)
+    assert learner.commit(report) == 0
+
+
+# --- interactive walker ----------------------------------------------------
+
+
+def test_interactive_drill_down_search_and_save():
+    from ai.internet_learner import InteractiveLearner
+
+    store = _store()
+    provider = _CountingProvider([_result(_TRUSTED_URL, _TRUSTED_SNIPPET)])
+    persisted: list[str] = []
+    learner = build_internet_learner(
+        provider=provider,
+        store=store,
+        permissions=granted_permissions(),
+        approvals=approved_gate(),
+        persist=lambda doc: persisted.append(doc.doc_id),
+    )
+    # branches -> Petroleum Disciplines (1) -> Petrophysics course (1) ->
+    # first concept (1) -> search happens -> save (s)
+    scripted = iter(["1", "1", "1", "s", "q"])
+    out: list[str] = []
+    code = InteractiveLearner(
+        learner, input_func=lambda _prompt: next(scripted), print_func=out.append
+    ).run()
+    assert code == 0
+    assert any("Science branches" in line for line in out)
+    assert any("[accepted]" in line for line in out)
+    assert len(store) == 2  # one learned statement was saved
+
+
+def test_interactive_ignore_saves_nothing():
+    from ai.internet_learner import InteractiveLearner
+
+    store = _store()
+    provider = _CountingProvider([_result(_TRUSTED_URL, _TRUSTED_SNIPPET)])
+    learner = build_internet_learner(
+        provider=provider,
+        store=store,
+        permissions=granted_permissions(),
+        approvals=approved_gate(),
+    )
+    scripted = iter(["1", "1", "1", "i", "q"])
+    code = InteractiveLearner(
+        learner, input_func=lambda _p: next(scripted), print_func=lambda _l: None
+    ).run()
+    assert code == 0
+    assert len(store) == 1  # ignored

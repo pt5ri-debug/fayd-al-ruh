@@ -97,7 +97,13 @@ Arabic is kept as secondary aliases where useful.
   over corpus-derived petroleum topics from trusted domains only (SPE, OnePetro,
   API, ISO, ASTM, Wikipedia, `.gov`/`.edu`), folding accepted statements into the
   document store through `KnowledgeUpdater`. Denied by default and dry-run by
-  default; `--write` persists with provenance. CLI: `python -m cli internet-learner`.
+  default; `--write` persists with provenance. `commit(report)` saves a previewed
+  dry-run report without searching again. CLI: `python -m cli internet-learner`.
+- `core/knowledge_navigator.py` — `science_branches()` exposes the curriculum as
+  an ordered tree of **science branch → course → concept** with readable concept
+  phrases; `InteractiveLearner` (in `ai/internet_learner.py`) walks it with
+  numbered menus, searches at any level, reviews results, then saves or ignores.
+  Menu entry (5) opens this interactive mode.
 - `core/vision.py` — optional multimodal perception: dependency-free `ImageBuffer`
   (PPM P6), measurable `ImageFeatures`, `HeuristicVisionEncoder`, and a
   `MultimodalAssistant` that grounds an image description in the RAG store. A real
