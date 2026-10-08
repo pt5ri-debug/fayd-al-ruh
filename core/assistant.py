@@ -22,11 +22,15 @@ Two guarantees matter and are deliberate:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from core.conversation import Conversation, ConversationMemory
 from core.documents import Document, DocumentStore
 from core.model_interface import CognitiveModel, ModelRequest
 from core.rag import RagRetriever, RetrievedPassage
+
+if TYPE_CHECKING:
+    from core.rag import BulkCorpusRetriever
 
 SYSTEM_INSTRUCTION = (
     "You are a petroleum-engineering expert assistant. Answer using only the "
@@ -299,6 +303,17 @@ def _extractive_answer(question: str, passages: list[RetrievedPassage]) -> str:
     return grounded_answer(question, sources)
 
 
+def _default_bulk_retriever() -> "BulkCorpusRetriever | None":
+    """A streaming retriever over the built knowledge base, or ``None`` if absent."""
+    from core.knowledge_base import default_knowledge_base_dir, iter_local_documents
+    from core.rag import BulkCorpusRetriever
+
+    store_dir = default_knowledge_base_dir()
+    if not (store_dir / "manifest.json").exists() and not list(store_dir.glob("shard-*.jsonl")):
+        return None
+    return BulkCorpusRetriever(lambda: iter_local_documents(store_dir))
+
+
 def build_default_assistant(
     *,
     model: CognitiveModel | None = None,
@@ -308,6 +323,7 @@ def build_default_assistant(
     web=None,
     web_threshold: float = _WEAK_EVIDENCE,
     on_learn=None,
+    bulk: bool = False,
 ) -> GroundedAssistant:
     """Assemble the assistant over the project's own knowledge corpus.
 
@@ -315,7 +331,10 @@ def build_default_assistant(
     fresh in-memory store seeded from the bundled corpus. With ``web_enabled``
     the assistant consults the internet when its own evidence is weak, compares
     the result with internal knowledge, and learns trusted answers into the same
-    store (so they are retrievable immediately).
+    store (so they are retrievable immediately). With ``bulk`` the assistant
+    also consults a built bulk knowledge base (``python -m cli knowledge build``)
+    as an additional, citation-carrying evidence source; the store is streamed,
+    never loaded whole.
     """
     from core.curriculum_knowledge import seed_curriculum
     from core.documents import build_document_store
@@ -328,7 +347,8 @@ def build_default_assistant(
     seed_curriculum(ontology)
     seed_petroleum_corpus(ontology)
     store = documents or build_document_store()
-    retriever = RagRetriever(store, ontology=ontology)
+    bulk_retriever = _default_bulk_retriever() if bulk else None
+    retriever = RagRetriever(store, ontology=ontology, bulk=bulk_retriever)
 
     if web_enabled and web is None:
         from core.web_verifier import (

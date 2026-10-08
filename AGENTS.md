@@ -108,6 +108,16 @@ Arabic is kept as secondary aliases where useful.
   (PPM P6), measurable `ImageFeatures`, `HeuristicVisionEncoder`, and a
   `MultimodalAssistant` that grounds an image description in the RAG store. A real
   encoder can implement the `VisionEncoder` protocol without touching the assistant.
+- `core/knowledge_base.py` — the **bulk knowledge base**: a keyless
+  `WikipediaFetcher` (batched MediaWiki API), `chunk_text`, and a sharded JSONL
+  `KnowledgeBaseStore`. `build_knowledge_base(store_dir, target_mb=...)` fetches,
+  chunks, and stores until the byte target, resumably via `checkpoint.json`.
+  Lives under the data directory (`data/knowledge_base`, git-ignored), built on
+  demand — never committed. CLI: `python -m cli knowledge build|stats|search`
+  (`cli/knowledge.py`). `core/rag.py`'s `BulkCorpusRetriever` streams the store
+  per query (bounded memory) and is wired into `RagRetriever(bulk=...)` and
+  `build_default_assistant(bulk=True)`. It is *reference material only*: never fed
+  to the acceptance policy or belief layers.
 - `core/version.py` is the single source of the version string.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.

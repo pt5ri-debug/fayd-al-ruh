@@ -8,6 +8,9 @@ Usage:
     python -m cli learn               # continuous learning + regression gate
     python -m cli internet-learner    # learn petroleum facts from trusted sites
     python -m cli web "question"      # web answer, cited and trust-scored (governed)
+    python -m cli knowledge build     # build the bulk knowledge base (100 MB+)
+    python -m cli knowledge stats     # show the bulk knowledge base size
+    python -m cli knowledge search Q  # search the built knowledge base
     python -m cli paths               # show asset/data locations
     python -m cli demo                # local cognitive demo
     python -m cli ml --episodes 60    # ML pipeline
@@ -35,6 +38,7 @@ from cli.menu import (
     run_evaluation,
     run_internet_learner,
     run_jarvis,
+    run_knowledge,
     run_learn,
     run_llm,
     run_ml,
@@ -52,6 +56,7 @@ _COMMANDS = {
     "learn": run_learn,
     "internet-learner": run_internet_learner,
     "web": run_web,
+    "knowledge": run_knowledge,
     "demo": run_demo,
     "ml": run_ml,
     "llm": run_llm,
