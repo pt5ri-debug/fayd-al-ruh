@@ -437,9 +437,8 @@ ungrounded in the passages, it is rejected and replaced by the composed,
 extractive answer.
 
 ```bash
-python -m cli ask "What is the relationship between porosity and permeability?"
-python -m ai.ask --no-model "What is a well log?"   # extractive only
-python -m ai.ask                                    # multi-turn session
+python -m cli jarvis "What is the relationship between porosity and permeability?"   # cited answer
+python -m cli jarvis --no-web --session demo                                        # multi-turn, internal knowledge only
 ```
 
 ## The subword tokenizer (BPE)
@@ -520,7 +519,7 @@ orchestrates what already exists, and every guarantee still holds.
   `AudioSpeechGate` rejects silence and clips too short or too quiet to be speech.
 - `core/command_router.py` (`NaturalLanguageRouter`) turns a clear sentence into a
   sandboxed tool plan — calculate, search, list, read, write — and routes
-  everything else to the grounded assistant. A proposed tool call must already be
+  everything else to the assistant. A proposed tool call must already be
   on the sandbox allow-list, so a sentence can never widen the agent's authority.
 - `core/jarvis.py` (`JarvisMode`) runs the loop and records every turn. It keeps
   one conversation session per run, so follow-up questions stay in context, and it
@@ -700,7 +699,7 @@ python -m cli demo       # local demo
 python -m cli ml --episodes 60
 python -m cli llm --steps 4000
 python -m cli eval
-python -m cli ask "What is the relationship between porosity and permeability?"   # source-grounded assistant
+python -m cli jarvis "What is the relationship between porosity and permeability?"   # cited, source-grounded answer
 python -m cli jarvis "list the files in notes/"    # Jarvis mode: route, act, and answer
 python -m cli web --approve "What is a gas kick?"   # web answer, cited and trust-scored
 python -m cli paths      # where assets are read and data is written

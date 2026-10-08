@@ -90,11 +90,6 @@ def run_selfcheck(argv: Sequence[str] = ()) -> int:
     return 0
 
 
-def run_ask(argv: Sequence[str] = ()) -> int:
-    """Ask the grounded, citation-backed petroleum assistant."""
-    return _run_module("ai.ask", argv)
-
-
 def run_voice(argv: Sequence[str] = ()) -> int:
     """Run one voice turn through the assistant (transcript in, WAV out)."""
     return _run_module("ai.voice", argv)
@@ -185,7 +180,6 @@ def run_curriculum(argv: Sequence[str] = ()) -> int:
 
 
 MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
-    ("Ask the grounded assistant", run_ask, ()),
     ("One voice turn", run_voice, ("--write-wav", "voice-turn.wav", "water")),
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Jarvis mode (listen, act, speak)", run_jarvis, ()),
@@ -261,7 +255,6 @@ def menu_loop(reader: Callable[[str], str] = input) -> int:
 
 __all__ = [
     "MENU",
-    "run_ask",
     "run_voice",
     "run_agent",
     "run_jarvis",
