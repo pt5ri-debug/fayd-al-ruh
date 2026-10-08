@@ -29,9 +29,13 @@ _ARTICLE = (
 class FakeFetcher:
     """A deterministic stand-in for :class:`WikipediaFetcher`."""
 
-    def __init__(self, per_category: int = 3) -> None:
+    def __init__(self, per_category: int = 3, subcats: int = 1) -> None:
         self.per_category = per_category
+        self.subcats = subcats
         self.calls: list[str] = []
+
+    def subcategories(self, category: str, *, limit: int = 500) -> list[str]:
+        return [f"{category} subcat {i}" for i in range(self.subcats)]
 
     def category_titles(self, category: str) -> list[str]:
         self.calls.append(category)
@@ -121,6 +125,39 @@ def test_build_reaches_target_and_writes_manifest(tmp_path):
     assert store.shard_paths()
     assert store.manifest_path.exists()
     assert store.load_manifest()["total_chunks"] == manifest["total_chunks"]
+
+
+def test_build_walks_subcategories(tmp_path):
+    store_dir = tmp_path / "kb"
+    fetcher = FakeFetcher(per_category=2, subcats=2)
+    build_knowledge_base(
+        store_dir,
+        target_mb=100.0,
+        categories=["Geology"],
+        fetcher=fetcher,
+        batch=2,
+        sleep=0,
+        depth=1,
+    )
+    # The seed category plus its two subcategories were all fetched.
+    assert "Geology" in fetcher.calls
+    assert "Geology subcat 0" in fetcher.calls
+    assert "Geology subcat 1" in fetcher.calls
+
+
+def test_build_depth_zero_uses_only_seed(tmp_path):
+    store_dir = tmp_path / "kb"
+    fetcher = FakeFetcher(per_category=2, subcats=3)
+    build_knowledge_base(
+        store_dir,
+        target_mb=100.0,
+        categories=["Geology"],
+        fetcher=fetcher,
+        batch=2,
+        sleep=0,
+        depth=0,
+    )
+    assert fetcher.calls == ["Geology"]
 
 
 def test_build_is_resumable_via_checkpoint(tmp_path):

@@ -17,6 +17,8 @@ from collections.abc import Sequence
 
 from core.knowledge_base import (
     DEFAULT_CATEGORIES,
+    DEFAULT_DEPTH,
+    DEFAULT_SUBCAT_LIMIT,
     DEFAULT_TARGET_MB,
     KnowledgeBaseStore,
     build_knowledge_base,
@@ -45,9 +47,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Category to include (repeatable; default: the broad seed).",
     )
-    build.add_argument("--batch", type=int, default=20)
+    build.add_argument("--batch", type=int, default=50)
     build.add_argument("--chunk-chars", type=int, default=1200)
     build.add_argument("--overlap", type=int, default=150)
+    build.add_argument(
+        "--depth",
+        type=int,
+        default=DEFAULT_DEPTH,
+        help="Subcategory depth to walk (0 = seed categories only).",
+    )
+    build.add_argument("--subcat-limit", type=int, default=DEFAULT_SUBCAT_LIMIT)
 
     sub.add_parser("stats", help="Show the store size and chunk count.")
 
@@ -81,6 +90,8 @@ def run_build(args: argparse.Namespace) -> int:
         batch=args.batch,
         chunk_chars=args.chunk_chars,
         overlap=args.overlap,
+        depth=args.depth,
+        subcat_limit=args.subcat_limit,
         max_articles=args.max_articles,
         progress=progress,
     )

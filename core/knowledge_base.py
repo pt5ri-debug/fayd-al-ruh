@@ -96,6 +96,10 @@ DEFAULT_OVERLAP = 150
 DEFAULT_MIN_CHUNK = 200
 DEFAULT_SLEEP = 0.05
 DEFAULT_TARGET_MB = 100.0
+# Most Wikipedia content sits in subcategories, so walking two levels down is
+# what turns a thin seed into a broad corpus.
+DEFAULT_DEPTH = 2
+DEFAULT_SUBCAT_LIMIT = 500
 
 
 @dataclass(frozen=True)
@@ -264,11 +268,50 @@ class WikipediaFetcher:
             self._session = requests.Session()
             self._session.headers.update({"User-Agent": WIKI_USER_AGENT})
 
-    def _get(self, params: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover - network
-        params = {**params, "format": "json"}
-        response = self._session.get(WIKI_API, params=params, timeout=self.timeout)
+    def _get(
+        self, params: dict[str, Any], *, retries: int = 6
+    ) -> dict[str, Any]:  # pragma: no cover - network
+        params = {**params, "format": "json", "maxlag": "5"}
+        delay = 1.0
+        for attempt in range(retries):
+            response = self._session.get(WIKI_API, params=params, timeout=self.timeout)
+            if response.status_code in (429, 503):
+                # Wikipedia rate-limits bursts; honour Retry-After, then back off.
+                retry_after = response.headers.get("Retry-After")
+                wait = float(retry_after) if (retry_after or "").replace(".", "", 1).isdigit() else delay
+                time.sleep(min(max(wait, delay), 60.0))
+                delay = min(delay * 2, 60.0)
+                continue
+            response.raise_for_status()
+            return response.json()
         response.raise_for_status()
-        return response.json()
+        return {}
+
+    def subcategories(self, category: str, *, limit: int = 500) -> list[str]:
+        """Return the subcategory names of a category (namespace 14)."""
+        names: list[str] = []
+        cont: str | None = None
+        while True:
+            params: dict[str, Any] = {
+                "action": "query",
+                "list": "categorymembers",
+                "cmtitle": category if category.startswith("Category:") else f"Category:{category}",
+                "cmlimit": "500",
+                "cmtype": "subcat",
+                "cmnamespace": "14",
+            }
+            if cont:
+                params["cmcontinue"] = cont
+            payload = self._get(params)
+            for member in payload.get("query", {}).get("categorymembers", []):
+                name = member["title"].split(":", 1)[-1]
+                names.append(name)
+                if len(names) >= limit:
+                    return names
+            cont = payload.get("continue", {}).get("cmcontinue")
+            if not cont:
+                break
+        return names
 
     def category_titles(self, category: str, *, limit: int | None = None) -> list[str]:
         """Return the article titles in a category (namespace 0 only)."""
@@ -328,6 +371,40 @@ class WikipediaFetcher:
         return out
 
 
+def _category_queue(
+    fetch: Any,
+    categories: Sequence[str],
+    *,
+    depth: int,
+    subcat_limit: int,
+    progress: Any | None,
+) -> Iterator[tuple[str, int]]:
+    """Breadth-first walk of a category and its subcategories to ``depth``.
+
+    Most of Wikipedia's content lives in subcategories, so a seed category alone
+    is a thin sample. Yields ``(category_name, level)`` in BFS order. Depth 0
+    means the seed categories only.
+    """
+    seen: set[str] = set()
+    queue: list[tuple[str, int]] = [(name, 0) for name in categories]
+    while queue:
+        name, level = queue.pop(0)
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        yield name, level
+        if level >= depth:
+            continue
+        try:
+            children = fetch.subcategories(name, limit=subcat_limit)
+        except Exception as error:  # pragma: no cover - network path
+            if progress:
+                progress(f"subcategories for {name!r} failed: {error}")
+            continue
+        queue.extend((child, level + 1) for child in children)
+
+
 def build_knowledge_base(
     store_dir: str | Path,
     *,
@@ -339,21 +416,26 @@ def build_knowledge_base(
     overlap: int = DEFAULT_OVERLAP,
     min_chunk: int = DEFAULT_MIN_CHUNK,
     sleep: float = DEFAULT_SLEEP,
+    depth: int = DEFAULT_DEPTH,
+    subcat_limit: int = DEFAULT_SUBCAT_LIMIT,
     max_articles: int | None = None,
     progress: Any | None = None,
 ) -> dict[str, Any]:
     """Fetch, chunk, and store a bulk knowledge base until ``target_mb`` is met.
 
-    Resumable: a ``checkpoint.json`` records the categories already finished and
-    the byte total so far, and the shards already written are kept. Passing an
-    explicit ``fetcher`` (any object with ``category_titles`` / ``extracts``)
-    makes the whole build offline and testable.
+    Categories are walked breadth-first through their subcategories (``depth``),
+    which is what makes the corpus broad rather than a thin sample. Resumable: a
+    ``checkpoint.json`` records finished categories and the byte total, and the
+    shards already written are kept. Passing an explicit ``fetcher`` (any object
+    with ``subcategories`` / ``category_titles`` / ``extracts``) makes the whole
+    build offline and testable.
     """
     store = KnowledgeBaseStore(store_dir)
     store.ensure()
     target_bytes = int(target_mb * 1024 * 1024)
     checkpoint = store.load_checkpoint()
     done_categories: set[str] = set(checkpoint.get("done_categories", []))
+    seen_titles: set[str] = set(checkpoint.get("seen_titles", []))
     total_bytes = int(checkpoint.get("total_bytes", 0))
     total_chunks = int(checkpoint.get("total_chunks", 0))
     total_articles = int(checkpoint.get("total_articles", 0))
@@ -361,7 +443,22 @@ def build_knowledge_base(
 
     fetch = fetcher if fetcher is not None else WikipediaFetcher()
     stop = False
-    for category in categories:
+
+    def save() -> None:
+        store.save_checkpoint(
+            {
+                "done_categories": sorted(done_categories),
+                "seen_titles": sorted(seen_titles),
+                "total_bytes": total_bytes,
+                "total_chunks": total_chunks,
+                "total_articles": total_articles,
+                "shard_index": shard_index,
+            }
+        )
+
+    for category, level in _category_queue(
+        fetch, categories, depth=depth, subcat_limit=subcat_limit, progress=progress
+    ):
         if stop:
             break
         if category in done_categories:
@@ -372,7 +469,7 @@ def build_knowledge_base(
             if progress:
                 progress(f"category {category!r} failed: {error}")
             continue
-        unique = [t for t in dict.fromkeys(titles) if t]
+        unique = [t for t in titles if t and t not in seen_titles]
         for index in range(0, len(unique), batch):
             if max_articles is not None and total_articles >= max_articles:
                 stop = True
@@ -386,6 +483,7 @@ def build_knowledge_base(
                 continue
             chunks: list[KnowledgeChunk] = []
             for title, text in articles:
+                seen_titles.add(title)
                 if len(text) < min_chunk:
                     continue
                 url = WIKI_BASE_URL + title.replace(" ", "_")
@@ -408,7 +506,7 @@ def build_knowledge_base(
                 shard_index = store.next_shard_index()
             if progress:
                 progress(
-                    f"{category}: {total_articles} articles, "
+                    f"{category} (d{level}): {total_articles} articles, "
                     f"{total_bytes / 1024 / 1024:.1f}/{target_mb:.0f} MB"
                 )
             if total_bytes >= target_bytes:
@@ -416,17 +514,8 @@ def build_knowledge_base(
                 break
             if sleep:
                 time.sleep(sleep)
-        if not stop:
-            done_categories.add(category)
-            store.save_checkpoint(
-                {
-                    "done_categories": sorted(done_categories),
-                    "total_bytes": total_bytes,
-                    "total_chunks": total_chunks,
-                    "total_articles": total_articles,
-                    "shard_index": shard_index,
-                }
-            )
+        done_categories.add(category)
+        save()
 
     manifest = {
         "source": "wikipedia",
@@ -437,6 +526,7 @@ def build_knowledge_base(
         "total_chunks": total_chunks,
         "total_articles": total_articles,
         "categories": list(categories),
+        "depth": depth,
         "done_categories": sorted(done_categories),
         "complete": total_bytes >= target_bytes,
     }
@@ -564,7 +654,9 @@ __all__ = [
     "DEFAULT_BATCH",
     "DEFAULT_CATEGORIES",
     "DEFAULT_CHUNK_CHARS",
+    "DEFAULT_DEPTH",
     "DEFAULT_OVERLAP",
+    "DEFAULT_SUBCAT_LIMIT",
     "DEFAULT_TARGET_MB",
     "KnowledgeBaseStore",
     "KnowledgeChunk",
