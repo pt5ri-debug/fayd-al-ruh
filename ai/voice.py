@@ -15,6 +15,7 @@ import argparse
 from pathlib import Path
 
 from core.assistant import build_default_assistant, bulk_knowledge_available
+from core.composition import sources_block
 from core.speech import (
     SAMPLE_RATE,
     AudioClip,
@@ -44,10 +45,9 @@ def main(argv: list[str] | None = None) -> int:
     turn = voice.respond_to_speech(AudioClip.silence(0.5))
     print(f"Heard: {turn.heard}")
     print(f"Answer: {turn.answer_text}")
-    if turn.citations:
-        print("Sources:")
-        for citation in turn.citations:
-            print(f"  - {citation}")
+    block = sources_block(turn.citations)
+    if block:
+        print(block)
     print(f"Audio duration: {turn.spoken.duration_seconds:.2f} s at {SAMPLE_RATE} Hz")
     if args.write_wav is not None:
         turn.spoken.write_wav(args.write_wav)

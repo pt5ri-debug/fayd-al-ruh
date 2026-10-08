@@ -22,6 +22,8 @@ from core.composition import (
     grounded_answer,
     reasoning_step_sentence,
     sentences,
+    sources_block,
+    topic_phrase,
     web_answer,
 )
 
@@ -50,7 +52,7 @@ def test_ensure_terminal_capitalises_and_punctuates():
     assert ensure_terminal("already fine.") == "Already fine."
 
 
-def test_grounded_answer_reads_as_prose_and_cites_sources():
+def test_grounded_answer_reads_as_prose_without_inline_citations():
     text = grounded_answer(
         "what is porosity",
         [
@@ -61,7 +63,32 @@ def test_grounded_answer_reads_as_prose_and_cites_sources():
     assert text.startswith("Here is what the available sources say about porosity.")
     assert "Porosity measures void space in the rock." in text
     assert "In addition," in text
-    assert "Sources:" in text and "[notes:1] Porosity" in text
+    # Attribution is data, not prose: no citation leaks into the answer body.
+    assert "Sources:" not in text
+    assert "[notes:1]" not in text
+
+
+def test_topic_phrase_keeps_word_order_and_drops_question_words():
+    assert topic_phrase("what is the meaning of drilling oil wells?") == "drilling oil wells"
+    assert topic_phrase("how does porosity relate to permeability") == "porosity relate permeability"
+
+
+def test_grounded_answer_skips_bare_fragment_sources():
+    text = grounded_answer(
+        "what is a wellbore",
+        [
+            Source("Wellbore", "Wellbore.", "[a] Wellbore"),
+            Source("Drilling", "A drilling rig drills wells into the earth for many purposes.", "[b] Drilling"),
+        ],
+    )
+    assert "Wellbore." not in text
+    assert "A drilling rig drills wells" in text
+
+
+def test_sources_block_lists_each_citation_once_in_order():
+    block = sources_block(["[a] One", "[b] Two", "[a] One"])
+    assert block == "Sources:\n  - [a] One\n  - [b] Two"
+    assert sources_block([]) == ""
 
 
 def test_grounded_answer_without_evidence_says_so_plainly():
@@ -70,15 +97,17 @@ def test_grounded_answer_without_evidence_says_so_plainly():
     assert "xyzzy" in text
 
 
-def test_web_answer_attributes_the_primary_source():
+def test_web_answer_body_has_no_inline_attribution():
     text = web_answer(
         "what is the klinkenberg correction",
         [Source("Klinkenberg correction", "It accounts for gas slippage.", "en.wikipedia.org")],
         internal=("[notes:1] Permeability",),
     )
-    assert "en.wikipedia.org" in text
     assert "gas slippage" in text
     assert "internal corpus" in text.lower()
+    # The source is carried by the citation list, not interpolated into a sentence.
+    assert "en.wikipedia.org" not in text
+    assert "(source:" not in text
 
 
 def test_web_answer_without_sources_says_so_plainly():

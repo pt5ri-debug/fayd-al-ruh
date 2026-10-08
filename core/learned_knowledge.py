@@ -17,8 +17,10 @@ breaking store construction, so the project still starts if the file is absent.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
+from core.acceptance_policy import sanitize_statement
 from core.documents import Document
 from core.paths import bundle_root
 
@@ -46,9 +48,18 @@ def learned_documents() -> list[Document]:
         if not isinstance(item, dict):
             continue
         try:
-            documents.append(Document.from_primitive(item))
+            document = Document.from_primitive(item)
         except (KeyError, ValueError, TypeError):
             continue
+        # Repair at read time: a promoted statement that is only a fragment (or
+        # has no terminal punctuation) is dropped, so a stale file can never put
+        # broken prose back into an answer.
+        statement = sanitize_statement(document.text)
+        if not statement:
+            continue
+        if statement != document.text:
+            document = replace(document, text=statement)
+        documents.append(document)
     return documents
 
 

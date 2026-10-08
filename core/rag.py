@@ -30,6 +30,10 @@ from core.semantic_memory import SemanticMemoryIndex, hashed_embedding
 _WEIGHT_LEXICAL = 0.7
 _WEIGHT_SEMANTIC = 0.1
 _WEIGHT_ONTOLOGY = 0.2
+# The bulk corpus is BM25-calibrated, so its scores are rescaled before they are
+# mixed with the internal (coverage-based) scores. Without a real index the bulk
+# retriever's coverage scores are on the same scale as lexical ones and used as is.
+_BULK_FUSION_WEIGHT = 0.6
 _TOKEN_RE = re.compile(r"\w+", flags=re.UNICODE)
 _DIACRITICS_RE = re.compile(r"[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed]")
 _STOPWORDS = frozenset(
@@ -120,6 +124,11 @@ class BulkCorpusRetriever:
         # query is served from the FTS5 index in milliseconds instead of
         # re-tokenizing the whole corpus.
         self.index = index
+
+    @property
+    def indexed(self) -> bool:
+        """Whether a built FTS5 index backs this retriever."""
+        return self.index is not None and self.index.exists()
 
     def retrieve(self, query: str, *, limit: int = 4) -> list[RetrievedPassage]:
         if not query.strip():
@@ -250,19 +259,47 @@ class RagRetriever:
                 )
             )
 
-        passages.sort(key=lambda passage: (-passage.score, passage.doc_id))
-        passages = passages[:limit]
+        # The bulk corpus is a first-class evidence source, so its chunks are
+        # ranked *with* the internal ones rather than appended after them. The
+        # FTS5 index selects the candidates (fast), but its scores are normalised
+        # within a query (its best hit is always 1.0), which is not comparable
+        # with the internal coverage scores -- so each candidate is rescored by
+        # the same query coverage the internal documents use. External evidence is
+        # kept slightly below internal evidence (``_BULK_FUSION_WEIGHT``).
+        if self.bulk is not None:
+            passages.extend(
+                self._bulk_passages(query, query_terms, limit, indexed=self.bulk.indexed)
+            )
 
-        # The bulk corpus is optional and separate: it can only *add* evidence
-        # for a query the internal store did not answer, and its results never
-        # outrank an internal passage on a tie (stable by score then doc_id).
-        if self.bulk is not None and len(passages) < limit:
-            seen = {passage.doc_id for passage in passages}
-            for extra in self.bulk.retrieve(query, limit=limit - len(passages)):
-                if extra.doc_id not in seen:
-                    passages.append(extra)
-                    seen.add(extra.doc_id)
+        passages.sort(key=lambda passage: (-passage.score, passage.doc_id))
         return passages[:limit]
+
+    def _bulk_passages(
+        self, query: str, query_terms: set[str], limit: int, *, indexed: bool
+    ) -> list[RetrievedPassage]:
+        """Bulk-corpus candidates, deduplicated by article and rescored by coverage."""
+        fetch = max(limit * 4, limit)
+        best: dict[str, RetrievedPassage] = {}
+        for passage in self.bulk.retrieve(query, limit=fetch):  # type: ignore[union-attr]
+            if indexed:
+                score = _coverage(query_terms, _tokens(f"{passage.title} {passage.text}"))
+            else:
+                score = passage.score
+            score = min(1.0, score * _BULK_FUSION_WEIGHT)
+            if score <= 0.0:
+                continue
+            key = passage.title or passage.doc_id
+            existing = best.get(key)
+            if existing is None or score > existing.score:
+                best[key] = RetrievedPassage(
+                    doc_id=passage.doc_id,
+                    title=passage.title,
+                    text=passage.text,
+                    source=passage.source,
+                    score=round(score, 6),
+                    signal=passage.signal,
+                )
+        return list(best.values())
 
 
 __all__ = ["BulkCorpusRetriever", "RagRetriever", "RetrievedPassage"]

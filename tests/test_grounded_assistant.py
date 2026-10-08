@@ -11,7 +11,7 @@ from core.model_interface import ModelResponse
 from core.ontology import Ontology
 from core.domain_knowledge import seed_ontology
 from core.curriculum_knowledge import seed_curriculum
-from core.rag import RagRetriever
+from core.rag import RagRetriever, RetrievedPassage
 from storage.json_store import JsonStore
 
 
@@ -173,6 +173,56 @@ def test_index_document_makes_new_text_retrievable():
     )
     passages = retriever.retrieve("heavy oil heating", limit=2)
     assert passages[0].doc_id == "note:x"
+
+
+class _StubBulk:
+    """A bulk retriever whose scores are already on the internal coverage scale."""
+
+    def __init__(self, passages):
+        self._passages = list(passages)
+        self.indexed = False
+
+    def retrieve(self, query, *, limit=4):
+        return self._passages[:limit]
+
+
+def test_bulk_corpus_joins_the_main_ranking_and_can_win():
+    store = DocumentStore()
+    store.add(Document("note:weak", "Weak note", "An unrelated note about nothing.", "notes"))
+    retriever = RagRetriever(
+        store,
+        bulk=_StubBulk(
+            [
+                RetrievedPassage(
+                    doc_id="kb:Drilling_rig:1",
+                    title="Drilling rig",
+                    text="A drilling rig is an integrated system that drills wells into the earth.",
+                    source="wikipedia:kb",
+                    score=1.0,
+                    signal="lexical",
+                )
+            ]
+        ),
+    )
+    passages = retriever.retrieve("what is a drilling rig", limit=1)
+    # The strong external passage is ranked with internal ones, not appended
+    # only when internal evidence runs short.
+    assert passages[0].doc_id == "kb:Drilling_rig:1"
+
+
+def test_bulk_passages_are_deduplicated_by_article():
+    retriever = RagRetriever(
+        build_document_store(),
+        bulk=_StubBulk(
+            [
+                RetrievedPassage("kb:Drilling_rig:1", "Drilling rig", "First chunk about drilling rigs.", "wikipedia:kb", 0.9, "lexical"),
+                RetrievedPassage("kb:Drilling_rig:2", "Drilling rig", "Second chunk about drilling rigs.", "wikipedia:kb", 0.8, "lexical"),
+            ]
+        ),
+    )
+    passages = retriever.retrieve("drilling rig", limit=8)
+    drilling = [p for p in passages if p.title == "Drilling rig"]
+    assert len(drilling) == 1
 
 
 # --- assistant ------------------------------------------------------------

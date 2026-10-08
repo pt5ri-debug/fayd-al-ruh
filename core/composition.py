@@ -12,6 +12,11 @@ Composition is intentionally shallow: it does not invent facts, it *renders*
 facts. Callers hand it structured evidence (see :class:`Source`) and it returns
 readable prose. The helpers at the bottom let the reasoning explainers share the
 same voice.
+
+Attribution is kept *out* of the prose. The answer body states the facts, and the
+citations travel alongside it as data (``GroundedAssistant.answer.citations``);
+the command-line layers render them once, after the answer, so a citation never
+interrupts a sentence. :func:`sources_block` builds that trailing block.
 """
 
 from __future__ import annotations
@@ -28,6 +33,29 @@ _LEAD_RE = re.compile(r"^\s*(?:[-*\u2022>]+\s*|\d+[.)]\s*)")
 _TERMINAL = ".!?"
 
 _CONNECTORS = ("First, ", "In addition, ", "Finally, ")
+# A rendered statement with fewer words than this is a fragment (a bare heading
+# such as "Wellbore."), not a quotable point, so it is skipped when better
+# evidence exists.
+_MIN_STATEMENT_WORDS = 3
+
+# Question words and generic terms that name no topic. Dropped from the topic
+# phrase so "what is the meaning of drilling oil wells" reads "drilling oil
+# wells" rather than "drilling meaning oil wells".
+_TOPIC_STOPWORDS = frozenset(
+    {
+        "what", "how", "why", "when", "where", "which", "who", "whom",
+        "is", "are", "was", "were", "be", "being", "been",
+        "the", "a", "an", "of", "to", "for", "in", "on", "at", "by", "with",
+        "and", "or", "about", "into", "from", "that", "this", "these", "those",
+        "mean", "means", "meaning", "definition", "define", "explain", "explanation",
+        "please", "tell", "give", "list", "describe",
+        "do", "does", "did", "can", "could", "should", "would", "will",
+        # Arabic question and generic words
+        "ما", "ماذا", "كيف", "هل", "من", "في", "على", "إلى", "عن", "هو", "هي",
+        "معنى", "تعريف", "اشرح", "شرح",
+    }
+)
+_TOPIC_TOKEN_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
 
 
 @dataclass(frozen=True)
@@ -63,6 +91,28 @@ def first_sentences(text: str, limit: int = 1) -> str:
     return " ".join(sentences(text)[:limit])
 
 
+def complete_sentences(text: str, limit: int | None = None) -> str:
+    """The leading run of *whole* sentences in ``text``, dropping fragments.
+
+    Learned text often begins mid-sentence ("drawbacks—mud filtrate soaks...")
+    or ends mid-word ("...into the earth's"). Rendering such text produces broken
+    prose, so only sentences that both start at a boundary and end with terminal
+    punctuation survive. Returns ``""`` when no whole sentence is present.
+    """
+    value = clean(text)
+    if not value:
+        return ""
+    if value[-1] not in _TERMINAL:
+        boundary = max((value.rfind(mark) for mark in _TERMINAL), default=-1)
+        value = value[: boundary + 1] if boundary >= 0 else ""
+    parts = sentences(value)
+    while parts and not (parts[0][0].isupper() or parts[0][0].isdigit()):
+        parts.pop(0)
+    if limit is not None:
+        parts = parts[:limit]
+    return " ".join(parts)
+
+
 def ensure_terminal(text: str) -> str:
     """Capitalise the first letter and end with terminal punctuation."""
     value = clean(text)
@@ -75,37 +125,70 @@ def ensure_terminal(text: str) -> str:
 
 
 def topic_phrase(question: str) -> str:
-    """A compact noun phrase naming what the question is about."""
-    from core.rag import _query_terms
+    """A compact noun phrase naming what the question is about.
 
-    terms = sorted(_query_terms(question))
-    if not terms:
-        value = clean(question).rstrip("?.!")
-        return value or "this question"
-    return " ".join(terms)
+    Word order is preserved (``"drilling oil wells"``, not the alphabetised
+    ``"drilling meaning oil wells"``) and question words are dropped, so the
+    phrase reads as the subject the user named.
+    """
+    terms = [
+        token
+        for token in _TOPIC_TOKEN_RE.findall(question)
+        if token.casefold() not in _TOPIC_STOPWORDS
+    ]
+    if terms:
+        return " ".join(terms)
+    value = clean(question).rstrip("?.!")
+    return value or "this question"
+
+
+def sources_block(citations: Sequence[str]) -> str:
+    """The trailing ``Sources:`` block for an answer, de-duplicated in order."""
+    unique = list(dict.fromkeys(clean(citation) for citation in citations if clean(citation)))
+    if not unique:
+        return ""
+    return "Sources:\n" + "\n".join(f"  - {citation}" for citation in unique)
 
 
 def _attributed(sources: Sequence[Source], limit: int = 3) -> str:
-    """A flowing paragraph that states each source's key sentence and cites it."""
-    chosen = [source for source in sources if clean(source.text)][:limit]
+    """A flowing paragraph that states each source's key sentence.
+
+    Attribution is *not* embedded here -- citations are returned as data and
+    rendered once after the answer. Statements are read as whole sentences
+    (one to two), and a source whose text is only a fragment is skipped when a
+    longer statement is available, so the paragraph does not degenerate into
+    bare headings.
+    """
+    chosen = [source for source in sources if clean(source.text)]
     if not chosen:
         return ""
+    usable = [source for source in chosen if len(clean(source.text).split()) >= _MIN_STATEMENT_WORDS]
+    if usable:
+        chosen = usable
+    statements: list[str] = []
+    for source in chosen[:limit]:
+        statement = complete_sentences(source.text, 2)
+        if not statement:
+            continue
+        statements.append(ensure_terminal(statement))
+    if not statements:
+        return ""
+    if len(statements) == 1:
+        return statements[0]
     parts: list[str] = []
-    for index, source in enumerate(chosen):
-        statement = ensure_terminal(first_sentences(source.text, 1) or source.title)
-        label = clean(source.label)
-        connector = _CONNECTORS[index] if len(chosen) > 1 and index < len(_CONNECTORS) else ""
-        citation = f" (source: {label})" if label else ""
-        parts.append(f"{connector}{statement}{citation}")
+    for index, statement in enumerate(statements):
+        connector = _CONNECTORS[index] if index < len(_CONNECTORS) else ""
+        parts.append(f"{connector}{statement}")
     return " ".join(parts)
 
 
 def grounded_answer(question: str, sources: Sequence[Source]) -> str:
-    """Render a citation-only answer from retrieved passages.
+    """Render an answer body from retrieved passages, with no inline citations.
 
     This is what the assistant falls back to when no model is available (or its
-    output is not grounded). The answer keeps the provenance that makes the
-    project evidence-aware while reading as connected prose rather than a dump.
+    output is not grounded). The body reads as connected prose; the citations
+    that support it are exposed separately (``GroundedAssistant.answer.citations``)
+    and printed once at the end by the CLI, never mid-sentence.
     """
     topic = topic_phrase(question)
     present = [source for source in sources if clean(source.text)]
@@ -113,11 +196,7 @@ def grounded_answer(question: str, sources: Sequence[Source]) -> str:
         return f"There is not enough evidence on file to answer this question about {topic}."
     lead = f"Here is what the available sources say about {topic}."
     body = _attributed(present)
-    citation_line = "Sources: " + "; ".join(clean(source.label) for source in present if clean(source.label))
-    blocks = [lead, body]
-    if citation_line != "Sources: ":
-        blocks.append(citation_line)
-    return "\n\n".join(block for block in blocks if block)
+    return "\n\n".join(block for block in (lead, body) if block)
 
 
 def web_answer(question: str, sources: Sequence[Source], internal: Sequence[str] = ()) -> str:
@@ -125,8 +204,9 @@ def web_answer(question: str, sources: Sequence[Source], internal: Sequence[str]
 
     ``sources`` carry a title, the snippet, and a domain/URL label; ``internal``
     is the list of internal citations that the verifier compared the answer
-    against. Attribution stays explicit so the reader can see it came from the
-    web, not from the project's own knowledge.
+    against. The body states the facts only; the web source is attributed through
+    the citation list, which the caller lists after the answer, so the reader can
+    still see it came from the web and not from the project's own knowledge.
     """
     topic = topic_phrase(question)
     present = [source for source in sources if clean(source.text)] or list(sources)
@@ -134,10 +214,10 @@ def web_answer(question: str, sources: Sequence[Source], internal: Sequence[str]
         return f"No web source answered the question about {topic}."
     lead = f"Searching externally for {topic}, the best-supported answer is:"
     primary = present[0]
-    statement = ensure_terminal(first_sentences(primary.text, 2) or primary.title)
-    label = clean(primary.label)
-    attribution = f" (source: {primary.title}{', ' + label if label else ''})"
-    blocks = [lead, f"{statement}{attribution}"]
+    statement = ensure_terminal(complete_sentences(primary.text, 2) or primary.title)
+    # No inline attribution: the domain/title travel as citations and are listed
+    # once after the answer (see ``WebAssessment.summary`` and the CLI layers).
+    blocks = [lead, statement]
     if len(present) > 1:
         titles = "; ".join(clean(source.title) for source in present[1:4])
         blocks.append(f"{len(present) - 1} further source(s) corroborate this: {titles}.")
@@ -214,6 +294,7 @@ __all__ = [
     "causal_chain_sentence",
     "causal_effect_sentence",
     "clean",
+    "complete_sentences",
     "counterfactual_sentence",
     "decision_sentences",
     "ensure_terminal",
@@ -222,6 +303,7 @@ __all__ = [
     "grounded_answer",
     "reasoning_step_sentence",
     "sentences",
+    "sources_block",
     "topic_phrase",
     "web_answer",
 ]

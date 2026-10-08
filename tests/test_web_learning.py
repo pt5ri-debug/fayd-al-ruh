@@ -113,7 +113,11 @@ def test_weak_evidence_searches_and_cites_web_sources():
 
     assert answer.used_web
     assert any("spe.org" in citation or "Archie" in citation for citation in answer.citations)
-    assert "Water saturation" in answer.text or "http" in answer.text
+    # Citations live in the data, not in the prose: the body states the fact and
+    # the URL is carried by the citation list instead of interrupting a sentence.
+    assert "water saturation" in answer.text.lower()
+    assert "http" not in answer.text
+    assert any("https://" in citation for citation in answer.citations)
 
 
 def test_off_topic_web_answer_is_shown_but_not_learned():
