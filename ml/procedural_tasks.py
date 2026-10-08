@@ -18,7 +18,6 @@ from dataclasses import dataclass
 
 from core.petroleum_corpus import entries
 from core.sandbox_environment import SandboxTask
-from core.state import State
 from core.symbolic_simulation import ActionSpec
 
 _SUCCESS_FACT = "procedure_done"
