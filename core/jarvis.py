@@ -40,6 +40,16 @@ HELP_TEXT = (
     "Anything else, ask me a question or give me a command."
 )
 
+#: The same controls phrased for a text-only conversation, where there is no
+#: voice to mute and nothing to replay out loud.
+TEXT_HELP_TEXT = (
+    "Conversation controls: type 'new conversation' to start over, 'save' to "
+    "persist this session, 'sessions' to list saved ones, 'repeat' to show the "
+    "last answer again, 'web on' or 'web off' to toggle internet lookups, "
+    "'that's right' to confirm my last answer, 'that's wrong, it's ...' to correct "
+    "it, or 'quit' to leave. Anything else, ask me a question or give me a command."
+)
+
 
 def _web_note(used_web: bool, learned: bool) -> str:
     """The provenance line appended to a web-augmented answer."""
@@ -86,6 +96,7 @@ class JarvisMode:
         controls: JarvisControls | None = None,
         learner: ContinuousLearner | None = None,
         mute: bool = False,
+        help_text: str = HELP_TEXT,
     ) -> None:
         self.assistant = assistant
         self.router = router
@@ -98,6 +109,7 @@ class JarvisMode:
         self.controls = controls or JarvisControls()
         self.learner = learner
         self.mute = mute
+        self.help_text = help_text
         self._conversation: Conversation | None = None
 
     @property
@@ -249,7 +261,7 @@ class JarvisMode:
             response = self._handle_feedback(control.utterance, confirmed=False, correction=control.correction)
             return self._control_turn(utterance, intent, response, self._speak(response, speak))
         # HELP
-        return self._control_turn(utterance, intent, HELP_TEXT, self._speak(HELP_TEXT, speak))
+        return self._control_turn(utterance, intent, self.help_text, self._speak(self.help_text, speak))
 
     def _handle_feedback(
         self,
@@ -385,4 +397,4 @@ class JarvisMode:
         return f"I could not do that: {failed.result.error}"
 
 
-__all__ = ["HELP_TEXT", "JarvisMode", "JarvisTurn"]
+__all__ = ["HELP_TEXT", "TEXT_HELP_TEXT", "JarvisMode", "JarvisTurn"]

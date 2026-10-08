@@ -33,7 +33,7 @@ from core.composition import sources_block
 from core.continuous_learning import ContinuousLearner
 from core.conversation import ConversationMemory
 from core.documents import build_document_store
-from core.jarvis import JarvisMode, JarvisTurn
+from core.jarvis import HELP_TEXT, TEXT_HELP_TEXT, JarvisMode, JarvisTurn
 from core.jarvis_controls import JarvisControls
 from core.knowledge_update import KnowledgeUpdater
 from core.paths import data_dir
@@ -78,23 +78,44 @@ def _documents():
         return build_document_store()
 
 
-def _build_mode(args: argparse.Namespace) -> JarvisMode:
-    root = Path(args.root).expanduser() if args.root else _default_sandbox_root()
-    sandbox = build_sandbox(root, read_only=not args.read_write)
+def build_session(
+    *,
+    root: Path | None = None,
+    read_write: bool = False,
+    no_web: bool = False,
+    web_threshold: float | None = None,
+    no_feedback: bool = False,
+    asr: str = "auto",
+    tts: str = "auto",
+    play: bool = False,
+    text_only: bool = False,
+) -> JarvisMode:
+    """Assemble a fully-wired Jarvis session from explicit options.
+
+    Shared by the ``jarvis`` and ``chat`` commands so both run the same loop over
+    the same assistant, learner, and sandbox. Keeping the wiring in one place
+    means a fix to any gate applies to both entry points. With ``text_only`` the
+    session uses the transcript/silent speech engines and the text-worded help,
+    so a voice-less conversation never talks about muting or replaying audio.
+    """
+    sandbox_root = root.expanduser() if root else _default_sandbox_root()
+    sandbox = build_sandbox(sandbox_root, read_only=not read_write)
     documents = _documents()
     assistant = build_default_assistant(
         documents=documents,
-        web_enabled=not args.no_web,
-        web_threshold=args.web_threshold if args.web_threshold is not None else _WEAK_EVIDENCE,
+        web_enabled=not no_web,
+        web_threshold=web_threshold if web_threshold is not None else _WEAK_EVIDENCE,
         on_learn=documents.save,
         bulk=bulk_knowledge_available(),
     )
     learner = ContinuousLearner(KnowledgeUpdater(documents))
     router = NaturalLanguageRouter(sandbox)
     preferences = UserPreferences(data_dir())
-    wake = WakeWordDetector(phrases=(preferences.record.wake_word, "hey " + preferences.record.wake_word, "يا جارفيس"))
-    recognizer = load_recognizer(args.asr)
-    synthesizer = load_synthesizer(args.tts)
+    wake = WakeWordDetector(
+        phrases=(preferences.record.wake_word, "hey " + preferences.record.wake_word, "يا جارفيس")
+    )
+    recognizer = load_recognizer("transcript" if text_only else asr)
+    synthesizer = load_synthesizer("silent" if text_only else tts)
     voice = VoiceAssistant(assistant, recognizer=recognizer, synthesizer=synthesizer)
     return JarvisMode(
         assistant,
@@ -102,11 +123,25 @@ def _build_mode(args: argparse.Namespace) -> JarvisMode:
         agent=ToolAgent(sandbox),
         voice=voice,
         wake=wake,
-        speaker=Speaker() if args.play else None,
+        speaker=None if text_only else (Speaker() if play else None),
         memory=_memory(),
         controls=JarvisControls(),
-        learner=None if args.no_feedback else learner,
-        mute=not preferences.record.speak,
+        learner=None if no_feedback else learner,
+        mute=text_only or not preferences.record.speak,
+        help_text=TEXT_HELP_TEXT if text_only else HELP_TEXT,
+    )
+
+
+def _build_mode(args: argparse.Namespace) -> JarvisMode:
+    return build_session(
+        root=Path(args.root) if args.root else None,
+        read_write=args.read_write,
+        no_web=args.no_web,
+        web_threshold=args.web_threshold,
+        no_feedback=args.no_feedback,
+        asr=args.asr,
+        tts=args.tts,
+        play=args.play,
     )
 
 
