@@ -652,6 +652,41 @@ python -m ai.learn_demo
 python -m cli learn
 ```
 
+## Asking the AI: what can it do and what has it learned
+
+The `insight` command is the project's own answer to "how good is it, and what
+does it know?". It answers two questions honestly, and it answers *your*
+questions with citations.
+
+```bash
+python -m cli insight                       # learning + knowledge report
+python -m cli insight "what is porosity?"   # ask the AI, with cited sources
+python -m cli insight --interactive         # ask questions until 'quit'
+python -m cli insight --json                # machine-readable report
+python -m cli insight --no-model "what is permeability?"   # extractive, no model
+```
+
+**How well does it learn?** `ai/insight.py` reads the release manifest written by
+`python -m ml.release` and reports the metric each layer was *trained and
+measured* on: sandbox policy success, predictive-coding brain error, the
+supervised outcome head, the knowledge-graph link-prediction score (Hit@1 against
+its baseline), the learned reward model's calibration, petroleum-task and
+procedural coverage, and the language model's size. Because the numbers come from
+a recorded run rather than a fresh claim, the report repeats a verified result; if
+no manifest exists it says so instead of inventing one.
+
+**What has it learned?** It lists the repositories the layers were trained on
+(disciplines, courses, the petroleum corpus, the bulk knowledge base), the
+learned statements promoted into the project
+(`knowledge/learned_petroleum.json`), and the knowledge gained at runtime from
+internet learning and Jarvis feedback.
+
+**Asking it questions** uses the same grounded assistant as the rest of the
+project: retrieve passages, cite them, and answer. With the bundled language model
+it writes the prose; with `--no-model` it answers extractively from the retrieved
+passages — either way every answer carries its sources, so a fresh clone is useful
+before any training run.
+
 ## Continuous internet learning
 
 The same governed web path can also *grow the corpus on its own* from trusted
@@ -817,7 +852,7 @@ python -m cli web --endpoint https://api.example.com/search "What is a gas kick?
 python -m ai.web_verify --json --approve "What is a gas kick?"
 ```
 
-In the interactive menu, option **5) Ask the web and verify the answer** grants the
+In the interactive menu, option **7) Ask the web and verify the answer** grants the
 capability and then asks you to type the question, so you are never stuck with a
 fixed example question.
 
@@ -926,6 +961,7 @@ python -m cli llm --steps 4000
 python -m cli eval
 python -m cli jarvis "What is the relationship between porosity and permeability?"   # cited, source-grounded answer
 python -m cli jarvis "list the files in notes/"    # Jarvis mode: route, act, and answer
+python -m cli insight    # what the AI can do and what it has learned
 python -m cli web --approve "What is a gas kick?"   # web answer, cited and trust-scored
 python -m cli paths      # where assets are read and data is written
 python -m cli selfcheck  # verify the bundled language model loads
