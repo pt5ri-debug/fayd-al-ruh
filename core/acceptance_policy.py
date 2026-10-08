@@ -74,6 +74,10 @@ REJECT_UNTRUSTED = "domain not trusted"
 REJECT_LOW_CREDIBILITY = "credibility below floor"
 REJECT_EMPTY = "empty snippet"
 REJECT_FORMULA = "formula fragment"
+REJECT_INCOMPLETE = "incomplete statement"
+
+_TERMINAL_RE = re.compile(r"[.!?][\"')\]]?\s*$")
+_MIN_STATEMENT_WORDS = 4
 
 
 def title_words(text: str) -> set[str]:
@@ -98,6 +102,46 @@ def clean_statement(text: str) -> str:
 def is_formula_fragment(text: str) -> bool:
     """Whether text is symbolic markup rather than a quotable statement."""
     return bool(_FORMULA_MARKERS_RE.search(text))
+
+
+def is_incomplete_statement(text: str) -> bool:
+    """Whether text is a mid-sentence / mid-word fragment rather than a statement.
+
+    Promoted knowledge must be quotable on its own. Search snippets that begin
+    mid-sentence ("drawbacks—mud filtrate soaks...") or end mid-word ("...into
+    the earth's") read as broken prose once rendered, so they are refused at the
+    gate instead of polluting answers later. A leading lowercase letter, a
+    trailing possessive/fragment word, an unbalanced bracket, or a missing
+    sentence terminal all mark the text as incomplete.
+    """
+    value = text.strip()
+    if not value:
+        return True
+    if len(value.split()) < _MIN_STATEMENT_WORDS:
+        return True
+    if not _TERMINAL_RE.search(value):
+        return True
+    if value[0].islower():
+        return True
+    if value.count("(") != value.count(")"):
+        return True
+    return bool(re.search(r"['\u2019]\s*$", value))
+
+
+def sanitize_statement(text: str) -> str:
+    """Reduce a stored snippet to the whole sentences it actually contains.
+
+    Returns the leading run of complete sentences (or ``""`` when the text is
+    only a fragment). Used both to vet a newly learned statement before it is
+    promoted and to repair previously promoted files, so what ships as knowledge
+    is always quotable prose.
+    """
+    from core.composition import complete_sentences, ensure_terminal
+
+    whole = complete_sentences(clean_statement(text))
+    if not whole or is_incomplete_statement(whole):
+        return ""
+    return ensure_terminal(whole)
 
 
 def is_relevant_to_topic(topic: str, title: str) -> bool:
@@ -145,6 +189,8 @@ def source_rejection_reason(
         return REJECT_EMPTY
     if is_formula_fragment(snippet):
         return REJECT_FORMULA
+    if is_incomplete_statement(clean_statement(snippet)):
+        return REJECT_INCOMPLETE
     return None
 
 
@@ -192,6 +238,7 @@ __all__ = [
     "MIN_CREDIBILITY",
     "REJECT_EMPTY",
     "REJECT_FORMULA",
+    "REJECT_INCOMPLETE",
     "REJECT_LOW_CREDIBILITY",
     "REJECT_UNTRUSTED",
     "TITLE_COVERAGE",
@@ -199,9 +246,11 @@ __all__ = [
     "TRUSTED_SUFFIXES",
     "clean_statement",
     "is_formula_fragment",
+    "is_incomplete_statement",
     "is_relevant_to_topic",
     "is_trusted",
     "rejection_reason",
+    "sanitize_statement",
     "source_rejection_reason",
     "title_words",
 ]

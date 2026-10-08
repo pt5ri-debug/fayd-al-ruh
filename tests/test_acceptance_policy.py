@@ -10,12 +10,15 @@ from __future__ import annotations
 from core.acceptance_policy import (
     MIN_CREDIBILITY,
     REJECT_FORMULA,
+    REJECT_INCOMPLETE,
     TITLE_COVERAGE,
     clean_statement,
     is_formula_fragment,
+    is_incomplete_statement,
     is_relevant_to_topic,
     is_trusted,
     rejection_reason,
+    sanitize_statement,
     source_rejection_reason,
 )
 
@@ -142,6 +145,40 @@ def test_source_gate_still_refuses_untrusted_low_credibility_and_formula():
         snippet="text",
         credibility=MIN_CREDIBILITY - 0.01,
     ).startswith("credibility")
+
+
+def test_incomplete_statement_is_refused():
+    for fragment in (
+        "into the earth's",
+        "drawbacks—mud filtrate soaks into the formation",
+        "Effective porosity is a measure of the rock or",
+        "Porosity or void fraction is a measure of the void (i.e.",
+    ):
+        assert is_incomplete_statement(fragment)
+    assert not is_incomplete_statement("Permeability measures how easily fluid flows through rock.")
+
+
+def test_source_gate_refuses_an_incomplete_snippet():
+    assert (
+        source_rejection_reason(
+            url="https://www.spe.org/x",
+            snippet="drawbacks—mud filtrate soaks into the formation around the borehole",
+            credibility=0.9,
+        )
+        == REJECT_INCOMPLETE
+    )
+
+
+def test_sanitize_statement_keeps_only_whole_sentences():
+    assert sanitize_statement("Rock porosity is high. It controls flow.") == (
+        "Rock porosity is high. It controls flow."
+    )
+    # Leading fragment dropped, the whole sentence after it kept.
+    assert sanitize_statement("the earth's. A drilling rig drills wells into the ground.") == (
+        "A drilling rig drills wells into the ground."
+    )
+    # Only a fragment: nothing survives.
+    assert sanitize_statement("into the earth's") == ""
 
 
 def test_source_gate_is_reused_by_the_topic_gate():

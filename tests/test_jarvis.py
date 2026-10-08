@@ -75,6 +75,19 @@ def test_question_is_answered_with_citations(tmp_path):
     assert turn.spoken is not None
 
 
+def test_sources_are_listed_at_the_end_not_inline(tmp_path):
+    from core.composition import sources_block
+
+    turn = _mode(tmp_path).handle("what is porosity?")
+    # The prose must not interrupt itself with a citation marker...
+    assert "[" not in turn.answer_text
+    # ...and the display helper appends the source list after the body.
+    block = sources_block(turn.citations)
+    assert block.startswith("Sources:")
+    displayed = f"{turn.answer_text}\n{block}"
+    assert displayed.index("Sources:") > displayed.index(turn.answer_text.splitlines()[0])
+
+
 def test_tool_request_runs_in_the_sandbox(tmp_path):
     turn = _mode(tmp_path).handle("calculate 2 * (3 + 4)")
     assert turn.routed == "tool"

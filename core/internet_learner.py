@@ -49,6 +49,7 @@ from core.acceptance_policy import (
     is_relevant_to_topic,
     is_trusted,
     rejection_reason,
+    sanitize_statement,
 )
 from core.documents import Document, DocumentStore
 from core.knowledge_update import KnowledgeUpdate, KnowledgeUpdater, UpdateOutcome
@@ -307,7 +308,7 @@ class InternetLearner:
             for result in outcome.results:
                 if result.url not in accepted:
                     continue
-                statement = clean_statement(result.snippet) or f"{result.title} ({result.url})"
+                statement = sanitize_statement(result.snippet) or f"{result.title} ({result.url})"
                 doc_id = self.updater.doc_id_for(statement)
                 if doc_id in known_ids:
                     continue

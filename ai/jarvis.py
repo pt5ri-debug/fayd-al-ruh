@@ -29,6 +29,7 @@ from pathlib import Path
 
 from core.assistant import _WEAK_EVIDENCE, build_default_assistant, bulk_knowledge_available
 from core.command_router import NaturalLanguageRouter
+from core.composition import sources_block
 from core.continuous_learning import ContinuousLearner
 from core.conversation import ConversationMemory
 from core.documents import build_document_store
@@ -150,10 +151,9 @@ def _print_turn(turn: JarvisTurn, *, as_json: bool) -> None:
             print(f"  [{status}] {step.call.tool}: {detail}")
     else:
         print(f"Answer : {turn.response}")
-        if turn.citations:
-            print("Sources:")
-            for citation in turn.citations:
-                print(f"  - {citation}")
+        block = sources_block(turn.citations)
+        if block:
+            print(block)
 
 
 def run_loop(mode: JarvisMode, *, as_json: bool, require_wake: bool, speak: bool, autosave: bool = False) -> int:
