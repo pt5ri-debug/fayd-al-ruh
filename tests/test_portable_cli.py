@@ -24,7 +24,7 @@ def test_assistant_commands_are_dispatched() -> None:
     """
     from cli import __main__ as cli_entry
 
-    for command in ("voice", "agent", "jarvis", "learn"):
+    for command in ("voice", "agent", "jarvis", "learn", "internet-learner"):
         assert command in cli_entry._COMMANDS, f"{command} is not wired into the CLI"
 
 
@@ -33,7 +33,7 @@ def test_menu_entries_are_all_dispatchable() -> None:
 
     for label, action, _argv in menu.MENU:
         assert callable(action), label
-    assert {"voice", "agent", "jarvis", "learn"} <= set(cli_entry._COMMANDS)
+    assert {"voice", "agent", "jarvis", "learn", "internet-learner"} <= set(cli_entry._COMMANDS)
 
 
 def test_run_choice_quit_codes() -> None:

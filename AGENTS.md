@@ -93,6 +93,11 @@ Arabic is kept as secondary aliases where useful.
   it retrieves from (immediately retrievable). `build_default_assistant` wires a
   default internet verifier when `web_enabled=True`. Jarvis toggles it with the
   `web on`/`web off` control; the CLI exposes `--no-web` and `--web-threshold`.
+- `core/internet_learner.py` — the *Continuous Internet Learner*: batch learning
+  over corpus-derived petroleum topics from trusted domains only (SPE, OnePetro,
+  API, ISO, ASTM, Wikipedia, `.gov`/`.edu`), folding accepted statements into the
+  document store through `KnowledgeUpdater`. Denied by default and dry-run by
+  default; `--write` persists with provenance. CLI: `python -m cli internet-learner`.
 - `core/vision.py` — optional multimodal perception: dependency-free `ImageBuffer`
   (PPM P6), measurable `ImageFeatures`, `HeuristicVisionEncoder`, and a
   `MultimodalAssistant` that grounds an image description in the RAG store. A real

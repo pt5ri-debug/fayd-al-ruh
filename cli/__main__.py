@@ -6,6 +6,7 @@ Usage:
     python -m cli agent               # tool-agent demo in the safety sandbox
     python -m cli jarvis              # Jarvis mode: listen, understand, act, speak
     python -m cli learn               # continuous learning + regression gate
+    python -m cli internet-learner    # learn petroleum facts from trusted sites
     python -m cli web "question"      # web answer, cited and trust-scored (governed)
     python -m cli paths               # show asset/data locations
     python -m cli demo                # local cognitive demo
@@ -32,6 +33,7 @@ from cli.menu import (
     run_curriculum,
     run_demo,
     run_evaluation,
+    run_internet_learner,
     run_jarvis,
     run_learn,
     run_llm,
@@ -48,6 +50,7 @@ _COMMANDS = {
     "agent": run_agent,
     "jarvis": run_jarvis,
     "learn": run_learn,
+    "internet-learner": run_internet_learner,
     "web": run_web,
     "demo": run_demo,
     "ml": run_ml,

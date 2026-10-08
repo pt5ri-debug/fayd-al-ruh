@@ -606,6 +606,30 @@ python -m ai.learn_demo
 python -m cli learn
 ```
 
+## Continuous internet learning
+
+The same governed web path can also *grow the corpus on its own* from trusted
+petroleum sites, as a batch rather than one question at a time. The *Continuous
+Internet Learner* takes topics from the project's own petroleum corpus, searches
+the internet for each, keeps only results from trusted domains (SPE, OnePetro,
+API, ISO, ASTM, Wikipedia, and government or academic hosts), and folds accepted
+statements into the project's data store.
+
+Every rule of the system still applies: search is denied until `--approve` grants
+the external capability and records a human approval, a statement enters the store
+only if it shares terms with existing knowledge (`KnowledgeUpdater`), each learned
+statement keeps its source URL, and every run is a **dry run** until `--write` is
+given, so you can inspect what would be added before it is saved.
+
+```bash
+python -m cli internet-learner --list-topics            # topics from the corpus
+python -m cli internet-learner                          # denied by default
+python -m cli internet-learner --approve                # search, but write nothing
+python -m cli internet-learner --approve --write        # save accepted statements
+python -m cli internet-learner --approve --write --max-topics 10 --per-topic 2
+python -m cli internet-learner --topics "Porosity" "Permeability" --approve
+```
+
 ## Answering from the web, with trust checks
 
 The project can also answer a question it does not already know by searching the

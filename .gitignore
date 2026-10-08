@@ -13,6 +13,10 @@ dist/
 # Portable-mode data written next to a frozen build
 data/
 
+# Knowledge learned at runtime (internet learning, Jarvis feedback). User-local
+# state, not curated release content, so it is never committed.
+documents/
+
 # Test / coverage artifacts
 .pytest-tmp/
 .pytest_cache/
