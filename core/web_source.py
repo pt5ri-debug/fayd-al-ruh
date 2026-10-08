@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlparse
 
+from core.acceptance_policy import TRUSTED_HOSTS, TRUSTED_SUFFIXES
 from core.audit_log import AuditLog, AuditOutcome, AuditRecord
 from core.human_approval import HumanApprovalGate
 from core.permissions import Capability, PermissionDecision, PermissionPolicy
@@ -35,9 +36,11 @@ from core.permissions import Capability, PermissionDecision, PermissionPolicy
 _SEARCH_TOOL = "web_search"
 
 # Top-level suffixes (and a few well-known hosts) ranked by how much a claim
-# from them is worth. The scale is deliberately coarse and inspectable.
-_HIGH_CREDIBILITY_SUFFIXES = (".gov", ".edu", ".mil", ".ac.uk", ".gov.uk")
-_STANDARDS_HOSTS = ("spe.org", "onepetro.org", "api.org", "iso.org", "astm.org")
+# from them is worth. The scale is deliberately coarse and inspectable. The
+# authority list is shared with the acceptance policy, so "what counts as a
+# trusted source" is defined once.
+_HIGH_CREDIBILITY_SUFFIXES = TRUSTED_SUFFIXES
+_STANDARDS_HOSTS = tuple(host for host in TRUSTED_HOSTS if host != "wikipedia.org")
 _REFERENCE_HOSTS = ("wikipedia.org", "britannica.com")
 _MEDIUM_CREDIBILITY_SUFFIXES = (".org",)
 

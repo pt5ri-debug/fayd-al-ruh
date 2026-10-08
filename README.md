@@ -671,6 +671,55 @@ second network call — into the project store.
 
 Run it directly with `python -m cli internet-learner --interactive --approve`.
 
+### Promoting reviewed knowledge into the project
+
+By default the learner saves to the writable data store (`data/documents`),
+which is not part of the repository — so a learned fact lives only on your
+machine. When a batch has been reviewed and you want it to **ship with the
+project**, run the interactive mode with `--promote` (the menu entry enables it):
+
+```bash
+python -m cli internet-learner --interactive --approve --promote
+```
+
+Saving then writes the accepted statements to `knowledge/learned_petroleum.json`,
+a file committed to the repository and loaded at startup by
+`core/learned_knowledge.py`. A fresh clone therefore already knows them, and
+they behave exactly like the seeded corpus: citable documents with their source
+URL. Promotion is idempotent — records are de-duplicated by their stable
+document id — so re-running never duplicates a statement.
+
+The learner only accepts an article whose title is genuinely about the topic
+(a shared head-noun like "reservoir" or "screen" is not enough), rejects
+symbolic formula fragments, and strips HTML entities and citation URLs from
+snippets, so the promoted corpus stays on-topic and clean.
+
+### The one acceptance policy
+
+Every accept/refuse decision for newly learned knowledge is made by a single
+module, `core.acceptance_policy.py`. It is the *only* gate: the same criteria
+that reviewed the Petroleum Disciplines branch govern every statement learned
+later, whether from a batch topic search or a single-question web answer. There
+is no second, softer path for data that arrives afterwards.
+
+A result is accepted only when it clears every gate, in order:
+
+1. **Trusted source** — the host is on the explicit trusted list (SPE, OnePetro,
+   API, ISO, ASTM, Wikipedia) or a government/academic host.
+2. **Credible enough** — source credibility meets `MIN_CREDIBILITY` (0.6).
+3. **Non-empty** — there is a snippet to store.
+4. **Not a formula fragment** — symbolic markup is rejected.
+5. **About the topic** — the article's title and the topic share at least
+   `TITLE_COVERAGE` (0.5) of their words, in *both* directions, so an article
+   that is mostly about something else is refused even when it shares a word.
+6. **Anchored to seeded knowledge** — the statement must share terms with the
+   project's *seeded* corpus (`KnowledgeUpdater`); already-learned statements are
+   excluded so learned text cannot vouch for the next statement.
+
+The thresholds are named constants, and the criteria are pinned by
+`tests/test_acceptance_policy.py`, so changing acceptance is a visible,
+deliberate change rather than a quiet drift.
+
 ## Answering from the web, with trust checks
 
 The project can also answer a question it does not already know by searching the

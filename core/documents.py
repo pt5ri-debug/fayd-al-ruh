@@ -161,9 +161,12 @@ def _course_document(course) -> Document:
 
 def build_knowledge_documents() -> list[Document]:
     """Turn the seeded disciplines, courses, and corpus into citable documents."""
+    from core.learned_knowledge import learned_documents
+
     documents = [_discipline_document(discipline) for discipline in disciplines()]
     documents.extend(_course_document(course) for course in courses())
     documents.extend(corpus_documents())
+    documents.extend(learned_documents())
     return documents
 
 

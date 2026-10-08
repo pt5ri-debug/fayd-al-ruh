@@ -17,6 +17,11 @@ Four rules keep it safe, all inherited rather than reinvented:
 * **Corpus-gated acceptance** -- ``KnowledgeUpdater`` rejects any statement that
   shares no terms with what the project already knows, so off-topic text cannot
   flood the store.
+* **One acceptance policy** -- the exact criteria (trusted source, credibility
+  floor, non-empty, not a formula fragment, genuinely about the topic, anchored
+  to seeded knowledge) live in :mod:`core.acceptance_policy` and are the only
+  criteria applied. The same gate that reviewed the Petroleum Disciplines branch
+  governs every future statement; there is no softer path for later data.
 * **Dry-run by default** -- the learner only reports what it *would* add unless
   the caller asks to persist.
 
@@ -27,35 +32,32 @@ by a hand-written question list.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Iterable
-from urllib.parse import urlparse
 
+from core.acceptance_policy import (
+    MIN_CREDIBILITY,
+    clean_statement,
+    is_relevant_to_topic,
+    is_trusted,
+    rejection_reason,
+)
 from core.documents import Document, DocumentStore
 from core.knowledge_update import KnowledgeUpdate, KnowledgeUpdater, UpdateOutcome
 from core.web_source import WebResult, WebSearchService
 
-# Hosts we treat as authoritative for petroleum engineering and general facts.
-_TRUSTED_HOSTS = (
-    "spe.org",
-    "onepetro.org",
-    "api.org",
-    "iso.org",
-    "astm.org",
-    "wikipedia.org",
-)
-# Top-level suffixes that mark a source as government or academic.
-_TRUSTED_SUFFIXES = (".gov", ".edu", ".mil", ".ac.uk", ".gov.uk")
 
-
-def is_trusted(url: str) -> bool:
-    """Whether a URL's host is on the trusted list or a government/academic host."""
-    host = urlparse(url).netloc.casefold()
-    if not host:
-        return False
-    if host.endswith(_TRUSTED_SUFFIXES):
-        return True
-    return any(host == trusted or host.endswith(f".{trusted}") for trusted in _TRUSTED_HOSTS)
+def _read_learned_file(path: Path) -> list[dict]:
+    """Read a learned-knowledge JSON file, returning [] when absent or invalid."""
+    if not path.exists():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
 
 
 def corpus_topics() -> tuple[str, ...]:
@@ -142,7 +144,7 @@ class InternetLearner:
         updater: KnowledgeUpdater,
         *,
         trusted_only: bool = True,
-        min_credibility: float = 0.6,
+        min_credibility: float = MIN_CREDIBILITY,
         per_topic: int = 3,
         persist: Callable[[Document], None] | None = None,
     ) -> None:
@@ -163,12 +165,18 @@ class InternetLearner:
         *,
         limit: int | None = None,
         dry_run: bool = True,
+        context: str | None = None,
     ) -> LearnerReport:
         """Run one batch over ``topics``; ``limit`` caps how many topics run.
 
         A dry run still exercises the real acceptance logic, but against a
         scratch copy of the store, so it can say what *would* be added without
         mutating the project's actual knowledge.
+
+        ``context`` is appended to each topic when searching, so an ambiguous
+        term is searched with its domain ("safety first Health, Safety and
+        Environment") instead of in the abstract. It never changes the stored
+        statement, only which results come back.
         """
         chosen = [topic for topic in topics if topic.strip()]
         if limit is not None:
@@ -179,7 +187,7 @@ class InternetLearner:
         outcomes: list[TopicOutcome] = []
         added_any = False
         for topic in chosen:
-            outcome = self._learn_topic(topic, updater=updater, dry_run=dry_run)
+            outcome = self._learn_topic(topic, updater=updater, dry_run=dry_run, context=context)
             outcomes.append(outcome)
             if outcome.added:
                 added_any = True
@@ -206,6 +214,50 @@ class InternetLearner:
                     stored += 1
         return stored
 
+    def promote(self, report: LearnerReport, path: str | Path) -> int:
+        """Add a report's accepted statements to a committed project knowledge file.
+
+        Where :meth:`commit` writes to the user's local data store, this writes to
+        a file inside the project itself, so a reviewed batch becomes part of the
+        project rather than a local artifact. Existing records are preserved and
+        de-duplicated by their stable document id, so re-running is idempotent.
+        """
+        path = Path(path)
+        existing = _read_learned_file(path)
+        known_ids = {record["doc_id"] for record in existing if "doc_id" in record}
+        added = 0
+        for outcome in report.outcomes:
+            accepted = set(outcome.added)
+            for result in outcome.results:
+                if result.url not in accepted:
+                    continue
+                statement = clean_statement(result.snippet) or f"{result.title} ({result.url})"
+                doc_id = self.updater.doc_id_for(statement)
+                if doc_id in known_ids:
+                    continue
+                existing.append(
+                    {
+                        "doc_id": doc_id,
+                        "title": f"Learned statement: {outcome.topic}",
+                        "text": statement,
+                        "source": f"learned/{result.url}",
+                        "metadata": {
+                            "topic": outcome.topic,
+                            "confidence": f"{result.credibility:.4f}",
+                            "source_url": result.url,
+                            "source_title": result.title,
+                        },
+                    }
+                )
+                known_ids.add(doc_id)
+                added += 1
+        if added:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(existing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+        return added
+
     def _scratch_updater(self) -> KnowledgeUpdater:
         """A throwaway updater over a copy of the store, for dry runs."""
         scratch = DocumentStore()
@@ -213,16 +265,19 @@ class InternetLearner:
             scratch.add(document)
         return KnowledgeUpdater(scratch)
 
-    def _learn_topic(self, topic: str, *, updater: KnowledgeUpdater, dry_run: bool) -> TopicOutcome:
-        search = self.service.search(topic, limit=self.per_topic * 3)
+    def _learn_topic(
+        self, topic: str, *, updater: KnowledgeUpdater, dry_run: bool, context: str | None = None
+    ) -> TopicOutcome:
+        query = topic if not context else f"{topic} {context}"
+        search = self.service.search(query, limit=self.per_topic * 3)
         if not search.allowed:
-            return TopicOutcome(topic, topic, False, search.reason, (), (), (), dry_run)
+            return TopicOutcome(topic, query, False, search.reason, (), (), (), dry_run)
         added: list[str] = []
         skipped: list[tuple[str, str]] = []
         for result in search.results:
             if len(added) >= self.per_topic:
                 break
-            reason = self._rejection(result)
+            reason = self._rejection(result, topic)
             if reason is not None:
                 skipped.append((result.url, reason))
                 continue
@@ -231,19 +286,23 @@ class InternetLearner:
                 added.append(result.url)
             else:
                 skipped.append((result.url, outcome.reason or outcome.action))
-        return TopicOutcome(topic, topic, True, search.reason, search.results, tuple(added), tuple(skipped), dry_run)
+        return TopicOutcome(
+            topic, query, True, search.reason, search.results, tuple(added), tuple(skipped), dry_run
+        )
 
-    def _rejection(self, result: WebResult) -> str | None:
-        if self.trusted_only and not is_trusted(result.url):
-            return "domain not trusted"
-        if result.credibility < self.min_credibility:
-            return f"credibility {result.credibility:.2f} below {self.min_credibility:.2f}"
-        if not result.snippet.strip():
-            return "empty snippet"
-        return None
+    def _rejection(self, result: WebResult, topic: str) -> str | None:
+        return rejection_reason(
+            url=result.url,
+            title=result.title,
+            topic=topic,
+            snippet=result.snippet,
+            credibility=result.credibility,
+            trusted_only=self.trusted_only,
+            min_credibility=self.min_credibility,
+        )
 
     def _apply(self, topic: str, result: WebResult, *, updater: KnowledgeUpdater, dry_run: bool) -> UpdateOutcome:
-        statement = " ".join(result.snippet.split()) or f"{result.title} ({result.url})"
+        statement = clean_statement(result.snippet) or f"{result.title} ({result.url})"
         outcome = updater.apply(
             KnowledgeUpdate(
                 statement=statement,
@@ -296,6 +355,8 @@ __all__ = [
     "LearnerReport",
     "TopicOutcome",
     "build_internet_learner",
+    "clean_statement",
     "corpus_topics",
+    "is_relevant_to_topic",
     "is_trusted",
 ]

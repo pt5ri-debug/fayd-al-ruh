@@ -1,0 +1,1862 @@
+[
+  {
+    "doc_id": "learned:007e6979",
+    "title": "Learned statement: effective porosity",
+    "text": "Effective porosity is most commonly considered to represent the porosity of a rock or sediment available to contribute to fluid flow through the rock or",
+    "source": "learned/https://en.wikipedia.org/?curid=7788817",
+    "metadata": {
+      "topic": "effective porosity",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=7788817",
+      "source_title": "Effective porosity"
+    }
+  },
+  {
+    "doc_id": "learned:5f89a6c3",
+    "title": "Learned statement: effective porosity",
+    "text": "Porosity or void fraction is a measure of the void (i.e. \"empty\") spaces in a material, and is a fraction of the volume of voids over the total volume",
+    "source": "learned/https://en.wikipedia.org/?curid=19461794",
+    "metadata": {
+      "topic": "effective porosity",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=19461794",
+      "source_title": "Porosity"
+    }
+  },
+  {
+    "doc_id": "learned:2e3dfdf0",
+    "title": "Learned statement: hydrocarbon saturation",
+    "text": "Percentage of the net reservoir rock occupied by pores (typically 5-35%) Hydrocarbon saturation (Sh) Some of the pore space is filled with water - this must be",
+    "source": "learned/https://en.wikipedia.org/?curid=614302",
+    "metadata": {
+      "topic": "hydrocarbon saturation",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=614302",
+      "source_title": "Hydrocarbon exploration"
+    }
+  },
+  {
+    "doc_id": "learned:12d8f361",
+    "title": "Learned statement: formation factor",
+    "text": "drawbacks—mud filtrate soaks into the formation around the borehole and a mud cake plasters the sides of the hole. These factors obscure the possible presence",
+    "source": "learned/https://en.wikipedia.org/?curid=222313",
+    "metadata": {
+      "topic": "formation factor",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=222313",
+      "source_title": "Formation evaluation"
+    }
+  },
+  {
+    "doc_id": "learned:a00db4c4",
+    "title": "Learned statement: reservoir fluid",
+    "text": "Synthetic-based fluid is a mud in which the base fluid is a synthetic oil. This is most often used on offshore rigs because it has the properties of an oil-based",
+    "source": "learned/https://en.wikipedia.org/?curid=3229964",
+    "metadata": {
+      "topic": "reservoir fluid",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=3229964",
+      "source_title": "Drilling fluid"
+    }
+  },
+  {
+    "doc_id": "learned:866e5374",
+    "title": "Learned statement: reservoir fluid",
+    "text": "Brake fluid is a type of hydraulic fluid used in hydraulic brake and hydraulic clutch applications in automobiles, motorcycles, light trucks, and some",
+    "source": "learned/https://en.wikipedia.org/?curid=1338292",
+    "metadata": {
+      "topic": "reservoir fluid",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1338292",
+      "source_title": "Brake fluid"
+    }
+  },
+  {
+    "doc_id": "learned:81f4b2fe",
+    "title": "Learned statement: reservoir fluid",
+    "text": "in a reservoir include the fluid distribution in the reservoir, initial volumes of fluids in place, reservoir pressure, fluid and rock properties, reservoir",
+    "source": "learned/https://en.wikipedia.org/?curid=2910801",
+    "metadata": {
+      "topic": "reservoir fluid",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=2910801",
+      "source_title": "Petroleum reservoir"
+    }
+  },
+  {
+    "doc_id": "learned:dd6be7ec",
+    "title": "Learned statement: fluid viscosity",
+    "text": "to the fluid viscosity as very thin and free-flowing (like chocolate milk) while being pumped, but when pumping is stopped, the static fluid congeals",
+    "source": "learned/https://en.wikipedia.org/?curid=3229964",
+    "metadata": {
+      "topic": "fluid viscosity",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=3229964",
+      "source_title": "Drilling fluid"
+    }
+  },
+  {
+    "doc_id": "learned:85806802",
+    "title": "Learned statement: fluid viscosity",
+    "text": "and ESP systems, DOT 4 and DOT 5.1 brake fluids exist with low viscosity meeting the maximum 750 mm2/s viscosity at −40 °C (−40 °F) requirement of ISO 4925",
+    "source": "learned/https://en.wikipedia.org/?curid=1338292",
+    "metadata": {
+      "topic": "fluid viscosity",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1338292",
+      "source_title": "Brake fluid"
+    }
+  },
+  {
+    "doc_id": "learned:dcb52b03",
+    "title": "Learned statement: thermal expansion",
+    "text": "fluid, water, changes from liquid to vapor and back during the cycle, their efficiencies depend on the thermodynamic properties of water. The thermal",
+    "source": "learned/https://en.wikipedia.org/?curid=4024093",
+    "metadata": {
+      "topic": "thermal expansion",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=4024093",
+      "source_title": "Thermal efficiency"
+    }
+  },
+  {
+    "doc_id": "learned:964e1b33",
+    "title": "Learned statement: pressure distribution",
+    "text": "understanding reservoir properties that could have influenced the engineering decisions made in the Deepwater Horizon event. Capillary pressure, as seen in",
+    "source": "learned/https://en.wikipedia.org/?curid=3916819",
+    "metadata": {
+      "topic": "pressure distribution",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=3916819",
+      "source_title": "Capillary pressure"
+    }
+  },
+  {
+    "doc_id": "learned:9a273c19",
+    "title": "Learned statement: pressure distribution",
+    "text": "operation are regulated by engineering authorities backed by legislation. For these reasons, the definition of a pressure vessel varies from country to",
+    "source": "learned/https://en.wikipedia.org/?curid=636219",
+    "metadata": {
+      "topic": "pressure distribution",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=636219",
+      "source_title": "Pressure vessel"
+    }
+  },
+  {
+    "doc_id": "learned:74e3c76b",
+    "title": "Learned statement: reservoir connectivity",
+    "text": "petroleum reservoir or oil and gas reservoir is a subsurface accumulation of hydrocarbons contained in porous or fractured rock formations. Such reservoirs form",
+    "source": "learned/https://en.wikipedia.org/?curid=2910801",
+    "metadata": {
+      "topic": "reservoir connectivity",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=2910801",
+      "source_title": "Petroleum reservoir"
+    }
+  },
+  {
+    "doc_id": "learned:ccee604e",
+    "title": "Learned statement: reservoir connectivity",
+    "text": "The Prospect Reservoir is a heritage-listed 50,200-megalitre (1,770×10^6 cu ft) potable water supply and storage reservoir created by the Prospect Dam",
+    "source": "learned/https://en.wikipedia.org/?curid=6740065",
+    "metadata": {
+      "topic": "reservoir connectivity",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=6740065",
+      "source_title": "Prospect Reservoir"
+    }
+  },
+  {
+    "doc_id": "learned:6b98c393",
+    "title": "Learned statement: reservoir study",
+    "text": "Reservoir engineering is a branch of petroleum engineering that applies scientific principles to the fluid flow through a porous medium during the development",
+    "source": "learned/https://en.wikipedia.org/?curid=5879295",
+    "metadata": {
+      "topic": "reservoir study",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=5879295",
+      "source_title": "Reservoir engineering"
+    }
+  },
+  {
+    "doc_id": "learned:59b4dcf0",
+    "title": "Learned statement: reservoir study",
+    "text": "A reservoir (/ˈrɛzərvwɑːr/; from French réservoir [ʁezɛʁvwaʁ]) is an enlarged lake behind a dam, usually built to store fresh water, often doubling for",
+    "source": "learned/https://en.wikipedia.org/?curid=3292675",
+    "metadata": {
+      "topic": "reservoir study",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=3292675",
+      "source_title": "Reservoir"
+    }
+  },
+  {
+    "doc_id": "learned:e344b321",
+    "title": "Learned statement: reservoir study",
+    "text": "Quabbin Reservoir is the largest inland body of water in Massachusetts. Along with Wachusett Reservoir, it is the primary water supply for Boston, 65 miles",
+    "source": "learned/https://en.wikipedia.org/?curid=520049",
+    "metadata": {
+      "topic": "reservoir study",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=520049",
+      "source_title": "Quabbin Reservoir"
+    }
+  },
+  {
+    "doc_id": "learned:67d12cc6",
+    "title": "Learned statement: drilling rig",
+    "text": "A drilling rig is an integrated system that drills wells, such as oil or water wells, or holes for piling and other construction purposes, into the earth's",
+    "source": "learned/https://en.wikipedia.org/?curid=1241965",
+    "metadata": {
+      "topic": "drilling rig",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1241965",
+      "source_title": "Drilling rig"
+    }
+  },
+  {
+    "doc_id": "learned:5ab188c4",
+    "title": "Learned statement: drilling rig",
+    "text": "Drilling engineering is a subset of petroleum engineering. Drilling engineers design and implement procedures to drill wells as safely and economically",
+    "source": "learned/https://en.wikipedia.org/?curid=6710843",
+    "metadata": {
+      "topic": "drilling rig",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=6710843",
+      "source_title": "Drilling engineering"
+    }
+  },
+  {
+    "doc_id": "learned:c2736f84",
+    "title": "Learned statement: drilling rig",
+    "text": "In geotechnical engineering, drilling fluid, also known as drilling mud or drilling slurry, is used to aid the drilling of boreholes into the earth. Used",
+    "source": "learned/https://en.wikipedia.org/?curid=3229964",
+    "metadata": {
+      "topic": "drilling rig",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=3229964",
+      "source_title": "Drilling fluid"
+    }
+  },
+  {
+    "doc_id": "learned:07ee438d",
+    "title": "Learned statement: drill string",
+    "text": "Form of core drill (for metal drilling) Drilling fluid – Aid for drilling boreholes into the ground Drilling rig – Integrated system to drill wells Exploration",
+    "source": "learned/https://en.wikipedia.org/?curid=3444907",
+    "metadata": {
+      "topic": "drill string",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=3444907",
+      "source_title": "Core drill"
+    }
+  },
+  {
+    "doc_id": "learned:dc045aae",
+    "title": "Learned statement: drill string",
+    "text": "crankshaft Gimlet, a small tool for drilling holes Bradawl, similar to a screwdriver but with a drilling point Cranial drill, an instrument used throughout",
+    "source": "learned/https://en.wikipedia.org/?curid=205126",
+    "metadata": {
+      "topic": "drill string",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=205126",
+      "source_title": "Drill"
+    }
+  },
+  {
+    "doc_id": "learned:c2103373",
+    "title": "Learned statement: well casing",
+    "text": "cement, as casing that is cemented in place aids the drilling process in several ways. Optimum design of the casing program decreases the well construction",
+    "source": "learned/https://en.wikipedia.org/?curid=2910720",
+    "metadata": {
+      "topic": "well casing",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=2910720",
+      "source_title": "Casing (borehole)"
+    }
+  },
+  {
+    "doc_id": "learned:9cf35606",
+    "title": "Learned statement: well casing",
+    "text": "Well drilling is the process of drilling a hole in the ground for the extraction of a natural resource such as ground water, brine, natural gas, or petroleum",
+    "source": "learned/https://en.wikipedia.org/?curid=67488",
+    "metadata": {
+      "topic": "well casing",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=67488",
+      "source_title": "Well drilling"
+    }
+  },
+  {
+    "doc_id": "learned:660086c1",
+    "title": "Learned statement: well casing",
+    "text": "wellbore. Some oil wells are drilled with air or foam as the drilling fluid. The generated rock \"cuttings\" are swept up by the drilling fluid as it circulates",
+    "source": "learned/https://en.wikipedia.org/?curid=198570",
+    "metadata": {
+      "topic": "well casing",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=198570",
+      "source_title": "Oil well"
+    }
+  },
+  {
+    "doc_id": "learned:6f94b2a4",
+    "title": "Learned statement: mud engineering",
+    "text": "techniques. Drilling engineers manage the technical aspects of drilling exploratory, production and injection wells. Drilling fluid engineers A mud engineer",
+    "source": "learned/https://en.wikipedia.org/?curid=65465",
+    "metadata": {
+      "topic": "mud engineering",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=65465",
+      "source_title": "Petroleum engineering"
+    }
+  },
+  {
+    "doc_id": "learned:d3b5eeca",
+    "title": "Learned statement: mud engineering",
+    "text": "brought down through soft mud until a suitable foundation material is encountered. While bedrock is preferred, a stable, hard mud is sometimes used when",
+    "source": "learned/https://en.wikipedia.org/?curid=1672587",
+    "metadata": {
+      "topic": "mud engineering",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1672587",
+      "source_title": "Caisson (engineering)"
+    }
+  },
+  {
+    "doc_id": "learned:7c246a09",
+    "title": "Learned statement: well trajectory",
+    "text": "Specialists involved in well log interpretation are called log analysts. Drilling mud Drilling rig Erygmascope Formation evaluation Well control Geosteering",
+    "source": "learned/https://en.wikipedia.org/?curid=1111473",
+    "metadata": {
+      "topic": "well trajectory",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1111473",
+      "source_title": "Well logging"
+    }
+  },
+  {
+    "doc_id": "learned:8fb9a23c",
+    "title": "Learned statement: well flow",
+    "text": "pipe. The flow regime is similar to plug flow, but the bubbles are larger and move at a greater velocity. Production of hydrocarbon in wells and their",
+    "source": "learned/https://en.wikipedia.org/?curid=42261806",
+    "metadata": {
+      "topic": "well flow",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=42261806",
+      "source_title": "Slug flow"
+    }
+  },
+  {
+    "doc_id": "learned:8f16533d",
+    "title": "Learned statement: flow control",
+    "text": "Control engineering, also known as control systems engineering and, in some European countries, automation engineering, is an engineering discipline that",
+    "source": "learned/https://en.wikipedia.org/?curid=7011",
+    "metadata": {
+      "topic": "flow control",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=7011",
+      "source_title": "Control engineering"
+    }
+  },
+  {
+    "doc_id": "learned:ed0f209b",
+    "title": "Learned statement: flow control",
+    "text": "Engineering controls are strategies designed to protect workers from hazardous conditions by placing a barrier between the worker and the hazard or by",
+    "source": "learned/https://en.wikipedia.org/?curid=50800008",
+    "metadata": {
+      "topic": "flow control",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=50800008",
+      "source_title": "Engineering control"
+    }
+  },
+  {
+    "doc_id": "learned:6bf2edb1",
+    "title": "Learned statement: production treatment",
+    "text": "reactions or subject to mechanical or heat treatment. Continuous processing is contrasted with discrete production. Continuous usually means operating 24",
+    "source": "learned/https://en.wikipedia.org/?curid=1642843",
+    "metadata": {
+      "topic": "production treatment",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1642843",
+      "source_title": "Continuous production"
+    }
+  },
+  {
+    "doc_id": "learned:4de60824",
+    "title": "Learned statement: production treatment",
+    "text": "Coffee production is the industrial process of converting the raw fruit (the coffee cherry) of the coffee plant into finished coffee beans. About eight",
+    "source": "learned/https://en.wikipedia.org/?curid=1393929",
+    "metadata": {
+      "topic": "production treatment",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1393929",
+      "source_title": "Coffee production"
+    }
+  },
+  {
+    "doc_id": "learned:4bad5fc3",
+    "title": "Learned statement: production treatment",
+    "text": "water. Agricultural wastewater treatment is required for continuous confined animal operations like milk and egg production. It may be performed in plants",
+    "source": "learned/https://en.wikipedia.org/?curid=588004",
+    "metadata": {
+      "topic": "production treatment",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=588004",
+      "source_title": "Wastewater treatment"
+    }
+  },
+  {
+    "doc_id": "learned:09315892",
+    "title": "Learned statement: gamma ray log",
+    "text": "stratigraphic logs. The gamma ray log, like other types of well logging, is done by lowering an instrument down the drill hole and recording gamma radiation",
+    "source": "learned/https://en.wikipedia.org/?curid=7273383",
+    "metadata": {
+      "topic": "gamma ray log",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=7273383",
+      "source_title": "Gamma ray logging"
+    }
+  },
+  {
+    "doc_id": "learned:e13d8eb5",
+    "title": "Learned statement: resistivity log",
+    "text": "Resistivity logging is a method of well logging that works by characterizing the rock or sediment in a borehole by measuring its electrical resistivity",
+    "source": "learned/https://en.wikipedia.org/?curid=12346323",
+    "metadata": {
+      "topic": "resistivity log",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=12346323",
+      "source_title": "Resistivity logging"
+    }
+  },
+  {
+    "doc_id": "learned:f691fd4e",
+    "title": "Learned statement: density log",
+    "text": "Density logging is a well logging tool that can provide a continuous record of a formation's bulk density along the length of a borehole. In geology,",
+    "source": "learned/https://en.wikipedia.org/?curid=12347279",
+    "metadata": {
+      "topic": "density log",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=12347279",
+      "source_title": "Density logging"
+    }
+  },
+  {
+    "doc_id": "learned:ddddefdc",
+    "title": "Learned statement: density log",
+    "text": "A caliper log is a well logging tool that provides a continuous measurement of the size and shape of a borehole along its depth and is commonly used in",
+    "source": "learned/https://en.wikipedia.org/?curid=12348732",
+    "metadata": {
+      "topic": "density log",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=12348732",
+      "source_title": "Caliper log"
+    }
+  },
+  {
+    "doc_id": "learned:953ec788",
+    "title": "Learned statement: porosity log",
+    "text": "a formation porosity estimate is based on the simultaneous use of neutron and density logs. Under normal logging conditions, the porosity estimates obtained",
+    "source": "learned/https://en.wikipedia.org/?curid=7922734",
+    "metadata": {
+      "topic": "porosity log",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=7922734",
+      "source_title": "Gas porosity"
+    }
+  },
+  {
+    "doc_id": "learned:5658f82b",
+    "title": "Learned statement: porosity log",
+    "text": "“total porosity” (notwithstanding comments in ). This core total porosity will generally be equivalent to the total porosity derived from the density log when",
+    "source": "learned/https://en.wikipedia.org/?curid=7788817",
+    "metadata": {
+      "topic": "porosity log",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=7788817",
+      "source_title": "Effective porosity"
+    }
+  },
+  {
+    "doc_id": "learned:19553853",
+    "title": "Learned statement: log interpretation",
+    "text": "some logs are well below the water line. Consequently, log scalers would walk the rafts and measure and grade the logs in the water. When logging was done",
+    "source": "learned/https://en.wikipedia.org/?curid=3438874",
+    "metadata": {
+      "topic": "log interpretation",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=3438874",
+      "source_title": "Log scaler"
+    }
+  },
+  {
+    "doc_id": "learned:190709ca",
+    "title": "Learned statement: screen",
+    "text": "visual element that estimates the completion status and remaining loading time. In early video games, the loading screen was also a chance for graphic artists",
+    "source": "learned/https://en.wikipedia.org/?curid=25719815",
+    "metadata": {
+      "topic": "screen",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=25719815",
+      "source_title": "Loading screen"
+    }
+  },
+  {
+    "doc_id": "learned:2a1cd5ef",
+    "title": "Learned statement: well equipment",
+    "text": "produce the well. If the pressure depletes and it is considered economically viable, an artificial lift method mentioned in the completions section can",
+    "source": "learned/https://en.wikipedia.org/?curid=198570",
+    "metadata": {
+      "topic": "well equipment",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=198570",
+      "source_title": "Oil well"
+    }
+  },
+  {
+    "doc_id": "learned:a70f030f",
+    "title": "Learned statement: well equipment",
+    "text": "workover or completion operations, other methods are often used. Bullheading is a common way to kill a well during workovers and completions operations",
+    "source": "learned/https://en.wikipedia.org/?curid=2711593",
+    "metadata": {
+      "topic": "well equipment",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=2711593",
+      "source_title": "Well control"
+    }
+  },
+  {
+    "doc_id": "learned:9914957d",
+    "title": "Learned statement: cement slurry",
+    "text": "Cement kilns are mechanical, industrial furnaces used for the pyroprocessing stage of manufacture of portland and other types of hydraulic cement. The",
+    "source": "learned/https://en.wikipedia.org/?curid=7240939",
+    "metadata": {
+      "topic": "cement slurry",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=7240939",
+      "source_title": "Cement kiln"
+    }
+  },
+  {
+    "doc_id": "learned:c9487852",
+    "title": "Learned statement: cement slurry",
+    "text": "open cuts, and to lay foundations. Slurry walls are a \"well-established\" technology but the decision to use slurry walls for a certain project requires",
+    "source": "learned/https://en.wikipedia.org/?curid=216795",
+    "metadata": {
+      "topic": "cement slurry",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=216795",
+      "source_title": "Slurry wall"
+    }
+  },
+  {
+    "doc_id": "learned:59c9269e",
+    "title": "Learned statement: cement additives",
+    "text": "Portland cement is the most common type of cement in general use around the world as a basic ingredient of concrete, mortar, stucco, and non-specialty",
+    "source": "learned/https://en.wikipedia.org/?curid=40318",
+    "metadata": {
+      "topic": "cement additives",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=40318",
+      "source_title": "Portland cement"
+    }
+  },
+  {
+    "doc_id": "learned:bfee8e59",
+    "title": "Learned statement: cement additives",
+    "text": "A cement is a binder used for construction that sets, hardens, and adheres to other materials to bind them together. Cement is seldom used on its own",
+    "source": "learned/https://en.wikipedia.org/?curid=6670",
+    "metadata": {
+      "topic": "cement additives",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=6670",
+      "source_title": "Cement"
+    }
+  },
+  {
+    "doc_id": "learned:bc969e67",
+    "title": "Learned statement: cement additives",
+    "text": "manufacturers use additives like mica, aluminium stearate and cenospheres in order to achieve certain board qualities. Typical cement fiber board is made",
+    "source": "learned/https://en.wikipedia.org/?curid=7606557",
+    "metadata": {
+      "topic": "cement additives",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=7606557",
+      "source_title": "Cement board"
+    }
+  },
+  {
+    "doc_id": "learned:aa579330",
+    "title": "Learned statement: hydraulic fracturing",
+    "text": "sewage Hydraulic fracturing, a well-stimulation technique in which rock is fractured by a pressurized liquid Hydraulic fracturing by country Hydraulic intensifier",
+    "source": "learned/https://en.wikipedia.org/?curid=34748637",
+    "metadata": {
+      "topic": "hydraulic fracturing",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=34748637",
+      "source_title": "Hydraulic (disambiguation)"
+    }
+  },
+  {
+    "doc_id": "learned:4f24f0ff",
+    "title": "Learned statement: breakdown pressure",
+    "text": "other and placebo. It is not clear if electrical stimulation is an effective treatment for pressure ulcers. In addition, the benefit of using systemic",
+    "source": "learned/https://en.wikipedia.org/?curid=902762",
+    "metadata": {
+      "topic": "breakdown pressure",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=902762",
+      "source_title": "Pressure ulcer"
+    }
+  },
+  {
+    "doc_id": "learned:86a7367b",
+    "title": "Learned statement: formation damage",
+    "text": "activating system. Furthermore, single-shock stimulation of the sciatic nerve also activated the medial reticular formation, hypothalamus, and thalamus. Excitation",
+    "source": "learned/https://en.wikipedia.org/?curid=1507921",
+    "metadata": {
+      "topic": "formation damage",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1507921",
+      "source_title": "Reticular formation"
+    }
+  },
+  {
+    "doc_id": "learned:996ecaa1",
+    "title": "Learned statement: gas lift",
+    "text": "fluid to be pulled up. Gas lifts are commonly used as artificial lifts for water or oil, using compressed air or water vapor. Gas lifts have been used for",
+    "source": "learned/https://en.wikipedia.org/?curid=980282",
+    "metadata": {
+      "topic": "gas lift",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=980282",
+      "source_title": "Gas lift"
+    }
+  },
+  {
+    "doc_id": "learned:276da61e",
+    "title": "Learned statement: gas lift",
+    "text": "Artificial lift is the use of artificial means to increase the flow of liquids, such as crude oil or water, from a production well. Generally this is achieved",
+    "source": "learned/https://en.wikipedia.org/?curid=7569885",
+    "metadata": {
+      "topic": "gas lift",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=7569885",
+      "source_title": "Artificial lift"
+    }
+  },
+  {
+    "doc_id": "learned:c15b13ec",
+    "title": "Learned statement: gas lift",
+    "text": "plunger lift is an artificial lift method of deliquifying a natural gas well. A plunger is used to remove contaminants from productive natural gas wells",
+    "source": "learned/https://en.wikipedia.org/?curid=22025119",
+    "metadata": {
+      "topic": "gas lift",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=22025119",
+      "source_title": "Plunger lift"
+    }
+  },
+  {
+    "doc_id": "learned:6491911b",
+    "title": "Learned statement: electrical submersible pump",
+    "text": "A submersible pump (or electric submersible pump (ESP) is a device which has a hermetically sealed motor close-coupled to the pump body. The whole assembly",
+    "source": "learned/https://en.wikipedia.org/?curid=235893",
+    "metadata": {
+      "topic": "electrical submersible pump",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=235893",
+      "source_title": "Submersible pump"
+    }
+  },
+  {
+    "doc_id": "learned:17344346",
+    "title": "Learned statement: operating pressure",
+    "text": "Pressure washing or power washing is the use of high-pressure water spray to remove loose paint, mold, grime, dust, mud, and dirt from surfaces and objects",
+    "source": "learned/https://en.wikipedia.org/?curid=2748878",
+    "metadata": {
+      "topic": "operating pressure",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=2748878",
+      "source_title": "Pressure washing"
+    }
+  },
+  {
+    "doc_id": "learned:740e85d9",
+    "title": "Learned statement: pump efficiency",
+    "text": "replacements for body parts, in particular the artificial heart and penile prosthesis. When a pump contains two or more pump mechanisms with fluid being directed",
+    "source": "learned/https://en.wikipedia.org/?curid=23617",
+    "metadata": {
+      "topic": "pump efficiency",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=23617",
+      "source_title": "Pump"
+    }
+  },
+  {
+    "doc_id": "learned:5df3a01d",
+    "title": "Learned statement: pump efficiency",
+    "text": "liquid or vapors. Submersible pumps are used in oil production to provide a relatively efficient form of \"artificial lift\", able to operate across a broad",
+    "source": "learned/https://en.wikipedia.org/?curid=235893",
+    "metadata": {
+      "topic": "pump efficiency",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=235893",
+      "source_title": "Submersible pump"
+    }
+  },
+  {
+    "doc_id": "learned:add5424b",
+    "title": "Learned statement: pump efficiency",
+    "text": "A booster pump is a machine which increases the pressure of a fluid. It may be used with liquids or gases, and the construction details vary depending",
+    "source": "learned/https://en.wikipedia.org/?curid=33653162",
+    "metadata": {
+      "topic": "pump efficiency",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=33653162",
+      "source_title": "Booster pump"
+    }
+  },
+  {
+    "doc_id": "learned:3b236380",
+    "title": "Learned statement: lift design",
+    "text": "to ensure lift by ground effect and another pair of fans for forward flight. Lift jet VTOL RayPosva, neuhaus, Wilhelm and Leyland. \"Design and aerodynamic",
+    "source": "learned/https://en.wikipedia.org/?curid=48060239",
+    "metadata": {
+      "topic": "lift design",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=48060239",
+      "source_title": "Lift fan"
+    }
+  },
+  {
+    "doc_id": "learned:3767ead6",
+    "title": "Learned statement: lift design",
+    "text": "Lift irrigation is a method of irrigation in which water is not transported by natural flow, (as in gravity-fed canal) but is lifted with pumps or surge",
+    "source": "learned/https://en.wikipedia.org/?curid=16019866",
+    "metadata": {
+      "topic": "lift design",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=16019866",
+      "source_title": "Lift irrigation"
+    }
+  },
+  {
+    "doc_id": "learned:4b404fc8",
+    "title": "Learned statement: buildup test",
+    "text": "80s Buildup, or more simply as Buildup, is a 2023 Indian Tamil-language period supernatural comedy film written and directed by Kalyaan. Produced by K",
+    "source": "learned/https://en.wikipedia.org/?curid=75396443",
+    "metadata": {
+      "topic": "buildup test",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=75396443",
+      "source_title": "80s Buildup"
+    }
+  },
+  {
+    "doc_id": "learned:4b49eb01",
+    "title": "Learned statement: drawdown test",
+    "text": "capacity is a quantity which a water well can produce per unit of drawdown. It is normally obtained from a step drawdown test. Specific capacity is expressed",
+    "source": "learned/https://en.wikipedia.org/?curid=1074464",
+    "metadata": {
+      "topic": "drawdown test",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1074464",
+      "source_title": "Well test"
+    }
+  },
+  {
+    "doc_id": "learned:1488fd2d",
+    "title": "Learned statement: drawdown test",
+    "text": "used for testing paints and coatings through wet film preparation Drawdown chart, paper used to test various coating properties Income drawdown, a method",
+    "source": "learned/https://en.wikipedia.org/?curid=1438614",
+    "metadata": {
+      "topic": "drawdown test",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1438614",
+      "source_title": "Drawdown"
+    }
+  },
+  {
+    "doc_id": "learned:f45d0630",
+    "title": "Learned statement: drawdown test",
+    "text": "pumping a well as part of an aquifer test or well test. In surface water hydrology and civil engineering, drawdown refers to the lowering of the surface",
+    "source": "learned/https://en.wikipedia.org/?curid=1854440",
+    "metadata": {
+      "topic": "drawdown test",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1854440",
+      "source_title": "Drawdown (hydrology)"
+    }
+  },
+  {
+    "doc_id": "learned:79f39e56",
+    "title": "Learned statement: reservoir model",
+    "text": "numerical reservoir modeling, production forecasting, well testing, well drilling and workover planning, economic modeling, and PVT analysis of reservoir fluids",
+    "source": "learned/https://en.wikipedia.org/?curid=5879295",
+    "metadata": {
+      "topic": "reservoir model",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=5879295",
+      "source_title": "Reservoir engineering"
+    }
+  },
+  {
+    "doc_id": "learned:845a8733",
+    "title": "Learned statement: reservoir model",
+    "text": "additional wells and evaluating alternative reservoir management scenarios. A reservoir model represents the physical space of the reservoir by an array",
+    "source": "learned/https://en.wikipedia.org/?curid=25169288",
+    "metadata": {
+      "topic": "reservoir model",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=25169288",
+      "source_title": "Reservoir modeling"
+    }
+  },
+  {
+    "doc_id": "learned:c54bfa1c",
+    "title": "Learned statement: reservoir model",
+    "text": "Reservoir simulation is an area of reservoir engineering in which computer models are used to predict the flow of fluids (typically, oil, water, and gas)",
+    "source": "learned/https://en.wikipedia.org/?curid=6711015",
+    "metadata": {
+      "topic": "reservoir model",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=6711015",
+      "source_title": "Reservoir simulation"
+    }
+  },
+  {
+    "doc_id": "learned:2c8f3472",
+    "title": "Learned statement: skin factor",
+    "text": "that address any particular skin concerns you may have. The effectiveness of skin care depends on various factors such as skin type, sensitivity, age, hyperpigmentation",
+    "source": "learned/https://en.wikipedia.org/?curid=5053663",
+    "metadata": {
+      "topic": "skin factor",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=5053663",
+      "source_title": "Skin care"
+    }
+  },
+  {
+    "doc_id": "learned:19735271",
+    "title": "Learned statement: thermal recovery",
+    "text": "oil from primary oil reserves: Enhanced oil recovery Microbial enhanced oil recovery Solar thermal enhanced oil recovery Alternatively it may simply be",
+    "source": "learned/https://en.wikipedia.org/?curid=56221682",
+    "metadata": {
+      "topic": "thermal recovery",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=56221682",
+      "source_title": "Oil recovery"
+    }
+  },
+  {
+    "doc_id": "learned:3f2eb62c",
+    "title": "Learned statement: thermal recovery",
+    "text": "A thermal wheel, also known as a rotary heat exchanger, or rotary air-to-air enthalpy wheel, energy recovery wheel, or heat recovery wheel, is a type of",
+    "source": "learned/https://en.wikipedia.org/?curid=30547984",
+    "metadata": {
+      "topic": "thermal recovery",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=30547984",
+      "source_title": "Thermal wheel"
+    }
+  },
+  {
+    "doc_id": "learned:f760dedb",
+    "title": "Learned statement: interfacial tension",
+    "text": "by understanding their behavior the crude oil separation process can be enhanced. Also enhanced oil recovery efficiency can be optimized. Specialized setups",
+    "source": "learned/https://en.wikipedia.org/?curid=62627023",
+    "metadata": {
+      "topic": "interfacial tension",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=62627023",
+      "source_title": "Interfacial rheology"
+    }
+  },
+  {
+    "doc_id": "learned:a9cf6423",
+    "title": "Learned statement: blowout preventer",
+    "text": "blowout preventer (BOP) (pronounced B-O-P) is a specialized valve or similar mechanical device, used to seal, control and monitor oil and gas wells to",
+    "source": "learned/https://en.wikipedia.org/?curid=5239446",
+    "metadata": {
+      "topic": "blowout preventer",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=5239446",
+      "source_title": "Blowout preventer"
+    }
+  },
+  {
+    "doc_id": "learned:9d93d95b",
+    "title": "Learned statement: pressure kick",
+    "text": "Australian rules football, a kick-in (sometimes known as a kick-out, and known for much of the game's history as a kick-off) is the common name for the",
+    "source": "learned/https://en.wikipedia.org/?curid=6823187",
+    "metadata": {
+      "topic": "pressure kick",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=6823187",
+      "source_title": "Kick-in"
+    }
+  },
+  {
+    "doc_id": "learned:5ac1e996",
+    "title": "Learned statement: well barrier",
+    "text": "electrodynamics. The simplest model of a quantum well system is the infinite well model. The walls/barriers of the potential well are assumed to be infinite in this",
+    "source": "learned/https://en.wikipedia.org/?curid=642886",
+    "metadata": {
+      "topic": "well barrier",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=642886",
+      "source_title": "Quantum well"
+    }
+  },
+  {
+    "doc_id": "learned:b504f56d",
+    "title": "Learned statement: well barrier",
+    "text": "exceptional. The Equatorial Barrier contains six \"Avenues\" on either side of the barrier; each avenue leads up to the naked barrier. These are the only authorized",
+    "source": "learned/https://en.wikipedia.org/?curid=30826311",
+    "metadata": {
+      "topic": "well barrier",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=30826311",
+      "source_title": "Well World"
+    }
+  },
+  {
+    "doc_id": "learned:d52c410c",
+    "title": "Learned statement: well barrier",
+    "text": "the wire. It also requires an additional shear-seal BOP as a tertiary barrier, as the upper master valve on the Christmas tree can only cut slickline",
+    "source": "learned/https://en.wikipedia.org/?curid=10300971",
+    "metadata": {
+      "topic": "well barrier",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=10300971",
+      "source_title": "Well intervention"
+    }
+  },
+  {
+    "doc_id": "learned:187d8677",
+    "title": "Learned statement: pressure test",
+    "text": "A hydrostatic test is a way in which pressure vessels such as pipelines, plumbing, gas cylinders, boilers and fuel tanks can be tested for strength and",
+    "source": "learned/https://en.wikipedia.org/?curid=404854",
+    "metadata": {
+      "topic": "pressure test",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=404854",
+      "source_title": "Hydrostatic test"
+    }
+  },
+  {
+    "doc_id": "learned:a138db5d",
+    "title": "Learned statement: pressure test",
+    "text": "Construction is tested using nondestructive testing, such as ultrasonic testing, radiography, and pressure tests. Hydrostatic pressure tests usually use water",
+    "source": "learned/https://en.wikipedia.org/?curid=636219",
+    "metadata": {
+      "topic": "pressure test",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=636219",
+      "source_title": "Pressure vessel"
+    }
+  },
+  {
+    "doc_id": "learned:61dc2b18",
+    "title": "Learned statement: gas processing",
+    "text": "In Australia, natural gas is transported from gas processing facilities to regulator stations via transmission pipelines. Gas is then regulated down",
+    "source": "learned/https://en.wikipedia.org/?curid=22131",
+    "metadata": {
+      "topic": "gas processing",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=22131",
+      "source_title": "Natural gas"
+    }
+  },
+  {
+    "doc_id": "learned:f1b5a990",
+    "title": "Learned statement: pipeline",
+    "text": "ethylene storage at one location. Western Canada is the source of all products transported by Pembina pipeline systems, which include the Syncrude pipeline, Horizon",
+    "source": "learned/https://en.wikipedia.org/?curid=30333508",
+    "metadata": {
+      "topic": "pipeline",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=30333508",
+      "source_title": "Pembina Pipeline"
+    }
+  },
+  {
+    "doc_id": "learned:2d02d24f",
+    "title": "Learned statement: pipeline",
+    "text": "it and Corridor there are 1,900 km of pipeline. Corridor Pipeline - offers services related to oil sands storage and transport. Bulk Liquid Storage - The",
+    "source": "learned/https://en.wikipedia.org/?curid=30140355",
+    "metadata": {
+      "topic": "pipeline",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=30140355",
+      "source_title": "Inter Pipeline"
+    }
+  },
+  {
+    "doc_id": "learned:61691e6c",
+    "title": "Learned statement: pipeline",
+    "text": "sent through a pipeline. Pipelines exist for the transport of crude and refined petroleum, fuels—such as oil, natural gas and biofuels—and other fluids",
+    "source": "learned/https://en.wikipedia.org/?curid=51111",
+    "metadata": {
+      "topic": "pipeline",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=51111",
+      "source_title": "Pipeline"
+    }
+  },
+  {
+    "doc_id": "learned:c192a455",
+    "title": "Learned statement: pump station",
+    "text": "and removal of sewage to processing sites. A pumping station is an integral part of a pumped-storage hydroelectricity installation. Pumping stations are",
+    "source": "learned/https://en.wikipedia.org/?curid=851965",
+    "metadata": {
+      "topic": "pump station",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=851965",
+      "source_title": "Pumping station"
+    }
+  },
+  {
+    "doc_id": "learned:e0933925",
+    "title": "Learned statement: storage tank",
+    "text": "cryogenic storage tank.[citation needed] Oxygen tanks are used to store gas for: medical breathing (oxygen therapy) at medical facilities and at home (high",
+    "source": "learned/https://en.wikipedia.org/?curid=2227994",
+    "metadata": {
+      "topic": "storage tank",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=2227994",
+      "source_title": "Oxygen tank"
+    }
+  },
+  {
+    "doc_id": "learned:dce59bc5",
+    "title": "Learned statement: storage tank",
+    "text": "energy; and ice storage tanks, which store ice frozen by cheaper energy at night to meet peak daytime demand for cooling. Fossil fuels such as coal and gasoline",
+    "source": "learned/https://en.wikipedia.org/?curid=24130",
+    "metadata": {
+      "topic": "storage tank",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=24130",
+      "source_title": "Energy storage"
+    }
+  },
+  {
+    "doc_id": "learned:fe57eeae",
+    "title": "Learned statement: storage tank",
+    "text": "Flexible tanks (also flexi-bags, flexibags and flexi-tanks) are a kind of storage equipment for liquids such as water or oil. Compared to steel tanks, flexible",
+    "source": "learned/https://en.wikipedia.org/?curid=24418564",
+    "metadata": {
+      "topic": "storage tank",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=24418564",
+      "source_title": "Flexible tank"
+    }
+  },
+  {
+    "doc_id": "learned:00c2f1ed",
+    "title": "Learned statement: production metering",
+    "text": "Net metering (or net energy metering, NEM) is an electricity billing mechanism that allows consumers who generate some or all of their own electricity",
+    "source": "learned/https://en.wikipedia.org/?curid=843050",
+    "metadata": {
+      "topic": "production metering",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=843050",
+      "source_title": "Net metering"
+    }
+  },
+  {
+    "doc_id": "learned:1a807f83",
+    "title": "Learned statement: pipeline integrity",
+    "text": "American crude oil to enter the XL pipelines at Baker, Montana, on their way to the storage and distribution facilities at Cushing, Oklahoma. Cushing is",
+    "source": "learned/https://en.wikipedia.org/?curid=11675105",
+    "metadata": {
+      "topic": "pipeline integrity",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=11675105",
+      "source_title": "Keystone Pipeline"
+    }
+  },
+  {
+    "doc_id": "learned:bb8820c7",
+    "title": "Learned statement: pipeline integrity",
+    "text": "Colonial Pipeline Company is a pipeline operating company headquartered in Alpharetta, Georgia. The company was founded in 1961 and started construction",
+    "source": "learned/https://en.wikipedia.org/?curid=2945580",
+    "metadata": {
+      "topic": "pipeline integrity",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=2945580",
+      "source_title": "Colonial Pipeline"
+    }
+  },
+  {
+    "doc_id": "learned:4dd6f1e8",
+    "title": "Learned statement: offshore platform",
+    "text": "Offshore drilling is a mechanical process where a wellbore is drilled below the seabed. It is typically carried out in order to explore for and subsequently",
+    "source": "learned/https://en.wikipedia.org/?curid=9969688",
+    "metadata": {
+      "topic": "offshore platform",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=9969688",
+      "source_title": "Offshore drilling"
+    }
+  },
+  {
+    "doc_id": "learned:0c6ea14d",
+    "title": "Learned statement: offshore platform",
+    "text": "multiple wells. Offshore drilling presents environmental challenges, both from the produced hydrocarbons and the materials used during the drilling operation",
+    "source": "learned/https://en.wikipedia.org/?curid=163806",
+    "metadata": {
+      "topic": "offshore platform",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=163806",
+      "source_title": "Oil platform"
+    }
+  },
+  {
+    "doc_id": "learned:cc77421c",
+    "title": "Learned statement: offshore platform",
+    "text": "Oil platform Semi-submersible platform Sea fort Accommodation platform Offshore embedded anchors Offshore geotechnical engineering Offshore drilling Land",
+    "source": "learned/https://en.wikipedia.org/?curid=193341",
+    "metadata": {
+      "topic": "offshore platform",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=193341",
+      "source_title": "Offshore construction"
+    }
+  },
+  {
+    "doc_id": "learned:39c6e6f9",
+    "title": "Learned statement: drillship",
+    "text": "A drillship is a merchant vessel designed for use in exploratory offshore drilling of new oil and gas wells or for scientific drilling purposes. In recent",
+    "source": "learned/https://en.wikipedia.org/?curid=2616345",
+    "metadata": {
+      "topic": "drillship",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=2616345",
+      "source_title": "Drillship"
+    }
+  },
+  {
+    "doc_id": "learned:48f00e2e",
+    "title": "Learned statement: drillship",
+    "text": "Bartolomej. \"Turkey Expands Drillship Fleet\". Offshore Engineer. Retrieved 6 April 2020. \"Giant $600m deep water drilling ship looms over Falmouth\". Cornwall",
+    "source": "learned/https://en.wikipedia.org/?curid=63564656",
+    "metadata": {
+      "topic": "drillship",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=63564656",
+      "source_title": "Kanuni (drillship)"
+    }
+  },
+  {
+    "doc_id": "learned:d67ce536",
+    "title": "Learned statement: subsea wellhead",
+    "text": "A wellhead is the component at the surface of an oil or gas well that provides the structural and pressure-containing interface for the drilling and production",
+    "source": "learned/https://en.wikipedia.org/?curid=3187823",
+    "metadata": {
+      "topic": "subsea wellhead",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=3187823",
+      "source_title": "Wellhead"
+    }
+  },
+  {
+    "doc_id": "learned:0dbb8a3a",
+    "title": "Learned statement: subsea wellhead",
+    "text": "Subsea technology involves fully submerged ocean equipment, operations, or applications, especially when some distance offshore, in deep ocean waters",
+    "source": "learned/https://en.wikipedia.org/?curid=10350431",
+    "metadata": {
+      "topic": "subsea wellhead",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=10350431",
+      "source_title": "Subsea technology"
+    }
+  },
+  {
+    "doc_id": "learned:b8d8dc08",
+    "title": "Learned statement: subsea christmas tree",
+    "text": "pipe. Christmas trees are used on both surface and subsea wells. It is common to identify the type of tree as either \"subsea tree\" or \"surface tree\". Each",
+    "source": "learned/https://en.wikipedia.org/?curid=1902795",
+    "metadata": {
+      "topic": "subsea christmas tree",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1902795",
+      "source_title": "Christmas tree (oil well)"
+    }
+  },
+  {
+    "doc_id": "learned:882d7101",
+    "title": "Learned statement: discount rate",
+    "text": "synonymously with overnight rate, bank rate, base rate, discount rate, coupon rate, repo rate, prime rate, yield to maturity, and internal rate of return. The nominal",
+    "source": "learned/https://en.wikipedia.org/?curid=163115",
+    "metadata": {
+      "topic": "discount rate",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=163115",
+      "source_title": "Interest rate"
+    }
+  },
+  {
+    "doc_id": "learned:bf2bf81b",
+    "title": "Learned statement: oil price",
+    "text": "although the Organization of the Petroleum Exporting Countries (OPEC) cartel increases oil prices. Before oil, whale oil was used in lamps, as lubrication",
+    "source": "learned/https://en.wikipedia.org/?curid=5137675",
+    "metadata": {
+      "topic": "oil price",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=5137675",
+      "source_title": "Price of oil"
+    }
+  },
+  {
+    "doc_id": "learned:1fc1a048",
+    "title": "Learned statement: royalty",
+    "text": "first royalty trust in 1979; however Marine Petroleum Trust (Marps) was created in 1956, twenty three years earlier.[citation needed] Royalty trusts",
+    "source": "learned/https://en.wikipedia.org/?curid=697907",
+    "metadata": {
+      "topic": "royalty",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=697907",
+      "source_title": "Royalty trust"
+    }
+  },
+  {
+    "doc_id": "learned:1da2e773",
+    "title": "Learned statement: royalty",
+    "text": "Canada's northern territories is the federal Frontier Lands Petroleum Royalty Regulations. The royalty rate starts at 1% of gross revenues of the first 18 months",
+    "source": "learned/https://en.wikipedia.org/?curid=305567",
+    "metadata": {
+      "topic": "royalty",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=305567",
+      "source_title": "Royalty payment"
+    }
+  },
+  {
+    "doc_id": "learned:9383b291",
+    "title": "Learned statement: sensitivity analysis",
+    "text": "uncertainty and sensitivity analysis should be run in tandem. A mathematical model (for example in biology, climate science, or economics) can be highly",
+    "source": "learned/https://en.wikipedia.org/?curid=620083",
+    "metadata": {
+      "topic": "sensitivity analysis",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=620083",
+      "source_title": "Sensitivity analysis"
+    }
+  },
+  {
+    "doc_id": "learned:26e381f6",
+    "title": "Learned statement: sensitivity analysis",
+    "text": "used. For more on this topic, see statistical model validation. Sensitivity analysis. A procedure to study the behavior of a system or model when global",
+    "source": "learned/https://en.wikipedia.org/?curid=2720954",
+    "metadata": {
+      "topic": "sensitivity analysis",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=2720954",
+      "source_title": "Data analysis"
+    }
+  },
+  {
+    "doc_id": "learned:e58ade83",
+    "title": "Learned statement: sensitivity analysis",
+    "text": "Cluster analysis, or clustering, is a data analysis technique aimed at partitioning a set of objects into groups such that objects within the same group",
+    "source": "learned/https://en.wikipedia.org/?curid=669675",
+    "metadata": {
+      "topic": "sensitivity analysis",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=669675",
+      "source_title": "Cluster analysis"
+    }
+  },
+  {
+    "doc_id": "learned:44c4eb1f",
+    "title": "Learned statement: project life cycle",
+    "text": "Project cycle management (PCM) is the process of planning, organizing, coordinating, and controlling a project effectively and efficiently throughout its",
+    "source": "learned/https://en.wikipedia.org/?curid=37609850",
+    "metadata": {
+      "topic": "project life cycle",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=37609850",
+      "source_title": "Project cycle management"
+    }
+  },
+  {
+    "doc_id": "learned:9376c92c",
+    "title": "Learned statement: project scope",
+    "text": "In project management, scope is the defined features and functions of a product, or the scope of work needed to finish a project. Scope involves getting",
+    "source": "learned/https://en.wikipedia.org/?curid=26828127",
+    "metadata": {
+      "topic": "project scope",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=26828127",
+      "source_title": "Scope (project management)"
+    }
+  },
+  {
+    "doc_id": "learned:9f365cf3",
+    "title": "Learned statement: project scope",
+    "text": "usually described in project documentation, created at the beginning of the development process. The primary constraints are scope, time and budget. The",
+    "source": "learned/https://en.wikipedia.org/?curid=24042",
+    "metadata": {
+      "topic": "project scope",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=24042",
+      "source_title": "Project management"
+    }
+  },
+  {
+    "doc_id": "learned:74b5359b",
+    "title": "Learned statement: project scope",
+    "text": "project may form a part of wider programme management or function as an ad hoc system. Open-source software \"projects\" or artists' musical \"projects\"",
+    "source": "learned/https://en.wikipedia.org/?curid=160483",
+    "metadata": {
+      "topic": "project scope",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=160483",
+      "source_title": "Project"
+    }
+  },
+  {
+    "doc_id": "learned:413ea4cd",
+    "title": "Learned statement: budget",
+    "text": "system: line-item (budget execution), performance (budget accountability), and zero-based budgeting. The Department of Budget and Management (DBM) prepares",
+    "source": "learned/https://en.wikipedia.org/?curid=377116",
+    "metadata": {
+      "topic": "budget",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=377116",
+      "source_title": "Budget"
+    }
+  },
+  {
+    "doc_id": "learned:1b62a425",
+    "title": "Learned statement: risk management",
+    "text": "Financial risk management is the practice of protecting economic value in a firm by managing exposure to financial risk - principally credit risk and market",
+    "source": "learned/https://en.wikipedia.org/?curid=1526304",
+    "metadata": {
+      "topic": "risk management",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1526304",
+      "source_title": "Financial risk management"
+    }
+  },
+  {
+    "doc_id": "learned:1e0c5db5",
+    "title": "Learned statement: risk management",
+    "text": "goals vary widely according to whether the risk management method is in the context of project management, security, engineering, industrial processes",
+    "source": "learned/https://en.wikipedia.org/?curid=26404",
+    "metadata": {
+      "topic": "risk management",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=26404",
+      "source_title": "Risk management"
+    }
+  },
+  {
+    "doc_id": "learned:37df1a42",
+    "title": "Learned statement: risk management",
+    "text": "Project management is the process of supervising the work of a team to achieve all project goals within the given constraints. This information is usually",
+    "source": "learned/https://en.wikipedia.org/?curid=24042",
+    "metadata": {
+      "topic": "risk management",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=24042",
+      "source_title": "Project management"
+    }
+  },
+  {
+    "doc_id": "learned:b9849878",
+    "title": "Learned statement: quality assurance",
+    "text": "quality management focused on providing confidence that quality requirements will be fulfilled\". This defect prevention aspect of quality assurance differs",
+    "source": "learned/https://en.wikipedia.org/?curid=305224",
+    "metadata": {
+      "topic": "quality assurance",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=305224",
+      "source_title": "Quality assurance"
+    }
+  },
+  {
+    "doc_id": "learned:0d51b477",
+    "title": "Learned statement: quality assurance",
+    "text": "Software quality assurance (SQA) is a means and practice of monitoring all software engineering processes, methods, and work products to ensure compliance",
+    "source": "learned/https://en.wikipedia.org/?curid=1843409",
+    "metadata": {
+      "topic": "quality assurance",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1843409",
+      "source_title": "Software quality assurance"
+    }
+  },
+  {
+    "doc_id": "learned:f956f549",
+    "title": "Learned statement: quality assurance",
+    "text": "components: quality planning, quality assurance, quality control, and quality improvement. Customers recognize that quality is an important attribute when",
+    "source": "learned/https://en.wikipedia.org/?curid=1614268",
+    "metadata": {
+      "topic": "quality assurance",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1614268",
+      "source_title": "Quality management"
+    }
+  },
+  {
+    "doc_id": "learned:2f092b0d",
+    "title": "Learned statement: risk assessment",
+    "text": "Risk assessment is a process for identifying hazards, potential (future) events which may negatively impact (harm) an individual(s), asset(s), and/or the",
+    "source": "learned/https://en.wikipedia.org/?curid=219072",
+    "metadata": {
+      "topic": "risk assessment",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=219072",
+      "source_title": "Risk assessment"
+    }
+  },
+  {
+    "doc_id": "learned:a1c164fc",
+    "title": "Learned statement: risk assessment",
+    "text": "economics, environment, finance, information technology, health, insurance, safety, security, and privacy. The international standard for risk management",
+    "source": "learned/https://en.wikipedia.org/?curid=24462958",
+    "metadata": {
+      "topic": "risk assessment",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=24462958",
+      "source_title": "Risk"
+    }
+  },
+  {
+    "doc_id": "learned:324c29fd",
+    "title": "Learned statement: risk assessment",
+    "text": "plant) or the effects of stressors on the environment (probabilistic environmental risk assessment, or PERA). Risk in a PRA is defined as a feasible detrimental",
+    "source": "learned/https://en.wikipedia.org/?curid=2080354",
+    "metadata": {
+      "topic": "risk assessment",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=2080354",
+      "source_title": "Probabilistic risk assessment"
+    }
+  },
+  {
+    "doc_id": "learned:4e3dc0cf",
+    "title": "Learned statement: personal protective equipment",
+    "text": "Personal protective equipment (PPE) is protective clothing, helmets, goggles, or other garments or equipment designed to protect the wearer's body from",
+    "source": "learned/https://en.wikipedia.org/?curid=55530",
+    "metadata": {
+      "topic": "personal protective equipment",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=55530",
+      "source_title": "Personal protective equipment"
+    }
+  },
+  {
+    "doc_id": "learned:3b460901",
+    "title": "Learned statement: personal protective equipment",
+    "text": "use of personal protective equipment (PPE) is inherent in the theory of universal precaution, which requires specialized clothing or equipment for the",
+    "source": "learned/https://en.wikipedia.org/?curid=24559450",
+    "metadata": {
+      "topic": "personal protective equipment",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=24559450",
+      "source_title": "Usage of personal protective equipment"
+    }
+  },
+  {
+    "doc_id": "learned:749f6dca",
+    "title": "Learned statement: personal protective equipment",
+    "text": "including: Personal Protective Equipment Regulations, 2002 Personal Protective Equipment at Work Regulations 1992 Health and Safety at Work etc. Act 1974",
+    "source": "learned/https://en.wikipedia.org/?curid=51057358",
+    "metadata": {
+      "topic": "personal protective equipment",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=51057358",
+      "source_title": "Respiratory protective equipment"
+    }
+  },
+  {
+    "doc_id": "learned:d359e116",
+    "title": "Learned statement: waste management",
+    "text": "Hazardous waste is waste that can damage human health or the environment. Waste can be hazardous because it is toxic, reactive, or corrosive, etc. As",
+    "source": "learned/https://en.wikipedia.org/?curid=38031",
+    "metadata": {
+      "topic": "waste management",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=38031",
+      "source_title": "Hazardous waste"
+    }
+  },
+  {
+    "doc_id": "learned:04b5df02",
+    "title": "Learned statement: waste management",
+    "text": "Waste Management, Inc., doing business as WM, is a waste management an American company operating in North America. Founded in 1968, the company is headquartered",
+    "source": "learned/https://en.wikipedia.org/?curid=4155870",
+    "metadata": {
+      "topic": "waste management",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=4155870",
+      "source_title": "Waste Management, Inc."
+    }
+  },
+  {
+    "doc_id": "learned:2f4c0ab2",
+    "title": "Learned statement: waste management",
+    "text": "are also considered e-waste. Informal processing of e-waste in developing countries can lead to adverse human health effects and environmental pollution",
+    "source": "learned/https://en.wikipedia.org/?curid=3887690",
+    "metadata": {
+      "topic": "waste management",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=3887690",
+      "source_title": "Electronic waste"
+    }
+  },
+  {
+    "doc_id": "learned:d7e81912",
+    "title": "Learned statement: emergency response",
+    "text": "Emergency service response codes are predefined systems used by emergency services to describe the priority and response assigned to calls for service",
+    "source": "learned/https://en.wikipedia.org/?curid=5247716",
+    "metadata": {
+      "topic": "emergency response",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=5247716",
+      "source_title": "Emergency service response codes"
+    }
+  },
+  {
+    "doc_id": "learned:3bf5adc9",
+    "title": "Learned statement: emergency response",
+    "text": "that poses an immediate risk to health, life, property, or environment and requires immediate action. Most emergencies require urgent intervention to prevent",
+    "source": "learned/https://en.wikipedia.org/?curid=146334",
+    "metadata": {
+      "topic": "emergency response",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=146334",
+      "source_title": "Emergency"
+    }
+  },
+  {
+    "doc_id": "learned:b9789642",
+    "title": "Learned statement: emergency response",
+    "text": "creates a network for rapid response to hazardous material incidents and other events that threaten the public health and safety. It is also used to respond",
+    "source": "learned/https://en.wikipedia.org/?curid=19077549",
+    "metadata": {
+      "topic": "emergency response",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=19077549",
+      "source_title": "Oklahoma Emergency Response Act"
+    }
+  },
+  {
+    "doc_id": "learned:76d5ffa2",
+    "title": "Learned statement: occupational health",
+    "text": "Occupational safety and health (OSH) or occupational health and safety (OHS) is a multidisciplinary field concerned with the safety, health, and welfare",
+    "source": "learned/https://en.wikipedia.org/?curid=35319154",
+    "metadata": {
+      "topic": "occupational health",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=35319154",
+      "source_title": "Occupational safety and health"
+    }
+  },
+  {
+    "doc_id": "learned:c076f818",
+    "title": "Learned statement: occupational health",
+    "text": "Occupational health nursing is a specialty nursing practice that provides for and delivers health and safety programs and services to workers, worker",
+    "source": "learned/https://en.wikipedia.org/?curid=34123709",
+    "metadata": {
+      "topic": "occupational health",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=34123709",
+      "source_title": "Occupational health nursing"
+    }
+  },
+  {
+    "doc_id": "learned:1331a26d",
+    "title": "Learned statement: professional responsibility",
+    "text": "Professional ethics encompass the personal and corporate standards of behavior expected of professionals. The word professionalism originally applied to",
+    "source": "learned/https://en.wikipedia.org/?curid=844530",
+    "metadata": {
+      "topic": "professional responsibility",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=844530",
+      "source_title": "Professional ethics"
+    }
+  },
+  {
+    "doc_id": "learned:32539fd6",
+    "title": "Learned statement: professional responsibility",
+    "text": "Professional responsibility is a set of duties within the concept of professional ethics for those who exercise a unique set of knowledge and skill as",
+    "source": "learned/https://en.wikipedia.org/?curid=1598791",
+    "metadata": {
+      "topic": "professional responsibility",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1598791",
+      "source_title": "Professional responsibility"
+    }
+  },
+  {
+    "doc_id": "learned:4f020f00",
+    "title": "Learned statement: safety first",
+    "text": "\"Artificial Intelligence Safety Engineering: Why Machine Ethics is a Wrong Approach\", in Müller, Vincent C. (ed.), Philosophy and Theory of Artificial Intelligence",
+    "source": "learned/https://en.wikipedia.org/?curid=72360809",
+    "metadata": {
+      "topic": "safety first",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=72360809",
+      "source_title": "AI safety"
+    }
+  },
+  {
+    "doc_id": "learned:07ea8531",
+    "title": "Learned statement: safety first",
+    "text": "Ethics, Professionalism and Human Rights Committee (4 December 2007). \"Pay-for-performance principles that promote patient-centered care: An ethics manifesto\"",
+    "source": "learned/https://en.wikipedia.org/?curid=5780856",
+    "metadata": {
+      "topic": "safety first",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=5780856",
+      "source_title": "Patient safety"
+    }
+  },
+  {
+    "doc_id": "learned:5e0b407c",
+    "title": "Learned statement: data ethics",
+    "text": "Business ethics (also known as corporate ethics) is a form of applied ethics or professional ethics that examines ethical principles and moral or ethical",
+    "source": "learned/https://en.wikipedia.org/?curid=4770",
+    "metadata": {
+      "topic": "data ethics",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=4770",
+      "source_title": "Business ethics"
+    }
+  },
+  {
+    "doc_id": "learned:ad30469a",
+    "title": "Learned statement: data ethics",
+    "text": "sociology. Veterinary ethics combines veterinary professional ethics and the subject of animal ethics. The subject of veterinary ethics can be interpreted",
+    "source": "learned/https://en.wikipedia.org/?curid=30856302",
+    "metadata": {
+      "topic": "data ethics",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=30856302",
+      "source_title": "Veterinary ethics"
+    }
+  },
+  {
+    "doc_id": "learned:33cfb749",
+    "title": "Learned statement: social responsibility",
+    "text": "Professional responsibility is a set of duties within the concept of professional ethics for those who exercise a unique set of knowledge and skill as professionals",
+    "source": "learned/https://en.wikipedia.org/?curid=1598791",
+    "metadata": {
+      "topic": "social responsibility",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=1598791",
+      "source_title": "Professional responsibility"
+    }
+  },
+  {
+    "doc_id": "learned:5217a58a",
+    "title": "Learned statement: history matching",
+    "text": "including galaxy formation, disease modelling, climate science, and traffic simulation. The basis of history matching is to use observed data to rule-out",
+    "source": "learned/https://en.wikipedia.org/?curid=63825293",
+    "metadata": {
+      "topic": "history matching",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=63825293",
+      "source_title": "Bayesian history matching"
+    }
+  },
+  {
+    "doc_id": "learned:fc53c899",
+    "title": "Learned statement: equation of state",
+    "text": "Cubic equations of state are a specific class of thermodynamic models for modeling the pressure of a gas as a function of temperature and density and which",
+    "source": "learned/https://en.wikipedia.org/?curid=69442178",
+    "metadata": {
+      "topic": "equation of state",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=69442178",
+      "source_title": "Cubic equations of state"
+    }
+  },
+  {
+    "doc_id": "learned:dcd7f2b0",
+    "title": "Learned statement: compositional model",
+    "text": "it differs from earlier models of the Solar System's formation. This planetary migration is used in dynamical simulations of the Solar System to explain",
+    "source": "learned/https://en.wikipedia.org/?curid=19835580",
+    "metadata": {
+      "topic": "compositional model",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=19835580",
+      "source_title": "Nice model"
+    }
+  },
+  {
+    "doc_id": "learned:9723f0e2",
+    "title": "Learned statement: reservoir simulator",
+    "text": "geophysicists and aim to provide a static description of the reservoir, prior to production. Reservoir simulation models are created by reservoir engineers and use",
+    "source": "learned/https://en.wikipedia.org/?curid=25169288",
+    "metadata": {
+      "topic": "reservoir simulator",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=25169288",
+      "source_title": "Reservoir modeling"
+    }
+  },
+  {
+    "doc_id": "learned:fbc83586",
+    "title": "Learned statement: reservoir simulator",
+    "text": "computer (and therefore any simpler quantum simulator), meaning they are equivalent from the point of view of computability theory. The simulation of quantum",
+    "source": "learned/https://en.wikipedia.org/?curid=38602386",
+    "metadata": {
+      "topic": "reservoir simulator",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=38602386",
+      "source_title": "Quantum simulator"
+    }
+  },
+  {
+    "doc_id": "learned:061c27a3",
+    "title": "Learned statement: subsea well",
+    "text": "generically referred to using a subsea prefix, such as subsea well, subsea field, subsea project, and subsea developments. Subsea oil field developments are",
+    "source": "learned/https://en.wikipedia.org/?curid=10350431",
+    "metadata": {
+      "topic": "subsea well",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=10350431",
+      "source_title": "Subsea technology"
+    }
+  },
+  {
+    "doc_id": "learned:9d561b15",
+    "title": "Learned statement: subsea tree",
+    "text": "waters, or on the seabed. The term subsea is frequently used in connection with oceanography, marine or ocean engineering, ocean exploration, remotely operated",
+    "source": "learned/https://en.wikipedia.org/?curid=10350431",
+    "metadata": {
+      "topic": "subsea tree",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=10350431",
+      "source_title": "Subsea technology"
+    }
+  },
+  {
+    "doc_id": "learned:27a7c90c",
+    "title": "Learned statement: hydrate",
+    "text": "hypothesis Gas hydrate pingo Flow Assurance MEG Reclamation Star formation and evolution Englezos, Peter (1993). \"Clathrate hydrates\". Industrial & Engineering",
+    "source": "learned/https://en.wikipedia.org/?curid=54140",
+    "metadata": {
+      "topic": "hydrate",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=54140",
+      "source_title": "Clathrate hydrate"
+    }
+  },
+  {
+    "doc_id": "learned:69fbb3bb",
+    "title": "Learned statement: bow-tie",
+    "text": "A bow-tie diagram is a graphic tool used to describe a possible damage process in terms of the mechanisms that may initiate an event in which energy is",
+    "source": "learned/https://en.wikipedia.org/?curid=72105261",
+    "metadata": {
+      "topic": "bow-tie",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=72105261",
+      "source_title": "Bow-tie diagram"
+    }
+  },
+  {
+    "doc_id": "learned:114ae62e",
+    "title": "Learned statement: safety instrumented system",
+    "text": "In functional safety, a safety instrumented system (SIS) is an engineered set of hardware and software controls which provides a protection layer that",
+    "source": "learned/https://en.wikipedia.org/?curid=5844089",
+    "metadata": {
+      "topic": "safety instrumented system",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=5844089",
+      "source_title": "Safety instrumented system"
+    }
+  },
+  {
+    "doc_id": "learned:726590d4",
+    "title": "Learned statement: safety instrumented system",
+    "text": "sort are usually managed with the methods and tools of safety engineering. A safety-critical system is designed to lose less than one life per billion (109)",
+    "source": "learned/https://en.wikipedia.org/?curid=286550",
+    "metadata": {
+      "topic": "safety instrumented system",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=286550",
+      "source_title": "Safety-critical system"
+    }
+  },
+  {
+    "doc_id": "learned:3ea3ced4",
+    "title": "Learned statement: safety case",
+    "text": "Safety engineering is an engineering discipline which assures that engineered systems provide acceptable levels of safety. It is strongly related to industrial",
+    "source": "learned/https://en.wikipedia.org/?curid=29278",
+    "metadata": {
+      "topic": "safety case",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=29278",
+      "source_title": "Safety engineering"
+    }
+  },
+  {
+    "doc_id": "learned:48843749",
+    "title": "Learned statement: safety case",
+    "text": "company – Type of company Safety engineering – Engineering discipline Fail-safe – Design feature or practice Poka-yoke – Process that helps an equipment",
+    "source": "learned/https://en.wikipedia.org/?curid=252712",
+    "metadata": {
+      "topic": "safety case",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=252712",
+      "source_title": "Safety"
+    }
+  },
+  {
+    "doc_id": "learned:a4ebd743",
+    "title": "Learned statement: safety case",
+    "text": "Process safety is an interdisciplinary engineering domain focusing on the study, prevention, and management of large-scale fires, explosions and chemical",
+    "source": "learned/https://en.wikipedia.org/?curid=11375163",
+    "metadata": {
+      "topic": "safety case",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=11375163",
+      "source_title": "Process safety"
+    }
+  },
+  {
+    "doc_id": "learned:7a6d0e27",
+    "title": "Learned statement: CO2 plume",
+    "text": "CO2-Plume Geothermal (CPG) is a proposed technology that combines carbon capture and storage (CCS/CCUS) with geothermal energy extraction, utilising carbon",
+    "source": "learned/https://en.wikipedia.org/?curid=76910391",
+    "metadata": {
+      "topic": "CO2 plume",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=76910391",
+      "source_title": "CO2-Plume Geothermal"
+    }
+  },
+  {
+    "doc_id": "learned:33cce8f6",
+    "title": "Learned statement: integrated asset model",
+    "text": "Integrated asset modelling (IAM) is the generic term used in the oil industry for computer modelling of both the subsurface and the surface elements of",
+    "source": "learned/https://en.wikipedia.org/?curid=33193914",
+    "metadata": {
+      "topic": "integrated asset model",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=33193914",
+      "source_title": "Integrated asset modelling"
+    }
+  },
+  {
+    "doc_id": "learned:faef4c25",
+    "title": "Learned statement: production forecast",
+    "text": "chain management and manufacturing, production control is the activity of monitoring and controlling any particular production or operation. Production control",
+    "source": "learned/https://en.wikipedia.org/?curid=44508450",
+    "metadata": {
+      "topic": "production forecast",
+      "confidence": "0.7000",
+      "source_url": "https://en.wikipedia.org/?curid=44508450",
+      "source_title": "Production control"
+    }
+  }
+]
