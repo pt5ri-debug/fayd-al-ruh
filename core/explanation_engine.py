@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from core.composition import evidence_summary_sentence
 from core.decision_explainer import DecisionExplainer
 from core.decision_trace import DecisionTrace
 from core.evidence import Evidence
@@ -20,5 +21,9 @@ class ExplanationEngine:
         evidence_trace = EvidenceTrace.from_evidence(items)
         reasoning = self.reasoning.explain(reasoning_trace) if reasoning_trace is not None else ()
         decision = self.decision.explain(decision_trace) if decision_trace is not None else ()
-        summary = f"{conclusion}. Based on {len(evidence_trace.supporting_ids)} supporting and {len(evidence_trace.contradicting_ids)} contradicting evidence items."
+        summary = evidence_summary_sentence(
+            conclusion,
+            len(evidence_trace.supporting_ids),
+            len(evidence_trace.contradicting_ids),
+        )
         return Explanation(conclusion, summary, evidence_trace.evidence_ids, reasoning, causal, decision)
