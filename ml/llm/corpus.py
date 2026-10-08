@@ -96,31 +96,76 @@ def curriculum_sentences() -> list[str]:
     return sentences
 
 
-def build_corpus(*, repeats: int = 40, structured_repeats: int = 60) -> str:
+def repository_sentences(*, include_runtime: bool = True) -> list[str]:
+    """Training prose from the smaller repositories: learned statements and runtime docs.
+
+    The authored seeds are covered by :func:`curriculum_sentences` and
+    :func:`corpus_sentences`; this adds the rest of what the project holds at a
+    manageable size -- the promoted learned statements and the documents written
+    at runtime -- so the model is trained on the same knowledge the retriever
+    cites, not only on the seeds.
+    """
+    from ml.knowledge_corpus import iter_documents, sentences_from_documents
+
+    documents = [
+        document
+        for document in iter_documents(kb_max_chunks=0, include_runtime=include_runtime)
+        if document.source not in {"domain_knowledge", "curriculum_knowledge", "petroleum_corpus"}
+    ]
+    return sentences_from_documents(documents)
+
+
+def knowledge_base_sentences(*, kb_max_chunks: int) -> list[str]:
+    """Training prose from a relevance-filtered sample of the bulk knowledge base."""
+    if kb_max_chunks <= 0:
+        return []
+    from ml.knowledge_corpus import knowledge_base_sample, sentences_from_documents
+
+    documents, _relevant = knowledge_base_sample(max_chunks=kb_max_chunks)
+    return sentences_from_documents(documents)
+
+
+def build_corpus(
+    *,
+    repeats: int = 40,
+    structured_repeats: int = 60,
+    kb_max_chunks: int = 0,
+    kb_repeats: int = 1,
+    include_runtime: bool = True,
+) -> str:
     """Return the training text, repeated so the small model can fit it.
 
-    Five blocks are concatenated: general prose about the project's world,
+    Blocks are concatenated: general prose about the project's world,
     petroleum-engineering prose matching the declared identity, prose generated
     from the whole seeded curriculum (every discipline and course), prose and
     formulas from the seeded petroleum corpus (the knowledge content behind the
-    curriculum), and JSON objects in the shape ``MODEL_OUTPUT_SCHEMA`` expects.
-    The JSON block teaches the model the field names and English values used by
-    schema-guided decoding.
+    curriculum), prose from the other repositories (promoted learned statements
+    and runtime documents), a relevance-filtered sample of the bulk knowledge
+    base when ``kb_max_chunks`` is positive (repeated ``kb_repeats`` times, since
+    it is large and broad), and JSON objects in the shape ``MODEL_OUTPUT_SCHEMA``
+    expects. The JSON block teaches the model the field names and English values
+    used by schema-guided decoding.
     """
     if repeats < 1:
         raise ValueError("repeats must be at least 1.")
     if structured_repeats < 1:
         raise ValueError("structured_repeats must be at least 1.")
+    if kb_repeats < 1:
+        kb_repeats = 1
     prose = " ".join(_sentences())
     petroleum = " ".join(_petroleum_sentences())
     curriculum = " ".join(curriculum_sentences())
     corpus = " ".join(corpus_sentences())
+    repositories = " ".join(repository_sentences(include_runtime=include_runtime))
+    bulk = " ".join(knowledge_base_sentences(kb_max_chunks=kb_max_chunks))
     structured = " ".join(structured_examples())
     return (
         (prose + " ") * repeats
         + (petroleum + " ") * repeats
         + (curriculum + " ") * repeats
         + (corpus + " ") * repeats
+        + (repositories + " ") * (repeats if repositories else 0)
+        + (bulk + " ") * (kb_repeats if bulk else 0)
         + (structured + " ") * structured_repeats
     )
 
@@ -192,4 +237,11 @@ def normalise(text: str) -> str:
     return unicodedata.normalize("NFC", text)
 
 
-__all__ = ["build_corpus", "corpus_sentences", "curriculum_sentences", "normalise"]
+__all__ = [
+    "build_corpus",
+    "corpus_sentences",
+    "curriculum_sentences",
+    "knowledge_base_sentences",
+    "normalise",
+    "repository_sentences",
+]

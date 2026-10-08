@@ -38,7 +38,21 @@ from core.petroleum_corpus import corpus_coverage_score, entries as corpus_entri
 from core.ontology import Ontology
 from core.paths import artifacts_dir, checkpoints_dir, default_checkpoint
 from core.version import __version__
-from ml.llm.corpus import build_corpus, corpus_sentences, curriculum_sentences, structured_examples
+from ml.knowledge_corpus import (
+    authored_documents,
+    knowledge_base_sample,
+    knowledge_sample,
+    repository_key,
+    runtime_documents,
+)
+from ml.llm.corpus import (
+    build_corpus,
+    corpus_sentences,
+    curriculum_sentences,
+    knowledge_base_sentences,
+    repository_sentences,
+    structured_examples,
+)
 from ml.llm.__main__ import train_and_save
 from ml.llm.tokenizer import TOKENIZER_KINDS
 from ml.petroleum import train_petroleum
@@ -46,6 +60,8 @@ from ml.petroleum import train_petroleum
 RELEASE_MANIFEST_NAME = "release_manifest.json"
 DEFAULT_EPISODES = 120
 DEFAULT_LLM_STEPS = 4000
+# The relevance-filtered bulk sample a release trains its language model on.
+DEFAULT_KB_CHUNKS = 15000
 
 Manifest = dict[str, Any]
 
@@ -61,8 +77,13 @@ class TrainingConfig:
     seed: int = 0
     replay_batch: int = 32
     include_base: bool = True
-    tokenizer_kind: str = "bpe"
+    tokenizer_kind: str = "byte"
     tokenizer_vocab_size: int = 1024
+    kb_max_chunks: int = DEFAULT_KB_CHUNKS
+    kb_repeats: int = 1
+    include_runtime: bool = True
+    include_procedural: bool = True
+    max_procedural: int | None = None
 
 
 def _git_revision() -> str:
@@ -80,11 +101,12 @@ def _git_revision() -> str:
 
 
 def knowledge_summary() -> Manifest:
-    """The seeded knowledge a release was trained on, counted from the source."""
+    """The knowledge a release was trained on, counted from every repository."""
     ontology = Ontology()
     seed_ontology(ontology)
     seed_curriculum(ontology)
     seed_petroleum_corpus(ontology)
+    authored = authored_documents()
     return {
         "disciplines": len(discipline_keys()),
         "courses": len(course_keys()),
@@ -97,23 +119,46 @@ def knowledge_summary() -> Manifest:
         "ontology_relations": len(ontology.relations),
         "curriculum_coverage": round(curriculum_coverage_score(ontology), 6),
         "corpus_coverage": round(corpus_coverage_score(ontology), 6),
+        "authored_documents": len(authored),
+        "authored_by_repository": _count_by(authored),
     }
+
+
+def _count_by(documents: list) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for document in documents:
+        key = repository_key(document)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def corpus_summary(config: TrainingConfig) -> Manifest:
     """The language-model training text, counted from the generator."""
     text = build_corpus(
-        repeats=config.llm_repeats, structured_repeats=config.llm_structured_repeats
+        repeats=config.llm_repeats,
+        structured_repeats=config.llm_structured_repeats,
+        kb_max_chunks=config.kb_max_chunks,
+        kb_repeats=config.kb_repeats,
+        include_runtime=config.include_runtime,
+    )
+    sample = knowledge_sample(
+        kb_max_chunks=config.kb_max_chunks, include_runtime=config.include_runtime
     )
     return {
         "curriculum_sentences": len(curriculum_sentences()),
         "corpus_sentences": len(corpus_sentences()),
+        "repository_sentences": len(repository_sentences(include_runtime=config.include_runtime)),
+        "knowledge_base_sentences": len(knowledge_base_sentences(kb_max_chunks=config.kb_max_chunks)),
         "structured_examples": len(structured_examples()),
         "characters": len(text),
         "repeats": config.llm_repeats,
+        "kb_max_chunks": config.kb_max_chunks,
+        "kb_repeats": config.kb_repeats,
+        "include_runtime": config.include_runtime,
         "structured_repeats": config.llm_structured_repeats,
         "tokenizer_kind": config.tokenizer_kind,
         "tokenizer_vocab_size": config.tokenizer_vocab_size,
+        "document_counts": sample.counts,
     }
 
 
@@ -162,6 +207,11 @@ def train_release(
             "include_base": config.include_base,
             "tokenizer_kind": config.tokenizer_kind,
             "tokenizer_vocab_size": config.tokenizer_vocab_size,
+            "kb_max_chunks": config.kb_max_chunks,
+            "kb_repeats": config.kb_repeats,
+            "include_runtime": config.include_runtime,
+            "include_procedural": config.include_procedural,
+            "max_procedural": config.max_procedural,
         },
         "knowledge": knowledge_summary(),
         "corpus": corpus_summary(config),
@@ -181,6 +231,8 @@ def train_release(
         seed=config.seed,
         replay_batch=config.replay_batch,
         save_dir=save_dir / "petroleum",
+        include_procedural=config.include_procedural,
+        max_procedural=config.max_procedural,
     )
     manifest["petroleum"] = petroleum.as_dict()
 
@@ -193,6 +245,9 @@ def train_release(
         checkpoint=checkpoint,
         tokenizer_kind=config.tokenizer_kind,
         vocab_size=config.tokenizer_vocab_size,
+        kb_max_chunks=config.kb_max_chunks,
+        kb_repeats=config.kb_repeats,
+        include_runtime=config.include_runtime,
     )
     manifest["language_model"] = {
         "steps": config.llm_steps,
@@ -231,6 +286,19 @@ def format_manifest(manifest: Manifest) -> str:
     petroleum = manifest.get("petroleum")
     if isinstance(petroleum, dict):
         lines.append(f"  Petroleum task success: {petroleum['overall_success']:.4f}")
+        if "procedural_tasks" in petroleum:
+            procedural = petroleum["procedural_tasks"]
+            lines.append(
+                f"  Procedural tasks: {procedural['covered']}/{procedural['total']} "
+                f"({petroleum.get('procedural_coverage', 0.0):.0%})"
+            )
+    corpus = manifest.get("corpus")
+    if isinstance(corpus, dict) and "knowledge_base_sentences" in corpus:
+        lines.append(
+            f"  Corpus: {corpus['characters']} chars "
+            f"(repositories={corpus['repository_sentences']} "
+            f"kb={corpus['knowledge_base_sentences']})"
+        )
     return "\n".join(lines)
 
 
@@ -246,10 +314,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--tokenizer-kind",
         choices=TOKENIZER_KINDS,
-        default="bpe",
-        help="language-model tokenizer: byte or subword BPE",
+        default="byte",
+        help="language-model tokenizer: byte (linear, used for the full corpus) or "
+        "subword BPE (better compression, but slow to train on a large corpus)",
     )
     parser.add_argument("--vocab-size", type=int, default=1024)
+    parser.add_argument(
+        "--kb-max-chunks",
+        type=int,
+        default=DEFAULT_KB_CHUNKS,
+        help="relevance-filtered knowledge-base sample size for language training",
+    )
+    parser.add_argument("--kb-repeats", type=int, default=1)
+    parser.add_argument(
+        "--no-runtime-docs",
+        action="store_true",
+        help="skip documents written at runtime when training the language model",
+    )
+    parser.add_argument(
+        "--no-procedural",
+        action="store_true",
+        help="skip the procedural tasks derived from the corpus",
+    )
     parser.add_argument(
         "--manifest-only",
         action="store_true",
@@ -266,6 +352,10 @@ def main(argv: list[str] | None = None) -> int:
         include_base=not args.skip_base,
         tokenizer_kind=args.tokenizer_kind,
         tokenizer_vocab_size=args.vocab_size,
+        kb_max_chunks=args.kb_max_chunks,
+        kb_repeats=args.kb_repeats,
+        include_runtime=not args.no_runtime_docs,
+        include_procedural=not args.no_procedural,
     )
 
     if args.manifest_only:
@@ -284,6 +374,11 @@ def main(argv: list[str] | None = None) -> int:
                 "include_base": config.include_base,
                 "tokenizer_kind": config.tokenizer_kind,
                 "tokenizer_vocab_size": config.tokenizer_vocab_size,
+                "kb_max_chunks": config.kb_max_chunks,
+                "kb_repeats": config.kb_repeats,
+                "include_runtime": config.include_runtime,
+                "include_procedural": config.include_procedural,
+                "max_procedural": config.max_procedural,
             },
             "knowledge": knowledge_summary(),
             "corpus": corpus_summary(config),

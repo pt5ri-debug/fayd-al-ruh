@@ -28,10 +28,13 @@ from core.state import State
 from ml.cognitive_brain import CognitiveBrain
 from ml.dataset import FeatureHasher
 from ml.learner import evaluate_policy, train_policy
+from ml.procedural_tasks import procedural_sandbox_tasks, procedural_success
 
 
 def petroleum_success(task_name: str) -> Callable[[State], bool]:
     """The success predicate for a petroleum task: its milestone fact is present."""
+    if task_name.startswith("procedure-"):
+        return procedural_success(task_name)
     fact = success_fact_for(task_name)
     return lambda state: fact in state.facts
 
@@ -78,6 +81,8 @@ class PetroleumReport:
     discipline_success: dict[str, float]
     generalisation_success: dict[str, float]
     discipline_labels: dict[str, str]
+    procedural_covered: int = 0
+    procedural_total: int = 0
 
     @property
     def overall_success(self) -> float:
@@ -89,9 +94,18 @@ class PetroleumReport:
     def disciplines_covered(self) -> tuple[str, ...]:
         return tuple(self.discipline_success)
 
+    @property
+    def procedural_coverage(self) -> float:
+        """Fraction of the derived procedural tasks that were trained on."""
+        if self.procedural_total <= 0:
+            return 0.0
+        return self.procedural_covered / self.procedural_total
+
     def as_dict(self) -> dict[str, object]:
         return {
             "overall_success": round(self.overall_success, 6),
+            "procedural_coverage": round(self.procedural_coverage, 6),
+            "procedural_tasks": {"covered": self.procedural_covered, "total": self.procedural_total},
             "discipline_success": {
                 key: round(value, 6) for key, value in self.discipline_success.items()
             },
@@ -155,16 +169,26 @@ def train_petroleum(
     replay_batch: int = 32,
     save_dir: Path | None = None,
     include_held_out: bool = True,
+    include_procedural: bool = False,
+    max_procedural: int | None = None,
 ) -> PetroleumReport:
     """Train the policy and brain on every petroleum task.
 
     Held-out disciplines are trained fresh (never reused) so their success is a
-    genuine generalisation check rather than memorised performance.
+    genuine generalisation check rather than memorised performance. When
+    ``include_procedural`` is set, the tasks derived from the corpus procedures
+    are trained too, so the learners cover the recorded know-how as well as the
+    hand-written catalog; ``max_procedural`` bounds how many derived tasks are
+    used (``None`` uses all), which keeps the evaluation gate fast.
     """
     hasher = FeatureHasher(64)
     trained_tasks = PETROLEUM_TASKS
     held_out_tasks = PETROLEUM_HELD_OUT_TASKS if include_held_out else ()
-    tasks = (*trained_tasks, *held_out_tasks)
+    procedural = procedural_sandbox_tasks() if include_procedural else ()
+    procedural_total = len(procedural)
+    if max_procedural is not None:
+        procedural = procedural[:max_procedural]
+    tasks = (*trained_tasks, *held_out_tasks, *procedural)
 
     outcomes: list[TaskOutcome] = []
     for task in tasks:
@@ -179,21 +203,21 @@ def train_petroleum(
             )
         )
 
-    def grouped_success(names: tuple[str, ...]) -> dict[str, float]:
+    def grouped_success(selected: tuple[SandboxTask, ...]) -> dict[str, float]:
+        names = {task.name for task in selected}
         buckets: dict[str, list[float]] = {}
         for outcome in outcomes:
             if outcome.name in names:
                 buckets.setdefault(outcome.discipline, []).append(outcome.held_out_success)
         return {key: sum(values) / len(values) for key, values in buckets.items()}
 
-    trained_names = tuple(task.name for task in trained_tasks)
-    held_out_names = tuple(task.name for task in held_out_tasks)
-
     return PetroleumReport(
         outcomes=tuple(outcomes),
-        discipline_success=grouped_success(trained_names),
-        generalisation_success=grouped_success(held_out_names),
+        discipline_success=grouped_success((*trained_tasks, *procedural)),
+        generalisation_success=grouped_success(tuple(held_out_tasks)),
         discipline_labels=discipline_labels(),
+        procedural_covered=len(procedural),
+        procedural_total=procedural_total,
     )
 
 
@@ -220,6 +244,10 @@ def format_report(report: PetroleumReport) -> str:
             label = report.discipline_labels.get(key, key)
             lines.append(f"  {label:28s} success={value:.2f}")
     lines.append("")
+    lines.append(
+        f"Procedural tasks covered: {report.procedural_covered}/{report.procedural_total} "
+        f"({report.procedural_coverage:.0%})"
+    )
     lines.append(f"Overall held-out success: {report.overall_success:.2f}")
     return "\n".join(lines)
 
@@ -246,6 +274,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=0, help="random seed")
     parser.add_argument("--replay-batch", type=int, default=32, help="brain replay batch size")
     parser.add_argument("--save-dir", type=_Path, default=None, help="directory for artifacts")
+    parser.add_argument(
+        "--procedural",
+        action="store_true",
+        help="Also train the tasks derived from every corpus procedure.",
+    )
+    parser.add_argument(
+        "--max-procedural",
+        type=int,
+        default=None,
+        help="Bound how many derived procedural tasks to train on.",
+    )
     parser.add_argument("--json", action="store_true", help="print a JSON summary")
     args = parser.parse_args(argv)
 
@@ -254,6 +293,8 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         replay_batch=args.replay_batch,
         save_dir=args.save_dir,
+        include_procedural=args.procedural,
+        max_procedural=args.max_procedural,
     )
     if args.json:
         print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))

@@ -204,8 +204,16 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Show the bulk knowledge base status", run_knowledge, ("stats",)),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--episodes", "60")),
-    ("Train the language model", run_llm, ("--steps", "200")),
-    ("Train petroleum-engineering tasks", run_petroleum, ("--episodes", "120")),
+    (
+        "Train the language model from all repositories",
+        run_llm,
+        ("--steps", "200", "--kb-max-chunks", "2000"),
+    ),
+    (
+        "Train petroleum-engineering tasks (with procedures)",
+        run_petroleum,
+        ("--episodes", "120", "--procedural"),
+    ),
     ("Show the petroleum-engineering curriculum", run_curriculum, ()),
     ("Train everything for a release", run_release, ("--episodes", "120", "--llm-steps", "4000")),
     ("Run the evaluation suite", run_evaluation, ()),

@@ -42,6 +42,21 @@
         "self_tuned_learning_rate": 0.005876448813374413
       }
     },
+    "general_knowledge": {
+      "concepts": 460,
+      "epochs": 60,
+      "generalisation_gain": 0.158602,
+      "held_out_accuracy": 0.575269,
+      "held_out_baseline": 0.5,
+      "held_out_examples": 93,
+      "hit_at_1": 0.408602,
+      "mean_rank": 2.021505,
+      "relation_types": 177,
+      "relations": 467,
+      "stopped_early": true,
+      "train_accuracy": 0.997326,
+      "train_examples": 374
+    },
     "generalisation": {
       "light-candle": {
         "error_improvement": 0.012734336766257934,
@@ -99,26 +114,50 @@
   "config": {
     "episodes": 120,
     "include_base": true,
+    "include_procedural": true,
+    "include_runtime": true,
+    "kb_max_chunks": 15000,
+    "kb_repeats": 1,
     "llm_repeats": 40,
     "llm_steps": 4000,
     "llm_structured_repeats": 60,
+    "max_procedural": null,
     "replay_batch": 32,
     "seed": 0,
-    "tokenizer_kind": "bpe",
+    "tokenizer_kind": "byte",
     "tokenizer_vocab_size": 1024
   },
   "corpus": {
-    "characters": 4871820,
+    "characters": 20847568,
     "corpus_sentences": 836,
     "curriculum_sentences": 1139,
+    "document_counts": {
+      "curriculum_knowledge": 48,
+      "domain_knowledge": 17,
+      "knowledge_base": 15000,
+      "learned": 51,
+      "petroleum_corpus": 48
+    },
+    "include_runtime": true,
+    "kb_max_chunks": 15000,
+    "kb_repeats": 1,
+    "knowledge_base_sentences": 112426,
     "repeats": 40,
+    "repository_sentences": 63,
     "structured_examples": 7,
     "structured_repeats": 60,
-    "tokenizer_kind": "bpe",
+    "tokenizer_kind": "byte",
     "tokenizer_vocab_size": 1024
   },
-  "git_revision": "b975726",
+  "git_revision": "b615191",
   "knowledge": {
+    "authored_by_repository": {
+      "curriculum_knowledge": 48,
+      "domain_knowledge": 17,
+      "learned": 48,
+      "petroleum_corpus": 48
+    },
+    "authored_documents": 161,
     "corpus_coverage": 1.0,
     "corpus_entries": 48,
     "course_concepts": 321,
@@ -133,9 +172,9 @@
   },
   "language_model": {
     "checkpoint": "/workspace/project/fayd-al-ruh/ml/llm/checkpoints/fayd-llm.npz",
-    "parameters": 538464,
+    "parameters": 391200,
     "steps": 4000,
-    "tokenizer": "bpe",
+    "tokenizer": "byte",
     "tokenizer_vocab_size": 1024
   },
   "petroleum": {
@@ -147,6 +186,7 @@
       "economics": 1.0,
       "eor": 1.0,
       "facilities": 1.0,
+      "geoscience": 1.0,
       "hse": 1.0,
       "petrophysics": 1.0,
       "process_safety": 1.0,
@@ -163,6 +203,11 @@
       "geoscience": 1.0
     },
     "overall_success": 1.0,
+    "procedural_coverage": 1.0,
+    "procedural_tasks": {
+      "covered": 48,
+      "total": 48
+    },
     "tasks": [
       {
         "brain_final_error": 0.000361,
@@ -334,9 +379,441 @@
         "held_out_success": 1.0,
         "name": "flow-assurance",
         "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000547,
+        "brain_initial_error": 0.011545,
+        "brain_policy_success": 1.0,
+        "discipline": "reservoir",
+        "held_out_success": 1.0,
+        "name": "procedure-reservoir_rock_properties",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000539,
+        "brain_initial_error": 0.011602,
+        "brain_policy_success": 1.0,
+        "discipline": "reservoir",
+        "held_out_success": 1.0,
+        "name": "procedure-reservoir_drive_mechanisms",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000541,
+        "brain_initial_error": 0.01169,
+        "brain_policy_success": 1.0,
+        "discipline": "reservoir",
+        "held_out_success": 1.0,
+        "name": "procedure-volumetric_reserves",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000541,
+        "brain_initial_error": 0.011695,
+        "brain_policy_success": 1.0,
+        "discipline": "reservoir",
+        "held_out_success": 1.0,
+        "name": "procedure-material_balance",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000544,
+        "brain_initial_error": 0.011803,
+        "brain_policy_success": 1.0,
+        "discipline": "petrophysics",
+        "held_out_success": 1.0,
+        "name": "procedure-formation_evaluation",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000434,
+        "brain_initial_error": 0.011593,
+        "brain_policy_success": 1.0,
+        "discipline": "petrophysics",
+        "held_out_success": 1.0,
+        "name": "procedure-saturation_height",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000575,
+        "brain_initial_error": 0.011292,
+        "brain_policy_success": 1.0,
+        "discipline": "well_logging",
+        "held_out_success": 1.0,
+        "name": "procedure-logging_tools",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000574,
+        "brain_initial_error": 0.011132,
+        "brain_policy_success": 1.0,
+        "discipline": "well_logging",
+        "held_out_success": 1.0,
+        "name": "procedure-log_interpretation_workflow",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000548,
+        "brain_initial_error": 0.01151,
+        "brain_policy_success": 1.0,
+        "discipline": "drilling",
+        "held_out_success": 1.0,
+        "name": "procedure-drilling_fluids",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000662,
+        "brain_initial_error": 0.011652,
+        "brain_policy_success": 1.0,
+        "discipline": "drilling",
+        "held_out_success": 1.0,
+        "name": "procedure-casing_and_cementing_design",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.001349,
+        "brain_initial_error": 0.016069,
+        "brain_policy_success": 1.0,
+        "discipline": "drilling",
+        "held_out_success": 1.0,
+        "name": "procedure-directional_drilling",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000548,
+        "brain_initial_error": 0.011357,
+        "brain_policy_success": 1.0,
+        "discipline": "production",
+        "held_out_success": 1.0,
+        "name": "procedure-production_optimisation",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000458,
+        "brain_initial_error": 0.011836,
+        "brain_policy_success": 1.0,
+        "discipline": "artificial_lift",
+        "held_out_success": 1.0,
+        "name": "procedure-artificial_lift_selection",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000549,
+        "brain_initial_error": 0.011565,
+        "brain_policy_success": 1.0,
+        "discipline": "completions",
+        "held_out_success": 1.0,
+        "name": "procedure-well_completions_design",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000536,
+        "brain_initial_error": 0.011328,
+        "brain_policy_success": 1.0,
+        "discipline": "stimulation",
+        "held_out_success": 1.0,
+        "name": "procedure-hydraulic_fracturing",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000543,
+        "brain_initial_error": 0.011593,
+        "brain_policy_success": 1.0,
+        "discipline": "stimulation",
+        "held_out_success": 1.0,
+        "name": "procedure-matrix_acidizing",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000524,
+        "brain_initial_error": 0.01132,
+        "brain_policy_success": 1.0,
+        "discipline": "cementing",
+        "held_out_success": 1.0,
+        "name": "procedure-primary_cementing",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000545,
+        "brain_initial_error": 0.01181,
+        "brain_policy_success": 1.0,
+        "discipline": "well_control",
+        "held_out_success": 1.0,
+        "name": "procedure-well_control_kicks",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000544,
+        "brain_initial_error": 0.01137,
+        "brain_policy_success": 1.0,
+        "discipline": "eor",
+        "held_out_success": 1.0,
+        "name": "procedure-enhanced_oil_recovery",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.00062,
+        "brain_initial_error": 0.007008,
+        "brain_policy_success": 1.0,
+        "discipline": "well_testing",
+        "held_out_success": 1.0,
+        "name": "procedure-pressure_transient_testing",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000665,
+        "brain_initial_error": 0.011667,
+        "brain_policy_success": 1.0,
+        "discipline": "economics",
+        "held_out_success": 1.0,
+        "name": "procedure-petroleum_economics_npv",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.00055,
+        "brain_initial_error": 0.011639,
+        "brain_policy_success": 1.0,
+        "discipline": "economics",
+        "held_out_success": 1.0,
+        "name": "procedure-field_development_planning",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000545,
+        "brain_initial_error": 0.011545,
+        "brain_policy_success": 1.0,
+        "discipline": "hse",
+        "held_out_success": 1.0,
+        "name": "procedure-well_integrity_management",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000544,
+        "brain_initial_error": 0.011633,
+        "brain_policy_success": 1.0,
+        "discipline": "hse",
+        "held_out_success": 1.0,
+        "name": "procedure-process_safety",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000547,
+        "brain_initial_error": 0.011468,
+        "brain_policy_success": 1.0,
+        "discipline": "reservoir",
+        "held_out_success": 1.0,
+        "name": "procedure-reservoir_fluid_properties",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000523,
+        "brain_initial_error": 0.011573,
+        "brain_policy_success": 1.0,
+        "discipline": "reservoir",
+        "held_out_success": 1.0,
+        "name": "procedure-rock_mechanics",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000547,
+        "brain_initial_error": 0.011573,
+        "brain_policy_success": 1.0,
+        "discipline": "reservoir",
+        "held_out_success": 1.0,
+        "name": "procedure-fluid_flow_in_porous_media",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000548,
+        "brain_initial_error": 0.011615,
+        "brain_policy_success": 1.0,
+        "discipline": "hse",
+        "held_out_success": 1.0,
+        "name": "procedure-offshore_operations",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.00052,
+        "brain_initial_error": 0.011691,
+        "brain_policy_success": 1.0,
+        "discipline": "production",
+        "held_out_success": 1.0,
+        "name": "procedure-facilities_and_transport",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000545,
+        "brain_initial_error": 0.011647,
+        "brain_policy_success": 1.0,
+        "discipline": "economics",
+        "held_out_success": 1.0,
+        "name": "procedure-project_management",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000531,
+        "brain_initial_error": 0.011566,
+        "brain_policy_success": 1.0,
+        "discipline": "hse",
+        "held_out_success": 1.0,
+        "name": "procedure-professional_ethics",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000542,
+        "brain_initial_error": 0.01169,
+        "brain_policy_success": 1.0,
+        "discipline": "geoscience",
+        "held_out_success": 1.0,
+        "name": "procedure-petroleum_system",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000548,
+        "brain_initial_error": 0.011591,
+        "brain_policy_success": 1.0,
+        "discipline": "geoscience",
+        "held_out_success": 1.0,
+        "name": "procedure-seismic_interpretation",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000526,
+        "brain_initial_error": 0.011433,
+        "brain_policy_success": 1.0,
+        "discipline": "facilities",
+        "held_out_success": 1.0,
+        "name": "procedure-surface_facilities",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000548,
+        "brain_initial_error": 0.011393,
+        "brain_policy_success": 1.0,
+        "discipline": "facilities",
+        "held_out_success": 1.0,
+        "name": "procedure-gas_processing_and_lng",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000522,
+        "brain_initial_error": 0.011552,
+        "brain_policy_success": 1.0,
+        "discipline": "process_safety",
+        "held_out_success": 1.0,
+        "name": "procedure-process_safety_management",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000552,
+        "brain_initial_error": 0.011676,
+        "brain_policy_success": 1.0,
+        "discipline": "unconventional",
+        "held_out_success": 1.0,
+        "name": "procedure-unconventional_resources",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000545,
+        "brain_initial_error": 0.011948,
+        "brain_policy_success": 1.0,
+        "discipline": "reservoir",
+        "held_out_success": 1.0,
+        "name": "procedure-reservoir_simulation_modelling",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000433,
+        "brain_initial_error": 0.008369,
+        "brain_policy_success": 1.0,
+        "discipline": "eor",
+        "held_out_success": 1.0,
+        "name": "procedure-advanced_eor_methods",
+        "train_success": 0.916667
+      },
+      {
+        "brain_final_error": 0.000543,
+        "brain_initial_error": 0.011633,
+        "brain_policy_success": 1.0,
+        "discipline": "reservoir",
+        "held_out_success": 1.0,
+        "name": "procedure-waterflood_management",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000533,
+        "brain_initial_error": 0.011491,
+        "brain_policy_success": 1.0,
+        "discipline": "economics",
+        "held_out_success": 1.0,
+        "name": "procedure-field_development_planning_advanced",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000547,
+        "brain_initial_error": 0.011664,
+        "brain_policy_success": 1.0,
+        "discipline": "drilling",
+        "held_out_success": 1.0,
+        "name": "procedure-geomechanics_and_wellbore_stability",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000543,
+        "brain_initial_error": 0.011769,
+        "brain_policy_success": 1.0,
+        "discipline": "production",
+        "held_out_success": 1.0,
+        "name": "procedure-flow_assurance",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000549,
+        "brain_initial_error": 0.011545,
+        "brain_policy_success": 1.0,
+        "discipline": "production",
+        "held_out_success": 1.0,
+        "name": "procedure-multiphase_flow",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000539,
+        "brain_initial_error": 0.011643,
+        "brain_policy_success": 1.0,
+        "discipline": "production",
+        "held_out_success": 1.0,
+        "name": "procedure-subsea_and_deepwater",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000544,
+        "brain_initial_error": 0.011695,
+        "brain_policy_success": 1.0,
+        "discipline": "production",
+        "held_out_success": 1.0,
+        "name": "procedure-data_analytics_and_ml",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000546,
+        "brain_initial_error": 0.011448,
+        "brain_policy_success": 1.0,
+        "discipline": "hse",
+        "held_out_success": 1.0,
+        "name": "procedure-carbon_capture_and_storage",
+        "train_success": 1.0
+      },
+      {
+        "brain_final_error": 0.000435,
+        "brain_initial_error": 0.008369,
+        "brain_policy_success": 1.0,
+        "discipline": "cementing",
+        "held_out_success": 1.0,
+        "name": "procedure-well_decommissioning",
+        "train_success": 0.916667
       }
     ]
   },
-  "trained_at": "2026-10-06T23:11:15.615277+00:00",
-  "version": "2.2.0"
+  "trained_at": "2026-10-08T18:04:33.523295+00:00",
+  "version": "2.3.0"
 }
