@@ -26,6 +26,7 @@ import json as _json
 import os
 
 from core.human_approval import HumanApprovalGate
+from core.internet_learner import LearnerReport
 from core.permissions import Capability, PermissionPolicy
 from core.web_source import (
     FallbackSearchProvider,
@@ -116,10 +117,11 @@ class InteractiveLearner:
     the project store, and it does so without searching again.
     """
 
-    def __init__(self, learner, *, input_func=input, print_func=print) -> None:
+    def __init__(self, learner, *, input_func=input, print_func=print, promote_path=None) -> None:
         self.learner = learner
         self.input = input_func
         self.print = print_func
+        self.promote_path = promote_path
 
     def run(self) -> int:
         from core.knowledge_navigator import science_branches
@@ -134,7 +136,7 @@ class InteractiveLearner:
             if choice == "q":
                 return 0
             if choice == "a":
-                self._review(_all_topics(branches), "all branches")
+                self._review(_all_segments(branches), "all branches")
                 continue
             branch = branches[choice]
             result = self._branch_loop(branch)
@@ -154,7 +156,7 @@ class InteractiveLearner:
             if choice == "b":
                 return "back"
             if choice == "s":
-                self._review(_branch_topics(branch), branch.label)
+                self._review(_branch_segments(branch), branch.label)
                 continue
             course = branch.courses[choice]
             result = self._course_loop(branch, course)
@@ -174,17 +176,22 @@ class InteractiveLearner:
             if choice == "b":
                 return "back"
             if choice == "s":
-                self._review(course.topics, course.label)
+                self._review([(course.topics, course.label)], course.label)
                 continue
-            self._review((course.topics[choice],), course.topics[choice])
+            self._review([((course.topics[choice],), course.label)], course.topics[choice])
 
-    def _review(self, topics, label) -> None:
-        topics = tuple(topic for topic in topics if topic.strip())
-        if not topics:
+    def _review(self, segments, label) -> None:
+        segments = [(topics, context) for topics, context in segments if any(t.strip() for t in topics)]
+        total = sum(len(topics) for topics, _ in segments)
+        if not total:
             self.print("  (nothing to search here)")
             return
-        self.print(f"\nSearching {len(topics)} topic(s): {label}")
-        report = self.learner.learn_topics(topics, limit=None, dry_run=True)
+        self.print(f"\nSearching {total} topic(s): {label}")
+        outcomes = []
+        for topics, context in segments:
+            report = self.learner.learn_topics(topics, limit=None, dry_run=True, context=context)
+            outcomes.extend(report.outcomes)
+        report = LearnerReport(tuple(outcomes), dry_run=True, saved=False)
         self.print(report.summary())
         for outcome in report.outcomes:
             accepted = set(outcome.added)
@@ -202,7 +209,11 @@ class InteractiveLearner:
         answer = self.input(f"  {report.added_count} statement(s) to save. [s]ave / [i]gnore: ")
         if answer.strip().casefold() in {"s", "save", "y", "yes"}:
             stored = self.learner.commit(report)
-            self.print(f"  Saved {stored} statement(s) to the project store.\n")
+            self.print(f"  Saved {stored} statement(s) to the project store.")
+            if self.promote_path is not None:
+                promoted = self.learner.promote(report, self.promote_path)
+                self.print(f"  Promoted {promoted} new statement(s) into {self.promote_path}.")
+            self.print("")
         else:
             self.print("  Ignored; nothing was saved.\n")
 
@@ -221,12 +232,14 @@ class InteractiveLearner:
             self.print("  Invalid choice, try again.")
 
 
-def _all_topics(branches):
-    return [topic for branch in branches for course in branch.courses for topic in course.topics]
+def _all_segments(branches):
+    return [
+        (course.topics, course.label) for branch in branches for course in branch.courses
+    ]
 
 
-def _branch_topics(branch):
-    return [topic for course in branch.courses for topic in course.topics]
+def _branch_segments(branch):
+    return [(course.topics, course.label) for course in branch.courses]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -268,6 +281,11 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get(_ENDPOINT_ENV),
         help=f"search endpoint URL (or set {_ENDPOINT_ENV}); default: Wikipedia, then offline",
     )
+    parser.add_argument(
+        "--promote",
+        action="store_true",
+        help="with --interactive, save approved statements into knowledge/learned_petroleum.json so they ship with the project",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -290,7 +308,10 @@ def main(argv: list[str] | None = None) -> int:
         per_topic=args.per_topic,
     )
     if args.interactive:
-        return InteractiveLearner(learner).run()
+        from core.learned_knowledge import learned_path
+
+        promote_path = learned_path() if args.promote else None
+        return InteractiveLearner(learner, promote_path=promote_path).run()
     report = learner.learn_topics(topics, limit=limit, dry_run=not args.write)
     _print_report(report, as_json=args.json)
     return 0

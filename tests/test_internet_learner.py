@@ -37,8 +37,8 @@ def _store() -> DocumentStore:
     return store
 
 
-def _result(url: str, snippet: str, credibility: float = 0.9) -> WebResult:
-    return WebResult(url=url, title="Petroleum note", snippet=snippet, credibility=credibility)
+def _result(url: str, snippet: str, credibility: float = 0.9, title: str = "Permeability") -> WebResult:
+    return WebResult(url=url, title=title, snippet=snippet, credibility=credibility)
 
 
 def _learner(store, results, *, approved=True, trusted_only=True, persist=None):
@@ -127,6 +127,27 @@ def test_off_topic_statement_is_rejected_even_when_trusted():
     assert len(store) == 1
 
 
+def test_result_not_about_the_topic_is_rejected():
+    store = _store()
+    # Trusted, petroleum-flavoured prose, but the article is a water reservoir.
+    snippet = "Permeability of the reservoir rock controls groundwater flow in the aquifer."
+    learner = _learner(
+        store, [_result(_TRUSTED_URL, snippet, title="Pandan Reservoir MRT station")]
+    )
+    report = learner.learn_topics(["Permeability"], dry_run=False)
+    assert report.added_count == 0
+    assert any("not about" in reason for _url, reason in report.outcomes[0].skipped)
+
+
+def test_formula_fragment_is_rejected():
+    store = _store()
+    snippet = r"{\displaystyle \phi} is the effective porosity and k is the absolute permeability."
+    learner = _learner(store, [_result(_TRUSTED_URL, snippet)])
+    report = learner.learn_topics(["Permeability"], dry_run=False)
+    assert report.added_count == 0
+    assert any(reason == "formula fragment" for _url, reason in report.outcomes[0].skipped)
+
+
 # --- topics come from the corpus -----------------------------------------
 
 
@@ -182,6 +203,26 @@ class _CountingProvider(StaticSearchProvider):
         return super().search(query, limit=limit)
 
 
+class _EchoProvider(StaticSearchProvider):
+    """Returns a result whose title is the query, so it is always on-topic."""
+
+    def __init__(self, snippet, url=_TRUSTED_URL, credibility=0.9):
+        super().__init__()
+        self._snippet = snippet
+        self._url = url
+        self._credibility = credibility
+
+    def search(self, query, *, limit=5):
+        return (
+            WebResult(
+                url=self._url,
+                title=query,
+                snippet=self._snippet,
+                credibility=self._credibility,
+            ),
+        )
+
+
 def test_commit_saves_previewed_statements_without_searching_again():
     store = _store()
     provider = _CountingProvider([_result(_TRUSTED_URL, _TRUSTED_SNIPPET)])
@@ -212,6 +253,61 @@ def test_commit_is_a_noop_for_a_non_dry_run_report():
     assert learner.commit(report) == 0
 
 
+# --- promote into a committed project file --------------------------------
+
+
+def test_promote_writes_accepted_statements_to_the_project_file(tmp_path):
+    import json
+
+    store = _store()
+    learner = _learner(store, [_result(_TRUSTED_URL, _TRUSTED_SNIPPET)])
+    report = learner.learn_topics(["Permeability"], dry_run=True)
+    path = tmp_path / "knowledge" / "learned_petroleum.json"
+    added = learner.promote(report, path)
+    assert added == 1
+    records = json.loads(path.read_text(encoding="utf-8"))
+    assert len(records) == 1
+    assert records[0]["doc_id"].startswith("learned:")
+    assert records[0]["metadata"]["topic"] == "Permeability"
+
+    # Promoting again is idempotent: the same statement is not duplicated.
+    assert learner.promote(report, path) == 0
+    assert len(json.loads(path.read_text(encoding="utf-8"))) == 1
+
+
+def test_learned_documents_loader_reads_promoted_file(tmp_path, monkeypatch):
+    import json
+
+    from core import learned_knowledge
+
+    path = tmp_path / "learned_petroleum.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "doc_id": "learned:test1234",
+                    "title": "Learned statement: permeability",
+                    "text": "Permeability measures how easily fluid flows through the rock.",
+                    "source": "learned/https://www.spe.org/x",
+                    "metadata": {"topic": "permeability"},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(learned_knowledge, "learned_path", lambda: path)
+    documents = learned_knowledge.learned_documents()
+    assert len(documents) == 1
+    assert documents[0].doc_id == "learned:test1234"
+
+
+def test_learned_documents_loader_is_empty_when_missing(tmp_path, monkeypatch):
+    from core import learned_knowledge
+
+    monkeypatch.setattr(learned_knowledge, "learned_path", lambda: tmp_path / "nope.json")
+    assert learned_knowledge.learned_documents() == []
+
+
 # --- interactive walker ----------------------------------------------------
 
 
@@ -219,7 +315,7 @@ def test_interactive_drill_down_search_and_save():
     from ai.internet_learner import InteractiveLearner
 
     store = _store()
-    provider = _CountingProvider([_result(_TRUSTED_URL, _TRUSTED_SNIPPET)])
+    provider = _EchoProvider(_TRUSTED_SNIPPET)
     persisted: list[str] = []
     learner = build_internet_learner(
         provider=provider,
@@ -245,7 +341,7 @@ def test_interactive_ignore_saves_nothing():
     from ai.internet_learner import InteractiveLearner
 
     store = _store()
-    provider = _CountingProvider([_result(_TRUSTED_URL, _TRUSTED_SNIPPET)])
+    provider = _EchoProvider(_TRUSTED_SNIPPET)
     learner = build_internet_learner(
         provider=provider,
         store=store,
@@ -258,3 +354,28 @@ def test_interactive_ignore_saves_nothing():
     ).run()
     assert code == 0
     assert len(store) == 1  # ignored
+
+
+def test_interactive_promote_writes_into_the_project_file(tmp_path):
+    from ai.internet_learner import InteractiveLearner
+
+    store = _store()
+    provider = _EchoProvider(_TRUSTED_SNIPPET)
+    learner = build_internet_learner(
+        provider=provider,
+        store=store,
+        permissions=granted_permissions(),
+        approvals=approved_gate(),
+    )
+    promote_path = tmp_path / "learned_petroleum.json"
+    scripted = iter(["1", "1", "1", "s", "q"])
+    out: list[str] = []
+    code = InteractiveLearner(
+        learner,
+        input_func=lambda _p: next(scripted),
+        print_func=out.append,
+        promote_path=promote_path,
+    ).run()
+    assert code == 0
+    assert promote_path.exists()
+    assert any("Promoted" in line for line in out)

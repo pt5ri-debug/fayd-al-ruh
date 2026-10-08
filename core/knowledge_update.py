@@ -105,9 +105,19 @@ class KnowledgeUpdater:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
         return f"learned:{digest}"
 
+    def doc_id_for(self, statement: str) -> str:
+        """The stable id a statement would receive, for deduplication."""
+        return self._doc_id_for(statement)
+
     def _vocabulary(self) -> set[str]:
         terms: set[str] = set()
         for document in self.store.documents():
+            # Learned statements are excluded so the acceptance gate stays
+            # anchored to the project's seeded knowledge: otherwise a learned
+            # statement could vouch for the next one and the corpus would drift
+            # away from petroleum on its own.
+            if document.doc_id.startswith("learned:"):
+                continue
             terms |= _query_terms(f"{document.title} {document.text}")
         return terms
 

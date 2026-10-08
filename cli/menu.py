@@ -189,7 +189,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Jarvis mode (listen, act, speak)", run_jarvis, ()),
     ("Continuous learning and regression gate", run_learn, ()),
-    ("Continuous Internet Learner", run_internet_learner, ("--interactive", "--approve")),
+    (
+        "Continuous Internet Learner",
+        run_internet_learner,
+        ("--interactive", "--approve", "--promote"),
+    ),
     ("Ask the web and verify the answer", run_web, ("--approve",)),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--episodes", "60")),

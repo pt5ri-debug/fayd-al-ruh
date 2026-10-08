@@ -671,6 +671,29 @@ second network call — into the project store.
 
 Run it directly with `python -m cli internet-learner --interactive --approve`.
 
+### Promoting reviewed knowledge into the project
+
+By default the learner saves to the writable data store (`data/documents`),
+which is not part of the repository — so a learned fact lives only on your
+machine. When a batch has been reviewed and you want it to **ship with the
+project**, run the interactive mode with `--promote` (the menu entry enables it):
+
+```bash
+python -m cli internet-learner --interactive --approve --promote
+```
+
+Saving then writes the accepted statements to `knowledge/learned_petroleum.json`,
+a file committed to the repository and loaded at startup by
+`core/learned_knowledge.py`. A fresh clone therefore already knows them, and
+they behave exactly like the seeded corpus: citable documents with their source
+URL. Promotion is idempotent — records are de-duplicated by their stable
+document id — so re-running never duplicates a statement.
+
+The learner only accepts an article whose title is genuinely about the topic
+(a shared head-noun like "reservoir" or "screen" is not enough), rejects
+symbolic formula fragments, and strips HTML entities and citation URLs from
+snippets, so the promoted corpus stays on-topic and clean.
+
 ## Answering from the web, with trust checks
 
 The project can also answer a question it does not already know by searching the
