@@ -630,6 +630,47 @@ python -m cli internet-learner --approve --write --max-topics 10 --per-topic 2
 python -m cli internet-learner --topics "Porosity" "Permeability" --approve
 ```
 
+### Choosing what to learn, step by step
+
+Menu entry (5) opens the **interactive** mode, which walks the project's own
+science tree one level at a time: **science branch → course → concept**. Each
+level lists its children with numbers, and you can search at any level — a
+single concept, a whole course, a whole branch, or everything — without having
+to drill to the bottom first.
+
+```
+Science branches:
+  1) Petroleum Disciplines (29 courses, 198 topics)
+  2) Engineering Science (6 courses, 39 topics)
+  3) Earth Sciences (7 courses, 45 topics)
+  4) Foundations (6 courses, 39 topics)
+  a) search all topics
+  q) quit
+Choose: 1
+Petroleum Disciplines:
+  1) Petrophysics (8 topics)
+  ...
+  s) search this branch
+  b) back
+  q) quit
+Choose: 1
+Petroleum Disciplines > Petrophysics:
+  1) effective porosity
+  2) absolute permeability
+  ...
+  s) search this course
+  b) back
+  q) quit
+Choose: 1
+```
+
+A search never decides silently: it prints **every result** (title, source URL,
+and snippet) marked `[accepted]` or `[skipped]`, then asks **`[s]ave / [i]gnore`**.
+Saving writes the exact statements you just saw — the same preview, with no
+second network call — into the project store.
+
+Run it directly with `python -m cli internet-learner --interactive --approve`.
+
 ## Answering from the web, with trust checks
 
 The project can also answer a question it does not already know by searching the

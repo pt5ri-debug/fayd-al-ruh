@@ -186,6 +186,26 @@ class InternetLearner:
         saved = added_any and not dry_run
         return LearnerReport(tuple(outcomes), dry_run=dry_run, saved=saved)
 
+    def commit(self, report: LearnerReport) -> int:
+        """Persist the statements a dry-run report accepted, without re-searching.
+
+        The preview already selected the accepted results; this re-applies those
+        exact results to the real store and persists them, so an interactive
+        'save' never runs a second network search. Returns how many were stored.
+        """
+        if not report.dry_run:
+            return 0
+        stored = 0
+        for outcome in report.outcomes:
+            accepted = set(outcome.added)
+            for result in outcome.results:
+                if result.url not in accepted:
+                    continue
+                applied = self._apply(outcome.topic, result, updater=self.updater, dry_run=False)
+                if applied.action in {"added", "reinforced"}:
+                    stored += 1
+        return stored
+
     def _scratch_updater(self) -> KnowledgeUpdater:
         """A throwaway updater over a copy of the store, for dry runs."""
         scratch = DocumentStore()
