@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from core.acceptance_policy import clean_statement, source_rejection_reason
 from core.knowledge_update import KnowledgeUpdate, KnowledgeUpdater, UpdateOutcome
 from core.permissions import Capability, PermissionPolicy
 from core.human_approval import HumanApprovalGate
@@ -117,6 +118,7 @@ class WebVerifier:
         updater: KnowledgeUpdater | None = None,
         trust_threshold: float = 0.6,
         min_support: float = 0.2,
+        trusted_only: bool = True,
     ) -> None:
         if not 0.0 <= trust_threshold <= 1.0:
             raise ValueError("trust_threshold must be between 0 and 1.")
@@ -127,6 +129,7 @@ class WebVerifier:
         self.updater = updater
         self.trust_threshold = trust_threshold
         self.min_support = min_support
+        self.trusted_only = trusted_only
 
     def verify(
         self,
@@ -178,8 +181,16 @@ class WebVerifier:
         citations = tuple(source.citation for source in sources)
 
         learned_doc_id: str | None = None
+        best = max(sources, key=lambda source: (source.result.credibility, source.support), default=None)
+        source_ok = best is not None and source_rejection_reason(
+            url=best.result.url,
+            snippet=best.result.snippet,
+            credibility=best.result.credibility,
+            trusted_only=self.trusted_only,
+        ) is None
         if (
             learn
+            and source_ok
             and not contradicts_internal
             and trust >= self.trust_threshold
             and support >= self.min_support
@@ -326,9 +337,9 @@ def _compose_answer(
 
 
 def _statement(question: str, result: WebResult) -> str:
-    snippet = " ".join(result.snippet.split())
-    if snippet:
-        return snippet
+    statement = clean_statement(result.snippet)
+    if statement:
+        return statement
     return f"{result.title} ({result.url})"
 
 

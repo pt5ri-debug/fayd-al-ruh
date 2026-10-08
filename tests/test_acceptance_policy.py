@@ -1,0 +1,156 @@
+"""The acceptance policy is the single gate for newly learned knowledge.
+
+These tests pin the exact criteria -- the same ones that reviewed the Petroleum
+Disciplines branch -- so any future change to acceptance is a visible, deliberate
+change to this file rather than a quiet drift in the learner.
+"""
+
+from __future__ import annotations
+
+from core.acceptance_policy import (
+    MIN_CREDIBILITY,
+    REJECT_FORMULA,
+    TITLE_COVERAGE,
+    clean_statement,
+    is_formula_fragment,
+    is_relevant_to_topic,
+    is_trusted,
+    rejection_reason,
+    source_rejection_reason,
+)
+
+
+def _reason(**overrides):
+    base = dict(
+        url="https://www.spe.org/x",
+        title="Permeability",
+        topic="Permeability",
+        snippet="Permeability measures how easily fluid flows through reservoir rock.",
+        credibility=0.9,
+    )
+    base.update(overrides)
+    return rejection_reason(**base)
+
+
+# --- the happy path -------------------------------------------------------
+
+
+def test_an_on_topic_trusted_result_is_accepted():
+    assert _reason() is None
+
+
+# --- each gate, in isolation ---------------------------------------------
+
+
+def test_untrusted_domain_is_refused():
+    assert _reason(url="https://randompetroleumblog.com/x") == "domain not trusted"
+
+
+def test_low_credibility_is_refused():
+    reason = _reason(credibility=MIN_CREDIBILITY - 0.01)
+    assert reason is not None and reason.startswith("credibility")
+
+
+def test_empty_snippet_is_refused():
+    assert _reason(snippet="   ") == "empty snippet"
+
+
+def test_formula_fragment_is_refused():
+    assert _reason(snippet=r"{\displaystyle \phi} is the porosity.") == REJECT_FORMULA
+    assert is_formula_fragment(r"k = \frac{q \mu}{A}")
+
+
+def test_result_not_about_the_topic_is_refused():
+    assert not is_relevant_to_topic("reservoir boundary", "Western Water Catchment")
+    assert not is_relevant_to_topic("screen", "Blue screen of death")
+    assert not is_relevant_to_topic(
+        "decline curve analysis", "Economy of India"
+    )
+
+
+def test_a_shared_word_is_not_enough_when_the_title_is_mostly_about_something_else():
+    # "screen" is shared, but the title is mostly about something else.
+    assert not is_relevant_to_topic("screen", "Blue screen of death")
+    assert not is_relevant_to_topic("reservoir boundary", "Western Water Catchment")
+
+
+def test_title_coverage_is_symmetric():
+    # Topic fully covered by the title, but the title is far larger -> refused.
+    assert not is_relevant_to_topic("screen", "Blue screen of death")
+    # Genuine match -> accepted.
+    assert is_relevant_to_topic("gamma ray log", "Gamma ray logging")
+
+
+def test_topic_match_ignores_case_and_punctuation():
+    assert is_relevant_to_topic("Effective Porosity", "effective porosity")
+    assert is_relevant_to_topic("well test", "well test")
+
+
+def test_threshold_is_documented_and_midrange():
+    assert 0.0 < TITLE_COVERAGE < 1.0
+
+
+# --- trust and cleaning ---------------------------------------------------
+
+
+def test_is_trusted_accepts_standards_academic_and_government_hosts():
+    assert is_trusted("https://www.spe.org/x")
+    assert is_trusted("https://en.wikipedia.org/wiki/Permeability")
+    assert is_trusted("https://www.energy.gov/x")
+    assert not is_trusted("https://randompetroleumblog.com/x")
+
+
+def test_clean_statement_strips_tags_urls_and_entities():
+    text = 'A &amp; B <a href="#">link</a> https://www.sec.gov/whistleblower about rock.'
+    cleaned = clean_statement(text)
+    assert "&amp;" not in cleaned
+    assert "http" not in cleaned.casefold()
+    assert "<" not in cleaned
+    assert "A & B" in cleaned
+
+
+# --- the source gate is topic-independent ---------------------------------
+
+
+def test_source_gate_ignores_topic_and_passes_a_clean_source():
+    assert (
+        source_rejection_reason(
+            url="https://www.spe.org/x",
+            snippet="Permeability measures flow through rock.",
+            credibility=0.9,
+        )
+        is None
+    )
+
+
+def test_source_gate_still_refuses_untrusted_low_credibility_and_formula():
+    assert (
+        source_rejection_reason(
+            url="https://randompetroleumblog.com/x",
+            snippet="text",
+            credibility=0.9,
+        )
+        == "domain not trusted"
+    )
+    assert REJECT_FORMULA == source_rejection_reason(
+        url="https://www.spe.org/x",
+        snippet=r"\displaystyle \phi",
+        credibility=0.9,
+    )
+    assert source_rejection_reason(
+        url="https://www.spe.org/x",
+        snippet="text",
+        credibility=MIN_CREDIBILITY - 0.01,
+    ).startswith("credibility")
+
+
+def test_source_gate_is_reused_by_the_topic_gate():
+    # Same refusal, reached through either entry point.
+    kwargs = dict(
+        url="https://randompetroleumblog.com/x",
+        snippet="text",
+        credibility=0.9,
+    )
+    assert source_rejection_reason(**kwargs) == rejection_reason(
+        title="anything", topic="anything", **kwargs
+    )

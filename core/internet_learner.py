@@ -17,6 +17,11 @@ Four rules keep it safe, all inherited rather than reinvented:
 * **Corpus-gated acceptance** -- ``KnowledgeUpdater`` rejects any statement that
   shares no terms with what the project already knows, so off-topic text cannot
   flood the store.
+* **One acceptance policy** -- the exact criteria (trusted source, credibility
+  floor, non-empty, not a formula fragment, genuinely about the topic, anchored
+  to seeded knowledge) live in :mod:`core.acceptance_policy` and are the only
+  criteria applied. The same gate that reviewed the Petroleum Disciplines branch
+  governs every future statement; there is no softer path for later data.
 * **Dry-run by default** -- the learner only reports what it *would* add unless
   the caller asks to persist.
 
@@ -27,71 +32,21 @@ by a hand-written question list.
 
 from __future__ import annotations
 
-import html
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
-from urllib.parse import urlparse
 
+from core.acceptance_policy import (
+    MIN_CREDIBILITY,
+    clean_statement,
+    is_relevant_to_topic,
+    is_trusted,
+    rejection_reason,
+)
 from core.documents import Document, DocumentStore
 from core.knowledge_update import KnowledgeUpdate, KnowledgeUpdater, UpdateOutcome
 from core.web_source import WebResult, WebSearchService
-
-_TAG_RE = re.compile(r"<[^>]+>")
-_URL_RE = re.compile(r"https?://\S+")
-_FORMULA_MARKERS_RE = re.compile(r"displaystyle|\\[a-zA-Z]+|\\\(")
-_TITLE_RE = re.compile(r"[a-z0-9]+")
-
-
-def _title_words(text: str) -> set[str]:
-    return set(_TITLE_RE.findall(text.casefold()))
-
-
-def is_relevant_to_topic(topic: str, title: str) -> bool:
-    """Whether a result's article is genuinely about the topic.
-
-    A search for an ambiguous term returns results that merely share a word
-    ("reservoir" -> a drinking-water reservoir, "screen" -> "Blue screen of
-    death"). Those statements would pass the corpus gate yet teach nothing
-    petroleum-specific, so the article's own title must be *about* the topic:
-    the topic's words and the title's words must overlap substantially in both
-    directions. A shared head-noun is not enough -- the article must not be
-    mostly about something else.
-    """
-    topic_words = _title_words(topic)
-    title_words = _title_words(title)
-    if not topic_words or not title_words:
-        return False
-    shared = topic_words & title_words
-    return len(shared) / len(topic_words) >= 0.5 and len(shared) / len(title_words) >= 0.5
-
-
-def clean_statement(text: str) -> str:
-    """Normalise a snippet into a stored statement.
-
-    Search results arrive with HTML entities and citation URLs mixed into the
-    prose. Left in, a URL's host leaks words like ``www`` into the store and
-    creates spurious matches with unrelated text. This unescapes entities, drops
-    tags and URLs, and collapses whitespace, so only the statement survives.
-    """
-    unescaped = html.unescape(text)
-    without_tags = _TAG_RE.sub(" ", unescaped)
-    without_urls = _URL_RE.sub(" ", without_tags)
-    return " ".join(without_urls.split())
-
-# Hosts we treat as authoritative for petroleum engineering and general facts.
-_TRUSTED_HOSTS = (
-    "spe.org",
-    "onepetro.org",
-    "api.org",
-    "iso.org",
-    "astm.org",
-    "wikipedia.org",
-)
-# Top-level suffixes that mark a source as government or academic.
-_TRUSTED_SUFFIXES = (".gov", ".edu", ".mil", ".ac.uk", ".gov.uk")
 
 
 def _read_learned_file(path: Path) -> list[dict]:
@@ -103,16 +58,6 @@ def _read_learned_file(path: Path) -> list[dict]:
     except (OSError, ValueError):
         return []
     return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
-
-
-def is_trusted(url: str) -> bool:
-    """Whether a URL's host is on the trusted list or a government/academic host."""
-    host = urlparse(url).netloc.casefold()
-    if not host:
-        return False
-    if host.endswith(_TRUSTED_SUFFIXES):
-        return True
-    return any(host == trusted or host.endswith(f".{trusted}") for trusted in _TRUSTED_HOSTS)
 
 
 def corpus_topics() -> tuple[str, ...]:
@@ -199,7 +144,7 @@ class InternetLearner:
         updater: KnowledgeUpdater,
         *,
         trusted_only: bool = True,
-        min_credibility: float = 0.6,
+        min_credibility: float = MIN_CREDIBILITY,
         per_topic: int = 3,
         persist: Callable[[Document], None] | None = None,
     ) -> None:
@@ -346,17 +291,15 @@ class InternetLearner:
         )
 
     def _rejection(self, result: WebResult, topic: str) -> str | None:
-        if self.trusted_only and not is_trusted(result.url):
-            return "domain not trusted"
-        if result.credibility < self.min_credibility:
-            return f"credibility {result.credibility:.2f} below {self.min_credibility:.2f}"
-        if not result.snippet.strip():
-            return "empty snippet"
-        if _FORMULA_MARKERS_RE.search(result.snippet):
-            return "formula fragment"
-        if not is_relevant_to_topic(topic, result.title):
-            return f"not about '{topic}' (article is '{result.title}')"
-        return None
+        return rejection_reason(
+            url=result.url,
+            title=result.title,
+            topic=topic,
+            snippet=result.snippet,
+            credibility=result.credibility,
+            trusted_only=self.trusted_only,
+            min_credibility=self.min_credibility,
+        )
 
     def _apply(self, topic: str, result: WebResult, *, updater: KnowledgeUpdater, dry_run: bool) -> UpdateOutcome:
         statement = clean_statement(result.snippet) or f"{result.title} ({result.url})"
@@ -412,6 +355,8 @@ __all__ = [
     "LearnerReport",
     "TopicOutcome",
     "build_internet_learner",
+    "clean_statement",
     "corpus_topics",
+    "is_relevant_to_topic",
     "is_trusted",
 ]
