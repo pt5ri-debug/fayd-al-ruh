@@ -30,6 +30,28 @@ class Ontology:
             raise ValueError("Semantic relations must reference known concepts.")
         self.relations[relation.id] = relation
 
+    def add_relation_once(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: str,
+        confidence: float = 0.5,
+    ) -> None:
+        """Add a relation unless an equivalent one exists, retrying id collisions."""
+        for relation in self.relations.values():
+            if (
+                relation.source_id == source_id
+                and relation.target_id == target_id
+                and relation.relation_type == relation_type
+            ):
+                return
+        relation = SemanticRelation(source_id, target_id, relation_type, confidence)
+        # Relation ids carry a truncated random suffix; regenerate on the rare
+        # collision so seeding never fails on an id clash.
+        while relation.id in self.relations:
+            relation = SemanticRelation(source_id, target_id, relation_type, confidence)
+        self.add_relation(relation)
+
     def remove_relation(self, relation_id: str) -> None:
         if relation_id not in self.relations:
             raise KeyError(f"Unknown semantic relation: {relation_id}")

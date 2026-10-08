@@ -44,8 +44,17 @@ def train_and_save(
     vocab_size: int = 1024,
     config: TransformerConfig | None = None,
     log_every: int = 100,
+    kb_max_chunks: int = 0,
+    kb_repeats: int = 1,
+    include_runtime: bool = True,
 ) -> TransformerLM:
-    text = build_corpus(repeats=repeats, structured_repeats=structured_repeats)
+    text = build_corpus(
+        repeats=repeats,
+        structured_repeats=structured_repeats,
+        kb_max_chunks=kb_max_chunks,
+        kb_repeats=kb_repeats,
+        include_runtime=include_runtime,
+    )
     tokenizer = train_tokenizer(tokenizer_kind, text, vocab_size=vocab_size)
     tokenizer_path = tokenizer_path or Path(checkpoint).with_suffix(".tokenizer.json")
     save_tokenizer(tokenizer, tokenizer_path)
@@ -81,6 +90,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tokenizer", type=Path, default=None)
     parser.add_argument("--tokenizer-kind", choices=TOKENIZER_KINDS, default="byte")
     parser.add_argument("--vocab-size", type=int, default=1024)
+    parser.add_argument(
+        "--kb-max-chunks",
+        type=int,
+        default=0,
+        help="Train on a relevance-filtered sample of the bulk knowledge base of this size "
+        "(0 disables it; a release uses a positive value).",
+    )
+    parser.add_argument(
+        "--no-runtime-docs",
+        action="store_true",
+        help="Skip documents written at runtime (internet learning, Jarvis feedback).",
+    )
     parser.add_argument("--generate", type=str, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=64)
     args = parser.parse_args(argv)
@@ -94,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
         tokenizer_path=args.tokenizer,
         tokenizer_kind=args.tokenizer_kind,
         vocab_size=args.vocab_size,
+        kb_max_chunks=args.kb_max_chunks,
+        include_runtime=not args.no_runtime_docs,
     )
     if args.generate is not None:
         tokenizer = load_tokenizer(

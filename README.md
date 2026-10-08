@@ -251,6 +251,14 @@ python -m cli petroleum --episodes 120    # train every petroleum-engineering di
 python -m cli petroleum --json            # machine-readable summary
 ```
 
+Beyond the hand-written catalog, `ml/procedural_tasks.py` derives a task from
+**every procedure recorded in the corpus** — one ordered action chain per entry,
+ending in the recorded outcome. These are opt-in so the default run stays fast:
+
+```bash
+python -m cli petroleum --episodes 120 --procedural
+```
+
 This also runs from the operator menu (the "Train petroleum-engineering tasks"
 option) and is measured via `petroleum_learning_accuracy` in the evaluation
 package.
@@ -271,18 +279,35 @@ python -m ml.release --manifest-only        # rewrite the manifest without retra
 1. **The base cognitive pipeline** (`python -m ml`): policies, predictive brain,
    experience classifier.
 2. **Petroleum-engineering tasks** (`ml/petroleum.py`): every discipline +
-   generalisation.
+   generalisation, plus the **procedural tasks** derived from the corpus
+   (`ml/procedural_tasks.py`) when enabled.
 3. **The in-project language model** (`ml/llm`): trained on a corpus that
-   includes the whole curriculum.
+   includes the whole curriculum **and every repository's knowledge** — the
+   authored documents and (by default) the runtime documents, plus a
+   relevance-filtered sample of the bulk knowledge base.
+
+Because the full corpus is large, release training uses the **byte** tokenizer by
+default (encoding is linear); BPE gives better compression but is slow to train on
+a multi-megabyte corpus, so it is opt-in via `--tokenizer-kind bpe`.
+
+```bash
+python -m ml.release --kb-max-chunks 2000          # smaller knowledge-base sample
+python -m ml.release --no-procedural               # skip corpus-derived procedures
+python -m ml.release --no-runtime-docs             # authored documents only
+```
 
 It then writes a **manifest** at `ml/artifacts/release_manifest.json` recording:
 
 - The project version (`core/version.py`), the training time, and the git revision.
 - **The knowledge** trained on: number of disciplines, courses, concepts, and
-  relations, and the curriculum coverage (1.0).
-- **The corpus**: number of curriculum sentences, built examples, and characters.
-- **The configuration**: episodes, language steps, seed, and replay size.
-- **The results**: petroleum task success, and the language-model parameter count.
+  relations, the curriculum coverage (1.0), and the authored documents per
+  repository.
+- **The corpus**: number of curriculum sentences, repository and knowledge-base
+  sentences, built examples, and characters.
+- **The configuration**: episodes, language steps, seed, replay size, and the
+  knowledge-base sample and procedural options.
+- **The results**: petroleum task success (and procedural coverage), and the
+  language-model parameter count.
 
 All outputs are stored inside the project: `ml/artifacts/` (policies, brains,
 classifier, and `petroleum/`) and `ml/llm/checkpoints/fayd-llm.npz`. These files
@@ -394,6 +419,27 @@ credited or blamed:
 This is how the graph is shaped by the outcomes of retrieval, not only by its
 structure. This is what `petroleum-ontology-feedback` measures and the
 `petroleum_ontology_feedback_accuracy` metric protects.
+
+## Learning the whole knowledge graph
+
+Identity and tasks are not the whole picture: the system also learns from its
+**knowledge graph** — the concepts and relations seeded across the disciplines,
+the curriculum, and the corpus. `ml/general_learning.py` treats this as **link
+prediction**: it holds out a fifth of the edges, then asks the model to rank each
+true target against decoys, using concept vocabulary alone.
+
+- **Honest baseline**: the reported `hit_at_1` is measured against a random
+  baseline (one right answer among four candidates = 0.25), with mean rank and a
+  `generalisation_gain`, so the number is never a training-set artefact.
+- **No hand-coded answers**: the model never sees the held-out edge; it must
+  generalise from how concepts are used elsewhere.
+
+It runs as part of `python -m ml` and reports one line:
+
+```text
+General knowledge (link prediction): relations=467 concepts=460 types=177
+held-out Hit@1=0.41 baseline=0.25 gain=+0.16 mean-rank=2.02
+```
 
 ## Layout
 
@@ -969,9 +1015,11 @@ trained inside the repository, so no external service and no API keys are needed
   attention, GELU, LayerNorm) with manual backprop and Adam — we verified the
   gradients numerically.
 - `ml/llm/corpus.py`: an in-repo training corpus (English about the project's
-  world and about petroleum engineering, and a **corpus generated from the whole
+  world and about petroleum engineering, a **corpus generated from the whole
   curriculum** — a sentence for every concept and relation in the disciplines and
-  courses, with JSON examples in the schema format).
+  courses — and, when enabled, sentences from **every repository's documents**:
+  the authored knowledge plus a relevance-filtered sample of the bulk knowledge
+  base, with JSON examples in the schema format).
 - `ml/llm/generator.py` and `ai/local_model.py`: text generation, and adaptation
   to the `CognitiveModel` interface so it replaces Ollama anywhere a model is
   accepted.
@@ -983,6 +1031,8 @@ trained inside the repository, so no external service and no API keys are needed
 python -m ml.llm                       # train and save the default checkpoint
 python -m ml.llm --steps 4000          # train longer
 python -m ml.llm --generate "water"    # train, then sample a continuation
+python -m ml.llm --kb-max-chunks 2000  # also train on the bulk knowledge base
+python -m ml.llm --tokenizer-kind bpe  # smaller corpus: use the subword tokenizer
 ```
 
 Using it as a cognitive model:

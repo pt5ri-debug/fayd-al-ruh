@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from core.concept import Concept
 from core.ontology import Ontology
 from core.self_model import SelfModel
-from core.semantic_relation import SemanticRelation
 
 # The foundation layer: the concepts every discipline builds on. Kept separate so
 # the original seed stays recognizable and stable.
@@ -435,16 +434,7 @@ def _add_relation(
     relation_type: str,
     confidence: float,
 ) -> None:
-    if any(
-        relation.source_id == source.id
-        and relation.target_id == target.id
-        and relation.relation_type == relation_type
-        for relation in ontology.relations.values()
-    ):
-        return
-    ontology.add_relation(
-        SemanticRelation(source.id, target.id, relation_type, confidence)
-    )
+    ontology.add_relation_once(source.id, target.id, relation_type, confidence)
 
 
 __all__ = [

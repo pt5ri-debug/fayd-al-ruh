@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING
 
 from core.concept import Concept
 from core.ontology import Ontology
-from core.semantic_relation import SemanticRelation
 
 if TYPE_CHECKING:
     from core.documents import Document
@@ -1638,14 +1637,7 @@ def _concept_for(ontology: Ontology, label: str, aliases: tuple[str, ...]) -> Co
 def _add_relation(
     ontology: Ontology, source: Concept, target: Concept, relation_type: str, confidence: float
 ) -> None:
-    if any(
-        relation.source_id == source.id
-        and relation.target_id == target.id
-        and relation.relation_type == relation_type
-        for relation in ontology.relations.values()
-    ):
-        return
-    ontology.add_relation(SemanticRelation(source.id, target.id, relation_type, confidence))
+    ontology.add_relation_once(source.id, target.id, relation_type, confidence)
 
 
 def seed_petroleum_corpus(ontology: Ontology) -> list[Concept]:

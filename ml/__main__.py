@@ -21,6 +21,7 @@ from core.sandbox_tasks import HELD_OUT_TASKS, TASKS
 from core.state import State
 from ml.cognitive_brain import CognitiveBrain
 from ml.dataset import FeatureHasher, Transition, build_classification_dataset, train_val_split
+from ml.general_learning import train_relation_outcome
 from ml.interaction_learner import (
     evaluate_interaction_policy,
     recorded_action_outcomes,
@@ -236,6 +237,15 @@ def main(argv: list[str] | None = None) -> int:
         "stopped_early": float(training.stopped_early),
     }
 
+    # General knowledge: learn the whole relation graph, not just the sandboxes.
+    # The model predicts held-out relations from concept vocabulary alone, so the
+    # reported Hit@1 measures real generalisation against the random baseline.
+    relation_model, relation_report = train_relation_outcome(
+        hasher=hasher, save_to=(args.save_dir / "relation_model.npz") if args.save_dir else None
+    )
+    general_knowledge = relation_report.as_dict()
+    _ = relation_model
+
     if args.save_dir:
         args.save_dir.mkdir(parents=True, exist_ok=True)
         save_model(model, args.save_dir / "experience_classifier.npz")
@@ -251,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
                     "interaction_policies": interaction_summary,
                     "model_based": model_based_summary,
                     "supervised": supervised,
+                    "general_knowledge": general_knowledge,
                 },
                 indent=2,
                 ensure_ascii=False,
@@ -281,6 +292,13 @@ def main(argv: list[str] | None = None) -> int:
         f"Supervised classifier: samples={int(supervised['samples'])} "
         f"train_acc={supervised['train_accuracy']:.2f} "
         f"val_acc={supervised['val_accuracy']:.2f} brier={supervised['val_brier']:.3f}"
+    )
+    print(
+        f"General knowledge (link prediction): relations={int(general_knowledge['relations'])} "
+        f"concepts={int(general_knowledge['concepts'])} "
+        f"types={int(general_knowledge['relation_types'])} "
+        f"held-out Hit@1={general_knowledge['hit_at_1']:.2f} "
+        f"(random 0.25) mean-rank={general_knowledge['mean_rank']:.2f}"
     )
     if args.real_reward and interaction_summary:
         diagnostics = reward_model.summary()
