@@ -198,7 +198,7 @@ class _CountingProvider(StaticSearchProvider):
         super().__init__(tuple(results))
         self.calls = 0
 
-    def search(self, query, *, limit=5):
+    def search(self, query, *, limit=5, offset=0, fresh=False):
         self.calls += 1
         return super().search(query, limit=limit)
 
@@ -212,7 +212,7 @@ class _EchoProvider(StaticSearchProvider):
         self._url = url
         self._credibility = credibility
 
-    def search(self, query, *, limit=5):
+    def search(self, query, *, limit=5, offset=0, fresh=False):
         return (
             WebResult(
                 url=self._url,
@@ -379,3 +379,211 @@ def test_interactive_promote_writes_into_the_project_file(tmp_path):
     assert code == 0
     assert promote_path.exists()
     assert any("Promoted" in line for line in out)
+
+
+# --- paging forward through the ranking (choice A) ------------------------
+
+
+class _WindowProvider(StaticSearchProvider):
+    """A provider that honours both ``limit`` and ``offset`` over a fixed list."""
+
+    def __init__(self, results):
+        super().__init__(tuple(results))
+        self.calls: list[tuple[int, int, bool]] = []
+
+    def search(self, query, *, limit=5, offset=0, fresh=False):
+        self.calls.append((limit, offset, fresh))
+        return tuple(self._results[offset : offset + limit])
+
+
+def _ranked_results(count):
+    return [
+        WebResult(
+            url=f"{_TRUSTED_URL}-{index}",
+            title="Permeability",
+            snippet=f"Permeability statement number {index} about reservoir flow.",
+            credibility=0.9,
+        )
+        for index in range(count)
+    ]
+
+
+def _cursor_store():
+    store = DocumentStore()
+    store.add_text(
+        "note:porosity",
+        "Porosity",
+        "Porosity measures void space in reservoir rock; permeability measures flow.",
+        source="notes",
+    )
+    return store
+
+
+def test_cursor_pages_forward_so_repeat_searches_are_different(tmp_path):
+    from core.internet_learner import SearchCursor
+
+    provider = _WindowProvider(_ranked_results(10))
+    cursor = SearchCursor(tmp_path / "cursor.json")
+    learner = build_internet_learner(
+        provider=provider,
+        store=_cursor_store(),
+        permissions=granted_permissions(),
+        approvals=approved_gate(),
+        per_topic=2,
+        cursor=cursor,
+        page_size=4,
+    )
+
+    first = learner.learn_topics(["Permeability"], dry_run=False)
+    second = learner.learn_topics(["Permeability"], dry_run=False)
+
+    first_urls = [url for outcome in first.outcomes for url in outcome.added]
+    second_urls = [url for outcome in second.outcomes for url in outcome.added]
+    assert first_urls == [f"{_TRUSTED_URL}-0", f"{_TRUSTED_URL}-1"]
+    assert second_urls == [f"{_TRUSTED_URL}-6", f"{_TRUSTED_URL}-7"]
+    assert set(first_urls).isdisjoint(second_urls)
+    # The cursor recorded where it stopped and the next call paged forward.
+    assert provider.calls[0][:2] == (6, 0)
+    assert provider.calls[1][:2] == (6, 6)
+
+
+def test_cursor_round_trips_through_the_state_file(tmp_path):
+    from core.internet_learner import SearchCursor
+
+    path = tmp_path / "cursor.json"
+    SearchCursor(path).advance("Permeability", 3)
+
+    reloaded = SearchCursor(path)
+    assert reloaded.offset("Permeability") == 3
+    assert reloaded.offset("something else") == 0
+
+
+def test_dry_run_does_not_advance_the_cursor(tmp_path):
+    from core.internet_learner import SearchCursor
+
+    provider = _WindowProvider(_ranked_results(10))
+    cursor = SearchCursor(tmp_path / "cursor.json")
+    learner = build_internet_learner(
+        provider=provider,
+        store=_cursor_store(),
+        permissions=granted_permissions(),
+        approvals=approved_gate(),
+        per_topic=2,
+        cursor=cursor,
+        page_size=4,
+    )
+
+    learner.learn_topics(["Permeability"], dry_run=True)
+    assert cursor.offset("Permeability") == 0
+    assert provider.calls[0][:2] == (6, 0)
+
+
+# --- recency reaches the Wikipedia provider (choice B) --------------------
+
+
+def test_wikipedia_provider_pages_and_carries_timestamps(monkeypatch):
+    from core.web_source import WikipediaSearchProvider
+
+    captured: dict[str, object] = {}
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "query": {
+                    "search": [
+                        {
+                            "title": "Mud engineer",
+                            "pageid": 1,
+                            "snippet": "mud",
+                            "timestamp": "2026-09-01T00:00:00Z",
+                        }
+                    ]
+                }
+            }
+
+    def _fake_get(url, params=None, headers=None, timeout=None):
+        captured["params"] = params
+        return _Response()
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", _fake_get)
+    results = WikipediaSearchProvider().search("mud engineering", limit=5, offset=5, fresh=True)
+
+    params = captured["params"]
+    assert params["sroffset"] == "5"
+    assert params["srprop"] == "snippet|timestamp"
+    # Wikipedia only sorts by relevance; a recency sort would drop relevance, so
+    # it is never requested.
+    assert "srsort" not in params
+    assert results[0].updated_at == "2026-09-01T00:00:00Z"
+
+
+def test_learner_prefers_recently_updated_results():
+    from core.internet_learner import _by_recency
+
+    old = WebResult(
+        url=f"{_TRUSTED_URL}-old",
+        title="Permeability",
+        snippet="Permeability statement about flow.",
+        credibility=0.9,
+        updated_at="2020-01-01T00:00:00Z",
+    )
+    new = WebResult(
+        url=f"{_TRUSTED_URL}-new",
+        title="Permeability",
+        snippet="Permeability statement about flow.",
+        credibility=0.9,
+        updated_at="2026-01-01T00:00:00Z",
+    )
+    undated = WebResult(
+        url=f"{_TRUSTED_URL}-undated",
+        title="Permeability",
+        snippet="Permeability statement about flow.",
+        credibility=0.9,
+    )
+    ordered = _by_recency((old, undated, new))
+    assert [result.url for result in ordered] == [
+        f"{_TRUSTED_URL}-new",
+        f"{_TRUSTED_URL}-old",
+        f"{_TRUSTED_URL}-undated",
+    ]
+
+
+def test_recent_off_topic_result_does_not_displace_a_relevant_one():
+    from core.web_source import StaticSearchProvider
+
+    relevant = WebResult(
+        url=_TRUSTED_URL,
+        title="Permeability",
+        snippet="Permeability measures how easily fluid flows through the connected pores of rock.",
+        credibility=0.9,
+        updated_at="2019-01-01T00:00:00Z",
+    )
+    recent_off_topic = WebResult(
+        url="https://en.wikipedia.org/?curid=999",
+        title="Spaghetti code",
+        snippet="Spaghetti code is a pejorative phrase for unstructured software.",
+        credibility=0.9,
+        updated_at="2026-10-01T00:00:00Z",
+    )
+
+    class _Mixed(StaticSearchProvider):
+        def search(self, query, *, limit=5, offset=0, fresh=False):
+            return (recent_off_topic, relevant)
+
+    learner = build_internet_learner(
+        provider=_Mixed((recent_off_topic, relevant)),
+        store=_cursor_store(),
+        permissions=granted_permissions(),
+        approvals=approved_gate(),
+        per_topic=1,
+    )
+    report = learner.learn_topics(["Permeability"], dry_run=True)
+    outcome = report.outcomes[0]
+    assert list(outcome.added) == [_TRUSTED_URL]
+    assert any(url == recent_off_topic.url for url, _reason in outcome.skipped)
+

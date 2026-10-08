@@ -107,7 +107,7 @@ def test_provider_failure_is_contained():
     class _Broken:
         name = "broken"
 
-        def search(self, query: str, *, limit: int = 5):
+        def search(self, query: str, *, limit: int = 5, offset: int = 0, fresh: bool = False):
             raise RuntimeError("network down")
 
     policy, approvals = _granted()
@@ -277,13 +277,13 @@ def test_fallback_provider_uses_backup_on_failure_and_on_empty():
     class _Broken:
         name = "broken"
 
-        def search(self, query: str, *, limit: int = 5):
+        def search(self, query: str, *, limit: int = 5, offset: int = 0, fresh: bool = False):
             raise RuntimeError("offline")
 
     class _Empty:
         name = "empty"
 
-        def search(self, query: str, *, limit: int = 5):
+        def search(self, query: str, *, limit: int = 5, offset: int = 0, fresh: bool = False):
             return ()
 
     backup = StaticSearchProvider((_RELATED,))

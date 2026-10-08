@@ -24,6 +24,12 @@ Four rules keep it safe, all inherited rather than reinvented:
   governs every future statement; there is no softer path for later data.
 * **Dry-run by default** -- the learner only reports what it *would* add unless
   the caller asks to persist.
+* **Paging and recency** -- a search provider returns a stable ranking, so an
+  unattended repeat search would return the same head. An attached
+  :class:`SearchCursor` remembers how far each query was consumed and asks the
+  provider for the next slice, while the learner orders each slice's fetch by
+  how recently each article was edited, so repeated learning on one topic keeps
+  finding fresh material.
 
 Topics come from the project's own petroleum corpus (:func:`corpus_topics`), so
 the material learned is relevant to petroleum engineering by construction, not
@@ -47,6 +53,68 @@ from core.acceptance_policy import (
 from core.documents import Document, DocumentStore
 from core.knowledge_update import KnowledgeUpdate, KnowledgeUpdater, UpdateOutcome
 from core.web_source import WebResult, WebSearchService
+
+
+def _by_recency(results):
+    """Order results most-recently-updated first; undated ones keep their rank.
+
+    Wikipedia can only rank by relevance, so preference for fresh material is
+    applied here instead. ``updated_at`` is an ISO-8601 UTC string, so a plain
+    string sort is chronological; results without a timestamp sort last.
+    """
+    return tuple(sorted(results, key=lambda result: result.updated_at or "", reverse=True))
+
+
+class SearchCursor:
+    """Remembers how far each topic's ranked results have been consumed.
+
+    A search provider returns a *stable* ranking, so searching "mud engineering"
+    twice used to return the very same head. This cursor advances a per-query
+    offset each time results are consumed, so a repeated search pages forward to
+    fresh material instead of the same top hits. It is a plain JSON file and is
+    optional: without an attached cursor every search starts at offset 0.
+    """
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        self.path = Path(path) if path is not None else None
+        self._offsets: dict[str, int] = {}
+        self._load()
+
+    def offset(self, key: str) -> int:
+        return self._offsets.get(key, 0)
+
+    def advance(self, key: str, count: int) -> None:
+        if count <= 0:
+            return
+        self._offsets[key] = self._offsets.get(key, 0) + count
+        self._save()
+
+    def reset(self, key: str) -> None:
+        if key in self._offsets:
+            self._offsets.pop(key)
+            self._save()
+
+    def _load(self) -> None:
+        if self.path is None:
+            return
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                if isinstance(value, int) and value >= 0:
+                    self._offsets[str(key)] = value
+
+    def _save(self) -> None:
+        if self.path is None:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            text = json.dumps(self._offsets, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+            self.path.write_text(text, encoding="utf-8")
+        except OSError:
+            pass
 
 
 def _read_learned_file(path: Path) -> list[dict]:
@@ -147,17 +215,25 @@ class InternetLearner:
         min_credibility: float = MIN_CREDIBILITY,
         per_topic: int = 3,
         persist: Callable[[Document], None] | None = None,
+        cursor: "SearchCursor | None" = None,
+        page_size: int = 20,
+        prefer_recent: bool = True,
     ) -> None:
         if not 0.0 <= min_credibility <= 1.0:
             raise ValueError("min_credibility must be between 0 and 1.")
         if per_topic < 1:
             raise ValueError("per_topic must be at least 1.")
+        if page_size < 1:
+            raise ValueError("page_size must be at least 1.")
         self.service = service
         self.updater = updater
         self.trusted_only = trusted_only
         self.min_credibility = min_credibility
         self.per_topic = per_topic
         self.persist = persist
+        self.cursor = cursor
+        self.page_size = page_size
+        self.prefer_recent = prefer_recent
 
     def learn_topics(
         self,
@@ -269,25 +345,42 @@ class InternetLearner:
         self, topic: str, *, updater: KnowledgeUpdater, dry_run: bool, context: str | None = None
     ) -> TopicOutcome:
         query = topic if not context else f"{topic} {context}"
-        search = self.service.search(query, limit=self.per_topic * 3)
+        # (أ+ب) Fetch a whole page and page forward on repeat runs so the same
+        # topic yields fresh material. Wikipedia can only rank by relevance, so
+        # the recency preference (ب) is applied locally, and only among the
+        # results that already pass the source/topic gate -- an off-topic article
+        # being recently edited must never push a relevant one out. The page is
+        # advanced in full (every result was seen), and only when the run really
+        # persists; a dry run leaves the cursor untouched.
+        offset = self.cursor.offset(query) if self.cursor is not None else 0
+        page = max(self.per_topic * 3, self.page_size)
+        search = self.service.search(query, limit=page, offset=offset)
         if not search.allowed:
             return TopicOutcome(topic, query, False, search.reason, (), (), (), dry_run)
-        added: list[str] = []
+        window = search.results
+        candidates: list[WebResult] = []
         skipped: list[tuple[str, str]] = []
-        for result in search.results:
-            if len(added) >= self.per_topic:
-                break
+        for result in window:
             reason = self._rejection(result, topic)
             if reason is not None:
                 skipped.append((result.url, reason))
-                continue
+            else:
+                candidates.append(result)
+        if self.prefer_recent:
+            candidates = list(_by_recency(candidates))
+        added: list[str] = []
+        for result in candidates:
+            if len(added) >= self.per_topic:
+                break
             outcome = self._apply(topic, result, updater=updater, dry_run=dry_run)
             if outcome.action in {"added", "reinforced"}:
                 added.append(result.url)
             else:
                 skipped.append((result.url, outcome.reason or outcome.action))
+        if not dry_run and self.cursor is not None:
+            self.cursor.advance(query, len(window))
         return TopicOutcome(
-            topic, query, True, search.reason, search.results, tuple(added), tuple(skipped), dry_run
+            topic, query, True, search.reason, window, tuple(added), tuple(skipped), dry_run
         )
 
     def _rejection(self, result: WebResult, topic: str) -> str | None:
@@ -329,12 +422,18 @@ def build_internet_learner(
     trusted_only: bool = True,
     min_credibility: float = 0.6,
     per_topic: int = 3,
+    cursor: "SearchCursor | None" = None,
+    page_size: int = 20,
+    prefer_recent: bool = True,
 ) -> InternetLearner:
     """Assemble the learner over the project's own corpus and governance.
 
     ``store`` is the shared document store (the project's data repository); the
     same ``KnowledgeUpdater`` gate the web verifier uses is applied here, so a
     statement enters the store only when it connects to existing knowledge.
+    Pass ``cursor`` to page forward through a query's ranking on repeat runs,
+    and ``prefer_recent=False`` to keep the provider's relevance order instead of
+    preferring the most recently edited results.
     """
     service = WebSearchService(provider, permissions=permissions, approvals=approvals, audit=audit)
     updater = KnowledgeUpdater(store)
@@ -347,12 +446,16 @@ def build_internet_learner(
         min_credibility=min_credibility,
         per_topic=per_topic,
         persist=persist,
+        cursor=cursor,
+        page_size=page_size,
+        prefer_recent=prefer_recent,
     )
 
 
 __all__ = [
     "InternetLearner",
     "LearnerReport",
+    "SearchCursor",
     "TopicOutcome",
     "build_internet_learner",
     "clean_statement",

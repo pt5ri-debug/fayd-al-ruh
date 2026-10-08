@@ -54,6 +54,7 @@ class WebResult:
     snippet: str
     credibility: float = 0.5
     provider: str = "static"
+    updated_at: str | None = None
 
     def __post_init__(self) -> None:
         if not self.url.strip():
@@ -69,11 +70,19 @@ class WebResult:
 
 
 class WebSearchProvider(Protocol):
-    """The contract every search backend satisfies."""
+    """The contract every search backend satisfies.
+
+    ``offset`` asks for a later slice of the same query's ranked results so
+    repeated searches can fetch fresh material instead of the same top hits;
+    backends that cannot page may ignore it, but the governed callers always
+    pass it so a capable provider can use it.
+    """
 
     name: str
 
-    def search(self, query: str, *, limit: int = 5) -> tuple[WebResult, ...]: ...
+    def search(
+        self, query: str, *, limit: int = 5, offset: int = 0, fresh: bool = False
+    ) -> tuple[WebResult, ...]: ...
 
 
 class StaticSearchProvider:
@@ -84,7 +93,9 @@ class StaticSearchProvider:
     def __init__(self, results: tuple[WebResult, ...] = ()) -> None:
         self._results = tuple(results)
 
-    def search(self, query: str, *, limit: int = 5) -> tuple[WebResult, ...]:
+    def search(
+        self, query: str, *, limit: int = 5, offset: int = 0, fresh: bool = False
+    ) -> tuple[WebResult, ...]:
         if not query.strip():
             raise ValueError("Search query cannot be empty.")
         from core.rag import _query_terms
@@ -96,7 +107,10 @@ class StaticSearchProvider:
             if overlap:
                 scored.append((overlap, result))
         scored.sort(key=lambda item: (-item[0], item[1].url))
-        return tuple(result for _score, result in scored[:limit])
+        ranked = [result for _score, result in scored]
+        # The offline corpus is finite: ``offset`` still walks it, so a caller
+        # that pages forward gets the next slice instead of the same head.
+        return tuple(ranked[offset : offset + limit])
 
 
 class HttpSearchProvider:
@@ -122,7 +136,9 @@ class HttpSearchProvider:
         self.api_key = api_key
         self.timeout = timeout
 
-    def search(self, query: str, *, limit: int = 5) -> tuple[WebResult, ...]:
+    def search(
+        self, query: str, *, limit: int = 5, offset: int = 0, fresh: bool = False
+    ) -> tuple[WebResult, ...]:
         if not query.strip():
             raise ValueError("Search query cannot be empty.")
         import requests
@@ -130,9 +146,12 @@ class HttpSearchProvider:
         headers = {"Accept": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        params = {"q": query, "limit": str(limit), "offset": str(offset)}
+        if fresh:
+            params["sort"] = "newest"
         response = requests.get(
             self.endpoint,
-            params={"q": query, "limit": str(limit)},
+            params=params,
             headers=headers,
             timeout=self.timeout,
         )
@@ -166,6 +185,11 @@ class WikipediaSearchProvider:
     the box. Any network failure raises and is contained by
     :class:`WebSearchService`, which lets the caller fall back to an offline
     provider.
+
+    Wikipedia ranks results by relevance and offers no way to mix that with a
+    recency sort, so ``fresh`` does not reorder here; the caller can still prefer
+    recent articles using each result's ``updated_at``. ``offset`` pages forward
+    through the relevance ranking.
     """
 
     name = "wikipedia"
@@ -176,20 +200,29 @@ class WikipediaSearchProvider:
     def __init__(self, *, timeout: float = 15.0) -> None:
         self.timeout = timeout
 
-    def search(self, query: str, *, limit: int = 5) -> tuple[WebResult, ...]:
+    def search(
+        self, query: str, *, limit: int = 5, offset: int = 0, fresh: bool = False
+    ) -> tuple[WebResult, ...]:
         if not query.strip():
             raise ValueError("Search query cannot be empty.")
         import requests
 
+        params = {
+            "action": "query",
+            "list": "search",
+            "srsearch": query,
+            "format": "json",
+            "srlimit": str(limit),
+            # Ask for both the snippet (what the learner stores) and the edit
+            # timestamp (what it prefers freshness by); srprop replaces the
+            # default properties, so snippet must be named explicitly.
+            "srprop": "snippet|timestamp",
+        }
+        if offset:
+            params["sroffset"] = str(offset)
         response = requests.get(
             self._API,
-            params={
-                "action": "query",
-                "list": "search",
-                "srsearch": query,
-                "format": "json",
-                "srlimit": str(limit),
-            },
+            params=params,
             headers={"Accept": "application/json", "User-Agent": self._USER_AGENT},
             timeout=self.timeout,
         )
@@ -209,6 +242,7 @@ class WikipediaSearchProvider:
                 if page_id is not None
                 else f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
             )
+            timestamp = str(item.get("timestamp", "")).strip() or None
             results.append(
                 WebResult(
                     url=url,
@@ -216,6 +250,7 @@ class WikipediaSearchProvider:
                     snippet=_strip_html(str(item.get("snippet", ""))),
                     credibility=estimate_credibility(url),
                     provider=self.name,
+                    updated_at=timestamp,
                 )
             )
         return tuple(results)
@@ -248,14 +283,16 @@ class FallbackSearchProvider:
         self.backup = backup
         self.name = f"{primary.name}+{backup.name}"
 
-    def search(self, query: str, *, limit: int = 5) -> tuple[WebResult, ...]:
+    def search(
+        self, query: str, *, limit: int = 5, offset: int = 0, fresh: bool = False
+    ) -> tuple[WebResult, ...]:
         try:
-            results = self.primary.search(query, limit=limit)
+            results = self.primary.search(query, limit=limit, offset=offset, fresh=fresh)
         except Exception:
             results = ()
         if results:
             return results
-        return self.backup.search(query, limit=limit)
+        return self.backup.search(query, limit=limit, offset=offset, fresh=fresh)
 
 
 @dataclass(frozen=True)
@@ -318,7 +355,9 @@ class WebSearchService:
             return False, approval.reason, approval.approval_id
         return True, "Search allowed.", approval.approval_id
 
-    def search(self, query: str, *, limit: int = 5) -> SearchOutcome:
+    def search(
+        self, query: str, *, limit: int = 5, offset: int = 0, fresh: bool = False
+    ) -> SearchOutcome:
         if not query.strip():
             raise ValueError("Search query cannot be empty.")
         if limit < 1:
@@ -329,13 +368,13 @@ class WebSearchService:
         self.audit.record_decision(
             PermissionDecision(decision.capability, decision.target, allowed, reason),
             actor=self.actor,
-            metadata={"query": query, "approval_id": approval_id or ""},
+            metadata={"query": query, "approval_id": approval_id or "", "offset": offset},
         )
         if not allowed:
             return SearchOutcome(query, False, reason, approval_id=approval_id)
 
         try:
-            results = self.provider.search(query, limit=limit)
+            results = self.provider.search(query, limit=limit, offset=offset, fresh=fresh)
         except Exception as error:  # a provider must never crash the caller
             message = f"Search provider failed: {error}"
             self.audit.append(

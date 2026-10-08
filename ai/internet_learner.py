@@ -243,7 +243,7 @@ def _branch_segments(branch):
 
 
 def main(argv: list[str] | None = None) -> int:
-    from core.internet_learner import build_internet_learner, corpus_topics
+    from core.internet_learner import SearchCursor, build_internet_learner, corpus_topics
 
     parser = argparse.ArgumentParser(
         description="Learn petroleum knowledge from trusted internet sites, into the data store."
@@ -286,6 +286,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="with --interactive, save approved statements into knowledge/learned_petroleum.json so they ship with the project",
     )
+    parser.add_argument(
+        "--reset-cursor",
+        action="store_true",
+        help="forget how far each topic was paged, so the next search starts from the top again",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -297,6 +302,15 @@ def main(argv: list[str] | None = None) -> int:
 
     limit = None if args.max_topics == 0 else max(0, args.max_topics)
     documents = _documents()
+    from core.paths import data_dir
+
+    cursor = SearchCursor(data_dir() / "learned_cursor.json")
+    if args.reset_cursor:
+        cursor = SearchCursor(None)
+        try:
+            (data_dir() / "learned_cursor.json").unlink(missing_ok=True)
+        except OSError:
+            pass
     learner = build_internet_learner(
         provider=_provider(args.endpoint),
         store=documents,
@@ -306,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
         trusted_only=not args.allow_untrusted,
         min_credibility=args.min_credibility,
         per_topic=args.per_topic,
+        cursor=cursor,
     )
     if args.interactive:
         from core.learned_knowledge import learned_path
