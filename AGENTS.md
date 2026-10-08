@@ -50,6 +50,11 @@ Arabic is kept as secondary aliases where useful.
   citations. `core/assistant.py` — `GroundedAssistant` / `build_default_assistant`;
   answers with citations, extractive fallback with no model, and a groundedness gate
   that rejects ungrounded model output. CLI: `python -m ai.ask` / `python -m cli ask`.
+- `core/composition.py` — the deterministic composer: dependency-free rules that
+  render evidence (retrieved passages, web sources, causal/reasoning/decision
+  traces) into clean attributed prose. Shared by the assistant's extractive
+  fallback, the web verifier's answer, and the causal/reasoning/decision
+  explainers, so surface wording lives in one auditable place.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. CLI:
   `python -m ai.voice` / `python -m cli voice`.

@@ -422,11 +422,19 @@ components instead of duplicating them:
 - `core/assistant.py` — `GroundedAssistant`: retrieves, then answers, then
   attaches citations; if no language model is available it answers
   **extractively** from the passages.
+- `core/composition.py` — the deterministic **composer**: a rule-based
+  verbaliser that turns structured evidence (retrieved passages, web sources,
+  causal/reasoning/decision traces) into clean, attributed English prose. It is
+  the dry, auditable counterpart to free generation: every word is placed by a
+  rule and every claim keeps its citation. The assistant's extractive fallback,
+  the web verifier's answer, and the causal/reasoning/decision explainers all
+  compose through it, so the project speaks with one voice in pure Python.
 
 Two deliberate guarantees: the language model receives only a rendered prompt (it
 never touches the knowledge graph or runs tools), and if no model is available
 the assistant stays useful with no external service. If the model's answer looks
-ungrounded in the passages, it is rejected and replaced by the extractive answer.
+ungrounded in the passages, it is rejected and replaced by the composed,
+extractive answer.
 
 ```bash
 python -m cli ask "What is the relationship between porosity and permeability?"

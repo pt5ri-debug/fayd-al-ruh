@@ -285,15 +285,18 @@ def _confidence(passages: list[RetrievedPassage]) -> float:
 
 
 def _extractive_answer(question: str, passages: list[RetrievedPassage]) -> str:
-    """A citation-only answer used when no model is available."""
-    if not passages:
-        return f"Not enough information to answer: {question}"
-    lines = [f'According to the available sources for "{question}":']
-    for passage in passages:
-        first_lines = [line for line in passage.text.splitlines() if line.strip()][:3]
-        lines.append(f"- {passage.title}: " + " ".join(first_lines))
-    lines.append("Sources: " + "; ".join(passage.citation for passage in passages))
-    return "\n".join(lines)
+    """A citation-only answer used when no model is available.
+
+    Composed by :mod:`core.composition` so the fallback reads as connected prose
+    rather than a raw dump, while keeping every claim's citation.
+    """
+    from core.composition import Source, grounded_answer
+
+    sources = [
+        Source(title=passage.title, text=passage.text, label=passage.citation)
+        for passage in passages
+    ]
+    return grounded_answer(question, sources)
 
 
 def build_default_assistant(

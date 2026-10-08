@@ -308,15 +308,21 @@ def _compose_answer(
     sources: tuple[SourceAssessment, ...],
     internal: tuple[RetrievedPassage, ...],
 ) -> str:
-    if not sources:
-        return f"No web source answered: {question}"
-    lines = [f'Web answer for "{question}":']
-    for source in sources[:3]:
-        text = " ".join(source.result.snippet.split())
-        lines.append(f"- {source.result.title} ({source.result.domain}): {text}")
-    if internal:
-        lines.append("Internal knowledge consulted: " + "; ".join(passage.citation for passage in internal[:2]))
-    return "\n".join(lines)
+    from core.composition import Source, web_answer
+
+    rendered = [
+        Source(
+            title=source.result.title,
+            text=source.result.snippet,
+            label=source.result.domain or source.result.url,
+        )
+        for source in sources
+    ]
+    return web_answer(
+        question,
+        rendered,
+        internal=tuple(passage.citation for passage in internal),
+    )
 
 
 def _statement(question: str, result: WebResult) -> str:
