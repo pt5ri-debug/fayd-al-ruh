@@ -110,6 +110,11 @@ def run_learn(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.learn_demo", argv)
 
 
+def run_insight(argv: Sequence[str] = ()) -> int:
+    """Ask the AI what it can do and what it has learned (report or question)."""
+    return _run_module("ai.insight", argv)
+
+
 def run_internet_learner(argv: Sequence[str] = ()) -> int:
     """Learn petroleum knowledge from trusted internet sites into the data store."""
     return _run_module("ai.internet_learner", argv)
@@ -194,6 +199,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Jarvis mode (listen, act, speak)", run_jarvis, ()),
     ("Continuous learning and regression gate", run_learn, ()),
+    ("Ask the AI: what can it do and what has it learned", run_insight, ()),
     (
         "Continuous Internet Learner",
         run_internet_learner,
@@ -291,6 +297,7 @@ __all__ = [
     "run_agent",
     "run_jarvis",
     "run_learn",
+    "run_insight",
     "run_internet_learner",
     "run_web",
     "run_demo",
