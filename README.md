@@ -801,6 +801,40 @@ is stored in the project. With no endpoint it uses the keyless Wikipedia API, an
 drops back to a small offline corpus when there is no network — so the whole path
 works on a fresh clone.
 
+## The bulk knowledge base (100 MB+)
+
+The curated seeds above are deliberately small. For breadth across *every*
+field, the project can build a large reference corpus from Wikipedia (keyless)
+and retrieve it as additional, citation-carrying evidence:
+
+```bash
+python -m cli knowledge build --target-mb 100   # fetch, chunk, store (needs network)
+python -m cli knowledge stats                   # show the real size in MB
+python -m cli knowledge search "hydraulic fracturing"
+```
+
+- `core/knowledge_base.py`: the fetcher (`WikipediaFetcher`, batched MediaWiki
+  API), the chunker, and the sharded JSONL store. `build_knowledge_base` is
+  **resumable** through a `checkpoint.json`, so a long build can be stopped and
+  restarted, and stops exactly when the byte target is reached.
+- `core/rag.py`: `BulkCorpusRetriever` streams the store per query and keeps only
+  the top matches, so a 100 MB+ base never has to fit in memory at once. It is
+  wired into `RagRetriever` as an optional `bulk` source and used by
+  `build_default_assistant(bulk=True)`.
+- **Where it lives:** under the writable data directory (`data/knowledge_base` by
+  default; `FAYD_DATA_DIR` overrides). It is **git-ignored** and built on demand,
+  so nothing large is ever committed. Pass `--store-dir` to place it elsewhere.
+- **Separate from governed learning:** this text is reference material only. It
+  is retrieved and cited (every chunk carries its source URL and the CC BY-SA
+  licence), and it never feeds the acceptance policy or the belief layers. The
+  governed internet learner remains the only path that can change internal
+  knowledge.
+
+> Reality check: free, specialised petroleum text is scarce. Reaching 100 MB
+> therefore draws on broad fields (chemistry, physics, geology, engineering,
+> mathematics, and more), which is why the default category set is wide. The
+> target is a floor, not a guarantee, and `stats` always reports the true size.
+
 ## Multimodal perception (optional)
 
 Perception is an optional add-on, not a requirement: the core and the assistant
@@ -974,7 +1008,7 @@ of the application and the user.
 
 ## Status
 
-- Version: 2.1.0
+- Version: 2.2.0
 - Python: 3.12 or newer
 - License: MIT — see `LICENSE.txt`
 - The release is trained and ready: all outputs are inside `ml/artifacts/` and

@@ -120,6 +120,11 @@ def run_web(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.web_verify", argv)
 
 
+def run_knowledge(argv: Sequence[str] = ()) -> int:
+    """Build, inspect, or search the bulk knowledge base."""
+    return _run_module("cli.knowledge", argv)
+
+
 def run_curriculum(argv: Sequence[str] = ()) -> int:
     """Show the seeded petroleum-engineering curriculum and its coverage."""
     if argv:
@@ -195,6 +200,8 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         ("--interactive", "--approve", "--promote"),
     ),
     ("Ask the web and verify the answer", run_web, ("--approve",)),
+    ("Build the bulk knowledge base (100 MB)", run_knowledge, ("build", "--target-mb", "100")),
+    ("Show the bulk knowledge base status", run_knowledge, ("stats",)),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--episodes", "60")),
     ("Train the language model", run_llm, ("--steps", "200")),

@@ -20,6 +20,11 @@ documents/
 # How far each learning query has been paged; advances on every write run.
 learned_cursor.json
 
+# The built bulk knowledge base (large; rebuild with `python -m cli knowledge
+# build`). Lives under the data directory, but in source mode that is the repo
+# root, so ignore it explicitly too.
+knowledge_base/
+
 # Test / coverage artifacts
 .pytest-tmp/
 .pytest_cache/
