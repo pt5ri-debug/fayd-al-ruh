@@ -17,14 +17,14 @@ def test_run_choice_rejects_out_of_range_and_non_numeric(capsys) -> None:
 
 
 def test_assistant_commands_are_dispatched() -> None:
-    """`python -m cli ask|voice|agent|learn` must reach the assistant modules.
+    """`python -m cli voice|agent|jarvis|learn` must reach the assistant modules.
 
     These were reachable from the interactive menu but not from the command line;
     a regression here would silently fall through to the usage text.
     """
     from cli import __main__ as cli_entry
 
-    for command in ("ask", "voice", "agent", "learn"):
+    for command in ("voice", "agent", "jarvis", "learn"):
         assert command in cli_entry._COMMANDS, f"{command} is not wired into the CLI"
 
 
@@ -33,7 +33,7 @@ def test_menu_entries_are_all_dispatchable() -> None:
 
     for label, action, _argv in menu.MENU:
         assert callable(action), label
-    assert {"ask", "voice", "agent", "learn"} <= set(cli_entry._COMMANDS)
+    assert {"voice", "agent", "jarvis", "learn"} <= set(cli_entry._COMMANDS)
 
 
 def test_run_choice_quit_codes() -> None:

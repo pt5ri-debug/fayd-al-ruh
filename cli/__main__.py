@@ -2,7 +2,6 @@
 
 Usage:
     python -m cli                     # interactive numbered menu
-    python -m cli ask "your question"   # grounded assistant (cited answers)
     python -m cli voice "your question" # one voice turn
     python -m cli agent               # tool-agent demo in the safety sandbox
     python -m cli jarvis              # Jarvis mode: listen, understand, act, speak
@@ -30,7 +29,6 @@ from cli.menu import (
     menu_loop,
     missing_dependency_message,
     run_agent,
-    run_ask,
     run_curriculum,
     run_demo,
     run_evaluation,
@@ -46,7 +44,6 @@ from cli.menu import (
 )
 
 _COMMANDS = {
-    "ask": run_ask,
     "voice": run_voice,
     "agent": run_agent,
     "jarvis": run_jarvis,
