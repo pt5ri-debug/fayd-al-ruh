@@ -586,6 +586,23 @@ class KnowledgeBaseStore:
                     if line:
                         yield KnowledgeChunk.from_json(line)
 
+    def read_chunks(self, chunk_ids: Iterable[str]) -> dict[str, KnowledgeChunk]:
+        """Read specific chunks by id, scanning shards once (used by the index).
+
+        A single full pass is cheaper than open-seek per id, and it keeps memory
+        bounded: only the requested chunks are returned.
+        """
+        wanted = set(chunk_ids)
+        if not wanted:
+            return {}
+        found: dict[str, KnowledgeChunk] = {}
+        for chunk in self.iter_chunks():
+            if chunk.chunk_id in wanted:
+                found[chunk.chunk_id] = chunk
+                if len(found) == len(wanted):
+                    break
+        return found
+
     def iter_documents(self, *, limit: int | None = None) -> Iterator[Document]:
         for count, chunk in enumerate(self.iter_chunks()):
             if limit is not None and count >= limit:

@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from core.assistant import build_default_assistant, _WEAK_EVIDENCE
+from core.assistant import _WEAK_EVIDENCE, build_default_assistant, bulk_knowledge_available
 from core.command_router import NaturalLanguageRouter
 from core.continuous_learning import ContinuousLearner
 from core.conversation import ConversationMemory
@@ -86,6 +86,7 @@ def _build_mode(args: argparse.Namespace) -> JarvisMode:
         web_enabled=not args.no_web,
         web_threshold=args.web_threshold if args.web_threshold is not None else _WEAK_EVIDENCE,
         on_learn=documents.save,
+        bulk=bulk_knowledge_available(),
     )
     learner = ContinuousLearner(KnowledgeUpdater(documents))
     router = NaturalLanguageRouter(sandbox)

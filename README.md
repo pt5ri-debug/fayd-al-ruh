@@ -809,6 +809,7 @@ and retrieve it as additional, citation-carrying evidence:
 
 ```bash
 python -m cli knowledge build --target-mb 100   # fetch, chunk, store (needs network)
+python -m cli knowledge build-index             # fast full-text index (one-off, ~5 s)
 python -m cli knowledge stats                   # show the real size in MB
 python -m cli knowledge search "hydraulic fracturing"
 ```
@@ -823,10 +824,18 @@ python -m cli knowledge search "hydraulic fracturing"
   off on HTTP 429/503.
 - **Verified:** a default build reaches **100.28 MB** (81,061 chunks, 11,869
   articles, 545 shards) across 40+ fields, well past the 100 MB floor.
-- `core/rag.py`: `BulkCorpusRetriever` streams the store per query and keeps only
-  the top matches, so a 100 MB+ base never has to fit in memory at once. It is
-  wired into `RagRetriever` as an optional `bulk` source and used by
-  `build_default_assistant(bulk=True)`.
+- `core/knowledge_index.py`: a **SQLite FTS5** full-text index (standard library,
+  no new dependency) built once beside the shards. `build-index` indexes 81k
+  chunks in ~5 s, after which a query returns BM25-ranked chunk ids in
+  milliseconds. Without the index, `BulkCorpusRetriever` falls back to a
+  streaming scan; with it, an interactive turn never stalls on the corpus.
+- `core/rag.py`: `BulkCorpusRetriever` keeps only the top matches, so a 100 MB+
+  base never has to fit in memory at once. It serves queries from the FTS5 index
+  when present and streams otherwise. It is wired into `RagRetriever` as an
+  optional `bulk` source and used by `build_default_assistant(bulk=True)`.
+  **Voice and Jarvis enable it automatically once the index exists**
+  (`bulk_knowledge_available()`), so a keyless 100 MB+ base widens every
+  interactive answer without a configuration step.
 - **Where it lives:** under the writable data directory (`data/knowledge_base` by
   default; `FAYD_DATA_DIR` overrides). It is **git-ignored** and built on demand,
   so nothing large is ever committed. Pass `--store-dir` to place it elsewhere.

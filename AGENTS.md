@@ -109,15 +109,24 @@ Arabic is kept as secondary aliases where useful.
   `MultimodalAssistant` that grounds an image description in the RAG store. A real
   encoder can implement the `VisionEncoder` protocol without touching the assistant.
 - `core/knowledge_base.py` — the **bulk knowledge base**: a keyless
-  `WikipediaFetcher` (batched MediaWiki API), `chunk_text`, and a sharded JSONL
-  `KnowledgeBaseStore`. `build_knowledge_base(store_dir, target_mb=...)` fetches,
-  chunks, and stores until the byte target, resumably via `checkpoint.json`.
-  Lives under the data directory (`data/knowledge_base`, git-ignored), built on
-  demand — never committed. CLI: `python -m cli knowledge build|stats|search`
-  (`cli/knowledge.py`). `core/rag.py`'s `BulkCorpusRetriever` streams the store
-  per query (bounded memory) and is wired into `RagRetriever(bulk=...)` and
-  `build_default_assistant(bulk=True)`. It is *reference material only*: never fed
-  to the acceptance policy or belief layers.
+  `WikipediaFetcher` (batched MediaWiki API, `Retry-After`-aware), `chunk_text`,
+  and a sharded JSONL `KnowledgeBaseStore`. `build_knowledge_base(store_dir,
+  target_mb=...)` walks seed categories **recursively through subcategories**
+  (`depth=2`), de-dupes titles, and stores until the byte target, resumably via
+  `checkpoint.json`. Lives under the data directory (`data/knowledge_base`,
+  git-ignored), built on demand — never committed. CLI:
+  `python -m cli knowledge build|build-index|stats|search` (`cli/knowledge.py`).
+- `core/knowledge_index.py` — a SQLite **FTS5** index (stdlib, no new dependency)
+  over the shards, built once with `build-index` (~5 s for 81k chunks). Turns a
+  query from a ~35 s streaming scan into milliseconds. `KnowledgeTextIndex` owns
+  its `KnowledgeBaseStore` (`read_chunks` fetches only the winning chunks);
+  contentless FTS keeps the index ~60 MB without duplicating the text.
+- `core/rag.py`'s `BulkCorpusRetriever` serves queries from that index when
+  present and streams otherwise (bounded memory either way); wired into
+  `RagRetriever(bulk=...)` and `build_default_assistant(bulk=True)`. Voice and
+  Jarvis call `bulk_knowledge_available()` and enable it automatically once the
+  index exists. It is *reference material only*: never fed to the acceptance
+  policy or belief layers.
 - `core/version.py` is the single source of the version string.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.

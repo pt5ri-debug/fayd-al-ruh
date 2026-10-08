@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from typing import Any
 
 from core.documents import Document, DocumentStore
 from core.memory import CognitiveMemory
@@ -110,15 +111,36 @@ class BulkCorpusRetriever:
         source: Callable[[], Iterable[Document]] | Iterable[Document],
         *,
         dimensions: int = 128,
+        index: Any | None = None,
     ) -> None:
         self._source = source if callable(source) else (lambda: iter(source))
         self.dimensions = dimensions
+        # ``index`` is a KnowledgeTextIndex (or any object with ``exists`` and
+        # ``search(query, limit=...) -> [(score, chunk)]``). When present, a
+        # query is served from the FTS5 index in milliseconds instead of
+        # re-tokenizing the whole corpus.
+        self.index = index
 
     def retrieve(self, query: str, *, limit: int = 4) -> list[RetrievedPassage]:
         if not query.strip():
             raise ValueError("Retrieval query cannot be empty.")
         if limit < 1:
             raise ValueError("Retrieval limit must be at least 1.")
+
+        if self.index is not None and self.index.exists():
+            passages = [
+                RetrievedPassage(
+                    doc_id=chunk.chunk_id,
+                    title=chunk.title,
+                    text=chunk.text,
+                    source=chunk.source,
+                    score=score,
+                    signal="lexical",
+                )
+                for score, chunk in self.index.search(query, limit=limit)
+            ]
+            if passages:
+                return passages
 
         query_terms = _query_terms(query)
         query_vector = hashed_embedding(query, self.dimensions)

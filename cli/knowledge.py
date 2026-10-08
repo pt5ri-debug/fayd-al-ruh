@@ -25,6 +25,7 @@ from core.knowledge_base import (
     default_knowledge_base_dir,
     iter_local_documents,
 )
+from core.knowledge_index import KnowledgeTextIndex, build_index
 from core.rag import BulkCorpusRetriever
 
 
@@ -59,6 +60,10 @@ def _build_parser() -> argparse.ArgumentParser:
     build.add_argument("--subcat-limit", type=int, default=DEFAULT_SUBCAT_LIMIT)
 
     sub.add_parser("stats", help="Show the store size and chunk count.")
+    sub.add_parser(
+        "build-index",
+        help="Build the fast full-text index (run after `build`).",
+    )
 
     search = sub.add_parser("search", help="Search a built store (offline).")
     search.add_argument("query")
@@ -104,7 +109,8 @@ def run_build(args: argparse.Namespace) -> int:
 
 
 def run_stats(args: argparse.Namespace) -> int:
-    store = KnowledgeBaseStore(_resolve_dir(args.store_dir))
+    store_dir = _resolve_dir(args.store_dir)
+    store = KnowledgeBaseStore(store_dir)
     stats = store.stats()
     print(f"Knowledge base : {stats['path']}")
     print(f"Size           : {stats['size_mb']:.2f} MB ({stats['size_bytes']} bytes)")
@@ -113,6 +119,22 @@ def run_stats(args: argparse.Namespace) -> int:
     print(f"Articles       : {stats['articles']}")
     print(f"Target         : {stats['target_mb']:.0f} MB")
     print(f"Complete       : {stats['complete']}")
+    index_stats = KnowledgeTextIndex(store_dir).stats()
+    if index_stats["present"]:
+        print(f"Index          : {index_stats['size_mb']:.2f} MB ({index_stats['chunks']} entries)")
+    else:
+        print("Index          : absent (run `python -m cli knowledge build-index`)")
+    return 0
+
+
+def run_build_index(args: argparse.Namespace) -> int:
+    store_dir = _resolve_dir(args.store_dir)
+    if not KnowledgeBaseStore(store_dir).shard_paths():
+        print(f"No knowledge base at {store_dir}. Build it with `python -m cli knowledge build`.")
+        return 1
+    print(f"Building text index in {store_dir}")
+    summary = build_index(store_dir, progress=lambda message: print(message, flush=True))
+    print(f"Done: indexed {summary['indexed']} chunks ({summary['size_mb']:.2f} MB)")
     return 0
 
 
@@ -121,7 +143,11 @@ def run_search(args: argparse.Namespace) -> int:
     if not KnowledgeBaseStore(store_dir).shard_paths():
         print(f"No knowledge base at {store_dir}. Build it with `python -m cli knowledge build`.")
         return 1
-    retriever = BulkCorpusRetriever(lambda: iter_local_documents(store_dir))
+    index = KnowledgeTextIndex(store_dir)
+    retriever = BulkCorpusRetriever(
+        lambda: iter_local_documents(store_dir),
+        index=index if index.exists() else None,
+    )
     passages = retriever.retrieve(args.query, limit=args.limit)
     if not passages:
         print("No match.")
@@ -138,6 +164,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_build(args)
     if args.command == "stats":
         return run_stats(args)
+    if args.command == "build-index":
+        return run_build_index(args)
     if args.command == "search":
         return run_search(args)
     return 1

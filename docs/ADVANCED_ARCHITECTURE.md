@@ -393,6 +393,27 @@ seed_petroleum_corpus(controller.ontology)          # idempotent
 corpus_coverage_score(controller.ontology)          # 1.0
 ```
 
+### The bulk reference layer (100 MB+)
+
+The 48-entry corpus above is curated and small. For breadth across *every* field,
+`core/knowledge_base.py` builds a large reference corpus from Wikipedia (keyless,
+CC BY-SA) on demand — a default build reaches **100.28 MB** (81,061 chunks, 11,869
+articles) across 40+ fields, stored as sharded JSONL under a git-ignored data
+directory. It walks each seed category recursively through its subcategories
+(most content lives there) and is resumable.
+
+Because a linear scan over ~80k chunks costs ~35 s per query, `core/knowledge_index.py`
+builds a SQLite **FTS5** index (standard library) once with
+`python -m cli knowledge build-index`; queries then return BM25-ranked chunks in
+milliseconds. `BulkCorpusRetriever` serves from the index when present and streams
+otherwise, so the corpus is never held in memory whole in either direction.
+
+The layer is **separate from governed learning**: it is retrieved and cited (every
+chunk carries its source URL and licence), and it is never fed to the acceptance
+policy or the belief layers. `build_default_assistant(bulk=True)` merges it as an
+optional evidence source that can only *add* grounded passages; voice and Jarvis
+enable it automatically once the index exists.
+
 ### Wiring a real language model to actions
 
 `core/model_advisor.py` (`ModelActionAdvisor`) wraps any `CallableModel` as a
