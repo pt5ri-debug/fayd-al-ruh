@@ -630,6 +630,22 @@ python -m cli internet-learner --approve --write --max-topics 10 --per-topic 2
 python -m cli internet-learner --topics "Porosity" "Permeability" --approve
 ```
 
+### Fresh results on repeat searches
+
+A search provider returns a *stable, relevance-ranked* list, so searching the
+same topic twice returns the same top hits. The learner keeps a small cursor file
+(`data/learned_cursor.json`) recording how far each query has been consumed;
+because Wikipedia can only rank by relevance, the learner also prefers the most
+recently edited article among the results that already pass the trusted-source
+and topic-relevance gates. Each run therefore pages forward and finds new
+material instead of repeating the same statements. A dry run never moves the
+cursor, so previewing does not consume the window.
+
+```bash
+python -m cli internet-learner --approve --write        # continues where the last run stopped
+python -m cli internet-learner --approve --write --reset-cursor   # start from the top again
+```
+
 ### Choosing what to learn, step by step
 
 Menu entry (5) opens the **interactive** mode, which walks the project's own

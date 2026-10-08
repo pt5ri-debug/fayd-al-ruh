@@ -81,7 +81,7 @@ def test_strong_internal_evidence_does_not_search():
     provider_calls: list[str] = []
 
     class _RecordingProvider(StaticSearchProvider):
-        def search(self, query, *, limit=5):  # type: ignore[override]
+        def search(self, query, *, limit=5, offset=0, fresh=False):  # type: ignore[override]
             provider_calls.append(query)
             return super().search(query, limit=limit)
 

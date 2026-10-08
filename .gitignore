@@ -17,6 +17,9 @@ data/
 # state, not curated release content, so it is never committed.
 documents/
 
+# How far each learning query has been paged; advances on every write run.
+learned_cursor.json
+
 # Test / coverage artifacts
 .pytest-tmp/
 .pytest_cache/
