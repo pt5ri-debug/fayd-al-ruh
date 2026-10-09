@@ -685,6 +685,44 @@ The model mouth is wired only in `ai/chat.py` (`ai/mind.py` holds the logic) and
 never touches `ai/jarvis.py`, `core/jarvis.py`, or the session builder, so Jarvis
 mode is unaffected.
 
+## Graphical interface (ChatGPT-style)
+
+A desktop window that looks and reads like ChatGPT ships **next to** the command
+line, not instead of it. The CLI is untouched: `python -m cli` still opens the
+numbered menu, and every `python -m cli <command>` behaves exactly as before.
+
+```bash
+python -m cli gui                       # from the menu/CLI command
+python -m gui                           # the same window, directly
+python -m cli gui --mind                # start answering from the trained model
+python -m cli gui --session demo        # resume a saved conversation
+python -m cli gui --no-web              # answer only from internal knowledge
+```
+
+The numbered menu shows it as the first entry, **“Open the graphical
+interface (ChatGPT-style)”**; choosing it launches the window.
+
+The window is a thin shell over the same code the CLI already runs:
+
+- It builds the **same text-only Jarvis session** `python -m cli chat` builds
+  (`ai.jarvis.build_session(..., text_only=True)`), and reuses `ai.chat`'s
+  `ModelSwitcher` to swap the answering mouth. A GUI answer and a CLI answer come
+  from the same path, so there is no second implementation to keep in sync.
+- The sidebar's **New chat**, **Save conversation**, the **“From sources”/“From
+  trained model”** switch, and the **Actions** buttons all call the `cli.menu`
+  `run_*` functions the numbered menu calls. Training and evaluation steps are
+  available here even though they are hidden from the numbered CLI menu.
+- Answers run on a **worker thread** and are posted back through a queue, so the
+  window never freezes while the model thinks; output from a sidebar action is
+  streamed into the transcript.
+
+Tkinter is used for the window because it ships with CPython — **no new
+dependency** is added, keeping the runtime at pure Python plus numpy/requests. It
+is imported lazily by the `gui` command, so a headless machine without Tk can
+still run every CLI command; a missing display is reported with the suggestion to
+use `python -m cli chat`. The GUI code lives in `gui/` (`service.py`,
+`actions.py`, `options.py`, `app.py`) and is included in the portable bundle.
+
 ## Continuous learning
 
 Once the system runs, it must improve from real interaction without losing its
@@ -1023,6 +1061,7 @@ portable build):
 
 ```bash
 python -m cli            # interactive numbered menu
+python -m cli gui        # open the ChatGPT-style graphical interface
 python -m cli demo       # local demo
 python -m cli ml --episodes 60
 python -m cli llm --steps 4000

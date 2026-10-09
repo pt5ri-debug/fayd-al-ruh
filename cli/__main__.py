@@ -2,6 +2,7 @@
 
 Usage:
     python -m cli                     # interactive numbered menu
+    python -m cli gui                 # open the ChatGPT-style graphical interface
     python -m cli voice "your question" # one voice turn
     python -m cli agent               # tool-agent demo in the safety sandbox
     python -m cli jarvis              # Jarvis mode: listen, understand, act, speak
@@ -42,6 +43,7 @@ from cli.menu import (
     run_curriculum,
     run_demo,
     run_evaluation,
+    run_gui,
     run_insight,
     run_internet_learner,
     run_jarvis,
@@ -62,6 +64,7 @@ _COMMANDS = {
     "agent": run_agent,
     "jarvis": run_jarvis,
     "chat": run_chat,
+    "gui": run_gui,
     "mind-chat": run_mind_chat,
     "learn": run_learn,
     "insight": run_insight,
