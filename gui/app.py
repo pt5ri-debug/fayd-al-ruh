@@ -45,6 +45,32 @@ def _pick_font() -> str:
     return "TkDefaultFont"
 
 
+class LineStream(io.TextIOBase):
+    """A text stream that forwards each complete line to a queue.
+
+    Training entry points print their live progress to stderr; the GUI redirects
+    stderr through this stream so each line reaches the transcript as it is
+    written, instead of arriving only after the run ends.
+    """
+
+    def __init__(self, lines: "queue.Queue[str]") -> None:
+        self._lines = lines
+        self._buffer = ""
+
+    def write(self, text: str) -> int:
+        self._buffer += text
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            if line.strip():
+                self._lines.put(line)
+        return len(text)
+
+    def flush(self) -> None:
+        if self._buffer.strip():
+            self._lines.put(self._buffer)
+        self._buffer = ""
+
+
 class FaydGUI:
     """The application window and its wiring to :class:`ChatService`."""
 
@@ -64,7 +90,9 @@ class FaydGUI:
             session=session,
         )
         self._results: queue.Queue[tuple[str, Any]] = queue.Queue()
+        self._lines: queue.Queue[str] = queue.Queue()
         self._busy = False
+        self._streaming_label: tk.Label | None = None
         self._font = _pick_font()
 
         root.title("Fayd Al-Ruh")
@@ -271,7 +299,7 @@ class FaydGUI:
 
     # -------------------------------------------------------------- transcript
 
-    def _add_bubble(self, role: str, text: str, *, extra: str = "") -> None:
+    def _add_bubble(self, role: str, text: str, *, extra: str = "") -> tk.Label:
         row = tk.Frame(self._transcript, bg=MAIN_BG)
         row.pack(fill="x", padx=16, pady=6)
         if role == "user":
@@ -294,6 +322,7 @@ class FaydGUI:
         self._bubbles = getattr(self, "_bubbles", [])
         self._bubbles.append(label)
         self._scroll_to_bottom()
+        return label
 
     def _update_wraplength(self) -> None:
         width = max(self._canvas.winfo_width() - 120, 240)
@@ -399,6 +428,7 @@ class FaydGUI:
                 return
             argv = (*argv, question)
         self._add_bubble("note", f"Running: {action.label} …")
+        self._streaming_label = self._add_bubble("note", f"{action.label} — live output:")
         self._start_work(lambda: self._run_action(action, argv))
 
     def _prompt_for_question(self, title: str) -> str:
@@ -406,11 +436,22 @@ class FaydGUI:
         return (simpledialog.askstring(title, "Question:", parent=self.root) or "").strip()
 
     def _run_action(self, action: GuiAction, argv: tuple[str, ...]) -> str:
+        # Capture stdout (the report) while streaming stderr -- the live training
+        # progress -- into the transcript line by line, so a long run never looks
+        # frozen and the operator can watch the time remaining.
         buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
+        with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(LineStream(self._lines)):
             action.command(argv)
         output = buffer.getvalue().strip()
         return output or f"{action.label} finished."
+
+    def _append_progress_line(self, text: str) -> None:
+        """Append one live output line to the running training bubble."""
+        if self._streaming_label is None:
+            self._add_bubble("note", text)
+        else:
+            self._streaming_label.configure(text=f"{self._streaming_label.cget('text')}\n{text}")
+        self._scroll_to_bottom()
 
     # -------------------------------------------------------------- threading
 
@@ -429,7 +470,12 @@ class FaydGUI:
         threading.Thread(target=run, daemon=True).start()
 
     def _pump(self) -> None:
-        """Drain worker results on the Tk main thread."""
+        """Drain worker results and live progress lines on the Tk main thread."""
+        while True:
+            try:
+                self._append_progress_line(self._lines.get_nowait())
+            except queue.Empty:
+                break
         try:
             while True:
                 kind, payload = self._results.get_nowait()
@@ -438,6 +484,7 @@ class FaydGUI:
                 else:
                     self._add_bubble("assistant", f"Something went wrong: {payload}")
                 self._busy = False
+                self._streaming_label = None
                 self._send.configure(state="normal")
                 self._update_status()
                 self.refresh_sessions()

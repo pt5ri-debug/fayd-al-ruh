@@ -13,6 +13,7 @@ given discipline-shaped tasks, covers the field.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -23,6 +24,7 @@ from core.petroleum_tasks import (
     PETROLEUM_TASKS,
     success_fact_for,
 )
+from core.progress import ProgressReporter
 from core.sandbox_environment import SandboxTask
 from core.state import State
 from ml.cognitive_brain import CognitiveBrain
@@ -135,16 +137,19 @@ def _train_task(
     seed: int,
     replay_batch: int,
     save_dir: Path | None,
+    verbose: bool = False,
 ) -> TaskOutcome:
     success = petroleum_success(task.name)
+    policy_progress = ProgressReporter(f"policy {task.name}", episodes, enabled=verbose)
+    brain_progress = ProgressReporter(f"brain {task.name}", episodes, enabled=verbose)
 
     agent, policy_report = train_policy(
-        task, success, episodes=episodes, hasher=hasher, seed=seed
+        task, success, episodes=episodes, hasher=hasher, seed=seed, progress=policy_progress
     )
     held_out = evaluate_policy(task, success, agent, episodes=20, hasher=hasher)
 
     brain = CognitiveBrain(task, success, seed=seed, replay_batch_size=replay_batch)
-    brain_report = brain.learn(episodes=episodes)
+    brain_report = brain.learn(episodes=episodes, progress=brain_progress)
 
     if save_dir is not None:
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -171,6 +176,7 @@ def train_petroleum(
     include_held_out: bool = True,
     include_procedural: bool = False,
     max_procedural: int | None = None,
+    verbose: bool = False,
 ) -> PetroleumReport:
     """Train the policy and brain on every petroleum task.
 
@@ -179,7 +185,9 @@ def train_petroleum(
     ``include_procedural`` is set, the tasks derived from the corpus procedures
     are trained too, so the learners cover the recorded know-how as well as the
     hand-written catalog; ``max_procedural`` bounds how many derived tasks are
-    used (``None`` uses all), which keeps the evaluation gate fast.
+    used (``None`` uses all), which keeps the evaluation gate fast. With
+    ``verbose`` set, a live progress line is printed for each task's policy and
+    brain.
     """
     hasher = FeatureHasher(64)
     trained_tasks = PETROLEUM_TASKS
@@ -191,7 +199,9 @@ def train_petroleum(
     tasks = (*trained_tasks, *held_out_tasks, *procedural)
 
     outcomes: list[TaskOutcome] = []
-    for task in tasks:
+    for index, task in enumerate(tasks, start=1):
+        if verbose:
+            print(f"[{index}/{len(tasks)}] petroleum task: {task.name}", file=sys.stderr, flush=True)
         outcomes.append(
             _train_task(
                 task,
@@ -200,6 +210,7 @@ def train_petroleum(
                 seed=seed,
                 replay_batch=replay_batch,
                 save_dir=save_dir,
+                verbose=verbose,
             )
         )
 
@@ -286,6 +297,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Bound how many derived procedural tasks to train on.",
     )
     parser.add_argument("--json", action="store_true", help="print a JSON summary")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Print only the final report, not the live per-task progress lines.",
+    )
     args = parser.parse_args(argv)
 
     report = train_petroleum(
@@ -295,6 +311,7 @@ def main(argv: list[str] | None = None) -> int:
         save_dir=args.save_dir,
         include_procedural=args.procedural,
         max_procedural=args.max_procedural,
+        verbose=not (args.json or args.quiet),
     )
     if args.json:
         print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))

@@ -22,6 +22,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -167,7 +168,7 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
     }
 
 
-def _base_training(config: TrainingConfig, save_dir: Path) -> Manifest:
+def _base_training(config: TrainingConfig, save_dir: Path, *, verbose: bool = False) -> Manifest:
     """Run the base ML pipeline (policies, brain, classifier) via its CLI."""
     command = [
         sys.executable,
@@ -181,8 +182,23 @@ def _base_training(config: TrainingConfig, save_dir: Path) -> Manifest:
         str(save_dir),
         "--json",
     ]
-    result = subprocess.run(command, capture_output=True, text=True, check=True)
-    return json.loads(result.stdout)
+    if not verbose:
+        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        return json.loads(result.stdout)
+
+    # Stream the child's stderr (its live progress) to our own stderr as it
+    # arrives, while its stdout -- the JSON summary -- is captured via a temp
+    # file so a slow reader on either pipe cannot deadlock the pair.
+    with tempfile.TemporaryDirectory() as scratch:
+        captured = Path(scratch) / "base.json"
+        with captured.open("w", encoding="utf-8") as sink:
+            process = subprocess.Popen(command, stdout=sink, stderr=subprocess.PIPE, text=True)
+            assert process.stderr is not None
+            for line in process.stderr:
+                print(line, end="", file=sys.stderr, flush=True)
+            if process.wait() != 0:
+                raise subprocess.CalledProcessError(process.returncode, command)
+        return json.loads(captured.read_text(encoding="utf-8"))
 
 
 def _match_preset(config: TransformerConfig) -> str | None:
@@ -273,12 +289,17 @@ def train_release(
     save_dir: Path | None = None,
     checkpoint: Path | None = None,
     write_manifest: bool = True,
+    verbose: bool = True,
 ) -> Manifest:
     """Train every layer and (optionally) write the release manifest."""
     config = config or TrainingConfig()
     save_dir = save_dir or artifacts_dir()
     checkpoint = checkpoint or checkpoints_dir() / "fayd-llm.npz"
     save_dir.mkdir(parents=True, exist_ok=True)
+
+    def announce(message: str) -> None:
+        if verbose:
+            print(message, file=sys.stderr, flush=True)
 
     manifest: Manifest = {
         "version": __version__,
@@ -310,10 +331,10 @@ def train_release(
         },
     }
     if config.include_base:
-        print("Training base cognitive pipeline ...")
-        manifest["base"] = _base_training(config, save_dir)
+        announce("Training base cognitive pipeline ...")
+        manifest["base"] = _base_training(config, save_dir, verbose=verbose)
 
-    print("Training petroleum-engineering tasks ...")
+    announce("Training petroleum-engineering tasks ...")
     petroleum = train_petroleum(
         episodes=config.episodes,
         seed=config.seed,
@@ -321,10 +342,11 @@ def train_release(
         save_dir=save_dir / "petroleum",
         include_procedural=config.include_procedural,
         max_procedural=config.max_procedural,
+        verbose=verbose,
     )
     manifest["petroleum"] = petroleum.as_dict()
 
-    print(f"Training language model ({config.llm_steps} steps) ...")
+    announce(f"Training language model ({config.llm_steps} steps) ...")
     # `--resume` on a missing checkpoint starts fresh, so record what actually
     # happened rather than the flag alone.
     continued = config.resume and checkpoint.exists()
@@ -341,6 +363,7 @@ def train_release(
         include_runtime=config.include_runtime,
         preset=config.llm_preset,
         resume=config.resume,
+        verbose=verbose,
     )
     manifest["language_model"] = describe_checkpoint(
         checkpoint,
@@ -361,7 +384,7 @@ def train_release(
             encoding="utf-8",
         )
         manifest["manifest_path"] = str(manifest_path)
-        print(f"Wrote release manifest: {manifest_path}")
+        announce(f"Wrote release manifest: {manifest_path}")
 
     return manifest
 
@@ -470,6 +493,11 @@ def main(argv: list[str] | None = None) -> int:
         "instead of starting from scratch (falls back to a fresh run when absent)",
     )
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Print only the final manifest, not the live training progress lines.",
+    )
     args = parser.parse_args(argv)
 
     config = TrainingConfig(
@@ -541,7 +569,7 @@ def main(argv: list[str] | None = None) -> int:
         manifest["manifest_path"] = str(path)
     else:
         manifest = train_release(
-            config, save_dir=args.save_dir, checkpoint=args.checkpoint
+            config, save_dir=args.save_dir, checkpoint=args.checkpoint, verbose=not args.quiet
         )
 
     if args.json:

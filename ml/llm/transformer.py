@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+from core.progress import ProgressCallback
 from ml.llm.tokenizer import VOCAB_SIZE
 from ml.models import Adam
 
@@ -523,6 +524,7 @@ def train_language_model(
     val_batches: int = 8,
     optimizer: "Adam | None" = None,
     start_step: int = 0,
+    progress: ProgressCallback | None = None,
 ) -> TrainReport:
     """Train on a flat token stream by next-token prediction.
 
@@ -537,6 +539,9 @@ def train_language_model(
     and training continues where it stopped instead of restarting the moment
     estimates. The learning-rate schedule then spans ``start_step + steps``, so
     asking for more steps extends the horizon rather than freezing it.
+
+    ``progress`` is called with the number of steps completed in this run and
+    the requested budget, so a caller can show a live bar while training.
     """
     block = model.config.block_size
     if len(token_stream) < block + 2:
@@ -572,6 +577,11 @@ def train_language_model(
             if report.val_losses:
                 extra += f"  val {report.val_losses[-1]:.4f}"
             print(f"step {step:5d}  loss {loss:.4f}{extra}")
+        if progress is not None:
+            detail = f"loss {loss:.4f}  lr {lr:.2e}"
+            if report.val_losses:
+                detail += f"  val {report.val_losses[-1]:.4f}"
+            progress(step - start_step, steps, detail=detail)
     model.eval()
     if val_stream is not None:
         report.val_losses.append(

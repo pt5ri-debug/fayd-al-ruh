@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Callable
 
@@ -17,6 +18,7 @@ from core.interaction_reward import (
     InteractionRewardModel,
     outcomes_from_evaluation_corpus,
 )
+from core.progress import ProgressReporter
 from core.sandbox_tasks import HELD_OUT_TASKS, TASKS
 from core.state import State
 from ml.cognitive_brain import CognitiveBrain
@@ -90,7 +92,20 @@ def main(argv: list[str] | None = None) -> int:
         help="seeds averaged for the model-based comparison (--model-based)",
     )
     parser.add_argument("--json", action="store_true", help="print a JSON summary")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Print only the final report, not the live progress lines.",
+    )
     args = parser.parse_args(argv)
+
+    # With --json, stdout must stay pure JSON, so live progress goes to stderr.
+    show_progress = not args.quiet
+    progress_stream = sys.stderr if args.json else None
+
+    def announce(message: str) -> None:
+        if show_progress:
+            print(message, file=progress_stream or sys.stdout, flush=True)
 
     if args.resume and args.save_dir is None:
         parser.error("--resume requires --save-dir pointing at a saved brain")
@@ -110,11 +125,18 @@ def main(argv: list[str] | None = None) -> int:
     for task in (*TASKS, *HELD_OUT_TASKS):
         reward_model.record_many(recorded_action_outcomes(task))
 
-    for task in TASKS:
+    for task_index, task in enumerate(TASKS, start=1):
         success = _success_for(task.name)
+        announce(f"[{task_index}/{len(TASKS)}] task: {task.name}")
 
         # Tier 1: symbolic reinforcement learning with a linear Q-function.
-        agent, policy_report = train_policy(task, success, episodes=args.episodes, hasher=hasher)
+        agent, policy_report = train_policy(
+            task,
+            success,
+            episodes=args.episodes,
+            hasher=hasher,
+            progress=ProgressReporter(f"policy {task.name}", args.episodes, stream=progress_stream, enabled=show_progress),
+        )
         held_out = evaluate_policy(task, success, agent, episodes=20, hasher=hasher)
         policy_summary[task.name] = {
             "train_success_rate": policy_report.success_rate_window,
@@ -131,7 +153,10 @@ def main(argv: list[str] | None = None) -> int:
             brain.replay_batch_size = args.replay_batch
         else:
             brain = CognitiveBrain(task, success, seed=0, replay_batch_size=args.replay_batch)
-        brain_report = brain.learn(episodes=args.episodes)
+        brain_report = brain.learn(
+            episodes=args.episodes,
+            progress=ProgressReporter(f"brain {task.name}", args.episodes, stream=progress_stream, enabled=show_progress),
+        )
         brain_summary[task.name] = {
             "initial_error": brain_report.initial_error,
             "final_error": brain_report.final_error,
@@ -153,8 +178,12 @@ def main(argv: list[str] | None = None) -> int:
     # that the same learning machinery works without task-specific tuning.
     for task in HELD_OUT_TASKS:
         success = _success_for(task.name)
+        announce(f"generalisation task: {task.name}")
         brain = CognitiveBrain(task, success, seed=0, replay_batch_size=args.replay_batch)
-        brain_report = brain.learn(episodes=args.episodes)
+        brain_report = brain.learn(
+            episodes=args.episodes,
+            progress=ProgressReporter(f"brain {task.name}", args.episodes, stream=progress_stream, enabled=show_progress),
+        )
         generalisation_summary[task.name] = {
             "initial_error": brain_report.initial_error,
             "final_error": brain_report.final_error,
@@ -173,7 +202,12 @@ def main(argv: list[str] | None = None) -> int:
         for task in (*TASKS, *HELD_OUT_TASKS):
             goal = _success_for(task.name)
             agent, report = train_interaction_policy(
-                task, reward_model, goal, episodes=args.episodes, hasher=hasher
+                task,
+                reward_model,
+                goal,
+                episodes=args.episodes,
+                hasher=hasher,
+                progress=ProgressReporter(f"interaction {task.name}", args.episodes, stream=progress_stream, enabled=show_progress),
             )
             held_out = evaluate_interaction_policy(
                 task, reward_model, goal, agent, episodes=20, hasher=hasher
@@ -209,6 +243,12 @@ def main(argv: list[str] | None = None) -> int:
                     episodes=comparison_episodes,
                     planning_steps=args.planning_steps,
                     seed=seed,
+                    progress=ProgressReporter(
+                        f"dyna-q {task.name}",
+                        comparison_episodes,
+                        stream=progress_stream,
+                        enabled=show_progress,
+                    ),
                 )
                 free_total += free_report.success_rate_window
                 dyna_total += dyna_report.success_rate
@@ -227,7 +267,13 @@ def main(argv: list[str] | None = None) -> int:
     train, val = train_val_split(dataset, val_fraction=0.25, seed=1)
     model = MLP(hasher.size, 32, max(2, dataset.num_classes), seed=3)
     trainer = Trainer(learning_rate=0.05, batch_size=8, max_epochs=150, patience=15, seed=2)
-    training = trainer.fit(model, train, val)
+    announce("Supervised classifier on consolidated experience ...")
+    training = trainer.fit(
+        model,
+        train,
+        val,
+        progress=ProgressReporter("classifier", trainer.max_epochs, stream=progress_stream, enabled=show_progress),
+    )
     supervised: dict[str, float] = {
         "samples": float(len(dataset)),
         "train_accuracy": training.final.train_accuracy,
@@ -241,7 +287,9 @@ def main(argv: list[str] | None = None) -> int:
     # The model predicts held-out relations from concept vocabulary alone, so the
     # reported Hit@1 measures real generalisation against the random baseline.
     relation_model, relation_report = train_relation_outcome(
-        hasher=hasher, save_to=(args.save_dir / "relation_model.npz") if args.save_dir else None
+        hasher=hasher,
+        save_to=(args.save_dir / "relation_model.npz") if args.save_dir else None,
+        progress=ProgressReporter("relation model", 300, stream=progress_stream, enabled=show_progress),
     )
     general_knowledge = relation_report.as_dict()
     _ = relation_model

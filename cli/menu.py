@@ -232,7 +232,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Build the bulk knowledge base (100 MB)", run_knowledge, ("build", "--target-mb", "100")),
     ("Show the bulk knowledge base status", run_knowledge, ("stats",)),
     ("Run the local cognitive demo", run_demo, ()),
-    ("Train the ML pipeline", run_ml, ("--episodes", "60")),
+    ("Train the ML pipeline", run_ml, ("--resume", "--episodes", "60")),
     (
         "Train the language model from all repositories",
         run_llm,

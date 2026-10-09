@@ -12,6 +12,7 @@ from ml.llm.transformer import TransformerConfig, TransformerLM
 from ml.release import (
     RELEASE_MANIFEST_NAME,
     TrainingConfig,
+    _base_training,
     _match_preset,
     _tokenizer_kind,
     corpus_summary,
@@ -106,6 +107,54 @@ def test_train_release_writes_every_artifact_and_a_manifest(tmp_path):
     stored = json.loads((tmp_path / RELEASE_MANIFEST_NAME).read_text(encoding="utf-8"))
     assert stored["version"] == manifest["version"]
     assert stored["knowledge"] == manifest["knowledge"]
+
+
+def test_train_release_streams_live_progress(capsys, tmp_path):
+    """A release run prints progress lines so a long run never looks frozen."""
+    config = TrainingConfig(
+        episodes=3,
+        llm_steps=5,
+        llm_repeats=1,
+        llm_structured_repeats=1,
+        include_base=False,
+    )
+    train_release(
+        config,
+        save_dir=tmp_path,
+        checkpoint=tmp_path / "llm" / "fayd-llm.npz",
+        write_manifest=False,
+    )
+    err = capsys.readouterr().err
+    assert "Training petroleum-engineering tasks" in err
+    assert "petroleum task" in err
+    assert "Training language model" in err
+
+
+def test_train_release_can_stay_quiet(capsys, tmp_path):
+    """``verbose=False`` keeps stderr silent for machine callers."""
+    config = TrainingConfig(
+        episodes=3,
+        llm_steps=5,
+        llm_repeats=1,
+        llm_structured_repeats=1,
+        include_base=False,
+    )
+    train_release(
+        config,
+        save_dir=tmp_path,
+        checkpoint=tmp_path / "llm" / "fayd-llm.npz",
+        write_manifest=False,
+        verbose=False,
+    )
+    assert capsys.readouterr().err == ""
+
+
+def test_base_training_streams_child_progress(capsys, tmp_path):
+    """The base pipeline runs in a child process; its progress must still stream."""
+    config = TrainingConfig(episodes=3, replay_batch=8, include_base=True)
+    manifest = _base_training(config, tmp_path / "base", verbose=True)
+    assert "policies" in manifest
+    assert "task: wet-garden" in capsys.readouterr().err
 
 
 def test_format_manifest_reports_the_language_model_when_recorded():
