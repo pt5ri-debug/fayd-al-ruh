@@ -1,0 +1,400 @@
+"""The Tkinter window: a ChatGPT-style front end for Fayd Al-Ruh.
+
+Tkinter ships with CPython, so the GUI adds no dependency. Long work (an answer
+or a sidebar command) runs on a worker thread and posts results back through a
+queue; Tk is only ever touched from the main thread, as Tk requires.
+
+This module is imported lazily by the CLI, so importing it never opens a window
+and never breaks the command-line path.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import io
+import queue
+import threading
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import tkinter as tk
+from tkinter import font as tkfont
+
+from gui.actions import ACTIONS, GuiAction
+from gui.options import build_parser
+from gui.service import ChatReply, ChatService
+
+# A ChatGPT-like palette.
+SIDEBAR_BG = "#202123"
+SIDEBAR_HOVER = "#2A2B32"
+MAIN_BG = "#343541"
+ASSISTANT_BG = "#444654"
+USER_BG = "#2A6FB0"
+TEXT_COLOR = "#ECECF1"
+MUTED_COLOR = "#9A9AA8"
+ACCENT = "#10A37F"
+
+
+def _pick_font() -> str:
+    """A clean UI font, falling back to whatever Tk offers."""
+    for name in ("Segoe UI", "Helvetica Neue", "DejaVu Sans", "Helvetica", "Arial"):
+        if name in tkfont.families():
+            return name
+    return "TkDefaultFont"
+
+
+class FaydGUI:
+    """The application window and its wiring to :class:`ChatService`."""
+
+    def __init__(
+        self,
+        root: tk.Tk,
+        *,
+        service: ChatService | None = None,
+        model_checkpoint: str | None = None,
+        no_web: bool = False,
+        session: str | None = None,
+    ) -> None:
+        self.root = root
+        self.service = service or ChatService(
+            no_web=no_web,
+            model_checkpoint=model_checkpoint,
+            session=session,
+        )
+        self._results: queue.Queue[tuple[str, Any]] = queue.Queue()
+        self._busy = False
+        self._font = _pick_font()
+
+        root.title("Fayd Al-Ruh")
+        root.geometry("1040x720")
+        root.minsize(760, 520)
+        root.configure(bg=MAIN_BG)
+
+        self._build_sidebar()
+        self._build_main()
+        self._set_source_label()
+        self._add_bubble(
+            "assistant",
+            "Welcome to Fayd Al-Ruh. Ask a question in the box below.\n"
+            "Use “From sources” for cited answers, or “From model” for the trained model.",
+        )
+        self._pump()
+
+    # ------------------------------------------------------------------ layout
+
+    def _build_sidebar(self) -> None:
+        sidebar = tk.Frame(self.root, bg=SIDEBAR_BG, width=260)
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+
+        tk.Label(
+            sidebar, text="Fayd Al-Ruh", bg=SIDEBAR_BG, fg=TEXT_COLOR,
+            font=(self._font, 15, "bold"), anchor="w", padx=16, pady=14,
+        ).pack(fill="x")
+
+        self._sidebar_button(sidebar, "＋  New chat", self._on_new_chat).pack(
+            fill="x", padx=10, pady=(0, 8)
+        )
+
+        tk.Label(
+            sidebar, text="Answering with", bg=SIDEBAR_BG, fg=MUTED_COLOR,
+            font=(self._font, 9), anchor="w", padx=16,
+        ).pack(fill="x", pady=(6, 2))
+        self._source_var = tk.StringVar(value="sources")
+        for value, label in (("sources", "From sources (cited)"), ("model", "From trained model")):
+            tk.Radiobutton(
+                sidebar, text=label, value=value, variable=self._source_var,
+                command=self._on_source_change, bg=SIDEBAR_BG, fg=TEXT_COLOR,
+                selectcolor=SIDEBAR_BG, activebackground=SIDEBAR_BG,
+                activeforeground=TEXT_COLOR, font=(self._font, 10),
+                anchor="w", padx=10, highlightthickness=0, bd=0,
+            ).pack(fill="x", padx=6)
+
+        self._sidebar_button(sidebar, "💾  Save conversation", self._on_save).pack(
+            fill="x", padx=10, pady=(8, 10)
+        )
+
+        tk.Label(
+            sidebar, text="Actions", bg=SIDEBAR_BG, fg=MUTED_COLOR,
+            font=(self._font, 9), anchor="w", padx=16,
+        ).pack(fill="x", pady=(4, 2))
+        for action in ACTIONS:
+            self._action_button(sidebar, action).pack(fill="x", padx=10, pady=1)
+
+        self._status = tk.Label(
+            sidebar, text=self._status_text(), bg=SIDEBAR_BG, fg=MUTED_COLOR,
+            font=(self._font, 9), anchor="w", justify="left", padx=16, pady=10,
+        )
+        self._status.pack(side="bottom", fill="x")
+
+    def _action_button(self, parent: tk.Misc, action: GuiAction) -> tk.Label:
+        """A sidebar button bound to one action (avoids a late-bound lambda)."""
+        return self._sidebar_button(
+            parent, action.label, lambda: self._on_action(action), small=True
+        )
+
+    def _sidebar_button(
+        self, parent: tk.Misc, text: str, command: Callable[[], Any], *, small: bool = False
+    ) -> tk.Label:
+        """A flat, hoverable label that behaves like a button."""
+        size = 9 if small else 11
+        button = tk.Label(
+            parent, text=text, bg=SIDEBAR_BG, fg=TEXT_COLOR,
+            font=(self._font, size), anchor="w", padx=12,
+            pady=(3 if small else 8),
+        )
+        button.bind("<Enter>", lambda _e: button.configure(bg=SIDEBAR_HOVER))
+        button.bind("<Leave>", lambda _e: button.configure(bg=SIDEBAR_BG))
+        button.bind("<Button-1>", lambda _e: command())
+        return button
+
+    def _build_main(self) -> None:
+        main = tk.Frame(self.root, bg=MAIN_BG)
+        main.pack(side="left", fill="both", expand=True)
+
+        header = tk.Frame(main, bg=MAIN_BG)
+        header.pack(fill="x", padx=20, pady=(14, 6))
+        tk.Label(
+            header, text="Chat", bg=MAIN_BG, fg=TEXT_COLOR,
+            font=(self._font, 14, "bold"), anchor="w",
+        ).pack(side="left")
+        self._mode_label = tk.Label(
+            header, text="", bg=MAIN_BG, fg=MUTED_COLOR,
+            font=(self._font, 10), anchor="e",
+        )
+        self._mode_label.pack(side="right")
+
+        # Scrollable transcript.
+        container = tk.Frame(main, bg=MAIN_BG)
+        container.pack(fill="both", expand=True)
+        self._canvas = tk.Canvas(container, bg=MAIN_BG, highlightthickness=0)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        scrollbar = tk.Scrollbar(container, command=self._canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        self._canvas.configure(yscrollcommand=scrollbar.set)
+
+        self._transcript = tk.Frame(self._canvas, bg=MAIN_BG)
+        self._window = self._canvas.create_window((0, 0), window=self._transcript, anchor="nw")
+        self._transcript.bind("<Configure>", self._on_transcript_configure)
+        self._canvas.bind("<Configure>", self._on_canvas_configure)
+        for widget in (self._canvas, self._transcript):
+            widget.bind("<MouseWheel>", self._on_mousewheel)
+            widget.bind("<Button-4>", self._on_mousewheel)
+            widget.bind("<Button-5>", self._on_mousewheel)
+
+        # Composer.
+        composer = tk.Frame(main, bg=MAIN_BG)
+        composer.pack(fill="x", padx=20, pady=(6, 16))
+        self._entry = tk.Text(
+            composer, height=2, bg=ASSISTANT_BG, fg=TEXT_COLOR,
+            insertbackground=TEXT_COLOR, font=(self._font, 11),
+            relief="flat", wrap="word", padx=10, pady=8,
+        )
+        self._entry.pack(side="left", fill="both", expand=True)
+        self._entry.bind("<Return>", self._on_enter)
+        self._entry.bind("<Shift-Return>", lambda _e: None)
+        self._send = tk.Button(
+            composer, text="Send", command=self._on_send, bg=ACCENT,
+            fg="white", activebackground="#0E8C6D", activeforeground="white",
+            font=(self._font, 11, "bold"), relief="flat", padx=18, pady=8,
+            cursor="hand2",
+        )
+        self._send.pack(side="right", fill="y", padx=(8, 0))
+        self._entry.focus_set()
+
+    # -------------------------------------------------------------- transcript
+
+    def _add_bubble(self, role: str, text: str, *, extra: str = "") -> None:
+        row = tk.Frame(self._transcript, bg=MAIN_BG)
+        row.pack(fill="x", padx=16, pady=6)
+        if role == "user":
+            row.pack_configure(anchor="e")
+            bg, fg = USER_BG, "#FFFFFF"
+        elif role == "note":
+            bg, fg = MAIN_BG, MUTED_COLOR
+        else:
+            bg, fg = ASSISTANT_BG, TEXT_COLOR
+
+        bubble = tk.Frame(row, bg=bg)
+        bubble.pack(side="right" if role == "user" else "left")
+        label = tk.Label(
+            bubble,
+            text=text if not extra else f"{text}\n\n{extra}",
+            bg=bg, fg=fg, font=(self._font, 11), justify="left",
+            anchor="w", wraplength=680, padx=14, pady=10,
+        )
+        label.pack()
+        self._bubbles = getattr(self, "_bubbles", [])
+        self._bubbles.append(label)
+        self._scroll_to_bottom()
+
+    def _update_wraplength(self) -> None:
+        width = max(self._canvas.winfo_width() - 120, 240)
+        for label in getattr(self, "_bubbles", []):
+            label.configure(wraplength=width)
+
+    def _on_transcript_configure(self, _event: tk.Event) -> None:
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event: tk.Event) -> None:
+        self._canvas.itemconfigure(self._window, width=event.width)
+        self._update_wraplength()
+
+    def _on_mousewheel(self, event: tk.Event) -> None:
+        delta = -1 * (event.delta // 120) if getattr(event, "delta", 0) else (
+            -1 if getattr(event, "num", 0) == 4 else 1
+        )
+        self._canvas.yview_scroll(delta, "units")
+
+    def _scroll_to_bottom(self) -> None:
+        self._canvas.update_idletasks()
+        self._canvas.yview_moveto(1.0)
+
+    # --------------------------------------------------------------- behavior
+
+    def _set_source_label(self) -> None:
+        self._mode_label.configure(text=self._source_label_text())
+
+    def _status_text(self) -> str:
+        return f"Session: {self.service.session or 'unsaved'}\nCtrl+Enter or click Send."
+
+    def _on_enter(self, _event: tk.Event) -> str:
+        self._on_send()
+        return "break"  # keep the newline out of the box
+
+    def _on_send(self) -> None:
+        if self._busy:
+            return
+        message = self._entry.get("1.0", "end").strip()
+        if not message:
+            return
+        self._entry.delete("1.0", "end")
+        self._add_bubble("user", message)
+        self._start_work(lambda: self.service.ask(message))
+
+    def _on_new_chat(self) -> None:
+        conversation_id = self.service.new_conversation()
+        self._add_bubble("note", f"Started a new conversation ({conversation_id}).")
+
+    def _on_save(self) -> None:
+        self._add_bubble("note", self.service.save())
+
+    def _on_source_change(self) -> None:
+        want = self._source_var.get()
+        if want == self.service.source:
+            return
+        try:
+            if want == "model":
+                self.service.use_model()
+            else:
+                self.service.use_sources()
+        except (FileNotFoundError, OSError, ValueError) as error:
+            self._source_var.set(self.service.source)
+            self._add_bubble(
+                "note",
+                f"Could not load the trained model: {error}\n"
+                "Train it first with the “Train the language model” action.",
+            )
+            return
+        self._set_source_label()
+        self._add_bubble(
+            "note",
+            "Now answering from the trained model (no sources)."
+            if want == "model"
+            else "Now answering from sources, with citations.",
+        )
+
+    def _on_action(self, action: GuiAction) -> None:
+        if self._busy:
+            return
+        self._add_bubble("note", f"Running: {action.label} …")
+        self._start_work(lambda: self._run_action(action))
+
+    def _run_action(self, action: GuiAction) -> str:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            action.command(action.argv)
+        output = buffer.getvalue().strip()
+        return output or f"{action.label} finished."
+
+    # -------------------------------------------------------------- threading
+
+    def _start_work(self, job) -> None:
+        """Run ``job`` on a worker thread; its result becomes an assistant bubble."""
+        self._busy = True
+        self._send.configure(state="disabled")
+        self._status.configure(text="Working…\nThis can take a moment.")
+
+        def run() -> None:
+            try:
+                self._results.put(("ok", job()))
+            except Exception as error:  # surfaced in the transcript, never crashes Tk
+                self._results.put(("error", error))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _pump(self) -> None:
+        """Drain worker results on the Tk main thread."""
+        try:
+            while True:
+                kind, payload = self._results.get_nowait()
+                if kind == "ok":
+                    self._render_result(payload)
+                else:
+                    self._add_bubble("assistant", f"Something went wrong: {payload}")
+                self._busy = False
+                self._send.configure(state="normal")
+                self._status.configure(text=self._status_text())
+        except queue.Empty:
+            pass
+        self.root.after(100, self._pump)
+
+    def _render_result(self, payload: Any) -> None:
+        if isinstance(payload, ChatReply):
+            self._add_bubble("assistant", payload.text)
+            if payload.hint:
+                self._add_bubble("note", payload.hint)
+        else:
+            self._add_bubble("assistant", str(payload))
+        self._mode_label.configure(text=self._source_label_text())
+        self._entry.focus_set()
+
+    def _source_label_text(self) -> str:
+        return (
+            "Answering from the trained model (no sources)"
+            if self.service.source == "model"
+            else "Answering from sources (cited)"
+        )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Launch the GUI. Returns a non-zero code when no display is available."""
+    args = build_parser().parse_args(argv)
+    try:
+        root = tk.Tk()
+    except tk.TclError as error:
+        print(f"The graphical interface needs a display: {error}")
+        print("Use the command line instead: python -m cli chat")
+        return 1
+
+    service = ChatService(
+        no_web=args.no_web,
+        root=Path(args.root) if args.root else None,
+        read_write=args.read_write,
+        model_checkpoint=args.model_checkpoint,
+        session=args.session,
+    )
+    if args.mind:
+        try:
+            service.use_model()
+        except (FileNotFoundError, OSError, ValueError) as error:
+            print(f"Could not load the trained model: {error}")
+            return 1
+
+    FaydGUI(root, service=service)
+    root.mainloop()
+    return 0
+
+
+__all__ = ["FaydGUI", "main"]

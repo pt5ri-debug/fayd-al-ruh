@@ -159,8 +159,15 @@ Arabic is kept as secondary aliases where useful.
 - `cli/` — portable front end. `menu.py` holds actions + `MENU`; `__main__.py`
   dispatches commands and reconfigures stdout/stderr to UTF-8 (Arabic-safe on
   legacy Windows consoles).
+- `gui/` — ChatGPT-style desktop window, an alternative *front end* to `cli/`,
+  never a replacement. `service.py` reuses the text `chat` session
+  (`ai.jarvis.build_session(text_only=True)`) + `ai.chat.ModelSwitcher`;
+  `actions.py` maps sidebar buttons to `cli.menu.run_*`; `options.py` has the
+  argument parser; `app.py` is the Tkinter window (imported lazily, so `cli/`
+  never imports Tk). Reachable as `python -m cli gui` and `python -m gui`.
 - `fayd-al-ruh.spec` — PyInstaller; uses `collect_submodules` for `ml`,
-  `evaluation`, `ai`, `storage` (and `core` is bundled as an imported package).
+  `evaluation`, `ai`, `storage`, `gui` (and `core` is bundled as an imported
+  package).
 
 ## Conventions
 

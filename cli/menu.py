@@ -90,6 +90,13 @@ def run_selfcheck(argv: Sequence[str] = ()) -> int:
     return 0
 
 
+def run_gui(argv: Sequence[str] = ()) -> int:
+    """Open the ChatGPT-style graphical interface (an alternative to the CLI)."""
+    from gui.app import main as gui_main
+
+    return gui_main(list(argv))
+
+
 def run_voice(argv: Sequence[str] = ()) -> int:
     """Run one voice turn through the assistant (transcript in, WAV out)."""
     return _run_module("ai.voice", argv)
@@ -208,6 +215,7 @@ def run_curriculum(argv: Sequence[str] = ()) -> int:
 
 
 MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
+    ("Open the graphical interface (ChatGPT-style)", run_gui, ()),
     ("One voice turn", run_voice, ("--write-wav", "voice-turn.wav", "water")),
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Jarvis mode (listen, act, speak)", run_jarvis, ()),
@@ -332,6 +340,7 @@ __all__ = [
     "MENU",
     "HIDDEN_MENU_LABELS",
     "visible_menu",
+    "run_gui",
     "run_voice",
     "run_agent",
     "run_jarvis",

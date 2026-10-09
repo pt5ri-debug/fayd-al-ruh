@@ -22,13 +22,16 @@ datas = [
 ]
 
 # These modules are imported dynamically (importlib in cli/menu.py) or are
-# __main__ modules, so the static analyzer would otherwise miss them.
+# __main__ modules, so the static analyzer would otherwise miss them. The `gui`
+# package is imported lazily by the `gui` command, so it is listed explicitly to
+# keep the graphical front end inside the portable bundle too.
 hiddenimports = (
-    ["main", "ml.__main__", "ml.llm.__main__", "evaluation.__main__"]
+    ["main", "ml.__main__", "ml.llm.__main__", "evaluation.__main__", "gui.__main__"]
     + collect_submodules("ml")
     + collect_submodules("evaluation")
     + collect_submodules("ai")
     + collect_submodules("storage")
+    + collect_submodules("gui")
 )
 
 a = Analysis(
