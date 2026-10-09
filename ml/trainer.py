@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from core.progress import ProgressCallback
 from ml.dataset import Dataset
 from ml.models import Adam, MLP, SoftmaxClassifier, save_model
 
@@ -67,7 +68,14 @@ class Trainer:
         if min(self.learning_rate, self.batch_size, self.max_epochs, self.patience) <= 0:
             raise ValueError("Trainer hyperparameters must be positive.")
 
-    def fit(self, model: Classifier, train: Dataset, val: Dataset | None = None) -> TrainingReport:
+    def fit(
+        self,
+        model: Classifier,
+        train: Dataset,
+        val: Dataset | None = None,
+        *,
+        progress: ProgressCallback | None = None,
+    ) -> TrainingReport:
         if len(train) == 0:
             raise ValueError("Training dataset is empty.")
         val = val if val is not None and len(val) else train
@@ -98,6 +106,13 @@ class Trainer:
                 val_brier=brier_score(val_probs, val.labels, model.num_classes),
             )
             epochs.append(report)
+            if progress is not None:
+                progress(
+                    epoch,
+                    self.max_epochs,
+                    detail=f"train {report.train_accuracy:.3f}  val {report.val_accuracy:.3f}  "
+                    f"loss {report.val_loss:.4f}",
+                )
 
             if report.val_loss < best_val - self.min_delta:
                 best_val = report.val_loss

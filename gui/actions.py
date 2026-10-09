@@ -100,7 +100,7 @@ ACTIONS: tuple[GuiAction, ...] = (
         run_llm,
         ("--resume", "--steps", "200", "--kb-max-chunks", "2000"),
     ),
-    GuiAction("ml", "Train the ML pipeline", run_ml, ("--episodes", "60")),
+    GuiAction("ml", "Train the ML pipeline", run_ml, ("--resume", "--episodes", "60")),
     GuiAction("curriculum", "Show the petroleum-engineering curriculum", run_curriculum, ()),
     GuiAction("demo", "Run the local cognitive demo", run_demo, ()),
 )

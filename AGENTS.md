@@ -34,6 +34,13 @@ Arabic is kept as secondary aliases where useful.
   `knowledge.corpus_coverage`). Trained artifacts in `ml/artifacts/` and
   `ml/llm/checkpoints/fayd-llm.npz` are committed on purpose for a release;
   regenerate with `python -m cli release`.
+- `core/progress.py` — live progress for long runs. `ProgressReporter` (stdlib
+  only) is callable, prints percentage/elapsed/eta to `sys.stderr` (so stdout
+  stays clean for `--json`), and every training loop takes an optional
+  `progress` callback. `ml`, `ml.petroleum`, `ml.llm`, and `ml.release` expose
+  `--quiet` to suppress it; `ml.release` streams its child process's stderr
+  line by line, and the GUI (`gui/app.py`) redirects stderr into the transcript
+  so a long run never looks frozen.
 - `ml/llm/corpus.py` builds the language-model text, including sentences generated
   from every discipline and course (`curriculum_sentences`), from the petroleum
   corpus (`corpus_sentences`), and numbered procedures (`procedural_sentences`);

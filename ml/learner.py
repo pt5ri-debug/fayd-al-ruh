@@ -15,6 +15,7 @@ from typing import Callable
 import numpy as np
 
 from core.action import Action
+from core.progress import ProgressCallback
 from core.sandbox_environment import SandboxEnvironment, SandboxTask
 from core.state import State
 from ml.dataset import FeatureHasher
@@ -194,6 +195,7 @@ def train_policy(
     hasher: FeatureHasher | None = None,
     agent: QLearningAgent | None = None,
     seed: int = 0,
+    progress: ProgressCallback | None = None,
 ) -> tuple[QLearningAgent, PolicyReport]:
     """Train an epsilon-greedy agent on one sandbox task."""
     if episodes < 1:
@@ -219,6 +221,12 @@ def train_policy(
                 break
         agent.decay_epsilon()
         history.append(EpisodeStats(episode_index, total_reward, steps, achieved, agent.epsilon))
+        if progress is not None:
+            progress(
+                episode_index,
+                episodes,
+                detail=f"reward {total_reward:+.2f}  eps {agent.epsilon:.3f}",
+            )
 
     window = history[-max(1, episodes // 10) :]
     report = PolicyReport(

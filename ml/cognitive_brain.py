@@ -27,6 +27,7 @@ import numpy as np
 
 from core.action import Action
 from core.action_policy import ActionPolicy
+from core.progress import ProgressCallback
 from core.sandbox_environment import SandboxEnvironment, SandboxTask
 from core.state import State
 from ml.dataset import FeatureHasher, ReplayBuffer, Transition
@@ -285,14 +286,23 @@ class CognitiveBrain:
         brain.memory.load_dicts(metadata.get("memory", []))
         return brain
 
-    def learn(self, *, episodes: int = 200) -> BrainReport:
+    def learn(
+        self, *, episodes: int = 200, progress: ProgressCallback | None = None
+    ) -> BrainReport:
         if episodes < 1:
             raise ValueError("episodes must be at least 1.")
         error_curve: list[float] = []
-        for _ in range(episodes):
+        for episode in range(1, episodes + 1):
             self.run_episode()
             self.episodes_trained += 1
-            error_curve.append(self.reflect().recent_error)
+            recent_error = self.reflect().recent_error
+            error_curve.append(recent_error)
+            if progress is not None:
+                progress(
+                    episode,
+                    episodes,
+                    detail=f"error {recent_error:.4f}  memory {len(self.memory)}",
+                )
 
         # Held-out greedy evaluation after learning.
         wins = 0

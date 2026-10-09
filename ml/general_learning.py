@@ -29,6 +29,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from core.progress import ProgressCallback
 from ml.dataset import Dataset, FeatureHasher
 from ml.models import MLP
 from ml.trainer import Trainer, accuracy
@@ -222,6 +223,7 @@ def train_relation_outcome(
     hasher: FeatureHasher | None = None,
     seed: int = 0,
     save_to: object | None = None,
+    progress: ProgressCallback | None = None,
 ) -> tuple[MLP, RelationLearningReport]:
     """Train the link-prediction head and measure held-out ranking quality."""
     hasher = hasher or FeatureHasher(64)
@@ -240,7 +242,10 @@ def train_relation_outcome(
     model = MLP(hasher.size, 48, 2, seed=seed)
     trainer = Trainer(learning_rate=0.05, batch_size=16, max_epochs=300, patience=25, seed=seed)
     training = trainer.fit(
-        model, Dataset(train_features, train_labels), Dataset(train_features, train_labels)
+        model,
+        Dataset(train_features, train_labels),
+        Dataset(train_features, train_labels),
+        progress=progress,
     )
 
     test_rows, test_labels = _with_negatives(test_rel, targets=concepts, seed=seed + 1)

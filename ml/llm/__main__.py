@@ -15,6 +15,7 @@ import argparse
 from pathlib import Path
 
 from core.paths import checkpoints_dir
+from core.progress import ProgressReporter
 from ml.llm.corpus import build_corpus, corpus_units
 from ml.llm.evaluate import document_split, encode_documents
 from ml.llm.generator import LocalGenerator
@@ -76,10 +77,14 @@ def train_and_save(
     val_every: int = 200,
     resume: bool = False,
     state_path: Path | None = None,
+    verbose: bool = True,
+    progress_every: int = 0,
 ) -> TransformerLM:
     units = corpus_units()
     split = document_split(units, val_fraction=0.1, test_fraction=0.1, seed=seed)
     held_out = set(split.validation) | set(split.test)
+    if verbose:
+        print(f"Building training corpus ({len(units)} documents) ...", flush=True)
     text = build_corpus(
         repeats=repeats,
         structured_repeats=structured_repeats,
@@ -113,6 +118,11 @@ def train_and_save(
             print(f"no checkpoint at {checkpoint}; starting a fresh run")
 
     if model is None:
+        if verbose:
+            print(
+                f"Training {tokenizer_kind} tokenizer (vocab {vocab_size}) ...",
+                flush=True,
+            )
         tokenizer = train_tokenizer(tokenizer_kind, tokenizer_source, vocab_size=vocab_size)
         save_tokenizer(tokenizer, tokenizer_path)
         stream = tokenizer.encode(text, bos=False)
@@ -126,6 +136,11 @@ def train_and_save(
     # run must persist the moments it actually learned with, not a zeroed stand-in.
     optimizer = optimizer or Adam(model.parameters())
     warmup = warmup if warmup is not None else max(1, steps // 20)
+    progress = (
+        ProgressReporter("language model", steps, every=progress_every, enabled=verbose)
+        if verbose
+        else None
+    )
     report = train_language_model(
         model,
         stream,
@@ -140,6 +155,7 @@ def train_and_save(
         val_every=val_every,
         optimizer=optimizer,
         start_step=start_step,
+        progress=progress,
     )
     model.save(checkpoint)
     total_steps = start_step + steps
@@ -191,6 +207,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--generate", type=str, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=64)
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Print only the final summary, not the live progress lines.",
+    )
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=0,
+        help="Print a progress line every N steps (0 picks about twenty lines).",
+    )
     args = parser.parse_args(argv)
 
     model = train_and_save(
@@ -210,6 +237,8 @@ def main(argv: list[str] | None = None) -> int:
         kb_max_chunks=args.kb_max_chunks,
         include_runtime=not args.no_runtime_docs,
         resume=args.resume,
+        progress_every=args.progress_every,
+        verbose=not args.quiet,
     )
     if args.generate is not None:
         tokenizer = load_tokenizer(

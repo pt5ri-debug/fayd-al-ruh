@@ -20,6 +20,7 @@ import numpy as np
 
 from core.action import Action
 from core.interaction_reward import InteractionRewardModel, Outcome
+from core.progress import ProgressCallback
 from core.sandbox_environment import SandboxEnvironment, SandboxTask
 from core.state import State
 from core.state_transition import StateTransition
@@ -145,6 +146,7 @@ def train_interaction_policy(
     hasher: FeatureHasher | None = None,
     seed: int = 0,
     agent: QLearningAgent | None = None,
+    progress: ProgressCallback | None = None,
 ) -> tuple[QLearningAgent, InteractionReport]:
     """Train a Q-learning agent whose reward comes from observed interaction."""
     hasher = hasher or FeatureHasher(64)
@@ -153,7 +155,7 @@ def train_interaction_policy(
 
     successes = 0
     window: list[bool] = []
-    for _ in range(episodes):
+    for episode in range(1, episodes + 1):
         features = env.reset()
         done = False
         while not done:
@@ -164,6 +166,12 @@ def train_interaction_policy(
         learner.decay_epsilon()
         successes += 1 if achieved else 0
         window.append(achieved)
+        if progress is not None:
+            progress(
+                episode,
+                episodes,
+                detail=f"success {successes / episode:.2f}  eps {learner.epsilon:.3f}",
+            )
 
     recent = window[-max(1, episodes // 5) :]
     success_rate = sum(recent) / len(recent)

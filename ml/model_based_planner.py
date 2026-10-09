@@ -21,6 +21,7 @@ from typing import Callable
 
 
 from core.action import Action
+from core.progress import ProgressCallback
 from core.sandbox_environment import SandboxEnvironment, SandboxTask
 from core.state import State
 from ml.dataset import FeatureHasher
@@ -174,6 +175,7 @@ def train_model_based_policy(
     explore_attempts: int = 200,
     hasher: FeatureHasher | None = None,
     seed: int = 0,
+    progress: ProgressCallback | None = None,
 ) -> tuple[DynaQAgent, SymbolicWorldModel, PlanningReport]:
     """Explore, then train a Dyna-Q agent that learns from real and imagined steps."""
     hasher = hasher or FeatureHasher(64)
@@ -215,6 +217,14 @@ def train_model_based_policy(
         if achieved and first_success == 0:
             first_success = episode
         window.append(achieved)
+        if progress is not None:
+            recent = window[-max(1, episodes // 5) :]
+            progress(
+                episode,
+                episodes,
+                detail=f"success {sum(recent) / len(recent):.2f}  "
+                f"transitions {model.transitions_observed}",
+            )
 
     recent = window[-max(1, episodes // 5) :]
     plan = plan_with_world_model(model, task, goal)
