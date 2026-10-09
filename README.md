@@ -304,10 +304,12 @@ It then writes a **manifest** at `ml/artifacts/release_manifest.json` recording:
   repository.
 - **The corpus**: number of curriculum sentences, repository and knowledge-base
   sentences, built examples, and characters.
-- **The configuration**: episodes, language steps, seed, replay size, and the
-  knowledge-base sample and procedural options.
-- **The results**: petroleum task success (and procedural coverage), and the
-  language-model parameter count.
+- **The configuration**: episodes, language steps, seed, replay size, the
+  language-model capacity preset, and the knowledge-base sample and procedural
+  options.
+- **The results**: petroleum task success (and procedural coverage), the
+  language-model parameter count and capacity tier, and — with
+  `--measure-perplexity` — its **held-out perplexity**.
 
 All outputs are stored inside the project: `ml/artifacts/` (policies, brains,
 classifier, and `petroleum/`) and `ml/llm/checkpoints/fayd-llm.npz`. These files
@@ -492,10 +494,17 @@ python -m cli jarvis --no-web --session demo                                    
 The in-project language model used to treat every UTF-8 byte as a separate token,
 so a common word cost several tokens. We added a byte-level BPE tokenizer trained
 inside the project (`ml/llm/bpe.py`): it merges frequent byte pairs, so common
-words and English terms and punctuation become single tokens. On the project
-corpus it compresses the text by about **5x** (from 64,206 bytes to 12,908
-tokens), i.e. an effective context five times longer. The tokenizer is optional:
-`--tokenizer-kind byte` restores the old behaviour.
+words and English terms and punctuation become single tokens. On the current
+corpus it compresses the text by about **3x**, i.e. an effective context three
+times longer. The tokenizer is optional: `--tokenizer-kind byte` restores the old
+behaviour.
+
+BPE merge learning scans the corpus, so it reads a bounded prefix (300k
+characters) rather than the full repeated text; encoding the whole corpus with
+those merges is linear. On a release-sized corpus the byte tokenizer is still the
+default because training stays faster; measure the trade-off honestly with
+`python -m ml.llm.evaluate`, which reports **bits per byte** so a byte model and a
+BPE model can be compared on equal terms.
 
 ```bash
 python -m ml.llm --tokenizer-kind bpe --vocab-size 1024 --steps 4000
@@ -729,7 +738,8 @@ python -m cli insight --no-model "what is permeability?"   # extractive, no mode
 measured* on: sandbox policy success, predictive-coding brain error, the
 supervised outcome head, the knowledge-graph link-prediction score (Hit@1 against
 its baseline), the learned reward model's calibration, petroleum-task and
-procedural coverage, and the language model's size. Because the numbers come from
+procedural coverage, and the language model's size, capacity tier, and (when
+recorded) its **held-out perplexity**. Because the numbers come from
 a recorded run rather than a fresh claim, the report repeats a verified result; if
 no manifest exists it says so instead of inventing one.
 
@@ -1106,16 +1116,24 @@ tasks — `plant-seed` 0.42->0.71, `boil-water` 0.67->0.92, `recharge-lamp`
 The project contains its own language model, written from scratch in `numpy` and
 trained inside the repository, so no external service and no API keys are needed.
 
-- `ml/llm/tokenizer.py`: byte-level encoding (safe for any script, no training).
+- `ml/llm/tokenizer.py`: byte-level encoding (safe for any script, no training),
+  plus a byte-level **BPE** tokenizer (`ml/llm/bpe.py`) that learns subword merges
+  from the corpus.
 - `ml/llm/transformer.py`: a decoder-only transformer (multi-head causal
   attention, GELU, LayerNorm) with manual backprop and Adam — we verified the
-  gradients numerically.
+  gradients numerically. It now supports **numbered capacity presets**
+  (`--preset small|release-1|capable`), **weight tying**, **dropout**,
+  **warmup+cosine learning-rate schedule**, and **gradient clipping**.
 - `ml/llm/corpus.py`: an in-repo training corpus (English about the project's
   world and about petroleum engineering, a **corpus generated from the whole
   curriculum** — a sentence for every concept and relation in the disciplines and
-  courses — and, when enabled, sentences from **every repository's documents**:
-  the authored knowledge plus a relevance-filtered sample of the bulk knowledge
-  base, with JSON examples in the schema format).
+  courses — **numbered procedural text** for every recorded procedure, and, when
+  enabled, sentences from **every repository's documents**: the authored knowledge
+  plus a relevance-filtered sample of the bulk knowledge base, with JSON examples
+  in the schema format).
+- `ml/llm/evaluate.py`: **honest evaluation** — a document-level train/validation/
+  test split, held-out **perplexity**, and cross-tokenizer **bits per byte**, so a
+  claim about the model is measurable and comparable rather than a single lucky run.
 - `ml/llm/generator.py` and `ai/local_model.py`: text generation, and adaptation
   to the `CognitiveModel` interface so it replaces Ollama anywhere a model is
   accepted.
@@ -1126,10 +1144,34 @@ trained inside the repository, so no external service and no API keys are needed
 ```bash
 python -m ml.llm                       # train and save the default checkpoint
 python -m ml.llm --steps 4000          # train longer
+python -m ml.llm --preset release-1    # the larger, released capacity tier
 python -m ml.llm --generate "water"    # train, then sample a continuation
 python -m ml.llm --kb-max-chunks 2000  # also train on the bulk knowledge base
 python -m ml.llm --tokenizer-kind bpe  # smaller corpus: use the subword tokenizer
+python -m ml.llm.evaluate --checkpoint ml/llm/checkpoints/fayd-llm.npz  # held-out perplexity
 ```
+
+Capacity presets make growth a deliberate, recorded choice rather than an edit:
+
+| Preset | Layers | Width | Heads | Context | Dropout | Tied |
+|---|---|---|---|---|---|---|
+| `small` (default) | 3 | 96 | 4 | 64 | 0.0 | no |
+| `release-1` | 4 | 128 | 8 | 128 | 0.1 | yes |
+| `capable` | 6 | 192 | 8 | 128 | 0.1 | yes |
+
+Measured on the shared **document-level held-out test split**, using **bits per
+byte** so tokenizers are compared on equal terms. These are recorded numbers, not
+estimates — reproduce with `python -m ml.llm.evaluate`:
+
+| Model | Preset | Params | Steps | Test perplexity | Test bits/byte |
+|---|---|---|---|---|---|
+| previous checkpoint | `small` | 391,200 | — | 5.781 | 2.570 |
+| released checkpoint | `release-1` | 842,624 | 4000 | 4.265 | **2.125** |
+
+Two honest caveats. First, capacity alone is not enough: at only 800 steps the
+larger `release-1` model is *worse* than `small` (2.845 bits/byte), so the extra
+parameters pay off only with the full schedule. Second, both models are small and
+trained on a small in-repo corpus; the improvement is real but the scale is not.
 
 Using it as a cognitive model:
 

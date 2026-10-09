@@ -2,6 +2,7 @@
 
     python -m ml.llm                 # train and save the default checkpoint
     python -m ml.llm --steps 800     # train longer
+    python -m ml.llm --preset release-1 --tokenizer-kind bpe   # the release tier
     python -m ml.llm --generate "water"  # train, then sample a continuation
 
 The checkpoint is written into ``ml/llm/checkpoints`` and committed, so the
@@ -14,7 +15,8 @@ import argparse
 from pathlib import Path
 
 from core.paths import checkpoints_dir
-from ml.llm.corpus import build_corpus
+from ml.llm.corpus import build_corpus, corpus_units
+from ml.llm.evaluate import document_split, encode_documents
 from ml.llm.generator import LocalGenerator
 from ml.llm.tokenizer import (
     TOKENIZER_KINDS,
@@ -22,14 +24,28 @@ from ml.llm.tokenizer import (
     save_tokenizer,
     train_tokenizer,
 )
-from ml.llm.transformer import TransformerConfig, TransformerLM, train_language_model
+from ml.llm.transformer import (
+    PRESETS,
+    TransformerConfig,
+    TransformerLM,
+    train_language_model,
+)
 
 CHECKPOINT = checkpoints_dir() / "fayd-llm.npz"
 TOKENIZER = checkpoints_dir() / "fayd-llm.tokenizer.json"
+# BPE merges are learned from a bounded prefix: enough to capture common words
+# without spending minutes scanning the repeated training text.
+BPE_SAMPLE_CHARS = 300_000
 
 
-def build_model(*, seed: int = 0, config: TransformerConfig | None = None) -> TransformerLM:
-    return TransformerLM(config or TransformerConfig(), seed=seed)
+def build_model(
+    *,
+    seed: int = 0,
+    config: TransformerConfig | None = None,
+    preset: str = "small",
+    vocab_size: int = 257,
+) -> TransformerLM:
+    return TransformerLM(config or TransformerConfig.preset(preset, vocab_size=vocab_size), seed=seed)
 
 
 def train_and_save(
@@ -43,39 +59,60 @@ def train_and_save(
     tokenizer_kind: str = "byte",
     vocab_size: int = 1024,
     config: TransformerConfig | None = None,
+    preset: str = "small",
     log_every: int = 100,
     kb_max_chunks: int = 0,
     kb_repeats: int = 1,
     include_runtime: bool = True,
+    learning_rate: float = 3e-3,
+    warmup: int | None = None,
+    max_grad_norm: float = 1.0,
+    val_every: int = 200,
 ) -> TransformerLM:
+    units = corpus_units()
+    split = document_split(units, val_fraction=0.1, test_fraction=0.1, seed=seed)
+    held_out = set(split.validation) | set(split.test)
     text = build_corpus(
         repeats=repeats,
         structured_repeats=structured_repeats,
         kb_max_chunks=kb_max_chunks,
         kb_repeats=kb_repeats,
         include_runtime=include_runtime,
+        exclude=held_out,
     )
-    tokenizer = train_tokenizer(tokenizer_kind, text, vocab_size=vocab_size)
+    # The tokenizer sees distinct training documents only; held-out sentences are
+    # kept out of the text it learns merges from as well.
+    tokenizer_source = text[:BPE_SAMPLE_CHARS] if tokenizer_kind == "bpe" else text
+    tokenizer = train_tokenizer(tokenizer_kind, tokenizer_source, vocab_size=vocab_size)
     tokenizer_path = tokenizer_path or Path(checkpoint).with_suffix(".tokenizer.json")
     save_tokenizer(tokenizer, tokenizer_path)
 
     stream = tokenizer.encode(text, bos=False)
-    model_config = config or TransformerConfig(vocab_size=tokenizer.vocab_size)
+    val_stream = encode_documents(tokenizer, split.validation)
+    model_config = config or TransformerConfig.preset(preset, vocab_size=tokenizer.vocab_size)
     model = build_model(seed=seed, config=model_config)
+    warmup = warmup if warmup is not None else max(1, steps // 20)
     report = train_language_model(
         model,
         stream,
         steps=steps,
         batch_size=16,
-        learning_rate=3e-3,
+        learning_rate=learning_rate,
         seed=seed,
         log_every=log_every,
+        warmup=warmup,
+        max_grad_norm=max_grad_norm,
+        val_stream=val_stream,
+        val_every=val_every,
     )
     model.save(checkpoint)
+    params = sum(p.size for p in model.parameters())
     print(
         f"trained {steps} steps  loss {report.initial_loss:.3f} -> "
-        f"{report.final_loss:.3f}  tokens {len(stream)}  "
-        f"tokenizer {tokenizer_kind}/{tokenizer.vocab_size}  saved {checkpoint}"
+        f"{report.final_loss:.3f}  val {report.best_val_loss:.3f}  "
+        f"params {params}  tokens {len(stream)}  "
+        f"tokenizer {tokenizer_kind}/{tokenizer.vocab_size}  "
+        f"preset {preset}  saved {checkpoint}"
     )
     return model
 
@@ -90,6 +127,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tokenizer", type=Path, default=None)
     parser.add_argument("--tokenizer-kind", choices=TOKENIZER_KINDS, default="byte")
     parser.add_argument("--vocab-size", type=int, default=1024)
+    parser.add_argument("--preset", choices=tuple(PRESETS), default="small")
+    parser.add_argument("--learning-rate", type=float, default=3e-3)
+    parser.add_argument("--warmup", type=int, default=None)
+    parser.add_argument("--max-grad-norm", type=float, default=1.0)
+    parser.add_argument("--val-every", type=int, default=200)
     parser.add_argument(
         "--kb-max-chunks",
         type=int,
@@ -115,6 +157,11 @@ def main(argv: list[str] | None = None) -> int:
         tokenizer_path=args.tokenizer,
         tokenizer_kind=args.tokenizer_kind,
         vocab_size=args.vocab_size,
+        preset=args.preset,
+        learning_rate=args.learning_rate,
+        warmup=args.warmup,
+        max_grad_norm=args.max_grad_norm,
+        val_every=args.val_every,
         kb_max_chunks=args.kb_max_chunks,
         include_runtime=not args.no_runtime_docs,
     )

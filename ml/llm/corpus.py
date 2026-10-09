@@ -132,6 +132,7 @@ def build_corpus(
     kb_max_chunks: int = 0,
     kb_repeats: int = 1,
     include_runtime: bool = True,
+    exclude: "set[str] | frozenset[str] | None" = None,
 ) -> str:
     """Return the training text, repeated so the small model can fit it.
 
@@ -139,12 +140,15 @@ def build_corpus(
     petroleum-engineering prose matching the declared identity, prose generated
     from the whole seeded curriculum (every discipline and course), prose and
     formulas from the seeded petroleum corpus (the knowledge content behind the
-    curriculum), prose from the other repositories (promoted learned statements
-    and runtime documents), a relevance-filtered sample of the bulk knowledge
-    base when ``kb_max_chunks`` is positive (repeated ``kb_repeats`` times, since
-    it is large and broad), and JSON objects in the shape ``MODEL_OUTPUT_SCHEMA``
-    expects. The JSON block teaches the model the field names and English values
-    used by schema-guided decoding.
+    curriculum), numbered procedural text, prose from the other repositories
+    (promoted learned statements and runtime documents), a relevance-filtered
+    sample of the bulk knowledge base when ``kb_max_chunks`` is positive
+    (repeated ``kb_repeats`` times, since it is large and broad), and JSON
+    objects in the shape ``MODEL_OUTPUT_SCHEMA`` expects. The JSON block teaches
+    the model the field names and English values used by schema-guided decoding.
+
+    ``exclude`` drops sentences held out for validation or test, so a held-out
+    perplexity is genuinely out-of-sample.
     """
     if repeats < 1:
         raise ValueError("repeats must be at least 1.")
@@ -152,18 +156,25 @@ def build_corpus(
         raise ValueError("structured_repeats must be at least 1.")
     if kb_repeats < 1:
         kb_repeats = 1
-    prose = " ".join(_sentences())
-    petroleum = " ".join(_petroleum_sentences())
-    curriculum = " ".join(curriculum_sentences())
-    corpus = " ".join(corpus_sentences())
-    repositories = " ".join(repository_sentences(include_runtime=include_runtime))
-    bulk = " ".join(knowledge_base_sentences(kb_max_chunks=kb_max_chunks))
+    held = exclude or frozenset()
+
+    def keep(sentences: list[str]) -> str:
+        return " ".join(s for s in sentences if s not in held)
+
+    prose = keep(_sentences())
+    petroleum = keep(_petroleum_sentences())
+    curriculum = keep(curriculum_sentences())
+    corpus = keep(corpus_sentences())
+    procedures = keep(procedural_sentences())
+    repositories = keep(repository_sentences(include_runtime=include_runtime))
+    bulk = keep(knowledge_base_sentences(kb_max_chunks=kb_max_chunks))
     structured = " ".join(structured_examples())
     return (
-        (prose + " ") * repeats
-        + (petroleum + " ") * repeats
-        + (curriculum + " ") * repeats
-        + (corpus + " ") * repeats
+        (prose + " ") * (repeats if prose else 0)
+        + (petroleum + " ") * (repeats if petroleum else 0)
+        + (curriculum + " ") * (repeats if curriculum else 0)
+        + (corpus + " ") * (repeats if corpus else 0)
+        + (procedures + " ") * (repeats if procedures else 0)
         + (repositories + " ") * (repeats if repositories else 0)
         + (bulk + " ") * (kb_repeats if bulk else 0)
         + (structured + " ") * structured_repeats
@@ -175,6 +186,48 @@ def corpus_sentences() -> list[str]:
     from core.petroleum_corpus import corpus_sentences as _corpus_sentences
 
     return _corpus_sentences()
+
+
+def procedural_sentences() -> list[str]:
+    """Procedures rendered as explicit, numbered steps.
+
+    The corpus stores each procedure as a sentence, but the model learns the
+    *order* better when it is stated: every step is anchored to its task and
+    numbered, and each task opens with how many steps it has. This is the text
+    that carries the project's recorded know-how into the language model.
+    """
+    from core.petroleum_corpus import entries
+
+    sentences: list[str] = []
+    for entry in entries():
+        steps = [step for step in entry.procedures if step.strip()]
+        if not steps:
+            continue
+        sentences.append(f"The procedure for {entry.title} has {len(steps)} steps.")
+        for index, step in enumerate(steps, start=1):
+            sentences.append(f"Step {index} of {entry.title}: {step}")
+    return sentences
+
+
+def corpus_units() -> list[str]:
+    """Unique documents for splitting and tokenizer training.
+
+    Concatenating the repeated training text would let the same sentence appear
+    in both training and test; these are the distinct units before repetition,
+    so a document-level split stays honest. The small structured-JSON block is
+    left out on purpose -- it teaches output shape and is always trained on.
+    """
+    from collections import OrderedDict
+
+    units = (
+        _sentences()
+        + _petroleum_sentences()
+        + curriculum_sentences()
+        + corpus_sentences()
+        + procedural_sentences()
+        + repository_sentences(include_runtime=False)
+    )
+    return list(OrderedDict.fromkeys(unit for unit in units if unit.strip()))
 
 
 def structured_examples() -> list[str]:

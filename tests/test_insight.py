@@ -35,7 +35,12 @@ def _manifest() -> dict:
             "procedural_tasks": {"covered": 48, "total": 48},
             "tasks": [{"name": "t1", "held_out_success": 1.0}, {"name": "t2", "held_out_success": 0.0}],
         },
-        "language_model": {"steps": 4000, "parameters": 391200},
+        "language_model": {
+            "steps": 4000,
+            "parameters": 391200,
+            "preset": "release-1",
+            "perplexity": {"validation": 4.675, "test": 4.265, "bits_per_byte": 2.125},
+        },
     }
 
 
@@ -63,6 +68,14 @@ def test_learning_rows_cover_every_layer() -> None:
     assert "Petroleum tasks" in layers
     assert "Procedural tasks" in layers
     assert "Language model" in layers
+
+
+def test_learning_rows_include_language_model_perplexity_and_bits_per_byte() -> None:
+    rows = insight.learning_rows(_manifest())
+    metrics = {(row["layer"], row["metric"]) for row in rows}
+    assert ("Language model", "capacity tier") in metrics
+    assert ("Language model", "held-out perplexity") in metrics
+    assert ("Language model", "test bits/byte") in metrics
 
 
 def test_learning_rows_mean_aggregates_multiple_tasks() -> None:
