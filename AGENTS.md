@@ -44,7 +44,15 @@ Arabic is kept as secondary aliases where useful.
   `release-1`, `capable`) with optional weight tying and dropout. Training uses a
   warmup+cosine learning-rate schedule, gradient clipping, and periodic held-out
   validation (`train_language_model` returns `TrainReport` with `val_losses` and
-  `learning_rates`). New config fields persist in save/load.
+  `learning_rates`). New config fields persist in save/load. `train_language_model`
+  also takes `optimizer`/`start_step`, and `train_and_save` exposes `--resume`: it
+  loads the checkpoint weights + saved tokenizer and continues instead of starting
+  over, extending the schedule to `start_step + steps`.
+- `ml/llm/state.py` — run state for resuming: `save_training_state` /
+  `load_training_state` persist Adam's moments and the cumulative step count to
+  `<checkpoint>.state.npz` (gitignored as run state, not release content). A
+  mismatched sidecar is a hard error; a missing one resumes weights with fresh
+  moments.
 - `ml/llm/evaluate.py` — honest measurement: `document_split` (whole documents to
   train/val/test), `perplexity` (held-out, dropout off), `aggregate` (mean±std
   across seeds), and bits-per-byte for cross-tokenizer comparison. CLI:

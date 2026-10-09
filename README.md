@@ -1201,6 +1201,26 @@ python -m ml.llm --tokenizer-kind bpe  # smaller corpus: use the subword tokeniz
 python -m ml.llm.evaluate --checkpoint ml/llm/checkpoints/fayd-llm.npz  # held-out perplexity
 ```
 
+### Resuming training instead of restarting
+
+By default every run builds a fresh model and overwrites the checkpoint. Pass
+`--resume` to continue from the checkpoint at `--checkpoint` instead: the saved
+weights and the tokenizer they were trained with are loaded, and training picks
+up where it stopped rather than starting over.
+
+```bash
+python -m ml.llm --resume --steps 1000        # 1000 more steps on top of the saved model
+python -m ml.release --resume --llm-steps 1000  # same, as part of a full release run
+```
+
+The Adam optimiser's moment estimates and step count live in a small sidecar
+next to the checkpoint (`fayd-llm.state.npz`). It is *run state*, not release
+content, so it is never committed; a fresh run rebuilds it. When the sidecar is
+missing, a resume still continues the weights but starts Adam's moments from
+zero. When there is no checkpoint at all, `--resume` falls back to a fresh run
+and says so. The warmup+cosine schedule spans the *new* total step count, so
+asking for more steps extends the horizon along the same curve.
+
 Capacity presets make growth a deliberate, recorded choice rather than an edit:
 
 | Preset | Layers | Width | Heads | Context | Dropout | Tied |

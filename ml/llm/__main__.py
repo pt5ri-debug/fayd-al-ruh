@@ -18,6 +18,11 @@ from core.paths import checkpoints_dir
 from ml.llm.corpus import build_corpus, corpus_units
 from ml.llm.evaluate import document_split, encode_documents
 from ml.llm.generator import LocalGenerator
+from ml.llm.state import (
+    load_training_state,
+    save_training_state,
+    state_path as _state_path,
+)
 from ml.llm.tokenizer import (
     TOKENIZER_KINDS,
     load_tokenizer,
@@ -30,6 +35,7 @@ from ml.llm.transformer import (
     TransformerLM,
     train_language_model,
 )
+from ml.models import Adam
 
 CHECKPOINT = checkpoints_dir() / "fayd-llm.npz"
 TOKENIZER = checkpoints_dir() / "fayd-llm.tokenizer.json"
@@ -68,6 +74,8 @@ def train_and_save(
     warmup: int | None = None,
     max_grad_norm: float = 1.0,
     val_every: int = 200,
+    resume: bool = False,
+    state_path: Path | None = None,
 ) -> TransformerLM:
     units = corpus_units()
     split = document_split(units, val_fraction=0.1, test_fraction=0.1, seed=seed)
@@ -83,14 +91,40 @@ def train_and_save(
     # The tokenizer sees distinct training documents only; held-out sentences are
     # kept out of the text it learns merges from as well.
     tokenizer_source = text[:BPE_SAMPLE_CHARS] if tokenizer_kind == "bpe" else text
-    tokenizer = train_tokenizer(tokenizer_kind, tokenizer_source, vocab_size=vocab_size)
     tokenizer_path = tokenizer_path or Path(checkpoint).with_suffix(".tokenizer.json")
-    save_tokenizer(tokenizer, tokenizer_path)
 
-    stream = tokenizer.encode(text, bos=False)
+    # Resuming must not silently change the token index space: start from the
+    # saved weights and the tokenizer they were trained with, then keep training.
+    model: TransformerLM | None = None
+    optimizer: Adam | None = None
+    start_step = 0
+    if resume:
+        if Path(checkpoint).exists():
+            model = TransformerLM.load(checkpoint)
+            tokenizer = load_tokenizer(tokenizer_path)
+            loaded = load_training_state(state_path or _state_path(checkpoint), model)
+            if loaded is not None:
+                optimizer, start_step = loaded
+            print(
+                f"resuming from {checkpoint} at step {start_step} "
+                f"(tokenizer {tokenizer_kind}/{tokenizer.vocab_size})"
+            )
+        else:
+            print(f"no checkpoint at {checkpoint}; starting a fresh run")
+
+    if model is None:
+        tokenizer = train_tokenizer(tokenizer_kind, tokenizer_source, vocab_size=vocab_size)
+        save_tokenizer(tokenizer, tokenizer_path)
+        stream = tokenizer.encode(text, bos=False)
+    else:
+        stream = tokenizer.encode(text, bos=False)
     val_stream = encode_documents(tokenizer, split.validation)
     model_config = config or TransformerConfig.preset(preset, vocab_size=tokenizer.vocab_size)
-    model = build_model(seed=seed, config=model_config)
+    if model is None:
+        model = build_model(seed=seed, config=model_config)
+    # Own the optimiser so its moments are real when we save the sidecar: a fresh
+    # run must persist the moments it actually learned with, not a zeroed stand-in.
+    optimizer = optimizer or Adam(model.parameters())
     warmup = warmup if warmup is not None else max(1, steps // 20)
     report = train_language_model(
         model,
@@ -104,8 +138,12 @@ def train_and_save(
         max_grad_norm=max_grad_norm,
         val_stream=val_stream,
         val_every=val_every,
+        optimizer=optimizer,
+        start_step=start_step,
     )
     model.save(checkpoint)
+    total_steps = start_step + steps
+    save_training_state(optimizer, total_steps, state_path or _state_path(checkpoint))
     params = sum(p.size for p in model.parameters())
     print(
         f"trained {steps} steps  loss {report.initial_loss:.3f} -> "
@@ -144,6 +182,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip documents written at runtime (internet learning, Jarvis feedback).",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Continue training from the checkpoint at --checkpoint (and its "
+        "optimiser-state sidecar) instead of starting from scratch. Falls back to "
+        "a fresh run when the checkpoint does not exist.",
+    )
     parser.add_argument("--generate", type=str, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=64)
     args = parser.parse_args(argv)
@@ -164,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
         val_every=args.val_every,
         kb_max_chunks=args.kb_max_chunks,
         include_runtime=not args.no_runtime_docs,
+        resume=args.resume,
     )
     if args.generate is not None:
         tokenizer = load_tokenizer(

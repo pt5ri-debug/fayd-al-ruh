@@ -50,3 +50,8 @@ env/
 # ships the trained state (see `python -m ml.release`); the manifest records how
 # they were produced. Regenerate with `python -m ml.release`.
 !ml/artifacts/
+
+# Optimiser state that lets language-model training resume (`--resume`). It is
+# run state, not release content, and changes on every run, so it is never
+# committed; a fresh run rebuilds it from scratch.
+ml/llm/checkpoints/*.state.npz

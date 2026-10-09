@@ -87,6 +87,7 @@ class TrainingConfig:
     include_procedural: bool = True
     max_procedural: int | None = None
     measure_perplexity: bool = False
+    resume: bool = False
 
 
 def _git_revision() -> str:
@@ -290,6 +291,7 @@ def train_release(
             "include_runtime": config.include_runtime,
             "include_procedural": config.include_procedural,
             "max_procedural": config.max_procedural,
+            "resume": config.resume,
         },
         "knowledge": knowledge_summary(),
         "corpus": corpus_summary(config),
@@ -298,7 +300,6 @@ def train_release(
             "checkpoint": str(checkpoint),
         },
     }
-
     if config.include_base:
         print("Training base cognitive pipeline ...")
         manifest["base"] = _base_training(config, save_dir)
@@ -327,6 +328,7 @@ def train_release(
         kb_repeats=config.kb_repeats,
         include_runtime=config.include_runtime,
         preset=config.llm_preset,
+        resume=config.resume,
     )
     manifest["language_model"] = describe_checkpoint(
         checkpoint,
@@ -447,6 +449,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="do not retrain; only rewrite the manifest from current knowledge",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue language-model training from the checkpoint at --checkpoint "
+        "instead of starting from scratch (falls back to a fresh run when absent)",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -464,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
         include_runtime=not args.no_runtime_docs,
         include_procedural=not args.no_procedural,
         measure_perplexity=args.measure_perplexity,
+        resume=args.resume,
     )
 
     if args.manifest_only:
@@ -488,6 +497,7 @@ def main(argv: list[str] | None = None) -> int:
                 "include_runtime": config.include_runtime,
                 "include_procedural": config.include_procedural,
                 "max_procedural": config.max_procedural,
+                "resume": config.resume,
             },
             "knowledge": knowledge_summary(),
             "corpus": corpus_summary(config),
