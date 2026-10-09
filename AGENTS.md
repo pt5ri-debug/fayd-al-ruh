@@ -47,13 +47,22 @@ Arabic is kept as secondary aliases where useful.
   corpus from the seeds (disciplines, courses, and the petroleum corpus).
   `core/rag.py` — fuses lexical coverage (Arabic-normalised),
   hashed semantic, and multi-hop ontology signals into `RetrievedPassage` with
-  citations. `core/assistant.py` — `GroundedAssistant` / `build_default_assistant`;
+  citations.   `core/assistant.py` — `GroundedAssistant` / `build_default_assistant`;
   answers with citations, extractive fallback with no model, and a groundedness gate
   that rejects ungrounded model output. CLI: `python -m cli chat` (text-only
   conversation) and `python -m cli jarvis` (listen/act/speak; `python -m ai.voice`
   and `python -m ai.jarvis` also use it). Both build their session through
   `ai/jarvis.py:build_session`, so the assistant, learner, and sandbox wiring
   lives in one place.
+- `ai/mind.py` — the model mouth: `MindAssistant` answers from the **trained
+  language model** directly, with no retrieval and no citations, so the quality of
+  what the model itself learned is visible. `load_mind_model` /
+  `mind_status` load and describe the checkpoint. Wired **only** into
+  `python -m cli chat --mind` (and the `from the model` / `from the sources`
+  switch, matched in `ai/chat.py`); it deliberately never touches
+  `ai/jarvis.py`, `core/jarvis.py`, `JarvisMode`, `build_session`, or the shared
+  `JarvisControls`, so Jarvis is unaffected. Every model answer is labelled as
+  ungrounded on purpose.
 - `core/composition.py` — the deterministic composer: dependency-free rules that
   render evidence (retrieved passages, web sources, causal/reasoning/decision
   traces) into clean attributed prose. Shared by the assistant's extractive

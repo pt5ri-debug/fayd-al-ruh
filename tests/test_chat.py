@@ -253,3 +253,173 @@ def _mode_for_wiring():
             return ""
 
     return _Stub()
+
+
+# --- model mouth ("from the model") ---------------------------------------
+
+
+class _FakeMindModel:
+    """A stand-in model whose ``generator.generate`` echoes a fixed continuation."""
+
+    def __init__(self, continuation: str) -> None:
+        self._continuation = continuation
+
+        class _Generator:
+            def __init__(self, continuation: str) -> None:
+                self._continuation = continuation
+
+            def generate(self, prompt: str, *, max_new_tokens: int = 64, seed: int | None = None) -> str:
+                return prompt + self._continuation
+
+        self.generator = _Generator(continuation)
+
+
+def _switcher_mode(tmp_path, continuation="model prose"):
+    """A chat mode plus a switcher wired to a fake model (no numpy needed)."""
+    mode = _mode(tmp_path)
+    switcher = chat.ModelSwitcher(
+        mode, loader=lambda: _FakeMindModel(continuation), max_new_tokens=16
+    )
+    return mode, switcher
+
+
+def test_match_switch_recognises_model_and_sources_phrases() -> None:
+    assert chat._match_switch("from the model") == "model"
+    assert chat._match_switch("Model on.") == "model"
+    assert chat._match_switch("من الموديل") == "model"
+    assert chat._match_switch("from the sources") == "sources"
+    assert chat._match_switch("model off") == "sources"
+    assert chat._match_switch("من المصادر") == "sources"
+
+
+def test_match_switch_leaves_real_questions_alone() -> None:
+    assert chat._match_switch("what is porosity?") is None
+    assert chat._match_switch("how does the model predict the next state?") is None
+    assert chat._match_switch("") is None
+
+
+def test_switcher_swaps_the_mouth_and_keeps_the_grounded_one(tmp_path) -> None:
+    mode, switcher = _switcher_mode(tmp_path)
+    grounded = switcher.grounded
+    grounded_help = switcher.grounded_help
+
+    switcher.use_model()
+    assert mode.assistant is switcher.mind
+    assert mode.voice.assistant is switcher.mind
+    assert mode.help_text != grounded_help
+    assert chat._match_switch("from the model")
+
+    switcher.use_sources()
+    assert mode.assistant is grounded
+    assert mode.voice.assistant is grounded
+    assert mode.help_text == grounded_help
+
+
+def test_model_answer_has_no_sources_and_carries_the_header(tmp_path) -> None:
+    mode, switcher = _switcher_mode(tmp_path, continuation="the model's own words")
+    switcher.use_model()
+    turn = mode.handle("what is porosity?", require_wake=False, speak=False)
+
+    assert "the model's own words" in turn.response
+    assert "not grounded in cited sources" in turn.response
+    assert turn.citations == ()
+    assert "Sources:" not in chat.format_turn(turn)
+
+
+def test_switcher_loads_the_model_lazily(tmp_path) -> None:
+    mode = _mode(tmp_path)
+    calls: list[int] = []
+
+    def _loader():
+        calls.append(1)
+        return _FakeMindModel("late")
+
+    switcher = chat.ModelSwitcher(mode, loader=_loader)
+    assert calls == []
+    switcher.use_model()
+    assert calls == [1]
+    switcher.use_model()
+    assert calls == [1]  # loaded once, reused
+
+
+def test_run_loop_switches_mouths_between_turns(tmp_path, monkeypatch, capsys) -> None:
+    mode, switcher = _switcher_mode(tmp_path, continuation="model words")
+    answers = iter(["from the model", "what is porosity?", "from the sources", "what is porosity?", "quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    assert chat.run_loop(mode, as_json=False, switcher=switcher) == 0
+    out = capsys.readouterr().out
+    assert "[model] Now answering from the trained model" in out
+    assert "model words" in out
+    assert "[sources] Now answering from retrieved passages" in out
+    assert "Sources:" in out
+
+
+def test_run_loop_switch_load_failure_is_reported_not_fatal(tmp_path, monkeypatch, capsys) -> None:
+    mode = _mode(tmp_path)
+
+    def _bad_loader():
+        raise FileNotFoundError("no model here")
+
+    switcher = chat.ModelSwitcher(mode, loader=_bad_loader)
+    answers = iter(["from the model", "quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    assert chat.run_loop(mode, as_json=False, switcher=switcher) == 0
+    assert "Could not load the trained model" in capsys.readouterr().out
+
+
+def test_main_without_mind_does_not_touch_the_model(tmp_path, monkeypatch, capsys) -> None:
+    """The default chat must not load a model: it stays the grounded assistant."""
+    loaded: list[int] = []
+
+    def _explode(*_args, **_kwargs):
+        loaded.append(1)
+        raise AssertionError("the model must not load without --mind")
+
+    monkeypatch.setattr(chat.mind_module, "load_mind_model", _explode)
+    monkeypatch.setattr(chat, "build_session", lambda **_kw: _mode(tmp_path))
+    assert chat.main(["what is porosity?"]) == 0
+    assert loaded == []
+
+
+def test_main_mind_missing_checkpoint_exits_cleanly(tmp_path, monkeypatch, capsys) -> None:
+    def _missing(*_args, **_kwargs):
+        raise FileNotFoundError("No local language model at /nowhere.npz.")
+
+    monkeypatch.setattr(chat.mind_module, "load_mind_model", _missing)
+    monkeypatch.setattr(chat, "build_session", lambda **_kw: _mode(tmp_path))
+    assert chat.main(["--mind", "hello"]) == 1
+    out = capsys.readouterr().out
+    assert "Could not load the trained model" in out
+    assert "python -m cli llm" in out
+
+
+def test_main_mind_answers_from_the_model(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(chat.mind_module, "load_mind_model", lambda *_a, **_k: _FakeMindModel("mind output"))
+    monkeypatch.setattr(chat, "build_session", lambda **_kw: _mode(tmp_path))
+    assert chat.main(["--mind", "what is porosity?"]) == 0
+    out = capsys.readouterr().out
+    assert "mind output" in out
+    assert "not grounded in cited sources" in out
+
+
+# --- Jarvis is untouched --------------------------------------------------
+
+
+def test_chat_module_imports_jarvis_but_not_the_other_way(tmp_path) -> None:
+    """The dependency is one-way: chat -> jarvis, never jarvis -> chat."""
+    import ai.jarvis as jarvis_module
+
+    assert not hasattr(jarvis_module, "mind")
+    assert not hasattr(jarvis_module, "ModelSwitcher")
+
+
+def test_jarvis_build_session_signature_has_no_mind_parameters() -> None:
+    import inspect
+
+    from ai.jarvis import build_session
+
+    parameters = inspect.signature(build_session).parameters
+    assert "mind" not in parameters
+    assert "model" not in parameters
+    assert "answer_from_model" not in parameters
+
