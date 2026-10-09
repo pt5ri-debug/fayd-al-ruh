@@ -110,6 +110,14 @@ def run_chat(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.chat", argv)
 
 
+def run_mind_chat(argv: Sequence[str] = ()) -> int:
+    """Talk with the AI in text, answering from the trained model itself."""
+    args = list(argv)
+    if "--mind" not in args:
+        args.insert(0, "--mind")
+    return _run_module("ai.chat", args)
+
+
 def run_learn(argv: Sequence[str] = ()) -> int:
     """Demonstrate continuous learning and the regression gate."""
     return _run_module("ai.learn_demo", argv)
@@ -204,6 +212,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Jarvis mode (listen, act, speak)", run_jarvis, ()),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
+    ("Chat answering from the trained model (no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
     ("Ask the AI: what can it do and what has it learned", run_insight, ()),
     (
@@ -303,6 +312,7 @@ __all__ = [
     "run_agent",
     "run_jarvis",
     "run_chat",
+    "run_mind_chat",
     "run_learn",
     "run_insight",
     "run_internet_learner",

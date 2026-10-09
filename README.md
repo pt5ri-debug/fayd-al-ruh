@@ -651,7 +651,13 @@ and no citations, so the quality of what the model itself has learned is visible
 python -m cli chat --mind "what is porosity?"          # answer from the model only
 python -m cli chat --mind --mind-tokens 160 "explain permeability"   # longer generation
 python -m cli chat --mind --model-checkpoint path/to/fayd-llm.npz "hi"  # a specific checkpoint
+python -m cli mind-chat                    # the same thing, from the menu/CLI command
 ```
+
+In the portable numbered menu, entry **“Chat answering from the trained model
+(no sources)”** opens exactly this mode, so the portable build (which has no
+command line) can reach it too. The plain **“Chat with the AI”** entry is
+unchanged and still answers from the sources with citations.
 
 Every such answer is labelled `[mind] answered from the trained model only; not
 grounded in cited sources.` — it is the model's own prose, not a cited extract,
@@ -661,8 +667,10 @@ model. A missing checkpoint is reported plainly, with the command to train one
 
 Inside an interactive session you can switch mouths without restarting: type
 `from the model` to answer from the model, or `from the sources` for cited,
-retrieved answers again. Those phrases are recognised by `chat` alone — they are
-**not** Jarvis controls, so the Jarvis command's wording is unchanged.
+retrieved answers again. When the sources cannot answer a question, the chat
+prints a short hint pointing at `from the model`. Those phrases are recognised by
+`chat` alone — they are **not** Jarvis controls, so the Jarvis command's wording
+is unchanged.
 
 The model mouth is wired only in `ai/chat.py` (`ai/mind.py` holds the logic) and
 never touches `ai/jarvis.py`, `core/jarvis.py`, or the session builder, so Jarvis

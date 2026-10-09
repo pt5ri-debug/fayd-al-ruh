@@ -37,6 +37,13 @@ from core.composition import sources_block
 from core.jarvis import JarvisMode, JarvisTurn
 
 INTRO = "Chat with the project's AI. Ask a question, or type 'help' for controls; 'quit' to exit."
+MIND_HINT = (
+    "AI: (the sources could not answer; type 'from the model' to answer from the "
+    "trained model instead, or 'from the sources' to go back)"
+)
+
+# The composer's wording when retrieval found nothing to stand on.
+_NO_SOURCE_MARKER = "not enough evidence"
 
 # Strips punctuation so "From the model." and "model on" match the same phrase.
 _NON_WORD = re.compile(r"[^\w\s]", flags=re.UNICODE)
@@ -209,6 +216,9 @@ def run_loop(mode, *, as_json: bool, autosave: bool = False, switcher=None) -> i
         print_turn(turn, as_json=as_json)
         if not as_json:
             print()
+            if switcher is not None and not switcher.active and _NO_SOURCE_MARKER in turn.response:
+                print(MIND_HINT)
+                print()
         if autosave:
             mode.save_session()
 
