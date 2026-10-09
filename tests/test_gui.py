@@ -31,6 +31,7 @@ class FakeSession:
         self.help_text = "help"
         self.voice = SimpleNamespace(assistant=self.assistant)
         self._conversation = SimpleNamespace(id="CNV-fake")
+        self.saved_ids: tuple[str, ...] = ()
 
     @property
     def conversation(self) -> SimpleNamespace:
@@ -52,7 +53,13 @@ class FakeSession:
 
     def resume_session(self, conversation_id: str) -> bool:
         self.resumed.append(conversation_id)
-        return conversation_id == self.conversation.id
+        if conversation_id in self.saved_ids or conversation_id == self.conversation.id:
+            self._conversation = SimpleNamespace(id=conversation_id)
+            return True
+        return False
+
+    def list_sessions(self) -> tuple[str, ...]:
+        return self.saved_ids
 
 
 def _service(mode: FakeSession, **kwargs: Any) -> ChatService:
@@ -142,6 +149,19 @@ def test_service_switches_between_model_and_sources() -> None:
     assert service.source == "sources"
 
 
+def test_service_lists_and_resumes_saved_sessions() -> None:
+    session = FakeSession()
+    session.saved_ids = ("CNV-fake", "CNV-other")
+    service = _service(session)
+
+    assert service.list_sessions() == ("CNV-fake", "CNV-other")
+
+    assert service.resume("CNV-fake") is True
+    assert service.session == "CNV-fake"
+    assert service.resume("CNV-missing") is False
+    assert session.resumed == ["CNV-fake", "CNV-missing"]
+
+
 # --- actions --------------------------------------------------------------
 
 
@@ -151,6 +171,46 @@ def test_every_action_is_callable_and_has_a_unique_key() -> None:
     for action in gui_actions.ACTIONS:
         assert callable(action.command)
         assert action.label
+
+
+def test_actions_cover_numbered_menu_items_five_through_eleven() -> None:
+    """Learn, insight, internet, web, and both knowledge entries are present."""
+    keys = {action.key for action in gui_actions.ACTIONS}
+    for key in (
+        "learn",
+        "insight",
+        "internet-learner",
+        "web",
+        "knowledge-build",
+        "knowledge-stats",
+    ):
+        assert key in keys, f"missing action {key!r}"
+
+
+def test_action_labels_match_cli_menu_items_five_to_eleven() -> None:
+    """Every numbered CLI item from 5 to 11 appears once, with the same label."""
+    from cli.menu import visible_menu
+
+    cli_items = visible_menu()[4:11]  # 1-based items 5..11
+    gui_labels = [action.label for action in gui_actions.ACTIONS]
+    for title, _command, _argv in cli_items:
+        assert gui_labels.count(title) == 1, f"{title!r} must appear exactly once"
+
+
+def test_actions_never_duplicate_a_gui_control() -> None:
+    """The window's own controls own the first menu items; the sidebar must not repeat them."""
+    forbidden = {"gui", "voice", "agent", "jarvis", "chat", "mind-chat", "new-chat", "save"}
+    keys = {action.key for action in gui_actions.ACTIONS}
+    assert not (keys & forbidden)
+
+    labels = [action.label for action in gui_actions.ACTIONS]
+    assert len(labels) == len(set(labels)), "two actions share a label"
+
+
+def test_web_action_asks_for_a_question() -> None:
+    action = gui_actions.action_by_key("web")
+    assert action.needs_input is True
+    assert "--approve" in action.argv
 
 
 def test_action_by_key_round_trips_and_rejects_unknown() -> None:
@@ -163,6 +223,20 @@ def test_action_by_key_round_trips_and_rejects_unknown() -> None:
 def test_action_commands_are_the_cli_menu_functions() -> None:
     for action in gui_actions.ACTIONS:
         assert action.command.__module__ == "cli.menu"
+
+
+def test_saved_session_items_mark_the_current_chat() -> None:
+    items = gui_actions.saved_session_items(("CNV-1", "CNV-2"), current="CNV-2")
+
+    assert [item.session_id for item in items] == ["CNV-1", "CNV-2"]
+    assert items[1].is_current is True
+    assert items[0].is_current is False
+    assert "current" in items[1].label
+    assert items[0].key == "session:CNV-1"
+
+
+def test_saved_session_items_are_empty_without_saves() -> None:
+    assert gui_actions.saved_session_items(()) == ()
 
 
 # --- CLI wiring must stay import-safe -------------------------------------
@@ -232,5 +306,53 @@ def test_window_builds_and_sends_a_message() -> None:
         texts = [bubble.cget("text") for bubble in app._bubbles]
         assert any("hello" in text for text in texts)
         assert any("ok" in text for text in texts)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_shows_actions_and_saved_chats() -> None:
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+    from gui.actions import ACTIONS
+
+    session = FakeSession()
+    session.saved_ids = ("CNV-alpha", "CNV-beta")
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(session))
+        root.update()
+        # One button per action, none of them repeated.
+        assert len(app._action_buttons) == len(ACTIONS)
+        labels = [button.cget("text") for button in app._session_buttons]
+        assert any("CNV-alpha" in text for text in labels)
+        assert any("CNV-beta" in text for text in labels)
+        # Tapping a saved chat marks it current, and the list refreshes in place.
+        app._on_resume_session(
+            gui_actions.SessionItem("session:CNV-alpha", "CNV-alpha", "CNV-alpha")
+        )
+        root.update()
+        assert app.service.session == "CNV-alpha"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_tolerates_a_broken_session_store() -> None:
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    class BrokenSession(FakeSession):
+        def list_sessions(self) -> tuple[str, ...]:
+            raise OSError("store is unreadable")
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(BrokenSession()))
+        root.update()
+        labels = [button.cget("text") for button in app._session_buttons]
+        assert labels == ["No saved chats yet."]
     finally:
         root.destroy()

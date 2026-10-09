@@ -709,9 +709,20 @@ The window is a thin shell over the same code the CLI already runs:
   `ModelSwitcher` to swap the answering mouth. A GUI answer and a CLI answer come
   from the same path, so there is no second implementation to keep in sync.
 - The sidebar's **New chat**, **Save conversation**, the **“From sources”/“From
-  trained model”** switch, and the **Actions** buttons all call the `cli.menu`
-  `run_*` functions the numbered menu calls. Training and evaluation steps are
-  available here even though they are hidden from the numbered CLI menu.
+  trained model”** switch, the **Actions** buttons, and the **Saved chats** list
+  all call the `cli.menu` `run_*` functions the numbered menu calls. The
+  **Actions** section adds numbered CLI items **5 through 11** — learn,
+  insight, Internet learner, web verify, and both knowledge-base entries — with
+  the same labels and default arguments, so nothing is offered twice: the
+  window's own controls and the composer already cover items 1–4 (the window,
+  Jarvis, and the two chat modes). The training and evaluation entries that
+  already lived in the sidebar are kept here too, even though they are hidden
+  from the numbered CLI menu.
+- The **Saved chats** list under Actions is filled from `mode.list_sessions()`
+  and rebuilds after every save, new chat, or action. Clicking an entry resumes
+  that conversation through `mode.resume_session(...)` and marks it **✓ current**.
+  **Ask the web and verify the answer** asks for a question in a small dialog
+  before it runs, matching the CLI's positional argument.
 - Answers run on a **worker thread** and are posted back through a queue, so the
   window never freezes while the model thinks; output from a sidebar action is
   streamed into the transcript.
