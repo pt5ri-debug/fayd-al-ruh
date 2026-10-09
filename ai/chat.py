@@ -3,6 +3,7 @@
     python -m cli chat                          # interactive conversation
     python -m cli chat "what is porosity?"      # one question, then exit
     python -m cli chat --no-web                 # answer only from what it knows
+    python -m cli chat --mind                   # answer from the trained model, not the sources
     python -m cli chat --session demo           # resume/autosave a named session
     python -m cli chat --list-sessions          # show saved conversations
 
@@ -16,19 +17,96 @@ The same spoken controls still work as typed commands: "new conversation" starts
 over, "save" persists the session, "sessions" lists saved ones, "web on"/"web
 off" toggle internet lookups, "that's right" and "that's wrong, it's ..." teach it
 from explicit feedback, and "help" lists them. Type "quit" to leave.
+
+With ``--mind`` the answer comes from the trained language model itself -- no
+retrieval, no citations -- so the quality of what it has learned is visible. That
+mouth is swapped in **here**, in this module, without touching the Jarvis loop or
+the session builder, so Jarvis mode is unaffected.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
+from ai import mind as mind_module
 from ai.jarvis import build_session
 from core.composition import sources_block
-from core.jarvis import JarvisTurn
+from core.jarvis import JarvisMode, JarvisTurn
 
 INTRO = "Chat with the project's AI. Ask a question, or type 'help' for controls; 'quit' to exit."
+
+# Strips punctuation so "From the model." and "model on" match the same phrase.
+_NON_WORD = re.compile(r"[^\w\s]", flags=re.UNICODE)
+
+
+def _normalize(text: str) -> str:
+    cleaned = _NON_WORD.sub(" ", text.strip().casefold())
+    return " ".join(cleaned.split())
+
+
+def _match_switch(text: str) -> str | None:
+    """Return "model" or "sources" when the line is a mouth switch, else ``None``.
+
+    Recognised only for the whole line, so an ordinary question is never captured.
+    The phrases live in :mod:`ai.mind`, not in the shared Jarvis controls, so the
+    Jarvis command's wording never changes.
+    """
+    normalized = _normalize(text)
+    if not normalized:
+        return None
+    if normalized in _normalize_set(mind_module.SWITCH_TO_MODEL):
+        return "model"
+    if normalized in _normalize_set(mind_module.SWITCH_TO_SOURCES):
+        return "sources"
+    return None
+
+
+def _normalize_set(phrases: tuple[str, ...]) -> set[str]:
+    return {_normalize(phrase) for phrase in phrases}
+
+
+class ModelSwitcher:
+    """Swaps the session's answering mouth between the model and the sources.
+
+    The grounded assistant and its help text are kept so switching back is exact.
+    Only ``mode.assistant``/``mode.voice.assistant``/``mode.help_text`` change;
+    nothing in the Jarvis loop, the controls, or the session builder is touched.
+
+    The model is loaded lazily on the first switch to it, so an interactive chat
+    that never asks for the model never pays for loading one.
+    """
+
+    def __init__(self, mode: JarvisMode, *, loader, max_new_tokens: int = 96) -> None:
+        self.mode = mode
+        self.grounded = mode.assistant
+        self.grounded_help = mode.help_text
+        self._loader = loader
+        self._max_new_tokens = max_new_tokens
+        self._mind: mind_module.MindAssistant | None = None
+        self.active = False
+
+    @property
+    def mind(self) -> mind_module.MindAssistant:
+        if self._mind is None:
+            self._mind = mind_module.MindAssistant(self._loader(), max_new_tokens=self._max_new_tokens)
+        return self._mind
+
+    def use_model(self) -> None:
+        """Activate the model mouth. Raises when the checkpoint cannot be loaded."""
+        assistant = self.mind  # load now, so a failure is reported before switching
+        self.mode.assistant = assistant
+        self.mode.voice.assistant = assistant
+        self.mode.help_text = f"{self.grounded_help} {mind_module.MIND_HELP}"
+        self.active = True
+
+    def use_sources(self) -> None:
+        self.mode.assistant = self.grounded
+        self.mode.voice.assistant = self.grounded
+        self.mode.help_text = self.grounded_help
+        self.active = False
 
 
 def format_turn(turn: JarvisTurn) -> str:
@@ -86,8 +164,23 @@ def print_turn(turn: JarvisTurn, *, as_json: bool) -> None:
     print(format_turn(turn))
 
 
-def run_loop(mode, *, as_json: bool, autosave: bool = False) -> int:
-    """Read questions from the terminal and answer until 'quit' or EOF."""
+def _print_switch(kind: str, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps({"routed": "switch", "mode": kind}, ensure_ascii=False))
+        return
+    if kind == "model":
+        print("AI: [model] Now answering from the trained model only (no sources).")
+    else:
+        print("AI: [sources] Now answering from retrieved passages with citations.")
+    print()
+
+
+def run_loop(mode, *, as_json: bool, autosave: bool = False, switcher=None) -> int:
+    """Read questions from the terminal and answer until 'quit' or EOF.
+
+    With a ``switcher`` the typed controls "from the model" / "from the sources"
+    change which mouth answers; without one the loop is exactly as before.
+    """
     if not as_json:
         print(INTRO)
     while True:
@@ -98,6 +191,18 @@ def run_loop(mode, *, as_json: bool, autosave: bool = False) -> int:
             return 0
         if line.strip().casefold() in {"quit", "exit", "q", ""}:
             return 0
+        if switcher is not None:
+            switch = _match_switch(line)
+            if switch in {"model", "sources"}:
+                try:
+                    switcher.use_model() if switch == "model" else switcher.use_sources()
+                except (FileNotFoundError, OSError, ValueError) as error:
+                    print(f"Could not load the trained model: {error}")
+                    print("Train it first with `python -m cli llm` (or point --model-checkpoint at one).")
+                    print()
+                    continue
+                _print_switch(switch, as_json=as_json)
+                continue
         turn = mode.handle(line, require_wake=False, speak=False)
         if not as_json:
             print("AI:", end=" ")
@@ -127,6 +232,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--session", default=None, help="resume a saved session by id, or start a new one")
     parser.add_argument("--list-sessions", action="store_true", help="list saved sessions and exit")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    parser.add_argument(
+        "--mind",
+        action="store_true",
+        help="answer from the trained model itself (no retrieval, no citations), not from the sources",
+    )
+    parser.add_argument("--model-checkpoint", default=None, help="path to a language-model checkpoint to answer with")
+    parser.add_argument("--mind-temperature", type=float, default=0.0, help="sampling temperature for model answers (0 = deterministic)")
+    parser.add_argument("--mind-tokens", type=int, default=96, help="maximum tokens to generate per model answer")
     args = parser.parse_args(argv)
 
     if args.list_sessions:
@@ -149,6 +262,25 @@ def main(argv: list[str] | None = None) -> int:
         text_only=True,
     )
 
+    switcher = ModelSwitcher(
+        mode,
+        loader=lambda: mind_module.load_mind_model(
+            args.model_checkpoint,
+            temperature=args.mind_temperature,
+            max_new_tokens=args.mind_tokens,
+        ),
+        max_new_tokens=args.mind_tokens,
+    )
+    if args.mind:
+        try:
+            switcher.use_model()
+        except (FileNotFoundError, OSError, ValueError) as error:
+            print(f"Could not load the trained model: {error}")
+            print("Train it first with `python -m cli llm` (or point --model-checkpoint at one).")
+            return 1
+        if not args.json:
+            print(mind_module.status_line(mind_module.mind_status(args.model_checkpoint)))
+
     if args.session:
         if not mode.resume_session(args.session):
             if not args.json:
@@ -163,11 +295,12 @@ def main(argv: list[str] | None = None) -> int:
             mode.save_session()
         return 0
 
-    return run_loop(mode, as_json=args.json, autosave=args.session is not None)
+    return run_loop(mode, as_json=args.json, autosave=args.session is not None, switcher=switcher)
 
 
 __all__ = [
     "INTRO",
+    "ModelSwitcher",
     "format_turn",
     "main",
     "print_turn",

@@ -629,6 +629,7 @@ same on a machine with no audio at all.
 python -m cli chat                          # interactive conversation
 python -m cli chat "what is porosity?"      # one question, then exit
 python -m cli chat --no-web                 # answer only from what it knows
+python -m cli chat --mind                   # answer from the trained model, not the sources
 python -m cli chat --session demo           # resume/autosave a named session
 python -m cli chat --list-sessions          # show saved conversations
 python -m cli chat --json "what is porosity?"   # machine-readable turn
@@ -638,6 +639,34 @@ The spoken controls still work as typed commands — `new conversation`, `save`,
 `sessions`, `repeat`, `web on`/`web off`, `that's right`, `that's wrong, it's ...`,
 and `help` — only the wording changes so it never mentions muting or replaying
 audio. Type `quit` to leave.
+
+### Answering from the trained model (`--mind`)
+
+By default `chat` answers the way Jarvis does: it retrieves the passages that
+support an answer and cites them. With `--mind` it instead asks the **trained
+language model** (`ml/llm/checkpoints/fayd-llm.npz`) directly, with no retrieval
+and no citations, so the quality of what the model itself has learned is visible:
+
+```bash
+python -m cli chat --mind "what is porosity?"          # answer from the model only
+python -m cli chat --mind --mind-tokens 160 "explain permeability"   # longer generation
+python -m cli chat --mind --model-checkpoint path/to/fayd-llm.npz "hi"  # a specific checkpoint
+```
+
+Every such answer is labelled `[mind] answered from the trained model only; not
+grounded in cited sources.` — it is the model's own prose, not a cited extract,
+and it is never checked against sources. That is the point: it measures the
+model. A missing checkpoint is reported plainly, with the command to train one
+(`python -m cli llm`).
+
+Inside an interactive session you can switch mouths without restarting: type
+`from the model` to answer from the model, or `from the sources` for cited,
+retrieved answers again. Those phrases are recognised by `chat` alone — they are
+**not** Jarvis controls, so the Jarvis command's wording is unchanged.
+
+The model mouth is wired only in `ai/chat.py` (`ai/mind.py` holds the logic) and
+never touches `ai/jarvis.py`, `core/jarvis.py`, or the session builder, so Jarvis
+mode is unaffected.
 
 ## Continuous learning
 
@@ -983,6 +1012,7 @@ python -m cli eval
 python -m cli jarvis "What is the relationship between porosity and permeability?"   # cited, source-grounded answer
 python -m cli jarvis "list the files in notes/"    # Jarvis mode: route, act, and answer
 python -m cli chat       # chat with the AI in text (Jarvis, no voice)
+python -m cli chat --mind   # answer from the trained model itself (no sources)
 python -m cli insight    # what the AI can do and what it has learned
 python -m cli web --approve "What is a gas kick?"   # web answer, cited and trust-scored
 python -m cli paths      # where assets are read and data is written
