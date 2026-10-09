@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import cli.menu as menu
 from cli.__main__ import main as cli_main
@@ -50,10 +50,19 @@ def test_hidden_menu_entries_stay_callable_but_unlisted() -> None:
 def test_visible_menu_indices_drive_run_choice(monkeypatch) -> None:
     """Numbering follows the visible menu, not the full MENU."""
     calls: list[str] = []
-    monkeypatch.setattr(menu, "MENU", (
-        ("Hidden item", lambda argv: calls.append("hidden") or 0, ()),
-        ("Shown item", lambda argv: calls.append("shown") or 0, ()),
-    ))
+
+    def make_action(name: str) -> Callable[[Sequence[str]], int]:
+        def action(_argv: Sequence[str]) -> int:
+            calls.append(name)
+            return 0
+
+        return action
+
+    monkeypatch.setattr(
+        menu,
+        "MENU",
+        (("Hidden item", make_action("hidden"), ()), ("Shown item", make_action("shown"), ())),
+    )
     monkeypatch.setattr(menu, "HIDDEN_MENU_LABELS", frozenset({"Hidden item"}))
     assert menu.run_choice("1") == 0
     assert calls == ["shown"]
