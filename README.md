@@ -663,8 +663,8 @@ python -m cli chat --mind --model-checkpoint path/to/fayd-llm.npz "hi"  # a spec
 python -m cli mind-chat                    # the same thing, from the menu/CLI command
 ```
 
-In the portable numbered menu, entry **“Chat answering from the trained model
-(no sources)”** opens exactly this mode, so the portable build (which has no
+In the portable numbered menu, entry **“Chat with the AI (trained model, no
+sources)”** opens exactly this mode, so the portable build (which has no
 command line) can reach it too. The plain **“Chat with the AI”** entry is
 unchanged and still answers from the sources with citations.
 

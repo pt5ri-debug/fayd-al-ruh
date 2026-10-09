@@ -212,7 +212,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Jarvis mode (listen, act, speak)", run_jarvis, ()),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
-    ("Chat answering from the trained model (no sources)", run_mind_chat, ()),
+    ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
     ("Ask the AI: what can it do and what has it learned", run_insight, ()),
     (
