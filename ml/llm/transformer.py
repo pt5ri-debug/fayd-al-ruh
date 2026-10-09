@@ -521,6 +521,8 @@ def train_language_model(
     val_stream: list[int] | None = None,
     val_every: int = 0,
     val_batches: int = 8,
+    optimizer: "Adam | None" = None,
+    start_step: int = 0,
 ) -> TrainReport:
     """Train on a flat token stream by next-token prediction.
 
@@ -529,17 +531,28 @@ def train_language_model(
     held-out validation with dropout disabled. With ``warmup=0`` and
     ``max_grad_norm=0`` and no ``val_stream`` the behaviour is the original
     constant-rate loop, so existing tests and callers are unaffected.
+
+    ``optimizer`` and ``start_step`` let a caller resume a run: pass the Adam
+    optimiser loaded from a saved state and the number of steps already taken,
+    and training continues where it stopped instead of restarting the moment
+    estimates. The learning-rate schedule then spans ``start_step + steps``, so
+    asking for more steps extends the horizon rather than freezing it.
     """
     block = model.config.block_size
     if len(token_stream) < block + 2:
         raise ValueError("Token stream is too short for the configured block size.")
-    rng = np.random.default_rng(seed)
-    optimizer = Adam(model.parameters(), lr=learning_rate)
+    if start_step < 0:
+        raise ValueError("start_step must not be negative.")
+    total_steps = start_step + steps
+    rng = np.random.default_rng(seed + start_step)
+    optimizer = optimizer or Adam(model.parameters(), lr=learning_rate)
+    if len(optimizer.params) != len(model.parameters()):
+        raise ValueError("Optimiser state does not match the model's parameters.")
     report = TrainReport(steps=steps)
     max_start = len(token_stream) - block - 1
     model.train(True)
-    for step in range(1, steps + 1):
-        lr = _lr_at(step, steps=steps, base_lr=learning_rate, warmup=warmup)
+    for step in range(start_step + 1, total_steps + 1):
+        lr = _lr_at(step, steps=total_steps, base_lr=learning_rate, warmup=warmup)
         optimizer.lr = lr
         starts = rng.integers(0, max_start, size=batch_size)
         x, y = _sample_batch(token_stream, block, starts)
@@ -550,11 +563,11 @@ def train_language_model(
         optimizer.step(grads)
         report.losses.append(loss)
         report.learning_rates.append(lr)
-        if val_stream is not None and val_every and step % val_every == 0:
+        if val_stream is not None and val_every and (step - start_step) % val_every == 0:
             report.val_losses.append(
                 _validation_loss(model, val_stream, batch_size=batch_size, seed=seed, batches=val_batches)
             )
-        if log_every and step % log_every == 0:
+        if log_every and (step - start_step) % log_every == 0:
             extra = f"  lr {lr:.2e}"
             if report.val_losses:
                 extra += f"  val {report.val_losses[-1]:.4f}"
