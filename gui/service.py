@@ -104,6 +104,17 @@ class ChatService:
         self.session = None
         return conversation.id
 
+    def list_sessions(self) -> tuple[str, ...]:
+        """The ids of saved conversations available to resume."""
+        return self.mode.list_sessions()
+
+    def resume(self, session_id: str) -> bool:
+        """Make a saved conversation current. Returns whether it was found."""
+        if not self.mode.resume_session(session_id):
+            return False
+        self.session = session_id
+        return True
+
     def _to_reply(self, turn: JarvisTurn) -> ChatReply:
         text = chat_module.format_turn(turn)
         if turn.routed == "control":

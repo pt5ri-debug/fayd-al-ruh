@@ -20,8 +20,9 @@ from typing import Any
 
 import tkinter as tk
 from tkinter import font as tkfont
+from tkinter import simpledialog
 
-from gui.actions import ACTIONS, GuiAction
+from gui.actions import ACTIONS, GuiAction, SessionItem, saved_session_items
 from gui.options import build_parser
 from gui.service import ChatReply, ChatService
 
@@ -93,40 +94,104 @@ class FaydGUI:
             font=(self._font, 15, "bold"), anchor="w", padx=16, pady=14,
         ).pack(fill="x")
 
-        self._sidebar_button(sidebar, "＋  New chat", self._on_new_chat).pack(
+        self._status = tk.Label(
+            sidebar, text=self._status_text(), bg=SIDEBAR_BG, fg=MUTED_COLOR,
+            font=(self._font, 9), anchor="w", justify="left", padx=16, pady=10,
+        )
+        self._status.pack(side="bottom", fill="x")
+
+        # The actions and saved chats can outgrow the window, so the body scrolls.
+        body = tk.Frame(sidebar, bg=SIDEBAR_BG)
+        body.pack(side="top", fill="both", expand=True)
+        canvas = tk.Canvas(body, bg=SIDEBAR_BG, highlightthickness=0, width=244)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar = tk.Scrollbar(body, command=canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        panel = tk.Frame(canvas, bg=SIDEBAR_BG)
+        window = canvas.create_window((0, 0), window=panel, anchor="nw")
+        panel.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+        for widget in (canvas, panel):
+            widget.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+
+        self._sidebar_button(panel, "＋  New chat", self._on_new_chat).pack(
             fill="x", padx=10, pady=(0, 8)
         )
 
         tk.Label(
-            sidebar, text="Answering with", bg=SIDEBAR_BG, fg=MUTED_COLOR,
+            panel, text="Answering with", bg=SIDEBAR_BG, fg=MUTED_COLOR,
             font=(self._font, 9), anchor="w", padx=16,
         ).pack(fill="x", pady=(6, 2))
         self._source_var = tk.StringVar(value="sources")
         for value, label in (("sources", "From sources (cited)"), ("model", "From trained model")):
             tk.Radiobutton(
-                sidebar, text=label, value=value, variable=self._source_var,
+                panel, text=label, value=value, variable=self._source_var,
                 command=self._on_source_change, bg=SIDEBAR_BG, fg=TEXT_COLOR,
                 selectcolor=SIDEBAR_BG, activebackground=SIDEBAR_BG,
                 activeforeground=TEXT_COLOR, font=(self._font, 10),
                 anchor="w", padx=10, highlightthickness=0, bd=0,
             ).pack(fill="x", padx=6)
 
-        self._sidebar_button(sidebar, "💾  Save conversation", self._on_save).pack(
+        self._sidebar_button(panel, "💾  Save conversation", self._on_save).pack(
             fill="x", padx=10, pady=(8, 10)
         )
 
         tk.Label(
-            sidebar, text="Actions", bg=SIDEBAR_BG, fg=MUTED_COLOR,
+            panel, text="Actions", bg=SIDEBAR_BG, fg=MUTED_COLOR,
             font=(self._font, 9), anchor="w", padx=16,
         ).pack(fill="x", pady=(4, 2))
-        for action in ACTIONS:
-            self._action_button(sidebar, action).pack(fill="x", padx=10, pady=1)
+        self._actions_panel = tk.Frame(panel, bg=SIDEBAR_BG)
+        self._actions_panel.pack(fill="x")
+        self._action_buttons = self._populate_actions(self._actions_panel)
 
-        self._status = tk.Label(
-            sidebar, text=self._status_text(), bg=SIDEBAR_BG, fg=MUTED_COLOR,
-            font=(self._font, 9), anchor="w", justify="left", padx=16, pady=10,
+        tk.Label(
+            panel, text="Saved chats", bg=SIDEBAR_BG, fg=MUTED_COLOR,
+            font=(self._font, 9), anchor="w", padx=16,
+        ).pack(fill="x", pady=(12, 2))
+        self._sessions_panel = tk.Frame(panel, bg=SIDEBAR_BG)
+        self._sessions_panel.pack(fill="x")
+        self._session_buttons: list[tk.Widget] = []
+        self.refresh_sessions()
+
+    def _populate_actions(self, parent: tk.Misc) -> list[tk.Widget]:
+        """Fill the Actions section with one button per entry (no duplicates)."""
+        buttons: list[tk.Widget] = []
+        for action in ACTIONS:
+            button = self._action_button(parent, action)
+            button.pack(fill="x", padx=10, pady=1)
+            buttons.append(button)
+        return buttons
+
+    def refresh_sessions(self) -> None:
+        """Rebuild the Saved chats list from the store, marking the current one."""
+        for widget in self._session_buttons:
+            widget.destroy()
+        self._session_buttons = []
+        try:
+            saved = self.service.list_sessions()
+        except Exception:  # a broken store must not blank the sidebar
+            saved = ()
+        items = saved_session_items(saved, current=self.service.session)
+        if not items:
+            hint = tk.Label(
+                self._sessions_panel, text="No saved chats yet.", bg=SIDEBAR_BG,
+                fg=MUTED_COLOR, font=(self._font, 9), anchor="w", padx=16, pady=2,
+            )
+            hint.pack(fill="x")
+            self._session_buttons.append(hint)
+            return
+        for item in items:
+            button = self._session_button(self._sessions_panel, item)
+            button.pack(fill="x", padx=10, pady=1)
+            self._session_buttons.append(button)
+
+    def _session_button(self, parent: tk.Misc, item: SessionItem) -> tk.Label:
+        """A sidebar button that resumes one saved chat."""
+        label = item.label
+        return self._sidebar_button(
+            parent, label, lambda: self._on_resume_session(item), small=True
         )
-        self._status.pack(side="bottom", fill="x")
 
     def _action_button(self, parent: tk.Misc, action: GuiAction) -> tk.Label:
         """A sidebar button bound to one action (avoids a late-bound lambda)."""
@@ -143,6 +208,7 @@ class FaydGUI:
             parent, text=text, bg=SIDEBAR_BG, fg=TEXT_COLOR,
             font=(self._font, size), anchor="w", padx=12,
             pady=(3 if small else 8),
+            justify="left", wraplength=216 if small else 0,
         )
         button.bind("<Enter>", lambda _e: button.configure(bg=SIDEBAR_HOVER))
         button.bind("<Leave>", lambda _e: button.configure(bg=SIDEBAR_BG))
@@ -276,9 +342,27 @@ class FaydGUI:
     def _on_new_chat(self) -> None:
         conversation_id = self.service.new_conversation()
         self._add_bubble("note", f"Started a new conversation ({conversation_id}).")
+        self._update_status()
+        self.refresh_sessions()
 
     def _on_save(self) -> None:
         self._add_bubble("note", self.service.save())
+        self._update_status()
+        self.refresh_sessions()
+
+    def _on_resume_session(self, item: SessionItem) -> None:
+        if self._busy or item.is_current:
+            return
+        if self.service.resume(item.session_id):
+            self._add_bubble("note", f"Resumed conversation {item.session_id}.")
+            self._update_status()
+            self.refresh_sessions()
+        else:
+            self._add_bubble("note", f"Could not resume conversation {item.session_id}.")
+            self.refresh_sessions()
+
+    def _update_status(self) -> None:
+        self._status.configure(text=self._status_text())
 
     def _on_source_change(self) -> None:
         want = self._source_var.get()
@@ -308,13 +392,23 @@ class FaydGUI:
     def _on_action(self, action: GuiAction) -> None:
         if self._busy:
             return
+        argv = action.argv
+        if action.needs_input:
+            question = self._prompt_for_question(action.label)
+            if not question:
+                return
+            argv = (*argv, question)
         self._add_bubble("note", f"Running: {action.label} …")
-        self._start_work(lambda: self._run_action(action))
+        self._start_work(lambda: self._run_action(action, argv))
 
-    def _run_action(self, action: GuiAction) -> str:
+    def _prompt_for_question(self, title: str) -> str:
+        """Ask for the extra argument an action needs; empty means cancelled."""
+        return (simpledialog.askstring(title, "Question:", parent=self.root) or "").strip()
+
+    def _run_action(self, action: GuiAction, argv: tuple[str, ...]) -> str:
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            action.command(action.argv)
+            action.command(argv)
         output = buffer.getvalue().strip()
         return output or f"{action.label} finished."
 
@@ -345,7 +439,8 @@ class FaydGUI:
                     self._add_bubble("assistant", f"Something went wrong: {payload}")
                 self._busy = False
                 self._send.configure(state="normal")
-                self._status.configure(text=self._status_text())
+                self._update_status()
+                self.refresh_sessions()
         except queue.Empty:
             pass
         self.root.after(100, self._pump)

@@ -161,10 +161,13 @@ Arabic is kept as secondary aliases where useful.
   legacy Windows consoles).
 - `gui/` — ChatGPT-style desktop window, an alternative *front end* to `cli/`,
   never a replacement. `service.py` reuses the text `chat` session
-  (`ai.jarvis.build_session(text_only=True)`) + `ai.chat.ModelSwitcher`;
-  `actions.py` maps sidebar buttons to `cli.menu.run_*`; `options.py` has the
-  argument parser; `app.py` is the Tkinter window (imported lazily, so `cli/`
-  never imports Tk). Reachable as `python -m cli gui` and `python -m gui`.
+  (`ai.jarvis.build_session(text_only=True)`) + `ai.chat.ModelSwitcher` and adds
+  `list_sessions`/`resume`; `actions.py` maps the sidebar to `cli.menu.run_*` —
+  the **Actions** list mirrors numbered CLI items 5..11 (never repeating the
+  window's own controls) and `saved_session_items` builds the **Saved chats**
+  list; `options.py` has the argument parser; `app.py` is the Tkinter window
+  (imported lazily, so `cli/` never imports Tk). Reachable as `python -m cli gui`
+  and `python -m gui`.
 - `fayd-al-ruh.spec` — PyInstaller; uses `collect_submodules` for `ml`,
   `evaluation`, `ai`, `storage`, `gui` (and `core` is bundled as an imported
   package).
