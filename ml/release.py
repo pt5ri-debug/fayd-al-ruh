@@ -56,6 +56,7 @@ from ml.llm.__main__ import train_and_save
 from ml.llm.evaluate import document_split, evaluate_model
 from ml.llm.tokenizer import TOKENIZER_KINDS, load_tokenizer
 from ml.llm.transformer import PRESETS, TransformerConfig, TransformerLM
+from ml.llm.state import load_step_count, state_path
 from ml.petroleum import train_petroleum
 
 RELEASE_MANIFEST_NAME = "release_manifest.json"
@@ -207,6 +208,8 @@ def describe_checkpoint(
     checkpoint: str | Path,
     *,
     steps: int | None = None,
+    total_steps: int | None = None,
+    resumed: bool = False,
     preset: str | None = None,
     tokenizer_kind: str = "byte",
     measure_perplexity: bool = False,
@@ -218,6 +221,10 @@ def describe_checkpoint(
     Reads the checkpoint when a model is not passed, so a manifest can be
     rewritten with `--manifest-only` for the checkpoint that is actually
     committed -- the honest way to record the model a release ships.
+
+    ``steps`` is the *requested* budget for this run. ``total_steps`` is the
+    cumulative figure the checkpoint actually holds, which a resumed run raises
+    above ``steps``; when it is not given it defaults to ``steps``.
     """
     checkpoint = Path(checkpoint)
     if model is None and checkpoint.exists():
@@ -229,6 +236,8 @@ def describe_checkpoint(
         tokenizer_kind = _tokenizer_kind(checkpoint, tokenizer_kind)
     info: Manifest = {
         "steps": steps,
+        "total_steps": total_steps if total_steps is not None else steps,
+        "resumed": resumed,
         "parameters": parameters,
         "checkpoint": str(checkpoint),
         "preset": preset,
@@ -316,6 +325,9 @@ def train_release(
     manifest["petroleum"] = petroleum.as_dict()
 
     print(f"Training language model ({config.llm_steps} steps) ...")
+    # `--resume` on a missing checkpoint starts fresh, so record what actually
+    # happened rather than the flag alone.
+    continued = config.resume and checkpoint.exists()
     model = train_and_save(
         steps=config.llm_steps,
         repeats=config.llm_repeats,
@@ -333,11 +345,13 @@ def train_release(
     manifest["language_model"] = describe_checkpoint(
         checkpoint,
         steps=config.llm_steps,
+        total_steps=load_step_count(state_path(checkpoint)),
         preset=config.llm_preset,
         tokenizer_kind=config.tokenizer_kind,
         measure_perplexity=config.measure_perplexity,
         seed=config.seed,
         model=model,
+        resumed=continued,
     )
 
     if write_manifest:
@@ -504,10 +518,14 @@ def main(argv: list[str] | None = None) -> int:
             "language_model": describe_checkpoint(
                 args.checkpoint or default_checkpoint(),
                 steps=config.llm_steps,
+                total_steps=load_step_count(
+                    state_path(args.checkpoint or default_checkpoint())
+                ),
                 preset=config.llm_preset,
                 tokenizer_kind=config.tokenizer_kind,
                 measure_perplexity=args.measure_perplexity,
                 seed=config.seed,
+                resumed=config.resume,
             ),
             "artifacts": {
                 "save_dir": str(save_dir),

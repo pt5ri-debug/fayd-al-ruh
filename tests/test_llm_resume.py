@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from ml.llm.__main__ import main, train_and_save
-from ml.llm.state import load_training_state, save_training_state, state_path
+from ml.llm.state import load_step_count, load_training_state, save_training_state, state_path
 from ml.llm.tokenizer import ByteTokenizer
 from ml.llm.transformer import TransformerConfig, TransformerLM, _lr_at, train_language_model
 from ml.models import Adam
@@ -175,3 +175,51 @@ def test_cli_resume_flag_is_wired(tmp_path, capsys):
     assert code == 0
     assert checkpoint.exists()
     assert "fresh run" in capsys.readouterr().out
+
+
+def test_menu_llm_and_release_entries_resume_by_default():
+    """The numbered menu's training entries must ask to resume, or they restart."""
+    from cli import menu
+
+    by_label = {label: argv for label, _action, argv in menu.MENU}
+    assert "--resume" in by_label["Train the language model from all repositories"]
+    assert "--resume" in by_label["Train everything for a release"]
+
+
+def test_gui_llm_and_release_actions_resume_by_default():
+    """The GUI sidebar shares the CLI menu's arguments, so it must resume too."""
+    from gui import actions
+
+    by_key = {action.key: action.argv for action in actions.ACTIONS}
+    assert "--resume" in by_key["llm"]
+    assert "--resume" in by_key["release"]
+
+
+def test_describe_checkpoint_reports_cumulative_steps_when_resumed(tmp_path):
+    """A resumed manifest must not claim the checkpoint holds only the new budget."""
+    from ml.release import describe_checkpoint
+
+    checkpoint = tmp_path / "fayd-llm.npz"
+    train_and_save(
+        steps=2, repeats=1, structured_repeats=1, checkpoint=checkpoint, log_every=0, val_every=0
+    )
+    info = describe_checkpoint(
+        checkpoint, steps=4, total_steps=load_step_count(state_path(checkpoint)), resumed=True
+    )
+    assert info["resumed"] is True
+    assert info["steps"] == 4
+    assert info["total_steps"] == 2
+
+
+def test_describe_checkpoint_defaults_total_steps_to_the_budget(tmp_path):
+    """A fresh run's manifest has no separate cumulative figure to report."""
+    from ml.release import describe_checkpoint
+
+    checkpoint = tmp_path / "fayd-llm.npz"
+    train_and_save(
+        steps=2, repeats=1, structured_repeats=1, checkpoint=checkpoint, log_every=0, val_every=0
+    )
+    info = describe_checkpoint(checkpoint, steps=7)
+    assert info["resumed"] is False
+    assert info["steps"] == 7
+    assert info["total_steps"] == 7
