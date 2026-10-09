@@ -59,7 +59,8 @@ Arabic is kept as secondary aliases where useful.
   what the model itself learned is visible. `load_mind_model` /
   `mind_status` load and describe the checkpoint. Wired **only** into
   `python -m cli chat --mind` (and the `from the model` / `from the sources`
-  switch, matched in `ai/chat.py`); it deliberately never touches
+  switch, matched in `ai/chat.py`; the portable menu reaches it through
+  `cli.menu.run_mind_chat`, command `python -m cli mind-chat`); it deliberately never touches
   `ai/jarvis.py`, `core/jarvis.py`, `JarvisMode`, `build_session`, or the shared
   `JarvisControls`, so Jarvis is unaffected. Every model answer is labelled as
   ungrounded on purpose.

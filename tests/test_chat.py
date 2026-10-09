@@ -212,6 +212,37 @@ def test_run_chat_dispatches_to_the_module(monkeypatch) -> None:
     assert captured == {"name": "ai.chat", "argv": ["--json"]}
 
 
+def test_run_mind_chat_adds_the_mind_flag(monkeypatch) -> None:
+    from cli import menu
+
+    captured: dict[str, object] = {}
+
+    def fake_run_module(name: str, argv) -> int:
+        captured["name"] = name
+        captured["argv"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(menu, "_run_module", fake_run_module)
+    assert menu.run_mind_chat(()) == 0
+    assert captured == {"name": "ai.chat", "argv": ["--mind"]}
+
+    assert menu.run_mind_chat(("--json",)) == 0
+    assert captured == {"name": "ai.chat", "argv": ["--mind", "--json"]}
+
+    # An explicit --mind must not be duplicated.
+    assert menu.run_mind_chat(("--mind",)) == 0
+    assert captured == {"name": "ai.chat", "argv": ["--mind"]}
+
+
+def test_mind_chat_is_wired_into_the_menu_and_cli() -> None:
+    import cli.__main__ as cli_entry
+    from cli import menu
+
+    assert "mind-chat" in cli_entry._COMMANDS
+    titles = [title for title, _action, _args in menu.MENU]
+    assert any("trained model" in title for title in titles)
+
+
 def test_jarvis_and_chat_share_the_session_builder(monkeypatch) -> None:
     """Both commands go through ai.jarvis.build_session, so gates stay in one place."""
     from ai import chat as chat_module
@@ -365,6 +396,34 @@ def test_run_loop_switch_load_failure_is_reported_not_fatal(tmp_path, monkeypatc
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
     assert chat.run_loop(mode, as_json=False, switcher=switcher) == 0
     assert "Could not load the trained model" in capsys.readouterr().out
+
+
+def test_run_loop_hints_the_model_when_the_sources_fail(tmp_path, monkeypatch, capsys) -> None:
+    """In sources mode, an unanswerable question points the user at the model."""
+    mode, switcher = _switcher_mode(tmp_path)
+    mode.handle = lambda *a, **k: _turn("There is not enough evidence on file to answer this question about x.")
+    answers = iter(["what is x?", "quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    chat.run_loop(mode, as_json=False, switcher=switcher)
+    out = capsys.readouterr().out
+    assert "not enough evidence" in out
+    assert "from the model" in out
+
+
+def test_run_loop_hint_is_silent_in_model_mode(tmp_path, monkeypatch, capsys) -> None:
+    mode, switcher = _switcher_mode(tmp_path)
+    switcher.use_model()
+    mode.handle = lambda *a, **k: _turn("There is not enough evidence on file to answer this question about x.")
+    answers = iter(["what is x?", "quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    chat.run_loop(mode, as_json=False, switcher=switcher)
+    assert "sources could not answer" not in capsys.readouterr().out
+
+
+def _turn(response: str):
+    from core.jarvis import JarvisTurn
+
+    return JarvisTurn(heard="", response=response, woke=True, routed="answer")
 
 
 def test_main_without_mind_does_not_touch_the_model(tmp_path, monkeypatch, capsys) -> None:

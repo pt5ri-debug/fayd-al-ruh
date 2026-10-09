@@ -6,6 +6,7 @@ Usage:
     python -m cli agent               # tool-agent demo in the safety sandbox
     python -m cli jarvis              # Jarvis mode: listen, understand, act, speak
     python -m cli chat                # chat with the AI in text (Jarvis, no voice)
+    python -m cli mind-chat           # chat answering from the trained model (no sources)
     python -m cli learn               # continuous learning + regression gate
     python -m cli insight             # what the AI can do and what it has learned
     python -m cli insight "question"  # ask the AI, with citations
@@ -47,6 +48,7 @@ from cli.menu import (
     run_knowledge,
     run_learn,
     run_llm,
+    run_mind_chat,
     run_ml,
     run_petroleum,
     run_release,
@@ -60,6 +62,7 @@ _COMMANDS = {
     "agent": run_agent,
     "jarvis": run_jarvis,
     "chat": run_chat,
+    "mind-chat": run_mind_chat,
     "learn": run_learn,
     "insight": run_insight,
     "internet-learner": run_internet_learner,
