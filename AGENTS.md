@@ -52,7 +52,11 @@ Arabic is kept as secondary aliases where useful.
   `load_training_state` persist Adam's moments and the cumulative step count to
   `<checkpoint>.state.npz` (gitignored as run state, not release content). A
   mismatched sidecar is a hard error; a missing one resumes weights with fresh
-  moments.
+  moments. `load_step_count` reads just the step figure for honest manifests.
+  The GUI sidebar's `llm`/`release` actions and the CLI `release` menu entry pass
+  `--resume`, so the menus accumulate training rather than restarting; `ml/release`
+  records `total_steps` and `resumed` (true only when a checkpoint was actually
+  loaded).
 - `ml/llm/evaluate.py` — honest measurement: `document_split` (whole documents to
   train/val/test), `perplexity` (held-out, dropout off), `aggregate` (mean±std
   across seeds), and bits-per-byte for cross-tokenizer comparison. CLI:

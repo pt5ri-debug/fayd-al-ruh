@@ -1213,6 +1213,11 @@ python -m ml.llm --resume --steps 1000        # 1000 more steps on top of the sa
 python -m ml.release --resume --llm-steps 1000  # same, as part of a full release run
 ```
 
+The GUI sidebar's **Train the language model** and **Train everything for a
+release** buttons, and the CLI's `release` menu entry, all pass `--resume` by
+default, so pressing them accumulates training instead of rebuilding from
+scratch. Add `--resume` explicitly for the same behaviour on the command line.
+
 The Adam optimiser's moment estimates and step count live in a small sidecar
 next to the checkpoint (`fayd-llm.state.npz`). It is *run state*, not release
 content, so it is never committed; a fresh run rebuilds it. When the sidecar is

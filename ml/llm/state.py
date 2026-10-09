@@ -68,4 +68,21 @@ def load_training_state(path: str | Path, model: TransformerLM) -> tuple[Adam, i
     return optimizer, steps
 
 
-__all__ = ["STATE_SUFFIX", "load_training_state", "save_training_state", "state_path"]
+def load_step_count(path: str | Path) -> int | None:
+    """The cumulative step count in a state sidecar, or ``None`` if it is absent."""
+    source = Path(path)
+    if not source.exists():
+        return None
+    with np.load(source, allow_pickle=False) as data:
+        if "steps" not in data:
+            return None
+        return int(data["steps"][0])
+
+
+__all__ = [
+    "STATE_SUFFIX",
+    "load_step_count",
+    "load_training_state",
+    "save_training_state",
+    "state_path",
+]
