@@ -118,6 +118,7 @@
     "include_runtime": true,
     "kb_max_chunks": 15000,
     "kb_repeats": 1,
+    "llm_preset": "release-1",
     "llm_repeats": 40,
     "llm_steps": 4000,
     "llm_structured_repeats": 60,
@@ -171,11 +172,26 @@
     "ontology_relations": 474
   },
   "language_model": {
-    "checkpoint": "/workspace/project/fayd-al-ruh/ml/llm/checkpoints/fayd-llm.npz",
-    "parameters": 391200,
+    "architecture": {
+      "block_size": 128,
+      "dropout": 0.1,
+      "n_embd": 128,
+      "n_head": 8,
+      "n_layer": 4,
+      "tie_weights": true
+    },
+    "checkpoint": "ml/llm/checkpoints/fayd-llm.npz",
+    "parameters": 842624,
+    "perplexity": {
+      "bits_per_byte": 2.124744,
+      "test": 4.2654,
+      "test_tokens": 13121,
+      "train": 3.11103,
+      "validation": 4.675404
+    },
+    "preset": "release-1",
     "steps": 4000,
-    "tokenizer": "byte",
-    "tokenizer_vocab_size": 1024
+    "tokenizer": "byte"
   },
   "petroleum": {
     "discipline_success": {

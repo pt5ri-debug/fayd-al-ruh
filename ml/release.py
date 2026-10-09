@@ -46,13 +46,16 @@ from ml.knowledge_corpus import (
 from ml.llm.corpus import (
     build_corpus,
     corpus_sentences,
+    corpus_units,
     curriculum_sentences,
     knowledge_base_sentences,
     repository_sentences,
     structured_examples,
 )
 from ml.llm.__main__ import train_and_save
-from ml.llm.tokenizer import TOKENIZER_KINDS
+from ml.llm.evaluate import document_split, evaluate_model
+from ml.llm.tokenizer import TOKENIZER_KINDS, load_tokenizer
+from ml.llm.transformer import PRESETS, TransformerConfig, TransformerLM
 from ml.petroleum import train_petroleum
 
 RELEASE_MANIFEST_NAME = "release_manifest.json"
@@ -75,6 +78,7 @@ class TrainingConfig:
     seed: int = 0
     replay_batch: int = 32
     include_base: bool = True
+    llm_preset: str = "release-1"
     tokenizer_kind: str = "byte"
     tokenizer_vocab_size: int = 1024
     kb_max_chunks: int = DEFAULT_KB_CHUNKS
@@ -82,6 +86,7 @@ class TrainingConfig:
     include_runtime: bool = True
     include_procedural: bool = True
     max_procedural: int | None = None
+    measure_perplexity: bool = False
 
 
 def _git_revision() -> str:
@@ -178,6 +183,80 @@ def _base_training(config: TrainingConfig, save_dir: Path) -> Manifest:
     return json.loads(result.stdout)
 
 
+def _match_preset(config: TransformerConfig) -> str | None:
+    """The capacity tier a config matches, so a manifest names the real size."""
+    for name, spec in PRESETS.items():
+        if all(getattr(config, key) == value for key, value in spec.items()):
+            return name
+    return None
+
+
+def _tokenizer_kind(checkpoint: Path, default: str) -> str:
+    """The tokenizer a checkpoint was saved with, read from its sidecar file."""
+    sidecar = checkpoint.with_suffix(".tokenizer.json")
+    if sidecar.exists():
+        try:
+            return str(json.loads(sidecar.read_text(encoding="utf-8")).get("kind", default))
+        except (ValueError, OSError):
+            return default
+    return default
+
+
+def describe_checkpoint(
+    checkpoint: str | Path,
+    *,
+    steps: int | None = None,
+    preset: str | None = None,
+    tokenizer_kind: str = "byte",
+    measure_perplexity: bool = False,
+    seed: int = 0,
+    model: TransformerLM | None = None,
+) -> Manifest:
+    """Describe a saved language-model checkpoint for the manifest.
+
+    Reads the checkpoint when a model is not passed, so a manifest can be
+    rewritten with `--manifest-only` for the checkpoint that is actually
+    committed -- the honest way to record the model a release ships.
+    """
+    checkpoint = Path(checkpoint)
+    if model is None and checkpoint.exists():
+        model = TransformerLM.load(checkpoint)
+    parameters = int(sum(p.size for p in model.parameters())) if model is not None else None
+    config = model.config if model is not None else None
+    if config is not None:
+        preset = _match_preset(config) or preset
+        tokenizer_kind = _tokenizer_kind(checkpoint, tokenizer_kind)
+    info: Manifest = {
+        "steps": steps,
+        "parameters": parameters,
+        "checkpoint": str(checkpoint),
+        "preset": preset,
+        "tokenizer": tokenizer_kind,
+    }
+    if config is not None:
+        info["architecture"] = {
+            "n_layer": config.n_layer,
+            "n_head": config.n_head,
+            "n_embd": config.n_embd,
+            "block_size": config.block_size,
+            "dropout": config.dropout,
+            "tie_weights": config.tie_weights,
+        }
+    if measure_perplexity and model is not None:
+        split = document_split(corpus_units(), val_fraction=0.1, test_fraction=0.1, seed=seed)
+        tokenizer = load_tokenizer(checkpoint.with_suffix(".tokenizer.json"))
+        model.eval()
+        report = evaluate_model(model, tokenizer, split, seed=seed)
+        info["perplexity"] = {
+            "train": round(report.train_ppl, 6),
+            "validation": round(report.validation_ppl, 6),
+            "test": round(report.test_ppl, 6),
+            "test_tokens": report.test_tokens,
+            "bits_per_byte": round(report.test_bits_per_byte, 6),
+        }
+    return info
+
+
 def train_release(
     config: TrainingConfig | None = None,
     *,
@@ -203,6 +282,7 @@ def train_release(
             "seed": config.seed,
             "replay_batch": config.replay_batch,
             "include_base": config.include_base,
+            "llm_preset": config.llm_preset,
             "tokenizer_kind": config.tokenizer_kind,
             "tokenizer_vocab_size": config.tokenizer_vocab_size,
             "kb_max_chunks": config.kb_max_chunks,
@@ -246,14 +326,17 @@ def train_release(
         kb_max_chunks=config.kb_max_chunks,
         kb_repeats=config.kb_repeats,
         include_runtime=config.include_runtime,
+        preset=config.llm_preset,
     )
-    manifest["language_model"] = {
-        "steps": config.llm_steps,
-        "parameters": int(sum(p.size for p in model.parameters())),
-        "checkpoint": str(checkpoint),
-        "tokenizer": config.tokenizer_kind,
-        "tokenizer_vocab_size": config.tokenizer_vocab_size,
-    }
+    manifest["language_model"] = describe_checkpoint(
+        checkpoint,
+        steps=config.llm_steps,
+        preset=config.llm_preset,
+        tokenizer_kind=config.tokenizer_kind,
+        measure_perplexity=config.measure_perplexity,
+        seed=config.seed,
+        model=model,
+    )
 
     if write_manifest:
         manifest_path = save_dir / RELEASE_MANIFEST_NAME
@@ -297,6 +380,19 @@ def format_manifest(manifest: Manifest) -> str:
             f"(repositories={corpus['repository_sentences']} "
             f"kb={corpus['knowledge_base_sentences']})"
         )
+    language_model = manifest.get("language_model")
+    if isinstance(language_model, dict):
+        parameters = language_model.get("parameters")
+        preset = language_model.get("preset") or "—"
+        size = f"{parameters:,}" if isinstance(parameters, int) else "—"
+        lines.append(f"  Language model: {size} params  preset {preset}")
+        perplexity = language_model.get("perplexity")
+        if isinstance(perplexity, dict):
+            lines.append(
+                f"  Language perplexity: validation {perplexity['validation']:.3f}  "
+                f"test {perplexity['test']:.3f}  "
+                f"bits/byte {perplexity.get('bits_per_byte', float('nan')):.3f}"
+            )
     return "\n".join(lines)
 
 
@@ -317,6 +413,18 @@ def main(argv: list[str] | None = None) -> int:
         "subword BPE (better compression, but slow to train on a large corpus)",
     )
     parser.add_argument("--vocab-size", type=int, default=1024)
+    parser.add_argument(
+        "--preset",
+        choices=("small", "release-1", "capable"),
+        default="release-1",
+        help="language-model capacity tier",
+    )
+    parser.add_argument(
+        "--measure-perplexity",
+        action="store_true",
+        help="after training, record held-out perplexity in the manifest "
+        "(exact, and cheap only when the KB sample is small)",
+    )
     parser.add_argument(
         "--kb-max-chunks",
         type=int,
@@ -348,12 +456,14 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         replay_batch=args.replay_batch,
         include_base=not args.skip_base,
+        llm_preset=args.preset,
         tokenizer_kind=args.tokenizer_kind,
         tokenizer_vocab_size=args.vocab_size,
         kb_max_chunks=args.kb_max_chunks,
         kb_repeats=args.kb_repeats,
         include_runtime=not args.no_runtime_docs,
         include_procedural=not args.no_procedural,
+        measure_perplexity=args.measure_perplexity,
     )
 
     if args.manifest_only:
@@ -370,6 +480,7 @@ def main(argv: list[str] | None = None) -> int:
                 "seed": config.seed,
                 "replay_batch": config.replay_batch,
                 "include_base": config.include_base,
+                "llm_preset": config.llm_preset,
                 "tokenizer_kind": config.tokenizer_kind,
                 "tokenizer_vocab_size": config.tokenizer_vocab_size,
                 "kb_max_chunks": config.kb_max_chunks,
@@ -380,6 +491,14 @@ def main(argv: list[str] | None = None) -> int:
             },
             "knowledge": knowledge_summary(),
             "corpus": corpus_summary(config),
+            "language_model": describe_checkpoint(
+                args.checkpoint or default_checkpoint(),
+                steps=config.llm_steps,
+                preset=config.llm_preset,
+                tokenizer_kind=config.tokenizer_kind,
+                measure_perplexity=args.measure_perplexity,
+                seed=config.seed,
+            ),
             "artifacts": {
                 "save_dir": str(save_dir),
                 "checkpoint": str(args.checkpoint or default_checkpoint()),
@@ -410,6 +529,7 @@ __all__ = [
     "RELEASE_MANIFEST_NAME",
     "TrainingConfig",
     "corpus_summary",
+    "describe_checkpoint",
     "format_manifest",
     "knowledge_summary",
     "main",

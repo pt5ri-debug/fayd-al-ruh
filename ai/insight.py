@@ -124,6 +124,13 @@ def learning_rows(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(language_model, dict):
         rows.append(_row("Language model", "training steps", language_model.get("steps"), "count"))
         rows.append(_row("Language model", "parameters", language_model.get("parameters"), "count"))
+        if language_model.get("preset"):
+            rows.append(_row("Language model", "capacity tier", language_model["preset"], "name"))
+        perplexity = language_model.get("perplexity")
+        if isinstance(perplexity, dict):
+            rows.append(_row("Language model", "held-out perplexity", perplexity.get("validation"), "lower-better"))
+            rows.append(_row("Language model", "test perplexity", perplexity.get("test"), "lower-better"))
+            rows.append(_row("Language model", "test bits/byte", perplexity.get("bits_per_byte"), "lower-better"))
     return rows
 
 

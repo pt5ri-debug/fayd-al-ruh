@@ -35,13 +35,25 @@ Arabic is kept as secondary aliases where useful.
   `ml/llm/checkpoints/fayd-llm.npz` are committed on purpose for a release;
   regenerate with `python -m cli release`.
 - `ml/llm/corpus.py` builds the language-model text, including sentences generated
-  from every discipline and course (`curriculum_sentences`) and from the petroleum
-  corpus (`corpus_sentences`).
+  from every discipline and course (`curriculum_sentences`), from the petroleum
+  corpus (`corpus_sentences`), and numbered procedures (`procedural_sentences`);
+  `corpus_units()` returns the distinct documents for an honest document-level
+  split, and `build_corpus(..., exclude=...)` drops held-out units from training.
+- `ml/llm/transformer.py` — decoder-only transformer with manual backprop.
+  `TransformerConfig.preset(name)` selects a capacity tier (`small` default,
+  `release-1`, `capable`) with optional weight tying and dropout. Training uses a
+  warmup+cosine learning-rate schedule, gradient clipping, and periodic held-out
+  validation (`train_language_model` returns `TrainReport` with `val_losses` and
+  `learning_rates`). New config fields persist in save/load.
+- `ml/llm/evaluate.py` — honest measurement: `document_split` (whole documents to
+  train/val/test), `perplexity` (held-out, dropout off), `aggregate` (mean±std
+  across seeds), and bits-per-byte for cross-tokenizer comparison. CLI:
+  `python -m ml.llm.evaluate --checkpoint <path>`.
 - `ml/llm/bpe.py` — byte-level BPE tokenizer trained in-project. `ml/llm/tokenizer.py`
   has `train_tokenizer(kind, text, vocab_size)` / `save_tokenizer` / `load_tokenizer`;
   the trainer writes `<checkpoint>.tokenizer.json` and `LocalLanguageModel` loads it
-  automatically. BPE compresses the corpus ~5x vs raw bytes. `--tokenizer-kind byte`
-  restores the old byte behaviour.
+  automatically. BPE compresses the corpus ~3x vs raw bytes; merges are learned from
+  a bounded 300k-char prefix. `--tokenizer-kind byte` restores the old byte behaviour.
 - `core/conversation.py` — multi-turn memory (sessions, roles, bounded window,
   `JsonStore` persistence). `core/documents.py` — citable documents + knowledge
   corpus from the seeds (disciplines, courses, and the petroleum corpus).
