@@ -36,6 +36,29 @@ def test_menu_entries_are_all_dispatchable() -> None:
     assert {"voice", "agent", "jarvis", "chat", "learn", "insight", "internet-learner"} <= set(cli_entry._COMMANDS)
 
 
+def test_hidden_menu_entries_stay_callable_but_unlisted() -> None:
+    """Hidden items must remain in MENU (reachable from the CLI) but not be shown."""
+    labels = [label for label, _action, _argv in menu.MENU]
+    for hidden in menu.HIDDEN_MENU_LABELS:
+        assert hidden in labels, f"{hidden!r} was removed instead of hidden"
+    shown = [label for label, _action, _argv in menu.visible_menu()]
+    for hidden in menu.HIDDEN_MENU_LABELS:
+        assert hidden not in shown
+    assert len(shown) == len(menu.MENU) - len(menu.HIDDEN_MENU_LABELS)
+
+
+def test_visible_menu_indices_drive_run_choice(monkeypatch) -> None:
+    """Numbering follows the visible menu, not the full MENU."""
+    calls: list[str] = []
+    monkeypatch.setattr(menu, "MENU", (
+        ("Hidden item", lambda argv: calls.append("hidden") or 0, ()),
+        ("Shown item", lambda argv: calls.append("shown") or 0, ()),
+    ))
+    monkeypatch.setattr(menu, "HIDDEN_MENU_LABELS", frozenset({"Hidden item"}))
+    assert menu.run_choice("1") == 0
+    assert calls == ["shown"]
+
+
 def test_run_choice_quit_codes() -> None:
     assert menu.run_choice("q") == 0
     assert menu.run_choice("quit") == 0
