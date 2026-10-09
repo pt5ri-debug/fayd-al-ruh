@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import cli.menu as menu
 from cli.__main__ import main as cli_main
@@ -34,6 +34,38 @@ def test_menu_entries_are_all_dispatchable() -> None:
     for label, action, _argv in menu.MENU:
         assert callable(action), label
     assert {"voice", "agent", "jarvis", "chat", "learn", "insight", "internet-learner"} <= set(cli_entry._COMMANDS)
+
+
+def test_hidden_menu_entries_stay_callable_but_unlisted() -> None:
+    """Hidden items must remain in MENU (reachable from the CLI) but not be shown."""
+    labels = [label for label, _action, _argv in menu.MENU]
+    for hidden in menu.HIDDEN_MENU_LABELS:
+        assert hidden in labels, f"{hidden!r} was removed instead of hidden"
+    shown = [label for label, _action, _argv in menu.visible_menu()]
+    for hidden in menu.HIDDEN_MENU_LABELS:
+        assert hidden not in shown
+    assert len(shown) == len(menu.MENU) - len(menu.HIDDEN_MENU_LABELS)
+
+
+def test_visible_menu_indices_drive_run_choice(monkeypatch) -> None:
+    """Numbering follows the visible menu, not the full MENU."""
+    calls: list[str] = []
+
+    def make_action(name: str) -> Callable[[Sequence[str]], int]:
+        def action(_argv: Sequence[str]) -> int:
+            calls.append(name)
+            return 0
+
+        return action
+
+    monkeypatch.setattr(
+        menu,
+        "MENU",
+        (("Hidden item", make_action("hidden"), ()), ("Shown item", make_action("shown"), ())),
+    )
+    monkeypatch.setattr(menu, "HIDDEN_MENU_LABELS", frozenset({"Hidden item"}))
+    assert menu.run_choice("1") == 0
+    assert calls == ["shown"]
 
 
 def test_run_choice_quit_codes() -> None:

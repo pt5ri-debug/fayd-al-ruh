@@ -241,6 +241,27 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Self-check the install", run_selfcheck, ()),
 )
 
+# Entries kept callable but not shown in the numbered menu. They remain reachable
+# from the command line (`python -m cli <command>`) and the public functions above.
+HIDDEN_MENU_LABELS: frozenset[str] = frozenset(
+    {
+        "One voice turn",
+        "Tool agent demo (sandbox)",
+        "Continuous learning and regression gate",
+        "Run the local cognitive demo",
+        "Train the ML pipeline",
+        "Train the language model from all repositories",
+        "Train petroleum-engineering tasks (with procedures)",
+        "Show the petroleum-engineering curriculum",
+        "Self-check the install",
+    }
+)
+
+
+def visible_menu() -> tuple[tuple[str, Action, Sequence[str]], ...]:
+    """The menu entries shown to the user, in order, without the hidden ones."""
+    return tuple(entry for entry in MENU if entry[0] not in HIDDEN_MENU_LABELS)
+
 
 def describe_paths() -> str:
     """A short report of where the build keeps its assets and data."""
@@ -270,10 +291,11 @@ def run_choice(choice: str) -> int:
         print(f"Unrecognised choice: {choice!r}")
         return 1
     index = int(text) - 1
-    if not 0 <= index < len(MENU):
+    entries = visible_menu()
+    if not 0 <= index < len(entries):
         print(f"Choice out of range: {choice!r}")
         return 1
-    _title, action, args = MENU[index]
+    _title, action, args = entries[index]
     try:
         return action(args)
     except ModuleNotFoundError as error:
@@ -284,7 +306,7 @@ def run_choice(choice: str) -> int:
 def _print_menu() -> None:
     print()
     print("Fayd Al-Ruh — portable menu")
-    for number, (title, _action, _args) in enumerate(MENU, start=1):
+    for number, (title, _action, _args) in enumerate(visible_menu(), start=1):
         print(f"  {number}) {title}")
     print("  q) Quit")
     print(describe_paths())
@@ -308,6 +330,8 @@ def menu_loop(reader: Callable[[str], str] = input) -> int:
 
 __all__ = [
     "MENU",
+    "HIDDEN_MENU_LABELS",
+    "visible_menu",
     "run_voice",
     "run_agent",
     "run_jarvis",
