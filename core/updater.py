@@ -81,6 +81,7 @@ class UpdateStatus:
     backup_path: str = ""
     backup_copied: int = 0
     backup_error: str = ""
+    blocked: bool = False
 
     @property
     def learned_files_changed(self) -> tuple[str, ...]:
@@ -103,8 +104,12 @@ class UpdateStatus:
                 f"Updated to {self.latest_revision} "
                 f"({len(self.changed_files)} file(s) changed)."
             )
-        if not self.available:
+        if self.blocked:
+            return "Cannot check for updates here. See the note below."
+        if self.latest_revision and not self.available:
             return f"Already up to date at {self.current_revision} ({self.current_version})."
+        if not self.available:
+            return "No update information is available right now."
         if not self.on_tracking_branch:
             return (
                 f"Update available on {self.branch} ({self.behind} commit(s) behind), "
@@ -185,6 +190,22 @@ def is_source_checkout(root: Path | None = None) -> bool:
     return (root / ".git").exists() and not is_frozen()
 
 
+#: Plain-language explanation for the portable / extracted-zip case.
+PORTABLE_REASON = (
+    "This folder is not a git clone, so it cannot self-update. It was probably "
+    "downloaded as a ZIP and extracted. Install Git and run `git clone "
+    "https://github.com/pt5ri-debug/fayd-al-ruh.git` once (the repository is "
+    "private, so git will ask you to sign in), copy your data/ folder into the "
+    "clone, and update from there."
+)
+
+#: Plain-language explanation for a source folder where git is missing.
+NO_GIT_REASON = (
+    "git was not found on the PATH, so the update cannot be checked. Install Git "
+    "from https://git-scm.com/download/win and reopen the program."
+)
+
+
 def _parse_ahead_behind(counts: str) -> tuple[int, int]:
     """Parse ``git rev-list --left-right --count`` into (behind, ahead)."""
     parts = counts.split()
@@ -204,7 +225,8 @@ def check_for_updates(repository_url: str = DEFAULT_REPOSITORY_URL, *, root: Pat
     root = root or _repo_root()
     commands: list[GitCommand] = []
 
-    if not is_source_checkout(root):
+    # Explain exactly why a check is impossible, rather than a vague "portable".
+    if is_frozen() or not (root / ".git").exists():
         return UpdateStatus(
             available=False,
             current_version=__version__,
@@ -215,12 +237,25 @@ def check_for_updates(repository_url: str = DEFAULT_REPOSITORY_URL, *, root: Pat
             ahead=0,
             dirty=False,
             repository_url=repository_url,
-            reason="This install is a portable build and cannot self-update; "
-            "download a newer bundle instead.",
+            reason=PORTABLE_REASON,
             commands=commands,
+            blocked=True,
         )
     if not _git_available():
-        raise UpdateError("git is not installed or not on the PATH.")
+        return UpdateStatus(
+            available=False,
+            current_version=__version__,
+            current_revision="",
+            latest_revision="",
+            branch="",
+            behind=0,
+            ahead=0,
+            dirty=False,
+            repository_url=repository_url,
+            reason=NO_GIT_REASON,
+            commands=commands,
+            blocked=True,
+        )
 
     head = _run_git(root, "rev-parse", "--abbrev-ref", "HEAD")
     commands.append(head)
@@ -366,9 +401,8 @@ def apply_update(
     commands = list(status.commands or [])
 
     if is_frozen() or not is_source_checkout(root):
-        status.reason = (
-            "This install is a portable build; download a newer bundle instead of updating in place."
-        )
+        status.reason = PORTABLE_REASON
+        status.blocked = True
         return status
     if not status.available:
         return status
@@ -406,8 +440,30 @@ def apply_update(
     return status
 
 
+def _wrap(text: str, width: int = 76, indent: str = "    ") -> str:
+    """Wrap a long note into indented lines, preserving any existing newlines."""
+    import textwrap
+
+    lines: list[str] = []
+    for paragraph in text.splitlines() or [""]:
+        wrapped = textwrap.wrap(paragraph, width=width - len(indent)) or [""]
+        lines.extend(f"{indent}{line}" for line in wrapped)
+    return "\n".join(lines)
+
+
 def format_status(status: UpdateStatus, *, verbose: bool = False) -> str:
     """A multi-line human report, optionally including the git commands run."""
+    if status.blocked:
+        lines = [
+            "Program update check",
+            f"  repository     : {sanitize_remote_url(status.repository_url)}",
+            f"  installed      : {status.current_version}",
+            "  state          : cannot check here",
+            "  reason         :",
+            _wrap(status.reason),
+        ]
+        return "\n".join(lines)
+
     lines = [
         "Program update check",
         f"  repository     : {sanitize_remote_url(status.repository_url)}",
