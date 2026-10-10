@@ -256,7 +256,10 @@ def compose_model_answer(raw: str, *, question: str = "") -> str:
     When ``question`` is given the model's answer is centred on it; ``raw`` alone
     still composes (the leading fragment and unfinished tail are dropped as
     before). When no whole sentence survives it falls back to the tidied raw text
-    so the mouth never goes silent. The result stays the model's own prose, which
+    so the mouth never goes silent -- unless that tidied text carries no word at
+    all (an empty continuation, or a stopping run such as ``")))))"``), in which
+    case it returns ``""`` so the caller can say the model produced nothing rather
+    than render a wordless message. The result stays the model's own prose, which
     is why the caller still labels it as ungrounded.
     """
     cleaned = _tidy_marks(raw)
@@ -300,7 +303,14 @@ def compose_model_answer(raw: str, *, question: str = "") -> str:
         body = " ".join(kept)
     else:
         body = cleaned
-    return ensure_terminal(body)
+    body = ensure_terminal(body)
+    # A stopping run such as ")))))" tidies down to bare punctuation; that is not
+    # an answer the model gave, so return nothing rather than a lone period (which
+    # would render, in the GUI, as a message with no text and only its Copy
+    # button). A real answer always carries at least one word.
+    if not _MODEL_TOKEN_RE.search(body):
+        return ""
+    return body
 
 
 def topic_phrase(question: str) -> str:

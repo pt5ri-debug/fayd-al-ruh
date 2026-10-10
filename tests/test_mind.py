@@ -108,6 +108,20 @@ def test_mind_ask_starts_a_conversation_when_none_is_given(tmp_path) -> None:
     assert answer.conversation_id
 
 
+def test_mind_ask_never_returns_a_header_with_no_body() -> None:
+    """An empty continuation must not leave a blank answer bubble in the GUI."""
+    assistant = mind.MindAssistant(_EchoModel(""), max_new_tokens=8)
+    answer = assistant.ask("porosity")
+    assert answer.text == f"{mind.MIND_HEADER}\n\n{mind.MIND_EMPTY}"
+
+
+def test_mind_ask_replaces_wordless_model_output() -> None:
+    """A stopping run such as ')))))' is reported, not rendered as punctuation."""
+    assistant = mind.MindAssistant(_EchoModel(")))))"), max_new_tokens=8)
+    answer = assistant.ask("porosity")
+    assert answer.text == f"{mind.MIND_HEADER}\n\n{mind.MIND_EMPTY}"
+
+
 def test_load_mind_model_reports_a_missing_checkpoint(tmp_path) -> None:
     with pytest.raises(FileNotFoundError):
         mind.load_mind_model(tmp_path / "absent.npz")
