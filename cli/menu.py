@@ -324,7 +324,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     (
         "Train the language model from all repositories",
         run_llm,
-        ("--resume", "--steps", "200", "--kb-max-chunks", "2000"),
+        ("--resume", "--steps", "200", "--kb-max-chunks", "2000", "--llm-shards", "4"),
     ),
     (
         "Train petroleum-engineering tasks (with procedures)",
@@ -335,7 +335,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     (
         "Train everything for a release",
         run_release,
-        ("--resume", "--episodes", "120", "--llm-steps", "4000"),
+        ("--resume", "--episodes", "120", "--llm-steps", "4000", "--llm-shards", "4"),
     ),
     ("Run the evaluation suite", run_evaluation, ()),
     ("Self-check the install", run_selfcheck, ()),

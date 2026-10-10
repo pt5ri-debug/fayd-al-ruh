@@ -57,6 +57,7 @@ from ml.llm.__main__ import train_and_save
 from ml.llm.evaluate import document_split, evaluate_model
 from ml.llm.tokenizer import TOKENIZER_KINDS, load_tokenizer
 from ml.llm.transformer import PRESETS, TransformerConfig, TransformerLM
+from ml.llm.schedule import describe_schedule, schedule_path
 from ml.llm.state import load_step_count, state_path
 from ml.petroleum import train_petroleum
 
@@ -90,6 +91,7 @@ class TrainingConfig:
     max_procedural: int | None = None
     measure_perplexity: bool = False
     resume: bool = False
+    shard_count: int = 0
 
 
 def _git_revision() -> str:
@@ -322,6 +324,7 @@ def train_release(
             "include_procedural": config.include_procedural,
             "max_procedural": config.max_procedural,
             "resume": config.resume,
+            "shard_count": config.shard_count,
         },
         "knowledge": knowledge_summary(),
         "corpus": corpus_summary(config),
@@ -363,6 +366,7 @@ def train_release(
         include_runtime=config.include_runtime,
         preset=config.llm_preset,
         resume=config.resume,
+        shard_count=config.shard_count,
         verbose=verbose,
     )
     manifest["language_model"] = describe_checkpoint(
@@ -376,6 +380,8 @@ def train_release(
         model=model,
         resumed=continued,
     )
+    if config.shard_count > 0:
+        manifest["language_model"]["schedule"] = describe_schedule(schedule_path(checkpoint))
 
     if write_manifest:
         manifest_path = save_dir / RELEASE_MANIFEST_NAME
@@ -492,6 +498,15 @@ def main(argv: list[str] | None = None) -> int:
         help="continue language-model training from the checkpoint at --checkpoint "
         "instead of starting from scratch (falls back to a fresh run when absent)",
     )
+    parser.add_argument(
+        "--llm-shards",
+        type=int,
+        default=0,
+        help="sharded, resumable language-model schedule: split the document "
+        "universe into this many shards and train one per run, recording the "
+        "consumed shard so a later --resume reaches new material (0 keeps the "
+        "whole-corpus behaviour)",
+    )
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--quiet",
@@ -515,6 +530,7 @@ def main(argv: list[str] | None = None) -> int:
         include_procedural=not args.no_procedural,
         measure_perplexity=args.measure_perplexity,
         resume=args.resume,
+        shard_count=args.llm_shards,
     )
 
     if args.manifest_only:
@@ -540,6 +556,7 @@ def main(argv: list[str] | None = None) -> int:
                 "include_procedural": config.include_procedural,
                 "max_procedural": config.max_procedural,
                 "resume": config.resume,
+                "shard_count": config.shard_count,
             },
             "knowledge": knowledge_summary(),
             "corpus": corpus_summary(config),

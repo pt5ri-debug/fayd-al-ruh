@@ -223,3 +223,41 @@ def test_format_manifest_handles_a_manifest_without_training_results():
     )
     assert "9.9.9" in summary
     assert "Curriculum coverage" in summary
+
+
+def test_release_records_the_sharded_schedule_when_asked(tmp_path):
+    """A sharded release writes the consumed-shard schedule into its manifest."""
+    from ml.llm.schedule import load_schedule, schedule_path
+
+    config = TrainingConfig(
+        episodes=3,
+        llm_steps=5,
+        llm_repeats=1,
+        llm_structured_repeats=1,
+        include_base=False,
+        shard_count=4,
+    )
+    checkpoint = tmp_path / "llm" / "fayd-llm.npz"
+    manifest = train_release(config, save_dir=tmp_path, checkpoint=checkpoint)
+
+    assert manifest["config"]["shard_count"] == 4
+    schedule = manifest["language_model"]["schedule"]
+    assert schedule["count"] == 4
+    assert schedule["consumed"] == [0]
+    assert schedule["next"] == 1
+    assert load_schedule(schedule_path(checkpoint)).consumed == [0]  # type: ignore[union-attr]
+    assert checkpoint.exists()
+
+
+def test_release_without_shards_has_no_schedule_in_the_manifest(tmp_path):
+    config = TrainingConfig(
+        episodes=3,
+        llm_steps=5,
+        llm_repeats=1,
+        llm_structured_repeats=1,
+        include_base=False,
+    )
+    checkpoint = tmp_path / "llm" / "fayd-llm.npz"
+    manifest = train_release(config, save_dir=tmp_path, checkpoint=checkpoint)
+    assert manifest["config"]["shard_count"] == 0
+    assert "schedule" not in manifest["language_model"]
