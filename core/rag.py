@@ -213,6 +213,17 @@ class RagRetriever:
         if self._retriever is not None:
             self._retriever.invalidate()
 
+    def remove_document(self, doc_id: str) -> bool:
+        """Drop a document from the store and the semantic index; the inverse of
+        :meth:`index_document`. Returns whether it was present."""
+        if self.documents.get(doc_id) is None:
+            return False
+        self.documents.remove(doc_id)
+        self._index.remove(doc_id)
+        if self._retriever is not None:
+            self._retriever.invalidate()
+        return True
+
     def retrieve(self, query: str, *, limit: int = 4) -> list[RetrievedPassage]:
         if not query.strip():
             raise ValueError("Retrieval query cannot be empty.")
