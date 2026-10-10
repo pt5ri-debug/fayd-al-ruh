@@ -45,13 +45,14 @@ Arabic is kept as secondary aliases where useful.
   fetches the remote (never touching the working tree) and reports how many
   commits the checkout is behind; `apply_update` fast-forwards the tracked branch
   only when the tree is clean and the branch is not ahead, so local work is never
-  destroyed. It reports when a commit touches the committed training files (the
-  user's own data in `data/` is separate), and copies `data/` to a timestamped
-  backup before applying. It is a thin wrapper over the project's own `git`,
-  carries no extra dependency, strips embedded credentials from every message,
-  and tells a frozen portable build to download a new bundle instead. Surfaced as
-  the CLI command `python -m cli update [--apply] [--no-backup]` and the GUI/CLI
-  "Search for program updates (GitHub)" entry.
+  destroyed. It reports when a commit touches the committed training files, but
+  never copies or moves the user's own data in `data/` — a fast-forward cannot
+  touch the git-ignored folder, so it is left exactly as it is. It is a thin
+  wrapper over the project's own `git`, carries no extra dependency, strips
+  embedded credentials from every message, and tells a frozen portable build to
+  download a new bundle instead. Surfaced as the CLI command
+  `python -m cli update [--apply]` and the GUI/CLI "Search for program updates
+  (GitHub)" entry.
 - `core/progress.py` — live progress for long runs. `ProgressReporter` (stdlib
   only) is callable, prints percentage/elapsed/eta to `sys.stderr` (so stdout
   stays clean for `--json`), and every training loop takes an optional
