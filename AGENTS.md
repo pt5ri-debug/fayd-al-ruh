@@ -231,7 +231,11 @@ Arabic is kept as secondary aliases where useful.
   **Saved chats**) behind a scrollbar that appears only when the content
   overflows, a toolbar showing the current answering source, and a centred
   hero/empty state that gives way to the first message (and returns when the
-  transcript is cleared). Each message is a role-labelled card ("YOU" /
+  transcript is cleared). A **＋** button beside the input attaches a Word
+  (`.docx`/`.docm`) or text file: the file's text is indexed into the source
+  assistant's store and previewed in the transcript, a removable chip tracks it,
+  and detaching (the chip's ✕, or a new chat) removes it from the store. Each
+  message is a role-labelled card ("YOU" /
   "FAYD AL-RUH" / "STATUS") whose body is a read-only `tk.Text`, so answers and
   live training output can be selected and copied — per-card Copy button, Ctrl+C
   copies the selection, Ctrl+A selects all, Delete clears, right-click offers
@@ -240,6 +244,19 @@ Arabic is kept as secondary aliases where useful.
   training output is queued and rendered at a bounded rate (coalesced into one
   widget update every ~0.15 s, fully drained before the result), so a fast
   training loop never freezes the window.
+- `core/document_reader.py` — read text out of a Word file with no third-party
+  dependency: a `.docx`/`.docm` is an Office Open XML package (a ZIP holding
+  `word/document.xml`), so `zipfile` + `xml.etree` extract its paragraphs
+  (joining runs, honouring tabs and breaks) into a `DocumentText`. Legacy `.doc`
+  and `.rtf` are refused with a "save as .docx" hint instead of being scrambled.
+  Plain `.txt` is read directly.
+- `gui/attachments.py` — the `+` composer button's brain: `attach_document`
+  reads a file through the reader, chunks it, and returns an `AttachmentNotice`
+  (success + preview, or the reader's error verbatim); the chunks become
+  `Document`s under the `attachment:` namespace and are indexed into the
+  assistant's own store, so an answer can retrieve and **cite** them like the
+  built-in corpus. `remove_documents` detaches them again. Kept out of the Tk
+  window so the logic is testable without a display.
 - `fayd-al-ruh.spec` — PyInstaller; uses `collect_submodules` for `ml`,
   `evaluation`, `ai`, `storage`, `gui` (and `core` is bundled as an imported
   package).

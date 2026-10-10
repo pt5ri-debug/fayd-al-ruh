@@ -17,6 +17,7 @@ from ai import chat as chat_module
 from ai import mind as mind_module
 from ai.jarvis import build_session
 from core.jarvis import JarvisMode, JarvisTurn
+from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
 
 
 @dataclass
@@ -72,6 +73,10 @@ class ChatService:
         self.session = session
         if session and not self.mode.resume_session(session):
             self.session = None
+        # Files the user attached to this conversation, kept so they can be listed
+        # in the UI and detached again. Their text is already in the assistant's
+        # store (see attach_file), so they need no separate retrieval path.
+        self.attachments: list[Attachment] = []
 
     @property
     def source(self) -> str:
@@ -107,6 +112,69 @@ class ChatService:
     def list_sessions(self) -> tuple[str, ...]:
         """The ids of saved conversations available to resume."""
         return self.mode.list_sessions()
+
+    def attach_file(self, path: str | Path) -> AttachmentNotice:
+        """Read a file, index its text, and remember it as an attachment.
+
+        The document's chunks join the assistant's own store, so a question can
+        retrieve and cite them exactly like the built-in corpus. A read failure
+        comes back as ``ok=False`` with a message, never as an exception.
+        """
+        notice = attach_document(path)
+        if not notice.ok or not notice.attachments:
+            return notice
+        retriever = self._retriever()
+        if retriever is None:
+            return AttachmentNotice(
+                filename=notice.filename,
+                ok=False,
+                message="Attachments need the source assistant, which is not available here.",
+            )
+        for attachment in notice.attachments:
+            for document in attachment.documents:
+                try:
+                    retriever.index_document(document)
+                except (ValueError, OSError) as error:
+                    return AttachmentNotice(
+                        filename=notice.filename,
+                        ok=False,
+                        message=f"Could not index the file: {error}",
+                    )
+            self.attachments.append(attachment)
+        return notice
+
+    def attach_document(self, attachment: Attachment) -> None:
+        """Index an already-read :class:`Attachment` (used when wiring in tests)."""
+        retriever = self._retriever()
+        if retriever is None:
+            raise ValueError("Attachments need the source assistant, which is not available here.")
+        for document in attachment.documents:
+            retriever.index_document(document)
+        self.attachments.append(attachment)
+
+    def remove_attachment(self, attachment: Attachment) -> int:
+        """Detach a file: drop its documents from the store. Returns how many left."""
+        retriever = self._retriever()
+        removed = remove_documents(retriever, attachment) if retriever is not None else 0
+        self.attachments = [item for item in self.attachments if item is not attachment]
+        return removed
+
+    def clear_attachments(self) -> int:
+        """Detach every file; returns how many were removed."""
+        removed = 0
+        for attachment in list(self.attachments):
+            removed += self.remove_attachment(attachment)
+        return removed
+
+    def _retriever(self):
+        """The grounded assistant's retriever, when one is wired in.
+
+        Taken from the switcher's grounded assistant rather than the active one,
+        so attaching a file works even while the window is answering from the
+        trained model -- the evidence is there the moment the user switches back.
+        """
+        grounded = getattr(self.switcher, "grounded", None)
+        return getattr(grounded, "retriever", None)
 
     def resume(self, session_id: str) -> bool:
         """Make a saved conversation current. Returns whether it was found."""

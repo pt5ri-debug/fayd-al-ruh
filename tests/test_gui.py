@@ -27,7 +27,7 @@ class FakeSession:
         self.heard: list[str] = []
         self.saved = 0
         self.resumed: list[str] = []
-        self.assistant = SimpleNamespace(name="grounded")
+        self.assistant: Any = SimpleNamespace(name="grounded")
         self.help_text = "help"
         self.voice = SimpleNamespace(assistant=self.assistant)
         self._conversation = SimpleNamespace(id="CNV-fake")
@@ -66,7 +66,67 @@ def _service(mode: FakeSession, **kwargs: Any) -> ChatService:
     return ChatService(mode=cast(JarvisMode, mode), **kwargs)
 
 
+def _service_with_retriever() -> ChatService:
+    """A service backed by a real assistant, so attachments have a store to join."""
+    from core.assistant import build_default_assistant
+
+    session = FakeSession()
+    session.assistant = build_default_assistant()
+    return _service(session)
+
+
 # --- service --------------------------------------------------------------
+
+
+def test_service_attach_file_indexes_and_detaches(tmp_path) -> None:
+    import zipfile
+
+    from core.assistant import build_default_assistant
+
+    session = FakeSession()
+    session.assistant = build_default_assistant()
+    service = ChatService(mode=cast(JarvisMode, session))
+    docx = tmp_path / "well.docx"
+    body = "<w:p><w:r><w:t>Zephyrium-9 flowed at 4200 barrels per day.</w:t></w:r></w:p>"
+    xml = (
+        '<?xml version="1.0"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{body}</w:body></w:document>"
+    )
+    with zipfile.ZipFile(docx, "w") as archive:
+        archive.writestr("word/document.xml", xml)
+
+    notice = service.attach_file(docx)
+
+    assert notice.ok is True
+    assert len(service.attachments) == 1
+    doc_id = service.attachments[0].doc_ids[0]
+    assert session.assistant.retriever.documents.get(doc_id) is not None
+    # A question can now retrieve the attached text and cite it.
+    from core.assistant import GroundedAssistant
+
+    assert isinstance(session.assistant, GroundedAssistant)
+    answer = session.assistant.ask("What did Zephyrium-9 flow at?")
+    assert any("attachment" in citation for citation in answer.citations)
+
+    removed = service.remove_attachment(service.attachments[0])
+
+    assert removed == 1
+    assert session.assistant.retriever.documents.get(doc_id) is None
+    assert service.attachments == []
+
+
+def test_service_attach_file_reports_failure(tmp_path) -> None:
+    from core.assistant import build_default_assistant
+
+    session = FakeSession()
+    session.assistant = build_default_assistant()
+    service = ChatService(mode=cast(JarvisMode, session))
+
+    notice = service.attach_file(tmp_path / "missing.docx")
+
+    assert notice.ok is False
+    assert service.attachments == []
 
 
 def test_service_answers_and_renders_sources() -> None:
@@ -497,6 +557,62 @@ def test_window_sidebar_has_a_scrollbar_shown_only_on_overflow() -> None:
         app._toggle_sidebar_scrollbar()
         root.update()
         assert not app._side_scrollbar.winfo_ismapped()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_attaches_a_document_and_shows_a_chip(tmp_path) -> None:
+    import tkinter as tk
+    import zipfile
+
+    from gui.app import FaydGUI
+
+    docx = tmp_path / "well.docx"
+    body = "<w:p><w:r><w:t>The Zephyrium-9 well flowed at 4200 bopd.</w:t></w:r></w:p>"
+    xml = (
+        '<?xml version="1.0"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{body}</w:body></w:document>"
+    )
+    with zipfile.ZipFile(docx, "w") as archive:
+        archive.writestr("word/document.xml", xml)
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service_with_retriever())
+        root.update()
+        assert app.service.attachments == []
+        notice = app._on_attach(str(docx))
+        root.update()
+        assert notice.ok is True
+        assert len(app.service.attachments) == 1
+        # A removable chip is shown for the attached file.
+        assert app._attachment_chips
+        assert app._attachments_row.winfo_ismapped()
+        # Detaching removes it from the service and the chips.
+        app._detach(app.service.attachments[0])
+        root.update()
+        assert app.service.attachments == []
+        assert app._attachment_chips == []
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_attachment_failure_is_reported_not_raised(tmp_path) -> None:
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service_with_retriever())
+        root.update()
+        notice = app._on_attach(str(tmp_path / "missing.docx"))
+        root.update()
+        assert notice.ok is False
+        assert app.service.attachments == []
     finally:
         root.destroy()
 

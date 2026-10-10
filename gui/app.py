@@ -25,12 +25,14 @@ from pathlib import Path
 from typing import Any
 
 import tkinter as tk
+from tkinter import filedialog
 from tkinter import font as tkfont
 from tkinter import simpledialog
 
 from core.paths import data_dir
 from core.version import __version__
 from gui.actions import ACTIONS, GuiAction, SessionItem, saved_session_items
+from gui.attachments import Attachment, AttachmentNotice
 from gui.options import build_parser
 from gui.service import ChatReply, ChatService
 from storage.json_store import JsonStore
@@ -140,6 +142,47 @@ def save_theme_name(name: str) -> None:
         JsonStore(data_dir()).save(_THEME_NAMESPACE, _THEME_KEY, {"theme": name})
     except Exception:
         pass
+
+
+class _Tooltip:
+    """A small hover hint for a control, shown after a short delay."""
+
+    def __init__(self, widget: tk.Widget, text: str, theme: Theme, font: str) -> None:
+        self._widget = widget
+        self._text = text
+        self._theme = theme
+        self._font = font
+        self._window: tk.Toplevel | None = None
+        self._after: str | None = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _schedule(self, _event: tk.Event) -> None:
+        self._after = self._widget.after(450, self._show)
+
+    def _show(self) -> None:
+        if self._window is not None:
+            return
+        window = tk.Toplevel(self._widget)
+        window.wm_overrideredirect(True)
+        window.configure(bg=self._theme.border)
+        tk.Label(
+            window, text=self._text, bg=self._theme.card_bg, fg=self._theme.text,
+            font=(self._font, 9), padx=8, pady=4, relief="flat",
+        ).pack()
+        x = self._widget.winfo_rootx() + 4
+        y = self._widget.winfo_rooty() - 32
+        window.wm_geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        self._window = window
+
+    def _hide(self, _event: tk.Event | None = None) -> None:
+        if self._after is not None:
+            self._widget.after_cancel(self._after)
+            self._after = None
+        if self._window is not None:
+            self._window.destroy()
+            self._window = None
 
 
 class LineStream(io.TextIOBase):
@@ -550,8 +593,29 @@ class FaydGUI:
     def _build_composer(self, main: tk.Frame) -> None:
         composer = tk.Frame(main, bg=self._theme.main_bg)
         composer.pack(fill="x", padx=18, pady=(10, 16))
+
+        # Files attached to this conversation appear as removable chips above the
+        # input, like a modern chat composer.
+        self._attachments_row = tk.Frame(composer, bg=self._theme.main_bg)
+        self._attachment_chips: list[tk.Widget] = []
+        self._attachments_row.pack(side="top", fill="x")
+
         field = tk.Frame(composer, bg=self._theme.card_bg)
         field.pack(side="left", fill="both", expand=True)
+
+        # A "+" button beside the input opens a file picker for Word documents.
+        self._attach_button = tk.Button(
+            field, text="＋", command=self._on_attach_clicked,
+            bg=self._theme.card_bg, fg=self._theme.muted,
+            activebackground=self._theme.sidebar_hover, activeforeground=self._theme.text,
+            font=(self._font, 15, "bold"), relief="flat", borderwidth=0,
+            padx=10, pady=0, cursor="hand2",
+        )
+        self._attach_button.pack(side="left", fill="y")
+        self._attach_tip = _Tooltip(
+            self._attach_button, "Attach a Word (.docx) or text file", self._theme, self._font
+        )
+
         self._entry = tk.Text(
             field, height=2, bg=self._theme.card_bg, fg=self._theme.text,
             insertbackground=self._theme.accent, font=(self._font, 11),
@@ -576,6 +640,7 @@ class FaydGUI:
             column, text="Return · Shift+Return = newline", bg=self._theme.main_bg,
             fg=self._theme.faint, font=(self._font, 8),
         ).pack(side="top", pady=(4, 0))
+        self._render_attachment_chips()
         self._entry.focus_set()
 
     # -------------------------------------------------------------- transcript
@@ -813,6 +878,7 @@ class FaydGUI:
             return "break"
         conversation_id = self.service.new_conversation()
         self._hide_thinking()
+        self._reset_attachments()
         self._add_bubble("note", f"Started a new conversation ({conversation_id}).")
         self._update_status()
         self.refresh_sessions()
@@ -830,12 +896,88 @@ class FaydGUI:
         if self._busy or item.is_current:
             return
         if self.service.resume(item.session_id):
+            self._reset_attachments()
             self._add_bubble("note", f"Resumed conversation {item.session_id}.")
             self._update_status()
             self.refresh_sessions()
         else:
             self._add_bubble("note", f"Could not resume conversation {item.session_id}.")
             self.refresh_sessions()
+
+    # ------------------------------------------------------------ attachments
+
+    def _on_attach_clicked(self) -> None:
+        """Open a file picker for a Word document and attach the choice."""
+        path = filedialog.askopenfilename(
+            parent=self.root,
+            title="Attach a document",
+            filetypes=[
+                ("Word documents", "*.docx *.docm"),
+                ("Text files", "*.txt"),
+                ("All files", "*.*"),
+            ],
+        )
+        if path:
+            self._on_attach(path)
+
+    def _on_attach(self, path: str) -> AttachmentNotice:
+        """Read and index a file, then show it in the transcript and as a chip."""
+        notice = self.service.attach_file(path)
+        if not notice.ok:
+            self._add_bubble("note", f"Could not attach {notice.filename}: {notice.message}")
+            return notice
+        summary = notice.message
+        if notice.preview:
+            summary = f"{summary}\n\nPreview:\n{notice.preview}"
+        self._add_bubble("note", summary)
+        self._render_attachment_chips()
+        return notice
+
+    def _render_attachment_chips(self) -> None:
+        """Rebuild the removable chips for the files attached to this chat."""
+        if not hasattr(self, "_attachments_row"):
+            return
+        for widget in self._attachment_chips:
+            widget.destroy()
+        self._attachment_chips = []
+        attachments = self.service.attachments
+        # The row stays packed (an empty frame has no visible height); re-packing
+        # it after forgetting would move it behind the input and give it no space.
+        self._attachments_row.pack_configure(pady=(0, 6) if attachments else 0)
+        for attachment in attachments:
+            self._attachment_chips.append(self._attachment_chip(attachment))
+
+    def _attachment_chip(self, attachment: Attachment) -> tk.Widget:
+        chip = tk.Frame(self._attachments_row, bg=self._theme.card_bg)
+        chip.pack(side="left", padx=(0, 6), pady=2)
+        tk.Label(
+            chip, text=f"📄 {attachment.filename}", bg=self._theme.card_bg,
+            fg=self._theme.text, font=(self._font, 9), padx=8, pady=3,
+        ).pack(side="left")
+        close = tk.Label(
+            chip, text="✕", bg=self._theme.card_bg, fg=self._theme.muted,
+            font=(self._font, 9, "bold"), padx=8, pady=3, cursor="hand2",
+        )
+        close.pack(side="left")
+        close.bind("<Enter>", lambda _e: close.configure(fg=self._theme.accent))
+        close.bind("<Leave>", lambda _e: close.configure(fg=self._theme.muted))
+        close.bind("<Button-1>", lambda _e: self._detach(attachment))
+        return chip
+
+    def _detach(self, attachment: Attachment) -> None:
+        removed = self.service.remove_attachment(attachment)
+        self._render_attachment_chips()
+        self._add_bubble(
+            "note",
+            f"Detached {attachment.filename}."
+            if removed
+            else f"Detached {attachment.filename} (its text was already gone).",
+        )
+
+    def _reset_attachments(self) -> None:
+        """Detach every file, used when the conversation changes."""
+        self.service.clear_attachments()
+        self._render_attachment_chips()
 
     def _update_status(self) -> None:
         self._status.configure(text=self._status_text())
