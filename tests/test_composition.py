@@ -91,6 +91,54 @@ def test_compose_model_answer_preserves_decimals_and_the_models_words():
     assert text == "The gradient is 0.052 psi/ft and the formula is q / A."
 
 
+def test_compose_model_answer_keeps_every_whole_sentence_in_order():
+    text = compose_model_answer("The well is cased. Then it is cemented. Finally it flows.")
+    assert text == "The well is cased. Then it is cemented. Finally it flows."
+
+
+def test_compose_model_answer_drops_a_dangling_final_clause():
+    # "... the completion" has no verb, so the finished sentence is preferred.
+    assert (
+        compose_model_answer("Measure porosity and permeability. Then run the completion")
+        == "Measure porosity and permeability."
+    )
+    # A trailing conjunction/article marks the clause as unfinished too.
+    assert (
+        compose_model_answer("The mud is mixed. Then pump the slurry and")
+        == "The mud is mixed."
+    )
+
+
+def test_compose_model_answer_keeps_a_dangling_sentence_when_it_is_all_there_is():
+    # Nothing cleaner survives, so the model's own (if clumsy) sentence is kept
+    # rather than dropping to silence.
+    assert compose_model_answer("Only pump the pad and") == "Only pump the pad and."
+
+
+def test_compose_model_answer_drops_a_repeated_sentence():
+    text = compose_model_answer("The well flows. The well flows. It is stable.")
+    assert text == "The well flows. It is stable."
+
+
+def test_compose_model_answer_centres_on_the_question():
+    raw = "Compute the surface facilities. The mud weight controls the wellbore pressure."
+    # The sentence naming the question's words ("mud"/"weight") opens the answer.
+    assert compose_model_answer(raw, question="How does mud weight work?") == (
+        "The mud weight controls the wellbore pressure. Compute the surface facilities."
+    )
+
+
+def test_compose_model_answer_demotes_a_bare_section_label():
+    raw = "Step 2 of Well integrity management: schedule the work. Cement bonds the casing."
+    text = compose_model_answer(raw, question="What is a casing?")
+    assert text.startswith("Cement bonds the casing.")
+    assert "Step 2 of" not in text
+
+
+def test_compose_model_answer_without_a_question_still_composes():
+    assert compose_model_answer("The well is cased. Then it flows") == "The well is cased."
+
+
 def test_grounded_answer_reads_as_prose_without_inline_citations():
     text = grounded_answer(
         "what is porosity",

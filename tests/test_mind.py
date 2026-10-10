@@ -65,6 +65,20 @@ def test_mind_answer_composes_the_continuation_into_sentences() -> None:
     assert result.raw_text == "the mud weight is 1.2 sg. The procedure for Prod"
 
 
+def test_mind_answer_centres_the_answer_on_the_question() -> None:
+    """The question steers which whole sentence opens the model's answer."""
+    assistant = mind.MindAssistant(
+        _EchoModel(
+            "Compute the surface facilities. The mud weight controls the pressure."
+        ),
+        max_new_tokens=8,
+    )
+    result = assistant.answer("How does mud weight work?")
+    assert result.text == (
+        "The mud weight controls the pressure. Compute the surface facilities."
+    )
+
+
 def test_mind_answer_rejects_an_empty_question(tmp_path) -> None:
     assistant = mind.MindAssistant(_tiny_model(tmp_path))
     with pytest.raises(ValueError):
