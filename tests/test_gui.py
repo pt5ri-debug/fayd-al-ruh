@@ -372,6 +372,75 @@ def test_window_coalesces_a_burst_of_progress_lines() -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_starts_with_a_hero_and_hides_it_after_a_message() -> None:
+    import time
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.update()
+        assert app._empty is not None  # the welcome/empty state is shown
+        app._entry.insert("1.0", "hello")
+        app._on_send()
+        for _ in range(40):
+            root.update()
+            time.sleep(0.02)
+        assert app._empty is None  # the first message replaces it
+        # Clearing the transcript brings the hero back.
+        app._clear_transcript()
+        root.update()
+        assert app._empty is not None
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_per_bubble_copy_button_copies_that_message() -> None:
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.update()
+        first = app._add_bubble("assistant", "the first answer")
+        app._add_bubble("assistant", "the second answer")
+        root.clipboard_clear()
+        app._copy_widget(first)
+        root.update()
+        assert root.clipboard_get() == "the first answer"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_shows_and_clears_a_thinking_indicator() -> None:
+    import time
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.update()
+        app._entry.insert("1.0", "hello")
+        app._on_send()
+        assert app._thinking is not None  # a pending answer is visible
+        for _ in range(40):
+            root.update()
+            time.sleep(0.02)
+        assert app._thinking is None  # cleared once the answer lands
+        assert app._busy is False
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_shows_actions_and_saved_chats() -> None:
     import tkinter as tk
 
