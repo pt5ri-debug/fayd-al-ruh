@@ -407,6 +407,36 @@ def test_window_bubbles_are_selectable_and_copyable() -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_fits_a_short_model_answer_without_clipping_its_last_line() -> None:
+    """A two-line model answer must show its body, not just its header.
+
+    A regression guard: ``count("1.0", "end-1c", "displaylines")`` undercounts by
+    one, which sized a short answer one line short. For a model answer -- a header
+    line, a blank line and the body -- that clipped the body entirely, leaving a
+    bubble that showed only the header and its Copy button.
+    """
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.update()
+        text = "header line\n\nporosity is the fraction of pore space"
+        bubble = app._add_bubble("assistant", text)
+        root.update()
+        logical = int(bubble.index("end-1c").split(".")[0])
+        assert int(bubble.cget("height")) >= logical
+        # Nothing is scrolled out of view: the whole message is visible.
+        first, last = bubble.yview()
+        assert first <= 0.0 and last >= 1.0
+        assert bubble.get("1.0", "end-1c") == text
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_coalesces_a_burst_of_progress_lines() -> None:
     import time
     import tkinter as tk
