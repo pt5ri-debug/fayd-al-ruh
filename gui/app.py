@@ -14,6 +14,7 @@ import contextlib
 import io
 import queue
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -92,8 +93,32 @@ class FaydGUI:
         self._results: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._lines: queue.Queue[str] = queue.Queue()
         self._busy = False
-        self._streaming_label: tk.Label | None = None
+        self._streaming_label: tk.Text | None = None
+        self._bubbles: list[tk.Text] = []
+        # Live output is coalesced and rendered at a bounded rate: a fast training
+        # loop can emit thousands of lines, and configuring a label or scrolling
+        # on every one would freeze the window.
+        self._pending: list[str] = []
+        self._last_render = 0.0
         self._font = _pick_font()
+
+        # The transcript is selectable and copyable; Delete clears it, Ctrl+C
+        # copies the selection, Ctrl+A selects the whole transcript, and a
+        # right-click offers the same as a menu.
+        root.bind("<Control-c>", self._on_copy)
+        root.bind("<Control-C>", self._on_copy)
+        root.bind("<Control-a>", self._on_select_all)
+        root.bind("<Control-A>", self._on_select_all)
+        root.bind("<Delete>", self._on_clear_transcript)
+        root.bind("<Button-3>", self._on_right_click)
+        self._clipboard_menu = tk.Menu(root, tearoff=0)
+        self._clipboard_menu.add_command(label="Copy", command=self._on_copy)
+        self._clipboard_menu.add_command(
+            label="Copy conversation", command=self._on_copy_conversation
+        )
+        self._clipboard_menu.add_command(label="Select all", command=self._on_select_all)
+        self._clipboard_menu.add_separator()
+        self._clipboard_menu.add_command(label="Clear transcript", command=self._clear_transcript)
 
         root.title("Fayd Al-Ruh")
         root.geometry("1040x720")
@@ -299,7 +324,7 @@ class FaydGUI:
 
     # -------------------------------------------------------------- transcript
 
-    def _add_bubble(self, role: str, text: str, *, extra: str = "") -> tk.Label:
+    def _add_bubble(self, role: str, text: str, *, extra: str = "") -> tk.Text:
         row = tk.Frame(self._transcript, bg=MAIN_BG)
         row.pack(fill="x", padx=16, pady=6)
         if role == "user":
@@ -312,29 +337,123 @@ class FaydGUI:
 
         bubble = tk.Frame(row, bg=bg)
         bubble.pack(side="right" if role == "user" else "left")
-        label = tk.Label(
+        # A read-only Text, not a Label: its text can be selected and copied.
+        widget = tk.Text(
             bubble,
-            text=text if not extra else f"{text}\n\n{extra}",
-            bg=bg, fg=fg, font=(self._font, 11), justify="left",
-            anchor="w", wraplength=680, padx=14, pady=10,
+            height=1, wrap="word", relief="flat", borderwidth=0,
+            highlightthickness=0, bg=bg, fg=fg, font=(self._font, 11),
+            padx=14, pady=10, cursor="xterm", takefocus=1,
         )
-        label.pack()
-        self._bubbles = getattr(self, "_bubbles", [])
-        self._bubbles.append(label)
+        widget.insert("1.0", text if not extra else f"{text}\n\n{extra}")
+        self._make_read_only(widget)
+        widget.pack(fill="x")
+        for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(wheel, self._on_bubble_wheel, add="+")
+        self._fit_height(widget)
+        self._bubbles.append(widget)
         self._scroll_to_bottom()
-        return label
+        return widget
 
-    def _update_wraplength(self) -> None:
-        width = max(self._canvas.winfo_width() - 120, 240)
-        for label in getattr(self, "_bubbles", []):
-            label.configure(wraplength=width)
+    @staticmethod
+    def _make_read_only(widget: tk.Text) -> None:
+        """Keep a Text editable-looking but read-only, yet still selectable/copyable.
+
+        Blocking only the mutating keys (rather than ``state="disabled"``) keeps
+        selection, Ctrl+C, and the mouse working normally.
+        """
+        def block(event: tk.Event) -> str:
+            if int(event.state) & 0x0004 or int(event.state) & 0x0008:  # Control / Command
+                return ""  # let accelerators (copy, select-all) through
+            if event.keysym in {"Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next"}:
+                return ""  # allow navigation
+            return "break"
+
+        for sequence in ("<Key>", "<<Paste>>", "<<Cut>>", "<<Clear>>"):
+            widget.bind(sequence, block)
+
+    def _on_bubble_wheel(self, event: tk.Event) -> str:
+        """Scroll the transcript when the bubble has nothing of its own to scroll."""
+        widget = event.widget
+        spans = widget.yview() if isinstance(widget, tk.Text) else (0.0, 1.0)
+        if spans[0] <= 0.0 and spans[1] >= 1.0:
+            self._on_mousewheel(event)
+            return "break"
+        return ""
+
+    def _fit_height(self, widget: tk.Text) -> None:
+        """Size a read-only Text to its wrapped content, up to a scroll cap."""
+        widget.update_idletasks()
+        measured = widget.count("1.0", "end-1c", "displaylines")
+        lines = int(measured[0]) if measured else 1
+        widget.configure(height=min(max(lines, 1), 30))
+
+    def _bubble_texts(self) -> list[str]:
+        return [widget.get("1.0", "end-1c") for widget in self._bubbles]
+
+    def _on_right_click(self, event: tk.Event) -> None:
+        try:
+            self._clipboard_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._clipboard_menu.grab_release()
+
+    def _copy_text(self, text: str) -> None:
+        if not text:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.root.update_idletasks()
+
+    def _selected_text(self) -> str:
+        """The selection from the focused Text widget, falling back to any selection."""
+        widget = self.root.focus_get()
+        if isinstance(widget, tk.Text):
+            try:
+                if widget.tag_ranges("sel"):
+                    return widget.get("sel.first", "sel.last")
+            except tk.TclError:
+                pass
+        for candidate in self._bubbles:
+            try:
+                if candidate.tag_ranges("sel"):
+                    return candidate.get("sel.first", "sel.last")
+            except tk.TclError:
+                continue
+        return ""
+
+    def _on_copy(self, _event: tk.Event | None = None) -> str:
+        """Copy the focused or transcript selection; never clobber it with nothing."""
+        selection = self._selected_text()
+        if not selection:
+            return ""  # nothing selected: leave the clipboard (and composer) alone
+        self._copy_text(selection)
+        return "break"
+
+    def _on_copy_conversation(self) -> None:
+        self._copy_text("\n\n".join(self._bubble_texts()))
+
+    def _on_select_all(self, _event: tk.Event | None = None) -> str:
+        if self.root.focus_get() is self._entry:
+            return ""  # keep the composer's own editing untouched
+        for widget in self._bubbles:
+            widget.tag_add("sel", "1.0", "end-1c")
+        return "break"
+
+    def _on_clear_transcript(self, _event: tk.Event | None = None) -> str:
+        if self.root.focus_get() is self._entry:
+            return ""  # Delete while typing edits the composer, never the transcript
+        self._clear_transcript()
+        return "break"
+
+    def _clear_transcript(self) -> None:
+        for widget in list(self._bubbles):
+            widget.master.destroy()  # the wrapping row frame
+        self._bubbles.clear()
 
     def _on_transcript_configure(self, _event: tk.Event) -> None:
         self._canvas.configure(scrollregion=self._canvas.bbox("all"))
 
     def _on_canvas_configure(self, event: tk.Event) -> None:
         self._canvas.itemconfigure(self._window, width=event.width)
-        self._update_wraplength()
 
     def _on_mousewheel(self, event: tk.Event) -> None:
         delta = -1 * (event.delta // 120) if getattr(event, "delta", 0) else (
@@ -446,11 +565,29 @@ class FaydGUI:
         return output or f"{action.label} finished."
 
     def _append_progress_line(self, text: str) -> None:
-        """Append one live output line to the running training bubble."""
+        """Queue one live output line; the pump flushes them at a bounded rate."""
+        self._pending.append(text)
+
+    def _flush_progress(self, *, force: bool = False) -> None:
+        """Render queued progress lines, coalesced and rate-limited.
+
+        A training loop can emit many lines between pumps; joining them into one
+        label update keeps the window responsive instead of reconfiguring a label
+        and re-scrolling on every single line.
+        """
+        if not self._pending:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_render < 0.15:
+            return
+        text = "\n".join(self._pending)
+        self._pending.clear()
+        self._last_render = now
         if self._streaming_label is None:
             self._add_bubble("note", text)
         else:
-            self._streaming_label.configure(text=f"{self._streaming_label.cget('text')}\n{text}")
+            self._streaming_label.insert("end", f"\n{text}")
+            self._fit_height(self._streaming_label)
         self._scroll_to_bottom()
 
     # -------------------------------------------------------------- threading
@@ -471,26 +608,37 @@ class FaydGUI:
 
     def _pump(self) -> None:
         """Drain worker results and live progress lines on the Tk main thread."""
-        while True:
+        self._drain_lines(cap=500)
+        self._flush_progress()
+        try:
+            kind, payload = self._results.get_nowait()
+        except queue.Empty:
+            kind = None
+        if kind is not None:
+            # The job has ended, so every line it printed is already queued;
+            # drain them all into the same live bubble before showing the result.
+            self._drain_lines(cap=None)
+            self._flush_progress(force=True)
+            if kind == "ok":
+                self._render_result(payload)
+            else:
+                self._add_bubble("assistant", f"Something went wrong: {payload}")
+            self._busy = False
+            self._streaming_label = None
+            self._send.configure(state="normal")
+            self._update_status()
+            self.refresh_sessions()
+        self.root.after(100, self._pump)
+
+    def _drain_lines(self, *, cap: int | None) -> None:
+        """Move queued live-output lines into the pending buffer, optionally capped."""
+        drained = 0
+        while cap is None or drained < cap:
             try:
                 self._append_progress_line(self._lines.get_nowait())
+                drained += 1
             except queue.Empty:
                 break
-        try:
-            while True:
-                kind, payload = self._results.get_nowait()
-                if kind == "ok":
-                    self._render_result(payload)
-                else:
-                    self._add_bubble("assistant", f"Something went wrong: {payload}")
-                self._busy = False
-                self._streaming_label = None
-                self._send.configure(state="normal")
-                self._update_status()
-                self.refresh_sessions()
-        except queue.Empty:
-            pass
-        self.root.after(100, self._pump)
 
     def _render_result(self, payload: Any) -> None:
         if isinstance(payload, ChatReply):
