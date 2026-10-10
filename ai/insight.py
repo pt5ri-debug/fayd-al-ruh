@@ -45,8 +45,13 @@ _LINK_BASELINE = 0.25
 
 
 def manifest_path() -> Path:
-    """Where the release manifest is expected to live."""
-    return artifacts_dir() / _MANIFEST_NAME
+    """Where the release manifest lives: the retrained copy, else the bundled one."""
+    from core.paths import bundled_artifacts_dir
+
+    trained = artifacts_dir() / _MANIFEST_NAME
+    if trained.exists():
+        return trained
+    return bundled_artifacts_dir() / _MANIFEST_NAME
 
 
 def load_manifest(path: Path | None = None) -> dict[str, Any] | None:

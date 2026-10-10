@@ -145,6 +145,94 @@ def run_web(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.web_verify", argv)
 
 
+def run_update(argv: Sequence[str] = ()) -> int:
+    """Check the project on GitHub for updates and optionally pull them in place."""
+    import argparse
+    import json
+
+    from core.updater import UpdateError, apply_update, check_for_updates, format_status
+
+    parser = argparse.ArgumentParser(
+        prog="update",
+        description="Check the project on GitHub for program updates.",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="download and apply any available update (fast-forward only).",
+    )
+    parser.add_argument(
+        "--no-backup",
+        dest="backup",
+        action="store_false",
+        help="skip the automatic backup of the trained data folder before applying.",
+    )
+    parser.add_argument(
+        "--repo",
+        default=None,
+        help="repository URL to check (defaults to the configured git remote).",
+    )
+    parser.add_argument("--json", action="store_true", help="print a JSON report.")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="print only the one-line summary.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="show the git commands that were run.",
+    )
+    args = parser.parse_args(list(argv))
+
+    try:
+        from core.updater import DEFAULT_REPOSITORY_URL
+
+        url = args.repo or DEFAULT_REPOSITORY_URL
+        status = check_for_updates(url)
+        if args.apply and status.available:
+            status = apply_update(url, status=status, backup=args.backup)
+    except UpdateError as error:
+        print(f"Update check failed: {error}")
+        return 1
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "available": status.available,
+                    "applied": status.applied,
+                    "installed_version": status.current_version,
+                    "installed_revision": status.current_revision,
+                    "latest_revision": status.latest_revision,
+                    "branch": status.branch,
+                    "checked_out_branch": status.head_branch,
+                    "behind": status.behind,
+                    "ahead": status.ahead,
+                    "local_changes": status.dirty,
+                    "repository": status.repository_url,
+                    "changed_files": list(status.changed_files),
+                    "training_files_changed": list(status.learned_files_changed),
+                    "data_backup": status.backup_path,
+                    "data_backup_files": status.backup_copied,
+                    "reason": status.reason,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    if args.quiet:
+        print(status.summary())
+    else:
+        print(format_status(status, verbose=args.verbose))
+        print(f"\n{status.summary()}")
+    if status.applied:
+        print("Restart the program to run the updated code.")
+    return 0
+
+
 def run_knowledge(argv: Sequence[str] = ()) -> int:
     """Build, inspect, or search the bulk knowledge base."""
     return _run_module("cli.knowledge", argv)
@@ -251,6 +339,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ),
     ("Run the evaluation suite", run_evaluation, ()),
     ("Self-check the install", run_selfcheck, ()),
+    ("Search for program updates (GitHub)", run_update, ("--apply",)),
 )
 
 # Entries kept callable but not shown in the numbered menu. They remain reachable
@@ -354,6 +443,7 @@ __all__ = [
     "run_insight",
     "run_internet_learner",
     "run_web",
+    "run_update",
     "run_demo",
     "run_ml",
     "run_llm",
