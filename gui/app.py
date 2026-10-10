@@ -912,9 +912,17 @@ class FaydGUI:
         return ""
 
     def _fit_height(self, widget: tk.Text) -> None:
-        """Size a read-only Text to its wrapped content, up to a scroll cap."""
+        """Size a read-only Text to its wrapped content, up to a scroll cap.
+
+        ``count -displaylines`` reports the number of line *boundaries* between
+        the two indices, which is one fewer than the lines the content occupies;
+        counting to ``"end"`` (which includes the widget's implicit trailing line)
+        yields the true display-line count. Counting from ``"1.0"`` to ``"end-1c"``
+        instead undercounts by one, so a short answer is sized one line short and
+        its last line -- the whole body of a two-line model answer -- is clipped.
+        """
         widget.update_idletasks()
-        measured = widget.count("1.0", "end-1c", "displaylines")
+        measured = widget.count("1.0", "end", "displaylines")
         lines = int(measured[0]) if measured else 1
         widget.configure(height=min(max(lines, 1), _MAX_BUBBLE_LINES))
 
