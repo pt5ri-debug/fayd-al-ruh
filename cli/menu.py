@@ -202,6 +202,7 @@ def run_update(argv: Sequence[str] = ()) -> int:
                 {
                     "available": status.available,
                     "applied": status.applied,
+                    "blocked": status.blocked,
                     "installed_version": status.current_version,
                     "installed_revision": status.current_revision,
                     "latest_revision": status.latest_revision,

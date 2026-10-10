@@ -150,7 +150,33 @@ def test_check_on_a_non_git_directory_is_unavailable(tmp_path: Path) -> None:
     status = check_for_updates("https://example.invalid/repo.git", root=tmp_path)
 
     assert status.available is False
-    assert "portable build" in status.reason
+    assert status.blocked is True
+    assert "not a git clone" in status.reason
+    assert "git clone" in status.reason
+    assert "already up to date" not in status.summary().lower()
+    assert "Cannot check" in status.summary()
+
+
+def test_check_without_git_explains_how_to_install_it(tmp_path: Path, monkeypatch) -> None:
+    _origin, installed = _repo_pair(tmp_path)
+    from core import updater
+
+    monkeypatch.setattr(updater, "_git_available", lambda: False)
+
+    status = check_for_updates(str(installed), root=installed)
+
+    assert status.blocked is True
+    assert "git was not found" in status.reason
+    assert "git-scm.com" in status.reason
+
+
+def test_blocked_report_never_claims_it_is_up_to_date(tmp_path: Path) -> None:
+    status = check_for_updates("https://example.invalid/repo.git", root=tmp_path)
+
+    report = format_status(status)
+
+    assert "cannot check here" in report
+    assert "up to date" not in report
 
 
 def test_format_status_includes_a_command_trail(tmp_path: Path) -> None:

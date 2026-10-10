@@ -49,7 +49,9 @@ Arabic is kept as secondary aliases where useful.
   user's own data in `data/` is separate), and copies `data/` to a timestamped
   backup before applying. It is a thin wrapper over the project's own `git`,
   carries no extra dependency, strips embedded credentials from every message,
-  and tells a frozen portable build to download a new bundle instead. Surfaced as
+  and explains precisely when a check is impossible -- a frozen build or an
+  extracted ZIP (no `.git`) gets the clone/migrate steps, and a missing `git`
+  gets the install link -- rather than claiming a vague "up to date". Surfaced as
   the CLI command `python -m cli update [--apply] [--no-backup]` and the GUI/CLI
   "Search for program updates (GitHub)" entry.
 - `core/progress.py` — live progress for long runs. `ProgressReporter` (stdlib
