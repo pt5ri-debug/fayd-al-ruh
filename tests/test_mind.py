@@ -22,20 +22,54 @@ def _tiny_model(tmp_path) -> LocalLanguageModel:
     return LocalLanguageModel(checkpoint, max_new_tokens=8, temperature=0.0, seed=0)
 
 
-def test_render_prompt_frames_a_question() -> None:
-    assert mind.render_prompt("what is porosity?") == "Question: what is porosity?\nAnswer:"
+def test_render_prompt_anchors_on_the_subject() -> None:
+    # The prompt must be in-distribution prose so the model completes a sentence
+    # instead of continuing an out-of-distribution question/answer frame.
+    assert mind.render_prompt("what is porosity?") == "Porosity is "
 
 
-def test_render_prompt_strips_surrounding_whitespace() -> None:
-    assert mind.render_prompt("  porosity  ") == "Question: porosity\nAnswer:"
+def test_render_prompt_strips_question_words() -> None:
+    assert mind.render_prompt("  what is permeability  ") == "Permeability is "
+    assert mind.render_prompt("how does drilling work") == "Drilling work is "
 
 
-def test_mind_answer_returns_the_continuation_only(tmp_path) -> None:
+def test_mind_answer_never_echoes_the_prompt(tmp_path) -> None:
     assistant = mind.MindAssistant(_tiny_model(tmp_path), max_new_tokens=8)
     result = assistant.answer("porosity")
     assert result.text
     assert "Question:" not in result.text
     assert "Answer:" not in result.text
+
+
+class _EchoGenerator:
+    """A model whose continuation is a fixed string (no numpy needed)."""
+
+    def __init__(self, continuation: str) -> None:
+        self._continuation = continuation
+
+    def generate(self, prompt: str, *, max_new_tokens: int = 64, seed: int | None = None) -> str:
+        return prompt + self._continuation
+
+
+class _StubModel:
+    def __init__(self, continuation: str) -> None:
+        self.generator = _EchoGenerator(continuation)
+
+
+def test_mind_answer_says_so_when_the_model_is_incoherent() -> None:
+    # A continuation that is only a fragment must not be printed as an answer; the
+    # result says plainly that nothing usable came out.
+    assistant = mind.MindAssistant(_StubModel(", a bare fragment with no sentence"))
+    assert assistant.answer("porosity").text == mind.MIND_NO_ANSWER
+
+
+def test_mind_answer_composes_the_model_continuation() -> None:
+    # A continuation that joins a new, lowercase sentence after the anchored one is
+    # reduced to the whole sentence the prompt steered the model into.
+    assistant = mind.MindAssistant(
+        _StubModel(" measured in the lab. matrix is a concept from Physics.")
+    )
+    assert assistant.answer("porosity").text == "Porosity is measured in the lab."
 
 
 def test_mind_answer_rejects_an_empty_question(tmp_path) -> None:

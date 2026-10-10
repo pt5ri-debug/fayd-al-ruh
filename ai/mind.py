@@ -7,8 +7,11 @@ retrieval and no citations, so the quality of its own prose is visible.
 
 That is a measurement, not a smarter answer: the model here is small, trained
 inside the repository, and its output is *not* checked against sources. The
-answer is returned raw, and every answer is labelled as coming from the model so
-it is never mistaken for a grounded, cited one.
+continuation is composed into clean prose by :mod:`core.composition` -- the same
+deterministic verbaliser the grounded answers use -- but only the model's own
+sentences survive, so the answer is still an honest sample of what the model
+learned. Every answer is labelled as coming from the model so it is never
+mistaken for a grounded, cited one.
 
 Everything in this module is self-contained. It does not touch the assistant,
 the Jarvis loop, the controls, or the session builder, so enabling it cannot
@@ -23,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from core.assistant import AssistantAnswer
+from core.composition import is_coherent, model_answer, topic_phrase
 from core.conversation import Conversation
 from core.paths import default_checkpoint
 
@@ -75,11 +79,18 @@ def load_mind_model(
 def render_prompt(question: str) -> str:
     """The prompt the question is turned into.
 
-    A plain completion prompt: the model is trained on short declarative prose,
-    so a question/answer frame would only put it out of distribution. Keeping the
-    frame minimal asks the model to continue from the question as written.
+    The model is trained on short declarative sentences, so the prompt must look
+    like the prose it was trained on: a bare ``Question:``/``Answer:`` frame sits
+    out of distribution and the model continues it with noise. Anchoring the
+    prompt on the subject -- ``"Permeability is "`` -- puts the model back in
+    distribution, and it completes the sentence instead of drifting. The subject
+    is read from the question with the composer's :func:`topic_phrase`, so the
+    same phrase names the topic in the answer body.
     """
-    return f"Question: {question.strip()}\nAnswer:"
+    topic = topic_phrase(question)
+    if topic and topic != "this question":
+        return f"{topic[:1].upper()}{topic[1:]} is "
+    return f"{question.strip().rstrip('?.!')} is "
 
 
 def mind_status(checkpoint: str | Path | None = None) -> dict[str, Any]:
@@ -135,9 +146,15 @@ def _manifest_info() -> dict[str, Any]:
     return info
 
 
+#: Shown in place of prose when the continuation holds no complete sentence. It
+#: keeps the answer honest -- the model did not say anything usable -- instead of
+#: printing a broken fragment as though it were an answer.
+MIND_NO_ANSWER = "(the model produced no complete sentence for this question)"
+
+
 @dataclass
 class MindResult:
-    """The raw result of one model-only answer."""
+    """The composed result of one model-only answer."""
 
     question: str
     text: str
@@ -160,11 +177,19 @@ class MindAssistant:
         self.memory = None
 
     def answer(self, question: str) -> MindResult:
-        """Generate the model's continuation for one question."""
+        """Generate the model's answer for one question, as composed prose.
+
+        The prompt anchors the sentence on the subject (``"Permeability is "``),
+        so the model's continuation is the predicate of a real sentence; prompt
+        and continuation are then composed together and reduced to whole
+        sentences. The result is the model's own words, restated as prose.
+        """
         if not question.strip():
             raise ValueError("Question cannot be empty.")
         prompt = render_prompt(question)
-        text = self._generate(prompt)
+        text = model_answer(question, prompt + self._generate(prompt))
+        if not is_coherent(text):
+            text = MIND_NO_ANSWER
         return MindResult(question=question, text=text, header=self.header)
 
     def ask(
@@ -203,6 +228,7 @@ class MindAssistant:
 __all__ = [
     "MIND_HEADER",
     "MIND_HELP",
+    "MIND_NO_ANSWER",
     "MindAssistant",
     "MindResult",
     "SWITCH_TO_MODEL",

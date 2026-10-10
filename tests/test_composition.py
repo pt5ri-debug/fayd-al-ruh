@@ -20,6 +20,8 @@ from core.composition import (
     evidence_summary_sentence,
     first_sentences,
     grounded_answer,
+    is_coherent,
+    model_answer,
     reasoning_step_sentence,
     sentences,
     sources_block,
@@ -112,6 +114,43 @@ def test_web_answer_body_has_no_inline_attribution():
 
 def test_web_answer_without_sources_says_so_plainly():
     assert "no web source" in web_answer("what is xyzzy", []).lower()
+
+
+def test_model_answer_keeps_only_whole_sentences_of_the_model():
+    text = model_answer(
+        "what is porosity",
+        "Porosity is measured in the lab. matrix is a concept from Physics.",
+    )
+    # The lowercase fragment that the model joined mid-paragraph is not prose and
+    # is dropped; the model's own anchored sentence survives unchanged.
+    assert text == "Porosity is measured in the lab."
+
+
+def test_model_answer_reports_a_fragment_as_empty():
+    assert model_answer("what is porosity", ", a bare fragment with no sentence") == ""
+    assert model_answer("what is porosity", "") == ""
+    assert model_answer("what is porosity", "   ") == ""
+
+
+def test_model_answer_drops_identifiers_and_formulas():
+    assert model_answer("what is porosity", "differential_equations is a concept.") == ""
+    assert model_answer("what is porosity", "Porosity is PI = 0.") == ""
+
+
+def test_model_answer_caps_the_number_of_sentences():
+    text = model_answer(
+        "what is porosity",
+        "Porosity is one. Permeability is two. Pressure is three.",
+        limit=2,
+    )
+    assert text == "First, Porosity is one. In addition, Permeability is two."
+
+
+def test_is_coherent_rejects_raw_model_noise():
+    assert is_coherent("Porosity is measured in the lab.") is True
+    assert is_coherent(", and faults are fracture properties") is False
+    assert is_coherent("") is False
+    assert is_coherent("   ") is False
 
 
 def test_causal_chain_sentence_renders_path_and_confidence():

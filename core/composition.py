@@ -150,6 +150,24 @@ def sources_block(citations: Sequence[str]) -> str:
     return "Sources:\n" + "\n".join(f"  - {citation}" for citation in unique)
 
 
+def _compose_statements(statements: Sequence[str]) -> str:
+    """Join whole sentences into one flowing paragraph.
+
+    Connectors are drawn from the shared vocabulary so every composed answer
+    -- grounded, web, or model -- reads with the same voice.
+    """
+    cleaned = [statement.strip() for statement in statements if statement.strip()]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    parts: list[str] = []
+    for index, statement in enumerate(cleaned):
+        connector = _CONNECTORS[index] if index < len(_CONNECTORS) else ""
+        parts.append(f"{connector}{statement}")
+    return " ".join(parts)
+
+
 def _attributed(sources: Sequence[Source], limit: int = 3) -> str:
     """A flowing paragraph that states each source's key sentence.
 
@@ -171,15 +189,7 @@ def _attributed(sources: Sequence[Source], limit: int = 3) -> str:
         if not statement:
             continue
         statements.append(ensure_terminal(statement))
-    if not statements:
-        return ""
-    if len(statements) == 1:
-        return statements[0]
-    parts: list[str] = []
-    for index, statement in enumerate(statements):
-        connector = _CONNECTORS[index] if index < len(_CONNECTORS) else ""
-        parts.append(f"{connector}{statement}")
-    return " ".join(parts)
+    return _compose_statements(statements)
 
 
 def grounded_answer(question: str, sources: Sequence[Source]) -> str:
@@ -224,6 +234,71 @@ def web_answer(question: str, sources: Sequence[Source], internal: Sequence[str]
     if internal:
         blocks.append("The internal corpus also touches on this: " + "; ".join(internal[:2]) + ".")
     return "\n\n".join(blocks)
+
+
+# A word carrying an underscore or a dotted name is a corpus identifier
+# (``differential_equations``, ``petroleum.system``), not prose; a sentence that
+# contains one reads as a data dump, so it is dropped from a composed answer.
+_IDENTIFIER_RE = re.compile(r"\w+_\w+|\w+\.\w+")
+
+# Model continuations often join a new sentence onto the previous one without
+# capitalising it ("...known as porosity. matrix is a concept..."). ``sentences``
+# only splits before a capital, so the model answer splits on any terminal
+# punctuation and lets ``complete_sentences`` drop the lowercase fragment.
+_MODEL_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+
+# A sentence built around an equation ("PI = 0", "mu/V") is a formula the model
+# half-copied from the corpus, not prose, so it is dropped from an answer.
+_FORMULA_RE = re.compile(r"[=≈≠≤≥∑√∫]|[\w)]\s*/\s*[\w(]")
+
+#: How many sentences a model answer may run to. The first complete sentence is
+#: the anchored, in-distribution one the model was steered into; later sentences
+#: tend to drift onto a neighbouring topic, so one is the default.
+_MODEL_ANSWER_SENTENCES = 1
+
+
+def model_answer(question: str, text: str, limit: int = _MODEL_ANSWER_SENTENCES) -> str:
+    """Render the trained model's own answer as clean prose.
+
+    The in-project model is small, so its raw continuation is often broken: it
+    begins mid-clause (``", and faults are fracture properties"``), trails off
+    mid-word, or leaks the corpus's internal identifiers. This is the same fix
+    the grounded answers already use -- a deterministic verbaliser -- applied to
+    the model mouth: the continuation is reduced to the *whole* sentences it
+    actually contains, joined into a paragraph with the project's shared voice.
+    A sentence carrying a corpus identifier (``differential_equations``) reads as
+    a data dump and is dropped, and the answer is capped at ``limit`` sentences
+    so it states a point instead of rambling.
+
+    Only the model's own words survive (``text`` is never supplemented, unlike
+    :func:`grounded_answer`), so the output stays an honest sample of what the
+    model produced. When the continuation holds no complete sentence, the
+    function returns ``""`` and the caller can say so plainly.
+    """
+    present = clean(text)
+    if not present or limit < 1:
+        return ""
+    statements: list[str] = []
+    for sentence in _MODEL_SENTENCE_RE.split(present):
+        whole = complete_sentences(sentence)
+        if not whole or _IDENTIFIER_RE.search(whole) or _FORMULA_RE.search(whole):
+            continue
+        statements.append(ensure_terminal(whole))
+        if len(statements) >= limit:
+            break
+    return _compose_statements(statements)
+
+
+def is_coherent(text: str) -> bool:
+    """Whether ``text`` is safe to show as prose, not raw model noise.
+
+    A usable answer has at least one word and its first character is one a
+    sentence can start with -- never a stray punctuation mark such as the comma
+    a truncated continuation begins with. This is a cheap gate, not a quality
+    score; it only keeps obviously broken output out of the answer.
+    """
+    value = clean(text)
+    return bool(value) and value[0].isalnum()
 
 
 # --- shared voice for the reasoning explainers ----------------------------
@@ -301,6 +376,8 @@ __all__ = [
     "evidence_summary_sentence",
     "first_sentences",
     "grounded_answer",
+    "is_coherent",
+    "model_answer",
     "reasoning_step_sentence",
     "sentences",
     "sources_block",
