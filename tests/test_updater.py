@@ -123,6 +123,18 @@ def test_apply_refuses_when_there_are_local_changes(tmp_path: Path) -> None:
     assert "local changes" in status.summary().lower()
 
 
+def test_untracked_files_do_not_block_an_update(tmp_path: Path) -> None:
+    origin, installed = _repo_pair(tmp_path)
+    (installed / "scratch notes.txt").write_text("mine\n", encoding="utf-8")
+
+    status = apply_update(str(origin), root=installed)
+
+    assert status.applied is True
+    assert status.dirty is False
+    # The untracked file is left alone by the fast-forward.
+    assert (installed / "scratch notes.txt").read_text(encoding="utf-8") == "mine\n"
+
+
 def test_apply_refuses_when_the_branch_is_ahead(tmp_path: Path) -> None:
     _origin, installed = _repo_pair(tmp_path)
     (installed / "local_only.py").write_text("stay\n", encoding="utf-8")
