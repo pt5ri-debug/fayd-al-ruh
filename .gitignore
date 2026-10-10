@@ -55,3 +55,6 @@ env/
 # run state, not release content, and changes on every run, so it is never
 # committed; a fresh run rebuilds it from scratch.
 ml/llm/checkpoints/*.state.npz
+# Sharded-schedule bookkeeping for `--llm-shards`: which shards the resumable
+# schedule has consumed. Run state too, so it is never committed.
+ml/llm/checkpoints/*.schedule.json

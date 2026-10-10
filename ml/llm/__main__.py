@@ -19,6 +19,14 @@ from core.progress import ProgressReporter
 from ml.llm.corpus import build_corpus, corpus_units
 from ml.llm.evaluate import document_split, encode_documents
 from ml.llm.generator import LocalGenerator
+from ml.llm.schedule import (
+    ScheduleState,
+    ShardPlan,
+    load_schedule,
+    save_schedule,
+    schedule_path,
+    select_shard,
+)
 from ml.llm.state import (
     load_training_state,
     save_training_state,
@@ -55,6 +63,19 @@ def build_model(
     return TransformerLM(config or TransformerConfig.preset(preset, vocab_size=vocab_size), seed=seed)
 
 
+def _shard_stream_is_too_short(
+    train_units: list[str], repeats: int, structured_repeats: int, *, min_bytes: int = 2560
+) -> bool:
+    """Whether a shard holds too little text to fill even a small training window.
+
+    The byte block size reaches 256, so a shard must carry comfortably more than
+    a few windows; below this a shard is a misconfiguration, not a short shard.
+    """
+    length = sum(len(unit) for unit in train_units) * max(1, repeats)
+    length += structured_repeats * 200  # the always-included JSON block
+    return length < min_bytes
+
+
 def train_and_save(
     *,
     steps: int = 4000,
@@ -79,10 +100,41 @@ def train_and_save(
     state_path: Path | None = None,
     verbose: bool = True,
     progress_every: int = 0,
+    shard_count: int = 0,
+    schedule_path_arg: Path | None = None,
 ) -> TransformerLM:
     units = corpus_units()
     split = document_split(units, val_fraction=0.1, test_fraction=0.1, seed=seed)
     held_out = set(split.validation) | set(split.test)
+    plan = ShardPlan(shard_count) if shard_count > 0 else None
+    schedule_file = schedule_path_arg or schedule_path(checkpoint)
+    schedule: ScheduleState | None = None
+    shard: list[str] | None = None
+    shard_index: int | None = None
+    if plan is not None:
+        # The schedule advances only when resuming, so a fresh run restarts the
+        # sequence just as it restarts the weights: `--resume` is the single
+        # switch for both.
+        previous = load_schedule(schedule_file) if resume else None
+        if previous is not None and not previous.matches(plan, seed):
+            raise ValueError(
+                f"Schedule {schedule_file} is for {previous.count} shards at seed "
+                f"{previous.seed}, but this run asks for {plan.count} at seed {seed}."
+            )
+        schedule = previous or ScheduleState(count=plan.count, seed=seed)
+        shard, shard_index = select_shard(units, plan, schedule, seed=seed)
+        train_units = [unit for unit in shard if unit not in held_out]
+        if _shard_stream_is_too_short(train_units, repeats, structured_repeats):
+            raise ValueError(
+                f"Shard {shard_index} of {plan.count} has too few documents to fill a "
+                "window; lower --llm-shards."
+            )
+        if verbose:
+            print(
+                f"Sharded schedule: training on shard {shard_index + 1}/{plan.count} "
+                f"({len(train_units)} documents, {len(schedule.consumed)} consumed).",
+                flush=True,
+            )
     if verbose:
         print(f"Building training corpus ({len(units)} documents) ...", flush=True)
     text = build_corpus(
@@ -92,6 +144,7 @@ def train_and_save(
         kb_repeats=kb_repeats,
         include_runtime=include_runtime,
         exclude=held_out,
+        include=set(shard) if shard is not None else None,
     )
     # The tokenizer sees distinct training documents only; held-out sentences are
     # kept out of the text it learns merges from as well.
@@ -160,6 +213,12 @@ def train_and_save(
     model.save(checkpoint)
     total_steps = start_step + steps
     save_training_state(optimizer, total_steps, state_path or _state_path(checkpoint))
+    if schedule is not None and shard_index is not None:
+        # Record the shard only after the run succeeded, so a crash does not
+        # silently consume it.
+        schedule.consumed.append(shard_index)
+        schedule.units = len(shard) if shard is not None else schedule.units
+        save_schedule(schedule, schedule_file)
     params = sum(p.size for p in model.parameters())
     print(
         f"trained {steps} steps  loss {report.initial_loss:.3f} -> "
@@ -205,6 +264,15 @@ def main(argv: list[str] | None = None) -> int:
         "optimiser-state sidecar) instead of starting from scratch. Falls back to "
         "a fresh run when the checkpoint does not exist.",
     )
+    parser.add_argument(
+        "--llm-shards",
+        type=int,
+        default=0,
+        help="Sharded, resumable schedule: split the document universe into this "
+        "many shards and train one shard per run, recording the consumed shard so a "
+        "later --resume reaches new material instead of replaying the same corpus "
+        "(0 keeps the whole-corpus behaviour).",
+    )
     parser.add_argument("--generate", type=str, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument(
@@ -237,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         kb_max_chunks=args.kb_max_chunks,
         include_runtime=not args.no_runtime_docs,
         resume=args.resume,
+        shard_count=args.llm_shards,
         progress_every=args.progress_every,
         verbose=not args.quiet,
     )

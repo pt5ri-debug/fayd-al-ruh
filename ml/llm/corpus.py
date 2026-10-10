@@ -133,6 +133,7 @@ def build_corpus(
     kb_repeats: int = 1,
     include_runtime: bool = True,
     exclude: "set[str] | frozenset[str] | None" = None,
+    include: "set[str] | frozenset[str] | None" = None,
 ) -> str:
     """Return the training text, repeated so the small model can fit it.
 
@@ -148,7 +149,9 @@ def build_corpus(
     the model the field names and English values used by schema-guided decoding.
 
     ``exclude`` drops sentences held out for validation or test, so a held-out
-    perplexity is genuinely out-of-sample.
+    perplexity is genuinely out-of-sample. ``include`` keeps only the sentences
+    of a chosen document set (the sharded schedule's current shard), while still
+    processing the validation/test held-out exclusion.
     """
     if repeats < 1:
         raise ValueError("repeats must be at least 1.")
@@ -157,9 +160,12 @@ def build_corpus(
     if kb_repeats < 1:
         kb_repeats = 1
     held = exclude or frozenset()
+    chosen = include
 
     def keep(sentences: list[str]) -> str:
-        return " ".join(s for s in sentences if s not in held)
+        return " ".join(
+            s for s in sentences if s not in held and (chosen is None or s in chosen)
+        )
 
     prose = keep(_sentences())
     petroleum = keep(_petroleum_sentences())

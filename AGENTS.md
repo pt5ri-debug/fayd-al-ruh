@@ -73,6 +73,15 @@ Arabic is kept as secondary aliases where useful.
   also takes `optimizer`/`start_step`, and `train_and_save` exposes `--resume`: it
   loads the checkpoint weights + saved tokenizer and continues instead of starting
   over, extending the schedule to `start_step + steps`.
+- `ml/llm/schedule.py` — the sharded, resumable schedule. By default a `--resume`
+  replays the same corpus, so more steps deepen the fit rather than reaching new
+  material; `--llm-shards N` (in `ml/llm` and `ml.release`) instead splits the
+  document universe into `N` deterministic shards and trains one per run,
+  recording the consumed shards in `<checkpoint>.schedule.json` (gitignored run
+  state) so a later `--resume` trains the next shard and cycles once all are
+  consumed. `ShardPlan.shards`/`next_index`, `ScheduleState`, `load_schedule`/
+  `save_schedule`/`schedule_path`, `select_shard`, and `describe_schedule` (used
+  by the release manifest); the shard is recorded only after a run succeeds.
 - `ml/llm/state.py` — run state for resuming: `save_training_state` /
   `load_training_state` persist Adam's moments and the cumulative step count to
   `<checkpoint>.state.npz` (gitignored as run state, not release content). A
