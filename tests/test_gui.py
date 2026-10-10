@@ -663,3 +663,83 @@ def test_window_tolerates_a_broken_session_store() -> None:
         assert labels == ["No saved chats yet."]
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_uses_the_openhands_palette() -> None:
+    """The window draws with OpenHands' cool-grey tokens in both appearances."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME, LIGHT_THEME, FaydGUI
+
+    # Dark base and surface match the OpenHands cool-grey-950/925 fills exactly.
+    assert DARK_THEME.base == "#0B0E14"
+    assert DARK_THEME.surface == "#21252F"
+    assert DARK_THEME.primary == "#C9B974"
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()), theme="dark")
+        root.update()
+        assert app.root.cget("bg") == DARK_THEME.base
+        assert app._entry.cget("bg") == DARK_THEME.surface
+        app._toggle_theme()
+        root.update()
+        assert app.root.cget("bg") == LIGHT_THEME.base
+        assert app._entry.cget("bg") == LIGHT_THEME.surface
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_composer_is_a_rounded_card() -> None:
+    """The composer is a rounded surface panel holding the input and send button."""
+    import tkinter as tk
+
+    from gui.app import RADIUS_LARGE, FaydGUI, RoundedBox
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.geometry("1200x780")
+        for _ in range(10):
+            root.update()
+        assert isinstance(app._composer_box, RoundedBox)
+        assert app._composer_box._corner == RADIUS_LARGE
+        # The entry and the send button both live inside the rounded panel.
+        assert app._entry.winfo_toplevel() is root
+        assert app._entry.master is app._composer_box.inner
+        assert app._send.master is app._composer_box.inner
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_messages_are_centred_in_a_readable_column() -> None:
+    """Rows are indented into a centred column; user bubbles sit on the right."""
+    import tkinter as tk
+
+    from gui.app import _COLUMN_MAX, FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.geometry("1200x780")
+        for _ in range(10):
+            root.update()
+        pad = app._column_pad()
+        assert pad > 20  # a wide window centres the column rather than hugging the edge
+        user = app._add_bubble("user", "short question")
+        assistant = app._add_bubble("assistant", "a longer answer " * 6)
+        for _ in range(10):
+            root.update()
+        # The assistant reply spans the column; the user bubble is narrower and
+        # right-aligned inside the same column.
+        box = user.master.master  # the user's RoundedBox, inside its row
+        assert box is not None
+        assert assistant.master is not None
+        assert assistant.master.winfo_width() == _COLUMN_MAX
+        assert box.winfo_width() <= _COLUMN_MAX
+        assert box.winfo_x() > 0  # pushed toward the right within its row
+    finally:
+        root.destroy()
