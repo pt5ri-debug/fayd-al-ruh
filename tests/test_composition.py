@@ -86,6 +86,18 @@ def test_compose_model_answer_falls_back_to_the_tidied_text():
     assert compose_model_answer("") == ""
 
 
+def test_compose_model_answer_drops_output_with_no_words():
+    """A stopping run tidies to bare punctuation, which is not an answer."""
+    assert compose_model_answer(")))))") == ""
+    assert compose_model_answer("...") == ""
+    assert compose_model_answer("   ") == ""
+
+
+def test_compose_model_answer_keeps_a_word_that_survives_tidying():
+    # A single surviving word is still the model's own answer.
+    assert compose_model_answer("porosity") == "Porosity."
+
+
 def test_compose_model_answer_preserves_decimals_and_the_models_words():
     text = compose_model_answer("the gradient is 0.052 psi/ft and the formula is q / A.")
     assert text == "The gradient is 0.052 psi/ft and the formula is q / A."

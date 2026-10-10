@@ -45,6 +45,12 @@ MIND_HELP = (
     "'from the sources' to answer from retrieved passages with citations again."
 )
 
+#: Shown in place of a body when the model produced nothing wordbearing (an empty
+#: continuation, or a stopping run such as ")))))" that tidies away). Without it
+#: the answer would be the header alone -- a message with no text, which the GUI
+#: renders as an empty bubble carrying only its Copy button.
+MIND_EMPTY = "The model produced no connected words for this question."
+
 #: The controls ``chat`` recognises to switch mouths (kept here, not in the shared
 #: Jarvis controls, so the Jarvis command's wording is untouched).
 SWITCH_TO_MODEL = (
@@ -176,8 +182,10 @@ class MindAssistant:
         before it is returned, so the mouth shows readable sentences rather than a
         fragment that stops mid-word. That helper never rewrites the model's
         words; it only keeps the whole sentences the model finished and centres
-        them on the question. ``MindResult.raw_text`` keeps the untouched output
-        for inspection.
+        them on the question. When the model produced nothing wordbearing the
+        tidied text is empty, and ``ask`` substitutes :data:`MIND_EMPTY` so the
+        answer is never a header with no body. ``MindResult.raw_text`` keeps the
+        untouched output for inspection.
         """
         if not question.strip():
             raise ValueError("Question cannot be empty.")
@@ -206,7 +214,8 @@ class MindAssistant:
             conversation = Conversation(title=question.strip()[:40])
         conversation.add_user(question)
         result = self.answer(question)
-        text = f"{result.header}\n\n{result.text.strip()}"
+        body = result.text.strip() or MIND_EMPTY
+        text = f"{result.header}\n\n{body}"
         conversation.add_assistant(text, ())
         return AssistantAnswer(
             text=text,
@@ -228,6 +237,7 @@ __all__ = [
     "MIND_HELP",
     "MindAssistant",
     "MindResult",
+    "MIND_EMPTY",
     "SWITCH_TO_MODEL",
     "SWITCH_TO_SOURCES",
     "load_mind_model",

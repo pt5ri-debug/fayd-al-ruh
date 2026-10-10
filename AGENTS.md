@@ -124,7 +124,11 @@ Arabic is kept as secondary aliases where useful.
   it collapses repeated punctuation/doubled words, capitalises and punctuates.
   The mouth therefore reads as connected sentences while still speaking the
   model's own words; `MindResult.raw_text` keeps the untouched continuation for
-  inspection. `load_mind_model` /
+  inspection. When the model produced nothing wordbearing (an empty continuation
+  or a stopping run such as `")))))"`) the tidied text is empty and `ask`
+  substitutes `MIND_EMPTY`, so the answer is never a header with no body — the
+  GUI would otherwise draw a blank bubble carrying only its Copy button.
+  `load_mind_model` /
   `mind_status` load and describe the checkpoint. Wired **only** into
   `python -m cli chat --mind` (and the `from the model` / `from the sources`
   switch, matched in `ai/chat.py`; the portable menu reaches it through
