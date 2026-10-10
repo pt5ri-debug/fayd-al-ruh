@@ -222,6 +222,12 @@ Arabic is kept as secondary aliases where useful.
   list; `options.py` has the argument parser; `app.py` is the Tkinter window
   (imported lazily, so `cli/` never imports Tk). Reachable as `python -m cli gui`
   and `python -m gui`.
+- `gui/app.py` transcript — each message is a read-only `tk.Text` (not a `Label`),
+  so answers and live training output can be selected and copied (Ctrl+C copies
+  the selection, Ctrl+A selects all, Delete clears, right-click offers copy /
+  copy-conversation / select-all / clear). Live training output is queued and
+  rendered at a bounded rate (coalesced into one widget update every ~0.15 s),
+  so a fast training loop never freezes the window.
 - `fayd-al-ruh.spec` — PyInstaller; uses `collect_submodules` for `ml`,
   `evaluation`, `ai`, `storage`, `gui` (and `core` is bundled as an imported
   package).

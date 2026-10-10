@@ -303,9 +303,70 @@ def test_window_builds_and_sends_a_message() -> None:
         for _ in range(40):
             root.update()
             time.sleep(0.02)
-        texts = [bubble.cget("text") for bubble in app._bubbles]
+        texts = [bubble.get("1.0", "end-1c") for bubble in app._bubbles]
         assert any("hello" in text for text in texts)
         assert any("ok" in text for text in texts)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_bubbles_are_selectable_and_copyable() -> None:
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.update()
+        app._add_bubble("assistant", "porosity is the fraction of pore space")
+        root.update()
+        bubble = app._bubbles[-1]
+        # The text is selectable, so a copy can pick it up.
+        bubble.tag_add("sel", "1.0", "end-1c")
+        app._on_copy()
+        root.update()
+        assert "porosity" in root.clipboard_get()
+        # With no selection, Ctrl+C must not clobber the clipboard.
+        bubble.tag_remove("sel", "1.0", "end-1c")
+        root.clipboard_clear()
+        root.clipboard_append("keep me")
+        root.update()
+        app._on_copy()
+        root.update()
+        assert root.clipboard_get() == "keep me"
+        # The context menu can copy the whole conversation, then clear it.
+        app._on_copy_conversation()
+        root.update()
+        assert "porosity" in root.clipboard_get()
+        app._clear_transcript()
+        assert app._bubbles == []
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_coalesces_a_burst_of_progress_lines() -> None:
+    import time
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.update()
+        app._streaming_label = app._add_bubble("note", "training — live output:")
+        app._last_render = time.monotonic()  # simulate a render just happened
+        for i in range(500):
+            app._append_progress_line(f"line {i}")
+        app._flush_progress()  # rate-limited: nothing rendered yet
+        assert "line 499" not in app._streaming_label.get("1.0", "end-1c")
+        app._flush_progress(force=True)  # the forced flush renders them all
+        text = app._streaming_label.get("1.0", "end-1c")
+        assert "line 0" in text and "line 499" in text
+        assert text.count("line") == 500
     finally:
         root.destroy()
 
