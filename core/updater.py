@@ -232,7 +232,9 @@ def check_for_updates(repository_url: str = DEFAULT_REPOSITORY_URL, *, root: Pat
     commands.append(remote)
     origin_url = sanitize_remote_url(remote.stdout) if remote.ok else repository_url
 
-    dirty = bool(_run_git(root, "status", "--porcelain").stdout)
+    # Only *tracked* modifications block an update. Untracked files (notes, scratch
+    # files) cannot be overwritten by a fast-forward, so they must not refuse one.
+    dirty = bool(_run_git(root, "status", "--porcelain", "--untracked-files=no").stdout)
 
     fetch = _run_git(root, "fetch", "--prune", "origin")
     commands.append(fetch)
