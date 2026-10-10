@@ -34,6 +34,17 @@ Arabic is kept as secondary aliases where useful.
   `knowledge.corpus_coverage`). Trained artifacts in `ml/artifacts/` and
   `ml/llm/checkpoints/fayd-llm.npz` are committed on purpose for a release;
   regenerate with `python -m cli release`.
+- `core/paths.py` — resolves bundled assets vs. writable data (source vs. frozen
+  build). `core/version.py` — the single version string.
+- `core/updater.py` — program updates for a source checkout. `check_for_updates`
+  fetches the remote (never touching the working tree) and reports how many
+  commits the checkout is behind; `apply_update` fast-forwards the tracked branch
+  only when the tree is clean and the branch is not ahead, so local work is never
+  destroyed. It is a thin wrapper over the project's own `git`, carries no extra
+  dependency, strips embedded credentials from every message, and tells a frozen
+  portable build to download a new bundle instead. Surfaced as the CLI command
+  `python -m cli update [--apply]` and the GUI/CLI "Search for program updates
+  (GitHub)" entry.
 - `core/progress.py` — live progress for long runs. `ProgressReporter` (stdlib
   only) is callable, prints percentage/elapsed/eta to `sys.stderr` (so stdout
   stays clean for `--json`), and every training loop takes an optional

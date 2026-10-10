@@ -29,6 +29,7 @@ from cli.menu import (
     run_ml,
     run_release,
     run_selfcheck,
+    run_update,
     run_web,
 )
 
@@ -94,6 +95,12 @@ ACTIONS: tuple[GuiAction, ...] = (
     ),
     GuiAction("evaluation", "Run the evaluation suite", run_evaluation, ()),
     GuiAction("selfcheck", "Self-check the install", run_selfcheck, ()),
+    GuiAction(
+        "update",
+        "Search for program updates (GitHub)",
+        run_update,
+        ("--apply",),
+    ),
     GuiAction(
         "llm",
         "Train the language model",

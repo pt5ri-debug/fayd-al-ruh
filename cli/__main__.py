@@ -25,6 +25,8 @@ Usage:
     python -m cli curriculum          # show the seeded degree curriculum
     python -m cli release             # train everything for a release
     python -m cli eval                # evaluation suite
+    python -m cli update              # check GitHub for program updates
+    python -m cli update --apply      # download and apply available updates
 
 The commands mirror the modules developers already use, so nothing about the
 in-repo workflow changes.
@@ -55,6 +57,7 @@ from cli.menu import (
     run_petroleum,
     run_release,
     run_selfcheck,
+    run_update,
     run_voice,
     run_web,
 )
@@ -80,6 +83,7 @@ _COMMANDS = {
     "eval": run_evaluation,
     "evaluation": run_evaluation,
     "selfcheck": run_selfcheck,
+    "update": run_update,
 }
 
 
