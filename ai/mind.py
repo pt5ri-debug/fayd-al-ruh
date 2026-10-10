@@ -6,9 +6,14 @@ deliberately different mouth: it asks the **trained model** directly, with no
 retrieval and no citations, so the quality of its own prose is visible.
 
 That is a measurement, not a smarter answer: the model here is small, trained
-inside the repository, and its output is *not* checked against sources. The
-answer is returned raw, and every answer is labelled as coming from the model so
-it is never mistaken for a grounded, cited one.
+inside the repository, and its output is *not* checked against sources. Because a
+byte-level continuation model leaves ragged edges -- a leading fragment, a
+sentence that stops mid-word, a run of repeated punctuation -- the continuation
+is passed through :func:`core.composition.compose_model_answer` first, so the
+mouth reads as sentences while still speaking the model's own words (it never
+paraphrases or adds a fact). The answer is labelled as coming from the model so
+it is never mistaken for a grounded, cited one, and ``MindResult.raw_text`` keeps
+the untouched continuation for inspection.
 
 Everything in this module is self-contained. It does not touch the assistant,
 the Jarvis loop, the controls, or the session builder, so enabling it cannot
@@ -23,11 +28,14 @@ from pathlib import Path
 from typing import Any
 
 from core.assistant import AssistantAnswer
+from core.composition import compose_model_answer
 from core.conversation import Conversation
 from core.paths import default_checkpoint
 
 #: Wording shown above every model answer. It must stay honest: the answer is the
 #: model's own prose, not a cited extract, so it never looks like grounded output.
+#: The prose is tidied by :func:`core.composition.compose_model_answer`, but it
+#: is still the model's own words -- no fact is added -- so it stays ungrounded.
 MIND_HEADER = "[mind] answered from the trained model only; not grounded in cited sources."
 
 #: One line explaining the model switches, appended by ``chat`` to the help text.
@@ -142,6 +150,7 @@ class MindResult:
     question: str
     text: str
     header: str = MIND_HEADER
+    raw_text: str = ""
 
 
 class MindAssistant:
@@ -160,12 +169,23 @@ class MindAssistant:
         self.memory = None
 
     def answer(self, question: str) -> MindResult:
-        """Generate the model's continuation for one question."""
+        """Generate the model's continuation for one question.
+
+        The continuation is tidied by :func:`core.composition.compose_model_answer`
+        before it is returned, so the mouth shows readable sentences rather than a
+        fragment that stops mid-word. That helper never rewrites the model's
+        words; ``MindResult.raw_text`` keeps the untouched output for inspection.
+        """
         if not question.strip():
             raise ValueError("Question cannot be empty.")
         prompt = render_prompt(question)
-        text = self._generate(prompt)
-        return MindResult(question=question, text=text, header=self.header)
+        raw = self._generate(prompt)
+        return MindResult(
+            question=question,
+            text=compose_model_answer(raw),
+            header=self.header,
+            raw_text=raw,
+        )
 
     def ask(
         self,

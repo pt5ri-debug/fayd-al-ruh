@@ -14,6 +14,7 @@ from core.composition import (
     causal_chain_sentence,
     causal_effect_sentence,
     clean,
+    compose_model_answer,
     counterfactual_sentence,
     decision_sentences,
     ensure_terminal,
@@ -50,6 +51,44 @@ def test_first_sentences_limits_output():
 def test_ensure_terminal_capitalises_and_punctuates():
     assert ensure_terminal("porosity is high") == "Porosity is high."
     assert ensure_terminal("already fine.") == "Already fine."
+
+
+def test_compose_model_answer_keeps_a_whole_sentence_and_punctuates_it():
+    assert (
+        compose_model_answer("the well is completed with casing. Then it flows")
+        == "The well is completed with casing."
+    )
+
+
+def test_compose_model_answer_drops_the_trailing_incomplete_sentence():
+    assert (
+        compose_model_answer("Monitor and pigging the well to kicks. The procedure for Prod")
+        == "Monitor and pigging the well to kicks."
+    )
+
+
+def test_compose_model_answer_drops_a_leading_fragment_before_a_sentence():
+    assert (
+        compose_model_answer("the saturation forecast the simulation. Porosity measures voids.")
+        == "Porosity measures voids."
+    )
+
+
+def test_compose_model_answer_collapses_repeated_punctuation_and_words():
+    assert compose_model_answer("Mud wh))))) The well flows.") == "Mud wh. The well flows."
+    assert compose_model_answer("Mud wh)))))") == "Mud wh."
+    assert compose_model_answer("the the well flows.") == "The well flows."
+
+
+def test_compose_model_answer_falls_back_to_the_tidied_text():
+    # No whole sentence survives, so the mouth still speaks the model's words.
+    assert compose_model_answer("partway through a thoug") == "Partway through a thoug."
+    assert compose_model_answer("") == ""
+
+
+def test_compose_model_answer_preserves_decimals_and_the_models_words():
+    text = compose_model_answer("the gradient is 0.052 psi/ft and the formula is q / A.")
+    assert text == "The gradient is 0.052 psi/ft and the formula is q / A."
 
 
 def test_grounded_answer_reads_as_prose_without_inline_citations():

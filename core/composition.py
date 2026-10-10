@@ -32,6 +32,19 @@ _SENTENCE_RE = re.compile(r'(?<=[.!?])\s+(?=[A-Z0-9"\u201c])')
 _LEAD_RE = re.compile(r"^\s*(?:[-*\u2022>]+\s*|\d+[.)]\s*)")
 _TERMINAL = ".!?"
 
+# Raw model output is looser than authored prose: a continuation often runs on
+# past a sentence end starting the next one in lower case, so the model-specific
+# split keys on terminal punctuation plus whitespace alone (a decimal point has
+# no space after it, so "0.052 psi/ft" is still never split).
+_MODEL_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+# Runs the byte-level model repeats, such as the ")))))" or "..." at a stopping
+# point; a repeated mark is collapsed to one. When that mark is not itself a
+# sentence end it becomes a period, so the run reads as a sentence boundary.
+_REPEAT_MARK_RE = re.compile(r"([^\w\s])\1+")
+_REPEATED_WORD_RE = re.compile(r"(?<!\w)(\w+)(?:\s+\1\b)+", flags=re.IGNORECASE)
+# Leading/trailing decoration the model leaves around a sentence.
+_EDGE_CHARS = " \t\"'\u201c\u201d\u2018\u2019()[]{}*_-"
+
 _CONNECTORS = ("First, ", "In addition, ", "Finally, ")
 # A rendered statement with fewer words than this is a fragment (a bare heading
 # such as "Wellbore."), not a quotable point, so it is skipped when better
@@ -122,6 +135,59 @@ def ensure_terminal(text: str) -> str:
     if value[-1] not in _TERMINAL:
         value += "."
     return value
+
+
+def _tidy_marks(text: str) -> str:
+    """Collapse punctuation runs and doubled words the byte model repeats.
+
+    A run of the *same* mark is collapsed; when the mark is not itself a
+    sentence-end it becomes a period, so a stopping run such as ``")))))"``
+    turns into a boundary instead of an unreadable cluster.
+    """
+    def _collapse(match: re.Match[str]) -> str:
+        mark = match.group(1)
+        return mark if mark in _TERMINAL else "."
+
+    value = _REPEAT_MARK_RE.sub(_collapse, text)
+    value = _REPEATED_WORD_RE.sub(r"\1", value)
+    return clean(value)
+
+
+def compose_model_answer(raw: str) -> str:
+    """Tidy raw model output into readable prose without rewriting its words.
+
+    The in-project model is a small byte-level continuation model, so its raw
+    output is messy in ways the authored prose (:func:`complete_sentences`) never
+    is: it begins mid-sentence, runs on past a lower-case sentence boundary, ends
+    mid-word, and repeats punctuation such as ``")))))"``.
+
+    This is the model-output half of the composer. It *does not paraphrase and
+    does not add facts* -- it only tidies the container so the model's own words
+    read as sentences: it drops the trailing unfinished sentence, drops a leading
+    fragment, collapses repeated punctuation/doubled words, then capitalises the
+    first letter and ends with terminal punctuation. When there is no finished
+    sentence to keep it falls back to the tidied raw text so the mouth never goes
+    silent. The result stays the model's own prose, which is why the caller still
+    labels it as ungrounded.
+    """
+    cleaned = _tidy_marks(raw)
+    if not cleaned:
+        return ""
+    # Keep only whole sentences: a continuation that stops mid-word ("...int")
+    # has a final incomplete sentence, and its leading sentence may itself follow
+    # on from the prompt's question rather than start a new thought. A leading
+    # fragment is dropped only when a real sentence follows it, so a lone
+    # lowercase sentence is still returned as the model's whole answer.
+    segments = [segment.strip(_EDGE_CHARS) for segment in _MODEL_SENTENCE_RE.split(cleaned)]
+    segments = [segment for segment in segments if segment]
+    if len(segments) > 1 and segments[-1][-1] not in _TERMINAL:
+        segments.pop()
+    if len(segments) > 1:
+        first = segments[0]
+        if first[-1] not in _TERMINAL or first[0].islower() or first[0].isdigit():
+            segments.pop(0)
+    body = " ".join(segments) if segments else cleaned
+    return ensure_terminal(body)
 
 
 def topic_phrase(question: str) -> str:
@@ -295,6 +361,7 @@ __all__ = [
     "causal_effect_sentence",
     "clean",
     "complete_sentences",
+    "compose_model_answer",
     "counterfactual_sentence",
     "decision_sentences",
     "ensure_terminal",
