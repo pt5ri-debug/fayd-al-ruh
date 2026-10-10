@@ -107,6 +107,11 @@ def _use_utf8_console() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     _use_utf8_console()
+    # First run after an upgrade: pull any pre-existing in-repo training under
+    # the git-ignored data folder, so it survives and never dirties the tree.
+    from core.paths import ensure_data_layout
+
+    ensure_data_layout()
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
         return menu_loop()

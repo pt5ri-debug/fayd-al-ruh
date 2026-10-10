@@ -58,6 +58,7 @@ def _repo_pair(tmp_path: Path) -> tuple[Path, Path]:
 
     seed = tmp_path / "seed"
     _git(tmp_path, "clone", str(origin), str(seed))
+    (seed / ".gitignore").write_text("data/\n", encoding="utf-8")
     (seed / "app.txt").write_text("v1\n", encoding="utf-8")
     _commit(seed, "initial")
     _git(seed, "push", "-u", "origin", "main")
@@ -184,6 +185,56 @@ def test_apply_refuses_when_not_on_the_compared_branch(tmp_path: Path) -> None:
 
     assert status.applied is False
     assert not (installed / "new_module.py").exists()
+
+
+def test_check_flags_changes_to_committed_training_files(tmp_path: Path) -> None:
+    origin, installed = _repo_pair(tmp_path)
+    seed = tmp_path / "seed"
+    (seed / "ml" / "artifacts").mkdir(parents=True)
+    (seed / "ml" / "artifacts" / "release_manifest.json").write_text("{}", encoding="utf-8")
+    _commit(seed, "retrain")
+    _git(seed, "push", "origin", "main")
+
+    status = check_for_updates(str(origin), root=installed)
+
+    assert "ml/artifacts/release_manifest.json" in status.learned_files_changed
+    assert "training files" in format_status(status)
+
+
+def test_apply_backs_up_the_data_folder_before_updating(tmp_path: Path) -> None:
+    origin, installed = _repo_pair(tmp_path)
+    (installed / "data" / "ml" / "artifacts").mkdir(parents=True)
+    (installed / "data" / "ml" / "artifacts" / "policy.npz").write_bytes(b"learned")
+    (installed / "data" / "learned_cursor.json").write_text("{}", encoding="utf-8")
+
+    status = apply_update(str(origin), root=installed)
+
+    assert status.applied is True
+    assert status.backup_path
+    backup = Path(status.backup_path)
+    assert (backup / "ml" / "artifacts" / "policy.npz").read_bytes() == b"learned"
+    assert status.backup_copied >= 2
+    # The live data folder is left intact.
+    assert (installed / "data" / "ml" / "artifacts" / "policy.npz").exists()
+
+
+def test_apply_can_skip_the_backup(tmp_path: Path) -> None:
+    origin, installed = _repo_pair(tmp_path)
+
+    status = apply_update(str(origin), root=installed, backup=False)
+
+    assert status.applied is True
+    assert status.backup_path == ""
+
+
+def test_apply_succeeds_without_a_data_folder(tmp_path: Path) -> None:
+    origin, installed = _repo_pair(tmp_path)
+
+    status = apply_update(str(origin), root=installed)
+
+    assert status.applied is True
+    assert status.backup_path == ""
+    assert status.backup_error == ""
 
 
 def test_cli_update_command_uses_the_local_remote(tmp_path, capsys, monkeypatch) -> None:

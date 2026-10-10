@@ -35,16 +35,23 @@ Arabic is kept as secondary aliases where useful.
   `ml/llm/checkpoints/fayd-llm.npz` are committed on purpose for a release;
   regenerate with `python -m cli release`.
 - `core/paths.py` — resolves bundled assets vs. writable data (source vs. frozen
-  build). `core/version.py` — the single version string.
+  build). A source checkout keeps learned data (artifacts, LLM checkpoints,
+  knowledge base, learned documents) in a git-ignored `data/` folder beside the
+  code, so retraining never dirties the working tree; the committed `ml/artifacts`
+  and `ml/llm/checkpoints` copies stay as the read-only fallback. `ensure_data_layout`
+  copies any pre-upgrade in-repo data into `data/` on first run.
+  `core/version.py` — the single version string.
 - `core/updater.py` — program updates for a source checkout. `check_for_updates`
   fetches the remote (never touching the working tree) and reports how many
   commits the checkout is behind; `apply_update` fast-forwards the tracked branch
   only when the tree is clean and the branch is not ahead, so local work is never
-  destroyed. It is a thin wrapper over the project's own `git`, carries no extra
-  dependency, strips embedded credentials from every message, and tells a frozen
-  portable build to download a new bundle instead. Surfaced as the CLI command
-  `python -m cli update [--apply]` and the GUI/CLI "Search for program updates
-  (GitHub)" entry.
+  destroyed. It reports when a commit touches the committed training files (the
+  user's own data in `data/` is separate), and copies `data/` to a timestamped
+  backup before applying. It is a thin wrapper over the project's own `git`,
+  carries no extra dependency, strips embedded credentials from every message,
+  and tells a frozen portable build to download a new bundle instead. Surfaced as
+  the CLI command `python -m cli update [--apply] [--no-backup]` and the GUI/CLI
+  "Search for program updates (GitHub)" entry.
 - `core/progress.py` — live progress for long runs. `ProgressReporter` (stdlib
   only) is callable, prints percentage/elapsed/eta to `sys.stderr` (so stdout
   stays clean for `--json`), and every training loop takes an optional

@@ -116,9 +116,10 @@ def _manifest_info() -> dict[str, Any]:
     """``trained_at``/``version`` from the release manifest, when present."""
     import json
 
-    from core.paths import artifacts_dir
+    from core.paths import artifacts_dir, bundled_artifacts_dir
 
-    path = artifacts_dir() / "release_manifest.json"
+    trained = artifacts_dir() / "release_manifest.json"
+    path = trained if trained.exists() else bundled_artifacts_dir() / "release_manifest.json"
     if not path.exists():
         return {}
     try:
