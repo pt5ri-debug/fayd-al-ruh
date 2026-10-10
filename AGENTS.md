@@ -116,11 +116,15 @@ Arabic is kept as secondary aliases where useful.
 - `ai/mind.py` — the model mouth: `MindAssistant` answers from the **trained
   language model** directly, with no retrieval and no citations, so the quality of
   what the model itself learned is visible. The raw continuation is tidied by
-  `core.composition.compose_model_answer` (drops a trailing unfinished sentence
-  and a leading fragment, collapses repeated punctuation/doubled words,
-  capitalises and punctuates) so the mouth reads as whole sentences while still
-  speaking the model's own words; `MindResult.raw_text` keeps the untouched
-  continuation for inspection. `load_mind_model` /
+  `core.composition.compose_model_answer` — it keeps the whole sentences the
+  model finished (in order), drops the leading fragment, a trailing clause that
+  ends on a conjunction/article, a repeated sentence, and a bare section label
+  ("Step 2 of ...") when a cleaner statement survives; it centres the answer on
+  the question by opening with the sentence that names the question's words; and
+  it collapses repeated punctuation/doubled words, capitalises and punctuates.
+  The mouth therefore reads as connected sentences while still speaking the
+  model's own words; `MindResult.raw_text` keeps the untouched continuation for
+  inspection. `load_mind_model` /
   `mind_status` load and describe the checkpoint. Wired **only** into
   `python -m cli chat --mind` (and the `from the model` / `from the sources`
   switch, matched in `ai/chat.py`; the portable menu reaches it through
@@ -133,9 +137,10 @@ Arabic is kept as secondary aliases where useful.
   traces) into clean attributed prose. Shared by the assistant's extractive
   fallback, the web verifier's answer, and the causal/reasoning/decision
   explainers, so surface wording lives in one auditable place. `compose_model_answer`
-  is the model-output half: it tidies raw model continuations (whole sentences
-  only, collapsed repeats, capitalised and punctuated) without rewriting the
-  model's words, and is used by `ai/mind.py`.
+  is the model-output half: given an optional `question` it keeps the whole
+  sentences the model finished, drops fragments/dangling tails/repeats and bare
+  section labels, centres the answer on the question, and collapses repeats —
+  without rewriting the model's words — and is used by `ai/mind.py`.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. CLI:
   `python -m ai.voice` / `python -m cli voice`.

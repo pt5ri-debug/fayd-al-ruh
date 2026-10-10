@@ -45,6 +45,30 @@ _REPEATED_WORD_RE = re.compile(r"(?<!\w)(\w+)(?:\s+\1\b)+", flags=re.IGNORECASE)
 # Leading/trailing decoration the model leaves around a sentence.
 _EDGE_CHARS = " \t\"'\u201c\u201d\u2018\u2019()[]{}*_-"
 
+# A sentence the byte model leaves ending on one of these is an unfinished clause
+# ("... and", "... the rock and"), not a statement, so the composer drops it when
+# a clean sentence exists -- the same honesty rule the grounded composer applies
+# to bare headings.
+_DANGLING_WORDS = frozenset(
+    {
+        "and", "or", "but", "nor", "so", "the", "a", "an", "of", "to", "with",
+        "for", "at", "by", "from", "in", "on", "into", "as", "than", "then",
+        "that", "which", "while", "when", "where", "is", "are", "was", "were",
+        "be", "been", "its", "their", "this", "these", "those",
+    }
+)
+# Words that open a section label the model repeats ("Step 2 of ...", "The
+# procedure for ..."). Such a sentence names a part of a document rather than
+# answering, so it is ranked last -- kept only when nothing better survives.
+_META_LEADS = ("step ", "the procedure for ", "the formula for ", "table ")
+# A sentence with fewer real words than this is a fragment, not a statement.
+_MIN_MODEL_WORDS = 2
+# At most this many model sentences are kept, so the mouth reads as an answer
+# rather than a paragraph of loosely joined continuations.
+_MAX_MODEL_SENTENCES = 3
+# One token, its letters only; used to compare a sentence with the question.
+_MODEL_TOKEN_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
+
 _CONNECTORS = ("First, ", "In addition, ", "Finally, ")
 # A rendered statement with fewer words than this is a fragment (a bare heading
 # such as "Wellbore."), not a quotable point, so it is skipped when better
@@ -153,40 +177,129 @@ def _tidy_marks(text: str) -> str:
     return clean(value)
 
 
-def compose_model_answer(raw: str) -> str:
+def _question_vocabulary(question: str) -> frozenset[str]:
+    """The content words the question names, lower-cased (empty when none).
+
+    Used only to *centre* the model's answer on what was asked: a sentence that
+    mentions a question word is preferred as the opening, and a sentence that
+    repeats an earlier sentence is dropped. No word is ever added to the answer.
+    """
+    seen: list[str] = []
+    for token in _MODEL_TOKEN_RE.findall(question):
+        folded = token.casefold()
+        if folded not in _TOPIC_STOPWORDS and len(folded) > 1:
+            seen.append(folded)
+    return frozenset(seen)
+
+
+def _sentence_quality(sentence: str) -> tuple[int, int]:
+    """Rank a whole model sentence: content first, section labels last.
+
+    Returns ``(is_dangling, is_meta)`` so the caller can keep every clean
+    sentence while preferring real statements over a repeated ``"Step 2 of ..."``
+    label. Nothing is dropped by position alone.
+    """
+    lowered = sentence.casefold()
+    words = _MODEL_TOKEN_RE.findall(lowered)
+    dangling = 0
+    if words and words[-1] in _DANGLING_WORDS:
+        dangling = 1
+    meta = 1 if lowered.lstrip().startswith(_META_LEADS) else 0
+    return dangling, meta
+
+
+def _model_sentences(raw: str) -> list[str]:
+    """Split tidied model output into whole, clean sentences.
+
+    A sentence survives when it starts at a boundary (upper case or a digit) and
+    ends with terminal punctuation; the leading fragment and the trailing
+    mid-word fragment the byte model leaves are dropped here.
+    """
+    cleaned = _tidy_marks(raw)
+    if not cleaned:
+        return []
+    segments = [segment.strip(_EDGE_CHARS) for segment in _MODEL_SENTENCE_RE.split(cleaned)]
+    segments = [segment for segment in segments if segment]
+    if segments and segments[-1][-1] not in _TERMINAL:
+        segments.pop()
+    # A leading fragment is dropped only when a real sentence follows it, so a
+    # lone lower-case sentence is still returned as the model's whole answer.
+    if len(segments) > 1 and not (segments[0][0].isupper() or segments[0][0].isdigit()):
+        segments.pop(0)
+    return segments
+
+
+def compose_model_answer(raw: str, *, question: str = "") -> str:
     """Tidy raw model output into readable prose without rewriting its words.
 
     The in-project model is a small byte-level continuation model, so its raw
     output is messy in ways the authored prose (:func:`complete_sentences`) never
     is: it begins mid-sentence, runs on past a lower-case sentence boundary, ends
-    mid-word, and repeats punctuation such as ``")))))"``.
+    mid-word, repeats punctuation such as ``")))))"``, and joins clauses with no
+    verb ("... the well and reservoi").
 
     This is the model-output half of the composer. It *does not paraphrase and
     does not add facts* -- it only tidies the container so the model's own words
-    read as sentences: it drops the trailing unfinished sentence, drops a leading
-    fragment, collapses repeated punctuation/doubled words, then capitalises the
-    first letter and ends with terminal punctuation. When there is no finished
-    sentence to keep it falls back to the tidied raw text so the mouth never goes
-    silent. The result stays the model's own prose, which is why the caller still
-    labels it as ungrounded.
+    read as sentences, the way :func:`grounded_answer` already tidies retrieved
+    passages:
+
+    * keep the whole sentences the model actually finished, in order;
+    * drop a trailing sentence that ends on a dangling conjunction/article
+      ("... the rock and") when a clean sentence exists, so the answer never
+      stops mid-clause;
+    * drop a sentence that only repeats one already kept;
+    * prefer, as the opening, a sentence that names a word from the question, so
+      the answer is centred on what was asked, and demote a bare section label
+      ("Step 2 of ...") below the real statements;
+    * collapse repeated punctuation/doubled words, capitalise, and punctuate.
+
+    When ``question`` is given the model's answer is centred on it; ``raw`` alone
+    still composes (the leading fragment and unfinished tail are dropped as
+    before). When no whole sentence survives it falls back to the tidied raw text
+    so the mouth never goes silent. The result stays the model's own prose, which
+    is why the caller still labels it as ungrounded.
     """
     cleaned = _tidy_marks(raw)
     if not cleaned:
         return ""
-    # Keep only whole sentences: a continuation that stops mid-word ("...int")
-    # has a final incomplete sentence, and its leading sentence may itself follow
-    # on from the prompt's question rather than start a new thought. A leading
-    # fragment is dropped only when a real sentence follows it, so a lone
-    # lowercase sentence is still returned as the model's whole answer.
-    segments = [segment.strip(_EDGE_CHARS) for segment in _MODEL_SENTENCE_RE.split(cleaned)]
-    segments = [segment for segment in segments if segment]
-    if len(segments) > 1 and segments[-1][-1] not in _TERMINAL:
-        segments.pop()
-    if len(segments) > 1:
-        first = segments[0]
-        if first[-1] not in _TERMINAL or first[0].islower() or first[0].isdigit():
-            segments.pop(0)
-    body = " ".join(segments) if segments else cleaned
+    candidates = [sentence for sentence in _model_sentences(raw) if sentence]
+    if candidates:
+        vocabulary = _question_vocabulary(question) if question.strip() else frozenset()
+
+        kept: list[str] = []
+        seen: set[str] = set()
+        for sentence in candidates:
+            key = sentence.casefold().strip(_EDGE_CHARS)
+            if key in seen:
+                continue
+            seen.add(key)
+            kept.append(sentence)
+        kept = [s for s in kept if len(_MODEL_TOKEN_RE.findall(s)) >= _MIN_MODEL_WORDS]
+        if not kept:
+            kept = candidates
+        # Prefer real statements over unfinished clauses and bare section labels,
+        # dropping them only when something cleaner survives -- so the answer
+        # never ends mid-clause when the model did finish a sentence.
+        clean = [s for s in kept if not _sentence_quality(s)[0]]
+        if clean:
+            kept = clean
+        non_meta = [s for s in kept if not _sentence_quality(s)[1]]
+        if non_meta:
+            kept = non_meta
+        # Centre the answer on the question: open with the sentence that names the
+        # most of what was asked, when it is not already first.
+        if vocabulary and len(kept) > 1:
+            overlap = [
+                len(vocabulary.intersection(_MODEL_TOKEN_RE.findall(s.casefold())))
+                for s in kept
+            ]
+            if max(overlap) > overlap[0]:
+                best = max(range(len(kept)), key=lambda i: overlap[i])
+                kept.insert(0, kept.pop(best))
+        kept = kept[:_MAX_MODEL_SENTENCES]
+        body = " ".join(kept)
+    else:
+        body = cleaned
     return ensure_terminal(body)
 
 

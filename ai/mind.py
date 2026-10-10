@@ -8,9 +8,10 @@ retrieval and no citations, so the quality of its own prose is visible.
 That is a measurement, not a smarter answer: the model here is small, trained
 inside the repository, and its output is *not* checked against sources. Because a
 byte-level continuation model leaves ragged edges -- a leading fragment, a
-sentence that stops mid-word, a run of repeated punctuation -- the continuation
-is passed through :func:`core.composition.compose_model_answer` first, so the
-mouth reads as sentences while still speaking the model's own words (it never
+sentence that stops mid-word, an unfinished final clause, a repeated sentence, a
+run of repeated punctuation -- the continuation is passed through
+:func:`core.composition.compose_model_answer` first, so the mouth reads as
+connected sentences while still speaking the model's own words (it never
 paraphrases or adds a fact). The answer is labelled as coming from the model so
 it is never mistaken for a grounded, cited one, and ``MindResult.raw_text`` keeps
 the untouched continuation for inspection.
@@ -174,7 +175,9 @@ class MindAssistant:
         The continuation is tidied by :func:`core.composition.compose_model_answer`
         before it is returned, so the mouth shows readable sentences rather than a
         fragment that stops mid-word. That helper never rewrites the model's
-        words; ``MindResult.raw_text`` keeps the untouched output for inspection.
+        words; it only keeps the whole sentences the model finished and centres
+        them on the question. ``MindResult.raw_text`` keeps the untouched output
+        for inspection.
         """
         if not question.strip():
             raise ValueError("Question cannot be empty.")
@@ -182,7 +185,7 @@ class MindAssistant:
         raw = self._generate(prompt)
         return MindResult(
             question=question,
-            text=compose_model_answer(raw),
+            text=compose_model_answer(raw, question=question),
             header=self.header,
             raw_text=raw,
         )
