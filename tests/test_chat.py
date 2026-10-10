@@ -347,11 +347,11 @@ def test_switcher_swaps_the_mouth_and_keeps_the_grounded_one(tmp_path) -> None:
 
 
 def test_model_answer_has_no_sources_and_carries_the_header(tmp_path) -> None:
-    mode, switcher = _switcher_mode(tmp_path, continuation="the model's own words")
+    mode, switcher = _switcher_mode(tmp_path, continuation="the model's own words.")
     switcher.use_model()
     turn = mode.handle("what is porosity?", require_wake=False, speak=False)
 
-    assert "the model's own words" in turn.response
+    assert "The model's own words." in turn.response
     assert "not grounded in cited sources" in turn.response
     assert turn.citations == ()
     assert "Sources:" not in chat.format_turn(turn)
@@ -374,13 +374,13 @@ def test_switcher_loads_the_model_lazily(tmp_path) -> None:
 
 
 def test_run_loop_switches_mouths_between_turns(tmp_path, monkeypatch, capsys) -> None:
-    mode, switcher = _switcher_mode(tmp_path, continuation="model words")
+    mode, switcher = _switcher_mode(tmp_path, continuation="model words.")
     answers = iter(["from the model", "what is porosity?", "from the sources", "what is porosity?", "quit"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
     assert chat.run_loop(mode, as_json=False, switcher=switcher) == 0
     out = capsys.readouterr().out
     assert "[model] Now answering from the trained model" in out
-    assert "model words" in out
+    assert "Model words." in out
     assert "[sources] Now answering from retrieved passages" in out
     assert "Sources:" in out
 
@@ -453,11 +453,11 @@ def test_main_mind_missing_checkpoint_exits_cleanly(tmp_path, monkeypatch, capsy
 
 
 def test_main_mind_answers_from_the_model(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setattr(chat.mind_module, "load_mind_model", lambda *_a, **_k: _FakeMindModel("mind output"))
+    monkeypatch.setattr(chat.mind_module, "load_mind_model", lambda *_a, **_k: _FakeMindModel("mind output."))
     monkeypatch.setattr(chat, "build_session", lambda **_kw: _mode(tmp_path))
     assert chat.main(["--mind", "what is porosity?"]) == 0
     out = capsys.readouterr().out
-    assert "mind output" in out
+    assert "Mind output." in out
     assert "not grounded in cited sources" in out
 
 

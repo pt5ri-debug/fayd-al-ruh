@@ -38,6 +38,33 @@ def test_mind_answer_returns_the_continuation_only(tmp_path) -> None:
     assert "Answer:" not in result.text
 
 
+class _EchoModel:
+    """A fake mind model whose generator returns a fixed continuation."""
+
+    def __init__(self, continuation: str) -> None:
+        self._continuation = continuation
+
+        class _Generator:
+            def __init__(self, continuation: str) -> None:
+                self._continuation = continuation
+
+            def generate(self, prompt: str, *, max_new_tokens: int = 64, seed: int | None = None) -> str:
+                return prompt + self._continuation
+
+        self.generator = _Generator(continuation)
+
+
+def test_mind_answer_composes_the_continuation_into_sentences() -> None:
+    """The mouth tidies ragged model output into whole, punctuated sentences."""
+    assistant = mind.MindAssistant(
+        _EchoModel("the mud weight is 1.2 sg. The procedure for Prod"), max_new_tokens=8
+    )
+    result = assistant.answer("porosity")
+    assert result.text == "The mud weight is 1.2 sg."
+    # The untouched continuation is kept for inspection.
+    assert result.raw_text == "the mud weight is 1.2 sg. The procedure for Prod"
+
+
 def test_mind_answer_rejects_an_empty_question(tmp_path) -> None:
     assistant = mind.MindAssistant(_tiny_model(tmp_path))
     with pytest.raises(ValueError):
