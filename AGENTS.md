@@ -222,12 +222,19 @@ Arabic is kept as secondary aliases where useful.
   list; `options.py` has the argument parser; `app.py` is the Tkinter window
   (imported lazily, so `cli/` never imports Tk). Reachable as `python -m cli gui`
   and `python -m gui`.
-- `gui/app.py` transcript — each message is a read-only `tk.Text` (not a `Label`),
-  so answers and live training output can be selected and copied (Ctrl+C copies
-  the selection, Ctrl+A selects all, Delete clears, right-click offers copy /
-  copy-conversation / select-all / clear). Live training output is queued and
-  rendered at a bounded rate (coalesced into one widget update every ~0.15 s),
-  so a fast training loop never freezes the window.
+- `gui/app.py` — a professional desktop front end: a flat palette, a scrollable
+  sidebar (brand + version, source switch, **Actions**, **Saved chats**), a
+  toolbar showing the current answering source, and a centred hero/empty state
+  that gives way to the first message (and returns when the transcript is
+  cleared). Each message is a role-labelled card ("YOU" / "FAYD AL-RUH" /
+  "STATUS") whose body is a read-only `tk.Text`, so answers and live training
+  output can be selected and copied — per-card Copy button, Ctrl+C copies the
+  selection, Ctrl+A selects all, Delete clears, right-click offers copy /
+  copy-conversation / select-all / clear; Ctrl+N new chat, Ctrl+S save. A small
+  animated "Thinking…" indicator shows while an answer is pending. Live training
+  output is queued and rendered at a bounded rate (coalesced into one widget
+  update every ~0.15 s, fully drained before the result), so a fast training loop
+  never freezes the window.
 - `fayd-al-ruh.spec` — PyInstaller; uses `collect_submodules` for `ml`,
   `evaluation`, `ai`, `storage`, `gui` (and `core` is bundled as an imported
   package).
