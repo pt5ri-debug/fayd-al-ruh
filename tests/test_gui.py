@@ -430,12 +430,73 @@ def test_window_shows_and_clears_a_thinking_indicator() -> None:
         root.update()
         app._entry.insert("1.0", "hello")
         app._on_send()
-        assert app._thinking is not None  # a pending answer is visible
+        root.update()
+        assert app._thinking_row is not None  # a pending answer is visible
+        assert app._thinking_row.winfo_ismapped()
         for _ in range(40):
             root.update()
             time.sleep(0.02)
-        assert app._thinking is None  # cleared once the answer lands
+        # The indicator is hidden (not mapped) once the answer lands.
+        assert app._thinking_row is not None
+        assert not app._thinking_row.winfo_ismapped()
         assert app._busy is False
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_theme_toggle_switches_palette_and_persists(tmp_path, monkeypatch) -> None:
+    import tkinter as tk
+
+    from gui import app as app_module
+    from gui.app import DARK_THEME, FaydGUI, LIGHT_THEME
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.update()
+        assert app._theme is DARK_THEME
+        app._add_bubble("assistant", "keep me across the switch")
+        app._toggle_theme()
+        root.update()
+        assert app._theme is LIGHT_THEME
+        # The transcript survives the rebuild.
+        texts = [bubble.get("1.0", "end-1c") for bubble in app._bubbles]
+        assert any("keep me across the switch" in text for text in texts)
+        # The choice is written where a new launch will read it.
+        assert app_module.load_theme_name() == "light"
+        # And back again.
+        app._toggle_theme()
+        root.update()
+        assert app._theme is DARK_THEME
+        assert app_module.load_theme_name() == "dark"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_sidebar_has_a_scrollbar_shown_only_on_overflow() -> None:
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.geometry("1160x420")  # short enough that the sidebar overflows
+        for _ in range(10):
+            root.update()
+        # The actions overflow a short window, so the scrollbar is mapped.
+        app._toggle_sidebar_scrollbar()
+        root.update()
+        assert app._side_scrollbar.winfo_ismapped()
+        root.geometry("1160x2000")  # tall enough to fit everything
+        for _ in range(10):
+            root.update()
+        app._toggle_sidebar_scrollbar()
+        root.update()
+        assert not app._side_scrollbar.winfo_ismapped()
     finally:
         root.destroy()
 
