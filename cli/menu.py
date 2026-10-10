@@ -162,12 +162,6 @@ def run_update(argv: Sequence[str] = ()) -> int:
         help="download and apply any available update (fast-forward only).",
     )
     parser.add_argument(
-        "--no-backup",
-        dest="backup",
-        action="store_false",
-        help="skip the automatic backup of the trained data folder before applying.",
-    )
-    parser.add_argument(
         "--repo",
         default=None,
         help="repository URL to check (defaults to the configured git remote).",
@@ -191,7 +185,7 @@ def run_update(argv: Sequence[str] = ()) -> int:
         url = args.repo or DEFAULT_REPOSITORY_URL
         status = check_for_updates(url)
         if args.apply and status.available:
-            status = apply_update(url, status=status, backup=args.backup)
+            status = apply_update(url, status=status)
     except UpdateError as error:
         print(f"Update check failed: {error}")
         return 1
@@ -213,8 +207,6 @@ def run_update(argv: Sequence[str] = ()) -> int:
                     "repository": status.repository_url,
                     "changed_files": list(status.changed_files),
                     "training_files_changed": list(status.learned_files_changed),
-                    "data_backup": status.backup_path,
-                    "data_backup_files": status.backup_copied,
                     "reason": status.reason,
                 },
                 ensure_ascii=False,

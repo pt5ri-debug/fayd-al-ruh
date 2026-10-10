@@ -24,7 +24,6 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 from core.paths import executable_dir, is_frozen
@@ -78,9 +77,6 @@ class UpdateStatus:
     applied: bool = False
     changed_files: tuple[str, ...] = ()
     commands: list[GitCommand] | None = None
-    backup_path: str = ""
-    backup_copied: int = 0
-    backup_error: str = ""
 
     @property
     def learned_files_changed(self) -> tuple[str, ...]:
@@ -329,39 +325,19 @@ def _fetch_failure(fetch: GitCommand, url: str) -> str:
     return f"Could not fetch updates from the project on GitHub: {detail}"
 
 
-def backup_data_dir(root: Path) -> tuple[str, int, str]:
-    """Copy the git-ignored data folder (trained state) to a timestamped backup.
-
-    Returns ``(path, file_count, error)``. A missing data folder is not an
-    error: it simply means there is no learned state to protect yet.
-    """
-    data = root / "data"
-    if not data.is_dir():
-        return "", 0, ""
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    target = root / f"data-backup-{stamp}"
-    try:
-        shutil.copytree(data, target)
-    except OSError as exc:
-        return "", 0, _scrub_credentials(str(exc))
-    copied = sum(1 for path in target.rglob("*") if path.is_file())
-    return str(target), copied, ""
-
-
 def apply_update(
     repository_url: str = DEFAULT_REPOSITORY_URL,
     *,
     root: Path | None = None,
     status: UpdateStatus | None = None,
-    backup: bool = True,
 ) -> UpdateStatus:
     """Fast-forward the current branch to the remote. Refuses unsafe merges.
 
     The update is applied only when the tree is clean and the branch can move
     forward without a merge (behind but not ahead). Anything else is reported
-    rather than forced, so local work is never destroyed. Unless ``backup`` is
-    false, the trained data folder is copied to a timestamped ``data-backup-*``
-    beside the checkout first.
+    rather than forced, so local work is never destroyed. The user's learned
+    state lives in the git-ignored ``data/`` folder, which a fast-forward never
+    touches, so it is left exactly as it is.
     """
     root = root or _repo_root()
     status = status or check_for_updates(repository_url, root=root)
@@ -388,10 +364,6 @@ def apply_update(
             "refusing a non-fast-forward update."
         )
         return status
-
-    # Protect the user's learned state before touching anything.
-    if backup:
-        status.backup_path, status.backup_copied, status.backup_error = backup_data_dir(root)
 
     merge = _run_git(root, "merge", "--ff-only", f"origin/{status.branch}")
     commands.append(merge)
@@ -438,10 +410,6 @@ def format_status(status: UpdateStatus, *, verbose: bool = False) -> str:
             f"  training files : {len(learned)} bundled training file(s) change in the repo copy"
         )
         lines.append("                   (your own data lives in data/ and is untouched)")
-    if status.backup_path:
-        lines.append(f"  data backup    : {status.backup_path} ({status.backup_copied} file(s))")
-    elif status.backup_error:
-        lines.append(f"  data backup    : not created - {status.backup_error}")
     if status.reason:
         lines.append(f"  note           : {status.reason}")
     if verbose and status.commands:
@@ -457,7 +425,6 @@ __all__ = [
     "UpdateError",
     "UpdateStatus",
     "apply_update",
-    "backup_data_dir",
     "check_for_updates",
     "format_status",
     "is_source_checkout",
