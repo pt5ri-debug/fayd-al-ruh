@@ -132,6 +132,27 @@ def test_compose_model_answer_drops_a_repeated_sentence():
     assert text == "The well flows. It is stable."
 
 
+def test_compose_model_answer_drops_a_repeat_joined_by_a_conjunction():
+    # "And the pump." repeats "The pump."; showing it twice never helps, so the
+    # conjunction-led copy collapses into the first.
+    assert compose_model_answer("The pump. The pump. And the pump.") == "The pump."
+    assert compose_model_answer("It flows. Then it flows.") == "It flows."
+
+
+def test_compose_model_answer_does_not_let_a_list_marker_eat_a_decimal():
+    # The byte model emits numbered procedure sentences that can begin with a
+    # decimal ("1.5 times the gradient"); stripping a leading "1." as a list
+    # marker would corrupt the number, so the digit must survive.
+    text = compose_model_answer("1.5 times the gradient. the gradient is 0.052 psi/ft.")
+    assert text == "1.5 times the gradient. the gradient is 0.052 psi/ft."
+
+
+def test_compose_model_answer_still_drops_a_real_list_marker():
+    # A numbered marker followed by a space is decoration, not a number.
+    assert compose_model_answer("1. Run the casing.") == "Run the casing."
+    assert compose_model_answer("2) Cement the casing.") == "Cement the casing."
+
+
 def test_compose_model_answer_centres_on_the_question():
     raw = "Compute the surface facilities. The mud weight controls the wellbore pressure."
     # The sentence naming the question's words ("mud"/"weight") opens the answer.
