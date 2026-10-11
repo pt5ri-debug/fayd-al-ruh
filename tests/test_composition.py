@@ -80,6 +80,37 @@ def test_compose_model_answer_collapses_repeated_punctuation_and_words():
     assert compose_model_answer("the the well flows.") == "The well flows."
 
 
+def test_compose_model_answer_collapses_a_repeated_phrase():
+    # The byte model loops on a whole phrase, not only a single word; the repeat
+    # is the model stalling, so it is shown once.
+    assert (
+        compose_model_answer("the same the same the rock is porous.")
+        == "The same the rock is porous."
+    )
+    assert (
+        compose_model_answer("The production forecast the production forecast for a field.")
+        == "The production forecast for a field."
+    )
+    assert compose_model_answer("step 1 of Fluid fluid fluid flow in porous media: Force.") == (
+        "Step 1 of Fluid flow in porous media: Force."
+    )
+
+
+def test_compose_model_answer_keeps_a_word_reused_in_a_real_sentence():
+    # A word that recurs across a sentence (not back-to-back) is not a repeat.
+    text = compose_model_answer("Water fills the pores of the rock and the water moves.")
+    assert text == "Water fills the pores of the rock and the water moves."
+
+
+def test_compose_model_answer_does_not_corrupt_a_hyphen_range_or_name():
+    # A run of hyphens *between* word characters is a range ("10--20") or a
+    # compound name ("5CT--spec"), not repeated decoration, so collapsing it to a
+    # period would corrupt the model's own number.
+    assert compose_model_answer("The value is 10--20 m.") == "The value is 10--20 m."
+    assert compose_model_answer("API 5CT--spec is used.") == "API 5CT--spec is used."
+    assert compose_model_answer("Range 5--10 ft.") == "Range 5--10 ft."
+
+
 def test_compose_model_answer_falls_back_to_the_tidied_text():
     # No whole sentence survives, so the mouth still speaks the model's words.
     assert compose_model_answer("partway through a thoug") == "Partway through a thoug."

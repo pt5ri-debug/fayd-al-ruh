@@ -121,7 +121,12 @@ Arabic is kept as secondary aliases where useful.
   ends on a conjunction/article, a repeated sentence, and a bare section label
   ("Step 2 of ...") when a cleaner statement survives; it centres the answer on
   the question by opening with the sentence that names the question's words; and
-  it collapses repeated punctuation/doubled words, capitalises and punctuates.
+  it collapses repeated punctuation/doubled words *and short repeated phrases*
+  ("the same the same") while leaving a hyphen run between word characters
+  ("10--20", "5CT--spec") intact, capitalises and punctuates. The mouth also
+  forwards the checkpoint's `temperature`/`seed` to the generator, so
+  `--mind-temperature 0` really is greedy and reproducible (the generator's own
+  0.8/unseeded defaults no longer override it).
   The mouth therefore reads as connected sentences while still speaking the
   model's own words; `MindResult.raw_text` keeps the untouched continuation for
   inspection. When the model produced nothing wordbearing (an empty continuation

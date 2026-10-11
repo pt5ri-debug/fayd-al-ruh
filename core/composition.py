@@ -44,8 +44,17 @@ _MODEL_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 # Runs the byte-level model repeats, such as the ")))))" or "..." at a stopping
 # point; a repeated mark is collapsed to one. When that mark is not itself a
 # sentence end it becomes a period, so the run reads as a sentence boundary.
+# A hyphen run *between* word characters is left alone: "10--20" and "5CT--spec"
+# are a range and a compound name, and collapsing them to a period would corrupt
+# the model's own number or identifier.
 _REPEAT_MARK_RE = re.compile(r"([^\w\s])\1+")
-_REPEATED_WORD_RE = re.compile(r"(?<!\w)(\w+)(?:\s+\1\b)+", flags=re.IGNORECASE)
+# A word or short phrase (up to four words) the model loops on: "well well",
+# "the same the same", "the production forecast the production forecast". Only a
+# phrase repeated back-to-back with nothing between it counts, so a word reused
+# in a real sentence is never touched.
+_REPEATED_PHRASE_RE = re.compile(
+    r"(?<!\w)(\w+(?:\s+\w+){0,3})(?:\s+\1\b)+", flags=re.IGNORECASE
+)
 # Leading/trailing decoration the model leaves around a sentence.
 _EDGE_CHARS = " \t\"'\u201c\u201d\u2018\u2019()[]{}*_-"
 
@@ -166,18 +175,29 @@ def ensure_terminal(text: str) -> str:
 
 
 def _tidy_marks(text: str) -> str:
-    """Collapse punctuation runs and doubled words the byte model repeats.
+    """Collapse punctuation runs and repeated words/phrases the byte model repeats.
 
     A run of the *same* mark is collapsed; when the mark is not itself a
     sentence-end it becomes a period, so a stopping run such as ``")))))"``
-    turns into a boundary instead of an unreadable cluster.
+    turns into a boundary instead of an unreadable cluster. A hyphen run between
+    word characters is a range or compound name, not decoration, so it is left
+    intact. A repeated word *or short phrase* ("the same the same", "the
+    production forecast the production forecast") collapses to one, which is the
+    model looping rather than a statement said twice.
     """
     def _collapse(match: re.Match[str]) -> str:
         mark = match.group(1)
+        # A hyphen run *between* word characters ("10--20", "5CT--spec") is a
+        # range or compound name, not a repeated mark, so it is kept as written.
+        if mark == "-":
+            before = text[match.start() - 1] if match.start() else ""
+            after = text[match.end()] if match.end() < len(text) else ""
+            if before.isalnum() and after.isalnum():
+                return match.group(0)
         return mark if mark in _TERMINAL else "."
 
     value = _REPEAT_MARK_RE.sub(_collapse, text)
-    value = _REPEATED_WORD_RE.sub(r"\1", value)
+    value = _REPEATED_PHRASE_RE.sub(r"\1", value)
     return clean(value)
 
 

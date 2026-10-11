@@ -48,7 +48,14 @@ class _EchoModel:
             def __init__(self, continuation: str) -> None:
                 self._continuation = continuation
 
-            def generate(self, prompt: str, *, max_new_tokens: int = 64, seed: int | None = None) -> str:
+            def generate(
+                self,
+                prompt: str,
+                *,
+                max_new_tokens: int = 64,
+                temperature: float = 0.8,
+                seed: int | None = None,
+            ) -> str:
                 return prompt + self._continuation
 
         self.generator = _Generator(continuation)
@@ -83,6 +90,65 @@ def test_mind_answer_rejects_an_empty_question(tmp_path) -> None:
     assistant = mind.MindAssistant(_tiny_model(tmp_path))
     with pytest.raises(ValueError):
         assistant.answer("   ")
+
+
+class _RecordingGenerator:
+    """Records the settings each generation call is made with."""
+
+    def __init__(self, continuation: str) -> None:
+        self._continuation = continuation
+        self.calls: list[dict] = []
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        max_new_tokens: int = 64,
+        temperature: float = 0.8,
+        seed: int | None = None,
+    ) -> str:
+        self.calls.append(
+            {"max_new_tokens": max_new_tokens, "temperature": temperature, "seed": seed}
+        )
+        return prompt + self._continuation
+
+
+class _RecordingModel:
+    def __init__(self, continuation: str, *, temperature: float, seed: int | None) -> None:
+        self.temperature = temperature
+        self.seed = seed
+        self.generator = _RecordingGenerator(continuation)
+
+
+def test_mind_uses_the_models_temperature_and_seed() -> None:
+    """The mind must not fall back to the generator's own sampling defaults.
+
+    The generator defaults to ``temperature=0.8`` and no seed; if the mind did
+    not forward the loaded settings, ``--mind-temperature 0`` would still sample
+    and answers would not be reproducible.
+    """
+    model = _RecordingModel("The well flows.", temperature=0.0, seed=7)
+    assistant = mind.MindAssistant(model)
+    assistant.answer("porosity")
+
+    call = model.generator.calls[-1]
+    assert call["temperature"] == 0.0
+    assert call["seed"] == 7
+
+
+def test_mind_greedy_generation_is_deterministic(tmp_path) -> None:
+    """With a real greedy model, two runs of the same question are identical."""
+    assistant = mind.MindAssistant(_tiny_model(tmp_path), max_new_tokens=8)
+    assert assistant.answer("porosity").text == assistant.answer("porosity").text
+
+
+def test_mind_assistant_can_override_the_generation_settings() -> None:
+    model = _RecordingModel("The well flows.", temperature=0.0, seed=0)
+    assistant = mind.MindAssistant(model, temperature=0.9, seed=3)
+    assistant.answer("porosity")
+    call = model.generator.calls[-1]
+    assert call["temperature"] == 0.9
+    assert call["seed"] == 3
 
 
 def test_mind_ask_matches_the_grounded_assistant_shape(tmp_path) -> None:
