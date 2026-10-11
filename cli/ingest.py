@@ -65,6 +65,10 @@ def _build_parser() -> argparse.ArgumentParser:
     add.add_argument("--chunk-chars", type=int, default=DEFAULT_CHUNK_CHARS)
     add.add_argument("--overlap", type=int, default=DEFAULT_OVERLAP)
     add.add_argument("--no-incremental", action="store_true", help="Re-read every item, ignoring fingerprints.")
+    add.add_argument("--retries", type=int, default=2, help="Per-item retries for a transient read failure.")
+    add.add_argument("--no-normalize", action="store_true", help="Store text verbatim (skip normalization).")
+    add.add_argument("--no-fold-arabic", action="store_true", help="Normalize but keep Arabic letter variants.")
+    add.add_argument("--ocr", action="store_true", help="Allow OCR for scanned PDFs (needs the [ocr] extra).")
     add.add_argument("--allow-web", action="store_true", help="Register the internet connector.")
     add.add_argument("--approve", action="store_true", help="Grant the external capability for a web source.")
     add.add_argument("--quiet", action="store_true", help="Suppress progress.")
@@ -111,6 +115,10 @@ def _parse_options(pairs: Sequence[str]) -> dict[str, str]:
 def run_add(args: argparse.Namespace) -> int:
     store_dir = _resolve_dir(args.store_dir)
     options = _parse_options(args.option)
+    # Flags map onto connector options so the file connector can honour them.
+    options.setdefault("normalize", "false" if args.no_normalize else "true")
+    options.setdefault("fold_arabic", "false" if args.no_fold_arabic else "true")
+    options.setdefault("allow_ocr", "true" if args.ocr else "false")
     spec = SourceSpec(args.source, options=options)
     registry = build_default_registry(allow_web=args.allow_web)
     try:
@@ -137,7 +145,9 @@ def run_add(args: argparse.Namespace) -> int:
         jobs = JobStore(ingest_jobs_dir(store.root))
         job = jobs.load(args.job) or JobState(job_id=args.job, source=args.source)
         job.connector = connector.info.name
-    pipeline = IngestionPipeline(store, ledger, progress=progress, job=job, jobs=jobs)
+    pipeline = IngestionPipeline(
+        store, ledger, progress=progress, job=job, jobs=jobs, retries=args.retries
+    )
     report = pipeline.ingest(
         spec, connector=connector, incremental=not args.no_incremental
     )

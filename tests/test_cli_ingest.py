@@ -41,6 +41,30 @@ def test_add_missing_source_returns_error(tmp_path):
     assert code == 1
 
 
+def test_add_normalizes_arabic_by_default(tmp_path, capsys):
+    source = _docs(tmp_path / "src", **{"a.txt": "أَلْوَان\n"})
+    store_dir = tmp_path / "kb"
+    code = _run(["add", str(source), "--store-dir", str(store_dir), "--quiet"])
+    assert code == 0
+    from core.knowledge_base import KnowledgeBaseStore
+
+    stored = " ".join(chunk.text for chunk in KnowledgeBaseStore(store_dir).iter_chunks())
+    assert "الوان" in stored  # diacritics folded
+
+
+def test_add_no_normalize_keeps_text_verbatim(tmp_path):
+    source = _docs(tmp_path / "src", **{"a.txt": "أَلْوَان\n"})
+    store_dir = tmp_path / "kb"
+    code = _run(
+        ["add", str(source), "--store-dir", str(store_dir), "--quiet", "--no-normalize", "--no-fold-arabic"]
+    )
+    assert code == 0
+    from core.knowledge_base import KnowledgeBaseStore
+
+    stored = " ".join(chunk.text for chunk in KnowledgeBaseStore(store_dir).iter_chunks())
+    assert "أَلْوَان" in stored
+
+
 def test_add_unknown_connector_returns_error(tmp_path, capsys):
     code = _run(["add", "x.txt", "--connector", "nope", "--store-dir", str(tmp_path / "kb")])
     assert code == 1
