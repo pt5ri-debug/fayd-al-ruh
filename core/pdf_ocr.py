@@ -349,8 +349,10 @@ class TesseractOcrEngine:
             langs = pytesseract.get_languages(config=self.tesseract_config)
         except Exception as error:  # engine installed but unusable
             raise OcrUnavailableError(
-                f"Could not query {OCR_ENGINE_NAME} languages: {error}. Is the "
-                f"{OCR_SYSTEM_PACKAGES['binary']} package installed?"
+                f"Could not query {OCR_ENGINE_NAME} languages: {error} Install the optional "
+                f"Python packages with `pip install {OCR_EXTRA}` and the {OCR_SYSTEM_PACKAGES['binary']} "
+                f"engine with its language data ({OCR_SYSTEM_PACKAGES['eng']}, "
+                f"{OCR_SYSTEM_PACKAGES['ara']}) as system packages."
             ) from error
         return tuple(str(lang) for lang in langs)
 
