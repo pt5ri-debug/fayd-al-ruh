@@ -299,7 +299,14 @@ class _FakeMindModel:
             def __init__(self, continuation: str) -> None:
                 self._continuation = continuation
 
-            def generate(self, prompt: str, *, max_new_tokens: int = 64, seed: int | None = None) -> str:
+            def generate(
+                self,
+                prompt: str,
+                *,
+                max_new_tokens: int = 64,
+                temperature: float = 0.8,
+                seed: int | None = None,
+            ) -> str:
                 return prompt + self._continuation
 
         self.generator = _Generator(continuation)

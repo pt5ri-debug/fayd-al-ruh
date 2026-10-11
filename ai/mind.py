@@ -169,9 +169,24 @@ class MindAssistant:
     this way has no source behind it, and saying so is the point.
     """
 
-    def __init__(self, model, *, max_new_tokens: int = 96, header: str = MIND_HEADER) -> None:
+    def __init__(
+        self,
+        model,
+        *,
+        max_new_tokens: int = 96,
+        temperature: float | None = None,
+        seed: int | None = None,
+        header: str = MIND_HEADER,
+    ) -> None:
         self.model = model
         self.max_new_tokens = max_new_tokens
+        # Generation settings the model was loaded with. Passing them explicitly
+        # to the generator matters: the generator's own defaults (0.8 / unseeded)
+        # would otherwise override the checkpoint's greedy, reproducible settings
+        # for the mind mouth -- the same defect that made ``--mind-temperature 0``
+        # still sample.
+        self.temperature = getattr(model, "temperature", 0.0) if temperature is None else temperature
+        self.seed = getattr(model, "seed", None) if seed is None else seed
         self.header = header
         self.memory = None
 
@@ -228,7 +243,12 @@ class MindAssistant:
 
     def _generate(self, prompt: str) -> str:
         """The continuation only -- never the prompt echoed back."""
-        full = self.model.generator.generate(prompt, max_new_tokens=self.max_new_tokens)
+        full = self.model.generator.generate(
+            prompt,
+            max_new_tokens=self.max_new_tokens,
+            temperature=self.temperature,
+            seed=self.seed,
+        )
         return full[len(prompt):].strip()
 
 
