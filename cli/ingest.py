@@ -4,6 +4,7 @@
     python -m cli ingest add data.csv
     python -m cli ingest add report.pdf
     python -m cli ingest add locked.pdf --pdf-password secret
+    python -m cli ingest add scanned.pdf --ocr --ocr-languages ara+eng
     python -m cli ingest add notes.docx
     python -m cli ingest add sqlite:///data/wells.db
     python -m cli ingest add https://www.spe.org/... --allow-web --approve
@@ -13,7 +14,11 @@
 
 Local sources run with no network and no extra dependency. A *digital* PDF needs
 the optional ``[pdf]`` extra (``pip install fayd-al-ruh[pdf]``); ``--pdf-password``
-unlocks an encrypted one. A Word ``.docx``/``.docm`` (Stage 2B) is read with the
+unlocks an encrypted one. OCR for scanned PDF pages (Stage 3) is opt-in with
+``--ocr`` and needs the separate ``[ocr]`` extra plus the Tesseract engine and its
+language data (``apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara``);
+without it, a scanned PDF is reported, not mis-read. A Word ``.docx``/``.docm``
+(Stage 2B) is read with the
 standard library only, treating it as an untrusted ZIP package with archive
 resource limits. A web source is the one exception: it needs
 ``--allow-web`` to even register the connector, and ``--approve`` to pass the
@@ -82,6 +87,35 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Password for an encrypted PDF (encrypted PDFs are refused otherwise).",
     )
+    add.add_argument(
+        "--ocr",
+        action="store_true",
+        help="Enable OCR for scanned PDF pages (needs the [ocr] extra + Tesseract).",
+    )
+    add.add_argument(
+        "--ocr-languages",
+        default=None,
+        metavar="ARA+ENG",
+        help="Tesseract languages for OCR (default: eng).",
+    )
+    add.add_argument(
+        "--ocr-dpi",
+        type=int,
+        default=None,
+        help="Rasterisation DPI for OCR (default: 200).",
+    )
+    add.add_argument(
+        "--ocr-max-pages",
+        type=int,
+        default=None,
+        help="Cap OCR'd pages per PDF (0 = no cap).",
+    )
+    add.add_argument(
+        "--ocr-time-budget",
+        type=float,
+        default=None,
+        help="Seconds before OCR stops for a PDF (0 = no budget).",
+    )
     add.add_argument("--allow-web", action="store_true", help="Register the internet connector.")
     add.add_argument("--approve", action="store_true", help="Grant the external capability for a web source.")
     add.add_argument("--quiet", action="store_true", help="Suppress progress.")
@@ -135,6 +169,16 @@ def run_add(args: argparse.Namespace) -> int:
         options.setdefault("encoding", args.encoding)
     if args.pdf_password:
         options.setdefault("pdf_password", args.pdf_password)
+    if args.ocr:
+        options.setdefault("allow_ocr", "true")
+    if args.ocr_languages:
+        options.setdefault("ocr_languages", args.ocr_languages)
+    if args.ocr_dpi is not None:
+        options.setdefault("ocr_dpi", str(args.ocr_dpi))
+    if args.ocr_max_pages is not None:
+        options.setdefault("ocr_max_pages", str(args.ocr_max_pages))
+    if args.ocr_time_budget is not None:
+        options.setdefault("ocr_time_budget", str(args.ocr_time_budget))
     spec = SourceSpec(args.source, options=options)
     registry = build_default_registry(allow_web=args.allow_web)
     try:

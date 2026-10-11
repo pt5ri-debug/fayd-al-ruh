@@ -81,6 +81,14 @@ from core.pdf_extract import (
     PdfPageStream,
     pdf_available,
 )
+from core.pdf_ocr import (
+    DEFAULT_DPI as DEFAULT_OCR_DPI,
+    OCR_EXTRA,
+    OcrConfig,
+    OcrUnavailableError,
+    PageOcrEngine,
+    extract_pdf_pages,
+)
 from core.text_encoding import EncodingDetectionError, decode_bytes, detect_encoding
 from ingest.errors import ConnectorError
 from ingest.hashing import file_fingerprint, source_key
@@ -112,11 +120,16 @@ class FileConnector:
 
     info = ConnectorInfo(
         name="files",
-        description="Local TXT/Markdown/CSV/JSON/JSONL, digital PDF, and Word files.",
+        description="Local TXT/Markdown/CSV/JSON/JSONL, digital PDF (+optional OCR), and Word files.",
         suffixes=ALL_SUFFIXES,
         default=True,
         optional_dependency=PDF_EXTRA,
     )
+
+    def __init__(self, *, ocr_engine: PageOcrEngine | None = None) -> None:
+        # An injectable OCR engine lets a caller (or a test) supply the OCR
+        # implementation; when None the Stage 3 default engine is used.
+        self._ocr_engine = ocr_engine
 
     # -- planning ---------------------------------------------------------
 
@@ -125,6 +138,12 @@ class FileConnector:
         normalize = _flag(spec.option("normalize", True))
         fold_arabic = _flag(spec.option("fold_arabic", False))
         allow_ocr = _flag(spec.option("allow_ocr", False))
+        ocr_languages = _ocr_languages(spec.option("ocr_languages"))
+        ocr_dpi = int(spec.option("ocr_dpi", 0) or DEFAULT_OCR_DPI)
+        ocr_batch_size = int(spec.option("ocr_batch_size", 0) or 1)
+        ocr_max_pages = int(spec.option("ocr_max_pages", 0) or 0)
+        ocr_time_budget = float(spec.option("ocr_time_budget", 0) or 0.0)
+        ocr_min_chars = int(spec.option("ocr_min_chars", 0) or 0)
         encoding = spec.option("encoding") or None
         max_json_bytes = int(spec.option("max_json_bytes", 0) or DEFAULT_MAX_JSON_BYTES)
         pdf_password = spec.option("pdf_password") or None
@@ -154,6 +173,12 @@ class FileConnector:
                     "normalize": normalize,
                     "fold_arabic": fold_arabic,
                     "allow_ocr": allow_ocr,
+                    "ocr_languages": ocr_languages,
+                    "ocr_dpi": ocr_dpi,
+                    "ocr_batch_size": ocr_batch_size,
+                    "ocr_max_pages": ocr_max_pages,
+                    "ocr_time_budget": ocr_time_budget,
+                    "ocr_min_chars": ocr_min_chars,
                     "encoding": encoding,
                     "max_json_bytes": max_json_bytes,
                     "pdf_password": pdf_password,
@@ -252,21 +277,29 @@ class FileConnector:
     def _stream_pdf(
         self, item: IngestItem, path: Path, metadata: dict
     ) -> Iterator[SourceRecord]:
-        """Yield one record per PDF page, preserving page numbers (Stage 2A).
+        """Yield one record per PDF page, preserving page numbers (Stage 2A/3).
 
-        Pages are read one at a time through :class:`~core.pdf_extract.PdfPageStream`,
-        so a large PDF is never held whole -- only the current page's text is live
-        while it is chunked and written. Each page becomes its own record with its
-        1-based page number in the metadata and in the title (``… (p. N)``), which
-        is what makes a citation point at the right page. Encrypted, malformed,
-        empty, and image-only PDFs are reported distinctly; a missing optional
-        dependency is turned into an actionable message.
+        Digital text is read one page at a time through
+        :class:`~core.pdf_extract.PdfPageStream`. When OCR is enabled
+        (``allow_ocr``), a page with no text layer is OCR'd through
+        :mod:`core.pdf_ocr` -- bounded and per-page, with its 1-based number kept
+        and ``ocr`` provenance recorded in the metadata. A page that already
+        carries real text is never replaced by OCR output.
+
+        Each page becomes its own record with its 1-based page number in the
+        metadata and in the title (``… (p. N)``), which is what makes a citation
+        point at the right page. Encrypted, malformed, empty, and image-only PDFs
+        are reported distinctly; a missing optional dependency is turned into an
+        actionable message.
         """
         if not pdf_available():
             raise ConnectorError(
                 f"PDF support needs the optional '{PDF_EXTRA}' extra. Install it with "
                 f"`pip install {PDF_EXTRA}` and try again."
             )
+        if bool(metadata.get("allow_ocr", False)):
+            yield from self._stream_pdf_ocr(item, path, metadata)
+            return
         try:
             stream = PdfPageStream(
                 path,
@@ -301,6 +334,67 @@ class FileConnector:
         except PdfExtractionError as error:
             # Raised when the document turns out to have no text at all (a scan).
             raise ConnectorError(str(error)) from error
+
+    def _stream_pdf_ocr(
+        self, item: IngestItem, path: Path, metadata: dict
+    ) -> Iterator[SourceRecord]:
+        """Yield PDF records with OCR applied only to the pages that need it (Stage 3).
+
+        Native extraction runs first; each page whose text is thinner than
+        ``ocr_min_chars`` is OCR'd in bounded batches under the pixel, time, and
+        temp-disk limits of :class:`~core.pdf_ocr.OcrConfig`. Every record keeps
+        its page number, and an OCR'd page is labelled ``kind: "pdf-ocr"`` (with
+        ``ocr: True``) so OCR text is never mistaken for native text. Per-page OCR
+        failures are reported in the record metadata; they never abort the file.
+        """
+        config = OcrConfig(
+            enabled=True,
+            languages=tuple(metadata.get("ocr_languages") or ("eng",)),
+            dpi=int(metadata.get("ocr_dpi") or DEFAULT_OCR_DPI),
+            batch_size=int(metadata.get("ocr_batch_size") or 1),
+            max_pages=int(metadata.get("ocr_max_pages") or 0),
+            time_budget_seconds=float(metadata.get("ocr_time_budget") or 0.0),
+            min_chars_per_page=int(metadata.get("ocr_min_chars") or 0) or 16,
+        )
+        try:
+            result = extract_pdf_pages(
+                path,
+                config=config,
+                engine=self._ocr_engine,
+                password=metadata.get("pdf_password") or None,
+                max_chars=int(metadata.get("max_chars") or DEFAULT_PDF_MAX_CHARS),
+            )
+        except PdfExtractionError as error:
+            raise ConnectorError(str(error)) from error
+        except OcrUnavailableError as error:  # engine/extra missing: clear message
+            raise ConnectorError(str(error)) from error
+        failures = {failure.number: failure.reason for failure in result.failures}
+        title = result.title or item.title
+        count = 0
+        for page in result.pages:
+            if not page.text.strip():
+                continue
+            count += 1
+            from_ocr = page.number in result.ocr_pages
+            yield SourceRecord(
+                title=f"{title} (p. {page.number})",
+                text=page.text,
+                source="file",
+                source_key=item.source_key,
+                metadata={
+                    **metadata,
+                    "kind": "pdf-ocr" if from_ocr else "pdf",
+                    "page": page.number,
+                    "page_count": result.page_count,
+                    "rtl_hint": page.rtl_hint,
+                    "part": count,
+                    "truncated": result.truncated,
+                    "encoding": "utf-8",
+                    "ocr": from_ocr,
+                    "ocr_languages": list(result.languages_used),
+                    **({"ocr_failure": failures[page.number]} if page.number in failures else {}),
+                },
+            )
 
     def _stream_docx(
         self, item: IngestItem, path: Path, metadata: dict
@@ -584,6 +678,18 @@ def _flag(value: object) -> bool:
     return text not in {"0", "false", "no", "off", ""}
 
 
+def _ocr_languages(value: object) -> tuple[str, ...]:
+    """Parse an OCR ``languages`` option: a tuple/list, or a ``+``/``,`` string."""
+    if value is None or value == "":
+        return ("eng",)
+    if isinstance(value, (tuple, list)):
+        languages = tuple(str(item).strip() for item in value if str(item).strip())
+    else:
+        text = str(value).replace("+", ",")
+        languages = tuple(part.strip() for part in text.split(",") if part.strip())
+    return languages or ("eng",)
+
+
 def _skipped_name(name: str) -> bool:
     """Whether an entry name is hidden or a known-noise directory."""
     return name in _SKIP_DIRS or (name.startswith(".") and name not in (".", ".."))
@@ -608,6 +714,7 @@ __all__ = [
     "DEFAULT_PDF_MAX_CHARS",
     "DOCX_SUFFIXES",
     "FileConnector",
+    "OCR_EXTRA",
     "PDF_SUFFIXES",
     "READER_SUFFIXES",
     "STREAM_SUFFIXES",

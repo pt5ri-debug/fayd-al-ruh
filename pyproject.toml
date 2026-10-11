@@ -15,9 +15,10 @@ pdf = ["pypdf>=4.0"]
 # OCR for scanned PDFs is a separate optional extra. It rasterises pages in
 # memory (pypdfium2, no external poppler binary) and reads them with Tesseract
 # through pytesseract. The Tesseract engine itself must be installed separately
-# (e.g. `apt install tesseract-ocr tesseract-ocr-ara`); this extra is never
-# required by the base install.
-ocr = ["pypdfium2>=4.0", "pytesseract>=0.3.10", "Pillow>=10.0"]
+# (e.g. `apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara`); this
+# extra is never required by the base install. ``pypdf`` is included because OCR
+# runs on top of native page extraction.
+ocr = ["pypdf>=4.0", "pypdfium2>=4.0", "pytesseract>=0.3.10", "Pillow>=10.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
