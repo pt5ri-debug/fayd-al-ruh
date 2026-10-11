@@ -152,15 +152,41 @@ def _tiny_image():
     return Image.new("L", (64, 64), 255)
 
 
-def test_default_engine_reports_a_missing_extra_clearly():
-    """When the OCR packages are absent the engine names the extra to install."""
-    if ocr_available():
-        pytest.skip("the OCR extra is installed; the unavailable path cannot be shown")
+def test_default_engine_reports_a_missing_extra_clearly(monkeypatch):
+    """When the OCR Python packages are absent the engine names the extra to install."""
+    # The path is forced rather than skipped on: a machine can have the Python
+    # packages installed yet no Tesseract binary, and the message must name the
+    # installable extra in every case. A module set to None in ``sys.modules``
+    # makes ``import`` raise ImportError, exactly as a missing package does.
+    import sys
+
+    monkeypatch.setitem(sys.modules, "pypdfium2", None)
     with pytest.raises(OcrUnavailableError) as error:
         TesseractOcrEngine().available_languages()
     message = str(error.value)
     assert OCR_EXTRA in message
     assert "tesseract" in message.lower()
+
+
+def test_engine_without_the_tesseract_binary_names_both_installs(monkeypatch):
+    """The Python packages are present but the Tesseract engine is not.
+
+    The failure must still name the installable extra *and* the system package,
+    so a user knows there are two separate installs -- not only that "tesseract"
+    is missing.
+    """
+    import core.pdf_ocr as pdf_ocr
+
+    class _NoEngine:
+        def get_languages(self, config: str = ""):
+            raise RuntimeError("tesseract is not installed or it's not in your PATH")
+
+    monkeypatch.setattr(pdf_ocr, "_require_dependencies", lambda: (object(), _NoEngine()))
+    with pytest.raises(OcrUnavailableError) as error:
+        TesseractOcrEngine().available_languages()
+    message = str(error.value)
+    assert OCR_EXTRA in message
+    assert "tesseract-ocr" in message
 
 
 def test_resolve_languages_degrades_to_the_present_ones():
