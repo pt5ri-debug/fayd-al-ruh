@@ -173,9 +173,43 @@ def test_compose_model_answer_drops_a_repeat_joined_by_a_conjunction():
 def test_compose_model_answer_does_not_let_a_list_marker_eat_a_decimal():
     # The byte model emits numbered procedure sentences that can begin with a
     # decimal ("1.5 times the gradient"); stripping a leading "1." as a list
-    # marker would corrupt the number, so the digit must survive.
+    # marker would corrupt the number, so the digit must survive. The lower-case
+    # second sentence is capitalised (it began after a boundary), but the numbers
+    # are the model's own.
     text = compose_model_answer("1.5 times the gradient. the gradient is 0.052 psi/ft.")
-    assert text == "1.5 times the gradient. the gradient is 0.052 psi/ft."
+    assert text == "1.5 times the gradient. The gradient is 0.052 psi/ft."
+
+
+def test_compose_model_answer_capitalises_a_mid_answer_lower_case_sentence():
+    # The byte model runs on past a boundary without capitalising; each sentence
+    # is capitalised so the answer reads as sentences, with no words changed.
+    assert compose_model_answer(
+        "The mud is mixed. and the slurry is pumped. the casing is run."
+    ) == "The mud is mixed. And the slurry is pumped. The casing is run."
+    assert compose_model_answer(
+        "Porosity measures voids. permeability measures flow."
+    ) == "Porosity measures voids. Permeability measures flow."
+
+
+def test_compose_model_answer_does_not_capitalise_inside_a_word_or_number():
+    # Only a genuine sentence opening is capitalised; a decimal, a unit, and a
+    # formula are left exactly as the model wrote them.
+    assert compose_model_answer(
+        "The gradient is 0.052 psi/ft and the formula is q / A."
+    ) == "The gradient is 0.052 psi/ft and the formula is q / A."
+
+
+def test_compose_model_answer_closes_a_gap_before_punctuation():
+    # The byte model leaves a space before a full stop and glues the next
+    # sentence on; both are tidied to a single boundary.
+    assert compose_model_answer("The well flows .Then it stops.") == (
+        "The well flows. Then it stops."
+    )
+    assert compose_model_answer("The well flows.Then it stops.") == (
+        "The well flows. Then it stops."
+    )
+    # A hyphenated range keeps its spacing, so the fix does not touch numbers.
+    assert compose_model_answer("The value is 10 - 20 m.") == "The value is 10 - 20 m."
 
 
 def test_compose_model_answer_still_drops_a_real_list_marker():
