@@ -21,6 +21,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mind", action="store_true", help="start answering from the trained model")
     parser.add_argument("--model-checkpoint", default=None, help="path to a language-model checkpoint")
     parser.add_argument("--session", default=None, help="resume a saved session by id")
+    parser.add_argument(
+        "--mode",
+        default=None,
+        choices=("ai", "jarvics"),
+        help="start in 'ai' mode (conversation only) or 'jarvics' mode (conversation plus sandboxed tools)",
+    )
     return parser
 
 

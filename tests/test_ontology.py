@@ -42,3 +42,22 @@ def test_add_relation_once_survives_id_collisions(monkeypatch):
     ontology.add_relation_once(a.id, c.id, "relates")
     assert len(ontology.relations) == 2
     assert seen == ["SEM-dup", "SEM-dup", "SEM-fresh"]
+
+
+def test_add_concept_once_survives_id_collisions(monkeypatch):
+    from core import ontology as ontology_module
+    from core.concept import Concept as RealConcept
+
+    ids = iter(["CON-dup", "CON-dup", "CON-fresh"])
+
+    def factory(label, aliases=frozenset()):
+        concept = RealConcept(label, aliases)
+        object.__setattr__(concept, "id", next(ids))
+        return concept
+
+    monkeypatch.setattr(ontology_module, "Concept", factory)
+    ontology = Ontology()
+    first = ontology.add_concept_once("alpha")
+    second = ontology.add_concept_once("beta")
+    assert {first.id, second.id} == {"CON-dup", "CON-fresh"}
+    assert len(ontology.concepts) == 2
