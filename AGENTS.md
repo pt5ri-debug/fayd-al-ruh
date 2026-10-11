@@ -230,7 +230,8 @@ Arabic is kept as secondary aliases where useful.
   fallback; the internet connector is registered only with `allow_web=True`);
   `ingest.connectors.{files,sql,web}` stream TXT/Markdown/CSV/JSON/JSONL and
   digital PDFs (**Stage 2A adds `.pdf`**) and Word `.docx`/`.docm` (**Stage 2B**
-  adds Word; scanned-PDF OCR remains deliberately out of scope), read-only
+  adds Word); a scanned PDF is read with the opt-in OCR path
+  (**Stage 3**, `allow_ocr`/`--ocr`, via `core.pdf_ocr`), read-only
   SQLite/driver DBs, and
   (denied by default, host-allow-listed or explicitly authorized) one HTTP(S)
   page. `ingest.pipeline.IngestionPipeline`
@@ -259,7 +260,13 @@ Arabic is kept as secondary aliases where useful.
   (`IngestionPipeline(retries=...)`) with the report counters rolled back so a
   retry never double-counts. A Word `.docx`/`.docm` (Stage 2B) is read through
   `core/docx_extract` and grouped into records along its own structure (a heading
-  opens a record); each ingested record also writes text-free
+  opens a record). Scanned PDF pages (**Stage 3**) are OCR'd only when
+  `allow_ocr` is set (`--ocr`), through `core.pdf_ocr`: only the pages with no
+  text layer are sent to OCR (a page with real text is never replaced), the work
+  is bounded by `ocr_dpi`/`ocr_batch_size`/`ocr_max_pages`/`ocr_time_budget`
+  limits, each record keeps its page number and an `ocr` flag, and a missing
+  engine/extra is an actionable error rather than a silent skip. Each ingested
+  record also writes text-free
   per-document metadata (source path, filename/extension, content hash, media
   type, chunk ids, ingestion timestamp) through `ingest.metadata`, wired into the
   pipeline/CLI best-effort so a metadata-write failure never loses the ingest.
@@ -327,14 +334,41 @@ Arabic is kept as secondary aliases where useful.
   `MAX_TEXT_CHARS` with an incrementally-decoded, strictly-checked codec, and
   `DocumentText.truncated` / `DocumentText.encoding` report a capped read and the
   codec honestly. A digital `.pdf` is read **page by page** through
-  `core.pdf_extract` (the optional `pypdf` extra); `DocumentText.page_numbers`
-  and `DocumentText.scanned` carry the page split and the OCR provenance. A
-  scanned PDF with no extractable text falls back to the separate optional OCR
-  extra (`[ocr]` = pypdfium2 + pytesseract, engine installed separately), and a
+  `core.pdf_extract` (the optional `pypdf` extra); `DocumentText.page_numbers`,
+  `DocumentText.scanned`, and `DocumentText.ocr_pages` carry the page split and
+  the OCR provenance (which pages came from OCR). A scanned PDF with no
+  extractable text falls back to the separate optional OCR path — either the
+  Stage 3 per-page pipeline (`core.pdf_ocr`, enabled with an `OcrConfig` or an
+  `ocr_engine`) or the simple whole-file `ocr` callable — and a
   `NormalizationError` is raised only when a requested normalization fails.
-  `read_document(..., normalize=..., encoding=..., password=...)` applies
+  `read_document(..., normalize=..., encoding=..., password=..., ocr_config=...,
+  ocr_engine=...)` applies
   `core/text_normalize`, pins the codec, and decrypts a protected PDF. All lazy
   imports; the base install pulls nothing new and no document is ever executed.
+- `core/pdf_ocr.py` — the **optional OCR path for scanned PDFs** (Stage 3), off
+  unless a caller enables it, so the base install imports nothing from the OCR
+  extra. `OcrConfig` is the one validated set of knobs (`enabled`, `languages`,
+  `dpi`, `batch_size`, `max_pages`, `max_pixels_per_page`, `max_page_dimension`,
+  `time_budget_seconds`, `max_temp_bytes`, `min_chars_per_page`, `retries`).
+  `page_needs_ocr` flags a page whose native text is thinner than
+  `min_chars_per_page` (a scan, or a bare page number); `extract_pdf_pages` runs
+  native extraction first and OCRs **only** those pages — a page with real text
+  is never sent to OCR and never overwritten — and returns an `OcrPdfResult`
+  carrying every page's text plus `ocr_pages` (provenance), `failures`
+  (per-page, never fatal), `skipped_pages` (a cap or the time budget was hit),
+  and `languages_used`. The default engine is `TesseractOcrEngine` (maintained
+  Tesseract): `pypdfium2` rasterises in memory (no external poppler) and
+  `pytesseract` drives the engine. Limits are honest — the raster is refused
+  *before* allocation if it exceeds the pixel/dimension caps, the temp PNG is
+  measured against `max_temp_bytes` before it is written and removed after, and
+  a transient page failure is retried `retries` times. `check_raster_limits` and
+  `_write_bounded_png` are split out so the guards are testable without the
+  optional packages. Language data is required separately: `usable_languages` /
+  `resolve_languages` intersect the requested codes with what Tesseract has and
+  report the missing model by name, so Arabic + English work only when
+  `tesseract-ocr-ara` / `tesseract-ocr-eng` are installed. OCR reads pixels; it
+  never executes the document. (System packages are listed in
+  `OCR_SYSTEM_PACKAGES`; the extra is `[ocr]`.)
 - `core/pdf_extract.py` — read text out of a **digital** PDF page by page with
   `pypdf` (maintained, pure-Python, BSD; the optional `[pdf]` extra), imported
   lazily so the base install stays dependency-light. `PdfPageStream` opens and

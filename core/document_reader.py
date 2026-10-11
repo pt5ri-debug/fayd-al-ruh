@@ -26,6 +26,7 @@ import codecs
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from core.text_encoding import (
     EncodingDetectionError,
@@ -33,6 +34,9 @@ from core.text_encoding import (
     detect_encoding,
 )
 from core.text_normalize import normalize_text
+
+if TYPE_CHECKING:  # the OCR module is optional and imported lazily at runtime
+    from core.pdf_ocr import OcrConfig, PageOcrEngine
 
 #: Extensions this reader can turn into text.
 SUPPORTED_EXTENSIONS = frozenset({".docx", ".docm", ".txt", ".md", ".markdown"})
@@ -93,6 +97,13 @@ class DocumentText:
 
     scanned: bool = False
     """True when the text came from OCR of a scanned PDF, not a digital text layer."""
+
+    ocr_pages: tuple[int, ...] = ()
+    """The 1-based page numbers whose text came from OCR (Stage 3; empty otherwise).
+
+    Kept separate from ``page_numbers`` so OCR-derived text is never mistaken for
+    natively extracted PDF text -- a caller can label or debug it.
+    """
 
     def __post_init__(self) -> None:
         if not self.text.strip():
@@ -217,17 +228,54 @@ def _read_pdf(
     *,
     ocr: OCREngine | None = None,
     allow_ocr: bool = True,
+    ocr_config: "OcrConfig | None" = None,
+    ocr_engine: "PageOcrEngine | None" = None,
     password: str | None = None,
 ) -> DocumentText:
-    """Extract text from a PDF, optionally falling back to OCR for scans.
+    """Extract text from a PDF, optionally OCR-ing only the low-text pages.
 
-    Digital text extraction is delegated to :mod:`core.pdf_extract`, which wraps
-    the optional ``pypdf`` dependency and reports encrypted / malformed / empty /
-    image-only documents distinctly. When a PDF yields no text it is likely
-    scanned images; if an ``ocr`` engine was supplied it is used, otherwise the
-    caller is told which optional extra to install. OCR never executes the
-    document -- it reads pixels.
+    Digital extraction is delegated to :mod:`core.pdf_extract`. Two OCR paths
+    exist, both off unless asked for:
+
+    * the modern per-page path (Stage 3, ``core.pdf_ocr``) when ``ocr_config`` is
+      enabled or an ``ocr_engine`` is supplied -- it OCRs only the pages whose
+      native text is too thin and keeps ``ocr_pages`` provenance; and
+    * the simple whole-file ``ocr`` callable (kept for compatibility).
+
+    A page that already carries real text is never sent to OCR, so valid extracted
+    text is never replaced with a lower-quality guess. OCR reads pixels; it never
+    executes the document.
     """
+    from core.pdf_ocr import OcrConfig, extract_pdf_pages
+
+    wants_stage3_ocr = ocr_engine is not None or bool(ocr_config and ocr_config.enabled)
+    if wants_stage3_ocr:
+        config = ocr_config or OcrConfig(enabled=True)
+        try:
+            result = extract_pdf_pages(path, config=config, engine=ocr_engine, password=password)
+        except DocumentReadError:
+            raise
+        except Exception as error:  # an OCR/dependency failure is actionable, not fatal
+            raise DocumentReadError(f"{path.name!r} could not be read: {error}") from error
+        if not result.text.strip():
+            raise DocumentReadError(
+                f"{path.name!r} contains no extractable text"
+                + (" even after OCR." if config.enabled else " (it may be a scanned image).")
+            )
+        paragraphs = [page.text for page in result.pages if page.text.strip()]
+        document = _assemble(paragraphs, path, "pdf-ocr" if result.used_ocr else "pdf")
+        return DocumentText(
+            text=document.text,
+            paragraphs=document.paragraphs,
+            title=result.title or document.title,
+            kind=document.kind,
+            truncated=result.truncated,
+            encoding="utf-8",
+            page_numbers=tuple(page.number for page in result.pages if page.text.strip()),
+            scanned=result.used_ocr,
+            ocr_pages=result.ocr_pages,
+        )
+
     from core.pdf_extract import PdfExtractionError, PdfPageStream
 
     try:
@@ -264,7 +312,12 @@ def _with_pdf_facts(document: DocumentText, pages: list, stream) -> DocumentText
 def _pdf_ocr_fallback(
     path: Path, error: Exception | None, *, ocr: OCREngine | None, allow_ocr: bool
 ) -> DocumentText:
-    """Fall back to OCR for a PDF with no text layer, or explain how to enable it."""
+    """Fall back to whole-file OCR for a PDF with no text layer, or explain how to enable it.
+
+    This is the compatibility path for a caller that supplies its own
+    ``ocr`` callable. The modern per-page path lives in :func:`_read_pdf` and
+    :mod:`core.pdf_ocr`.
+    """
     engine = ocr
     if engine is None and allow_ocr:
         engine = _default_ocr_engine()
@@ -302,32 +355,20 @@ def _pdf_ocr_fallback(
 
 
 def _default_ocr_engine() -> OCREngine | None:
-    """The optional PyTesseract OCR engine, or ``None`` when it is not installed.
+    """The optional whole-file OCR engine, or ``None`` when it is not installed.
 
-    Imported lazily so the base install stays dependency-light. The PDF is
-    rasterised in memory by ``pypdfium2`` (no external poppler binary); both
-    packages live in the ``ocr`` extra.
+    Delegates to :mod:`core.pdf_ocr` (the Stage 3 per-page pipeline) so the
+    optional packages are imported in exactly one place. Imported lazily so the
+    base install stays dependency-light.
     """
-    try:
-        import pypdfium2  # type: ignore[import-not-found]
-        import pytesseract  # type: ignore[import-not-found]
-    except ImportError:
+    from core.pdf_ocr import OcrConfig, extract_pdf_pages, ocr_available
+
+    if not ocr_available():
         return None
 
     def _run(path: Path) -> str:
-        pdf = pypdfium2.PdfDocument(str(path))
-        try:
-            parts: list[str] = []
-            for page in pdf:
-                bitmap = page.render(scale=2.0)
-                image = bitmap.to_pil()
-                try:
-                    parts.append(pytesseract.image_to_string(image))
-                finally:
-                    image.close()
-            return "\n".join(parts)
-        finally:
-            pdf.close()
+        result = extract_pdf_pages(path, config=OcrConfig(enabled=True))
+        return result.text
 
     return _run
 
@@ -362,6 +403,8 @@ def read_document(
     fold_arabic: bool = False,
     ocr: OCREngine | None = None,
     allow_ocr: bool = False,
+    ocr_config: "OcrConfig | None" = None,
+    ocr_engine: "PageOcrEngine | None" = None,
     encoding: str | None = None,
     password: str | None = None,
 ) -> DocumentText:
@@ -378,8 +421,12 @@ def read_document(
     ``normalize=True`` applies :func:`core.text_normalize.normalize_text` to the
     extracted text (``fold_arabic=True`` additionally unifies Arabic letter
     forms). Normalization is off by default because it changes the text and hence
-    its content hash. ``ocr`` supplies an OCR engine for scanned PDFs; when it is
-    omitted the optional PyTesseract engine is used if installed.
+    its content hash.
+
+    OCR (Stage 3) is optional and **off by default**. Pass an enabled
+    :class:`core.pdf_ocr.OcrConfig` (or a ready ``ocr_engine``) to OCR only the
+    pages that carry no text layer; a page with real text is never replaced. The
+    older ``ocr`` whole-file callable is still accepted for compatibility.
     """
     source = Path(path).expanduser()
     if not source.exists():
@@ -393,7 +440,14 @@ def read_document(
             "Save it as .docx (Word: File > Save As > Word Document) and try again."
         )
     if suffix in OPTIONAL_EXTENSIONS:
-        document = _read_pdf(source, ocr=ocr, allow_ocr=allow_ocr, password=password)
+        document = _read_pdf(
+            source,
+            ocr=ocr,
+            allow_ocr=allow_ocr,
+            ocr_config=ocr_config,
+            ocr_engine=ocr_engine,
+            password=password,
+        )
     elif suffix not in SUPPORTED_EXTENSIONS:
         raise DocumentReadError(
             f"Unsupported file type {source.suffix or '(none)'}. "
@@ -428,6 +482,7 @@ def _normalized(document: DocumentText, *, fold_arabic: bool) -> DocumentText:
         encoding=document.encoding,
         page_numbers=document.page_numbers,
         scanned=document.scanned,
+        ocr_pages=document.ocr_pages,
     )
 
 

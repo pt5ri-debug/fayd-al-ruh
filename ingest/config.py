@@ -75,6 +75,15 @@ class IngestConfig:
     turn it on only when matching the retriever's token normalization matters
     more than keeping the original forms.
     """
+    allow_ocr: bool = False
+    """Enable OCR for scanned PDF pages (Stage 3). Off by default.
+
+    OCR is a separate optional path: it needs the ``[ocr]`` extra and the
+    Tesseract engine, and runs only when a caller turns it on here (or passes
+    ``--ocr``). A digital PDF is never OCR'd.
+    """
+    ocr_languages: str = "eng"
+    """Tesseract language codes for OCR, e.g. ``"ara+eng"`` for Arabic + English."""
 
     def __post_init__(self) -> None:
         if self.chunk_chars < 1:

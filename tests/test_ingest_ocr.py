@@ -1,10 +1,10 @@
-"""The optional OCR path for scanned PDFs.
+"""The optional whole-file OCR fallback for scanned PDFs.
 
-``pypdf`` and the OCR extra are not installed in the base environment, so these
-tests exercise the *reader's* fallback logic directly. ``pypdf`` -- a third-party
-parser, not our code -- is replaced by a tiny stub whose pages yield no text,
-which is exactly the "scanned image" case. The OCR engine itself is a real
-callable passed in, so no part of the project's own logic is mocked.
+The OCR extra may or may not be installed, so these tests exercise the
+*reader's* fallback logic directly. ``pypdf`` -- a third-party parser, not our
+code -- is replaced by a tiny stub whose pages yield no text, which is exactly
+the "scanned image" case. The OCR engine itself is a real callable passed in, so
+no part of the project's own logic is mocked.
 """
 
 from __future__ import annotations
@@ -79,9 +79,20 @@ def test_scanned_pdf_engine_failure_is_reported_not_fatal(scanned_pdf):
     assert "OCR" in str(error.value)
 
 
-def test_default_ocr_engine_is_none_when_extra_absent():
-    # Neither pypdfium2 nor pytesseract is installed in the base environment.
+def test_default_ocr_engine_is_none_when_extra_absent(monkeypatch):
+    # Force the "extra absent" branch so the assertion holds whether or not the
+    # optional packages happen to be installed in the running environment.
+    import core.pdf_ocr as pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
     assert _default_ocr_engine() is None
+
+
+def test_default_ocr_engine_is_callable_when_extra_present(monkeypatch):
+    import core.pdf_ocr as pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: True)
+    assert callable(_default_ocr_engine())
 
 
 def test_text_pdf_does_not_call_ocr(tmp_path, monkeypatch):
