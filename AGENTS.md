@@ -223,9 +223,11 @@ Arabic is kept as secondary aliases where useful.
   `SourceRecord`, `IngestItem`, `IngestionReport`, `Connector`); `ingest.registry`
   resolves a source to a connector by scheme/suffix (files is the path/dir
   fallback; the internet connector is registered only with `allow_web=True`);
-  `ingest.connectors.{files,sql,web}` stream TXT/MD/PDF/DOCX/CSV/JSON/JSONL,
-  read-only SQLite/driver DBs, and (denied by default, host-allow-listed or
-  explicitly authorized) one HTTP(S) page. `ingest.pipeline.IngestionPipeline`
+  `ingest.connectors.{files,sql,web}` stream TXT/Markdown/CSV/JSON/JSONL
+  (**Stage 1 file scope**; DOCX/PDF are deliberately out of scope for now and
+  an explicit `.docx`/`.pdf` path is refused), read-only SQLite/driver DBs, and
+  (denied by default, host-allow-listed or explicitly authorized) one HTTP(S)
+  page. `ingest.pipeline.IngestionPipeline`
   streams `plan`→`stream_item`, chunk-appends to `core.knowledge_base`
   (`INGESTED_SOURCE="ingested"`), skips unchanged sources via `ingest.dedup`
   (`DedupLedger`, content-addressed `ingest:<blake2b>` chunk ids), captures a
@@ -244,10 +246,16 @@ Arabic is kept as secondary aliases where useful.
   (`IngestConfig`) resolves tunables as explicit arg → `FAYD_INGEST_<FIELD>` env
   → stored `JsonStore` value → default, and never enables web on its own. File
   imports are normalized before chunking by `core/text_normalize.normalize_text`
-  (Unicode + structure, plus Arabic letter folding), opt-out with `--no-normalize`
-  / `--no-fold-arabic`; a transient local read is retried up to `--retries` times
+  (Unicode NFC + structure only; Arabic diacritics and letter distinctions are
+  **preserved** by default). `--fold-arabic` is the opt-in that also unifies
+  Arabic letter forms, and `--no-normalize` stores text verbatim. A transient
+  local read is retried up to `--retries` times
   (`IngestionPipeline(retries=...)`) with the report counters rolled back so a
-  retry never double-counts. CLI:
+  retry never double-counts. Each ingested record also writes text-free
+  per-document metadata (source path, filename/extension, content hash, media
+  type, chunk ids, ingestion timestamp) through `ingest.metadata`, wired into the
+  pipeline/CLI best-effort so a metadata-write failure never loses the ingest.
+  CLI:
   `python -m cli ingest add|list-connectors|
   stats|build-index|search|delete|jobs` (`cli/ingest.py`); the two knowledge
   actions mirror into the GUI sidebar.
@@ -302,19 +310,34 @@ Arabic is kept as secondary aliases where useful.
   `word/document.xml`), so `zipfile` + `xml.etree` extract its paragraphs
   (joining runs, honouring tabs and breaks) into a `DocumentText`. Legacy `.doc`
   and `.rtf` are refused with a "save as .docx" hint instead of being scrambled.
-  Plain `.txt` is read directly (large files are streamed line by line up to
-  `MAX_TEXT_CHARS`, and `DocumentText.truncated` reports a capped read honestly).
-  PDFs go through the optional `pypdf` extra; a scanned PDF with no extractable
-  text falls back to the separate optional OCR extra (`[ocr]` = pypdfium2 +
-  pytesseract, engine installed separately), and a `NormalizationError` is raised
-  only when a requested normalization fails. `read_document(..., normalize=...)`
-  applies `core/text_normalize`. All lazy imports; the base install pulls nothing
-  new and no document is ever executed.
+  Plain `.txt`/`.md` are read with **safe encoding detection** (a BOM, then
+  strict UTF-8, then a short list of legacy encodings; a mis-decoded file raises
+  rather than filling with U+FFFD). Large files are streamed line by line up to
+  `MAX_TEXT_CHARS` with an incrementally-decoded, strictly-checked codec, and
+  `DocumentText.truncated` / `DocumentText.encoding` report a capped read and the
+  codec honestly. PDFs go through the optional `pypdf` extra; a scanned PDF with
+  no extractable text falls back to the separate optional OCR extra (`[ocr]` =
+  pypdfium2 + pytesseract, engine installed separately), and a
+  `NormalizationError` is raised only when a requested normalization fails.
+  `read_document(..., normalize=..., encoding=...)` applies
+  `core/text_normalize` and pins the codec. All lazy imports; the base install
+  pulls nothing new and no document is ever executed.
+- `core/text_encoding.py` — dependency-free, explainable text decoding for
+  imported files. `detect_encoding` honours a BOM, trusts strictly-valid UTF-8
+  only when it decodes to plausible text (so NUL-filled UTF-16 is not mistaken
+  for UTF-8), then tries a small ordered set of legacy encodings (Windows Arabic
+  `cp1256`, `cp1252`, ISO-8859-6/1, KOI8-R, BOM-less UTF-16), each strict and
+  plausibility-checked; `decode_bytes` never uses `errors="replace"`. When
+  nothing fits it raises `EncodingDetectionError`, so a decode failure is explicit
+  and never silently corrupts a large amount of text. `allow_truncated` tolerates
+  a bounded stream prefix that ends mid-character.
 - `core/text_normalize.py` — one deterministic, pure pass over imported text:
-  Unicode NFC, unified line endings, control-char removal, whitespace collapse,
-  and (opt-in) Arabic diacritic/tatweel removal + letter folding matching
-  `core.rag`. Idempotent and hash-stable; normalization is applied at the
-  ingestion boundary because it changes the content hash (so it is opt-out).
+  Unicode NFC, unified line endings, control-char removal, and whitespace
+  collapse. It never removes punctuation, diacritics, or Arabic letter
+  distinctions; the Arabic diacritic/tatweel removal + letter folding matching
+  `core.rag` is the *opt-in* `fold_arabic` (`--fold-arabic`). Idempotent and
+  hash-stable; normalization is applied at the ingestion boundary because it
+  changes the content hash (so it is opt-out).
 - `gui/attachments.py` — the `+` composer button's brain: `attach_document`
   reads a file through the reader, chunks it, and returns an `AttachmentNotice`
   (success + preview, or the reader's error verbatim); the chunks become

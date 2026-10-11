@@ -16,11 +16,17 @@ text is already the thing this module produces.
 
 from __future__ import annotations
 
+import codecs
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
+from core.text_encoding import (
+    EncodingDetectionError,
+    decode_bytes,
+    detect_encoding,
+)
 from core.text_normalize import normalize_text
 
 _WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -40,6 +46,8 @@ OCR_EXTRA = "fayd-al-ruh[ocr]"
 MAX_TEXT_CHARS = 2_000_000
 #: Plain-text files larger than this are read as a bounded stream, not whole.
 STREAM_THRESHOLD_BYTES = 4 * 1024 * 1024
+#: Bytes sampled from the head of a large file to detect its encoding.
+ENCODING_SAMPLE_BYTES = 64 * 1024
 
 #: An OCR engine reads an image-producing PDF and returns its text ("" when none).
 OCREngine = Callable[[Path], str]
@@ -66,6 +74,13 @@ class DocumentText:
 
     Honest reporting: a caller can tell a complete document from a capped one
     rather than treating silent truncation as the whole file.
+    """
+
+    encoding: str = "utf-8"
+    """The encoding the bytes were decoded with (``"utf-8"`` for ``.docx`` XML).
+
+    Reported so an import can record *how* a file was read; an explicit decode
+    failure raises :class:`DocumentReadError` rather than being hidden here.
     """
 
     def __post_init__(self) -> None:
@@ -124,39 +139,67 @@ def _read_docx(path: Path) -> DocumentText:
     return _assemble(paragraphs, path, "docx")
 
 
-def _read_text(path: Path) -> DocumentText:
+def _read_text(path: Path, *, encoding: str | None = None) -> DocumentText:
     try:
         size = path.stat().st_size
     except OSError as error:
         raise DocumentReadError(f"Could not open {path.name!r}: {error}") from error
     if size >= STREAM_THRESHOLD_BYTES:
-        return _read_text_streamed(path)
+        return _read_text_streamed(path, encoding=encoding)
     try:
-        raw = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        raw = path.read_text(encoding="utf-8", errors="replace")
+        raw = path.read_bytes()
     except OSError as error:
         raise DocumentReadError(f"Could not open {path.name!r}: {error}") from error
-    paragraphs = [line.strip() for line in raw.splitlines() if line.strip()]
+    try:
+        decoded = decode_bytes(raw, encoding=encoding)
+    except EncodingDetectionError as error:
+        raise DocumentReadError(f"Could not decode {path.name!r}: {error}") from error
+    paragraphs = [line.strip() for line in decoded.text.splitlines() if line.strip()]
     if not paragraphs:
         raise DocumentReadError(f"{path.name!r} is empty.")
-    return _assemble(paragraphs, path, "text")
+    return _assemble(paragraphs, path, "text", encoding=decoded.encoding)
 
 
-def _read_text_streamed(path: Path) -> DocumentText:
+def _read_text_streamed(path: Path, *, encoding: str | None = None) -> DocumentText:
     """Read a very large plain-text file line by line, capping at ``MAX_TEXT_CHARS``.
 
     Memory stays bounded: only the kept lines, the accumulated text (itself
     capped), and a running character count are held -- never the whole file plus
     a copy of its text. Once the cap is reached the remainder is not read, so a
     multi-gigabyte log cannot be pulled into memory.
+
+    The encoding is detected from a bounded prefix, then the file is decoded
+    *incrementally* with the same codec, so a wrong guess cannot smuggle in
+    replacement characters and the whole file is never held as bytes.
     """
+    try:
+        with path.open("rb") as handle:
+            sample = handle.read(ENCODING_SAMPLE_BYTES)
+    except OSError as error:
+        raise DocumentReadError(f"Could not open {path.name!r}: {error}") from error
+    chosen = encoding
+    if chosen is None:
+        try:
+            chosen = detect_encoding(sample, allow_truncated=True)
+        except EncodingDetectionError as error:
+            raise DocumentReadError(f"Could not decode {path.name!r}: {error}") from error
+
     paragraphs: list[str] = []
     total = 0
     truncated = False
     try:
-        with path.open(encoding="utf-8", errors="replace") as handle:
-            for line in handle:
+        decoder = codecs.getincrementaldecoder(chosen)(errors="strict")
+    except LookupError as error:
+        raise DocumentReadError(f"Unknown encoding {chosen!r} for {path.name!r}.") from error
+    try:
+        with path.open("rb") as handle:
+            for raw_line in handle:
+                try:
+                    line = decoder.decode(raw_line)
+                except UnicodeDecodeError as error:
+                    raise DocumentReadError(
+                        f"Could not decode {path.name!r} as {chosen}: {error}"
+                    ) from error
                 stripped = line.strip()
                 if not stripped:
                     continue
@@ -169,7 +212,7 @@ def _read_text_streamed(path: Path) -> DocumentText:
         raise DocumentReadError(f"Could not open {path.name!r}: {error}") from error
     if not paragraphs:
         raise DocumentReadError(f"{path.name!r} is empty.")
-    return _assemble(paragraphs, path, "text", truncated=truncated)
+    return _assemble(paragraphs, path, "text", truncated=truncated, encoding=chosen)
 
 
 def _read_pdf(
@@ -261,7 +304,12 @@ def _default_ocr_engine() -> OCREngine | None:
 
 
 def _assemble(
-    paragraphs: list[str], path: Path, kind: str, *, truncated: bool = False
+    paragraphs: list[str],
+    path: Path,
+    kind: str,
+    *,
+    truncated: bool = False,
+    encoding: str = "utf-8",
 ) -> DocumentText:
     text = "\n".join(paragraphs)
     if len(text) > MAX_TEXT_CHARS:
@@ -274,6 +322,7 @@ def _assemble(
         title=path.stem or path.name,
         kind=kind,
         truncated=truncated,
+        encoding=encoding,
     )
 
 
@@ -284,10 +333,14 @@ def read_document(
     fold_arabic: bool = False,
     ocr: OCREngine | None = None,
     allow_ocr: bool = False,
+    encoding: str | None = None,
 ) -> DocumentText:
     """Read ``path`` into :class:`DocumentText`, or raise :class:`DocumentReadError`.
 
-    ``.docx``/``.docm`` are parsed from their XML; ``.txt`` is read directly.
+    ``.docx``/``.docm`` are parsed from their XML; ``.txt``/``.md`` are read with
+    safe encoding detection (a BOM, then UTF-8, then a short list of legacy
+    encodings, each strict) so a mis-decoded file raises rather than filling with
+    replacement characters. ``encoding`` pins the codec when the caller knows it.
     Legacy ``.doc``/``.rtf`` are refused with an actionable message.
 
     ``normalize=True`` applies :func:`core.text_normalize.normalize_text` to the
@@ -312,12 +365,12 @@ def read_document(
     elif suffix not in SUPPORTED_EXTENSIONS:
         raise DocumentReadError(
             f"Unsupported file type {source.suffix or '(none)'}. "
-            "Attach a .docx, .md, .pdf, or .txt file."
+            "Supported: .txt, .md, .markdown, .docx, .docm, .pdf, .csv, .json."
         )
     elif suffix in {".docx", ".docm"}:
         document = _read_docx(source)
     else:
-        document = _read_text(source)
+        document = _read_text(source, encoding=encoding)
     if normalize:
         return _normalized(document, fold_arabic=fold_arabic)
     return document
@@ -340,12 +393,14 @@ def _normalized(document: DocumentText, *, fold_arabic: bool) -> DocumentText:
         title=document.title,
         kind=document.kind,
         truncated=document.truncated,
+        encoding=document.encoding,
     )
 
 
 __all__ = [
     "DocumentReadError",
     "DocumentText",
+    "ENCODING_SAMPLE_BYTES",
     "LEGACY_EXTENSIONS",
     "MAX_TEXT_CHARS",
     "NormalizationError",

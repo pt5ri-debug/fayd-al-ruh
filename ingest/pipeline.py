@@ -22,6 +22,7 @@ ingestion and training separate.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -37,6 +38,11 @@ from ingest.dedup import DedupLedger
 from ingest.errors import ConnectorError, ErrorLog, IngestionError
 from ingest.hashing import content_hash
 from ingest.jobs import DONE, FAILED, JobState, JobStore
+from ingest.metadata import (
+    DocumentMetadataStore,
+    build_document_metadata,
+    metadata_path,
+)
 from ingest.records import (
     Connector,
     ConnectorInfo,
@@ -74,6 +80,7 @@ class IngestionPipeline:
         job: "JobState | None" = None,
         jobs: "JobStore | None" = None,
         retries: int = 0,
+        metadata: DocumentMetadataStore | None = None,
     ) -> None:
         if chunk_chars < 1:
             raise ValueError("chunk_chars must be at least 1.")
@@ -95,6 +102,11 @@ class IngestionPipeline:
         self.job = job
         self.jobs = jobs
         self.retries = retries
+        # Per-document metadata (path, hash, timestamp, chunk ids) is *recorded*
+        # but never read back by the pipeline, so a metadata-write failure must
+        # not fail an ingest that otherwise succeeded. Best-effort, like the
+        # manifest flush.
+        self.metadata = metadata
         self._shard: int | None = None
         self._shard_bytes: int = 0
 
@@ -240,11 +252,13 @@ class IngestionPipeline:
         item_bytes = 0
         for record in connector.stream_item(item):
             report.records += 1
-            written, count = self._store_record(record, item)
+            written, chunk_ids = self._store_record(record, item)
+            count = len(chunk_ids)
             item_chunks += count
             item_bytes += written
             report.chunks += count
             report.bytes_written += written
+            self._record_metadata(record, item, chunk_ids, connector.info.name)
         self.ledger.record_source(
             item.source_key,
             uri=item.uri,
@@ -259,8 +273,46 @@ class IngestionPipeline:
                 f"{report.bytes_written / 1024 / 1024:.1f} MB"
             )
 
-    def _store_record(self, record: SourceRecord, item: IngestItem) -> tuple[int, int]:
-        """Chunk one record, store the new chunks, and return (bytes, count)."""
+    def _record_metadata(
+        self,
+        record: SourceRecord,
+        item: IngestItem,
+        chunk_ids: list[str],
+        connector: str,
+    ) -> None:
+        """Record per-document metadata (best effort; never fails the ingest).
+
+        The store already holds the text and the ledger holds the dedup keys;
+        this adds the *bookkeeping* the store does not keep -- source path,
+        filename/extension, content hash, media type, ingestion timestamp, and
+        the chunk ids produced -- without duplicating any text.
+        """
+        if self.metadata is None:
+            return
+        source_id = item.source_key
+        meta = record.metadata or {}
+        try:
+            metadata = build_document_metadata(
+                source_id=source_id,
+                uri=str(meta.get("path", item.uri)),
+                title=record.title,
+                text=record.text,
+                chunk_ids=tuple(chunk_ids),
+                media_type=str(meta.get("kind", "")),
+                language="",
+                provider=connector,
+                license=record.license,
+                category=str(meta.get("category", "")),
+                tags=(str(meta.get("relative", "")),) if meta.get("relative") else (),
+                created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            )
+            self.metadata.record(metadata)
+        except (OSError, ValueError):
+            # Metadata is a side record; a write failure must not lose the ingest.
+            pass
+
+    def _store_record(self, record: SourceRecord, item: IngestItem) -> tuple[int, list[str]]:
+        """Chunk one record, store the new chunks, and return (bytes, chunk ids)."""
         pending: list[KnowledgeChunk] = []
         digests: list[str] = []
         for piece in chunk_text(
@@ -282,11 +334,11 @@ class IngestionPipeline:
             )
             digests.append(digest)
         if not pending:
-            return 0, 0
+            return 0, []
         written = self._write(pending)
         for digest, chunk in zip(digests, pending):
             self.ledger.record_chunk(digest, source_key=item.source_key, doc_id=chunk.chunk_id)
-        return written, len(pending)
+        return written, [chunk.chunk_id for chunk in pending]
 
     def _write(self, chunks: list[KnowledgeChunk]) -> int:
         if self._shard is None:
@@ -349,7 +401,8 @@ def ingest_source(
 
     store = KnowledgeBaseStore(store_dir or default_knowledge_base_dir())
     ledger = DedupLedger(ledger_path(store.root))
-    pipeline = IngestionPipeline(store, ledger, progress=progress, retries=retries)
+    metadata = DocumentMetadataStore(metadata_path(store.root))
+    pipeline = IngestionPipeline(store, ledger, progress=progress, retries=retries, metadata=metadata)
     registry = build_default_registry(allow_web=allow_web)
     connector = registry.resolve(spec)
     report = pipeline.ingest(spec, connector=connector, incremental=incremental)

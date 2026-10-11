@@ -62,9 +62,19 @@ class IngestConfig:
     retries: int = 2
     """Bounded per-item retries for a transient local read failure."""
     normalize: bool = True
-    """Normalize imported text (Unicode + structure) before chunking."""
-    fold_arabic: bool = True
-    """Also unify Arabic letter forms during normalization (bounded, opt-out)."""
+    """Normalize imported text (Unicode NFC + structure) before chunking.
+
+    The plain pass is conservative: it never removes meaningful characters,
+    punctuation, or diacritics. It only unifies line endings, drops control
+    characters, and collapses whitespace.
+    """
+    fold_arabic: bool = False
+    """Also unify Arabic letter forms (diacritics/tatweel dropped) -- opt-in.
+
+    Off by default so Arabic letter distinctions and diacritics are preserved;
+    turn it on only when matching the retriever's token normalization matters
+    more than keeping the original forms.
+    """
 
     def __post_init__(self) -> None:
         if self.chunk_chars < 1:

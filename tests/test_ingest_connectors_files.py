@@ -18,8 +18,11 @@ def _write(path, text):
 
 
 def test_suffixes_cover_the_required_formats():
-    for suffix in (".txt", ".md", ".markdown", ".docx", ".docm", ".pdf", ".csv", ".json", ".jsonl"):
+    # Stage 1 supports TXT, Markdown, CSV, and JSON; PDF/DOCX are out of scope.
+    for suffix in (".txt", ".md", ".markdown", ".csv", ".json", ".jsonl"):
         assert suffix in ALL_SUFFIXES
+    for suffix in (".docx", ".docm", ".pdf"):
+        assert suffix not in ALL_SUFFIXES
 
 
 def test_stream_reads_a_txt_file(tmp_path):
@@ -124,17 +127,10 @@ def test_exclude_roots_skips_a_subtree(tmp_path):
     assert [r.title for r in records] == ["a"]
 
 
-def test_docx_is_read_through_the_existing_reader(tmp_path):
-    import zipfile
-
+def test_docx_is_out_of_scope_for_stage_1(tmp_path):
+    # DOCX/PDF are deliberately excluded from Stage 1, so the connector refuses
+    # an explicit .docx path rather than silently ingesting it.
     path = tmp_path / "doc.docx"
-    document = (
-        '<?xml version="1.0"?>'
-        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-        "<w:body><w:p><w:r><w:t>Pressure drives oil.</w:t></w:r></w:p></w:body></w:document>"
-    )
-    with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr("word/document.xml", document)
-    records = list(FileConnector().stream(SourceSpec(str(path))))
-    assert "Pressure drives oil." in records[0].text
-    assert records[0].metadata["kind"] == "docx"
+    path.write_bytes(b"PK\x03\x04 not really a docx")
+    with pytest.raises(ConnectorError):
+        list(FileConnector().stream(SourceSpec(str(path))))

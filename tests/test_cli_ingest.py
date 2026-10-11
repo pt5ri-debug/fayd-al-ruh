@@ -41,7 +41,7 @@ def test_add_missing_source_returns_error(tmp_path):
     assert code == 1
 
 
-def test_add_normalizes_arabic_by_default(tmp_path, capsys):
+def test_add_preserves_arabic_by_default(tmp_path, capsys):
     source = _docs(tmp_path / "src", **{"a.txt": "أَلْوَان\n"})
     store_dir = tmp_path / "kb"
     code = _run(["add", str(source), "--store-dir", str(store_dir), "--quiet"])
@@ -49,14 +49,27 @@ def test_add_normalizes_arabic_by_default(tmp_path, capsys):
     from core.knowledge_base import KnowledgeBaseStore
 
     stored = " ".join(chunk.text for chunk in KnowledgeBaseStore(store_dir).iter_chunks())
-    assert "الوان" in stored  # diacritics folded
+    assert "أَلْوَان" in stored  # diacritics and letter forms preserved
+
+
+def test_add_fold_arabic_is_opt_in(tmp_path):
+    source = _docs(tmp_path / "src", **{"a.txt": "أَلْوَان\n"})
+    store_dir = tmp_path / "kb"
+    code = _run(
+        ["add", str(source), "--store-dir", str(store_dir), "--quiet", "--fold-arabic"]
+    )
+    assert code == 0
+    from core.knowledge_base import KnowledgeBaseStore
+
+    stored = " ".join(chunk.text for chunk in KnowledgeBaseStore(store_dir).iter_chunks())
+    assert "الوان" in stored  # diacritics folded when explicitly requested
 
 
 def test_add_no_normalize_keeps_text_verbatim(tmp_path):
     source = _docs(tmp_path / "src", **{"a.txt": "أَلْوَان\n"})
     store_dir = tmp_path / "kb"
     code = _run(
-        ["add", str(source), "--store-dir", str(store_dir), "--quiet", "--no-normalize", "--no-fold-arabic"]
+        ["add", str(source), "--store-dir", str(store_dir), "--quiet", "--no-normalize"]
     )
     assert code == 0
     from core.knowledge_base import KnowledgeBaseStore
