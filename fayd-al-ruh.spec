@@ -26,12 +26,21 @@ datas = [
 # package is imported lazily by the `gui` command, so it is listed explicitly to
 # keep the graphical front end inside the portable bundle too.
 hiddenimports = (
-    ["main", "ml.__main__", "ml.llm.__main__", "evaluation.__main__", "gui.__main__"]
+    [
+        "main",
+        "ml.__main__",
+        "ml.llm.__main__",
+        "evaluation.__main__",
+        "gui.__main__",
+        "cli.knowledge",
+        "cli.ingest",
+    ]
     + collect_submodules("ml")
     + collect_submodules("evaluation")
     + collect_submodules("ai")
     + collect_submodules("storage")
     + collect_submodules("gui")
+    + collect_submodules("ingest")
 )
 
 a = Analysis(

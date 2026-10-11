@@ -25,9 +25,11 @@ _W = f"{{{_WORD_NAMESPACE}}}"
 _DOCUMENT_PART = "word/document.xml"
 
 #: Extensions this reader can turn into text.
-SUPPORTED_EXTENSIONS = frozenset({".docx", ".docm", ".txt"})
+SUPPORTED_EXTENSIONS = frozenset({".docx", ".docm", ".txt", ".md", ".markdown"})
 #: Recognised but deliberately unsupported (binary, undocumented layout).
 LEGACY_EXTENSIONS = frozenset({".doc", ".rtf"})
+#: Extracted through an optional dependency (``fayd-al-ruh[pdf]``) when present.
+OPTIONAL_EXTENSIONS = frozenset({".pdf"})
 
 #: A cap so a pathological file cannot exhaust memory; generous for real documents.
 MAX_TEXT_CHARS = 2_000_000
@@ -115,6 +117,35 @@ def _read_text(path: Path) -> DocumentText:
     return _assemble(paragraphs, path, "text")
 
 
+def _read_pdf(path: Path) -> DocumentText:
+    """Extract text from a PDF through an optional dependency.
+
+    PyPDF is not a mandatory dependency, so it is imported lazily and its
+    absence is turned into an actionable message rather than an ImportError.
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError as error:
+        raise DocumentReadError(
+            "PDF support needs the optional 'pypdf' package. "
+            "Install it with `pip install fayd-al-ruh[pdf]` (or `pip install pypdf`) "
+            "and try again."
+        ) from error
+    try:
+        reader = PdfReader(str(path))
+        pages = [(page.extract_text() or "").strip() for page in reader.pages]
+    except OSError as error:
+        raise DocumentReadError(f"Could not open {path.name!r}: {error}") from error
+    except Exception as error:  # malformed PDF: report it, never crash the run
+        raise DocumentReadError(f"{path.name!r} could not be read as a PDF: {error}") from error
+    paragraphs = [page for page in pages if page]
+    if not paragraphs:
+        raise DocumentReadError(
+            f"{path.name!r} contains no extractable text (it may be a scanned image)."
+        )
+    return _assemble(paragraphs, path, "pdf")
+
+
 def _assemble(paragraphs: list[str], path: Path, kind: str) -> DocumentText:
     text = "\n".join(paragraphs)
     if len(text) > MAX_TEXT_CHARS:
@@ -145,10 +176,12 @@ def read_document(path: str | Path) -> DocumentText:
             f"{source.suffix} is an older Word format this reader cannot parse. "
             "Save it as .docx (Word: File > Save As > Word Document) and try again."
         )
+    if suffix in OPTIONAL_EXTENSIONS:
+        return _read_pdf(source)
     if suffix not in SUPPORTED_EXTENSIONS:
         raise DocumentReadError(
             f"Unsupported file type {source.suffix or '(none)'}. "
-            "Attach a .docx or .txt file."
+            "Attach a .docx, .md, .pdf, or .txt file."
         )
     if suffix in {".docx", ".docm"}:
         return _read_docx(source)
@@ -160,6 +193,7 @@ __all__ = [
     "DocumentText",
     "LEGACY_EXTENSIONS",
     "MAX_TEXT_CHARS",
+    "OPTIONAL_EXTENSIONS",
     "SUPPORTED_EXTENSIONS",
     "read_document",
 ]

@@ -21,6 +21,7 @@ from cli.menu import (
     run_curriculum,
     run_demo,
     run_evaluation,
+    run_ingest,
     run_insight,
     run_internet_learner,
     run_knowledge,
@@ -87,6 +88,18 @@ ACTIONS: tuple[GuiAction, ...] = (
         ("build", "--target-mb", "100"),
     ),
     GuiAction("knowledge-stats", "Show the bulk knowledge base status", run_knowledge, ("stats",)),
+    GuiAction(
+        "ingest-connectors",
+        "Ingest sources: files, SQL, authorized web",
+        run_ingest,
+        ("list-connectors",),
+    ),
+    GuiAction(
+        "ingest-stats",
+        "Show the ingestion status (store + ledger)",
+        run_ingest,
+        ("stats",),
+    ),
     GuiAction(
         "release",
         "Train everything for a release",

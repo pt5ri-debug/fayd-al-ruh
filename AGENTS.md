@@ -217,6 +217,25 @@ Arabic is kept as secondary aliases where useful.
   index exists. It is *reference material only*: never fed to the acceptance
   policy or belief layers.
 - `core/version.py` is the single source of the version string.
+- `ingest/` — the **local-first ingestion subsystem**: a separate pipeline that
+  turns *sources* into the same on-disk knowledge store without ever loading a
+  whole dataset into RAM. `ingest.records` holds the contracts (`SourceSpec`,
+  `SourceRecord`, `IngestItem`, `IngestionReport`, `Connector`); `ingest.registry`
+  resolves a source to a connector by scheme/suffix (files is the path/dir
+  fallback; the internet connector is registered only with `allow_web=True`);
+  `ingest.connectors.{files,sql,web}` stream TXT/MD/PDF/DOCX/CSV/JSON/JSONL,
+  read-only SQLite/driver DBs, and (denied by default, host-allow-listed or
+  explicitly authorized) one HTTP(S) page. `ingest.pipeline.IngestionPipeline`
+  streams `plan`→`stream_item`, chunk-appends to `core.knowledge_base`
+  (`INGESTED_SOURCE="ingested"`), skips unchanged sources via `ingest.dedup`
+  (`DedupLedger`, content-addressed `ingest:<blake2b>` chunk ids), captures a
+  bad source in `ingest.errors` (never raises a batch), and (optionally) records
+  resumable progress in `ingest.jobs`. `ingest.delete` removes a source's chunks
+  by an all-or-nothing shard rewrite and drops the stale FTS index. Ledger and
+  jobs live under `<store>/ingest/`; auto-excluded from its own walk. It never
+  touches training artifacts. CLI: `python -m cli ingest add|list-connectors|
+  stats|build-index|search|delete|jobs` (`cli/ingest.py`); the two knowledge
+  actions mirror into the GUI sidebar.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
   Update the baseline with `python -m evaluation --update-baseline`.

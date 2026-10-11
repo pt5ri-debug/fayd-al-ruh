@@ -230,6 +230,11 @@ def run_knowledge(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.knowledge", argv)
 
 
+def run_ingest(argv: Sequence[str] = ()) -> int:
+    """Add, inspect, or search ingested sources (files, SQL, authorized web)."""
+    return _run_module("cli.ingest", argv)
+
+
 def run_curriculum(argv: Sequence[str] = ()) -> int:
     """Show the seeded petroleum-engineering curriculum and its coverage."""
     if argv:
@@ -311,6 +316,8 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Ask the web and verify the answer", run_web, ("--approve",)),
     ("Build the bulk knowledge base (100 MB)", run_knowledge, ("build", "--target-mb", "100")),
     ("Show the bulk knowledge base status", run_knowledge, ("stats",)),
+    ("Ingest sources: files, SQL, authorized web", run_ingest, ("list-connectors",)),
+    ("Show the ingestion status (store + ledger)", run_ingest, ("stats",)),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--resume", "--episodes", "60")),
     (
@@ -347,6 +354,8 @@ HIDDEN_MENU_LABELS: frozenset[str] = frozenset(
         "Train petroleum-engineering tasks (with procedures)",
         "Show the petroleum-engineering curriculum",
         "Self-check the install",
+        "Ingest sources: files, SQL, authorized web",
+        "Show the ingestion status (store + ledger)",
     }
 )
 

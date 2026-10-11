@@ -17,6 +17,9 @@ Usage:
     python -m cli knowledge stats     # show the bulk knowledge base size
     python -m cli knowledge search Q  # search the built knowledge base
     python -m cli knowledge build-index # build the fast full-text index
+    python -m cli ingest add DOCS       # ingest files/folders/SQL (streaming)
+    python -m cli ingest list-connectors # show the available connectors
+    python -m cli ingest stats          # ingestion store + ledger status
     python -m cli paths               # show asset/data locations
     python -m cli demo                # local cognitive demo
     python -m cli ml --episodes 60    # ML pipeline
@@ -46,6 +49,7 @@ from cli.menu import (
     run_demo,
     run_evaluation,
     run_gui,
+    run_ingest,
     run_insight,
     run_internet_learner,
     run_jarvis,
@@ -74,6 +78,7 @@ _COMMANDS = {
     "internet-learner": run_internet_learner,
     "web": run_web,
     "knowledge": run_knowledge,
+    "ingest": run_ingest,
     "demo": run_demo,
     "ml": run_ml,
     "llm": run_llm,
