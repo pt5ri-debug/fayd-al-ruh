@@ -1,17 +1,23 @@
-"""Read plain text out of a Word ``.docx`` file, with no third-party dependency.
+"""Read plain text out of documents: text, Markdown, Word, and digital PDF.
 
-A ``.docx`` is an Office Open XML package: a ZIP archive whose main document is
-``word/document.xml``. The text of the document is the concatenation of its
-``<w:t>`` runs, with ``<w:p>`` paragraph boundaries and ``<w:tab>``/``<w:br>``
-markers honoured, so the extracted text keeps the paragraph and line structure a
-reader expects. The standard library's :mod:`zipfile` and :mod:`xml.etree` are
-enough, so the project keeps its no-mandatory-dependency promise.
+The reader is the project's single, dependency-light front door to a file's text:
 
-The reader is deliberately strict about what it accepts: only ``.docx`` (and the
-macro-enabled ``.docm``) are supported. The legacy binary ``.doc`` format is a
-different, undocumented layout, so it is refused with a clear message rather than
-scrambling its bytes into nonsense. A ``.txt`` file is read as-is, since plain
-text is already the thing this module produces.
+* ``.txt``/``.md``/``.markdown`` -- read with **safe encoding detection** (a BOM,
+  then strict UTF-8, then a short list of legacy encodings), preserving Arabic and
+  English; a very large file is streamed line by line under a hard character cap.
+* ``.docx``/``.docm`` -- a Word Office Open XML package (a ZIP holding
+  ``word/document.xml``), read through :mod:`core.docx_extract`, which owns the
+  untrusted-ZIP handling (resource limits, encrypted/legacy detection, malformed
+  reporting) and returns paragraphs **and table rows** in document order. The
+  standard library's :mod:`zipfile` and :mod:`xml.etree` are enough, so the
+  project keeps its no-mandatory-dependency promise.
+* ``.pdf`` -- a *digital* PDF, read page by page through :mod:`core.pdf_extract`
+  (the optional ``pypdf`` extra), preserving page numbers; a scanned PDF with no
+  text layer falls back to the separate optional OCR extra.
+
+The reader is deliberately strict about what it accepts: the legacy binary
+``.doc``/``.rtf`` formats are different, undocumented layouts, so they are refused
+with a clear message rather than scrambling their bytes into nonsense.
 """
 
 from __future__ import annotations
@@ -20,7 +26,6 @@ import codecs
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from xml.etree import ElementTree
 
 from core.text_encoding import (
     EncodingDetectionError,
@@ -28,10 +33,6 @@ from core.text_encoding import (
     detect_encoding,
 )
 from core.text_normalize import normalize_text
-
-_WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-_W = f"{{{_WORD_NAMESPACE}}}"
-_DOCUMENT_PART = "word/document.xml"
 
 #: Extensions this reader can turn into text.
 SUPPORTED_EXTENSIONS = frozenset({".docx", ".docm", ".txt", ".md", ".markdown"})
@@ -102,51 +103,37 @@ class DocumentText:
         return len(self.text.split())
 
 
-def _paragraph_text(paragraph: ElementTree.Element) -> str:
-    """The visible text of one ``<w:p>`` paragraph, with tabs and breaks honoured."""
-    parts: list[str] = []
-    for node in paragraph.iter():
-        if node.tag == f"{_W}t":
-            parts.append(node.text or "")
-        elif node.tag == f"{_W}tab":
-            parts.append("\t")
-        elif node.tag in (f"{_W}br", f"{_W}cr"):
-            parts.append("\n")
-    return "".join(parts)
+def _read_docx(path: Path, *, max_chars: int = MAX_TEXT_CHARS) -> DocumentText:
+    """Read a Word ``.docx``/``.docm`` body through :mod:`core.docx_extract`.
 
-
-def _read_docx(path: Path) -> DocumentText:
-    import zipfile
+    The extractor owns the untrusted-ZIP handling (resource limits, encrypted/
+    legacy detection, malformed-XML reporting) and returns blocks in document
+    order -- paragraphs and table rows -- so this stays a thin delegator. The
+    flattened block text becomes :class:`DocumentText` (tables included, which the
+    earlier paragraph-only reader dropped).
+    """
+    from core.docx_extract import DocxExtractionError, extract_docx
 
     try:
-        with zipfile.ZipFile(path) as archive:
-            try:
-                payload = archive.read(_DOCUMENT_PART)
-            except KeyError as error:
-                raise DocumentReadError(
-                    f"{path.name!r} is not a valid Word document (missing {_DOCUMENT_PART})."
-                ) from error
-    except zipfile.BadZipFile as error:
-        raise DocumentReadError(f"{path.name!r} is not a valid Word document.") from error
-    except OSError as error:
-        raise DocumentReadError(f"Could not open {path.name!r}: {error}") from error
-
-    try:
-        root = ElementTree.fromstring(payload)
-    except ElementTree.ParseError as error:
-        raise DocumentReadError(f"{path.name!r} has malformed document XML.") from error
-
-    paragraphs: list[str] = []
-    for paragraph in root.iter(f"{_W}p"):
-        text = _paragraph_text(paragraph)
-        if text.strip():
-            paragraphs.append(text.strip())
-
+        document = extract_docx(path, max_chars=max_chars)
+    except DocxExtractionError as error:
+        raise DocumentReadError(str(error)) from error
+    paragraphs = list(document.paragraphs)
     if not paragraphs:
         raise DocumentReadError(
             f"{path.name!r} contains no text (it may be empty, or hold only images or tables)."
         )
-    return _assemble(paragraphs, path, "docx")
+    result = _assemble(paragraphs, path, "docx")
+    if not document.title or document.title == path.stem:
+        return result
+    return DocumentText(
+        text=result.text,
+        paragraphs=result.paragraphs,
+        title=document.title,
+        kind=result.kind,
+        truncated=result.truncated,
+        encoding=result.encoding,
+    )
 
 
 def _read_text(path: Path, *, encoding: str | None = None) -> DocumentText:

@@ -4,6 +4,7 @@
     python -m cli ingest add data.csv
     python -m cli ingest add report.pdf
     python -m cli ingest add locked.pdf --pdf-password secret
+    python -m cli ingest add notes.docx
     python -m cli ingest add sqlite:///data/wells.db
     python -m cli ingest add https://www.spe.org/... --allow-web --approve
     python -m cli ingest list-connectors
@@ -12,7 +13,9 @@
 
 Local sources run with no network and no extra dependency. A *digital* PDF needs
 the optional ``[pdf]`` extra (``pip install fayd-al-ruh[pdf]``); ``--pdf-password``
-unlocks an encrypted one. A web source is the one exception: it needs
+unlocks an encrypted one. A Word ``.docx``/``.docm`` (Stage 2B) is read with the
+standard library only, treating it as an untrusted ZIP package with archive
+resource limits. A web source is the one exception: it needs
 ``--allow-web`` to even register the connector, and ``--approve`` to pass the
 permission and human-approval gates, so importing from the internet is a
 deliberate, audited act rather than a default.

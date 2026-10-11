@@ -18,12 +18,10 @@ def _write(path, text):
 
 
 def test_suffixes_cover_the_required_formats():
-    # Stage 1 supports TXT, Markdown, CSV, and JSON; Stage 2A adds digital PDF.
-    # DOCX/OCR remain out of scope.
-    for suffix in (".txt", ".md", ".markdown", ".csv", ".json", ".jsonl", ".pdf"):
+    # Stage 1 supports TXT, Markdown, CSV, and JSON; Stage 2A adds digital PDF;
+    # Stage 2B adds Word (.docx/.docm). OCR remains out of scope.
+    for suffix in (".txt", ".md", ".markdown", ".csv", ".json", ".jsonl", ".pdf", ".docx", ".docm"):
         assert suffix in ALL_SUFFIXES
-    for suffix in (".docx", ".docm"):
-        assert suffix not in ALL_SUFFIXES
 
 
 def test_stream_reads_a_txt_file(tmp_path):
@@ -128,10 +126,23 @@ def test_exclude_roots_skips_a_subtree(tmp_path):
     assert [r.title for r in records] == ["a"]
 
 
-def test_docx_is_out_of_scope_for_stage_1(tmp_path):
-    # DOCX/PDF are deliberately excluded from Stage 1, so the connector refuses
-    # an explicit .docx path rather than silently ingesting it.
-    path = tmp_path / "doc.docx"
-    path.write_bytes(b"PK\x03\x04 not really a docx")
+def test_docx_is_now_supported_by_the_file_connector(tmp_path):
+    # Stage 2B adds Word. A malformed .docx is still refused (as a bad package),
+    # not silently ingested; a valid one is read.
+    import zipfile
+
+    bad = tmp_path / "doc.docx"
+    bad.write_bytes(b"PK\x03\x04 not really a docx")
     with pytest.raises(ConnectorError):
-        list(FileConnector().stream(SourceSpec(str(path))))
+        list(FileConnector().stream(SourceSpec(str(bad))))
+
+    good = tmp_path / "good.docx"
+    xml = (
+        '<?xml version="1.0"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:body><w:p><w:r><w:t>Reservoir porosity.</w:t></w:r></w:p></w:body></w:document>"
+    )
+    with zipfile.ZipFile(good, "w") as archive:
+        archive.writestr("word/document.xml", xml)
+    records = list(FileConnector().stream(SourceSpec(str(good))))
+    assert records and records[0].metadata["kind"] == "docx"
