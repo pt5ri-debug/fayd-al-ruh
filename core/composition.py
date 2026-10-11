@@ -39,8 +39,16 @@ _TERMINAL = ".!?"
 # Raw model output is looser than authored prose: a continuation often runs on
 # past a sentence end starting the next one in lower case, so the model-specific
 # split keys on terminal punctuation plus whitespace alone (a decimal point has
-# no space after it, so "0.052 psi/ft" is still never split).
-_MODEL_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+# no space after it, so "0.052 psi/ft" is still never split). The byte model also
+# drops the space after a period ("...flows.Then it stops."), so a boundary
+# followed by an upper-case letter or an opening quote is a split too -- a digit
+# after the point ("0.052") is deliberately *not* one, so decimals stay intact.
+_MODEL_SENTENCE_RE = re.compile(r"(?<=[.!?])(?:\s+|(?=[A-Z\"\u201c]))")
+# A space before sentence punctuation ("flows . Then") is the byte model's, not
+# the sentence's: closing the gap is presentation, not a change of words. A
+# hyphen ("10 - 20") and a slash ("q / A") are left alone, so a range or a
+# formula keeps its spacing.
+_SPACE_BEFORE_MARK_RE = re.compile(r"\s+([.!?,;:])")
 # Runs the byte-level model repeats, such as the ")))))" or "..." at a stopping
 # point; a repeated mark is collapsed to one. When that mark is not itself a
 # sentence end it becomes a period, so the run reads as a sentence boundary.
@@ -198,6 +206,10 @@ def _tidy_marks(text: str) -> str:
 
     value = _REPEAT_MARK_RE.sub(_collapse, text)
     value = _REPEATED_PHRASE_RE.sub(r"\1", value)
+    # Close a gap the byte model leaves before punctuation ("flows . Then" ->
+    # "flows. Then"); a hyphen or slash is untouched, so a range/formula keeps
+    # its spacing.
+    value = _SPACE_BEFORE_MARK_RE.sub(r"\1", value)
     return clean(value)
 
 
@@ -256,7 +268,10 @@ def _model_sentences(raw: str) -> list[str]:
 
     A sentence survives when it starts at a boundary (upper case or a digit) and
     ends with terminal punctuation; the leading fragment and the trailing
-    mid-word fragment the byte model leaves are dropped here.
+    mid-word fragment the byte model leaves are dropped here. The model also runs
+    on past a boundary without capitalising ("...mixed. and the slurry is
+    pumped."), so every segment that begins after a boundary is capitalised --
+    presentation only, the words are untouched.
     """
     cleaned = _tidy_marks(raw)
     if not cleaned:
@@ -269,7 +284,12 @@ def _model_sentences(raw: str) -> list[str]:
     # lone lower-case sentence is still returned as the model's whole answer.
     if len(segments) > 1 and not (segments[0][0].isupper() or segments[0][0].isdigit()):
         segments.pop(0)
-    return segments
+    # A sentence that opens in lower case only because the byte model ran on past
+    # the previous boundary is capitalised, so the answer reads as sentences.
+    return [
+        segment[0].upper() + segment[1:] if segment[0].islower() else segment
+        for segment in segments
+    ]
 
 
 def compose_model_answer(raw: str, *, question: str = "") -> str:
