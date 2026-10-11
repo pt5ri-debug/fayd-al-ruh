@@ -16,6 +16,7 @@ import pytest
 from cli import menu as cli_menu
 from core.jarvis import JarvisMode, JarvisTurn
 from gui import actions as gui_actions
+from gui import modes as gui_modes
 from gui.service import ChatReply, ChatService
 
 
@@ -574,10 +575,10 @@ def test_window_sidebar_has_a_scrollbar_shown_only_on_overflow() -> None:
     root = tk.Tk()
     try:
         app = FaydGUI(root, service=_service(FakeSession()))
-        root.geometry("1160x420")  # short enough that the sidebar overflows
+        app._toggle_settings()  # the Actions list makes the sidebar long enough to overflow
+        root.geometry("1160x300")  # short enough that the sidebar overflows
         for _ in range(10):
             root.update()
-        # The actions overflow a short window, so the scrollbar is mapped.
         app._toggle_sidebar_scrollbar()
         root.update()
         assert app._side_scrollbar.winfo_ismapped()
@@ -660,14 +661,17 @@ def test_window_shows_actions_and_saved_chats() -> None:
     try:
         app = FaydGUI(root, service=_service(session))
         root.update()
-        # One button per action, none of them repeated.
+        # The Actions list is behind Settings; opening it builds one button per
+        # action, none of them repeated.
+        app._toggle_settings()
+        root.update()
         assert len(app._action_buttons) == len(ACTIONS)
         labels = [button.cget("text") for button in app._session_buttons]
         assert any("CNV-alpha" in text for text in labels)
         assert any("CNV-beta" in text for text in labels)
         # Tapping a saved chat marks it current, and the list refreshes in place.
         app._on_resume_session(
-            gui_actions.SessionItem("session:CNV-alpha", "CNV-alpha", "CNV-alpha")
+            gui_modes.HistoryItem("CNV-alpha", "CNV-alpha", None)
         )
         root.update()
         assert app.service.session == "CNV-alpha"

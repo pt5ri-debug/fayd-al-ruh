@@ -1279,9 +1279,7 @@ def curriculum_coverage_score(ontology: Ontology) -> float:
 
 
 def _add_concept(ontology: Ontology, label: str, aliases: tuple[str, ...]) -> Concept:
-    concept = Concept(label, frozenset(aliases))
-    ontology.add_concept(concept)
-    return concept
+    return ontology.add_concept_once(label, frozenset(aliases))
 
 
 def _add_relation(

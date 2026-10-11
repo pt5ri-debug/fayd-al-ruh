@@ -1,15 +1,20 @@
-"""The Tkinter window: a professional desktop front end for Fayd Al-Ruh.
+"""The Tkinter window: a ChatGPT-style desktop front end for Fayd Al-Ruh.
 
 Tkinter ships with CPython, so the GUI adds no dependency. Long work (an answer
 or a sidebar command) runs on a worker thread and posts results back through a
 queue; Tk is only ever touched from the main thread, as Tk requires.
 
-The look is deliberately restrained: a flat, high-contrast palette, a generous
-transcript with role-labelled message cards, and pill-shaped controls, so the
-window reads like a modern desktop assistant rather than a bare form.
+The layout follows ChatGPT closely: a collapsible left sidebar (logo, New chat,
+search, conversation history grouped by date, tools, settings), a slim header
+that names the active **operating mode** and the model selector, a centred
+transcript with Markdown-rendered messages, and a rounded composer pinned to the
+bottom. Two operating modes are offered -- **AI Mode** (conversation only) and
+**Jarvics Mode** (conversation plus sandboxed tools) -- with one obvious switch
+and a persisted choice; see :mod:`gui.modes`.
 
-This module is imported lazily by the CLI, so importing it never opens a window
-and never breaks the command-line path.
+The window is a thin shell over :class:`gui.service.ChatService`; it holds no
+answer logic of its own. This module is imported lazily by the CLI, so importing
+it never opens a window and never breaks the command-line path.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -31,11 +37,19 @@ from tkinter import simpledialog
 
 from core.paths import data_dir
 from core.version import __version__
-from gui.actions import ACTIONS, GuiAction, SessionItem, saved_session_items
+from gui import markdown as md
+from gui.actions import ACTIONS, GuiAction
 from gui.attachments import Attachment, AttachmentNotice
+from gui.modes import (
+    MODES,
+    HistoryItem,
+    ModeSpec,
+    group_by_date,
+    resolve_mode,
+    search_items,
+)
 from gui.options import build_parser
 from gui.service import ChatReply, ChatService
-from storage.json_store import JsonStore
 
 # ------------------------------------------------------- OpenHands design tokens
 #
@@ -47,6 +61,12 @@ from storage.json_store import JsonStore
 #: The small↔large radius pair OpenHands uses (HeroUI ``radius.small``/``large``).
 RADIUS_SMALL = 5
 RADIUS_LARGE = 20
+
+#: Below this width the sidebar starts hidden (a drawer), like ChatGPT on mobile.
+_COMPACT_WIDTH = 900
+#: The sidebar's expanded width and its collapsed rail width.
+_SIDEBAR_WIDTH = 288
+_RAIL_WIDTH = 0
 
 
 @dataclass(frozen=True)
@@ -77,6 +97,9 @@ class Theme:
     interactive_active: str  # selected/active on the base surface
     user_bubble: str       # user message fill
     user_bubble_fg: str    # user message text
+    code_bg: str           # fenced/inline code background
+    code_fg: str           # fenced code text
+    quote_bar: str         # blockquote accent
     success: str
     danger: str
     disabled: str
@@ -100,6 +123,9 @@ DARK_THEME = Theme(
     interactive_active="#383F50",  # cool-grey-800
     user_bubble="#2C313F",        # cool-grey-900, like OpenHands' bg-tertiary
     user_bubble_fg="#C3CDDC",
+    code_bg="#151A24",            # a touch deeper than the base
+    code_fg="#DCE3EE",
+    quote_bar="#4B5468",
     success="#A5E75E",
     danger="#E76A5E",
     disabled="#383F50",
@@ -123,6 +149,9 @@ LIGHT_THEME = Theme(
     interactive_active="#DCE3EE",  # cool-grey-200
     user_bubble="#EEF2F7",        # cool-grey-100
     user_bubble_fg="#0B0E14",
+    code_bg="#F0F3F8",
+    code_fg="#1B2029",
+    quote_bar="#C4CEDD",
     success="#3F7D1E",
     danger="#C0473C",
     disabled="#DCE3EE",
@@ -150,8 +179,18 @@ def _pick_font() -> str:
     return "TkDefaultFont"
 
 
+def _pick_mono() -> str:
+    """A monospace font for code, falling back to whatever Tk offers."""
+    for name in ("Consolas", "Menlo", "DejaVu Sans Mono", "Courier New", "Courier"):
+        if name in tkfont.families():
+            return name
+    return "TkFixedFont"
+
+
 def load_theme_name() -> str:
     """The saved theme name, defaulting to dark; never raises on a bad store."""
+    from storage.json_store import JsonStore
+
     try:
         saved = JsonStore(data_dir()).load(_THEME_NAMESPACE, _THEME_KEY)
     except Exception:  # a broken store must not stop the window opening
@@ -162,6 +201,8 @@ def load_theme_name() -> str:
 
 def save_theme_name(name: str) -> None:
     """Persist the chosen theme; a store error is silently ignored."""
+    from storage.json_store import JsonStore
+
     if name not in THEMES:
         return
     try:
@@ -310,6 +351,16 @@ class LineStream(io.TextIOBase):
         self._buffer = ""
 
 
+@dataclass
+class _Row:
+    """One transcript row and the widgets that make it up."""
+
+    role: str
+    widget: tk.Text
+    row: tk.Frame
+    text: str
+
+
 class FaydGUI:
     """The application window and its wiring to :class:`ChatService`."""
 
@@ -322,12 +373,14 @@ class FaydGUI:
         no_web: bool = False,
         session: str | None = None,
         theme: str | None = None,
+        operating_mode: str | None = None,
     ) -> None:
         self.root = root
         self.service = service or ChatService(
             no_web=no_web,
             model_checkpoint=model_checkpoint,
             session=session,
+            operating_mode=operating_mode,
         )
         self._results: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._lines: queue.Queue[str] = queue.Queue()
@@ -338,12 +391,22 @@ class FaydGUI:
         # freeze the window.
         self._pending: list[str] = []
         self._last_render = 0.0
-        self._bubbles: list[tk.Text] = []
-        self._bubble_roles: dict[tk.Text, str] = {}
+        self._rows: list[_Row] = []
         self._font = _pick_font()
+        self._mono = _pick_mono()
         self._thinking: tk.Label | None = None
         self._thinking_row: tk.Widget | None = None
         self._thinking_phase = 0
+        # Sidebar visibility. Wide windows show it; a compact window hides it as
+        # a drawer that the header's menu button toggles.
+        self._sidebar_visible = True
+        self._auto_hidden = False
+        self._settings_open = False
+        self._action_buttons: list[tk.Widget] = []
+        self._retry_text = ""
+        self._pending_message: str | None = None
+        self._confirm_bar: tk.Frame | None = None
+        self._history_query = tk.StringVar()
 
         # The theme is read from the user's saved preference unless one was passed
         # in; both toggle later through _toggle_theme.
@@ -371,12 +434,23 @@ class FaydGUI:
         self._clipboard_menu.add_command(label="Clear transcript", command=self._clear_transcript)
 
         root.title("Fayd Al-Ruh")
-        root.geometry("1160x768")
-        root.minsize(880, 560)
+        root.geometry("1180x780")
+        root.minsize(420, 520)
 
         self._build_ui()
+        root.bind("<Configure>", self._on_root_configure)
 
     # ------------------------------------------------------------------ layout
+
+    @property
+    def _bubbles(self) -> list[tk.Text]:
+        """The message text widgets, in order (kept for tests and callers)."""
+        return [entry.widget for entry in self._rows]
+
+    @property
+    def _session_buttons(self) -> list[tk.Widget]:
+        """The sidebar history widgets, in order (kept for tests and callers)."""
+        return self._history_buttons
 
     def _build_ui(self) -> None:
         """Build (or rebuild) the whole window for the current theme.
@@ -384,41 +458,43 @@ class FaydGUI:
         Called again by :meth:`_toggle_theme`; the transcript is snapshotted
         first and restored, so switching appearance keeps every message.
         """
-        had_messages = bool(self._bubbles)
-        self._bubbles = []
-        self._bubble_roles = {}
+        snapshot = self._snapshot_transcript()
+        self._rows = []
         self._pending = []
         self._streaming_label = None
         self._thinking_row = None
         self._thinking = None
+        self._confirm_bar = None
         for child in self.root.winfo_children():
             if isinstance(child, tk.Menu):  # the clipboard menu outlives a rebuild
                 continue
             child.destroy()
         self.root.configure(bg=self._theme.base)
 
-        self._build_sidebar()
-        self._build_main()
-        self._set_source_label()
-        if had_messages:
-            self._build_thinking()  # ready, but hidden until a job starts
-        else:
+        shell = tk.Frame(self.root, bg=self._theme.base)
+        shell.pack(fill="both", expand=True)
+        self._build_sidebar(shell)
+        self._build_main(shell)
+        self._apply_mode_label()
+        for role, text in snapshot:
+            self._add_bubble(role, text)
+        if not snapshot:
             self._show_hero()
         self._set_send_enabled(not self._busy)
         if not getattr(self, "_pumping", False):
             self._pumping = True
             self._pump()
 
-    def _build_sidebar(self) -> None:
-        sidebar = tk.Frame(self.root, bg=self._theme.surface, width=280)
+    def _build_sidebar(self, shell: tk.Frame) -> None:
+        """The left sidebar: brand, New chat, search, history, tools, settings."""
+        sidebar = tk.Frame(shell, bg=self._theme.surface, width=_SIDEBAR_WIDTH)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
-        # A hairline divides the sidebar from the conversation, like OpenHands.
+        self._sidebar = sidebar
         tk.Frame(sidebar, bg=self._theme.border_subtle, width=1).pack(side="right", fill="y")
 
         self._brand(sidebar)
 
-        # A filled "New chat" button, the sidebar's one primary action.
         new_chat = tk.Button(
             sidebar, text="＋   New chat", command=self._on_new_chat,
             bg=self._theme.surface_raised, fg=self._theme.contrast,
@@ -431,9 +507,15 @@ class FaydGUI:
         new_chat.bind("<Leave>", lambda _e: new_chat.configure(bg=self._theme.surface_raised))
         new_chat.pack(fill="x", padx=12, pady=(2, 6))
 
-        self._sidebar_button(sidebar, "⤓   Save conversation", self._on_save, small=True).pack(
-            fill="x", padx=12, pady=(0, 6)
+        self._search_entry = tk.Entry(
+            sidebar, textvariable=self._history_query, bg=self._theme.surface_raised,
+            fg=self._theme.foreground, insertbackground=self._theme.primary,
+            relief="flat", font=(self._font, 10), highlightthickness=0,
         )
+        self._search_entry.pack(fill="x", padx=12, pady=(0, 8), ipady=6)
+        self._search_entry.insert(0, "")
+        self._history_query.trace_add("write", lambda *_: self.refresh_history())
+        self._search_placeholder()
 
         # Everything below the header scrolls behind a scrollbar that appears
         # only when it actually overflows.
@@ -452,23 +534,28 @@ class FaydGUI:
             widget.bind("<Button-4>", self._on_sidebar_wheel)
             widget.bind("<Button-5>", self._on_sidebar_wheel)
 
-        self._section_label(panel, "Conversations", top=8)
-        self._sessions_panel = tk.Frame(panel, bg=self._theme.surface)
-        self._sessions_panel.pack(fill="x")
-        self._session_buttons: list[tk.Widget] = []
-        self.refresh_sessions()
+        self._section_label(panel, "Chats", top=2)
+        self._history_panel = tk.Frame(panel, bg=self._theme.surface)
+        self._history_panel.pack(fill="x")
+        self._history_buttons: list[tk.Widget] = []
+        self.refresh_history()
 
-        self._section_label(panel, "Answering with", top=14)
-        self._source_var = tk.StringVar(value=self.service.source)
-        for value, label in (("sources", "From sources (cited)"), ("model", "From trained model")):
-            self._radio(panel, label, value).pack(fill="x", padx=14, pady=1)
+        self._section_label(panel, "Tools", top=14)
+        self._tools_panel = tk.Frame(panel, bg=self._theme.surface)
+        self._tools_panel.pack(fill="x")
+        self._render_tools()
 
-        self._section_label(panel, "Actions", top=14)
-        self._actions_panel = tk.Frame(panel, bg=self._theme.surface)
-        self._actions_panel.pack(fill="x")
-        self._action_buttons = self._populate_actions(self._actions_panel)
+        self._section_label(panel, "Settings", top=14)
+        settings = tk.Frame(panel, bg=self._theme.surface)
+        settings.pack(fill="x")
+        self._settings_button = self._sidebar_button(
+            settings, "⚙   Settings", self._toggle_settings, small=True
+        )
+        self._settings_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._settings_panel = tk.Frame(panel, bg=self._theme.surface)
+        self._settings_panel.pack(fill="x")
 
-        self._section_label(panel, "Appearance", top=14)
+        self._section_label(panel, "Appearance", top=10)
         row = tk.Frame(panel, bg=self._theme.surface)
         row.pack(fill="x", padx=12, pady=(0, 14))
         right = "light mode  ☀" if self._theme.name == "dark" else "dark mode  ☾"
@@ -476,7 +563,7 @@ class FaydGUI:
             fill="x", pady=(0, 4)
         )
         tk.Label(
-            row, text="Theme is saved for next launch.", bg=self._theme.surface,
+            row, text="Theme and mode are saved for next launch.", bg=self._theme.surface,
             fg=self._theme.text_dim, font=(self._font, 8), anchor="w", padx=12,
         ).pack(fill="x")
 
@@ -485,6 +572,30 @@ class FaydGUI:
             font=(self._font, 8), anchor="w", justify="left", padx=18, pady=10,
         )
         self._status.pack(side="bottom", fill="x")
+
+        if self._is_compact():
+            sidebar.pack_forget()
+            self._sidebar_visible = False
+
+    def _search_placeholder(self) -> None:
+        """Show a greyed hint in the search box while it is empty."""
+        if self._history_query.get():
+            return
+        self._search_entry.configure(fg=self._theme.text_dim)
+        self._search_entry.insert(0, "Search chats")
+
+        def clear(_event: tk.Event) -> None:
+            if self._history_query.get() == "Search chats":
+                self._search_entry.delete(0, "end")
+                self._search_entry.configure(fg=self._theme.foreground)
+
+        def restore(_event: tk.Event) -> None:
+            if not self._history_query.get():
+                self._search_entry.configure(fg=self._theme.text_dim)
+                self._search_entry.insert(0, "Search chats")
+
+        self._search_entry.bind("<FocusIn>", clear)
+        self._search_entry.bind("<FocusOut>", restore)
 
     def _on_side_panel_configure(self, _event: tk.Event) -> None:
         self._side_canvas.configure(scrollregion=self._side_canvas.bbox("all"))
@@ -506,6 +617,8 @@ class FaydGUI:
         self._toggle_sidebar_scrollbar()
         return "break"
 
+    # ------------------------------------------------------------- appearance
+
     def _toggle_theme(self) -> str:
         """Switch between dark and light, persist the choice, and rebuild."""
         self._theme = LIGHT_THEME if self._theme.name == "dark" else DARK_THEME
@@ -516,16 +629,13 @@ class FaydGUI:
     def _rebuild_preserving_transcript(self) -> None:
         transcript = self._snapshot_transcript()
         self._build_ui()
-        for role, text in transcript:
-            self._add_bubble(role, text)
-        self._scroll_to_bottom()
+        # _build_ui restores the transcript itself; nothing more to do.
+        if transcript and self._rows:
+            self._scroll_to_bottom()
 
     def _snapshot_transcript(self) -> list[tuple[str, str]]:
         """The visible messages as (role, text), so a rebuild can restore them."""
-        return [
-            (self._bubble_roles.get(widget, "assistant"), widget.get("1.0", "end-1c"))
-            for widget in self._bubbles
-        ]
+        return [(entry.role, entry.text) for entry in self._rows]
 
     def _brand(self, sidebar: tk.Frame) -> None:
         header = tk.Frame(sidebar, bg=self._theme.surface)
@@ -553,60 +663,6 @@ class FaydGUI:
         label.pack(fill="x", pady=(top, 4))
         return label
 
-    def _radio(self, parent: tk.Misc, label: str, value: str) -> tk.Radiobutton:
-        return tk.Radiobutton(
-            parent, text=label, value=value, variable=self._source_var,
-            command=self._on_source_change, bg=self._theme.surface, fg=self._theme.foreground,
-            selectcolor=self._theme.surface, activebackground=self._theme.surface,
-            activeforeground=self._theme.foreground, font=(self._font, 10),
-            anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
-        )
-
-    def _populate_actions(self, parent: tk.Misc) -> list[tk.Widget]:
-        """Fill the Actions section with one button per entry (no duplicates)."""
-        buttons: list[tk.Widget] = []
-        for action in ACTIONS:
-            button = self._action_button(parent, action)
-            button.pack(fill="x", padx=12, pady=1)
-            buttons.append(button)
-        return buttons
-
-    def refresh_sessions(self) -> None:
-        """Rebuild the Saved chats list from the store, marking the current one."""
-        for widget in self._session_buttons:
-            widget.destroy()
-        self._session_buttons = []
-        try:
-            saved = self.service.list_sessions()
-        except Exception:  # a broken store must not blank the sidebar
-            saved = ()
-        items = saved_session_items(saved, current=self.service.session)
-        if not items:
-            hint = tk.Label(
-                self._sessions_panel, text="No saved chats yet.", bg=self._theme.surface,
-                fg=self._theme.text_dim, font=(self._font, 9), anchor="w", padx=18, pady=2,
-            )
-            hint.pack(fill="x")
-            self._session_buttons.append(hint)
-            return
-        for item in items:
-            button = self._session_button(self._sessions_panel, item)
-            button.pack(fill="x", padx=10, pady=1)
-            self._session_buttons.append(button)
-
-    def _session_button(self, parent: tk.Misc, item: SessionItem) -> tk.Label:
-        """A sidebar button that resumes one saved chat."""
-        return self._sidebar_button(
-            parent, item.label, lambda: self._on_resume_session(item), small=True,
-            active=item.is_current,
-        )
-
-    def _action_button(self, parent: tk.Misc, action: GuiAction) -> tk.Label:
-        """A sidebar button bound to one action (avoids a late-bound lambda)."""
-        return self._sidebar_button(
-            parent, action.label, lambda: self._on_action(action), small=True
-        )
-
     def _sidebar_button(
         self,
         parent: tk.Misc,
@@ -630,13 +686,127 @@ class FaydGUI:
         button.bind("<Button-1>", lambda _e: command())
         return button
 
-    def _build_main(self) -> None:
-        main = tk.Frame(self.root, bg=self._theme.base)
+    # ----------------------------------------------------------------- history
+
+    def refresh_history(self) -> None:
+        """Rebuild the Chats list from the store, grouped by date, with search."""
+        panel = getattr(self, "_history_panel", None)
+        if panel is None:
+            return
+        for widget in self._history_buttons:
+            widget.destroy()
+        self._history_buttons = []
+        try:
+            items = self.service.saved_session_summaries()
+        except Exception:  # a broken store must not blank the sidebar
+            items = ()
+        query = self._history_query.get()
+        if query == "Search chats":
+            query = ""
+        items = search_items(items, query)
+        if not items:
+            hint = tk.Label(
+                self._history_panel,
+                text="No matching chats." if query else "No saved chats yet.",
+                bg=self._theme.surface, fg=self._theme.text_dim, font=(self._font, 9),
+                anchor="w", padx=18, pady=2,
+            )
+            hint.pack(fill="x")
+            self._history_buttons.append(hint)
+            return
+        for bucket, group in group_by_date(items):
+            header = tk.Label(
+                self._history_panel, text=bucket, bg=self._theme.surface,
+                fg=self._theme.text_dim, font=(self._font, 8, "bold"), anchor="w", padx=18,
+            )
+            header.pack(fill="x", pady=(6, 1))
+            self._history_buttons.append(header)
+            for item in group:
+                button = self._history_button(self._history_panel, item)
+                button.pack(fill="x", padx=10, pady=1)
+                self._history_buttons.append(button)
+
+    def _history_button(self, parent: tk.Misc, item: HistoryItem) -> tk.Label:
+        label = f"{item.label}   ✓" if item.is_current else item.label
+        return self._sidebar_button(
+            parent, label, lambda: self._on_resume_session(item), small=True, active=item.is_current
+        )
+
+    def _render_tools(self) -> None:
+        """List the sandbox tools in the sidebar; dim them when tools are off."""
+        for child in self._tools_panel.winfo_children():
+            child.destroy()
+        if not self.service.tool_names:
+            tk.Label(
+                self._tools_panel, text="No tools available.", bg=self._theme.surface,
+                fg=self._theme.text_dim, font=(self._font, 9), anchor="w", padx=18, pady=2,
+            ).pack(fill="x")
+            return
+        enabled = self.service.tools_enabled
+        colour = self._theme.foreground if enabled else self._theme.text_dim
+        for name in self.service.tool_names:
+            tk.Label(
+                self._tools_panel, text=f"• {name}", bg=self._theme.surface, fg=colour,
+                font=(self._font, 9), anchor="w", padx=20, pady=1,
+            ).pack(fill="x")
+        note = (
+            "Available in Jarvics Mode."
+            if enabled
+            else "Switch to Jarvics Mode to use them."
+        )
+        tk.Label(
+            self._tools_panel, text=note, bg=self._theme.surface, fg=self._theme.text_dim,
+            font=(self._font, 8), anchor="w", padx=20, pady=2, wraplength=232, justify="left",
+        ).pack(fill="x")
+
+    def _toggle_settings(self) -> None:
+        """Expand/collapse the settings panel inside the sidebar."""
+        if self._settings_open:
+            for child in self._settings_panel.winfo_children():
+                child.destroy()
+            self._settings_open = False
+            return
+        self._settings_open = True
+        panel = self._settings_panel
+        tk.Label(
+            panel, text="Answering mouth", bg=self._theme.surface, fg=self._theme.text_secondary,
+            font=(self._font, 8, "bold"), anchor="w", padx=18,
+        ).pack(fill="x", pady=(6, 2))
+        self._source_var = tk.StringVar(value=self.service.source)
+        for value, label in (("sources", "From sources (cited)"), ("model", "From trained model")):
+            self._radio(panel, label, value).pack(fill="x", padx=14, pady=1)
+        self._sidebar_button(
+            panel, "⤓   Save conversation", self._on_save, small=True
+        ).pack(fill="x", padx=12, pady=(6, 0))
+        self._sidebar_button(
+            panel, "⌫   Clear transcript", self._clear_transcript, small=True
+        ).pack(fill="x", padx=12, pady=(2, 0))
+        self._section_label(panel, "Actions", top=8)
+        for action in ACTIONS:
+            button = self._sidebar_button(
+                panel, action.label, partial(self._on_action, action), small=True
+            )
+            button.pack(fill="x", padx=12, pady=1)
+            self._action_buttons.append(button)
+
+    def _radio(self, parent: tk.Misc, label: str, value: str) -> tk.Radiobutton:
+        return tk.Radiobutton(
+            parent, text=label, value=value, variable=self._source_var,
+            command=self._on_source_change, bg=self._theme.surface, fg=self._theme.foreground,
+            selectcolor=self._theme.surface, activebackground=self._theme.surface,
+            activeforeground=self._theme.foreground, font=(self._font, 10),
+            anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
+        )
+
+    # -------------------------------------------------------------------- main
+
+    def _build_main(self, shell: tk.Frame) -> None:
+        main = tk.Frame(shell, bg=self._theme.base)
         main.pack(side="left", fill="both", expand=True)
+        self._main_frame = main
 
-        self._build_toolbar(main)
+        self._build_header(main)
 
-        # Scrollable transcript, its rows centred into a readable column.
         container = tk.Frame(main, bg=self._theme.base)
         container.pack(fill="both", expand=True)
         self._canvas = tk.Canvas(container, bg=self._theme.base, highlightthickness=0)
@@ -645,8 +815,7 @@ class FaydGUI:
         self._canvas.configure(yscrollcommand=self._scrollbar.set)
 
         self._transcript = tk.Frame(self._canvas, bg=self._theme.base)
-        self._rows: list[tk.Frame] = []
-        self._row_of: dict[tk.Text, tk.Frame] = {}
+        self._row_frames: list[tk.Frame] = []
         self._window = self._canvas.create_window((0, 0), window=self._transcript, anchor="nw")
         self._transcript.bind("<Configure>", self._on_transcript_configure)
         self._canvas.bind("<Configure>", self._on_canvas_configure)
@@ -655,10 +824,69 @@ class FaydGUI:
             widget.bind("<Button-4>", self._on_mousewheel)
             widget.bind("<Button-5>", self._on_mousewheel)
 
+        self._empty: tk.Widget | None = None
         self._build_composer(main)
 
-        # A friendly empty state, shown until the first message arrives.
-        self._empty: tk.Widget | None = None
+    def _build_header(self, main: tk.Frame) -> None:
+        """The slim top bar: mode switch, model selector, and menu controls."""
+        bar = tk.Frame(main, bg=self._theme.base)
+        bar.pack(fill="x")
+        inner = tk.Frame(bar, bg=self._theme.base)
+        inner.pack(fill="x", padx=12, pady=8)
+
+        # Left: the sidebar toggle (also the mobile drawer handle) and the title.
+        self._sidebar_toggle = self._icon_button(
+            inner, "☰", self._toggle_sidebar, tip="Show or hide the sidebar"
+        )
+        self._sidebar_toggle.pack(side="left")
+
+        # The mode switch: one obvious control, the active mode shown by name.
+        self._mode_var = tk.StringVar(value=self.service.operating_mode.label)
+        self._mode_menu = tk.OptionMenu(
+            inner, self._mode_var, *[mode.label for mode in MODES], command=self._on_mode_menu,
+        )
+        self._mode_menu.configure(
+            bg=self._theme.surface_raised, fg=self._theme.contrast, activebackground=self._theme.interactive_active,
+            activeforeground=self._theme.contrast, relief="flat", highlightthickness=0,
+            font=(self._font, 10, "bold"), padx=10, pady=4, bd=0, cursor="hand2",
+            indicatoron=True,
+        )
+        self._mode_menu["menu"].configure(bg=self._theme.surface, fg=self._theme.foreground)
+        self._mode_menu.pack(side="left", padx=(8, 0))
+        self._mode_label = tk.Label(
+            inner, text="", bg=self._theme.base, fg=self._theme.text_secondary,
+            font=(self._font, 9), anchor="w",
+        )
+        self._mode_label.pack(side="left", padx=(10, 0))
+
+        # Right: the model selector (the window's real mouth switch) and theme.
+        self._source_var_menu = tk.StringVar(value=self._source_choice_label())
+        self._source_menu = tk.OptionMenu(
+            inner, self._source_var_menu,
+            "From sources (cited)", "From trained model", command=self._on_source_menu,
+        )
+        self._source_menu.configure(
+            bg=self._theme.base, fg=self._theme.foreground, activebackground=self._theme.surface_raised,
+            activeforeground=self._theme.contrast, relief="flat", highlightthickness=0,
+            font=(self._font, 9), padx=6, pady=3, bd=0, cursor="hand2",
+        )
+        self._source_menu["menu"].configure(bg=self._theme.surface, fg=self._theme.foreground)
+        self._source_menu.pack(side="right")
+        self._icon_button(inner, "☾" if self._theme.name == "dark" else "☀", self._toggle_theme, tip="Toggle theme").pack(
+            side="right", padx=(0, 6)
+        )
+
+        tk.Frame(main, bg=self._theme.border_subtle, height=1).pack(fill="x")
+
+    def _icon_button(self, parent: tk.Misc, glyph: str, command: Callable[[], Any], *, tip: str = "") -> tk.Button:
+        button = tk.Button(
+            parent, text=glyph, command=command, bg=self._theme.base, fg=self._theme.foreground,
+            activebackground=self._theme.surface_raised, activeforeground=self._theme.contrast,
+            font=(self._font, 13), relief="flat", borderwidth=0, padx=8, pady=2, cursor="hand2",
+        )
+        if tip:
+            _Tooltip(button, tip, self._theme, self._font)
+        return button
 
     def _column_pad(self) -> int:
         """Side padding that centres the transcript in a readable column."""
@@ -666,7 +894,7 @@ class FaydGUI:
         width = canvas.winfo_width() if canvas is not None else 0
         if width <= 1:
             return 20
-        return max(20, (width - _COLUMN_MAX) // 2)
+        return max(16, (width - _COLUMN_MAX) // 2)
 
     def _user_width(self, text: str) -> int:
         """A width for a right-aligned bubble: fit the longest line, capped."""
@@ -679,7 +907,7 @@ class FaydGUI:
         if self._empty is not None:
             return
         self._empty = tk.Frame(self._transcript, bg=self._theme.base)
-        self._empty.pack(pady=(72, 0), padx=24)
+        self._empty.pack(pady=(64, 0), padx=24)
         badge = tk.Canvas(
             self._empty, width=64, height=64, bg=self._theme.base, highlightthickness=0
         )
@@ -695,101 +923,33 @@ class FaydGUI:
             bg=self._theme.base, fg=self._theme.foreground, font=(self._font, 14),
         ).pack(pady=(6, 0))
         tk.Label(
-            self._empty,
-            text="Reservoir rock properties, drilling, production, petrophysics …",
+            self._empty, text=self._hero_subtitle(),
             bg=self._theme.base, fg=self._theme.text_secondary, font=(self._font, 11),
+            justify="center", wraplength=560,
         ).pack(pady=(10, 0))
         tk.Label(
             self._empty,
-            text="“From sources” gives cited answers · “From model” shows what the trained model learned",
+            text="Answering mouth: “From sources” cites passages · “From trained model” shows what it learned",
             bg=self._theme.base, fg=self._theme.text_dim, font=(self._font, 9), justify="center",
             wraplength=560,
         ).pack(pady=(16, 0))
 
-    def _build_toolbar(self, main: tk.Frame) -> None:
-        bar = tk.Frame(main, bg=self._theme.base)
-        bar.pack(fill="x")
-        inner = tk.Frame(bar, bg=self._theme.base)
-        inner.pack(fill="x", padx=18, pady=9)
-        tk.Label(
-            inner, text="Chat", bg=self._theme.base, fg=self._theme.contrast,
-            font=(self._font, 13, "bold"), anchor="w",
-        ).pack(side="left")
-        self._mode_label = tk.Label(
-            inner, text="", bg=self._theme.base, fg=self._theme.text_secondary,
-            font=(self._font, 10), anchor="e",
-        )
-        self._mode_label.pack(side="right")
-        tk.Frame(main, bg=self._theme.border_subtle, height=1).pack(fill="x")
-
-    def _build_composer(self, main: tk.Frame) -> None:
-        composer = tk.Frame(main, bg=self._theme.base)
-        composer.pack(fill="x", padx=self._column_pad(), pady=(12, 16))
-
-        # Files attached to this conversation appear as removable chips above the
-        # input, like a modern chat composer.
-        self._attachments_row = tk.Frame(composer, bg=self._theme.base)
-        self._attachment_chips: list[tk.Widget] = []
-        self._attachments_row.pack(side="top", fill="x", pady=(0, 6))
-
-        # The composer is a rounded surface card, matching OpenHands' 15px panel.
-        self._composer_box = RoundedBox(
-            composer, bg=self._theme.surface, fill=self._theme.surface,
-            outline=self._theme.border, corner=RADIUS_LARGE, parent_bg=self._theme.base,
-        )
-        self._composer_box.pack(side="top", fill="x")
-        field = self._composer_box.inner
-
-        # A "+" button beside the input opens a file picker for Word documents.
-        self._attach_button = tk.Button(
-            field, text="＋", command=self._on_attach_clicked,
-            bg=self._theme.surface, fg=self._theme.text_dim,
-            activebackground=self._theme.surface, activeforeground=self._theme.contrast,
-            font=(self._font, 16, "bold"), relief="flat", borderwidth=0,
-            padx=12, pady=0, cursor="hand2",
-        )
-        self._attach_button.pack(side="left", fill="y")
-        self._attach_tip = _Tooltip(
-            self._attach_button, "Attach a Word (.docx) or text file", self._theme, self._font
-        )
-
-        self._entry = tk.Text(
-            field, height=2, width=1, bg=self._theme.surface, fg=self._theme.contrast,
-            insertbackground=self._theme.primary, font=(self._font, 11),
-            relief="flat", wrap="word", padx=6, pady=12,
-            highlightthickness=0, borderwidth=0,
-        )
-        self._entry.pack(side="left", fill="both", expand=True)
-        self._entry.bind("<Return>", self._on_enter)
-        self._entry.bind("<Shift-Return>", lambda _e: None)
-        self._entry.bind("<FocusIn>", lambda _e: self._composer_box.set_outline(self._theme.primary))
-        self._entry.bind("<FocusOut>", lambda _e: self._composer_box.set_outline(self._theme.border))
-
-        # A circular send button, like OpenHands' size-8 round control.
-        self._send = tk.Button(
-            field, text="↑", command=self._on_send, bg=self._theme.primary,
-            fg=self._theme.primary_foreground, activebackground=self._theme.primary,
-            activeforeground=self._theme.primary_foreground,
-            font=(self._font, 14, "bold"), relief="flat", borderwidth=0,
-            padx=0, pady=2, width=2, cursor="hand2",
-        )
-        self._send.pack(side="right", padx=(6, 2), pady=8)
-        self._render_attachment_chips()
-        self._entry.focus_set()
+    def _hero_subtitle(self) -> str:
+        if self.service.tools_enabled:
+            return (
+                "Jarvics Mode: ask a question, or give a command — list files, read a "
+                "file, search, or calculate — run inside the sandbox."
+            )
+        return "AI Mode: reservoir rock, drilling, production, petrophysics … answers with citations."
 
     # -------------------------------------------------------------- transcript
 
     def _add_bubble(self, role: str, text: str, *, extra: str = "") -> tk.Text:
-        """Add one message row and return its selectable read-only text widget.
-
-        User messages are a small rounded bubble on the right; assistant and note
-        messages are full-width rows in the centred column, the assistant's with a
-        gold avatar, mirroring the OpenHands transcript.
-        """
+        """Add one message row and return its selectable read-only text widget."""
         pad = self._column_pad()
         row = tk.Frame(self._transcript, bg=self._theme.base)
         row.pack(fill="x", padx=(pad, pad), pady=6)
-        self._rows.append(row)
+        self._row_frames.append(row)
         self._hide_empty()
 
         if role == "user":
@@ -799,12 +959,10 @@ class FaydGUI:
                 parent_bg=self._theme.base,
             )
             card.pack(side="right", anchor="e")
-            inner = card.inner
             widget = tk.Text(
-                inner, height=1, wrap="word", relief="flat", borderwidth=0,
+                card.inner, height=1, wrap="word", relief="flat", borderwidth=0,
                 highlightthickness=0, bg=self._theme.user_bubble, fg=self._theme.user_bubble_fg,
-                font=(self._font, 11), padx=14, pady=8, cursor="xterm", takefocus=1,
-                width=0,
+                font=(self._font, 11), padx=14, pady=8, cursor="xterm", takefocus=1, width=0,
             )
             widget.insert("1.0", text)
             self._make_read_only(widget)
@@ -829,8 +987,9 @@ class FaydGUI:
                 row, height=1, wrap="word", relief="flat", borderwidth=0,
                 highlightthickness=0, bg=bg, fg=fg, font=(self._font, 11),
                 padx=(6 if role != "note" else 0), pady=0, cursor="xterm", takefocus=1,
+                spacing1=1, spacing3=1,
             )
-            widget.insert("1.0", text if not extra else f"{text}\n\n{extra}")
+            self._insert_rich(widget, f"{text}\n\n{extra}" if extra else text)
             self._make_read_only(widget)
             widget.pack(fill="x")
             self._fit_height(widget)
@@ -840,20 +999,130 @@ class FaydGUI:
 
         footer = tk.Frame(row, bg=self._theme.base)
         footer.pack(fill="x", pady=(2, 0))
+        if role != "user":
+            self._copy_label(footer, "⧉ Copy", widget)
+            retry = tk.Label(
+                footer, text="↻ Retry", bg=self._theme.base, fg=self._theme.text_dim,
+                font=(self._font, 8), cursor="hand2",
+            )
+            retry.pack(side="left", padx=(10, 0))
+            retry.bind("<Button-1>", lambda _e: self._on_retry())
+            retry.bind("<Enter>", lambda _e: retry.configure(fg=self._theme.foreground))
+            retry.bind("<Leave>", lambda _e: retry.configure(fg=self._theme.text_dim))
+        else:
+            self._copy_label(footer, "⧉ Copy", widget)
+
+        self._rows.append(_Row(role=role, widget=widget, row=row, text=text))
+        self._scroll_to_bottom()
+        return widget
+
+    def _copy_label(self, footer: tk.Frame, text: str, widget: tk.Text) -> None:
         copy = tk.Label(
-            footer, text="⧉ Copy", bg=self._theme.base, fg=self._theme.text_dim,
+            footer, text=text, bg=self._theme.base, fg=self._theme.text_dim,
             font=(self._font, 8), cursor="hand2",
         )
-        copy.pack(side="right" if role == "user" else "left")
+        copy.pack(side="right" if widget.cget("bg") == self._theme.user_bubble else "left")
         copy.bind("<Button-1>", lambda _e: self._copy_widget(widget))
         copy.bind("<Enter>", lambda _e: copy.configure(fg=self._theme.foreground))
         copy.bind("<Leave>", lambda _e: copy.configure(fg=self._theme.text_dim))
 
-        self._bubbles.append(widget)
-        self._bubble_roles[widget] = role
-        self._row_of[widget] = row
-        self._scroll_to_bottom()
-        return widget
+    def _insert_rich(self, widget: tk.Text, text: str) -> None:
+        """Insert Markdown-styled text into a Text widget, tags included.
+
+        Newlines are inserted *between* lines only, so the widget's content is the
+        message exactly -- no trailing newline -- which keeps a copied message
+        byte-for-byte identical to what was shown.
+        """
+        self._configure_tags(widget)
+        for index, styled in enumerate(md.iter_styled_lines(text)):
+            if index:
+                widget.insert("end", "\n")
+            self._insert_styled_line(widget, styled)
+
+    def _configure_tags(self, widget: tk.Text) -> None:
+        """Create the tags a rendered message uses, on this widget."""
+        theme = self._theme
+        widget.tag_configure("heading", font=(self._font, 15, "bold"), foreground=theme.contrast,
+                             spacing1=6, spacing3=4)
+        widget.tag_configure("heading3", font=(self._font, 12, "bold"), foreground=theme.contrast,
+                             spacing1=4, spacing3=3)
+        widget.tag_configure("bullet", lmargin1=16, lmargin2=30)
+        widget.tag_configure("quote", lmargin1=16, lmargin2=16, foreground=theme.text_secondary,
+                             background=theme.surface_raised)
+        widget.tag_configure("code", font=(self._mono, 10), background=theme.code_bg,
+                             foreground=theme.code_fg, lmargin1=10, lmargin2=10, spacing1=2, spacing3=2)
+        widget.tag_configure("table", font=(self._mono, 10), foreground=theme.foreground, lmargin1=8)
+        widget.tag_configure("rule", foreground=theme.border)
+        widget.tag_configure("bold", font=(self._font, 11, "bold"), foreground=theme.contrast)
+        widget.tag_configure("inline_code", font=(self._mono, 10), background=theme.code_bg,
+                             foreground=theme.code_fg)
+        widget.tag_configure("kw", foreground=theme.primary)
+        widget.tag_configure("str", foreground=theme.success)
+        widget.tag_configure("cmt", foreground=theme.text_dim)
+
+    def _insert_styled_line(self, widget: tk.Text, styled: md.StyledLine) -> None:
+        start = widget.index("end-1c")
+        widget.insert("end", styled.text)
+        end = widget.index("end-1c")
+        tag = None
+        if styled.in_code:
+            tag = "code"
+        elif styled.kind == md.HEADING:
+            tag = "heading" if styled.level <= 2 else "heading3"
+        elif styled.kind in (md.BULLET, md.NUMBER):
+            tag = "bullet"
+        elif styled.kind == md.QUOTE:
+            tag = "quote"
+        elif styled.kind == md.TABLE:
+            tag = "table"
+        elif styled.kind == md.RULE:
+            tag = "rule"
+        if tag:
+            widget.tag_add(tag, start, end)
+        if styled.in_code:
+            self._highlight_code_line(widget, styled.text, start, end)
+        elif styled.kind not in (md.CODE, md.RULE):
+            self._inline_tags(widget, styled.text, start)
+
+    def _inline_tags(self, widget: tk.Text, line: str, line_start: str) -> None:
+        """Add bold / inline-code tags to the recognised spans of one line."""
+        row = line_start.split(".")[0]
+        for segment in md.parse_inline(line):
+            if segment.kind == "text":
+                continue
+            # parse_inline returns whole-line offsets; map them onto the widget.
+            offset = line.index(segment.text) if segment.kind == "bold" else None
+            if segment.kind == "bold":
+                token = f"**{segment.text}**"
+                idx = line.find(token)
+                if idx >= 0:
+                    widget.tag_add("bold", f"{row}.{idx}", f"{row}.{idx + len(token)}")
+            elif offset is not None:
+                widget.tag_add("inline_code", f"{row}.{offset}", f"{row}.{offset + len(segment.text)}")
+        # Inline code is handled explicitly: mark `x` spans.
+        position = 0
+        while True:
+            opening = line.find("`", position)
+            if opening < 0:
+                break
+            closing = line.find("`", opening + 1)
+            if closing < 0:
+                break
+            widget.tag_add("inline_code", f"{row}.{opening}", f"{row}.{closing + 1}")
+            position = closing + 1
+
+    def _highlight_code_line(self, widget: tk.Text, line: str, start: str, end: str) -> None:
+        """Colour keywords/strings/comments inside a fenced code line."""
+        row = start.split(".")[0]
+        for segment in md.highlight_code(line):
+            if segment.kind == "plain" or segment.text == "\n":
+                continue
+            tag = {"keyword": "kw", "string": "str", "comment": "cmt"}.get(segment.kind)
+            if tag is None:
+                continue
+            idx = line.find(segment.text)
+            if idx >= 0:
+                widget.tag_add(tag, f"{row}.{idx}", f"{row}.{idx + len(segment.text)}")
 
     def _avatar(self, parent: tk.Misc) -> None:
         """A small gold disc with the brand letter, beside an assistant message."""
@@ -865,14 +1134,14 @@ class FaydGUI:
     def _reflow(self) -> None:
         """Recentre rows and resize bubbles after the window width changes."""
         pad = self._column_pad()
-        for row in self._rows:
+        for row in self._row_frames:
             row.pack_configure(padx=(pad, pad))
-        for widget in self._bubbles:
-            if self._bubble_roles.get(widget) == "user":
-                self._fit_height(widget)
-                box = widget.master.master if widget.master is not None else None
+        for entry in self._rows:
+            if entry.role == "user":
+                self._fit_height(entry.widget)
+                box = entry.widget.master.master if entry.widget.master is not None else None
                 if isinstance(box, RoundedBox):
-                    box.configure(width=self._user_width(widget.get("1.0", "end-1c")))
+                    box.configure(width=self._user_width(entry.text))
 
     @staticmethod
     def _role_label(role: str) -> str:
@@ -887,23 +1156,18 @@ class FaydGUI:
 
     @staticmethod
     def _make_read_only(widget: tk.Text) -> None:
-        """Keep a Text editable-looking but read-only, yet still selectable/copyable.
-
-        Blocking only the mutating keys (rather than ``state="disabled"``) keeps
-        selection, Ctrl+C, and the mouse working normally.
-        """
+        """Keep a Text editable-looking but read-only, yet still selectable/copyable."""
         def block(event: tk.Event) -> str:
             if int(event.state) & 0x0004 or int(event.state) & 0x0008:  # Control / Command
-                return ""  # let accelerators (copy, select-all) through
+                return ""
             if event.keysym in {"Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next"}:
-                return ""  # allow navigation
+                return ""
             return "break"
 
         for sequence in ("<Key>", "<<Paste>>", "<<Cut>>", "<<Clear>>"):
             widget.bind(sequence, block)
 
     def _on_bubble_wheel(self, event: tk.Event) -> str:
-        """Scroll the transcript when the bubble has nothing of its own to scroll."""
         widget = event.widget
         spans = widget.yview() if isinstance(widget, tk.Text) else (0.0, 1.0)
         if spans[0] <= 0.0 and spans[1] >= 1.0:
@@ -912,22 +1176,14 @@ class FaydGUI:
         return ""
 
     def _fit_height(self, widget: tk.Text) -> None:
-        """Size a read-only Text to its wrapped content, up to a scroll cap.
-
-        ``count -displaylines`` reports the number of line *boundaries* between
-        the two indices, which is one fewer than the lines the content occupies;
-        counting to ``"end"`` (which includes the widget's implicit trailing line)
-        yields the true display-line count. Counting from ``"1.0"`` to ``"end-1c"``
-        instead undercounts by one, so a short answer is sized one line short and
-        its last line -- the whole body of a two-line model answer -- is clipped.
-        """
+        """Size a read-only Text to its wrapped content, up to a scroll cap."""
         widget.update_idletasks()
         measured = widget.count("1.0", "end", "displaylines")
         lines = int(measured[0]) if measured else 1
         widget.configure(height=min(max(lines, 1), _MAX_BUBBLE_LINES))
 
     def _bubble_texts(self) -> list[str]:
-        return [widget.get("1.0", "end-1c") for widget in self._bubbles]
+        return [entry.text for entry in self._rows]
 
     def _hide_empty(self) -> None:
         empty = getattr(self, "_empty", None)
@@ -949,7 +1205,6 @@ class FaydGUI:
         self.root.update_idletasks()
 
     def _selected_text(self) -> str:
-        """The selection from the focused Text widget, falling back to any selection."""
         widget = self.root.focus_get()
         if isinstance(widget, tk.Text):
             try:
@@ -957,19 +1212,18 @@ class FaydGUI:
                     return widget.get("sel.first", "sel.last")
             except tk.TclError:
                 pass
-        for candidate in self._bubbles:
+        for entry in self._rows:
             try:
-                if candidate.tag_ranges("sel"):
-                    return candidate.get("sel.first", "sel.last")
+                if entry.widget.tag_ranges("sel"):
+                    return entry.widget.get("sel.first", "sel.last")
             except tk.TclError:
                 continue
         return ""
 
     def _on_copy(self, _event: tk.Event | None = None) -> str:
-        """Copy the focused or transcript selection; never clobber it with nothing."""
         selection = self._selected_text()
         if not selection:
-            return ""  # nothing selected: leave the clipboard (and composer) alone
+            return ""
         self._copy_text(selection)
         return "break"
 
@@ -978,35 +1232,23 @@ class FaydGUI:
 
     def _on_select_all(self, _event: tk.Event | None = None) -> str:
         if self.root.focus_get() is self._entry:
-            return ""  # keep the composer's own editing untouched
-        for widget in self._bubbles:
-            widget.tag_add("sel", "1.0", "end-1c")
+            return ""
+        for entry in self._rows:
+            entry.widget.tag_add("sel", "1.0", "end-1c")
         return "break"
 
     def _on_clear_transcript(self, _event: tk.Event | None = None) -> str:
         if self.root.focus_get() is self._entry:
-            return ""  # Delete while typing edits the composer, never the transcript
+            return ""
         self._clear_transcript()
         return "break"
 
     def _clear_transcript(self) -> None:
-        for widget in list(self._bubbles):
-            self._destroy_bubble(widget)
-        self._bubbles.clear()
-        self._bubble_roles.clear()
+        for entry in list(self._rows):
+            entry.row.destroy()
         self._rows.clear()
-        self._row_of.clear()
+        self._row_frames.clear()
         self._show_hero()
-
-    def _destroy_bubble(self, widget: tk.Text) -> None:
-        """Remove a message widget and its wrapping row."""
-        row: tk.Misc | None = self._row_of.pop(widget, None)
-        if row is None:
-            row = widget.master
-        if row in self._rows:
-            self._rows.remove(row)
-        if row is not None:
-            row.destroy()
 
     def _on_transcript_configure(self, _event: tk.Event) -> None:
         self._canvas.configure(scrollregion=self._canvas.bbox("all"))
@@ -1019,7 +1261,6 @@ class FaydGUI:
             self._empty.pack_configure(padx=self._column_pad())
 
     def _toggle_scrollbar(self) -> None:
-        """Show the scrollbar only when the transcript actually overflows."""
         first, last = self._canvas.yview()
         if first <= 0.0 and last >= 1.0:
             self._scrollbar.pack_forget()
@@ -1038,20 +1279,173 @@ class FaydGUI:
         self._canvas.yview_moveto(1.0)
         self._toggle_scrollbar()
 
-    # --------------------------------------------------------------- behavior
+    # ------------------------------------------------------------- composer
 
-    def _set_source_label(self) -> None:
-        self._mode_label.configure(text=self._source_label_text())
+    def _build_composer(self, main: tk.Frame) -> None:
+        composer = tk.Frame(main, bg=self._theme.base)
+        composer.pack(fill="x", padx=self._column_pad(), pady=(8, 14))
+        self._composer_wrap = composer
+
+        self._confirm_bar = tk.Frame(composer, bg=self._theme.surface_raised)
+        self._confirm_label = tk.Label(
+            self._confirm_bar, text="", bg=self._theme.surface_raised, fg=self._theme.foreground,
+            font=(self._font, 9), anchor="w", justify="left", wraplength=_COLUMN_MAX - 200,
+        )
+        self._confirm_label.pack(side="left", padx=10, pady=6)
+        for label, approve in (("Run", True), ("Cancel", False)):
+            button = tk.Button(
+                self._confirm_bar, text=label,
+                command=partial(self._resolve_confirmation, approve),
+                bg=self._theme.primary if approve else self._theme.surface,
+                fg=self._theme.primary_foreground if approve else self._theme.foreground,
+                relief="flat", borderwidth=0, font=(self._font, 9, "bold"), padx=10, pady=2,
+                cursor="hand2",
+            )
+            button.pack(side="right", padx=(0, 6), pady=4)
+
+        self._attachments_row = tk.Frame(composer, bg=self._theme.base)
+        self._attachment_chips: list[tk.Widget] = []
+        self._attachments_row.pack(side="top", fill="x", pady=(0, 6))
+
+        self._composer_box = RoundedBox(
+            composer, bg=self._theme.surface, fill=self._theme.surface,
+            outline=self._theme.border, corner=RADIUS_LARGE, parent_bg=self._theme.base,
+        )
+        self._composer_box.pack(side="top", fill="x")
+        field = self._composer_box.inner
+
+        self._attach_button = tk.Button(
+            field, text="＋", command=self._on_attach_clicked,
+            bg=self._theme.surface, fg=self._theme.text_dim,
+            activebackground=self._theme.surface, activeforeground=self._theme.contrast,
+            font=(self._font, 16, "bold"), relief="flat", borderwidth=0,
+            padx=12, pady=0, cursor="hand2",
+        )
+        self._attach_button.pack(side="left", fill="y")
+        _Tooltip(self._attach_button, "Attach a Word (.docx) or text file", self._theme, self._font)
+
+        self._entry = tk.Text(
+            field, height=2, width=1, bg=self._theme.surface, fg=self._theme.contrast,
+            insertbackground=self._theme.primary, font=(self._font, 11),
+            relief="flat", wrap="word", padx=6, pady=12,
+            highlightthickness=0, borderwidth=0,
+        )
+        self._entry.pack(side="left", fill="both", expand=True)
+        self._entry.bind("<Return>", self._on_enter)
+        self._entry.bind("<Shift-Return>", lambda _e: None)
+        self._entry.bind("<FocusIn>", lambda _e: self._composer_box.set_outline(self._theme.primary))
+        self._entry.bind("<FocusOut>", lambda _e: self._composer_box.set_outline(self._theme.border))
+
+        self._send = tk.Button(
+            field, text="↑", command=self._on_send, bg=self._theme.primary,
+            fg=self._theme.primary_foreground, activebackground=self._theme.primary,
+            activeforeground=self._theme.primary_foreground,
+            font=(self._font, 14, "bold"), relief="flat", borderwidth=0,
+            padx=0, pady=2, width=2, cursor="hand2",
+        )
+        self._send.pack(side="right", padx=(6, 2), pady=8)
+        self._render_attachment_chips()
+        self._entry.focus_set()
+
+    # ------------------------------------------------------------- behavior
+
+    def _apply_mode_label(self) -> None:
+        """Reflect the current operating mode in the header and the composer hint."""
+        spec = self.service.operating_mode
+        self._mode_var.set(spec.label)
+        self._mode_label.configure(text=f"{spec.label} · {spec.description}")
+        self._mode_menu.configure(fg=self._theme.contrast)
+
+    def _source_choice_label(self) -> str:
+        return "From trained model" if self.service.source == "model" else "From sources (cited)"
 
     def _status_text(self) -> str:
         return (
             f"Session  {self.service.session or 'unsaved'}\n"
-            "Ctrl+N new · Ctrl+S save · Ctrl+C copy"
+            f"{self.service.operating_mode.label} · Ctrl+N new · Ctrl+S save"
+        )
+
+    def _on_mode_menu(self, label: str) -> None:
+        """Switch operating mode from the header control; messages are preserved."""
+        spec = resolve_mode(label)
+        self._set_mode(spec)
+
+    def _set_mode(self, spec: ModeSpec) -> None:
+        previous = self.service.operating_mode
+        if spec.key == previous.key:
+            return
+        self.service.set_operating_mode(spec.key)
+        self._apply_mode_label()
+        self._render_tools()
+        self._add_bubble(
+            "note",
+            f"Switched to {spec.label}. "
+            + (
+                "Sandboxed tools are now available for this conversation."
+                if spec.allows_tools
+                else "Answers stay conversational; tools are off."
+            ),
+        )
+        self._update_status()
+
+    def _on_source_menu(self, label: str) -> None:
+        want = "model" if label.startswith("From trained") else "sources"
+        if want == self.service.source:
+            return
+        try:
+            if want == "model":
+                self.service.use_model()
+            else:
+                self.service.use_sources()
+        except (FileNotFoundError, OSError, ValueError) as error:
+            self._source_menu_var_reset()
+            self._add_bubble(
+                "note",
+                f"Could not load the trained model: {error}\n"
+                "Train it first with the “Train the language model” action.",
+            )
+            return
+        self._source_menu_var_reset()
+        self._add_bubble(
+            "note",
+            "Now answering from the trained model (no sources)."
+            if want == "model"
+            else "Now answering from sources, with citations.",
+        )
+
+    def _source_menu_var_reset(self) -> None:
+        """Keep the model selector's shown value in step with the real mouth."""
+        self._source_var_menu.set(self._source_choice_label())
+
+    def _on_source_change(self) -> None:
+        """The settings-panel radio, mirroring the header's model selector."""
+        want = self._source_var.get()
+        if want == self.service.source:
+            return
+        try:
+            if want == "model":
+                self.service.use_model()
+            else:
+                self.service.use_sources()
+        except (FileNotFoundError, OSError, ValueError) as error:
+            self._source_var.set(self.service.source)
+            self._add_bubble(
+                "note",
+                f"Could not load the trained model: {error}\n"
+                "Train it first with the “Train the language model” action.",
+            )
+            return
+        self._source_menu_var_reset()
+        self._add_bubble(
+            "note",
+            "Now answering from the trained model (no sources)."
+            if want == "model"
+            else "Now answering from sources, with citations.",
         )
 
     def _on_enter(self, _event: tk.Event) -> str:
         self._on_send()
-        return "break"  # keep the newline out of the box
+        return "break"
 
     def _on_send(self) -> None:
         if self._busy:
@@ -1061,8 +1455,48 @@ class FaydGUI:
             return
         self._entry.delete("1.0", "end")
         self._add_bubble("user", message)
-        self._show_thinking("Thinking")
+
+        # In Jarvics Mode a destructive plan asks first; everything else sends now.
+        preview = self.service.preview_execution(message) if self.service.tools_enabled else None
+        if preview is not None and preview.kind == "tool" and preview.needs_confirmation:
+            self._ask_confirmation(message, preview)
+            return
+        self._dispatch(message)
+
+    def _ask_confirmation(self, message: str, preview) -> None:
+        """Show the plan and wait for the user before a mutating tool runs."""
+        self._pending_message = message
+        lines = "\n".join(f"• {step['tool']}: {step['arguments']}" for step in preview.steps)
+        self._confirm_label.configure(
+            text=f"This will change files in the sandbox:\n{lines}\nRun it?"
+        )
+        if self._confirm_bar is not None:
+            self._confirm_bar.pack(side="top", fill="x", pady=(0, 6), before=self._attachments_row)
+        self._scroll_to_bottom()
+
+    def _resolve_confirmation(self, approve: bool) -> None:
+        message = self._pending_message
+        self._pending_message = None
+        if self._confirm_bar is not None:
+            self._confirm_bar.pack_forget()
+        if not message:
+            return
+        if approve:
+            self._dispatch(message)
+        else:
+            self._add_bubble("note", "Cancelled — the tool was not run.")
+
+    def _dispatch(self, message: str) -> None:
+        self._retry_text = message
+        self._show_thinking("Thinking" if not self.service.tools_enabled else "Working")
         self._start_work(lambda: self.service.ask(message))
+
+    def _on_retry(self) -> None:
+        """Re-send the last message; the previous answer stays in the transcript."""
+        if self._busy or not self._retry_text:
+            return
+        self._add_bubble("note", f"Retrying: {self._retry_text}")
+        self._dispatch(self._retry_text)
 
     def _on_new_chat(self, _event: tk.Event | None = None) -> str:
         if self._busy:
@@ -1070,9 +1504,10 @@ class FaydGUI:
         conversation_id = self.service.new_conversation()
         self._hide_thinking()
         self._reset_attachments()
+        self._clear_transcript()
         self._add_bubble("note", f"Started a new conversation ({conversation_id}).")
         self._update_status()
-        self.refresh_sessions()
+        self.refresh_history()
         return "break"
 
     def _on_save(self, _event: tk.Event | None = None) -> str:
@@ -1080,25 +1515,56 @@ class FaydGUI:
             return "break"
         self._add_bubble("note", self.service.save())
         self._update_status()
-        self.refresh_sessions()
+        self.refresh_history()
         return "break"
 
-    def _on_resume_session(self, item: SessionItem) -> None:
+    def _on_resume_session(self, item: HistoryItem) -> None:
         if self._busy or item.is_current:
             return
         if self.service.resume(item.session_id):
             self._reset_attachments()
             self._add_bubble("note", f"Resumed conversation {item.session_id}.")
             self._update_status()
-            self.refresh_sessions()
+            self.refresh_history()
         else:
             self._add_bubble("note", f"Could not resume conversation {item.session_id}.")
-            self.refresh_sessions()
+            self.refresh_history()
+
+    # ---------------------------------------------------------- sidebar toggle
+
+    def _is_compact(self) -> bool:
+        width = self.root.winfo_width()
+        if width <= 1:
+            return False  # not realised yet; keep the sidebar visible
+        return width < _COMPACT_WIDTH
+
+    def _toggle_sidebar(self) -> None:
+        """Show or hide the sidebar (a drawer on a compact window)."""
+        if self._sidebar_visible:
+            self._sidebar.pack_forget()
+            self._sidebar_visible = False
+            self._auto_hidden = False
+        else:
+            self._sidebar.pack(side="left", fill="y", before=self._main_frame)
+            self._sidebar_visible = True
+            self._auto_hidden = False
+
+    def _on_root_configure(self, event: tk.Event) -> None:
+        """Collapse the sidebar to a drawer on a compact window, and restore it."""
+        if event.widget is not self.root:
+            return
+        if self._is_compact() and self._sidebar_visible:
+            self._sidebar.pack_forget()
+            self._sidebar_visible = False
+            self._auto_hidden = True
+        elif not self._is_compact() and not self._sidebar_visible and getattr(self, "_auto_hidden", False):
+            self._sidebar.pack(side="left", fill="y", before=self._main_frame)
+            self._sidebar_visible = True
+            self._auto_hidden = False
 
     # ------------------------------------------------------------ attachments
 
     def _on_attach_clicked(self) -> None:
-        """Open a file picker for a Word document and attach the choice."""
         path = filedialog.askopenfilename(
             parent=self.root,
             title="Attach a document",
@@ -1112,7 +1578,6 @@ class FaydGUI:
             self._on_attach(path)
 
     def _on_attach(self, path: str) -> AttachmentNotice:
-        """Read and index a file, then show it in the transcript and as a chip."""
         notice = self.service.attach_file(path)
         if not notice.ok:
             self._add_bubble("note", f"Could not attach {notice.filename}: {notice.message}")
@@ -1125,15 +1590,12 @@ class FaydGUI:
         return notice
 
     def _render_attachment_chips(self) -> None:
-        """Rebuild the removable chips for the files attached to this chat."""
         if not hasattr(self, "_attachments_row"):
             return
         for widget in self._attachment_chips:
             widget.destroy()
         self._attachment_chips = []
         attachments = self.service.attachments
-        # The row stays packed (an empty frame has no visible height); re-packing
-        # it after forgetting would move it behind the input and give it no space.
         self._attachments_row.pack_configure(pady=(0, 6) if attachments else 0)
         for attachment in attachments:
             self._attachment_chips.append(self._attachment_chip(attachment))
@@ -1166,37 +1628,13 @@ class FaydGUI:
         )
 
     def _reset_attachments(self) -> None:
-        """Detach every file, used when the conversation changes."""
         self.service.clear_attachments()
         self._render_attachment_chips()
 
     def _update_status(self) -> None:
         self._status.configure(text=self._status_text())
 
-    def _on_source_change(self) -> None:
-        want = self._source_var.get()
-        if want == self.service.source:
-            return
-        try:
-            if want == "model":
-                self.service.use_model()
-            else:
-                self.service.use_sources()
-        except (FileNotFoundError, OSError, ValueError) as error:
-            self._source_var.set(self.service.source)
-            self._add_bubble(
-                "note",
-                f"Could not load the trained model: {error}\n"
-                "Train it first with the “Train the language model” action.",
-            )
-            return
-        self._set_source_label()
-        self._add_bubble(
-            "note",
-            "Now answering from the trained model (no sources)."
-            if want == "model"
-            else "Now answering from sources, with citations.",
-        )
+    # ---------------------------------------------------------------- actions
 
     def _on_action(self, action: GuiAction) -> None:
         if self._busy:
@@ -1212,13 +1650,9 @@ class FaydGUI:
         self._start_work(lambda: self._run_action(action, argv))
 
     def _prompt_for_question(self, title: str) -> str:
-        """Ask for the extra argument an action needs; empty means cancelled."""
         return (simpledialog.askstring(title, "Question:", parent=self.root) or "").strip()
 
     def _run_action(self, action: GuiAction, argv: tuple[str, ...]) -> str:
-        # Capture stdout (the report) while streaming stderr -- the live training
-        # progress -- into the transcript line by line, so a long run never looks
-        # frozen and the operator can watch the time remaining.
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(LineStream(self._lines)):
             action.command(argv)
@@ -1226,16 +1660,9 @@ class FaydGUI:
         return output or f"{action.label} finished."
 
     def _append_progress_line(self, text: str) -> None:
-        """Queue one live output line; the pump flushes them at a bounded rate."""
         self._pending.append(text)
 
     def _flush_progress(self, *, force: bool = False) -> None:
-        """Render queued progress lines, coalesced and rate-limited.
-
-        A training loop can emit many lines between pumps; joining them into one
-        widget update keeps the window responsive instead of reconfiguring a
-        widget and re-scrolling on every single line.
-        """
         if not self._pending:
             return
         now = time.monotonic()
@@ -1254,7 +1681,6 @@ class FaydGUI:
     # ------------------------------------------------------- thinking indicator
 
     def _build_thinking(self) -> None:
-        """Build the (initially hidden) Thinking row once, ready to reveal."""
         row = tk.Frame(self._transcript, bg=self._theme.base)
         self._thinking_row = row
         self._thinking = tk.Label(
@@ -1266,7 +1692,6 @@ class FaydGUI:
         self._thinking_phase = 1
 
     def _show_thinking(self, label: str) -> None:
-        """Reveal the animated indicator so a pending answer never looks frozen."""
         if self._thinking is None or self._thinking_row is None:
             self._build_thinking()
         self._thinking_base = label
@@ -1295,7 +1720,6 @@ class FaydGUI:
     # -------------------------------------------------------------- threading
 
     def _start_work(self, job) -> None:
-        """Run ``job`` on a worker thread; its result becomes an assistant bubble."""
         self._busy = True
         self._set_send_enabled(False)
         self._status.configure(text="Working…\nThis can take a moment.")
@@ -1316,7 +1740,6 @@ class FaydGUI:
         )
 
     def _pump(self) -> None:
-        """Drain worker results and live progress lines on the Tk main thread."""
         self._drain_lines(cap=500)
         self._flush_progress()
         try:
@@ -1324,8 +1747,6 @@ class FaydGUI:
         except queue.Empty:
             kind = None
         if kind is not None:
-            # The job has ended, so every line it printed is already queued;
-            # drain them all into the same live bubble before showing the result.
             self._drain_lines(cap=None)
             self._flush_progress(force=True)
             self._hide_thinking()
@@ -1337,11 +1758,10 @@ class FaydGUI:
             self._streaming_label = None
             self._set_send_enabled(True)
             self._update_status()
-            self.refresh_sessions()
+            self.refresh_history()
         self.root.after(100, self._pump)
 
     def _drain_lines(self, *, cap: int | None) -> None:
-        """Move queued live-output lines into the pending buffer, optionally capped."""
         drained = 0
         while cap is None or drained < cap:
             try:
@@ -1352,20 +1772,25 @@ class FaydGUI:
 
     def _render_result(self, payload: Any) -> None:
         if isinstance(payload, ChatReply):
-            self._add_bubble("assistant", payload.text)
+            if payload.steps:
+                self._add_bubble("assistant", self._render_steps(payload))
+            else:
+                self._add_bubble("assistant", payload.text)
             if payload.hint:
                 self._add_bubble("note", payload.hint)
         else:
             self._add_bubble("assistant", str(payload))
-        self._mode_label.configure(text=self._source_label_text())
         self._entry.focus_set()
 
-    def _source_label_text(self) -> str:
-        return (
-            "Answering from the trained model (no sources)"
-            if self.service.source == "model"
-            else "Answering from sources (cited)"
-        )
+    @staticmethod
+    def _render_steps(payload: ChatReply) -> str:
+        """Render a tool run's trace so results and errors are both visible."""
+        lines: list[str] = []
+        for step in payload.steps:
+            status = "ok" if step.get("ok") else "error"
+            detail = step.get("output") if step.get("ok") else step.get("error")
+            lines.append(f"- **{step.get('tool', '?')}** [{status}]: {detail}")
+        return "\n".join(lines) if lines else payload.text
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1384,6 +1809,7 @@ def main(argv: list[str] | None = None) -> int:
         read_write=args.read_write,
         model_checkpoint=args.model_checkpoint,
         session=args.session,
+        operating_mode=args.mode,
     )
     if args.mind:
         try:

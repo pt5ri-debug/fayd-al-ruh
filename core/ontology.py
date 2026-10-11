@@ -15,6 +15,20 @@ class Ontology:
             raise ValueError(f"Concept '{concept.id}' already exists.")
         self.concepts[concept.id] = concept
 
+    def add_concept_once(self, label: str, aliases: frozenset[str] = frozenset()) -> Concept:
+        """Add a concept, regenerating its id on the rare random-id collision.
+
+        Concept ids carry a truncated random suffix, so two seeded concepts can in
+        principle draw the same id and abort seeding. Regenerate until the id is
+        free, mirroring :meth:`add_relation_once`, so seeding never fails on a
+        clash. The label is not de-duplicated here -- callers check first.
+        """
+        concept = Concept(label, aliases)
+        while concept.id in self.concepts:
+            concept = Concept(label, aliases)
+        self.add_concept(concept)
+        return concept
+
     def add_relation(self, relation: SemanticRelation) -> None:
         if relation.id in self.relations:
             raise ValueError(f"Semantic relation '{relation.id}' already exists.")

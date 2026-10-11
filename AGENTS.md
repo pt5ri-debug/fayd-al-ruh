@@ -288,12 +288,26 @@ Arabic is kept as secondary aliases where useful.
 - `gui/` — ChatGPT-style desktop window, an alternative *front end* to `cli/`,
   never a replacement. `service.py` reuses the text `chat` session
   (`ai.jarvis.build_session(text_only=True)`) + `ai.chat.ModelSwitcher` and adds
-  `list_sessions`/`resume`; `actions.py` maps the sidebar to `cli.menu.run_*` —
+  `list_sessions`/`resume`, `saved_session_summaries` (dated `HistoryItem`s for
+  the sidebar), `set_operating_mode`, and `preview_execution` (the confirmation
+  gate for a mutating tool); `actions.py` maps the sidebar to `cli.menu.run_*` —
   the **Actions** list mirrors numbered CLI items 5..11 (never repeating the
-  window's own controls) and `saved_session_items` builds the **Saved chats**
-  list; `options.py` has the argument parser; `app.py` is the Tkinter window
-  (imported lazily, so `cli/` never imports Tk). Reachable as `python -m cli gui`
-  and `python -m gui`.
+  window's own controls); `options.py` has the argument parser (`--mode ai|jarvics`);
+  `app.py` is the Tkinter window (imported lazily, so `cli/` never imports Tk).
+  Reachable as `python -m cli gui` and `python -m gui`.
+- `gui/modes.py` — the two operating modes. **AI Mode** (`allows_tools=False`)
+  answers conversationally; **Jarvics Mode** (`allows_tools=True`) also runs the
+  sandboxed tools. `AnswerOnlyRouter` is the brain of AI Mode: it subclasses the
+  real `NaturalLanguageRouter` and always decides *answer*, so a command-shaped
+  sentence can never run a tool there. The chosen key persists through `JsonStore`
+  (`load_mode_key`/`save_mode_key`), `resolve_mode` accepts a key or a label and
+  falls back safely, and `HistoryItem`/`group_by_date`/`search_items` feed the
+  sidebar's dated, searchable history. Tk-free, so it is testable headless.
+- `gui/markdown.py` — a dependency-free block/segment renderer for the
+  transcript: headings, lists, block quotes, fenced code (with a light token
+  highlighter), tables, horizontal rules, and inline bold/code, returned as
+  `StyledLine`/`Segment`s the window paints with Tk text tags. No Markdown library
+  is added.
 - `gui/app.py` — a professional desktop front end styled after the **OpenHands
   chat UI**: the same cool-grey token scale (base `cool-grey-950`, surface
   `cool-grey-925`, raised `cool-grey-900`), the gold primary accent, and
@@ -309,22 +323,27 @@ Arabic is kept as secondary aliases where useful.
   **dark** and a **light** theme (the Appearance control toggles it, the choice
   is saved through `JsonStore` and reloaded on the next launch, and the whole
   window is rebuilt for the new palette with the transcript preserved), a
-  scrollable sidebar (brand + version, a filled **New chat** button, source
-  switch, **Conversations**, **Actions**) behind a scrollbar that appears only
-  when the content overflows, a toolbar showing the current answering source,
-  and a centred hero/empty state that gives way to the first message (and
-  returns when the transcript is cleared). A **＋** button beside the input
-  attaches a Word (`.docx`/`.docm`) or text file: the file's text is indexed into
-  the source assistant's store and previewed in the transcript, a removable chip
-  tracks it, and detaching (the chip's ✕, or a new chat) removes it from the
-  store. Each message body is a read-only `tk.Text`, so answers and live training
-  output can be selected and copied — per-message Copy button, Ctrl+C copies the
-  selection, Ctrl+A selects all, Delete clears, right-click offers copy /
-  copy-conversation / select-all / clear; Ctrl+N new chat, Ctrl+S save. A small
-  animated "Thinking…" indicator shows while an answer is pending. Live training
-  output is queued and rendered at a bounded rate (coalesced into one widget
-  update every ~0.15 s, fully drained before the result), so a fast training loop
-  never freezes the window.
+  collapsible sidebar (brand + version, a filled **New chat** button, a search
+  box, **Conversations** grouped by date, the sandbox tools, **Settings** with
+  the answering-mouth switch and the **Actions** list) behind a scrollbar that
+  appears only when the content overflows, a header showing the active mode by
+  name (one switch) plus the model selector, and a centred hero/empty state that
+  gives way to the first message (and returns when the transcript is cleared).
+  On a narrow (mobile-sized) window the sidebar becomes a drawer that
+  `_toggle_sidebar` shows or hides and that is restored when the window widens.
+  Assistant answers are rendered as **Markdown** through `gui/markdown.py`
+  (`_insert_rich`/`_insert_styled_line`/`_inline_tags`). A **＋** button beside
+  the input attaches a Word (`.docx`/`.docm`) or text file: the file's text is
+  indexed into the source assistant's store and previewed in the transcript, a
+  removable chip tracks it, and detaching (the chip's ✕, or a new chat) removes
+  it from the store. Each message body is a read-only `tk.Text`, so answers and
+  live training output can be selected and copied — per-message Copy button,
+  Ctrl+C copies the selection, Ctrl+A selects all, Delete clears, right-click
+  offers copy / copy-conversation / select-all / clear; Ctrl+N new chat, Ctrl+S
+  save. A small animated "Thinking…" indicator shows while an answer is pending.
+  Live training output is queued and rendered at a bounded rate (coalesced into
+  one widget update every ~0.15 s, fully drained before the result), so a fast
+  training loop never freezes the window.
 - `core/document_reader.py` — read text out of a Word file with no third-party
   dependency: a `.docx`/`.docm` is an Office Open XML package (a ZIP holding
   `word/document.xml`), read through **`core/docx_extract.py`** (Stage 2B), which

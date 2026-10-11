@@ -422,9 +422,7 @@ def domain_summary(self_model: SelfModel | None = None) -> str:
 
 
 def _add_concept(ontology: Ontology, label: str, aliases: tuple[str, ...]) -> Concept:
-    concept = Concept(label, frozenset(aliases))
-    ontology.add_concept(concept)
-    return concept
+    return ontology.add_concept_once(label, frozenset(aliases))
 
 
 def _add_relation(

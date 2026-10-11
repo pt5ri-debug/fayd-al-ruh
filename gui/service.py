@@ -10,14 +10,25 @@ answer is.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ai import chat as chat_module
 from ai import mind as mind_module
 from ai.jarvis import build_session
+from core.command_router import RouteKind, RoutedCommand
 from core.jarvis import JarvisMode, JarvisTurn
+from core.paths import data_dir
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
+from gui.modes import (
+    AnswerOnlyRouter,
+    HistoryItem,
+    ModeSpec,
+    load_mode_key,
+    resolve_mode,
+    save_mode_key,
+)
 
 
 @dataclass
@@ -34,6 +45,28 @@ class ChatReply:
     steps: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ExecutionPreview:
+    """What a message would do in the current mode, before it is sent.
+
+    Used to ask for confirmation on a destructive or sensitive action: when
+    :attr:`needs_confirmation` is true, the window shows the plan's steps and the
+    user must approve before the tool runs. It is computed with the *real* router,
+    so it describes the same decision the sandbox would make.
+    """
+
+    kind: str
+    summary: str
+    steps: tuple[dict[str, str], ...] = ()
+    needs_confirmation: bool = False
+
+
+#: Tools that change something on disk, so Jarvics Mode asks before running them.
+#: Read-only tools (list/search/read/calculate) run without a prompt; a write is
+#: the one sandboxed action that leaves a lasting change, so it is confirmed.
+_DESTRUCTIVE_TOOLS = frozenset({"write_file"})
+
+
 class ChatService:
     """Owns one conversation session and answers questions for the GUI.
 
@@ -41,6 +74,11 @@ class ChatService:
 
     - ``"sources"`` -- grounded answers with citations (default).
     - ``"model"`` -- answers from the trained language model, no citations.
+
+    ``mode`` selects the *operating mode* (see :mod:`gui.modes`). In **AI Mode**
+    the message is answered conversationally and no tool can run. In **Jarvics
+    Mode** the same message may be routed to a sandboxed tool by the project's
+    real router, under every existing guarantee.
     """
 
     def __init__(
@@ -54,6 +92,8 @@ class ChatService:
         model_checkpoint: str | None = None,
         max_new_tokens: int = 96,
         session: str | None = None,
+        operating_mode: str | None = None,
+        data_root: Path | None = None,
     ) -> None:
         self.mode = mode or build_session(
             root=root,
@@ -77,6 +117,81 @@ class ChatService:
         # in the UI and detached again. Their text is already in the assistant's
         # store (see attach_file), so they need no separate retrieval path.
         self.attachments: list[Attachment] = []
+
+        # The operating mode. The *real* router is kept so Jarvics Mode can run
+        # tools; AI Mode swaps in an answer-only router that never plans one.
+        self._data_root = data_root if data_root is not None else data_dir()
+        self._tool_router = getattr(self.mode, "router", None)
+        self._answer_router = (
+            AnswerOnlyRouter(self._tool_router.sandbox) if self._tool_router is not None else None
+        )
+        key = operating_mode if operating_mode is not None else load_mode_key(self._data_root)
+        self._mode_spec = resolve_mode(key)
+        self._apply_router()
+
+    # ------------------------------------------------------------ operating mode
+
+    @property
+    def operating_mode(self) -> ModeSpec:
+        """The current :class:`~gui.modes.ModeSpec` (AI Mode or Jarvics Mode)."""
+        return self._mode_spec
+
+    @property
+    def operating_mode_key(self) -> str:
+        return self._mode_spec.key
+
+    def set_operating_mode(self, key: str) -> ModeSpec:
+        """Switch the operating mode, persist it, and return the new spec."""
+        spec = resolve_mode(key)
+        self._mode_spec = spec
+        self._apply_router()
+        save_mode_key(self._data_root, spec.key)
+        return spec
+
+    def _apply_router(self) -> None:
+        """Point the session at the router the mode allows (tools on or off).
+
+        A session without a router (a lightweight test double) is left untouched,
+        so the mode logic is still testable without a full Jarvis session.
+        """
+        if self._tool_router is None or self._answer_router is None:
+            return
+        self.mode.router = self._tool_router if self._mode_spec.allows_tools else self._answer_router
+
+    @property
+    def tools_enabled(self) -> bool:
+        return self._mode_spec.allows_tools
+
+    @property
+    def tool_names(self) -> tuple[str, ...]:
+        """The tools the sandbox would actually allow, for the sidebar's list."""
+        if self._tool_router is None:
+            return ()
+        return tuple(sorted(self._tool_router.allowed_tools))
+
+    def preview_execution(self, message: str) -> ExecutionPreview:
+        """Describe what ``message`` would do in the current mode.
+
+        Always computed with the *real* router, so the preview is honest even in
+        AI Mode (where the message would not actually run a tool): it tells the
+        user what Jarvics Mode *would* do, and whether that needs confirmation.
+        """
+        if not message.strip() or self._tool_router is None:
+            return ExecutionPreview("answer", "")
+        routed: RoutedCommand = self._tool_router.route(message)
+        if routed.kind is not RouteKind.TOOL or routed.plan is None:
+            return ExecutionPreview("answer", routed.reason)
+        steps = tuple(
+            {"tool": call.tool, "arguments": ", ".join(f"{k}={v}" for k, v in call.arguments.items())}
+            for call in routed.plan.calls
+        )
+        needs = any(call.tool in _DESTRUCTIVE_TOOLS for call in routed.plan.calls)
+        return ExecutionPreview(
+            kind="tool",
+            summary=f"{routed.plan.goal} — {routed.reason}",
+            steps=steps,
+            needs_confirmation=needs,
+        )
 
     @property
     def source(self) -> str:
@@ -112,6 +227,44 @@ class ChatService:
     def list_sessions(self) -> tuple[str, ...]:
         """The ids of saved conversations available to resume."""
         return self.mode.list_sessions()
+
+    def saved_session_summaries(self) -> tuple[HistoryItem, ...]:
+        """The saved conversations as :class:`HistoryItem`s, newest first.
+
+        The title (the first user turn), the creation time, and a short snippet
+        come from the stored conversation, so the sidebar's history can group by
+        date and search by text. A store that cannot be read yields nothing rather
+        than an exception.
+        """
+        ids = self.list_sessions()
+        memory = getattr(self.mode, "memory", None)
+        items: list[HistoryItem] = []
+        for session_id in ids:
+            created: datetime | None = None
+            label = session_id
+            snippet = ""
+            try:
+                conversation = memory.load(session_id) if memory is not None else None
+            except Exception:
+                conversation = None
+            if conversation is not None:
+                created = conversation.created_at
+                for message in conversation.messages:
+                    if message.role.value == "user":
+                        snippet = message.text
+                        break
+                label = (snippet or conversation.title or session_id).strip().splitlines()[0][:60]
+            items.append(
+                HistoryItem(
+                    session_id=session_id,
+                    label=label or session_id,
+                    created_at=created,
+                    is_current=session_id == self.session,
+                    snippet=snippet,
+                )
+            )
+        items.sort(key=lambda item: item.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        return tuple(items)
 
     def attach_file(self, path: str | Path) -> AttachmentNotice:
         """Read a file, index its text, and remember it as an attachment.
@@ -214,4 +367,4 @@ class ChatService:
         )
 
 
-__all__ = ["ChatReply", "ChatService"]
+__all__ = ["ChatReply", "ChatService", "ExecutionPreview"]
