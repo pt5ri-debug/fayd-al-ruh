@@ -18,6 +18,13 @@ File ingestion supports these families:
   the metadata, so a citation points at the right page. Encrypted, malformed,
   empty, and image-only PDFs are reported distinctly; an image-only PDF is
   refused with a pointer to the OCR stage rather than silently mis-read.
+* **Word** (Stage 2B, ``.docx``/``.docm``) -- read through :mod:`core.docx_extract`
+  (stdlib only; the project's existing no-mandatory-dependency handling of an
+  untrusted ZIP package). Blocks are emitted in document order: a heading opens a
+  new record, and following paragraphs and table rows join it; the text is split
+  into parts only when it grows large. Encrypted/legacy OLE files, malformed
+  packages, archive bombs, and empty documents are reported distinctly, and a
+  ``.doc``/``.rtf`` is refused with a "save as .docx" hint. Macros are never run.
 
 **Structured-to-text conversion (deterministic, documented).** A CSV row is
 rendered as ``header1: value1; header2: value2`` for the columns that have a
@@ -59,6 +66,14 @@ from core.document_reader import (
     ENCODING_SAMPLE_BYTES,
     read_document,
 )
+from core.docx_extract import (
+    DEFAULT_MAX_CHARS as DEFAULT_DOCX_MAX_CHARS,
+    DEFAULT_MAX_ENTRIES as DEFAULT_DOCX_MAX_ENTRIES,
+    DEFAULT_MAX_PART_BYTES as DEFAULT_DOCX_MAX_PART_BYTES,
+    DocxExtractionError,
+    DocxReader,
+)
+from core.knowledge_base import DEFAULT_CHUNK_CHARS
 from core.pdf_extract import (
     DEFAULT_MAX_CHARS as DEFAULT_PDF_MAX_CHARS,
     PDF_EXTRA,
@@ -82,7 +97,9 @@ READER_SUFFIXES = frozenset({".txt", ".md", ".markdown"})
 STREAM_SUFFIXES = frozenset({".csv", ".tsv", ".json", ".jsonl", ".ndjson"})
 #: Digital PDFs (Stage 2A), read page by page through ``core.pdf_extract``.
 PDF_SUFFIXES = frozenset({".pdf"})
-ALL_SUFFIXES = READER_SUFFIXES | STREAM_SUFFIXES | PDF_SUFFIXES
+#: Word documents (Stage 2B), read through ``core.docx_extract`` (stdlib only).
+DOCX_SUFFIXES = frozenset({".docx", ".docm"})
+ALL_SUFFIXES = READER_SUFFIXES | STREAM_SUFFIXES | PDF_SUFFIXES | DOCX_SUFFIXES
 
 #: A plain JSON document is parsed whole; above this it is refused (use JSONL).
 DEFAULT_MAX_JSON_BYTES = 64 * 1024 * 1024
@@ -95,7 +112,7 @@ class FileConnector:
 
     info = ConnectorInfo(
         name="files",
-        description="Local TXT/Markdown/CSV/JSON/JSONL and digital PDF files.",
+        description="Local TXT/Markdown/CSV/JSON/JSONL, digital PDF, and Word files.",
         suffixes=ALL_SUFFIXES,
         default=True,
         optional_dependency=PDF_EXTRA,
@@ -112,6 +129,13 @@ class FileConnector:
         max_json_bytes = int(spec.option("max_json_bytes", 0) or DEFAULT_MAX_JSON_BYTES)
         pdf_password = spec.option("pdf_password") or None
         max_chars = int(spec.option("max_chars", 0) or DEFAULT_PDF_MAX_CHARS)
+        docx_max_chars = int(spec.option("docx_max_chars", 0) or DEFAULT_DOCX_MAX_CHARS)
+        docx_max_part_bytes = int(
+            spec.option("docx_max_part_bytes", 0) or DEFAULT_DOCX_MAX_PART_BYTES
+        )
+        docx_max_entries = int(
+            spec.option("docx_max_entries", 0) or DEFAULT_DOCX_MAX_ENTRIES
+        )
         for path in self._iter_paths(spec):
             suffix = path.suffix.lower()
             relative = self._relative(path, spec)
@@ -134,6 +158,9 @@ class FileConnector:
                     "max_json_bytes": max_json_bytes,
                     "pdf_password": pdf_password,
                     "max_chars": max_chars,
+                    "docx_max_chars": docx_max_chars,
+                    "docx_max_part_bytes": docx_max_part_bytes,
+                    "docx_max_entries": docx_max_entries,
                 },
             )
 
@@ -214,6 +241,9 @@ class FileConnector:
         if suffix in PDF_SUFFIXES:
             yield from self._stream_pdf(item, path, metadata)
             return
+        if suffix in DOCX_SUFFIXES:
+            yield from self._stream_docx(item, path, metadata)
+            return
         if suffix in STREAM_SUFFIXES:
             yield from self._stream_tabular(item, path, suffix, metadata)
             return
@@ -271,6 +301,90 @@ class FileConnector:
         except PdfExtractionError as error:
             # Raised when the document turns out to have no text at all (a scan).
             raise ConnectorError(str(error)) from error
+
+    def _stream_docx(
+        self, item: IngestItem, path: Path, metadata: dict
+    ) -> Iterator[SourceRecord]:
+        """Yield Word records, preserving document structure (Stage 2B).
+
+        A ``.docx`` is an untrusted ZIP package; it is read through
+        :class:`~core.docx_extract.DocxReader`, which owns the resource limits
+        (archive-bomb, over-large part/document), the encrypted/legacy OLE
+        detection, and the malformed-package reporting. Blocks come back in
+        document order -- paragraphs (with heading levels) and table rows -- and
+        are grouped into records along the document's own structure: a heading
+        opens a new record (carrying its ``heading``/``level`` metadata), and the
+        paragraphs and table rows that follow join it. A section longer than
+        ``section_chars`` is split into parts so no single record is unbounded.
+
+        Every record carries the source filename, kind, the document's content
+        hash (added by the pipeline's metadata store), and whether the read was
+        truncated. Macros and embedded content are never executed.
+        """
+        section_chars = int(metadata.get("docx_section_chars") or DEFAULT_CHUNK_CHARS)
+        try:
+            reader = DocxReader(
+                path,
+                max_chars=int(metadata.get("docx_max_chars") or DEFAULT_DOCX_MAX_CHARS),
+                max_part_bytes=int(
+                    metadata.get("docx_max_part_bytes") or DEFAULT_DOCX_MAX_PART_BYTES
+                ),
+                max_entries=int(
+                    metadata.get("docx_max_entries") or DEFAULT_DOCX_MAX_ENTRIES
+                ),
+            )
+        except DocxExtractionError as error:
+            raise ConnectorError(str(error)) from error
+        document = reader.document()
+        title = document.title or item.title
+        common = {
+            **metadata,
+            "kind": "docx",
+            "encoding": "utf-8",
+            "truncated": document.truncated,
+            "tables": document.table_count,
+        }
+
+        index = 0
+        heading = ""
+        level = 0
+        buffer: list[str] = []
+        buffer_chars = 0
+
+        def flush() -> Iterator[SourceRecord]:
+            nonlocal index, buffer, buffer_chars
+            if not buffer:
+                return
+            index += 1
+            text = "\n".join(buffer)
+            buffer = []
+            buffer_chars = 0
+            yield SourceRecord(
+                title=title if index == 1 else f"{title} — part {index}",
+                text=text,
+                source="file",
+                source_key=item.source_key,
+                metadata={
+                    **common,
+                    "part": index,
+                    **({"heading": heading} if heading else {}),
+                    **({"level": level} if level else {}),
+                },
+            )
+
+        for block in document.blocks:
+            if not block.text.strip():
+                continue
+            if block.kind == "paragraph" and block.level > 0:
+                # A heading opens a new section once the current one has content.
+                if buffer:
+                    yield from flush()
+                heading, level = block.text, block.level
+            buffer.append(block.text)
+            buffer_chars += len(block.text) + 1
+            if buffer_chars >= section_chars:
+                yield from flush()
+        yield from flush()
 
     def _stream_document(
         self, item: IngestItem, path: Path, metadata: dict
@@ -492,6 +606,7 @@ __all__ = [
     "ALL_SUFFIXES",
     "DEFAULT_MAX_JSON_BYTES",
     "DEFAULT_PDF_MAX_CHARS",
+    "DOCX_SUFFIXES",
     "FileConnector",
     "PDF_SUFFIXES",
     "READER_SUFFIXES",

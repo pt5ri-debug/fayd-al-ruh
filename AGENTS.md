@@ -229,8 +229,8 @@ Arabic is kept as secondary aliases where useful.
   resolves a source to a connector by scheme/suffix (files is the path/dir
   fallback; the internet connector is registered only with `allow_web=True`);
   `ingest.connectors.{files,sql,web}` stream TXT/Markdown/CSV/JSON/JSONL and
-  digital PDFs (**Stage 2A adds `.pdf`**; DOCX and scanned-PDF OCR remain
-  deliberately out of scope, and an explicit `.docx` path is refused), read-only
+  digital PDFs (**Stage 2A adds `.pdf`**) and Word `.docx`/`.docm` (**Stage 2B**
+  adds Word; scanned-PDF OCR remains deliberately out of scope), read-only
   SQLite/driver DBs, and
   (denied by default, host-allow-listed or explicitly authorized) one HTTP(S)
   page. `ingest.pipeline.IngestionPipeline`
@@ -257,7 +257,9 @@ Arabic is kept as secondary aliases where useful.
   Arabic letter forms, and `--no-normalize` stores text verbatim. A transient
   local read is retried up to `--retries` times
   (`IngestionPipeline(retries=...)`) with the report counters rolled back so a
-  retry never double-counts. Each ingested record also writes text-free
+  retry never double-counts. A Word `.docx`/`.docm` (Stage 2B) is read through
+  `core/docx_extract` and grouped into records along its own structure (a heading
+  opens a record); each ingested record also writes text-free
   per-document metadata (source path, filename/extension, content hash, media
   type, chunk ids, ingestion timestamp) through `ingest.metadata`, wired into the
   pipeline/CLI best-effort so a metadata-write failure never loses the ingest.
@@ -313,8 +315,11 @@ Arabic is kept as secondary aliases where useful.
   never freezes the window.
 - `core/document_reader.py` — read text out of a Word file with no third-party
   dependency: a `.docx`/`.docm` is an Office Open XML package (a ZIP holding
-  `word/document.xml`), so `zipfile` + `xml.etree` extract its paragraphs
-  (joining runs, honouring tabs and breaks) into a `DocumentText`. Legacy `.doc`
+  `word/document.xml`), read through **`core/docx_extract.py`** (Stage 2B), which
+  owns the untrusted-ZIP handling — archive resource limits (member count,
+  over-large part/member/total), encrypted/legacy OLE detection, malformed-package
+  reporting — and returns ordered **paragraphs and table rows** (a heading carries
+  a level) into a `DocumentText`. Legacy `.doc`
   and `.rtf` are refused with a "save as .docx" hint instead of being scrambled.
   Plain `.txt`/`.md` are read with **safe encoding detection** (a BOM, then
   strict UTF-8, then a short list of legacy encodings; a mis-decoded file raises
@@ -346,6 +351,26 @@ Arabic is kept as secondary aliases where useful.
   the format allows (a `ToUnicode` map decodes it correctly; PDFs store glyphs in
   visual order so it is often reversed -- a format limitation, flagged by
   `rtl_hint`, not a bug here).
+- `core/docx_extract.py` — read text out of a Word `.docx`/`.docm` (Stage 2B) with
+  the standard library only (`zipfile` + `xml.etree`), treating the file as an
+  **untrusted ZIP package**. `DocxReader`/`extract_docx` validate up front
+  (existence, not a ZIP, an encrypted/legacy OLE header, the archive resource
+  limits, a readable `word/document.xml`) and return an ordered `DocxDocument` of
+  `DocxBlock`s: paragraphs (a heading style maps to `level` 1-9) and table rows
+  rendered as TSV (`table` numbers them), so a table's rows keep their place in
+  the flow. Resource limits are honest and configurable: a member-count cap
+  (`DEFAULT_MAX_ENTRIES`), a per-member and total *declared*-size cap
+  (`DEFAULT_MAX_ENTRY_BYTES`/`DEFAULT_MAX_TOTAL_BYTES`, checked before anything is
+  inflated), a cap on `word/document.xml` (`DEFAULT_MAX_PART_BYTES`), and a
+  character cap (`DEFAULT_MAX_CHARS`, reporting `truncated`). Only the main body
+  is read, so **headers, footers, footnotes/endnotes, comments, text boxes, and
+  images are deliberately excluded**; tracked deletions (`<w:delText>`) are not
+  read. Macros (`word/vbaProject.bin`) and embedded content are never executed,
+  and instructions inside the text are inert. Arabic/English are preserved as
+  Unicode characters (no visual-order problem, unlike PDF). A non-ZIP file, a ZIP
+  without the document part, malformed XML, an OLE/encrypted file, an
+  archive-bomb, an over-large part, and a document with no text each raise
+  `DocxExtractionError` with a specific reason.
 - `core/text_encoding.py` — dependency-free, explainable text decoding for
   imported files. `detect_encoding` honours a BOM, trusts strictly-valid UTF-8
   only when it decodes to plausible text (so NUL-filled UTF-16 is not mistaken
