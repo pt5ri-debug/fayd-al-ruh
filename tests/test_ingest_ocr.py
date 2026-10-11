@@ -25,8 +25,14 @@ class _EmptyPage:
 
 
 class _StubReader:
+    is_encrypted = False
+    metadata = None
+
     def __init__(self, *_args, **_kwargs) -> None:
         self.pages = [_EmptyPage()]
+
+    def get_num_pages(self) -> int:
+        return len(self.pages)
 
 
 @pytest.fixture
@@ -87,8 +93,14 @@ def test_text_pdf_does_not_call_ocr(tmp_path, monkeypatch):
             return "This page already has text."
 
     class _TextReader:
+        is_encrypted = False
+        metadata = None
+
         def __init__(self, *_args, **_kwargs) -> None:
             self.pages = [_TextPage()]
+
+        def get_num_pages(self) -> int:
+            return len(self.pages)
 
     stub = types.ModuleType("pypdf")
     stub.PdfReader = _TextReader  # type: ignore[attr-defined]

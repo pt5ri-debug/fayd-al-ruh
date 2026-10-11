@@ -2,16 +2,20 @@
 
     python -m cli ingest add ./papers --store-dir data/knowledge_base
     python -m cli ingest add data.csv
+    python -m cli ingest add report.pdf
+    python -m cli ingest add locked.pdf --pdf-password secret
     python -m cli ingest add sqlite:///data/wells.db
     python -m cli ingest add https://www.spe.org/... --allow-web --approve
     python -m cli ingest list-connectors
     python -m cli ingest stats
     python -m cli ingest search "hydraulic fracturing"
 
-Local sources run with no network and no extra dependency. A web source is the
-one exception: it needs ``--allow-web`` to even register the connector, and
-``--approve`` to pass the permission and human-approval gates, so importing from
-the internet is a deliberate, audited act rather than a default.
+Local sources run with no network and no extra dependency. A *digital* PDF needs
+the optional ``[pdf]`` extra (``pip install fayd-al-ruh[pdf]``); ``--pdf-password``
+unlocks an encrypted one. A web source is the one exception: it needs
+``--allow-web`` to even register the connector, and ``--approve`` to pass the
+permission and human-approval gates, so importing from the internet is a
+deliberate, audited act rather than a default.
 
 Ingestion writes only to the knowledge store (``data/knowledge_base`` by
 default). It never touches training artifacts or the evaluation baseline, so a
@@ -70,6 +74,11 @@ def _build_parser() -> argparse.ArgumentParser:
     add.add_argument("--no-normalize", action="store_true", help="Store text verbatim (skip normalization).")
     add.add_argument("--fold-arabic", action="store_true", help="Also unify Arabic letter forms (opt-in).")
     add.add_argument("--encoding", default=None, help="Pin the source encoding (else detected).")
+    add.add_argument(
+        "--pdf-password",
+        default=None,
+        help="Password for an encrypted PDF (encrypted PDFs are refused otherwise).",
+    )
     add.add_argument("--allow-web", action="store_true", help="Register the internet connector.")
     add.add_argument("--approve", action="store_true", help="Grant the external capability for a web source.")
     add.add_argument("--quiet", action="store_true", help="Suppress progress.")
@@ -121,6 +130,8 @@ def run_add(args: argparse.Namespace) -> int:
     options.setdefault("fold_arabic", "true" if args.fold_arabic else "false")
     if args.encoding:
         options.setdefault("encoding", args.encoding)
+    if args.pdf_password:
+        options.setdefault("pdf_password", args.pdf_password)
     spec = SourceSpec(args.source, options=options)
     registry = build_default_registry(allow_web=args.allow_web)
     try:
