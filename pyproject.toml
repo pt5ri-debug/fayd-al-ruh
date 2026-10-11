@@ -8,6 +8,11 @@ version = "2.3.0"
 description = "An evidence-aware symbolic cognitive architecture."
 requires-python = ">=3.12"
 
+[project.optional-dependencies]
+# PDF ingestion is optional: the reader imports pypdf lazily and reports a clear
+# message when it is absent, so the base install stays dependency-light.
+pdf = ["pypdf>=4.0"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -21,7 +26,7 @@ markers = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["core", "storage", "tests", "ai", "evaluation", "ml", "cli", "gui", "scripts"]
+src = ["core", "storage", "tests", "ai", "evaluation", "ml", "cli", "gui", "scripts", "ingest"]
 
 [tool.ruff.lint]
 # Start by blocking correctness errors. Style rules are introduced gradually
@@ -30,7 +35,7 @@ select = ["F"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["core", "storage", "ai", "evaluation", "ml", "cli", "gui", "scripts", "tests", "main.py"]
+files = ["core", "storage", "ai", "evaluation", "ml", "cli", "gui", "scripts", "tests", "ingest", "main.py"]
 warn_unused_configs = true
 warn_redundant_casts = true
 no_implicit_optional = true
@@ -38,4 +43,10 @@ no_implicit_optional = true
 # PyInstaller is a build-time tool without published type stubs.
 [[tool.mypy.overrides]]
 module = ["PyInstaller"]
+ignore_missing_imports = true
+
+# PDF reads are optional (``pip install .[pdf]``), so the import is guarded and
+# may be absent; it must not fail a type check on a base install.
+[[tool.mypy.overrides]]
+module = ["pypdf"]
 ignore_missing_imports = true

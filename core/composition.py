@@ -29,7 +29,11 @@ _WHITESPACE_RE = re.compile(r"\s+")
 # Split on sentence-final punctuation followed by a new sentence. A decimal
 # point ("0.052") has no space after it, so it is never split.
 _SENTENCE_RE = re.compile(r'(?<=[.!?])\s+(?=[A-Z0-9"\u201c])')
-_LEAD_RE = re.compile(r"^\s*(?:[-*\u2022>]+\s*|\d+[.)]\s*)")
+# A leading list marker ("- ", "1) ", "2. "). The marker must be followed by
+# whitespace: a bare "1." is the integer half of a decimal ("1.5 times the
+# gradient"), which the byte model emits, and stripping it would corrupt the
+# number. So "1. Do X" loses its marker but "1.5 times" keeps its digit.
+_LEAD_RE = re.compile(r"^\s*(?:[-*\u2022>]+\s*|\d+[.)](?=\s|$))")
 _TERMINAL = ".!?"
 
 # Raw model output is looser than authored prose: a continuation often runs on
@@ -208,6 +212,25 @@ def _sentence_quality(sentence: str) -> tuple[int, int]:
     return dangling, meta
 
 
+#: A conjunction a continuation may start a repeated sentence with ("The pump.
+#: And the pump."). Stripped before comparing sentences so the same statement is
+#: recognised however it is joined.
+_DEDUP_LEADS = frozenset({"and", "but", "plus", "also", "then"})
+
+
+def _repeat_key(sentence: str) -> str:
+    """A content key for a sentence, ignoring decoration and a leading conjunction.
+
+    Two sentences that only differ by edge punctuation or an opening "and"/"then"
+    are the same statement, so they collapse to one; the model's words are not
+    changed, the repeat is simply not shown twice.
+    """
+    words = _MODEL_TOKEN_RE.findall(sentence.casefold())
+    while words and words[0] in _DEDUP_LEADS:
+        words.pop(0)
+    return " ".join(words)
+
+
 def _model_sentences(raw: str) -> list[str]:
     """Split tidied model output into whole, clean sentences.
 
@@ -272,7 +295,7 @@ def compose_model_answer(raw: str, *, question: str = "") -> str:
         kept: list[str] = []
         seen: set[str] = set()
         for sentence in candidates:
-            key = sentence.casefold().strip(_EDGE_CHARS)
+            key = _repeat_key(sentence)
             if key in seen:
                 continue
             seen.add(key)
