@@ -73,6 +73,7 @@ class IngestionPipeline:
         errors: ErrorLog | None = None,
         job: "JobState | None" = None,
         jobs: "JobStore | None" = None,
+        retries: int = 0,
     ) -> None:
         if chunk_chars < 1:
             raise ValueError("chunk_chars must be at least 1.")
@@ -80,6 +81,8 @@ class IngestionPipeline:
             raise ValueError("overlap must be in [0, chunk_chars).")
         if shard_bytes < 1:
             raise ValueError("shard_bytes must be at least 1.")
+        if retries < 0:
+            raise ValueError("retries cannot be negative.")
         self.store = store
         self.ledger = ledger
         self.connectors = connectors or {}
@@ -91,6 +94,7 @@ class IngestionPipeline:
         self.errors = errors or ErrorLog()
         self.job = job
         self.jobs = jobs
+        self.retries = retries
         self._shard: int | None = None
         self._shard_bytes: int = 0
 
@@ -205,6 +209,33 @@ class IngestionPipeline:
         item: IngestItem,
         report: IngestionReport,
     ) -> None:
+        """Ingest one item, retrying a transient read failure a bounded number of times.
+
+        Only the *read* is retried: a failed attempt's counters are rolled back
+        and its stream is rebuilt from the start, so a retry never double-counts
+        and never marks unwritten work as done.
+        """
+        attempt = 0
+        while True:
+            baseline = (report.records, report.chunks, report.bytes_written)
+            try:
+                self._read_item(connector, item, report)
+                break
+            except (ConnectorError, IngestionError, OSError, ValueError) as error:
+                # A failed attempt may have written some chunks; the ledger's
+                # content hashes keep the retry from storing them twice, and the
+                # report counters are rolled back so the run stays honest.
+                report.records, report.chunks, report.bytes_written = baseline
+                if attempt >= self.retries:
+                    raise
+                attempt += 1
+                self._report(
+                    f"retry {attempt}/{self.retries} for {item.uri}: {error}"
+                )
+
+    def _read_item(
+        self, connector: Connector, item: IngestItem, report: IngestionReport
+    ) -> None:
         item_chunks = 0
         item_bytes = 0
         for record in connector.stream_item(item):
@@ -308,6 +339,7 @@ def ingest_source(
     store_dir: "str | None" = None,
     incremental: bool = True,
     allow_web: bool = False,
+    retries: int = 0,
     progress: ProgressCallback | None = None,
 ) -> tuple[IngestionReport, ErrorLog]:
     """One-shot helper: build the default pipeline and ingest ``spec``."""
@@ -317,7 +349,7 @@ def ingest_source(
 
     store = KnowledgeBaseStore(store_dir or default_knowledge_base_dir())
     ledger = DedupLedger(ledger_path(store.root))
-    pipeline = IngestionPipeline(store, ledger, progress=progress)
+    pipeline = IngestionPipeline(store, ledger, progress=progress, retries=retries)
     registry = build_default_registry(allow_web=allow_web)
     connector = registry.resolve(spec)
     report = pipeline.ingest(spec, connector=connector, incremental=incremental)

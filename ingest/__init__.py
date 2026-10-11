@@ -22,10 +22,26 @@ The pieces:
 * :mod:`ingest.hashing` / :mod:`ingest.dedup` -- content hashing and a ledger so
   an incremental re-run skips what it already ingested.
 * :mod:`ingest.jobs` -- resumable job state for long imports.
+* :mod:`ingest.interfaces` -- the explicit connector and job interfaces.
+* :mod:`ingest.source_registry` -- persisted, text-free registration of sources.
+* :mod:`ingest.metadata` -- per-document metadata (hashes, sizes, chunk ids).
+* :mod:`ingest.config` -- tunables via ``JsonStore`` and ``FAYD_INGEST_*``.
 * :mod:`ingest.errors` -- a per-source error report that never aborts a batch.
 * :mod:`ingest.delete` -- safe, all-or-nothing removal of a source's chunks.
+
+Content, indexes, training data, and model checkpoints stay separate: this
+package writes only the knowledge *content* store (and its own small metadata
+files beside it under ``<store>/ingest/``); it never writes ``ml/artifacts``,
+``ml/llm/checkpoints``, or ``evaluation/baseline.json``.
 """
 
+from ingest.config import IngestConfig, load_ingest_config, save_ingest_config
+from ingest.interfaces import IngestionJob, JobStateStore, SourceConnector
+from ingest.metadata import (
+    DocumentMetadata,
+    DocumentMetadataStore,
+    build_document_metadata,
+)
 from ingest.records import (
     Connector,
     ConnectorInfo,
@@ -34,12 +50,31 @@ from ingest.records import (
     SourceRecord,
     SourceSpec,
 )
+from ingest.source_registry import (
+    SourceRegistration,
+    SourceRegistry,
+    source_registry_path,
+    source_slug,
+)
 
 __all__ = [
     "Connector",
     "ConnectorInfo",
+    "DocumentMetadata",
+    "DocumentMetadataStore",
+    "IngestConfig",
     "IngestItem",
+    "IngestionJob",
     "IngestionReport",
+    "JobStateStore",
+    "SourceConnector",
     "SourceRecord",
+    "SourceRegistration",
+    "SourceRegistry",
     "SourceSpec",
+    "build_document_metadata",
+    "load_ingest_config",
+    "save_ingest_config",
+    "source_registry_path",
+    "source_slug",
 ]

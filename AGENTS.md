@@ -233,7 +233,22 @@ Arabic is kept as secondary aliases where useful.
   resumable progress in `ingest.jobs`. `ingest.delete` removes a source's chunks
   by an all-or-nothing shard rewrite and drops the stale FTS index. Ledger and
   jobs live under `<store>/ingest/`; auto-excluded from its own walk. It never
-  touches training artifacts. CLI: `python -m cli ingest add|list-connectors|
+  touches training artifacts. Phase-1 interfaces and bookkeeping, all additive
+  and stdlib/SQLite-only: `ingest.interfaces` names the explicit contracts
+  (`SourceConnector`, `IngestionJob`, `JobStateStore`, all `runtime_checkable`);
+  `ingest.source_registry` persists *text-free* source registrations
+  (`SourceRegistration`/`SourceRegistry` via `storage.sqlite_store.SqliteStore`,
+  with provenance, `trusted`/`enabled` flags, and last-run state);
+  `ingest.metadata` stores per-document metadata only (`DocumentMetadata`/
+  `DocumentMetadataStore`, hashes/sizes/chunk ids, no text); `ingest.config`
+  (`IngestConfig`) resolves tunables as explicit arg → `FAYD_INGEST_<FIELD>` env
+  → stored `JsonStore` value → default, and never enables web on its own. File
+  imports are normalized before chunking by `core/text_normalize.normalize_text`
+  (Unicode + structure, plus Arabic letter folding), opt-out with `--no-normalize`
+  / `--no-fold-arabic`; a transient local read is retried up to `--retries` times
+  (`IngestionPipeline(retries=...)`) with the report counters rolled back so a
+  retry never double-counts. CLI:
+  `python -m cli ingest add|list-connectors|
   stats|build-index|search|delete|jobs` (`cli/ingest.py`); the two knowledge
   actions mirror into the GUI sidebar.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
@@ -287,7 +302,19 @@ Arabic is kept as secondary aliases where useful.
   `word/document.xml`), so `zipfile` + `xml.etree` extract its paragraphs
   (joining runs, honouring tabs and breaks) into a `DocumentText`. Legacy `.doc`
   and `.rtf` are refused with a "save as .docx" hint instead of being scrambled.
-  Plain `.txt` is read directly.
+  Plain `.txt` is read directly (large files are streamed line by line up to
+  `MAX_TEXT_CHARS`, and `DocumentText.truncated` reports a capped read honestly).
+  PDFs go through the optional `pypdf` extra; a scanned PDF with no extractable
+  text falls back to the separate optional OCR extra (`[ocr]` = pypdfium2 +
+  pytesseract, engine installed separately), and a `NormalizationError` is raised
+  only when a requested normalization fails. `read_document(..., normalize=...)`
+  applies `core/text_normalize`. All lazy imports; the base install pulls nothing
+  new and no document is ever executed.
+- `core/text_normalize.py` — one deterministic, pure pass over imported text:
+  Unicode NFC, unified line endings, control-char removal, whitespace collapse,
+  and (opt-in) Arabic diacritic/tatweel removal + letter folding matching
+  `core.rag`. Idempotent and hash-stable; normalization is applied at the
+  ingestion boundary because it changes the content hash (so it is opt-out).
 - `gui/attachments.py` — the `+` composer button's brain: `attach_document`
   reads a file through the reader, chunks it, and returns an `AttachmentNotice`
   (success + preview, or the reader's error verbatim); the chunks become

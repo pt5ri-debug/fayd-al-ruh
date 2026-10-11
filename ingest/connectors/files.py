@@ -52,6 +52,9 @@ class FileConnector:
 
     def plan(self, spec: SourceSpec) -> Iterator[IngestItem]:
         row_group = int(spec.option("row_group", 0) or 40)
+        normalize = _flag(spec.option("normalize", True))
+        fold_arabic = _flag(spec.option("fold_arabic", True))
+        allow_ocr = _flag(spec.option("allow_ocr", False))
         for path in self._paths(spec):
             suffix = path.suffix.lower()
             if suffix not in ALL_SUFFIXES:
@@ -67,6 +70,9 @@ class FileConnector:
                     "relative": relative,
                     "path": str(path),
                     "row_group": row_group,
+                    "normalize": normalize,
+                    "fold_arabic": fold_arabic,
+                    "allow_ocr": allow_ocr,
                 },
             )
 
@@ -124,7 +130,12 @@ class FileConnector:
         self, item: IngestItem, path: Path, metadata: dict
     ) -> Iterator[SourceRecord]:
         try:
-            document = read_document(path)
+            document = read_document(
+                path,
+                normalize=bool(metadata.get("normalize", True)),
+                fold_arabic=bool(metadata.get("fold_arabic", True)),
+                allow_ocr=bool(metadata.get("allow_ocr", False)),
+            )
         except DocumentReadError as error:
             raise ConnectorError(str(error)) from error
         yield SourceRecord(
@@ -132,7 +143,11 @@ class FileConnector:
             text=document.text,
             source="file",
             source_key=item.source_key,
-            metadata={**metadata, "kind": document.kind},
+            metadata={
+                **metadata,
+                "kind": document.kind,
+                "truncated": document.truncated,
+            },
         )
 
     def _stream_tabular(
@@ -237,6 +252,14 @@ def _render_json(value) -> str:
     if isinstance(value, list):
         return ", ".join(_render_json(item) for item in value)
     return str(value)
+
+
+def _flag(value: object) -> bool:
+    """Coerce an option value to a bool, treating "false"/"0"/"no" as False."""
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().casefold()
+    return text not in {"0", "false", "no", "off", ""}
 
 
 def _skipped(relative: Path) -> bool:

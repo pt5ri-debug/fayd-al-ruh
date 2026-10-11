@@ -16,9 +16,12 @@ text is already the thing this module produces.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
+
+from core.text_normalize import normalize_text
 
 _WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _W = f"{{{_WORD_NAMESPACE}}}"
@@ -30,13 +33,24 @@ SUPPORTED_EXTENSIONS = frozenset({".docx", ".docm", ".txt", ".md", ".markdown"})
 LEGACY_EXTENSIONS = frozenset({".doc", ".rtf"})
 #: Extracted through an optional dependency (``fayd-al-ruh[pdf]``) when present.
 OPTIONAL_EXTENSIONS = frozenset({".pdf"})
+#: Scanned PDFs need the separate optional OCR extra (``fayd-al-ruh[ocr]``).
+OCR_EXTRA = "fayd-al-ruh[ocr]"
 
 #: A cap so a pathological file cannot exhaust memory; generous for real documents.
 MAX_TEXT_CHARS = 2_000_000
+#: Plain-text files larger than this are read as a bounded stream, not whole.
+STREAM_THRESHOLD_BYTES = 4 * 1024 * 1024
+
+#: An OCR engine reads an image-producing PDF and returns its text ("" when none).
+OCREngine = Callable[[Path], str]
 
 
 class DocumentReadError(ValueError):
     """A document could not be read as text (unsupported, missing, or corrupt)."""
+
+
+class NormalizationError(ValueError):
+    """A requested text normalization could not be applied."""
 
 
 @dataclass(frozen=True)
@@ -47,6 +61,12 @@ class DocumentText:
     paragraphs: tuple[str, ...]
     title: str
     kind: str
+    truncated: bool = False
+    """True when the text hit :data:`MAX_TEXT_CHARS` and was cut off.
+
+    Honest reporting: a caller can tell a complete document from a capped one
+    rather than treating silent truncation as the whole file.
+    """
 
     def __post_init__(self) -> None:
         if not self.text.strip():
@@ -106,6 +126,12 @@ def _read_docx(path: Path) -> DocumentText:
 
 def _read_text(path: Path) -> DocumentText:
     try:
+        size = path.stat().st_size
+    except OSError as error:
+        raise DocumentReadError(f"Could not open {path.name!r}: {error}") from error
+    if size >= STREAM_THRESHOLD_BYTES:
+        return _read_text_streamed(path)
+    try:
         raw = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         raw = path.read_text(encoding="utf-8", errors="replace")
@@ -117,11 +143,45 @@ def _read_text(path: Path) -> DocumentText:
     return _assemble(paragraphs, path, "text")
 
 
-def _read_pdf(path: Path) -> DocumentText:
-    """Extract text from a PDF through an optional dependency.
+def _read_text_streamed(path: Path) -> DocumentText:
+    """Read a very large plain-text file line by line, capping at ``MAX_TEXT_CHARS``.
+
+    Memory stays bounded: only the kept lines, the accumulated text (itself
+    capped), and a running character count are held -- never the whole file plus
+    a copy of its text. Once the cap is reached the remainder is not read, so a
+    multi-gigabyte log cannot be pulled into memory.
+    """
+    paragraphs: list[str] = []
+    total = 0
+    truncated = False
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                paragraphs.append(stripped)
+                total += len(stripped) + 1  # the newline later joined back
+                if total >= MAX_TEXT_CHARS:
+                    truncated = True
+                    break
+    except OSError as error:
+        raise DocumentReadError(f"Could not open {path.name!r}: {error}") from error
+    if not paragraphs:
+        raise DocumentReadError(f"{path.name!r} is empty.")
+    return _assemble(paragraphs, path, "text", truncated=truncated)
+
+
+def _read_pdf(
+    path: Path, *, ocr: OCREngine | None = None, allow_ocr: bool = True
+) -> DocumentText:
+    """Extract text from a PDF, optionally falling back to OCR for scans.
 
     PyPDF is not a mandatory dependency, so it is imported lazily and its
     absence is turned into an actionable message rather than an ImportError.
+    When pypdf yields no text the PDF is likely scanned images; if an ``ocr``
+    engine was supplied it is used, otherwise the caller is told which optional
+    extra to install. OCR never executes the document -- it reads pixels.
     """
     try:
         from pypdf import PdfReader
@@ -139,31 +199,102 @@ def _read_pdf(path: Path) -> DocumentText:
     except Exception as error:  # malformed PDF: report it, never crash the run
         raise DocumentReadError(f"{path.name!r} could not be read as a PDF: {error}") from error
     paragraphs = [page for page in pages if page]
-    if not paragraphs:
+    if paragraphs:
+        return _assemble(paragraphs, path, "pdf")
+
+    # No extractable text: try OCR when an engine is available.
+    engine = ocr
+    if engine is None and allow_ocr:
+        engine = _default_ocr_engine()
+    if engine is None:
+        if not allow_ocr:
+            raise DocumentReadError(
+                f"{path.name!r} contains no extractable text (it may be a scanned image). "
+                "Re-run with OCR enabled to read scanned PDFs."
+            )
         raise DocumentReadError(
-            f"{path.name!r} contains no extractable text (it may be a scanned image)."
+            f"{path.name!r} contains no extractable text (it may be a scanned image). "
+            f"For scanned PDFs install the optional OCR extra "
+            f"(`pip install {OCR_EXTRA}`, which also needs the Tesseract engine)."
         )
-    return _assemble(paragraphs, path, "pdf")
+    try:
+        ocr_text = engine(path)
+    except DocumentReadError:
+        raise
+    except Exception as error:  # an OCR failure is reported, never fatal to a batch
+        raise DocumentReadError(f"{path.name!r} could not be OCR'd: {error}") from error
+    ocr_paragraphs = [line.strip() for line in (ocr_text or "").splitlines() if line.strip()]
+    if not ocr_paragraphs:
+        raise DocumentReadError(f"{path.name!r} produced no text even after OCR.")
+    return _assemble(ocr_paragraphs, path, "pdf-ocr")
 
 
-def _assemble(paragraphs: list[str], path: Path, kind: str) -> DocumentText:
+def _default_ocr_engine() -> OCREngine | None:
+    """The optional PyTesseract OCR engine, or ``None`` when it is not installed.
+
+    Imported lazily so the base install stays dependency-light. The PDF is
+    rasterised in memory by ``pypdfium2`` (no external poppler binary); both
+    packages live in the ``ocr`` extra.
+    """
+    try:
+        import pypdfium2  # type: ignore[import-not-found]
+        import pytesseract  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+
+    def _run(path: Path) -> str:
+        pdf = pypdfium2.PdfDocument(str(path))
+        try:
+            parts: list[str] = []
+            for page in pdf:
+                bitmap = page.render(scale=2.0)
+                image = bitmap.to_pil()
+                try:
+                    parts.append(pytesseract.image_to_string(image))
+                finally:
+                    image.close()
+            return "\n".join(parts)
+        finally:
+            pdf.close()
+
+    return _run
+
+
+def _assemble(
+    paragraphs: list[str], path: Path, kind: str, *, truncated: bool = False
+) -> DocumentText:
     text = "\n".join(paragraphs)
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS]
         paragraphs = text.split("\n")
+        truncated = True
     return DocumentText(
         text=text,
         paragraphs=tuple(paragraphs),
         title=path.stem or path.name,
         kind=kind,
+        truncated=truncated,
     )
 
 
-def read_document(path: str | Path) -> DocumentText:
+def read_document(
+    path: str | Path,
+    *,
+    normalize: bool = False,
+    fold_arabic: bool = False,
+    ocr: OCREngine | None = None,
+    allow_ocr: bool = False,
+) -> DocumentText:
     """Read ``path`` into :class:`DocumentText`, or raise :class:`DocumentReadError`.
 
     ``.docx``/``.docm`` are parsed from their XML; ``.txt`` is read directly.
     Legacy ``.doc``/``.rtf`` are refused with an actionable message.
+
+    ``normalize=True`` applies :func:`core.text_normalize.normalize_text` to the
+    extracted text (``fold_arabic=True`` additionally unifies Arabic letter
+    forms). Normalization is off by default because it changes the text and hence
+    its content hash. ``ocr`` supplies an OCR engine for scanned PDFs; when it is
+    omitted the optional PyTesseract engine is used if installed.
     """
     source = Path(path).expanduser()
     if not source.exists():
@@ -177,15 +308,39 @@ def read_document(path: str | Path) -> DocumentText:
             "Save it as .docx (Word: File > Save As > Word Document) and try again."
         )
     if suffix in OPTIONAL_EXTENSIONS:
-        return _read_pdf(source)
-    if suffix not in SUPPORTED_EXTENSIONS:
+        document = _read_pdf(source, ocr=ocr, allow_ocr=allow_ocr)
+    elif suffix not in SUPPORTED_EXTENSIONS:
         raise DocumentReadError(
             f"Unsupported file type {source.suffix or '(none)'}. "
             "Attach a .docx, .md, .pdf, or .txt file."
         )
-    if suffix in {".docx", ".docm"}:
-        return _read_docx(source)
-    return _read_text(source)
+    elif suffix in {".docx", ".docm"}:
+        document = _read_docx(source)
+    else:
+        document = _read_text(source)
+    if normalize:
+        return _normalized(document, fold_arabic=fold_arabic)
+    return document
+
+
+def _normalized(document: DocumentText, *, fold_arabic: bool) -> DocumentText:
+    """Return ``document`` with its text normalized, or raise ``NormalizationError``."""
+    try:
+        text = normalize_text(document.text, fold_arabic_letters=fold_arabic)
+    except Exception as error:  # a normalization failure must be actionable
+        raise NormalizationError(f"Could not normalize {document.title!r}: {error}") from error
+    if not text.strip():
+        raise NormalizationError(
+            f"Normalization left {document.title!r} with no text."
+        )
+    paragraphs = tuple(line for line in text.split("\n") if line.strip())
+    return DocumentText(
+        text=text,
+        paragraphs=paragraphs,
+        title=document.title,
+        kind=document.kind,
+        truncated=document.truncated,
+    )
 
 
 __all__ = [
@@ -193,7 +348,11 @@ __all__ = [
     "DocumentText",
     "LEGACY_EXTENSIONS",
     "MAX_TEXT_CHARS",
+    "NormalizationError",
+    "OCREngine",
+    "OCR_EXTRA",
     "OPTIONAL_EXTENSIONS",
+    "STREAM_THRESHOLD_BYTES",
     "SUPPORTED_EXTENSIONS",
     "read_document",
 ]

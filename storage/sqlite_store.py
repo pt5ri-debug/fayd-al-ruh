@@ -44,3 +44,12 @@ class SqliteStore:
         finally:
             connection.close()
         return [row[0] for row in rows]
+
+    def delete(self, namespace: str, key: str) -> bool:
+        connection = self._connect()
+        try:
+            cursor = connection.execute("DELETE FROM records WHERE namespace=? AND key=?", (namespace, key))
+            connection.commit()
+        finally:
+            connection.close()
+        return cursor.rowcount > 0
