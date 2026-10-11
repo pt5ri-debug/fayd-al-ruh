@@ -116,6 +116,28 @@ class ConnectorInfo:
             raise ValueError(f"Connector {self.name!r} needs a description.")
 
 
+@dataclass(frozen=True)
+class ItemOutcome:
+    """What happened to one source *item*, reported as the run proceeds.
+
+    The pipeline's aggregate :class:`IngestionReport` counts the whole run; a
+    caller that must show *per-file* results (the import centre, the GUI) needs
+    one of these per item instead. It is emitted through the pipeline's optional
+    ``on_item`` callback, so the per-item view comes from the same loop that
+    does the work rather than a second pass over the sources.
+    """
+
+    source_key: str
+    uri: str
+    title: str
+    status: str
+    """One of ``"ok"``, ``"unchanged"`` (deduped by fingerprint), ``"failed"``."""
+    records: int = 0
+    chunks: int = 0
+    bytes_written: int = 0
+    message: str = ""
+
+
 @dataclass
 class IngestionReport:
     """A running summary of one ingestion run."""

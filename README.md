@@ -719,10 +719,11 @@ The window is a thin shell over the same code the CLI already runs:
   dims them in AI Mode. The chosen mode persists (see `gui/modes.py`), and
   switching never clears the transcript.
 - The **composer** is a rounded, ChatGPT-like card: a multiline field (Enter
-  sends, Shift+Enter inserts a newline), a send button, and a **＋ attach**
-  control wired to the existing Word/text ingestion. A **＋**-attached document
-  shows as a removable chip and its text joins the retriever, so a question can
-  cite it like the built-in corpus.
+  sends, Shift+Enter inserts a newline), a send button, and a **＋** control that
+  opens two choices — **Attach a file to this chat** (the file's text joins this
+  conversation's evidence and shows as a removable chip, so a question can cite
+  it like the built-in corpus) and **Open Knowledge Import Center…** (the
+  persistent path below).
 - In Jarvics Mode a message that would **change files** (a `write_file` plan) is
   previewed and held for confirmation — the plan's steps are shown with **Run** /
   **Cancel** — so a destructive tool never runs unreviewed. Read-only tools run
@@ -740,9 +741,10 @@ The window is a thin shell over the same code the CLI already runs:
 - The sidebar's **Actions** buttons and the **Saved chats** list call the
   `cli.menu` `run_*` functions the numbered menu calls. The **Actions** section
   adds numbered CLI items **5 through 11** — learn, insight, Internet learner,
-  web verify, and both knowledge-base entries — with the same labels and default
-  arguments, so nothing is offered twice: the window's own controls and the
-  composer already cover items 1–4 (the window, Jarvis, and the two chat modes).
+  web verify, the two knowledge-base entries, and the Import Center — with the
+  same labels and default arguments, so nothing is offered twice: the window's
+  own controls and the composer already cover items 1–4 (the window, Jarvis, and
+  the two chat modes).
   The training and evaluation entries that already lived in the sidebar are kept
   here too, even though they are hidden from the numbered CLI menu.
 - Answers run on a **worker thread** and are posted back through a queue, so the
@@ -1070,6 +1072,63 @@ python -m cli knowledge search "hydraulic fracturing"
 > therefore draws on broad fields (chemistry, physics, geology, engineering,
 > mathematics, and more), which is why the default category set is wide. The
 > target is a floor, not a guarantee, and `stats` always reports the true size.
+
+## Importing your own documents (the Knowledge Import Center)
+
+The bulk base above comes from Wikipedia. To bring in **your own** files and
+folders — TXT, Markdown, CSV/TSV, JSON/JSONL, PDF, and Word — the window's **＋**
+control opens the **Knowledge Import Center**, and the CLI offers the same engine:
+
+```bash
+python -m cli import-center files report.pdf notes.txt data.csv
+python -m cli import-center folder ./papers            # recursive, bounded batches
+python -m cli import-center folder ./papers --job papers   # resumable
+python -m cli import-center resume papers              # continue an interrupted job
+python -m cli import-center jobs                       # list jobs
+python -m cli import-center formats                    # supported / unsupported formats
+```
+
+The window page (**Upload files** / **Import from a local folder** / **Import
+jobs**) and the CLI drive the *same* engine, `gui/import_center.py`
+(`KnowledgeImporter`), which in turn drives the existing `ingest/` pipeline — no
+second ingestion path exists to drift.
+
+- **Two import paths, matching how people work.** *Upload files* imports one or
+  many chosen files; *Import from a local folder* scans a folder (optionally its
+  subfolders) and imports every supported file in bounded batches. The app runs
+  on your machine, so a folder the picker returns is a real local path the
+  process can read — there is no server to upload to and no path is ever built
+  from free text.
+- **Bounded memory.** Nothing reads a whole dataset by default: CSV/JSONL are
+  streamed row by row, a large TXT is read line by line under a hard cap, a PDF
+  page by page, a DOCX block by block, and a folder is walked one directory at a
+  time. Measured: importing a 200-file folder peaked at **~0.2 MB** of traced
+  memory; a 12.8 MB single text file peaked at **~22 MB** (the capped streamed
+  read plus its chunk list).
+- **Useful metadata, kept text-free.** Each document records its source path,
+  filename/extension, content hash, media type, and ingestion timestamp in
+  `ingest/metadata.py` (SQLite beside the store), so an unchanged file is
+  recognised and re-imports are cheap.
+- **Safe normalization.** Text is NFC-normalized and structural only; meaningful
+  Arabic and English content, punctuation, and diacritics are preserved. Arabic
+  letter forms are unified only when `--fold-arabic` is passed explicitly.
+- **Dedup, retry, resume.** The dedup ledger skips unchanged files; a malformed
+  file is recorded per file and never aborts the batch; failed files can be
+  retried; a folder job is saved after every file and an interrupted job resumes
+  from where it stopped.
+- **Never executes content.** Every reader only *parses* bytes into text — no
+  macro, script, or instruction inside an imported document is ever run. A
+  `.doc`/`.rtf` is refused with a "save as .docx" hint rather than mis-read.
+- **Licensing.** The pipeline records a source's licence when one is known, and
+  imported text is *reference material only* — like the bulk base, it never feeds
+  the acceptance policy or the belief layers, and RAG/training are not wired into
+  this phase.
+
+> **PDF and OCR.** A *digital* PDF needs the optional `fayd-al-ruh[pdf]` extra
+> (`pypdf`); without it, the file is reported, not mis-read. A scanned PDF with no
+> text layer needs the separate `fayd-al-ruh[ocr]` extra plus Tesseract, enabled
+> with `--ocr` (and `--ocr-languages ara+eng` for Arabic). OCR is a clearly
+> separated optional path; a digital PDF is never OCR'd.
 
 ## Multimodal perception (optional)
 

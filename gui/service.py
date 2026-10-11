@@ -9,10 +9,11 @@ answer is.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ai import chat as chat_module
 from ai import mind as mind_module
@@ -21,6 +22,7 @@ from core.command_router import RouteKind, RoutedCommand
 from core.jarvis import JarvisMode, JarvisTurn
 from core.paths import data_dir
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
+from gui.import_center import ImportReport, KnowledgeImporter
 from gui.modes import (
     AnswerOnlyRouter,
     HistoryItem,
@@ -29,6 +31,9 @@ from gui.modes import (
     resolve_mode,
     save_mode_key,
 )
+
+if TYPE_CHECKING:
+    from gui.import_center import ProgressCallback
 
 
 @dataclass
@@ -94,6 +99,7 @@ class ChatService:
         session: str | None = None,
         operating_mode: str | None = None,
         data_root: Path | None = None,
+        import_store_dir: str | Path | None = None,
     ) -> None:
         self.mode = mode or build_session(
             root=root,
@@ -128,6 +134,11 @@ class ChatService:
         key = operating_mode if operating_mode is not None else load_mode_key(self._data_root)
         self._mode_spec = resolve_mode(key)
         self._apply_router()
+
+        # The Knowledge Import Center: the window's ＋ control imports files and
+        # folders through the existing ingestion pipeline, writing to the same
+        # on-disk knowledge store the CLI's `ingest add` writes to.
+        self._importer = KnowledgeImporter(store_dir=import_store_dir)
 
     # ------------------------------------------------------------ operating mode
 
@@ -318,6 +329,64 @@ class ChatService:
         for attachment in list(self.attachments):
             removed += self.remove_attachment(attachment)
         return removed
+
+    # --------------------------------------------------- knowledge import center
+
+    @property
+    def importer(self) -> KnowledgeImporter:
+        """The Knowledge Import Center engine (the ingestion pipeline front end)."""
+        return self._importer
+
+    def import_files(
+        self,
+        paths: Iterable[str | Path],
+        *,
+        progress: "ProgressCallback | None" = None,
+    ) -> ImportReport:
+        """Import one or many chosen files into the knowledge base.
+
+        The window's **Upload files** path: each file is imported on its own, so a
+        malformed one is recorded and the rest still succeed, and the per-file
+        result can be retried.
+        """
+        return self._importer.import_files(paths, progress=progress)
+
+    def import_folder(
+        self,
+        folder: str | Path,
+        *,
+        recursive: bool | None = None,
+        job_id: str | None = None,
+        resume: bool = True,
+        progress: "ProgressCallback | None" = None,
+    ) -> ImportReport:
+        """Import every supported file under ``folder`` (**Import from a folder**)."""
+        return self._importer.import_folder(
+            folder, recursive=recursive, job_id=job_id, resume=resume, progress=progress
+        )
+
+    def retry_failed(
+        self,
+        failures: Sequence[Any],
+        *,
+        progress: "ProgressCallback | None" = None,
+    ) -> ImportReport:
+        """Retry the files that failed in an earlier import run."""
+        return self._importer.retry_failed(failures, progress=progress)
+
+    def import_jobs(self):
+        """The recorded import jobs (for the Import Center's Jobs list)."""
+        return self._importer.list_jobs()
+
+    def resume_import_job(
+        self, job_id: str, *, progress: "ProgressCallback | None" = None
+    ) -> ImportReport:
+        """Resume an interrupted folder import from its last completed file."""
+        return self._importer.resume_job(job_id, progress=progress)
+
+    def import_stats(self) -> dict[str, Any]:
+        """A small description of the store and the import bookkeeping."""
+        return self._importer.stats()
 
     def _retriever(self):
         """The grounded assistant's retriever, when one is wired in.

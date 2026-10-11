@@ -48,6 +48,7 @@ from ingest.records import (
     ConnectorInfo,
     IngestItem,
     IngestionReport,
+    ItemOutcome,
     SourceRecord,
     SourceSpec,
 )
@@ -81,6 +82,7 @@ class IngestionPipeline:
         jobs: "JobStore | None" = None,
         retries: int = 0,
         metadata: DocumentMetadataStore | None = None,
+        on_item: "Callable[[ItemOutcome], None] | None" = None,
     ) -> None:
         if chunk_chars < 1:
             raise ValueError("chunk_chars must be at least 1.")
@@ -102,6 +104,10 @@ class IngestionPipeline:
         self.job = job
         self.jobs = jobs
         self.retries = retries
+        # Optional per-item view: the loop reports one :class:`ItemOutcome` per
+        # source file/table/URL so a caller can show per-file results without
+        # re-walking the sources. The aggregate report is unchanged.
+        self.on_item = on_item
         # Per-document metadata (path, hash, timestamp, chunk ids) is *recorded*
         # but never read back by the pipeline, so a metadata-write failure must
         # not fail an ingest that otherwise succeeded. Best-effort, like the
@@ -195,17 +201,54 @@ class IngestionPipeline:
                 continue
             if incremental and self.ledger.unchanged(item.source_key, item.fingerprint):
                 report.skipped_unchanged += 1
+                self._emit_item(item, "unchanged")
                 if self.progress and report.skipped_unchanged % 200 == 0:
                     self._report(f"skipped {report.skipped_unchanged} unchanged items")
                 self._record_position(position, report)
                 continue
+            before = (report.records, report.chunks, report.bytes_written)
             try:
                 self._ingest_item(connector, spec, item, report)
             except (ConnectorError, IngestionError, OSError, ValueError) as error:
                 report.failed += 1
                 self.errors.add(item.uri, type(error).__name__, str(error))
                 self._report(f"failed: {item.uri}: {error}")
+                self._emit_item(item, "failed", message=str(error))
+            else:
+                self._emit_item(
+                    item,
+                    "ok",
+                    records=report.records - before[0],
+                    chunks=report.chunks - before[1],
+                    bytes_written=report.bytes_written - before[2],
+                )
             self._record_position(position, report)
+
+    def _emit_item(
+        self,
+        item: IngestItem,
+        status: str,
+        *,
+        records: int = 0,
+        chunks: int = 0,
+        bytes_written: int = 0,
+        message: str = "",
+    ) -> None:
+        """Report one item's outcome, when a caller asked for the per-item view."""
+        if self.on_item is None:
+            return
+        self.on_item(
+            ItemOutcome(
+                source_key=item.source_key,
+                uri=item.uri,
+                title=item.title,
+                status=status,
+                records=records,
+                chunks=chunks,
+                bytes_written=bytes_written,
+                message=message,
+            )
+        )
 
     def _record_position(self, position: int, report: IngestionReport) -> None:
         """Persist progress after each item so a long job is resumable."""
