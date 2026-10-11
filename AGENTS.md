@@ -275,10 +275,31 @@ Arabic is kept as secondary aliases where useful.
   per-document metadata (source path, filename/extension, content hash, media
   type, chunk ids, ingestion timestamp) through `ingest.metadata`, wired into the
   pipeline/CLI best-effort so a metadata-write failure never loses the ingest.
-  CLI:
+  `IngestionPipeline(..., on_item=...)` emits one additive `ingest.records.ItemOutcome`
+  per source item (filename, status ok/unchanged/failed, chunks, message), which
+  the front ends collect for a per-file result. CLI:
   `python -m cli ingest add|list-connectors|
   stats|build-index|search|delete|jobs` (`cli/ingest.py`); the two knowledge
   actions mirror into the GUI sidebar.
+- `gui/import_center.py` — the **Knowledge Import Center** engine: the
+  user-facing front end over `ingest/`, shared by the window's ＋ control and the
+  CLI. `KnowledgeImporter` (`import_files`, `import_folder(recursive=, job_id=)`,
+  `retry_failed`, `resume_job`, `list_jobs`, `stats`) drives
+  `IngestionPipeline` with an `on_item` collector and returns an `ImportReport`
+  (counts + per-file `ImportOutcome`s, `failures`, `summary()`, `as_dict()`).
+  `SUPPORTED_SUFFIXES` / `UNSUPPORTED_SUFFIXES` / `picker_filetypes()` are the one
+  place the accepted formats are declared. It reuses `core.document_reader` and
+  `core.knowledge_base` rather than reimplementing extraction. Reachable headless
+  as `python -m cli import-center files|folder|resume|jobs|stats|formats`
+  (`cli/import_center.py`), mirrored as GUI action `import-center` and opened
+  from the composer's ＋ menu.
+- `gui/import_dialog.py` — the Import Center **dialog** (Tk, imported lazily so
+  `cli/` never imports Tk): Upload files / Import from a local folder / Import
+  jobs, with a background worker thread, per-file results, retry, and a progress
+  line. `core/document_reader.py` reads TXT/Markdown (streamed above 4 MB),
+  CSV/TSV, JSON/JSONL, digital PDF, and DOCX; scanned PDFs go through the
+  opt-in OCR path in `core/pdf_ocr.py`. Every reader only parses bytes — no macro
+  or embedded instruction is ever executed.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
   Update the baseline with `python -m evaluation --update-baseline`.

@@ -1565,17 +1565,60 @@ class FaydGUI:
     # ------------------------------------------------------------ attachments
 
     def _on_attach_clicked(self) -> None:
+        """Open the ＋ menu: attach a file to this chat, or open the Import Center.
+
+        Attaching keeps the existing behaviour (the file's text joins this
+        conversation's evidence). The Import Center is the *persistent* path: it
+        writes into the knowledge base through the ingestion pipeline, so the
+        imported documents are available to every future chat.
+        """
+        theme = self._theme
+        menu = tk.Menu(
+            self.root, tearoff=0, bg=theme.surface, fg=theme.foreground,
+            activebackground=theme.interactive_active, activeforeground=theme.contrast,
+            font=(self._font, 10), borderwidth=0,
+        )
+        menu.add_command(label="Attach a file to this chat…", command=self._attach_one_file)
+        menu.add_separator()
+        menu.add_command(
+            label="Open Knowledge Import Center…", command=self._open_import_center
+        )
+        try:
+            menu.tk_popup(
+                self._attach_button.winfo_rootx(),
+                self._attach_button.winfo_rooty() + self._attach_button.winfo_height(),
+            )
+        finally:
+            menu.grab_release()
+
+    def _attach_one_file(self) -> None:
         path = filedialog.askopenfilename(
             parent=self.root,
             title="Attach a document",
             filetypes=[
+                ("Documents", "*.txt *.md *.markdown *.csv *.json *.pdf *.docx *.docm"),
+                ("Text files", "*.txt *.md *.markdown"),
+                ("PDF", "*.pdf"),
                 ("Word documents", "*.docx *.docm"),
-                ("Text files", "*.txt"),
                 ("All files", "*.*"),
             ],
         )
         if path:
             self._on_attach(path)
+
+    def _open_import_center(self) -> None:
+        """Open the Knowledge Import Center as a separate window."""
+        from gui.import_dialog import ImportCenterDialog
+
+        # Keep a reference so the window is not garbage-collected while open.
+        self._import_dialog = ImportCenterDialog(
+            self.root,
+            self.service,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=lambda: setattr(self, "_import_dialog", None),
+        )
 
     def _on_attach(self, path: str) -> AttachmentNotice:
         notice = self.service.attach_file(path)

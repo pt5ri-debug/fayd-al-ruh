@@ -201,7 +201,7 @@ class FileConnector:
             yield path
             return
         if path.is_dir():
-            recursive = bool(spec.option("recursive", True))
+            recursive = _flag(spec.option("recursive", True))
             excludes = _exclude_roots(spec)
             yield from self._walk(path, recursive=recursive, excludes=excludes)
             return

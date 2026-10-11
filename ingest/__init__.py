@@ -47,6 +47,7 @@ from ingest.records import (
     ConnectorInfo,
     IngestItem,
     IngestionReport,
+    ItemOutcome,
     SourceRecord,
     SourceSpec,
 )
@@ -66,6 +67,7 @@ __all__ = [
     "IngestItem",
     "IngestionJob",
     "IngestionReport",
+    "ItemOutcome",
     "JobStateStore",
     "SourceConnector",
     "SourceRecord",

@@ -21,6 +21,7 @@ from cli.menu import (
     run_curriculum,
     run_demo,
     run_evaluation,
+    run_import_center,
     run_ingest,
     run_insight,
     run_internet_learner,
@@ -88,6 +89,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         ("build", "--target-mb", "100"),
     ),
     GuiAction("knowledge-stats", "Show the bulk knowledge base status", run_knowledge, ("stats",)),
+    GuiAction(
+        "import-center",
+        "Import files and folders (Knowledge Import Center)",
+        run_import_center,
+        ("formats",),
+    ),
     GuiAction(
         "ingest-connectors",
         "Ingest sources: files, SQL, authorized web",
