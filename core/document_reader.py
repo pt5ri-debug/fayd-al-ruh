@@ -83,6 +83,16 @@ class DocumentText:
     failure raises :class:`DocumentReadError` rather than being hidden here.
     """
 
+    page_numbers: tuple[int, ...] = ()
+    """The 1-based page numbers that produced text (PDFs only; empty otherwise).
+
+    Preserved so a citation can point at "page N" and so the page split is not
+    lost when the text is chunked.
+    """
+
+    scanned: bool = False
+    """True when the text came from OCR of a scanned PDF, not a digital text layer."""
+
     def __post_init__(self) -> None:
         if not self.text.strip():
             raise DocumentReadError("The document has no readable text.")
@@ -216,36 +226,58 @@ def _read_text_streamed(path: Path, *, encoding: str | None = None) -> DocumentT
 
 
 def _read_pdf(
-    path: Path, *, ocr: OCREngine | None = None, allow_ocr: bool = True
+    path: Path,
+    *,
+    ocr: OCREngine | None = None,
+    allow_ocr: bool = True,
+    password: str | None = None,
 ) -> DocumentText:
     """Extract text from a PDF, optionally falling back to OCR for scans.
 
-    PyPDF is not a mandatory dependency, so it is imported lazily and its
-    absence is turned into an actionable message rather than an ImportError.
-    When pypdf yields no text the PDF is likely scanned images; if an ``ocr``
-    engine was supplied it is used, otherwise the caller is told which optional
-    extra to install. OCR never executes the document -- it reads pixels.
+    Digital text extraction is delegated to :mod:`core.pdf_extract`, which wraps
+    the optional ``pypdf`` dependency and reports encrypted / malformed / empty /
+    image-only documents distinctly. When a PDF yields no text it is likely
+    scanned images; if an ``ocr`` engine was supplied it is used, otherwise the
+    caller is told which optional extra to install. OCR never executes the
+    document -- it reads pixels.
     """
-    try:
-        from pypdf import PdfReader
-    except ImportError as error:
-        raise DocumentReadError(
-            "PDF support needs the optional 'pypdf' package. "
-            "Install it with `pip install fayd-al-ruh[pdf]` (or `pip install pypdf`) "
-            "and try again."
-        ) from error
-    try:
-        reader = PdfReader(str(path))
-        pages = [(page.extract_text() or "").strip() for page in reader.pages]
-    except OSError as error:
-        raise DocumentReadError(f"Could not open {path.name!r}: {error}") from error
-    except Exception as error:  # malformed PDF: report it, never crash the run
-        raise DocumentReadError(f"{path.name!r} could not be read as a PDF: {error}") from error
-    paragraphs = [page for page in pages if page]
-    if paragraphs:
-        return _assemble(paragraphs, path, "pdf")
+    from core.pdf_extract import PdfExtractionError, PdfPageStream
 
-    # No extractable text: try OCR when an engine is available.
+    try:
+        stream = PdfPageStream(path, password=password)
+        pages = list(stream)
+    except PdfExtractionError as error:
+        message = str(error)
+        # A PDF with no extractable text may be a scan: offer the OCR path.
+        if "no extractable text" not in message:
+            raise DocumentReadError(message) from error
+        return _pdf_ocr_fallback(path, error, ocr=ocr, allow_ocr=allow_ocr)
+
+    paragraphs = [page.text for page in pages if page.text.strip()]
+    if paragraphs:
+        document = _assemble(paragraphs, path, "pdf")
+        return _with_pdf_facts(document, pages, stream)
+    return _pdf_ocr_fallback(path, None, ocr=ocr, allow_ocr=allow_ocr)
+
+
+def _with_pdf_facts(document: DocumentText, pages: list, stream) -> DocumentText:
+    """Attach page numbers and a scanned-PDF flag to an extracted PDF document."""
+    return DocumentText(
+        text=document.text,
+        paragraphs=document.paragraphs,
+        title=stream.title or document.title,
+        kind=document.kind,
+        truncated=document.truncated,
+        encoding=document.encoding,
+        page_numbers=tuple(page.number for page in pages if page.text.strip()),
+        scanned=False,
+    )
+
+
+def _pdf_ocr_fallback(
+    path: Path, error: Exception | None, *, ocr: OCREngine | None, allow_ocr: bool
+) -> DocumentText:
+    """Fall back to OCR for a PDF with no text layer, or explain how to enable it."""
     engine = ocr
     if engine is None and allow_ocr:
         engine = _default_ocr_engine()
@@ -269,7 +301,17 @@ def _read_pdf(
     ocr_paragraphs = [line.strip() for line in (ocr_text or "").splitlines() if line.strip()]
     if not ocr_paragraphs:
         raise DocumentReadError(f"{path.name!r} produced no text even after OCR.")
-    return _assemble(ocr_paragraphs, path, "pdf-ocr")
+    document = _assemble(ocr_paragraphs, path, "pdf-ocr")
+    return DocumentText(
+        text=document.text,
+        paragraphs=document.paragraphs,
+        title=document.title,
+        kind=document.kind,
+        truncated=document.truncated,
+        encoding=document.encoding,
+        page_numbers=(),
+        scanned=True,
+    )
 
 
 def _default_ocr_engine() -> OCREngine | None:
@@ -334,6 +376,7 @@ def read_document(
     ocr: OCREngine | None = None,
     allow_ocr: bool = False,
     encoding: str | None = None,
+    password: str | None = None,
 ) -> DocumentText:
     """Read ``path`` into :class:`DocumentText`, or raise :class:`DocumentReadError`.
 
@@ -341,7 +384,9 @@ def read_document(
     safe encoding detection (a BOM, then UTF-8, then a short list of legacy
     encodings, each strict) so a mis-decoded file raises rather than filling with
     replacement characters. ``encoding`` pins the codec when the caller knows it.
-    Legacy ``.doc``/``.rtf`` are refused with an actionable message.
+    ``.pdf`` is read page by page through :mod:`core.pdf_extract` (the optional
+    ``pypdf`` extra); ``password`` decrypts a protected PDF. Legacy ``.doc``/``.rtf``
+    are refused with an actionable message.
 
     ``normalize=True`` applies :func:`core.text_normalize.normalize_text` to the
     extracted text (``fold_arabic=True`` additionally unifies Arabic letter
@@ -361,7 +406,7 @@ def read_document(
             "Save it as .docx (Word: File > Save As > Word Document) and try again."
         )
     if suffix in OPTIONAL_EXTENSIONS:
-        document = _read_pdf(source, ocr=ocr, allow_ocr=allow_ocr)
+        document = _read_pdf(source, ocr=ocr, allow_ocr=allow_ocr, password=password)
     elif suffix not in SUPPORTED_EXTENSIONS:
         raise DocumentReadError(
             f"Unsupported file type {source.suffix or '(none)'}. "
@@ -394,6 +439,8 @@ def _normalized(document: DocumentText, *, fold_arabic: bool) -> DocumentText:
         kind=document.kind,
         truncated=document.truncated,
         encoding=document.encoding,
+        page_numbers=document.page_numbers,
+        scanned=document.scanned,
     )
 
 

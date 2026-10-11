@@ -1,6 +1,6 @@
-"""Read local files: TXT, Markdown, CSV/TSV, JSON, and JSONL.
+"""Read local files: TXT, Markdown, CSV/TSV, JSON, JSONL, and digital PDFs.
 
-Stage 1 of file ingestion supports four families:
+File ingestion supports these families:
 
 * **TXT** and **Markdown** (``.txt``, ``.md``, ``.markdown``) -- read through the
   project's existing :func:`core.document_reader.read_document` (reused, not
@@ -12,6 +12,12 @@ Stage 1 of file ingestion supports four families:
 * **JSON** and **JSONL** -- a JSON array yields one record per element, a JSON
   object yields one record, and JSONL yields one record per line. Values are
   rendered to text by :func:`_render_json` (see below).
+* **PDF** (Stage 2A, ``.pdf``) -- a *digital* PDF is read page by page through
+  :mod:`core.pdf_extract` (the optional ``pypdf`` extra), yielding one record per
+  page. The 1-based page number is kept in the record title (``… (p. N)``) and in
+  the metadata, so a citation points at the right page. Encrypted, malformed,
+  empty, and image-only PDFs are reported distinctly; an image-only PDF is
+  refused with a pointer to the OCR stage rather than silently mis-read.
 
 **Structured-to-text conversion (deterministic, documented).** A CSV row is
 rendered as ``header1: value1; header2: value2`` for the columns that have a
@@ -53,6 +59,13 @@ from core.document_reader import (
     ENCODING_SAMPLE_BYTES,
     read_document,
 )
+from core.pdf_extract import (
+    DEFAULT_MAX_CHARS as DEFAULT_PDF_MAX_CHARS,
+    PDF_EXTRA,
+    PdfExtractionError,
+    PdfPageStream,
+    pdf_available,
+)
 from core.text_encoding import EncodingDetectionError, decode_bytes, detect_encoding
 from ingest.errors import ConnectorError
 from ingest.hashing import file_fingerprint, source_key
@@ -67,7 +80,9 @@ from ingest.records import (
 READER_SUFFIXES = frozenset({".txt", ".md", ".markdown"})
 #: Tabular / line-delimited formats read and streamed here.
 STREAM_SUFFIXES = frozenset({".csv", ".tsv", ".json", ".jsonl", ".ndjson"})
-ALL_SUFFIXES = READER_SUFFIXES | STREAM_SUFFIXES
+#: Digital PDFs (Stage 2A), read page by page through ``core.pdf_extract``.
+PDF_SUFFIXES = frozenset({".pdf"})
+ALL_SUFFIXES = READER_SUFFIXES | STREAM_SUFFIXES | PDF_SUFFIXES
 
 #: A plain JSON document is parsed whole; above this it is refused (use JSONL).
 DEFAULT_MAX_JSON_BYTES = 64 * 1024 * 1024
@@ -80,9 +95,10 @@ class FileConnector:
 
     info = ConnectorInfo(
         name="files",
-        description="Local TXT/Markdown/CSV/JSON/JSONL files and directories.",
+        description="Local TXT/Markdown/CSV/JSON/JSONL and digital PDF files.",
         suffixes=ALL_SUFFIXES,
         default=True,
+        optional_dependency=PDF_EXTRA,
     )
 
     # -- planning ---------------------------------------------------------
@@ -94,6 +110,8 @@ class FileConnector:
         allow_ocr = _flag(spec.option("allow_ocr", False))
         encoding = spec.option("encoding") or None
         max_json_bytes = int(spec.option("max_json_bytes", 0) or DEFAULT_MAX_JSON_BYTES)
+        pdf_password = spec.option("pdf_password") or None
+        max_chars = int(spec.option("max_chars", 0) or DEFAULT_PDF_MAX_CHARS)
         for path in self._iter_paths(spec):
             suffix = path.suffix.lower()
             relative = self._relative(path, spec)
@@ -114,6 +132,8 @@ class FileConnector:
                     "allow_ocr": allow_ocr,
                     "encoding": encoding,
                     "max_json_bytes": max_json_bytes,
+                    "pdf_password": pdf_password,
+                    "max_chars": max_chars,
                 },
             )
 
@@ -191,10 +211,66 @@ class FileConnector:
         path = Path(item.uri)
         suffix = path.suffix.lower()
         metadata = dict(item.metadata)
+        if suffix in PDF_SUFFIXES:
+            yield from self._stream_pdf(item, path, metadata)
+            return
         if suffix in STREAM_SUFFIXES:
             yield from self._stream_tabular(item, path, suffix, metadata)
             return
         yield from self._stream_document(item, path, metadata)
+
+    def _stream_pdf(
+        self, item: IngestItem, path: Path, metadata: dict
+    ) -> Iterator[SourceRecord]:
+        """Yield one record per PDF page, preserving page numbers (Stage 2A).
+
+        Pages are read one at a time through :class:`~core.pdf_extract.PdfPageStream`,
+        so a large PDF is never held whole -- only the current page's text is live
+        while it is chunked and written. Each page becomes its own record with its
+        1-based page number in the metadata and in the title (``… (p. N)``), which
+        is what makes a citation point at the right page. Encrypted, malformed,
+        empty, and image-only PDFs are reported distinctly; a missing optional
+        dependency is turned into an actionable message.
+        """
+        if not pdf_available():
+            raise ConnectorError(
+                f"PDF support needs the optional '{PDF_EXTRA}' extra. Install it with "
+                f"`pip install {PDF_EXTRA}` and try again."
+            )
+        try:
+            stream = PdfPageStream(
+                path,
+                password=metadata.get("pdf_password") or None,
+                max_chars=int(metadata.get("max_chars") or DEFAULT_PDF_MAX_CHARS),
+            )
+        except PdfExtractionError as error:
+            raise ConnectorError(str(error)) from error
+        title = stream.title or item.title
+        count = 0
+        try:
+            for page in stream:
+                if not page.text.strip():
+                    continue
+                count += 1
+                yield SourceRecord(
+                    title=f"{title} (p. {page.number})",
+                    text=page.text,
+                    source="file",
+                    source_key=item.source_key,
+                    metadata={
+                        **metadata,
+                        "kind": "pdf",
+                        "page": page.number,
+                        "page_count": stream.page_count,
+                        "rtl_hint": page.rtl_hint,
+                        "part": count,
+                        "truncated": stream.truncated,
+                        "encoding": "utf-8",
+                    },
+                )
+        except PdfExtractionError as error:
+            # Raised when the document turns out to have no text at all (a scan).
+            raise ConnectorError(str(error)) from error
 
     def _stream_document(
         self, item: IngestItem, path: Path, metadata: dict
@@ -415,7 +491,9 @@ def _excluded(path: Path, excludes: tuple[Path, ...]) -> bool:
 __all__ = [
     "ALL_SUFFIXES",
     "DEFAULT_MAX_JSON_BYTES",
+    "DEFAULT_PDF_MAX_CHARS",
     "FileConnector",
+    "PDF_SUFFIXES",
     "READER_SUFFIXES",
     "STREAM_SUFFIXES",
 ]

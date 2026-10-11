@@ -223,9 +223,10 @@ Arabic is kept as secondary aliases where useful.
   `SourceRecord`, `IngestItem`, `IngestionReport`, `Connector`); `ingest.registry`
   resolves a source to a connector by scheme/suffix (files is the path/dir
   fallback; the internet connector is registered only with `allow_web=True`);
-  `ingest.connectors.{files,sql,web}` stream TXT/Markdown/CSV/JSON/JSONL
-  (**Stage 1 file scope**; DOCX/PDF are deliberately out of scope for now and
-  an explicit `.docx`/`.pdf` path is refused), read-only SQLite/driver DBs, and
+  `ingest.connectors.{files,sql,web}` stream TXT/Markdown/CSV/JSON/JSONL and
+  digital PDFs (**Stage 2A adds `.pdf`**; DOCX and scanned-PDF OCR remain
+  deliberately out of scope, and an explicit `.docx` path is refused), read-only
+  SQLite/driver DBs, and
   (denied by default, host-allow-listed or explicitly authorized) one HTTP(S)
   page. `ingest.pipeline.IngestionPipeline`
   streams `plan`→`stream_item`, chunk-appends to `core.knowledge_base`
@@ -315,13 +316,31 @@ Arabic is kept as secondary aliases where useful.
   rather than filling with U+FFFD). Large files are streamed line by line up to
   `MAX_TEXT_CHARS` with an incrementally-decoded, strictly-checked codec, and
   `DocumentText.truncated` / `DocumentText.encoding` report a capped read and the
-  codec honestly. PDFs go through the optional `pypdf` extra; a scanned PDF with
-  no extractable text falls back to the separate optional OCR extra (`[ocr]` =
-  pypdfium2 + pytesseract, engine installed separately), and a
+  codec honestly. A digital `.pdf` is read **page by page** through
+  `core.pdf_extract` (the optional `pypdf` extra); `DocumentText.page_numbers`
+  and `DocumentText.scanned` carry the page split and the OCR provenance. A
+  scanned PDF with no extractable text falls back to the separate optional OCR
+  extra (`[ocr]` = pypdfium2 + pytesseract, engine installed separately), and a
   `NormalizationError` is raised only when a requested normalization fails.
-  `read_document(..., normalize=..., encoding=...)` applies
-  `core/text_normalize` and pins the codec. All lazy imports; the base install
-  pulls nothing new and no document is ever executed.
+  `read_document(..., normalize=..., encoding=..., password=...)` applies
+  `core/text_normalize`, pins the codec, and decrypts a protected PDF. All lazy
+  imports; the base install pulls nothing new and no document is ever executed.
+- `core/pdf_extract.py` — read text out of a **digital** PDF page by page with
+  `pypdf` (maintained, pure-Python, BSD; the optional `[pdf]` extra), imported
+  lazily so the base install stays dependency-light. `PdfPageStream` opens and
+  validates the document up front (missing dependency, missing file, encrypted
+  without a usable password, unreadable page tree, zero pages all raise
+  `PdfExtractionError` with a specific reason) and then yields one `PdfPage`
+  (its 1-based number, text, `rtl_hint`) at a time, so a 1000-page PDF is never
+  held whole; the accumulated text is capped at `DEFAULT_MAX_CHARS`.
+  `extract_pdf` is the materialising convenience. Encrypted, malformed, empty,
+  and image-only (scanned) PDFs are distinguished, not lumped together: an
+  image-only PDF raises a message that points at the OCR stage. `pypdf` only
+  *parses* the file -- embedded JavaScript/launch actions are never executed and
+  instructions inside the text are never followed. Arabic is recovered as far as
+  the format allows (a `ToUnicode` map decodes it correctly; PDFs store glyphs in
+  visual order so it is often reversed -- a format limitation, flagged by
+  `rtl_hint`, not a bug here).
 - `core/text_encoding.py` — dependency-free, explainable text decoding for
   imported files. `detect_encoding` honours a BOM, trusts strictly-valid UTF-8
   only when it decodes to plausible text (so NUL-filled UTF-16 is not mistaken

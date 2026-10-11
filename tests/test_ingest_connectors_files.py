@@ -18,10 +18,11 @@ def _write(path, text):
 
 
 def test_suffixes_cover_the_required_formats():
-    # Stage 1 supports TXT, Markdown, CSV, and JSON; PDF/DOCX are out of scope.
-    for suffix in (".txt", ".md", ".markdown", ".csv", ".json", ".jsonl"):
+    # Stage 1 supports TXT, Markdown, CSV, and JSON; Stage 2A adds digital PDF.
+    # DOCX/OCR remain out of scope.
+    for suffix in (".txt", ".md", ".markdown", ".csv", ".json", ".jsonl", ".pdf"):
         assert suffix in ALL_SUFFIXES
-    for suffix in (".docx", ".docm", ".pdf"):
+    for suffix in (".docx", ".docm"):
         assert suffix not in ALL_SUFFIXES
 
 
