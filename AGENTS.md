@@ -296,15 +296,20 @@ Arabic is kept as secondary aliases where useful.
   as `python -m cli import-center [interactive]|files|folder|resume|jobs|stats|formats`
   (`cli/import_center.py`); with no subcommand it prompts for a file or folder
   (the menu's item 10 runs `interactive`, so it imports a typed path rather than
-  only listing formats). Mirrored as GUI action `import-center` — which the
+  only listing formats). Scanned PDFs are reachable end to end: `--ocr` /
+  `--ocr-languages` / `--ocr-dpi` / `--ocr-max-pages` select the opt-in OCR path,
+  and any run that skipped a scanned PDF offers to retry it with OCR on a
+  terminal. Mirrored as GUI action `import-center` — which the
   window routes to the dialog below — and opened from the composer's ＋ menu.
 - `gui/import_dialog.py` — the Import Center **dialog** (Tk, imported lazily so
   `cli/` never imports Tk): Upload files / Import from a local folder / Import
   jobs, with a background worker thread, per-file results, retry, and a progress
-  line. `core/document_reader.py` reads TXT/Markdown (streamed above 4 MB),
-  CSV/TSV, JSON/JSONL, digital PDF, and DOCX; scanned PDFs go through the
-  opt-in OCR path in `core/pdf_ocr.py`. Every reader only parses bytes — no macro
-  or embedded instruction is ever executed.
+  line. A **Read scanned PDFs (OCR)** checkbox (with a language field) turns on
+  the OCR path for both import buttons, and a **Retry with OCR** button appears
+  when a run failed on scanned PDFs. `core/document_reader.py` reads
+  TXT/Markdown (streamed above 4 MB), CSV/TSV, JSON/JSONL, digital PDF, and DOCX;
+  scanned PDFs go through the opt-in OCR path in `core/pdf_ocr.py`. Every reader
+  only parses bytes — no macro or embedded instruction is ever executed.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
   Update the baseline with `python -m evaluation --update-baseline`.
@@ -476,8 +481,11 @@ Arabic is kept as secondary aliases where useful.
   (success + preview, or the reader's error verbatim); the chunks become
   `Document`s under the `attachment:` namespace and are indexed into the
   assistant's own store, so an answer can retrieve and **cite** them like the
-  built-in corpus. `remove_documents` detaches them again. Kept out of the Tk
-  window so the logic is testable without a display.
+  built-in corpus. `ocr=True` reads a scanned PDF through the same opt-in OCR
+  path, and a scanned-PDF failure names the real next step (enable OCR, or use
+  the Import Center) instead of the reader's CLI-only flag. `remove_documents`
+  detaches them again. Kept out of the Tk window so the logic is testable without
+  a display.
 - `fayd-al-ruh.spec` — PyInstaller; uses `collect_submodules` for `ml`,
   `evaluation`, `ai`, `storage`, `gui` (and `core` is bundled as an imported
   package).

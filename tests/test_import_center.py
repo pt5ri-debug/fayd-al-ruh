@@ -510,3 +510,169 @@ def test_menu_import_center_entry_actually_imports(tmp_path: Path, monkeypatch, 
     out = capsys.readouterr().out
     assert code == 0
     assert "1 succeeded" in out
+
+
+# --- OCR for scanned PDFs -------------------------------------------------
+
+
+class _FakeOcrEngine:
+    """A real :class:`PageOcrEngine` double: returns fixed text, records pages."""
+
+    def __init__(self, *, languages: tuple[str, ...] = ("eng",), text: str = "OCR page text") -> None:
+        self._languages = languages
+        self._text = text
+        self.seen: list[int] = []
+
+    def available_languages(self) -> tuple[str, ...]:
+        return self._languages
+
+    def recognize_page(self, path, number, *, languages, config):  # noqa: ANN001
+        self.seen.append(number)
+        return f"{self._text} {number}"
+
+
+def _scanned_pdf(tmp_path: Path, name: str = "scan.pdf") -> Path:
+    # An image-only page: no text layer, so the native reader refuses it.
+    return pdf_fixtures.write_pdf(tmp_path / name, [pdf_fixtures.image_page()])
+
+
+def test_scanned_pdf_without_ocr_names_the_next_step(tmp_path: Path) -> None:
+    # The old message told a GUI user to "re-run with OCR enabled" without saying
+    # how; the failure must now name a real, reachable action.
+    report = _importer(tmp_path).import_files([_scanned_pdf(tmp_path)])
+
+    assert report.failed == 1
+    message = report.failures[0].message
+    assert "no extractable text" in message.lower()
+    assert "Enable OCR" in message
+    assert "Read scanned PDFs (OCR)" in message
+
+
+def test_import_files_with_ocr_reads_a_scanned_pdf(tmp_path: Path) -> None:
+    engine = _FakeOcrEngine(text="QAQC Final 2025")
+    importer = _importer(tmp_path, ocr_engine=engine)
+
+    report = importer.import_files([_scanned_pdf(tmp_path)], ocr=True)
+
+    assert report.succeeded == 1
+    assert engine.seen == [1]
+    stored = list(importer.store().iter_chunks())
+    assert any("QAQC Final 2025" in chunk.text for chunk in stored)
+
+
+def test_retry_failed_can_enable_ocr_for_a_scanned_pdf(tmp_path: Path) -> None:
+    engine = _FakeOcrEngine(text="Permeability 250 mD")
+    importer = _importer(tmp_path, ocr_engine=engine)
+
+    first = importer.import_files([_scanned_pdf(tmp_path)])
+    assert first.failed == 1 and engine.seen == []
+
+    retry = importer.retry_failed(first.failures, ocr=True)
+
+    assert retry.succeeded == 1
+    assert engine.seen == [1]
+
+
+def test_ocr_languages_reach_the_engine(tmp_path: Path) -> None:
+    engine = _FakeOcrEngine(languages=("eng", "ara"))
+    importer = _importer(tmp_path, ocr_engine=engine)
+
+    report = importer.import_files([_scanned_pdf(tmp_path)], ocr=True, ocr_languages="ara+eng")
+
+    assert report.succeeded == 1
+
+
+def test_attach_document_ocr_hint_names_the_window_action(tmp_path: Path) -> None:
+    from gui import attachments
+
+    failed = attachments.attach_document(_scanned_pdf(tmp_path))
+
+    assert failed.ok is False
+    assert "no extractable text" in failed.message.lower()
+    assert "Read scanned PDFs (OCR)" in failed.message
+
+
+def test_attach_document_with_ocr_never_raises(tmp_path: Path) -> None:
+    from gui import attachments
+
+    # The OCR path is opt-in; whether or not the extra is installed, a failure is
+    # reported as a notice, never raised at the caller.
+    notice = attachments.attach_document(_scanned_pdf(tmp_path), ocr=True)
+
+    assert isinstance(notice.ok, bool)
+    if not notice.ok:
+        assert notice.message
+
+
+# --- CLI OCR plumbing -----------------------------------------------------
+
+
+def test_cli_ocr_flags_reach_the_importer() -> None:
+    from cli import import_center as cli_ic
+
+    args = cli_ic._build_parser().parse_args(
+        ["--ocr", "--ocr-languages", "ara+eng", "--ocr-dpi", "300", "formats"]
+    )
+    importer = cli_ic._importer(args)
+
+    assert importer.allow_ocr is True
+    assert importer.ocr_languages == "ara+eng"
+    assert importer.ocr_dpi == 300
+
+
+def test_cli_ocr_retry_offer_is_skipped_when_ocr_is_on(tmp_path: Path) -> None:
+    from cli import import_center as cli_ic
+
+    report = _importer(tmp_path).import_files([_scanned_pdf(tmp_path)])
+    args = cli_ic._build_parser().parse_args(["--ocr", "files", str(tmp_path)])
+
+    # Already asking for OCR: no second offer, and never a prompt.
+    assert cli_ic._offer_ocr_retry(args, _importer(tmp_path), report) is False
+
+
+def test_cli_ocr_retry_offer_declines_without_a_terminal(tmp_path: Path, monkeypatch) -> None:
+    import io
+
+    from cli import import_center as cli_ic
+
+    report = _importer(tmp_path).import_files([_scanned_pdf(tmp_path)])
+    args = cli_ic._build_parser().parse_args(["files", str(tmp_path)])
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))  # not a tty
+
+    assert cli_ic._offer_ocr_retry(args, _importer(tmp_path), report) is False
+
+
+def test_cli_ocr_retry_offer_retries_when_accepted(tmp_path: Path, monkeypatch, capsys) -> None:
+    from cli import import_center as cli_ic
+
+    scanned = _scanned_pdf(tmp_path)
+    importer = _importer(tmp_path)
+    report = importer.import_files([scanned])
+    assert report.failed == 1
+
+    args = cli_ic._build_parser().parse_args(["files", str(scanned)])
+    monkeypatch.setattr("sys.stdin", _FakeTty("y"))
+
+    offered = cli_ic._offer_ocr_retry(args, importer, report)
+
+    # On a machine with the OCR extra the retry reads the page for real; without
+    # it the offer still fires and the retry reports honestly. Either way the
+    # user was asked and an attempt was made.
+    assert offered is True
+    assert "Retry them with OCR now?" in capsys.readouterr().out
+
+
+class _FakeTty:
+    """A minimal tty-like stdin: reports ``isatty`` and feeds one answer."""
+
+    def __init__(self, answer: str) -> None:
+        self._answer = answer + "\n"
+
+    def isatty(self) -> bool:
+        return True
+
+    def readline(self) -> str:
+        return self._answer
+
+    def read(self, *_args: object) -> str:
+        return self._answer

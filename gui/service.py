@@ -277,14 +277,15 @@ class ChatService:
         items.sort(key=lambda item: item.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
         return tuple(items)
 
-    def attach_file(self, path: str | Path) -> AttachmentNotice:
+    def attach_file(self, path: str | Path, *, ocr: bool = False) -> AttachmentNotice:
         """Read a file, index its text, and remember it as an attachment.
 
         The document's chunks join the assistant's own store, so a question can
         retrieve and cite them exactly like the built-in corpus. A read failure
         comes back as ``ok=False`` with a message, never as an exception.
+        ``ocr=True`` reads a scanned PDF (needs the ``[ocr]`` extra + Tesseract).
         """
-        notice = attach_document(path)
+        notice = attach_document(path, ocr=ocr)
         if not notice.ok or not notice.attachments:
             return notice
         retriever = self._retriever()
@@ -341,38 +342,54 @@ class ChatService:
         self,
         paths: Iterable[str | Path],
         *,
+        ocr: bool | None = None,
+        ocr_languages: str | None = None,
         progress: "ProgressCallback | None" = None,
     ) -> ImportReport:
         """Import one or many chosen files into the knowledge base.
 
         The window's **Upload files** path: each file is imported on its own, so a
         malformed one is recorded and the rest still succeed, and the per-file
-        result can be retried.
+        result can be retried. ``ocr=True`` reads scanned PDFs.
         """
-        return self._importer.import_files(paths, progress=progress)
+        return self._importer.import_files(
+            paths, ocr=ocr, ocr_languages=ocr_languages, progress=progress
+        )
 
     def import_folder(
         self,
         folder: str | Path,
         *,
         recursive: bool | None = None,
+        ocr: bool | None = None,
+        ocr_languages: str | None = None,
         job_id: str | None = None,
         resume: bool = True,
         progress: "ProgressCallback | None" = None,
     ) -> ImportReport:
         """Import every supported file under ``folder`` (**Import from a folder**)."""
         return self._importer.import_folder(
-            folder, recursive=recursive, job_id=job_id, resume=resume, progress=progress
+            folder,
+            recursive=recursive,
+            ocr=ocr,
+            ocr_languages=ocr_languages,
+            job_id=job_id,
+            resume=resume,
+            progress=progress,
         )
 
     def retry_failed(
         self,
         failures: Sequence[Any],
         *,
+        ocr: bool | None = None,
+        ocr_languages: str | None = None,
         progress: "ProgressCallback | None" = None,
     ) -> ImportReport:
-        """Retry the files that failed in an earlier import run."""
-        return self._importer.retry_failed(failures, progress=progress)
+        """Retry the files that failed in an earlier import run (optionally with OCR)."""
+        return self._importer.retry_failed(
+            failures, ocr=ocr, ocr_languages=ocr_languages, progress=progress
+        )
 
     def import_jobs(self):
         """The recorded import jobs (for the Import Center's Jobs list)."""

@@ -720,10 +720,11 @@ The window is a thin shell over the same code the CLI already runs:
   switching never clears the transcript.
 - The **composer** is a rounded, ChatGPT-like card: a multiline field (Enter
   sends, Shift+Enter inserts a newline), a send button, and a **＋** control that
-  opens two choices — **Attach a file to this chat** (the file's text joins this
-  conversation's evidence and shows as a removable chip, so a question can cite
-  it like the built-in corpus) and **Open Knowledge Import Center…** (the
-  persistent path below).
+  opens three choices — **Attach a file to this chat** (the file's text joins
+  this conversation's evidence and shows as a removable chip, so a question can
+  cite it like the built-in corpus), **Attach a scanned PDF (OCR)…** (the same,
+  for a PDF with no text layer; needs the optional `[ocr]` extra), and **Open
+  Knowledge Import Center…** (the persistent path below).
 - In Jarvics Mode a message that would **change files** (a `write_file` plan) is
   previewed and held for confirmation — the plan's steps are shown with **Run** /
   **Cancel** — so a destructive tool never runs unreviewed. Read-only tools run
@@ -1082,6 +1083,7 @@ control opens the **Knowledge Import Center**, and the CLI offers the same engin
 ```bash
 python -m cli import-center                            # prompt for a file or folder
 python -m cli import-center files report.pdf notes.txt data.csv
+python -m cli import-center --ocr files scanned.pdf    # OCR a scanned PDF
 python -m cli import-center folder ./papers            # recursive, bounded batches
 python -m cli import-center folder ./papers --job papers   # resumable
 python -m cli import-center resume papers              # continue an interrupted job
@@ -1105,6 +1107,14 @@ second ingestion path exists to drift.
   on your machine, so a folder the picker returns is a real local path the
   process can read — there is no server to upload to and no path is ever built
   from free text.
+- **Scanned PDFs are reachable, not a dead end.** A PDF with no text layer fails
+  with a message that names the real next step, and OCR is offered where the user
+  already is: the Import Center's **Read scanned PDFs (OCR)** checkbox (with a
+  language field, e.g. `ara+eng`), a **Retry with OCR** button on the failure, an
+  **Attach a scanned PDF (OCR)…** entry in the composer's **＋** menu, and
+  `--ocr` / `--ocr-languages` on the CLI (an interactive run also offers to retry
+  the scanned files it skipped). It needs the optional `fayd-al-ruh[ocr]` extra
+  plus Tesseract; a digital PDF is never OCR'd.
 - **Bounded memory.** Nothing reads a whole dataset by default: CSV/JSONL are
   streamed row by row, a large TXT is read line by line under a hard cap, a PDF
   page by page, a DOCX block by block, and a folder is walked one directory at a
