@@ -156,8 +156,9 @@ Arabic is kept as secondary aliases where useful.
   explainers, so surface wording lives in one auditable place. `compose_model_answer`
   is the model-output half: given an optional `question` it keeps the whole
   sentences the model finished, drops fragments/dangling tails/repeats and bare
-  section labels, centres the answer on the question, and collapses repeats —
-  without rewriting the model's words — and is used by `ai/mind.py`.
+  section labels, centres the answer on the question, collapses repeats, and reads
+  an ontology identifier the model echoed ("pore_pressure") as the phrase it names
+  — without rewriting the model's words — and is used by `ai/mind.py`.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. CLI:
   `python -m ai.voice` / `python -m cli voice`.

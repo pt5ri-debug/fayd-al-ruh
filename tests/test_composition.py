@@ -269,6 +269,39 @@ def test_compose_model_answer_without_a_question_still_composes():
     assert compose_model_answer("The well is cased. Then it flows") == "The well is cased."
 
 
+def test_compose_model_answer_reads_an_ontology_id_as_a_phrase():
+    # The training prose is built from concept labels, so the model echoes an
+    # identifier verbatim ("pore_pressure"); the underscore is a data-format
+    # separator, not a word the model chose, so it reads as the phrase it names.
+    assert (
+        compose_model_answer("Pore_pressure is a concept in Reservoir simulation.")
+        == "Pore pressure is a concept in Reservoir simulation."
+    )
+    assert (
+        compose_model_answer("Voidage_replacement is a concept from Well Completions.")
+        == "Voidage replacement is a concept from Well Completions."
+    )
+    assert compose_model_answer("co2_capture raises recovery.") == "Co2 capture raises recovery."
+
+
+def test_compose_model_answer_collapses_a_looping_ontology_id():
+    # An id the model loops on reads as the looping phrase it names, and collapses
+    # to one copy like any other repeat.
+    assert compose_model_answer("pore_pressure pore_pressure is high.") == (
+        "Pore pressure is high."
+    )
+
+
+def test_compose_model_answer_does_not_touch_a_decimal_range_or_formula():
+    # The id read-out must not disturb the model's own numbers, ranges, compound
+    # names, or formulas: none of them is a whole underscore-joined token.
+    assert compose_model_answer("The value is 10--20 m.") == "The value is 10--20 m."
+    assert compose_model_answer("API 5CT--spec is used.") == "API 5CT--spec is used."
+    assert compose_model_answer("The gradient is 0.052 psi/ft.") == "The gradient is 0.052 psi/ft."
+    assert compose_model_answer("The formula is q / A.") == "The formula is q / A."
+    assert compose_model_answer("The well is 10 - 20 m deep.") == "The well is 10 - 20 m deep."
+
+
 def test_grounded_answer_reads_as_prose_without_inline_citations():
     text = grounded_answer(
         "what is porosity",
