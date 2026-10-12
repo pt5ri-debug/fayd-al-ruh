@@ -140,6 +140,29 @@ def _build_parser() -> argparse.ArgumentParser:
     delete.add_argument("--json", action="store_true", dest="as_json")
 
     sub.add_parser("jobs", parents=[common], help="List resumable ingestion jobs.")
+
+    sql_import = sub.add_parser(
+        "sql-import",
+        parents=[common],
+        help="Resumable, idempotent SQL import with durable progress.",
+    )
+    sql_import.add_argument("source", help="A sqlite:// URI (or a .db/.sqlite path).")
+    sql_import.add_argument("--job", required=True, help="Job id (reused to resume).")
+    sql_import.add_argument("--batch-size", type=int, default=500, help="Rows per committed batch.")
+    sql_import.add_argument(
+        "--schema-change",
+        choices=("fail", "full-reimport"),
+        default="fail",
+        help="How to react when a table's structure changed (default: fail).",
+    )
+    sql_import.add_argument("--option", action="append", default=[], metavar="KEY=VALUE")
+    sql_import.add_argument("--quiet", action="store_true", help="Suppress progress.")
+    sql_import.add_argument("--json", action="store_true", dest="as_json")
+
+    sql_jobs = sub.add_parser(
+        "sql-jobs", parents=[common], help="List resumable SQL import jobs."
+    )
+    sql_jobs.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -374,6 +397,71 @@ def run_jobs(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_sql_import(args: argparse.Namespace) -> int:
+    from ingest.sql_job import (
+        SCHEMA_FAIL,
+        SCHEMA_FULL_REIMPORT,
+        SqlImportRunner,
+    )
+
+    store_dir = _resolve_dir(args.store_dir)
+    options = _parse_options(args.option)
+    source = _sqlite_uri(args.source)
+    spec = SourceSpec(source, options=options)
+    progress = (
+        (lambda message: print(message, file=sys.stderr, flush=True))
+        if not args.quiet
+        else None
+    )
+    policy = SCHEMA_FULL_REIMPORT if args.schema_change == "full-reimport" else SCHEMA_FAIL
+    runner = SqlImportRunner(
+        store_dir,
+        batch_size=args.batch_size,
+        progress=progress,
+    )
+    job = runner.run(spec, job_id=args.job, schema_change=policy)
+    if args.as_json:
+        print(json.dumps(job.as_dict(), ensure_ascii=False, indent=2))
+        return 0 if job.status == "done" else 1
+    for name, table in sorted(job.tables.items()):
+        print(f"  {name}: {table.status} ({table.resume_count}/{table.target_rows} rows)")
+    if job.failures:
+        for failure in job.failures:
+            print(f"  failed: {failure}")
+    print(f"job {job.job_id}: {job.status}")
+    return 0 if job.status == "done" else 1
+
+
+def run_sql_jobs(args: argparse.Namespace) -> int:
+    from ingest.sql_job import SqlJobStore, sql_jobs_dir
+
+    store_dir = _resolve_dir(args.store_dir)
+    jobs = SqlJobStore(sql_jobs_dir(store_dir)).list()
+    if args.as_json:
+        print(json.dumps([job.as_dict() for job in jobs], ensure_ascii=False, indent=2))
+        return 0
+    if not jobs:
+        print("No SQL import jobs recorded.")
+        return 0
+    for job in jobs:
+        rows = sum(table.resume_count for table in job.tables.values())
+        target = sum(table.target_rows for table in job.tables.values())
+        print(f"{job.job_id} [{job.status}] {rows}/{target} rows — {job.source_uri}")
+    return 0
+
+
+def _sqlite_uri(source: str) -> str:
+    """Accept a sqlite:// URI or a bare .db/.sqlite path and return a URI."""
+    if "://" in source:
+        return source
+    from pathlib import Path
+
+    path = Path(source).expanduser()
+    if not path.is_absolute():
+        path = path.resolve()
+    return f"sqlite://{path}"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else sys.argv[1:])
     if args.command == "add":
@@ -390,6 +478,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_delete(args)
     if args.command == "jobs":
         return run_jobs(args)
+    if args.command == "sql-import":
+        return run_sql_import(args)
+    if args.command == "sql-jobs":
+        return run_sql_jobs(args)
     return 1
 
 

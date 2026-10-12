@@ -131,3 +131,57 @@ def test_stats_and_search(tmp_path, capsys):
 def test_search_without_store_reports_helpfully(tmp_path, capsys):
     assert _run(["search", "q", "--store-dir", str(tmp_path / "empty")]) == 1
     assert "Ingest a source first" in capsys.readouterr().out
+
+
+def _sqlite_db(tmp_path, rows=7):
+    import sqlite3
+
+    db = tmp_path / "wells.db"
+    connection = sqlite3.connect(db)
+    connection.execute("CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT)")
+    connection.executemany(
+        "INSERT INTO t(id, v) VALUES(?, ?)", [(i, f"v{i}") for i in range(1, rows + 1)]
+    )
+    connection.commit()
+    connection.close()
+    return db
+
+
+def test_sql_import_runs_and_resumes(tmp_path, capsys):
+    db = _sqlite_db(tmp_path)
+    store_dir = tmp_path / "kb"
+    argv = [
+        "sql-import",
+        str(db),
+        "--job",
+        "cli1",
+        "--batch-size",
+        "3",
+        "--store-dir",
+        str(store_dir),
+    ]
+    assert _run(argv) == 0
+    out = capsys.readouterr().out
+    assert "t: done (7/7 rows)" in out
+    assert "job cli1: done" in out
+
+    # A rerun from the same job resumes at the end (nothing left to read).
+    capsys.readouterr()
+    assert _run([*argv, "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["tables"]["t"]["resume_count"] == 7
+
+
+def test_sql_jobs_lists_jobs(tmp_path, capsys):
+    db = _sqlite_db(tmp_path, rows=2)
+    store_dir = tmp_path / "kb"
+    _run(["sql-import", str(db), "--job", "listed", "--store-dir", str(store_dir), "--quiet"])
+    capsys.readouterr()
+    assert _run(["sql-jobs", "--store-dir", str(store_dir)]) == 0
+    assert "listed [done]" in capsys.readouterr().out
+
+
+def test_sql_jobs_empty(tmp_path, capsys):
+    assert _run(["sql-jobs", "--store-dir", str(tmp_path / "kb")]) == 0
+    assert "No SQL import jobs" in capsys.readouterr().out
+

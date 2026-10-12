@@ -23,6 +23,26 @@ class ConnectorError(IngestionError):
     """A connector could not read a source (bad format, missing dependency, ...)."""
 
 
+class IngestCancelled(IngestionError):
+    """A cooperative cancel stopped the run; committed work is kept, the rest is not.
+
+    This is *not* a connector failure: the caller asked to stop, so it must not
+    be recorded as a failed source, and the job must be marked ``cancelled``
+    rather than ``done``. The pipeline checks for it separately from the other
+    errors so a cancel never inflates the failure count.
+    """
+
+
+class IngestInterrupted(IngestionError):
+    """A deliberate interruption at a controlled point (tests, embedded callers).
+
+    Models a crash between a durably committed batch and its checkpoint: the run
+    stops where it was told to, already-written work stays, and the next run
+    resumes from the last checkpoint. It is never retried and never counted as a
+    failure, so the pipeline re-raises it instead of folding it into ``failed``.
+    """
+
+
 @dataclass(frozen=True)
 class SourceError:
     """One source that failed, and why."""
@@ -88,6 +108,8 @@ def _sanitise(message: str) -> str:
 __all__ = [
     "ConnectorError",
     "ErrorLog",
+    "IngestCancelled",
+    "IngestInterrupted",
     "IngestionError",
     "SourceError",
 ]
