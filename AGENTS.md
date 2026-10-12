@@ -123,7 +123,10 @@ Arabic is kept as secondary aliases where useful.
   the question by opening with the sentence that names the question's words; and
   it collapses repeated punctuation/doubled words *and short repeated phrases*
   ("the same the same") while leaving a hyphen run between word characters
-  ("10--20", "5CT--spec") intact, capitalises and punctuates. It also closes the
+  ("10--20", "5CT--spec") intact, capitalises and punctuates. The phrase collapse
+  is applied until it stops changing, so a *run* the byte model stalls on ("the
+  casing the casing the casing the casing") collapses all the way to one copy
+  rather than leaving every other copy. It also closes the
   two ragged boundaries the byte model leaves: a sentence that ran on past a
   boundary in lower case ("...mixed. and the slurry is pumped.") is capitalised
   (presentation only), and a space before a full stop or a glued-on next sentence

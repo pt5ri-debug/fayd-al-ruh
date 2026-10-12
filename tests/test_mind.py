@@ -86,6 +86,18 @@ def test_mind_answer_centres_the_answer_on_the_question() -> None:
     )
 
 
+def test_mind_answer_collapses_a_repeat_run_the_model_stalls_on() -> None:
+    """A byte model that loops on a phrase shows it once, not several times."""
+    assistant = mind.MindAssistant(
+        _EchoModel("schedule the casing the casing the casing the casing the lamin"),
+        max_new_tokens=8,
+    )
+    result = assistant.answer("how is casing designed?")
+    assert result.text == "Schedule the casing the lamin."
+    # The untouched continuation keeps the loop, for inspection.
+    assert result.raw_text == "schedule the casing the casing the casing the casing the lamin"
+
+
 def test_mind_answer_rejects_an_empty_question(tmp_path) -> None:
     assistant = mind.MindAssistant(_tiny_model(tmp_path))
     with pytest.raises(ValueError):

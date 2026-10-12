@@ -124,6 +124,38 @@ def test_compose_model_answer_drops_output_with_no_words():
     assert compose_model_answer("   ") == ""
 
 
+def test_compose_model_answer_collapses_a_long_repeat_run():
+    # The byte model stalls on a phrase for several copies ("the casing the
+    # casing the casing the casing"); a single regex pass only removes every
+    # other copy, so the run must collapse all the way to one. The words the
+    # model actually wrote around the loop are untouched.
+    assert (
+        compose_model_answer("schedule the casing the casing the casing the casing the lamin")
+        == "Schedule the casing the lamin."
+    )
+    assert compose_model_answer("the well the well the well the well the well the well") == (
+        "The well."
+    )
+    assert (
+        compose_model_answer("Monitor the sample work and the stage the stage the stage the complex.")
+        == "Monitor the sample work and the stage the complex."
+    )
+
+
+def test_compose_model_answer_collapses_a_long_repeat_run_without_touching_real_text():
+    # A word reused across a real sentence (not back-to-back) still survives, and
+    # a partial repeat that is not a whole loop keeps the words that are not the
+    # repeated unit.
+    assert (
+        compose_model_answer("the safety case the case the case the case the complete.")
+        == "The safety case the complete."
+    )
+    assert (
+        compose_model_answer("Water fills the pores of the rock and the water moves.")
+        == "Water fills the pores of the rock and the water moves."
+    )
+
+
 def test_compose_model_answer_keeps_a_word_that_survives_tidying():
     # A single surviving word is still the model's own answer.
     assert compose_model_answer("porosity") == "Porosity."
