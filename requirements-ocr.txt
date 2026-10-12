@@ -1,0 +1,14 @@
+# Optional: read *scanned* PDFs with OCR (the [ocr] extra).
+#
+# Install with:  python -m pip install -r requirements-ocr.txt
+#
+# These are the Python packages only. OCR also needs the Tesseract engine and its
+# language data as *system* packages, which pip cannot install:
+#   Debian/Ubuntu : sudo apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara
+#   macOS         : brew install tesseract tesseract-lang
+#   Windows       : https://github.com/UB-Mannheim/tesseract/wiki
+# The application checks for the engine and tells you if it is missing.
+pypdf>=4.0
+pypdfium2>=4.0
+pytesseract>=0.3.10
+Pillow>=10.0

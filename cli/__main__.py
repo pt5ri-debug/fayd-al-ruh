@@ -20,6 +20,8 @@ Usage:
     python -m cli ingest add DOCS       # ingest files/folders/SQL (streaming)
     python -m cli ingest list-connectors # show the available connectors
     python -m cli ingest stats          # ingestion store + ledger status
+    python -m cli deps                  # show which optional features are installed
+    python -m cli deps --install ocr    # install the OCR packages (scanned PDFs)
     python -m cli paths               # show asset/data locations
     python -m cli demo                # local cognitive demo
     python -m cli ml --episodes 60    # ML pipeline
@@ -47,6 +49,7 @@ from cli.menu import (
     run_chat,
     run_curriculum,
     run_demo,
+    run_deps,
     run_evaluation,
     run_gui,
     run_import_center,
@@ -81,6 +84,7 @@ _COMMANDS = {
     "knowledge": run_knowledge,
     "ingest": run_ingest,
     "import-center": run_import_center,
+    "deps": run_deps,
     "demo": run_demo,
     "ml": run_ml,
     "llm": run_llm,

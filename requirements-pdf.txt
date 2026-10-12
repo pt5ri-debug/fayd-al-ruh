@@ -1,0 +1,5 @@
+# Optional: read *digital* PDFs (the [pdf] extra).
+#
+# Install with:  python -m pip install -r requirements-pdf.txt
+# A scanned PDF with no text layer is a separate concern: see requirements-ocr.txt.
+pypdf>=4.0
