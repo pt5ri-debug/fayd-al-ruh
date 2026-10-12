@@ -44,6 +44,7 @@ from pathlib import Path
 
 from core.knowledge_base import KnowledgeBaseStore, default_knowledge_base_dir
 from core.paths import data_dir
+from core.pdf_ocr import PageOcrEngine
 from ingest.dedup import DedupLedger
 from ingest.jobs import DONE, FAILED, RUNNING, JobState, JobStore
 from ingest.metadata import DocumentMetadataStore, metadata_path
@@ -200,10 +201,13 @@ class KnowledgeImporter:
         fold_arabic: bool = False,
         allow_ocr: bool = False,
         ocr_languages: str = "eng",
+        ocr_dpi: int | None = None,
+        ocr_max_pages: int | None = None,
         chunk_chars: int | None = None,
         overlap: int | None = None,
         retries: int = 2,
         allow_web: bool = False,
+        ocr_engine: "PageOcrEngine | None" = None,
     ) -> None:
         self.store_dir = Path(store_dir) if store_dir is not None else default_knowledge_base_dir()
         self.recursive = recursive
@@ -211,11 +215,13 @@ class KnowledgeImporter:
         self.fold_arabic = fold_arabic
         self.allow_ocr = allow_ocr
         self.ocr_languages = ocr_languages
+        self.ocr_dpi = ocr_dpi
+        self.ocr_max_pages = ocr_max_pages
         self.chunk_chars = chunk_chars
         self.overlap = overlap
         self.retries = retries
         self.allow_web = allow_web
-        self._registry = build_default_registry(allow_web=allow_web)
+        self._registry = build_default_registry(allow_web=allow_web, ocr_engine=ocr_engine)
 
     # -- stores -----------------------------------------------------------
 
@@ -254,14 +260,30 @@ class KnowledgeImporter:
             kwargs["on_item"] = on_item
         return IngestionPipeline(self.store(), self._ledger(), **kwargs)  # type: ignore[arg-type]
 
-    def _options(self, *, recursive: bool | None = None) -> dict[str, str]:
-        return {
+    def _options(
+        self,
+        *,
+        recursive: bool | None = None,
+        ocr: bool | None = None,
+        ocr_languages: str | None = None,
+        ocr_dpi: int | None = None,
+        ocr_max_pages: int | None = None,
+    ) -> dict[str, str]:
+        use_ocr = self.allow_ocr if ocr is None else ocr
+        options = {
             "normalize": "true" if self.normalize else "false",
             "fold_arabic": "true" if self.fold_arabic else "false",
-            "allow_ocr": "true" if self.allow_ocr else "false",
-            "ocr_languages": self.ocr_languages,
+            "allow_ocr": "true" if use_ocr else "false",
+            "ocr_languages": ocr_languages or self.ocr_languages,
             "recursive": "true" if (self.recursive if recursive is None else recursive) else "false",
         }
+        dpi = self.ocr_dpi if ocr_dpi is None else ocr_dpi
+        max_pages = self.ocr_max_pages if ocr_max_pages is None else ocr_max_pages
+        if dpi:
+            options["ocr_dpi"] = str(dpi)
+        if max_pages:
+            options["ocr_max_pages"] = str(max_pages)
+        return options
 
     # -- import paths -----------------------------------------------------
 
@@ -269,6 +291,8 @@ class KnowledgeImporter:
         self,
         paths: Iterable[str | Path],
         *,
+        ocr: bool | None = None,
+        ocr_languages: str | None = None,
         progress: ProgressCallback | None = None,
     ) -> ImportReport:
         """Import one or many chosen files, each confined to its own folder.
@@ -276,15 +300,19 @@ class KnowledgeImporter:
         Every file is imported as its own source (with the file's folder as
         ``root``), so one malformed file is recorded and skipped without
         affecting the others, and the per-file result is available for retry.
+        ``ocr=True`` reads scanned PDFs (needs the ``[ocr]`` extra + Tesseract).
         """
         report = ImportReport()
         started = time.monotonic()
+        options = self._options(ocr=ocr, ocr_languages=ocr_languages)
+        ocr_enabled = options["allow_ocr"] == "true"
         for raw in paths:
             path = Path(raw).expanduser()
             outcome = self._import_one(
-                SourceSpec(str(path), options=self._options()),
+                SourceSpec(str(path), options=options),
                 root=str(path.parent),
                 progress=progress,
+                ocr_enabled=ocr_enabled,
             )
             report.outcomes.append(outcome)
             self._merge(report, outcome)
@@ -296,6 +324,8 @@ class KnowledgeImporter:
         folder: str | Path,
         *,
         recursive: bool | None = None,
+        ocr: bool | None = None,
+        ocr_languages: str | None = None,
         job_id: str | None = None,
         resume: bool = True,
         progress: ProgressCallback | None = None,
@@ -305,12 +335,15 @@ class KnowledgeImporter:
         The folder is scanned lazily and each file is deduped by its fingerprint,
         so a re-run imports only new or changed files. When ``job_id`` is given
         the job is saved after every file and a later call resumes from the last
-        completed item when ``resume`` is true.
+        completed item when ``resume`` is true. ``ocr=True`` reads scanned PDFs.
         """
         directory = Path(folder).expanduser()
         report = ImportReport()
         started = time.monotonic()
-        spec = SourceSpec(str(directory), options=self._options(recursive=recursive))
+        spec = SourceSpec(
+            str(directory),
+            options=self._options(recursive=recursive, ocr=ocr, ocr_languages=ocr_languages),
+        )
         job = None
         jobs = None
         resume_from = 0
@@ -328,6 +361,7 @@ class KnowledgeImporter:
                 job.position = 0
             report.job_id = job_id
         connector = self._registry.get("files") or self._registry.resolve(spec)
+        ocr_enabled = spec.option("allow_ocr", "false") in {"true", "1", "yes", "on"}
         collected: list[ItemOutcome] = []
         pipeline = self._pipeline(
             progress=progress, job=job, jobs=jobs, on_item=collected.append
@@ -344,7 +378,11 @@ class KnowledgeImporter:
                     chunks=item.chunks,
                     bytes_written=item.bytes_written,
                     skipped_unchanged=1 if item.status == "unchanged" else 0,
-                    message=item.message,
+                    message=(
+                        _ocr_hint(item.message, ocr_enabled=ocr_enabled)
+                        if item.status == "failed"
+                        else item.message
+                    ),
                 )
             )
         report.records += result.records
@@ -359,16 +397,19 @@ class KnowledgeImporter:
         self,
         failures: Sequence[ImportOutcome],
         *,
+        ocr: bool | None = None,
+        ocr_languages: str | None = None,
         progress: ProgressCallback | None = None,
     ) -> ImportReport:
         """Re-import the files that failed, as one bounded run.
 
         Retrying is just importing the same paths again: the dedup ledger makes a
         re-run cheap and the pipeline's per-source isolation keeps a still-broken
-        file from stopping the rest.
+        file from stopping the rest. ``ocr`` lets a retry enable OCR for a scanned
+        PDF that failed on the first pass.
         """
         paths = [outcome.source for outcome in failures if not outcome.ok]
-        return self.import_files(paths, progress=progress)
+        return self.import_files(paths, ocr=ocr, ocr_languages=ocr_languages, progress=progress)
 
     # -- jobs -------------------------------------------------------------
 
@@ -406,6 +447,7 @@ class KnowledgeImporter:
         *,
         root: str | None,
         progress: ProgressCallback | None,
+        ocr_enabled: bool = False,
     ) -> ImportOutcome:
         if root is not None:
             spec = SourceSpec(spec.uri, options={**spec.options, "root": root})
@@ -418,7 +460,7 @@ class KnowledgeImporter:
         pipeline = self._pipeline(progress=progress, job=None, jobs=None)
         before = len(pipeline.errors)
         result = pipeline.ingest(spec, connector=connector, incremental=True)
-        return self._outcome(spec.uri, result, pipeline, before)
+        return self._outcome(spec.uri, result, pipeline, before, ocr_enabled=ocr_enabled)
 
     def _outcome(
         self,
@@ -426,10 +468,13 @@ class KnowledgeImporter:
         result: IngestionReport,
         pipeline: IngestionPipeline,
         before: int,
+        *,
+        ocr_enabled: bool = False,
     ) -> ImportOutcome:
         errors = pipeline.errors.as_dicts()[before:]
         if errors:
-            return ImportOutcome(source=source, ok=False, message=errors[0]["message"])
+            message = _ocr_hint(errors[0]["message"], ocr_enabled=ocr_enabled)
+            return ImportOutcome(source=source, ok=False, message=message)
         if result.failed:
             return ImportOutcome(source=source, ok=False, message="The source failed to import.")
         return ImportOutcome(
@@ -446,6 +491,31 @@ class KnowledgeImporter:
         report.chunks += outcome.chunks
         report.bytes_written += outcome.bytes_written
         report.skipped_unchanged += outcome.skipped_unchanged
+
+
+def _ocr_hint(message: str, *, ocr_enabled: bool) -> str:
+    """Append a real next step to a scanned-PDF message.
+
+    A file with no text layer is not an error the reader can fix silently; the
+    message must say how to read it. This turns the reader's own wording into an
+    instruction the Import Center can act on (enable OCR), rather than repeating
+    the CLI-only flag name at a user who has no CLI.
+    """
+    if "no extractable text" not in message.lower():
+        return message
+    from core.pdf_ocr import ocr_available
+
+    if ocr_enabled:
+        return message + (
+            " OCR is on but found no readable text"
+            + ("" if ocr_available() else "; install the [ocr] extra and Tesseract")
+            + "."
+        )
+    return message + (
+        " Enable OCR to read it: import this PDF again with the “Read scanned PDFs (OCR)” "
+        "option (the Import Center window, or `python -m cli import-center --ocr files <path>`); "
+        "it needs the optional [ocr] extra plus the Tesseract engine."
+    )
 
 
 def default_store_dir() -> Path:

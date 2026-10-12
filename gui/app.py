@@ -1579,6 +1579,9 @@ class FaydGUI:
             font=(self._font, 10), borderwidth=0,
         )
         menu.add_command(label="Attach a file to this chat…", command=self._attach_one_file)
+        menu.add_command(
+            label="Attach a scanned PDF (OCR)…", command=lambda: self._attach_one_file(ocr=True)
+        )
         menu.add_separator()
         menu.add_command(
             label="Open Knowledge Import Center…", command=self._open_import_center
@@ -1591,10 +1594,10 @@ class FaydGUI:
         finally:
             menu.grab_release()
 
-    def _attach_one_file(self) -> None:
+    def _attach_one_file(self, *, ocr: bool = False) -> None:
         path = filedialog.askopenfilename(
             parent=self.root,
-            title="Attach a document",
+            title="Attach a scanned PDF (OCR)" if ocr else "Attach a document",
             filetypes=[
                 ("Documents", "*.txt *.md *.markdown *.csv *.json *.pdf *.docx *.docm"),
                 ("Text files", "*.txt *.md *.markdown"),
@@ -1604,7 +1607,7 @@ class FaydGUI:
             ],
         )
         if path:
-            self._on_attach(path)
+            self._on_attach(path, ocr=ocr)
 
     def _open_import_center(self) -> None:
         """Open the Knowledge Import Center as a separate window."""
@@ -1620,8 +1623,8 @@ class FaydGUI:
             on_close=lambda: setattr(self, "_import_dialog", None),
         )
 
-    def _on_attach(self, path: str) -> AttachmentNotice:
-        notice = self.service.attach_file(path)
+    def _on_attach(self, path: str, *, ocr: bool = False) -> AttachmentNotice:
+        notice = self.service.attach_file(path, ocr=ocr)
         if not notice.ok:
             self._add_bubble("note", f"Could not attach {notice.filename}: {notice.message}")
             return notice

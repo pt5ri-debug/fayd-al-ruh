@@ -84,14 +84,21 @@ def _chunks(document: DocumentText) -> list[str]:
     return chunks or [document.text.strip()]
 
 
-def build_attachment(path: str | Path) -> Attachment:
+def build_attachment(path: str | Path, *, ocr: bool = False) -> Attachment:
     """Read ``path`` and turn it into an :class:`Attachment` of citable documents.
 
-    Raises :class:`~core.document_reader.DocumentReadError` when the file cannot
-    be read, so the caller can show the message verbatim.
+    ``ocr=True`` reads a scanned PDF (no text layer) with OCR; it needs the
+    optional ``[ocr]`` extra and the Tesseract engine. Raises
+    :class:`~core.document_reader.DocumentReadError` when the file cannot be read,
+    so the caller can show the message verbatim.
     """
     source = Path(path).expanduser()
-    document = read_document(source)
+    ocr_config = None
+    if ocr:
+        from core.pdf_ocr import OcrConfig
+
+        ocr_config = OcrConfig(enabled=True)
+    document = read_document(source, ocr_config=ocr_config, allow_ocr=ocr)
     slug = _slug(source.stem)
     chunks = _chunks(document)
     multiple = len(chunks) > 1
@@ -120,18 +127,23 @@ def build_attachment(path: str | Path) -> Attachment:
     )
 
 
-def attach_document(path: str | Path) -> AttachmentNotice:
+def attach_document(path: str | Path, *, ocr: bool = False) -> AttachmentNotice:
     """Read a file and return a notice describing the outcome, never raising.
 
     On success the notice carries the :class:`Attachment` (its documents ready to
     index) and a preview of the opening text for the transcript. On failure it
-    carries the reader's message and ``ok=False``.
+    carries the reader's message and ``ok=False``. ``ocr=True`` reads a scanned
+    PDF with OCR.
     """
     source = Path(path).expanduser()
     try:
-        attachment = build_attachment(source)
+        attachment = build_attachment(source, ocr=ocr)
     except DocumentReadError as error:
-        return AttachmentNotice(filename=source.name or str(source), ok=False, message=str(error))
+        return AttachmentNotice(
+            filename=source.name or str(source),
+            ok=False,
+            message=_ocr_attachment_hint(str(error), ocr=ocr),
+        )
     except (OSError, ValueError) as error:
         return AttachmentNotice(
             filename=source.name or str(source), ok=False, message=f"Could not read the file: {error}"
@@ -146,6 +158,29 @@ def attach_document(path: str | Path) -> AttachmentNotice:
         preview=_preview(attachment.text),
         words=attachment.words,
         attachments=[attachment],
+    )
+
+
+def _ocr_attachment_hint(message: str, *, ocr: bool) -> str:
+    """Turn a scanned-PDF read failure into a next step the user can take.
+
+    The reader's raw message names a CLI flag; a chat attachment has no flag, so
+    this says what the window actually offers (attach it with OCR, or bring it in
+    through the Import Center).
+    """
+    if "no extractable text" not in message.lower():
+        return message
+    from core.pdf_ocr import ocr_available
+
+    if ocr:
+        return message + (
+            " OCR ran but found no readable text"
+            + ("" if ocr_available() else "; install the [ocr] extra and Tesseract")
+            + "."
+        )
+    return message + (
+        " Attach it with “Read scanned PDFs (OCR)” enabled (needs the [ocr] extra and "
+        "Tesseract), or import it from the Knowledge Import Center with OCR on."
     )
 
 

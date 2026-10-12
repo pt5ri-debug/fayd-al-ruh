@@ -12,10 +12,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from ingest.errors import ConnectorError
 from ingest.records import Connector, ConnectorInfo, SourceSpec
+
+if TYPE_CHECKING:
+    from core.pdf_ocr import PageOcrEngine
 
 
 class ConnectorRegistry:
@@ -86,18 +90,23 @@ def _suffix(uri: str) -> str:
     return name[dot:].lower() if dot > 0 else ""
 
 
-def build_default_registry(*, allow_web: bool = False) -> ConnectorRegistry:
+def build_default_registry(
+    *, allow_web: bool = False, ocr_engine: "PageOcrEngine | None" = None
+) -> ConnectorRegistry:
     """The registry the CLI and pipeline use by default.
 
     ``allow_web`` is off by default: the internet connector is only registered
     when the caller has explicitly opted in, so a plain local run cannot even
     resolve a URL -- the deny-by-default posture the project uses elsewhere.
+    ``ocr_engine``, when given, is the per-page engine the file connector uses for
+    scanned PDFs (a test double, or a caller-supplied engine); the default engine
+    is built lazily only when OCR is actually enabled.
     """
     from ingest.connectors.files import FileConnector
     from ingest.connectors.sql import SqlConnector
 
     registry = ConnectorRegistry()
-    registry.register(FileConnector())
+    registry.register(FileConnector(ocr_engine=ocr_engine))
     registry.register(SqlConnector())
     if allow_web:
         from ingest.connectors.web import WebConnector

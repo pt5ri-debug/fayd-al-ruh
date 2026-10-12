@@ -78,6 +78,8 @@ class ImportCenterDialog:
         self._last_report: ImportReport | None = None
         self._folder_var = tk.StringVar()
         self._recursive_var = tk.BooleanVar(value=True)
+        self._ocr_var = tk.BooleanVar(value=False)
+        self._ocr_languages_var = tk.StringVar(value="eng")
 
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
@@ -163,7 +165,7 @@ class ImportCenterDialog:
         )
         self._folder_label.pack(side="left", padx=10, fill="x", expand=True)
         row2 = tk.Frame(frame, bg=theme.surface)
-        row2.pack(fill="x", padx=12, pady=(0, 12))
+        row2.pack(fill="x", padx=12, pady=(0, 4))
         self._recursive_check = tk.Checkbutton(
             row2, text="Include subfolders", variable=self._recursive_var,
             bg=theme.surface, fg=theme.foreground, selectcolor=theme.surface_raised,
@@ -173,6 +175,29 @@ class ImportCenterDialog:
         self._recursive_check.pack(side="left")
         self._folder_import_button = self._button(row2, "Import folder", self._on_import_folder)
         self._folder_import_button.pack(side="right")
+        row3 = tk.Frame(frame, bg=theme.surface)
+        row3.pack(fill="x", padx=12, pady=(0, 12))
+        self._ocr_check = tk.Checkbutton(
+            row3, text="Read scanned PDFs (OCR)", variable=self._ocr_var,
+            bg=theme.surface, fg=theme.foreground, selectcolor=theme.surface_raised,
+            activebackground=theme.surface, activeforeground=theme.contrast,
+            font=(self.font, 9), highlightthickness=0, borderwidth=0, anchor="w",
+        )
+        self._ocr_check.pack(side="left")
+        tk.Label(
+            row3, text="languages", bg=theme.surface, fg=theme.text_secondary,
+            font=(self.font, 9),
+        ).pack(side="left", padx=(12, 4))
+        self._ocr_languages_entry = tk.Entry(
+            row3, textvariable=self._ocr_languages_var, width=10,
+            bg=theme.surface_deep, fg=theme.foreground, insertbackground=theme.foreground,
+            relief="flat", font=(self.mono, 9),
+        )
+        self._ocr_languages_entry.pack(side="left")
+        tk.Label(
+            row3, text="(e.g. ara+eng; needs the [ocr] extra + Tesseract)",
+            bg=theme.surface, fg=theme.text_dim, font=(self.font, 8),
+        ).pack(side="left", padx=6)
 
     def _build_jobs_section(self) -> None:
         theme = self.theme
@@ -196,6 +221,7 @@ class ImportCenterDialog:
         )
         self._status.pack(side="left")
         self._retry_button = self._button(top, "Retry failed", self._on_retry)
+        self._retry_ocr_button = self._button(top, "Retry with OCR", self._on_retry_ocr)
         # The retry button appears only when there is something to retry.
         self._results = tk.Text(
             frame, height=10, bg=theme.surface_deep, fg=theme.foreground,
@@ -216,7 +242,8 @@ class ImportCenterDialog:
         if not paths:
             return
         self._start("Importing %d file(s)…" % len(paths),
-                    lambda progress: self.service.import_files(paths, progress=progress))
+                    lambda progress: self.service.import_files(
+                        paths, ocr=self._ocr_var.get(), progress=progress))
 
     def _on_choose_folder(self) -> None:
         folder = filedialog.askdirectory(
@@ -239,20 +266,33 @@ class ImportCenterDialog:
         self._start(
             f"Importing {folder}…",
             lambda progress: self.service.import_folder(
-                folder, recursive=recursive, job_id=job_id, progress=progress
+                folder, recursive=recursive, ocr=self._ocr_var.get(),
+                ocr_languages=self._ocr_languages(), job_id=job_id, progress=progress
             ),
         )
 
-    def _on_retry(self) -> None:
+    def _ocr_languages(self) -> str:
+        """The language codes typed in the OCR row, or the engine default."""
+        return self._ocr_languages_var.get().strip() or "eng"
+
+    def _on_retry(self, *, ocr: bool | None = None) -> None:
         if self._busy or self._last_report is None:
             return
         failures = self._last_report.failures
         if not failures:
             return
+        use_ocr = self._ocr_var.get() if ocr is None else ocr
         self._start(
             f"Retrying {len(failures)} file(s)…",
-            lambda progress: self.service.retry_failed(failures, progress=progress),
+            lambda progress: self.service.retry_failed(
+                failures, ocr=use_ocr, ocr_languages=self._ocr_languages(), progress=progress
+            ),
         )
+
+    def _on_retry_ocr(self) -> None:
+        """Retry the scanned-PDF failures with OCR turned on for this run."""
+        self._ocr_var.set(True)
+        self._on_retry(ocr=True)
 
     def _on_resume_job(self, job_id: str) -> None:
         if self._busy:
@@ -324,9 +364,23 @@ class ImportCenterDialog:
                 error=True,
             )
             self._retry_button.pack(side="right", padx=8)
+            if self._scanned_failures(report):
+                self._retry_ocr_button.pack(side="right")
+            else:
+                self._retry_ocr_button.pack_forget()
         else:
             self._set_status(f"Done: {report.summary()}")
             self._retry_button.pack_forget()
+            self._retry_ocr_button.pack_forget()
+
+    @staticmethod
+    def _scanned_failures(report: ImportReport) -> list[Any]:
+        """The failures whose message says the PDF had no text layer."""
+        return [
+            outcome
+            for outcome in report.failures
+            if "no extractable text" in (outcome.message or "").lower()
+        ]
 
     def refresh_jobs(self) -> None:
         """Rebuild the jobs list from the recorded job state."""

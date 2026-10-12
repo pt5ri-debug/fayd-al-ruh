@@ -2,6 +2,7 @@
 
     python -m cli import-center                      # prompt for a file/folder
     python -m cli import-center files a.txt b.md     # upload-style import
+    python -m cli import-center --ocr files scan.pdf # OCR a scanned PDF
     python -m cli import-center folder ./papers      # recursive, bounded batches
     python -m cli import-center folder ./papers --job papers  # resumable
     python -m cli import-center resume papers        # continue a job
@@ -38,6 +39,28 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-normalize", action="store_true", help="Store text verbatim.")
     parser.add_argument("--fold-arabic", action="store_true", help="Also unify Arabic letter forms (opt-in).")
     parser.add_argument("--retries", type=int, default=2, help="Per-file retries for a transient read failure.")
+    parser.add_argument(
+        "--ocr",
+        action="store_true",
+        help="Read scanned PDFs with OCR (needs the [ocr] extra + Tesseract).",
+    )
+    parser.add_argument(
+        "--ocr-languages",
+        default="eng",
+        help="Tesseract languages for OCR, e.g. ara+eng (default: eng).",
+    )
+    parser.add_argument(
+        "--ocr-dpi",
+        type=int,
+        default=None,
+        help="Rasterisation DPI for OCR pages (default: 200).",
+    )
+    parser.add_argument(
+        "--ocr-max-pages",
+        type=int,
+        default=None,
+        help="Cap OCR'd pages per PDF (0 = no cap).",
+    )
     sub = parser.add_subparsers(dest="command")
 
     files = sub.add_parser("files", help="Import one or many chosen files.")
@@ -71,6 +94,10 @@ def _importer(args: argparse.Namespace) -> KnowledgeImporter:
         store_dir=args.store_dir,
         normalize=not args.no_normalize,
         fold_arabic=args.fold_arabic,
+        allow_ocr=args.ocr,
+        ocr_languages=args.ocr_languages,
+        ocr_dpi=args.ocr_dpi,
+        ocr_max_pages=args.ocr_max_pages,
         retries=args.retries,
     )
 
@@ -88,8 +115,12 @@ def _print_report(report, as_json: bool) -> int:
 
 
 def run_files(args: argparse.Namespace) -> int:
-    report = _importer(args).import_files(args.paths, progress=lambda m: print(m, flush=True))
-    return _print_report(report, args.as_json)
+    importer = _importer(args)
+    report = importer.import_files(
+        args.paths, ocr=args.ocr, ocr_languages=args.ocr_languages,
+        progress=lambda m: print(m, flush=True),
+    )
+    return _finish(args, importer, report)
 
 
 def run_folder(args: argparse.Namespace) -> int:
@@ -97,13 +128,24 @@ def run_folder(args: argparse.Namespace) -> int:
     if not target:
         print("No folder given.")
         return 1
-    report = _importer(args).import_folder(
+    importer = _importer(args)
+    report = importer.import_folder(
         target,
         recursive=not args.no_recursive,
+        ocr=args.ocr,
+        ocr_languages=args.ocr_languages,
         job_id=args.job,
         progress=lambda m: print(m, flush=True),
     )
-    return _print_report(report, args.as_json)
+    return _finish(args, importer, report)
+
+
+def _finish(args: argparse.Namespace, importer: KnowledgeImporter, report) -> int:
+    """Print a report, then offer OCR for any scanned PDFs it skipped."""
+    code = _print_report(report, getattr(args, "as_json", False))
+    if _offer_ocr_retry(args, importer, report):
+        return 0
+    return code
 
 
 def run_resume(args: argparse.Namespace) -> int:
@@ -172,12 +214,46 @@ def run_interactive(args: argparse.Namespace) -> int:
     if path.is_dir():
         report = importer.import_folder(
             path,
+            ocr=args.ocr,
+            ocr_languages=args.ocr_languages,
             job_id=f"import:{path.name}",
             progress=lambda m: print(m, flush=True),
         )
     else:
-        report = importer.import_files([path], progress=lambda m: print(m, flush=True))
-    return _print_report(report, getattr(args, "as_json", False))
+        report = importer.import_files(
+            [path], ocr=args.ocr, ocr_languages=args.ocr_languages,
+            progress=lambda m: print(m, flush=True),
+        )
+    return _finish(args, importer, report)
+
+
+def _offer_ocr_retry(args: argparse.Namespace, importer: KnowledgeImporter, report) -> bool:
+    """Offer to re-import scanned PDFs with OCR when the first pass skipped them.
+
+    Only in an interactive terminal, and only when OCR was off: a scanned PDF is
+    not a dead end, it is a file that needs a different reader.
+    """
+    if getattr(args, "ocr", False) or getattr(args, "as_json", False):
+        return False
+    failures = [
+        outcome
+        for outcome in getattr(report, "failures", [])
+        if "no extractable text" in (outcome.message or "").lower()
+    ]
+    if not failures:
+        return False
+    if not sys.stdin or not sys.stdin.isatty():
+        return False
+    print(
+        f"\n{len(failures)} file(s) look like scanned PDFs (no text layer). "
+        "OCR can read them if the [ocr] extra and Tesseract are installed."
+    )
+    answer = _prompt_path("Retry them with OCR now? [y/N]").strip().lower()
+    if answer not in {"y", "yes"}:
+        return False
+    retry = importer.retry_failed(failures, ocr=True, progress=lambda m: print(m, flush=True))
+    _print_report(retry, False)
+    return True
 
 
 def main(argv: Sequence[str] | None = None) -> int:
