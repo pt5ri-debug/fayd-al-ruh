@@ -131,7 +131,10 @@ Arabic is kept as secondary aliases where useful.
   boundary in lower case ("...mixed. and the slurry is pumped.") is capitalised
   (presentation only), and a space before a full stop or a glued-on next sentence
   ("flows .Then it stops.") is tidied to one boundary -- while a decimal, a
-  hyphenated range, and a formula ("q / A") keep their spacing. The mouth also
+  hyphenated range, and a formula ("q / A") keep their spacing. A *stuttered
+  separator* ("2,,3", "3:1::1", "saturation, , are") is trimmed to the model's own
+  mark rather than turned into a full stop, so the model's number or list is not
+  corrupted. The mouth also
   forwards the checkpoint's `temperature`/`seed` to the generator, so
   `--mind-temperature 0` really is greedy and reproducible (the generator's own
   0.8/unseeded defaults no longer override it).

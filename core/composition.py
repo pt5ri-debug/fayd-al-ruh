@@ -61,10 +61,16 @@ _SNAKE_TOKEN_RE = re.compile(r"(?<![\w])[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+(?
 # Runs the byte-level model repeats, such as the ")))))" or "..." at a stopping
 # point; a repeated mark is collapsed to one. When that mark is not itself a
 # sentence end it becomes a period, so the run reads as a sentence boundary.
-# A hyphen run *between* word characters is left alone: "10--20" and "5CT--spec"
-# are a range and a compound name, and collapsing them to a period would corrupt
-# the model's own number or identifier.
-_REPEAT_MARK_RE = re.compile(r"([^\w\s])\1+")
+# A hyphen run *between* word characters is left alone ("10--20", "5CT--spec").
+# A run of a *separator* (comma, semicolon, colon, slash, pipe) is deliberately
+# excluded here and handled by :data:`_SEPARATOR_RUN_RE`: replacing "2,,3" or
+# "3:1::1" with a full stop would corrupt the model's own number, so a separator
+# stutter is trimmed to the model's own mark instead of turned into a boundary.
+_REPEAT_MARK_RE = re.compile(r"([^\w\s,;:/\\|])\1+")
+# A run of two or more of the same separator ("a,,b", "3:1::1", "20 // 5"). The
+# model stutters, but a comma/colon/slash is not a sentence end, so the surplus
+# copies are dropped and the model's own mark (its first) is kept.
+_SEPARATOR_RUN_RE = re.compile(r"([,;:/\\|])\s*\1+")
 # A word or short phrase (up to four words) the model loops on: "well well",
 # "the same the same", "the production forecast the production forecast". Only a
 # phrase repeated back-to-back with nothing between it counts, so a word reused
@@ -198,9 +204,12 @@ def _tidy_marks(text: str) -> str:
     sentence-end it becomes a period, so a stopping run such as ``")))))"``
     turns into a boundary instead of an unreadable cluster. A hyphen run between
     word characters is a range or compound name, not decoration, so it is left
-    intact. A repeated word *or short phrase* ("the same the same", "the
-    production forecast the production forecast") collapses to one, which is the
-    model looping rather than a statement said twice.
+    intact. A run of a *separator* (comma, colon, slash) is a stutter, not a
+    boundary, so its surplus copies are trimmed to the model's own mark --
+    replacing ``"2,,3"`` with a full stop would corrupt the model's own number,
+    while ``"a,,b"`` reads ``"a,b"``. A repeated word *or short phrase* ("the same
+    the same", "the production forecast the production forecast") collapses to
+    one, which is the model looping rather than a statement said twice.
 
     The phrase collapse is applied until it stops changing: a single pass only
     removes non-overlapping copies, so a longer run ("the casing the casing the
@@ -210,6 +219,9 @@ def _tidy_marks(text: str) -> str:
     An ontology identifier the model echoed ("pore_pressure") is read as the
     phrase it names ("pore pressure") before the collapse runs; the words are the
     model's own, only the data-format separator is presentation.
+
+    The model's own spacing around a hyphen or a slash ("10 - 20", "q / A") is
+    a range or a formula, not a ragged edge, so it is left exactly as written.
     """
     def _collapse(match: re.Match[str]) -> str:
         mark = match.group(1)
@@ -223,6 +235,9 @@ def _tidy_marks(text: str) -> str:
         return mark if mark in _TERMINAL else "."
 
     value = _REPEAT_MARK_RE.sub(_collapse, text)
+    # Trim a stuttered separator ("a,,b" -> "a,b", "3:1::1" -> "3:1:1") without
+    # turning it into a boundary, so the model's own number/list is kept.
+    value = _SEPARATOR_RUN_RE.sub(r"\1", value)
     # Read an ontology id ("pore_pressure") as the phrase it names before the
     # repeat collapse, so a looping id ("pore_pressure pore_pressure") collapses
     # the same way a looping phrase does.
