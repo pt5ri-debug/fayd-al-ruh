@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -357,6 +357,26 @@ class SqlImportService:
         """The enabled database engines (SQLite only, at this stage)."""
         return DATABASE_TYPES
 
+    def driver_summaries(self) -> tuple[dict[str, object], ...]:
+        """The enabled SQL drivers with their schemes, suffixes, and access mode.
+
+        One entry per :data:`DATABASE_TYPES` engine, describing the *same*
+        connector the import uses, so ``list-drivers`` never advertises an engine
+        the service cannot actually drive.
+        """
+        info = self._connector().info
+        return (
+            {
+                "name": info.name,
+                "schemes": sorted(info.schemes),
+                "suffixes": sorted(info.suffixes),
+                "description": info.description,
+                "read_only": True,
+                "optional_dependency": info.optional_dependency,
+                "enabled": True,
+            },
+        )
+
     def default_job_id(self, path: str | Path) -> str:
         """A stable job id for ``path``, so re-importing resumes the same job."""
         resolved = str(Path(path).expanduser().resolve())
@@ -375,16 +395,22 @@ class SqlImportService:
         row_group: int | None = None,
         root: str | Path | None = None,
         timeout: float | None = None,
+        extra_options: Mapping[str, str] | None = None,
     ) -> SourceSpec:
         """A :class:`SourceSpec` for ``path`` with the selection turned into options.
 
         The connector honours the selection *before it reads*, so an excluded
         column is never in the query's projection. ``root`` defaults to the
         database's own folder, confining the source to where the user chose it.
+        ``extra_options`` lets a caller (the CLI) set connector options the view
+        does not expose -- e.g. ``page`` or ``batch_retries`` -- without that
+        caller reimplementing the spec.
         """
         database = Path(path).expanduser()
         uri = str(path) if "://" in str(path) else f"sqlite://{database}"
         options: dict[str, str] = {"source_path": str(database)}
+        if extra_options:
+            options.update({str(key): str(value) for key, value in extra_options.items()})
         if root is None:
             options["root"] = str(database.parent)
         else:
@@ -532,6 +558,7 @@ class SqlImportService:
         row_group: int | None = None,
         root: str | Path | None = None,
         timeout: float | None = None,
+        extra_options: Mapping[str, str] | None = None,
         progress: ProgressCallback | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> SqlImportReport:
@@ -553,6 +580,7 @@ class SqlImportService:
             row_group=row_group,
             root=root,
             timeout=timeout,
+            extra_options=extra_options,
         )
         return self._execute(
             spec,
@@ -704,6 +732,14 @@ class SqlImportService:
         """Remove a job's durable state file (after the user is done with it)."""
         return self._jobs().remove(job_id)
 
+    def raw_job(self, job_id: str) -> SqlImportJob | None:
+        """The durable job record itself, for callers that need its full state.
+
+        The CLI's ``sql-import --json`` emits this (the same shape it always
+        has); the window uses :meth:`job` for a display-ready view.
+        """
+        return self._jobs().load(job_id)
+
     def _to_view(self, job: SqlImportJob) -> SqlJobView:
         tables = tuple(
             TableReport(
@@ -736,6 +772,47 @@ class SqlImportService:
             "jobs": len(jobs),
             "running": sum(1 for job in jobs if job.is_running),
         }
+
+    # -- cross-process cancel markers ------------------------------------
+
+    def cancel_marker(self, job_id: str) -> Path:
+        """The file whose presence asks a running import to stop.
+
+        A cancel must work across *processes* -- the CLI starts an import and a
+        later ``cancel`` is a different invocation -- so a simple marker file
+        under the job directory is the honest mechanism: whoever runs the import
+        polls it with :meth:`should_cancel`, and the runner's checkpoint keeps
+        every row committed before the stop. The GUI's own in-thread cancel does
+        not need it, but the file approach works for both.
+        """
+        return self._jobs().root / f"{_safe_job_name(job_id)}.cancel"
+
+    def request_cancel(self, job_id: str) -> bool:
+        """Ask the running import ``job_id`` to stop; ``False`` if it is not known."""
+        if self._jobs().load(job_id) is None:
+            return False
+        marker = self.cancel_marker(job_id)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("cancel requested\n", encoding="utf-8")
+        return True
+
+    def should_cancel(self, job_id: str) -> bool:
+        """A predicate for :meth:`run_import` / :meth:`resume_job` that polls the marker."""
+        marker = self.cancel_marker(job_id)
+        return marker.exists()
+
+    def clear_cancel(self, job_id: str) -> bool:
+        """Remove a cancel marker once a run has honoured it."""
+        marker = self.cancel_marker(job_id)
+        if marker.exists():
+            marker.unlink()
+            return True
+        return False
+
+
+def _safe_job_name(job_id: str) -> str:
+    """A filesystem-safe mirror of the job store's own name rule."""
+    return "".join(char if char.isalnum() or char in "-_." else "_" for char in job_id)
 
 
 def _current_table(message: str, current: str) -> str:
