@@ -80,6 +80,32 @@ def test_compose_model_answer_collapses_repeated_punctuation_and_words():
     assert compose_model_answer("the the well flows.") == "The well flows."
 
 
+def test_compose_model_answer_trims_a_stuttered_separator():
+    # The byte model stutters a separator (a comma, a colon). Turning the run into
+    # a full stop would corrupt the model's own number or list, so the surplus
+    # copies are dropped and the model's own mark is kept.
+    assert compose_model_answer("the value is 2,,3 times the gradient.") == (
+        "The value is 2,3 times the gradient."
+    )
+    assert compose_model_answer("the ratio is 3:1::1 in the mix.") == (
+        "The ratio is 3:1:1 in the mix."
+    )
+    assert compose_model_answer("The well flows,, then stops.") == (
+        "The well flows, then stops."
+    )
+
+
+def test_compose_model_answer_closes_a_separator_gap_without_joining_a_slash():
+    # A stray space before a separator ("saturation, , are") is presentation; the
+    # gap closes. A space *around* a slash is a formula ("q / A"), not a gap, so
+    # it is left exactly as the model wrote it.
+    assert compose_model_answer("Porosity, permeability, and saturation, , are properties.") == (
+        "Porosity, permeability, and saturation, are properties."
+    )
+    assert compose_model_answer("The formula is q / A.") == "The formula is q / A."
+    assert compose_model_answer("The value is 10 - 20 m.") == "The value is 10 - 20 m."
+
+
 def test_compose_model_answer_collapses_a_repeated_phrase():
     # The byte model loops on a whole phrase, not only a single word; the repeat
     # is the model stalling, so it is shown once.
