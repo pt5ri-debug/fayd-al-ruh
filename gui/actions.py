@@ -93,7 +93,7 @@ ACTIONS: tuple[GuiAction, ...] = (
         "import-center",
         "Import files and folders (Knowledge Import Center)",
         run_import_center,
-        ("formats",),
+        ("interactive",),
     ),
     GuiAction(
         "ingest-connectors",
