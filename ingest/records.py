@@ -149,8 +149,15 @@ class IngestionReport:
     skipped_duplicates: int = 0
     skipped_unchanged: int = 0
     failed: int = 0
+    cancelled: bool = False
+    """True when a cooperative cancel stopped the run before it finished.
 
-    def as_dict(self) -> dict[str, int]:
+    A cancelled run is *not* a success: the items already committed to the store
+    stay, the in-flight item is left uncommitted, and the job is marked
+    ``cancelled`` rather than ``done``.
+    """
+
+    def as_dict(self) -> dict[str, int | bool]:
         return {
             "sources": self.sources,
             "records": self.records,
@@ -159,6 +166,7 @@ class IngestionReport:
             "skipped_duplicates": self.skipped_duplicates,
             "skipped_unchanged": self.skipped_unchanged,
             "failed": self.failed,
+            "cancelled": self.cancelled,
         }
 
 

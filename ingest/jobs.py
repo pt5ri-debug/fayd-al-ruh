@@ -13,7 +13,9 @@ keeps jobs independent and easy to list or delete.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+import os
+import tempfile
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from pathlib import Path
 RUNNING = "running"
 DONE = "done"
 FAILED = "failed"
+CANCELLED = "cancelled"
 
 
 @dataclass
@@ -36,6 +39,8 @@ class JobState:
     bytes_written: int = 0
     status: str = RUNNING
     updated_at: str = ""
+    failures: list[str] = field(default_factory=list)
+    """Actionable per-item/per-batch failure messages, capped by the writer."""
 
     def __post_init__(self) -> None:
         if not self.job_id.strip():
@@ -50,6 +55,39 @@ class JobState:
         return asdict(self)
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` atomically (temp file + fsync + rename).
+
+    A job file is the *only* record of how far a resumable run got, so a crash
+    while saving must leave either the old file or the new one -- never a
+    half-written file that would make a resumed run misread its position.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
+    finally:
+        os.close(dir_fd)
+
+
 class JobStore:
     """A directory of :class:`JobState` files, one per job."""
 
@@ -61,9 +99,9 @@ class JobStore:
 
     def save(self, state: JobState) -> JobState:
         state.touch()
-        self.root.mkdir(parents=True, exist_ok=True)
-        self._path(state.job_id).write_text(
-            json.dumps(state.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+        _atomic_write_text(
+            self._path(state.job_id),
+            json.dumps(state.as_dict(), ensure_ascii=False, indent=2),
         )
         return state
 
@@ -92,8 +130,21 @@ class JobStore:
         return False
 
 
+def write_atomic_text(path: Path, text: str) -> None:
+    """Public wrapper over the atomic write (used by the SQL job store)."""
+    _atomic_write_text(path, text)
+
+
 def _safe_name(job_id: str) -> str:
     return "".join(char if char.isalnum() or char in "-_." else "_" for char in job_id)
 
 
-__all__ = ["DONE", "FAILED", "RUNNING", "JobState", "JobStore"]
+__all__ = [
+    "CANCELLED",
+    "DONE",
+    "FAILED",
+    "RUNNING",
+    "JobState",
+    "JobStore",
+    "write_atomic_text",
+]

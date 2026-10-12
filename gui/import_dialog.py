@@ -117,6 +117,7 @@ class ImportCenterDialog:
 
         self._build_upload_section()
         self._build_folder_section()
+        self._build_sql_section()
         self._build_jobs_section()
         self._build_results_section()
 
@@ -208,9 +209,24 @@ class ImportCenterDialog:
         else:
             self._ocr_install_button.pack(side="right")
 
+    def _build_sql_section(self) -> None:
+        theme = self.theme
+        frame = self._section("3.  Import a SQL database")
+        row = tk.Frame(frame, bg=theme.surface)
+        row.pack(fill="x", padx=12, pady=(2, 12))
+        self._sql_button = self._button(row, "Open SQL Database Import…", self._on_open_sql_import)
+        self._sql_button.pack(side="left")
+        tk.Label(
+            row,
+            text="Add a SQLite database: read-only connection test, schema and column "
+                 "selection, a limited preview, and a resumable import.",
+            bg=theme.surface, fg=theme.text_secondary, font=(self.font, 9),
+            justify="left", wraplength=520,
+        ).pack(side="left", padx=10)
+
     def _build_jobs_section(self) -> None:
         theme = self.theme
-        frame = self._section("3.  Import jobs")
+        frame = self._section("4.  Import jobs")
         self._jobs_frame = tk.Frame(frame, bg=theme.surface)
         self._jobs_frame.pack(fill="x", padx=12, pady=(2, 8))
         row = tk.Frame(frame, bg=theme.surface)
@@ -342,6 +358,16 @@ class ImportCenterDialog:
     def _on_forget_job(self, job_id: str) -> None:
         self.service.importer.forget_job(job_id)
         self.refresh_jobs()
+
+    def _on_open_sql_import(self) -> None:
+        """Open the SQL Database Import screen, reusing this window's service."""
+        from gui.sql_import_dialog import SqlImportDialog
+
+        parent = self.window
+        self._sql_dialog = SqlImportDialog(
+            parent, self.service, theme=self.theme, font=self.font, mono=self.mono,
+            on_close=lambda: setattr(self, "_sql_dialog", None),
+        )
 
     # -- worker -----------------------------------------------------------
 

@@ -23,6 +23,7 @@ from core.jarvis import JarvisMode, JarvisTurn
 from core.paths import data_dir
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
 from gui.import_center import ImportReport, KnowledgeImporter
+from gui.sql_import import SqlImportService
 from gui.modes import (
     AnswerOnlyRouter,
     HistoryItem,
@@ -139,6 +140,10 @@ class ChatService:
         # folders through the existing ingestion pipeline, writing to the same
         # on-disk knowledge store the CLI's `ingest add` writes to.
         self._importer = KnowledgeImporter(store_dir=import_store_dir)
+        # The SQL Database Import screen drives the same resumable SQL ingestion
+        # service the CLI's `ingest sql-import` command uses, writing to the same
+        # store and the same `<store>/ingest/jobs-sql` job files.
+        self._sql_import = SqlImportService(store_dir=import_store_dir)
 
     # ------------------------------------------------------------ operating mode
 
@@ -404,6 +409,11 @@ class ChatService:
     def import_stats(self) -> dict[str, Any]:
         """A small description of the store and the import bookkeeping."""
         return self._importer.stats()
+
+    @property
+    def sql_import(self) -> SqlImportService:
+        """The SQL Database Import engine (the resumable SQL ingestion service)."""
+        return self._sql_import
 
     def _retriever(self):
         """The grounded assistant's retriever, when one is wired in.

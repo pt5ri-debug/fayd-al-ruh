@@ -35,9 +35,15 @@ from core.knowledge_base import (
     chunk_text,
 )
 from ingest.dedup import DedupLedger
-from ingest.errors import ConnectorError, ErrorLog, IngestionError
+from ingest.errors import (
+    ConnectorError,
+    ErrorLog,
+    IngestCancelled,
+    IngestInterrupted,
+    IngestionError,
+)
 from ingest.hashing import content_hash
-from ingest.jobs import DONE, FAILED, JobState, JobStore
+from ingest.jobs import CANCELLED, DONE, FAILED, JobState, JobStore
 from ingest.metadata import (
     DocumentMetadataStore,
     build_document_metadata,
@@ -58,6 +64,9 @@ from ingest.records import (
 DEFAULT_SHARD_BYTES = 48 * 1024 * 1024
 
 ProgressCallback = Callable[..., None]
+
+#: How many actionable failure messages a job keeps (bounded so job files stay tiny).
+MAX_JOB_FAILURES = 200
 
 #: Source label stored on chunks, kept distinct from the wiki build's "wikipedia".
 INGESTED_SOURCE = "ingested"
@@ -83,6 +92,9 @@ class IngestionPipeline:
         retries: int = 0,
         metadata: DocumentMetadataStore | None = None,
         on_item: "Callable[[ItemOutcome], None] | None" = None,
+        on_record: "Callable[[SourceRecord, int], None] | None" = None,
+        should_cancel: "Callable[[], bool] | None" = None,
+        durable: bool = False,
     ) -> None:
         if chunk_chars < 1:
             raise ValueError("chunk_chars must be at least 1.")
@@ -108,6 +120,18 @@ class IngestionPipeline:
         # source file/table/URL so a caller can show per-file results without
         # re-walking the sources. The aggregate report is unchanged.
         self.on_item = on_item
+        # Optional per-record hook: called with each stored record's title and the
+        # number of chunks it produced. A resumable SQL run uses it to advance a
+        # batch cursor *after* the record is durably written.
+        self.on_record = on_record
+        # Optional cooperative cancel: checked between records and between items.
+        # A truthy result stops the run without corrupting the source and without
+        # marking the job done.
+        self.should_cancel = should_cancel
+        # Durable mode: fsync each shard write before advancing a checkpoint, so
+        # persisted progress never runs ahead of what is on disk. Off for the
+        # fast bulk wiki build, on for resumable imports.
+        self.durable = durable
         # Per-document metadata (path, hash, timestamp, chunk ids) is *recorded*
         # but never read back by the pipeline, so a metadata-write failure must
         # not fail an ingest that otherwise succeeded. Best-effort, like the
@@ -142,10 +166,16 @@ class IngestionPipeline:
                 incremental=incremental,
                 resume_from=resume_from,
             )
+        except IngestCancelled:
+            report.cancelled = True
+            self._report(f"cancelled: {spec.uri}")
+        except IngestInterrupted:
+            raise
         except (ConnectorError, IngestionError, OSError, ValueError) as error:
             report.failed += 1
             self.errors.add(spec.uri, type(error).__name__, str(error))
             self._report(f"failed: {spec.uri}: {error}")
+            self._note_failure(spec.uri, str(error))
         self._flush_manifest()
         self._finish_job(report)
         return report
@@ -153,7 +183,12 @@ class IngestionPipeline:
     def _finish_job(self, report: IngestionReport) -> None:
         if self.job is None:
             return
-        self.job.status = FAILED if report.failed else DONE
+        if report.cancelled:
+            self.job.status = CANCELLED
+        elif report.failed:
+            self.job.status = FAILED
+        else:
+            self.job.status = DONE
         self._save_job(report)
 
     def _save_job(self, report: IngestionReport | None = None) -> None:
@@ -199,6 +234,8 @@ class IngestionPipeline:
             position += 1
             if position <= resume_from:
                 continue
+            if self._cancelled():
+                raise IngestCancelled("cancelled between items")
             if incremental and self.ledger.unchanged(item.source_key, item.fingerprint):
                 report.skipped_unchanged += 1
                 self._emit_item(item, "unchanged")
@@ -209,11 +246,14 @@ class IngestionPipeline:
             before = (report.records, report.chunks, report.bytes_written)
             try:
                 self._ingest_item(connector, spec, item, report)
+            except (IngestCancelled, IngestInterrupted):
+                raise
             except (ConnectorError, IngestionError, OSError, ValueError) as error:
                 report.failed += 1
                 self.errors.add(item.uri, type(error).__name__, str(error))
                 self._report(f"failed: {item.uri}: {error}")
                 self._emit_item(item, "failed", message=str(error))
+                self._note_failure(item.uri, str(error))
             else:
                 self._emit_item(
                     item,
@@ -223,6 +263,17 @@ class IngestionPipeline:
                     bytes_written=report.bytes_written - before[2],
                 )
             self._record_position(position, report)
+
+    def _cancelled(self) -> bool:
+        return self.should_cancel is not None and bool(self.should_cancel())
+
+    def _note_failure(self, source: str, message: str) -> None:
+        """Record an actionable per-item failure on the job, bounded in size."""
+        if self.job is None:
+            return
+        if len(self.job.failures) >= MAX_JOB_FAILURES:
+            return
+        self.job.failures.append(f"{source}: {message.splitlines()[0] if message else 'failed'}")
 
     def _emit_item(
         self,
@@ -276,6 +327,10 @@ class IngestionPipeline:
             try:
                 self._read_item(connector, item, report)
                 break
+            except (IngestCancelled, IngestInterrupted):
+                # A cancel or a deliberate interruption is the caller's decision,
+                # not a transient failure: do not retry it, let it unwind.
+                raise
             except (ConnectorError, IngestionError, OSError, ValueError) as error:
                 # A failed attempt may have written some chunks; the ledger's
                 # content hashes keep the retry from storing them twice, and the
@@ -294,6 +349,11 @@ class IngestionPipeline:
         item_chunks = 0
         item_bytes = 0
         for record in connector.stream_item(item):
+            if self._cancelled():
+                # Stop before storing anything for this record; the item's
+                # already-written records stay committed, the rest is left for
+                # the resume. Nothing is marked done that was not written.
+                raise IngestCancelled("cancelled during item")
             report.records += 1
             written, chunk_ids = self._store_record(record, item)
             count = len(chunk_ids)
@@ -302,6 +362,10 @@ class IngestionPipeline:
             report.chunks += count
             report.bytes_written += written
             self._record_metadata(record, item, chunk_ids, connector.info.name)
+            if self.on_record is not None:
+                # Called only after the record's chunks are durably written, so a
+                # caller can advance a batch cursor in step with the store.
+                self.on_record(record, count)
         self.ledger.record_source(
             item.source_key,
             uri=item.uri,
@@ -387,7 +451,7 @@ class IngestionPipeline:
         if self._shard is None:
             self._shard = self.store.next_shard_index()
             self._shard_bytes = 0
-        written = self.store.append(self._shard, chunks)
+        written = self.store.append(self._shard, chunks, sync=self.durable)
         self._shard_bytes += written
         if self._shard_bytes >= self.shard_bytes:
             self._shard = None

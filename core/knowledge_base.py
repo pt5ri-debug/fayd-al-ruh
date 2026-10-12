@@ -28,6 +28,7 @@ Design rules, all deliberate:
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from collections.abc import Iterable, Iterator, Sequence
@@ -534,6 +535,25 @@ def build_knowledge_base(
     return manifest
 
 
+def _fsync_dir(path: Path) -> None:
+    """Flush a directory entry so a just-created shard survives a crash.
+
+    Best effort: a filesystem that will not let us open the directory for
+    reading (or has no ``O_DIRECTORY``) is not a reason to fail an otherwise
+    durable write.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 class KnowledgeBaseStore:
     """On-disk JSONL storage for knowledge chunks, sharded for lazy reading."""
 
@@ -566,8 +586,23 @@ class KnowledgeBaseStore:
                 continue
         return (max(indices) + 1) if indices else len(existing)
 
-    def append(self, shard_index: int, chunks: Iterable[KnowledgeChunk]) -> int:
-        """Append chunks to a shard; return the number of bytes written."""
+    def append(
+        self,
+        shard_index: int,
+        chunks: Iterable[KnowledgeChunk],
+        *,
+        record_ids: "set[str] | None" = None,
+        sync: bool = False,
+    ) -> int:
+        """Append chunks to a shard; return the number of bytes written.
+
+        ``record_ids`` (optional) collects each appended ``chunk_id`` into the
+        given set, so a caller that must only commit a checkpoint after the data
+        is on disk can learn exactly which ids a write covered. ``sync`` flushes
+        the file and its directory before returning, so a crash afterwards cannot
+        lose the just-written batch -- resumable imports turn it on, the bulk
+        wiki build leaves it off for speed.
+        """
         self.ensure()
         path = self.root / f"shard-{shard_index:05d}.jsonl"
         written = 0
@@ -576,6 +611,13 @@ class KnowledgeBaseStore:
                 line = chunk.to_json() + "\n"
                 handle.write(line)
                 written += len(line.encode("utf-8"))
+                if record_ids is not None:
+                    record_ids.add(chunk.chunk_id)
+            if sync:
+                handle.flush()
+                os.fsync(handle.fileno())
+        if sync:
+            _fsync_dir(self.root)
         return written
 
     def iter_chunks(self) -> Iterator[KnowledgeChunk]:

@@ -41,6 +41,7 @@ never converted.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
 from collections.abc import Iterable, Iterator, Mapping
@@ -60,6 +61,8 @@ DEFAULT_ROW_GROUP = 40
 #: Hard ceilings so a bad option cannot defeat the bounded streaming.
 MAX_PAGE = 100_000
 MAX_ROW_GROUP = 100_000
+#: Upper bound accepted for a row-window option (resume row / max rows).
+_MAX_ROW = 1_000_000_000
 #: Seconds to wait for a lock before giving up; 0 fails immediately.
 DEFAULT_TIMEOUT = 5.0
 
@@ -146,6 +149,15 @@ class TableSchema:
     primary_key: tuple[str, ...] = ()
     foreign_keys: tuple[ForeignKey, ...] = ()
     without_rowid: bool = False
+    signature: str = ""
+    """A stable digest of the table's *full* structure, for schema-change detection.
+
+    It is taken from ``sqlite_master.sql`` (the complete CREATE statement, so a
+    column added, dropped, reordered, or retyped all show up) plus the declared
+    column metadata, never from row data. An import records it and a later run
+    compares it, so an incompatible source schema can be refused rather than
+    silently misread.
+    """
 
     @property
     def has_primary_key(self) -> bool:
@@ -154,6 +166,28 @@ class TableSchema:
     @property
     def composite_key(self) -> bool:
         return len(self.primary_key) > 1
+
+
+@dataclass(frozen=True)
+class TablePlan:
+    """What a resumable import needs to know about one table before reading it.
+
+    ``resume_supported`` is about *offsets*: a table has a deterministic row
+    order (a rowid or a primary key) or it does not. ``stable_identity`` is about
+    *per-row identity*: a reliable key exists to name a row (a complete primary
+    key). They differ -- a table with a rowid but no primary key can be resumed
+    by offset, yet has no stable row identity -- and the honest limits of each
+    are stated in ``reason``.
+    """
+
+    table: str
+    signature: str
+    total_rows: int
+    primary_key: tuple[str, ...] = ()
+    composite_key: bool = False
+    stable_identity: bool = False
+    resume_supported: bool = True
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -199,6 +233,16 @@ class SqliteOptions:
     timeout: float = DEFAULT_TIMEOUT
     root: str = ""
     policy: _RowPolicy = _RowPolicy()
+    resume_row: int = 0
+    """Rows already durably committed for this table; the read window skips them.
+
+    Used by a resumable import so a batch reads only rows after the checkpoint.
+    The value is positional (a row offset), which is why it is only used together
+    with a deterministic order and, for tables without a primary key, only for a
+    full re-import rather than row-level synchronisation.
+    """
+    max_rows: int = 0
+    """Upper bound on rows this read may return (0 = no bound)."""
 
     @classmethod
     def from_spec(cls, spec: SourceSpec) -> "SqliteOptions":
@@ -210,6 +254,8 @@ class SqliteOptions:
             timeout=_as_float(spec.option("timeout", DEFAULT_TIMEOUT), "timeout", 0.0),
             root=str(spec.option("root", "") or ""),
             policy=_policy_from_spec(spec),
+            resume_row=_as_int(spec.option("resume_row", 0), "resume_row", 0, _MAX_ROW),
+            max_rows=_as_int(spec.option("max_rows", 0), "max_rows", 0, _MAX_ROW),
         )
 
     def to_metadata(self) -> dict[str, Any]:
@@ -223,7 +269,21 @@ class SqliteOptions:
             "exclude_tables": list(self.policy.exclude_tables),
             "include_columns": list(self.policy.include_columns),
             "exclude_columns": list(self.policy.exclude_columns),
+            "resume_row": self.resume_row,
+            "max_rows": self.max_rows,
         }
+
+    def with_window(self, *, resume_row: int, max_rows: int) -> "SqliteOptions":
+        """A copy that reads one bounded window of a table (for a resumable batch)."""
+        return SqliteOptions(
+            page=self.page,
+            row_group=self.row_group,
+            timeout=self.timeout,
+            root=self.root,
+            policy=self.policy,
+            resume_row=_as_int(resume_row, "resume_row", 0, _MAX_ROW),
+            max_rows=_as_int(max_rows, "max_rows", 0, _MAX_ROW),
+        )
 
     @classmethod
     def from_metadata(cls, metadata: Mapping[str, Any]) -> "SqliteOptions":
@@ -243,6 +303,8 @@ class SqliteOptions:
                 include_columns=_as_names(metadata.get("include_columns")),
                 exclude_columns=_as_names(metadata.get("exclude_columns")),
             ),
+            resume_row=int(metadata.get("resume_row", 0)),
+            max_rows=int(metadata.get("max_rows", 0)),
         )
 
 
@@ -285,6 +347,7 @@ class SqliteConnector:
                         "columns": [column.name for column in kept],
                         "primary_key": list(schema.primary_key),
                         "composite_key": schema.composite_key,
+                        "schema_signature": schema.signature,
                         "foreign_keys": [fk.as_primitive() for fk in schema.foreign_keys],
                         "without_rowid": schema.without_rowid,
                     },
@@ -323,6 +386,25 @@ class SqliteConnector:
         with self._connect(path, options) as connection:
             return tuple(self._inspect(connection, options))
 
+    def describe(self, spec: SourceSpec) -> tuple[TablePlan, ...]:
+        """Per-table plan: schema signature, row count, and the identity limits.
+
+        Reads schema metadata, the current row count, and nothing else (no row
+        values), so it is cheap on a large table. A resumable import consults it
+        to decide whether resume-by-offset is possible and to detect a schema
+        change before it reads any data.
+        """
+        options = SqliteOptions.from_spec(spec)
+        path = _resolve_path(spec.uri, options.root)
+        plans = []
+        with self._connect(path, options) as connection:
+            for schema in self._inspect(connection, options):
+                kept = options.policy.included_columns(schema.columns)
+                if not kept:
+                    continue
+                plans.append(_table_plan(connection, schema))
+        return tuple(plans)
+
     # -- internals --------------------------------------------------------
 
     def _stream_table(
@@ -342,7 +424,9 @@ class SqliteConnector:
         )
         # A stable key needs the *whole* primary key; a partial one is not stable.
         has_stable_key = schema.has_primary_key and len(pk_columns) == len(schema.primary_key)
-        statement = _select_statement(schema, columns)
+        statement = _select_statement(
+            schema, columns, resume_row=options.resume_row, max_rows=options.max_rows
+        )
         cursor = connection.cursor()
         try:
             cursor.execute(statement)
@@ -353,8 +437,10 @@ class SqliteConnector:
                     f"Unexpected column count reading {schema.name!r}."
                 )
             buffer: list[str] = []
-            first_row = 0
-            position = 0
+            # Row numbers are absolute in the table even when a window started
+            # part-way in, so a checkpoint always names a real table row.
+            first_row = options.resume_row
+            position = options.resume_row
             while True:
                 try:
                     rows = cursor.fetchmany(options.page)
@@ -513,6 +599,54 @@ def _without_rowid(connection: sqlite3.Connection, table: str) -> bool:
     return False
 
 
+def _table_plan(connection: sqlite3.Connection, schema: TableSchema) -> TablePlan:
+    """Build a :class:`TablePlan`: row count plus honest identity/resume limits."""
+    total = _row_count(connection, schema)
+    stable = schema.has_primary_key
+    # Offsets are deterministic only when the read has a stable order: a rowid
+    # (unless WITHOUT ROWID) or a primary key. WITH a complete primary key the
+    # identity is stable; with only a rowid it is resumable but not identifiable.
+    resume_supported = schema.without_rowid is False or schema.has_primary_key
+    if stable:
+        reason = (
+            "Primary key present; each row has a stable identity. Resume is by row "
+            "offset, and offsets are NOT safe if rows are inserted, deleted, or "
+            "reordered between runs -- re-import for a changed table."
+        )
+    elif resume_supported:
+        reason = (
+            "No primary key: resume by row offset works for a full import, but no "
+            "stable row identity exists, so row-level synchronisation (detecting a "
+            "changed or deleted row) is not supported and never claimed."
+        )
+    else:
+        reason = (
+            "WITHOUT ROWID and no primary key: the read has no deterministic order, "
+            "so the table is read in one full pass and cannot be resumed by offset."
+        )
+    return TablePlan(
+        table=schema.name,
+        signature=schema.signature,
+        total_rows=total,
+        primary_key=schema.primary_key,
+        composite_key=schema.composite_key,
+        stable_identity=stable,
+        resume_supported=resume_supported,
+        reason=reason,
+    )
+
+
+def _row_count(connection: sqlite3.Connection, schema: TableSchema) -> int:
+    """The table's current row count (for a plan; never reads row values)."""
+    try:
+        row = connection.execute(
+            f"SELECT count(*) FROM {_quote(schema.name)}"
+        ).fetchone()
+    except sqlite3.Error as error:
+        raise _translate(error, schema.name) from error
+    return int(row[0]) if row else 0
+
+
 def _inspect_table(connection: sqlite3.Connection, table: str, *, without_rowid: bool) -> TableSchema:
     columns = _columns(connection, table)
     primary_key = tuple(
@@ -527,7 +661,34 @@ def _inspect_table(connection: sqlite3.Connection, table: str, *, without_rowid:
         primary_key=primary_key,
         foreign_keys=_foreign_keys(connection, table),
         without_rowid=without_rowid,
+        signature=_schema_signature(connection, table, columns),
     )
+
+
+def _schema_signature(
+    connection: sqlite3.Connection, table: str, columns: tuple[ColumnInfo, ...]
+) -> str:
+    """A digest of a table's full structure (its CREATE SQL + declared columns).
+
+    Change detection only -- it never depends on row values, so identical table
+    structures give the same signature across runs and data-only edits (inserts,
+    updates, deletes of rows) do not change it. A column added, dropped,
+    reordered, retyped, or re-constrained changes the CREATE SQL and therefore
+    the signature.
+    """
+    create_sql = ""
+    try:
+        row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+        if row and row[0]:
+            create_sql = str(row[0])
+    except sqlite3.Error as error:
+        raise _translate(error, table) from error
+    declaration = "|".join(
+        f"{c.name}:{c.declared_type}:{int(c.hidden)}:{c.primary_key}" for c in columns
+    )
+    return hashlib.sha256(f"{create_sql}\x00{declaration}".encode("utf-8")).hexdigest()[:16]
 
 
 def _columns(connection: sqlite3.Connection, table: str) -> tuple[ColumnInfo, ...]:
@@ -591,11 +752,28 @@ def _quote(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
-def _select_statement(schema: TableSchema, columns: list[str]) -> str:
-    """An internally generated read-only SELECT over the kept columns, in order."""
+def _select_statement(
+    schema: TableSchema,
+    columns: list[str],
+    *,
+    resume_row: int = 0,
+    max_rows: int = 0,
+) -> str:
+    """An internally generated read-only SELECT over the kept columns, in order.
+
+    A resumable import reads the table in bounded windows: ``resume_row`` skips
+    the rows a prior batch durably committed and ``max_rows`` caps how many rows
+    this read may return, so one batch never reads the whole table. Both are
+    integers the connector itself generates (never text from a caller), and the
+    window is only used with the deterministic order :func:`_order_clause`
+    produces.
+    """
     projection = ", ".join(_quote(column) for column in columns)
     order = _order_clause(schema)
-    return f"SELECT {projection} FROM {_quote(schema.name)}{order}"
+    window = ""
+    if resume_row or max_rows:
+        window = f" LIMIT {int(max_rows) if max_rows else -1} OFFSET {int(resume_row)}"
+    return f"SELECT {projection} FROM {_quote(schema.name)}{order}{window}"
 
 
 def _order_clause(schema: TableSchema) -> str:
@@ -666,6 +844,7 @@ def _record(
             "primary_key": list(schema.primary_key),
             "pk_columns": list(pk_columns),
             "composite_key": schema.composite_key,
+            "schema_signature": schema.signature,
             "stable_identity": stable,
             "without_rowid": schema.without_rowid,
             "row_start": start,
