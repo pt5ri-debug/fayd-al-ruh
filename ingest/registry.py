@@ -104,9 +104,14 @@ def build_default_registry(
     """
     from ingest.connectors.files import FileConnector
     from ingest.connectors.sql import SqlConnector
+    from ingest.connectors.sqlite import SqliteConnector
 
     registry = ConnectorRegistry()
     registry.register(FileConnector(ocr_engine=ocr_engine))
+    # SQLite has its own standard-library connector; it is registered before the
+    # DB-API one so ``sqlite://`` resolves to it, while ``sql`` keeps the
+    # optional driver schemes (PostgreSQL/MySQL).
+    registry.register(SqliteConnector())
     registry.register(SqlConnector())
     if allow_web:
         from ingest.connectors.web import WebConnector
