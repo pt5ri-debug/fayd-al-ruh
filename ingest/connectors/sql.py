@@ -54,12 +54,18 @@ _DRIVER_SCHEMES = {
 
 
 class SqlConnector:
-    """A read-only, streaming connector for SQL databases."""
+    """A read-only, streaming connector for DB-API SQL databases.
+
+    SQLite is read by the dedicated standard-library :class:`ingest.connectors.sqlite.SqliteConnector`
+    in :mod:`ingest.connectors.sqlite`; this connector keeps the optional driver
+    schemes (PostgreSQL, MySQL) and its SQLite helpers for direct use.
+    """
 
     info = ConnectorInfo(
         name="sql",
-        description="Read-only, streaming SQL databases (SQLite built in; others via DB-API).",
-        schemes=frozenset(_SQLITE_SCHEMES | set(_DRIVER_SCHEMES)),
+        description="Read-only, streaming SQL databases (PostgreSQL/MySQL via DB-API).",
+        schemes=frozenset(_DRIVER_SCHEMES),
+        optional_dependency="psycopg",
     )
 
     # -- planning ---------------------------------------------------------
