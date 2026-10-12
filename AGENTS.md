@@ -306,7 +306,9 @@ Arabic is kept as secondary aliases where useful.
   jobs, with a background worker thread, per-file results, retry, and a progress
   line. A **Read scanned PDFs (OCR)** checkbox (with a language field) turns on
   the OCR path for both import buttons, and a **Retry with OCR** button appears
-  when a run failed on scanned PDFs. `core/document_reader.py` reads
+  when a run failed on scanned PDFs. An **Install OCR support…** button appears
+  when the OCR packages are missing, running the bundled requirements file so a
+  desktop user never has to open a terminal. `core/document_reader.py` reads
   TXT/Markdown (streamed above 4 MB), CSV/TSV, JSON/JSONL, digital PDF, and DOCX;
   scanned PDFs go through the opt-in OCR path in `core/pdf_ocr.py`. Every reader
   only parses bytes — no macro or embedded instruction is ever executed.
@@ -424,6 +426,20 @@ Arabic is kept as secondary aliases where useful.
   `tesseract-ocr-ara` / `tesseract-ocr-eng` are installed. OCR reads pixels; it
   never executes the document. (System packages are listed in
   `OCR_SYSTEM_PACKAGES`; the extra is `[ocr]`.)
+- `core/optional_deps.py` — the **optional-feature installer**, so a user who
+  hits "OCR/PDF is not installed" has a next step the app can actually perform.
+  It owns, per feature (`pdf`, `ocr`), the bundled requirements file, the import
+  names to check, and the pip command that works from a source checkout
+  (`python -m pip install -r requirements-<feature>.txt`) — because the project
+  is **not on PyPI**, the old `pip install fayd-al-ruh[ocr]` hint could never
+  work. `status` separates a missing *Python* package (pip can fix) from a
+  missing *system* package (Tesseract; pip cannot), so the app never promises an
+  install it cannot do; `install` runs the command and returns an
+  `InstallResult`, and takes an injected `runner` so it is tested without the
+  network. Dependency-free and import-safe. `requirements-pdf.txt` /
+  `requirements-ocr.txt` mirror the extras. Surfaced as the CLI
+  `python -m cli deps [--install pdf|ocr]` and the window's **＋ → Install OCR
+  support…** entry and the Import Center's **Install OCR support…** button.
 - `core/pdf_extract.py` — read text out of a **digital** PDF page by page with
   `pypdf` (maintained, pure-Python, BSD; the optional `[pdf]` extra), imported
   lazily so the base install stays dependency-light. `PdfPageStream` opens and

@@ -240,6 +240,11 @@ def run_import_center(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.import_center", argv)
 
 
+def run_deps(argv: Sequence[str] = ()) -> int:
+    """Show or install the optional PDF/OCR features (``python -m cli deps``)."""
+    return _run_module("cli.deps", argv)
+
+
 def run_curriculum(argv: Sequence[str] = ()) -> int:
     """Show the seeded petroleum-engineering curriculum and its coverage."""
     if argv:
@@ -323,6 +328,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Show the bulk knowledge base status", run_knowledge, ("stats",)),
     ("Ingest sources: files, SQL, authorized web", run_ingest, ("list-connectors",)),
     ("Import files and folders (Knowledge Import Center)", run_import_center, ("interactive",)),
+    ("Install optional PDF/OCR support", run_deps, ()),
     ("Show the ingestion status (store + ledger)", run_ingest, ("stats",)),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--resume", "--episodes", "60")),
@@ -452,6 +458,7 @@ __all__ = [
     "run_web",
     "run_update",
     "run_import_center",
+    "run_deps",
     "run_demo",
     "run_ml",
     "run_llm",

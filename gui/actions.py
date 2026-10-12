@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from cli.menu import (
     run_curriculum,
     run_demo,
+    run_deps,
     run_evaluation,
     run_import_center,
     run_ingest,
@@ -94,6 +95,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         "Import files and folders (Knowledge Import Center)",
         run_import_center,
         ("interactive",),
+    ),
+    GuiAction(
+        "deps",
+        "Install optional PDF/OCR support",
+        run_deps,
+        ("--install", "pdf", "--install", "ocr"),
     ),
     GuiAction(
         "ingest-connectors",

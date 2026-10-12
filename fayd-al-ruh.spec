@@ -34,6 +34,7 @@ hiddenimports = (
         "gui.__main__",
         "cli.knowledge",
         "cli.ingest",
+        "cli.deps",
     ]
     + collect_submodules("ml")
     + collect_submodules("evaluation")

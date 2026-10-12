@@ -108,9 +108,12 @@ def _require_pypdf() -> Any:
     try:
         import pypdf  # type: ignore[import-not-found]
     except ImportError as error:  # pragma: no cover - depends on the environment
+        from core.optional_deps import FEATURE_PDF, pip_install_command
+
         raise PdfExtractionError(
             f"PDF support needs the optional '{PDF_DEPENDENCY}' package. Install it with "
-            f"`pip install {PDF_EXTRA}` (or `pip install {PDF_DEPENDENCY}`) and try again."
+            f"`pip install {PDF_EXTRA}` or, from a source checkout, "
+            f"`{pip_install_command(FEATURE_PDF)}` and try again."
         ) from error
     return pypdf
 

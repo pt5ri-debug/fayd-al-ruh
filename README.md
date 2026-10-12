@@ -1145,6 +1145,23 @@ second ingestion path exists to drift.
 > text layer needs the separate `fayd-al-ruh[ocr]` extra plus Tesseract, enabled
 > with `--ocr` (and `--ocr-languages ara+eng` for Arabic). OCR is a clearly
 > separated optional path; a digital PDF is never OCR'd.
+>
+> The project is not published on PyPI, so `pip install fayd-al-ruh[ocr]` cannot
+> work from a source checkout. Install the extras from the bundled requirements
+> files instead -- and the window offers the same install from its **＋** menu
+> ("Install OCR support…") and the Import Center, so a desktop user never has to
+> open a terminal:
+>
+> ```bash
+> python -m pip install -r requirements-pdf.txt   # digital PDFs
+> python -m pip install -r requirements-ocr.txt   # scanned PDFs (OCR)
+> ```
+>
+> The Tesseract engine and its language data are **system** packages that pip
+> cannot install: `apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara`
+> on Debian/Ubuntu, `brew install tesseract tesseract-lang` on macOS, or the
+> UB-Mannheim installer on Windows. `python -m cli deps` reports what is present
+> and what is missing for each feature.
 
 ## Multimodal perception (optional)
 
@@ -1180,6 +1197,7 @@ python -m cli jarvis "list the files in notes/"    # Jarvis mode: route, act, an
 python -m cli chat       # chat with the AI in text (Jarvis, no voice)
 python -m cli chat --mind   # answer from the trained model itself (no sources)
 python -m cli insight    # what the AI can do and what it has learned
+python -m cli deps       # show/install the optional PDF and OCR features
 python -m cli web --approve "What is a gas kick?"   # web answer, cited and trust-scored
 python -m cli paths      # where assets are read and data is written
 python -m cli selfcheck  # verify the bundled language model loads

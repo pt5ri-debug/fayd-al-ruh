@@ -31,6 +31,7 @@ from typing import Any, Literal
 import tkinter as tk
 from tkinter import filedialog, ttk
 
+from core import optional_deps
 from gui.import_center import (
     SUPPORTED_SUFFIXES,
     UNSUPPORTED_SUFFIXES,
@@ -198,6 +199,14 @@ class ImportCenterDialog:
             row3, text="(e.g. ara+eng; needs the [ocr] extra + Tesseract)",
             bg=theme.surface, fg=theme.text_dim, font=(self.font, 8),
         ).pack(side="left", padx=6)
+        # Offer the install right where OCR is chosen, but only when it is missing.
+        self._ocr_install_button = self._button(
+            row3, "Install OCR support…", self._on_install_ocr
+        )
+        if optional_deps.is_available(optional_deps.FEATURE_OCR):
+            self._ocr_install_button.pack_forget()
+        else:
+            self._ocr_install_button.pack(side="right")
 
     def _build_jobs_section(self) -> None:
         theme = self.theme
@@ -294,6 +303,34 @@ class ImportCenterDialog:
         self._ocr_var.set(True)
         self._on_retry(ocr=True)
 
+    def _on_install_ocr(self) -> None:
+        """Install the optional OCR packages from within the Import Center.
+
+        A scanned PDF cannot be imported without them, and the project is not on
+        PyPI, so the old "pip install fayd-al-ruh[ocr]" hint could not work here.
+        This runs the bundled requirements file instead and reports the outcome.
+        """
+        if self._busy:
+            return
+        if optional_deps.is_available(optional_deps.FEATURE_OCR):
+            self._set_status("OCR support is already installed.")
+            self._ocr_install_button.pack_forget()
+            return
+        if optional_deps.install_command(optional_deps.FEATURE_OCR) is None:
+            self._set_status(optional_deps.install_hint(optional_deps.FEATURE_OCR), error=True)
+            return
+        self._start("Installing OCR support…", self._install_ocr_job)
+
+    def _install_ocr_job(self, progress: Any) -> "optional_deps.InstallResult":
+        result = optional_deps.install(optional_deps.FEATURE_OCR, progress=progress)
+        return result
+
+    def _finish_install(self, result: "optional_deps.InstallResult") -> None:
+        self._set_status(result.message, error=not result.ok)
+        if result.ok and optional_deps.is_available(optional_deps.FEATURE_OCR):
+            self._ocr_var.set(True)
+            self._ocr_install_button.pack_forget()
+
     def _on_resume_job(self, job_id: str) -> None:
         if self._busy:
             return
@@ -328,13 +365,16 @@ class ImportCenterDialog:
     def _progress_line(self, message: str) -> None:
         self.window.after(0, lambda: self._set_status(message))
 
-    def _finish(self, report: ImportReport | None, error: Exception | None) -> None:
+    def _finish(self, report: Any, error: Exception | None) -> None:
         self._busy = False
         self._progress.stop()
         self._progress.pack_forget()
         self._set_buttons_enabled(True)
         if error is not None:
             self._set_status(f"Import failed: {error}", error=True)
+            return
+        if isinstance(report, optional_deps.InstallResult):
+            self._finish_install(report)
             return
         assert report is not None
         self._last_report = report

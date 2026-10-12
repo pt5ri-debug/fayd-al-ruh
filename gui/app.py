@@ -35,6 +35,7 @@ from tkinter import filedialog
 from tkinter import font as tkfont
 from tkinter import simpledialog
 
+from core import optional_deps
 from core.paths import data_dir
 from core.version import __version__
 from gui import markdown as md
@@ -1583,6 +1584,13 @@ class FaydGUI:
             label="Attach a scanned PDF (OCR)…", command=lambda: self._attach_one_file(ocr=True)
         )
         menu.add_separator()
+        ocr_ready = optional_deps.is_available(optional_deps.FEATURE_OCR)
+        menu.add_command(
+            label="OCR support is installed" if ocr_ready else "Install OCR support (scanned PDFs)…",
+            command=self._on_install_ocr,
+            state="disabled" if ocr_ready else "normal",
+        )
+        menu.add_separator()
         menu.add_command(
             label="Open Knowledge Import Center…", command=self._open_import_center
         )
@@ -1622,6 +1630,33 @@ class FaydGUI:
             mono=self._mono,
             on_close=lambda: setattr(self, "_import_dialog", None),
         )
+
+    def _on_install_ocr(self) -> None:
+        """Install the optional OCR packages from within the window.
+
+        The window used to fail an attach with a pip command the user could not
+        run (the project is not on PyPI). This runs the working command on a
+        worker thread and reports the outcome, then re-checks the feature so the
+        ＋ menu label reflects the new state.
+        """
+        if self._busy:
+            return
+        if optional_deps.is_available(optional_deps.FEATURE_OCR):
+            self._add_bubble("note", "OCR support is already installed.")
+            return
+        if optional_deps.install_command(optional_deps.FEATURE_OCR) is None:
+            self._add_bubble("note", optional_deps.install_hint(optional_deps.FEATURE_OCR))
+            return
+        self._add_bubble("note", "Installing OCR support… this can take a moment.")
+        self._start_work(lambda: optional_deps.install(optional_deps.FEATURE_OCR))
+
+    def _render_install_result(self, result: "optional_deps.InstallResult") -> None:
+        self._add_bubble("note", result.message)
+        if result.ok:
+            self._add_bubble(
+                "note",
+                "You can now attach a scanned PDF with “Attach a scanned PDF (OCR)…”.",
+            )
 
     def _on_attach(self, path: str, *, ocr: bool = False) -> AttachmentNotice:
         notice = self.service.attach_file(path, ocr=ocr)
@@ -1822,7 +1857,9 @@ class FaydGUI:
                 break
 
     def _render_result(self, payload: Any) -> None:
-        if isinstance(payload, ChatReply):
+        if isinstance(payload, optional_deps.InstallResult):
+            self._render_install_result(payload)
+        elif isinstance(payload, ChatReply):
             if payload.steps:
                 self._add_bubble("assistant", self._render_steps(payload))
             else:

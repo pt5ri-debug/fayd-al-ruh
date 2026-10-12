@@ -166,21 +166,26 @@ def _ocr_attachment_hint(message: str, *, ocr: bool) -> str:
 
     The reader's raw message names a CLI flag; a chat attachment has no flag, so
     this says what the window actually offers (attach it with OCR, or bring it in
-    through the Import Center).
+    through the Import Center). When the OCR packages are absent it points at the
+    window's own installer rather than a pip command the user cannot run.
     """
     if "no extractable text" not in message.lower():
         return message
+    from core.optional_deps import FEATURE_OCR, install_hint
     from core.pdf_ocr import ocr_available
 
     if ocr:
-        return message + (
-            " OCR ran but found no readable text"
-            + ("" if ocr_available() else "; install the [ocr] extra and Tesseract")
-            + "."
-        )
+        if not ocr_available():
+            return (
+                message
+                + " OCR is not installed; use “Install OCR support…” in the ＋ menu. "
+                + install_hint(FEATURE_OCR)
+            )
+        return message + " OCR ran but found no readable text."
     return message + (
-        " Attach it with “Read scanned PDFs (OCR)” enabled (needs the [ocr] extra and "
-        "Tesseract), or import it from the Knowledge Import Center with OCR on."
+        " Attach it with “Read scanned PDFs (OCR)” enabled (or “Attach a scanned PDF "
+        "(OCR)…” from the ＋ menu), or import it from the Knowledge Import Center with OCR "
+        "on. If OCR is not installed, use “Install OCR support…” in the ＋ menu."
     )
 
 

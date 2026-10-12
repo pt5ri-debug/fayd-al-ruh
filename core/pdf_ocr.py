@@ -55,6 +55,7 @@ from core.pdf_extract import (
     PdfPageStream,
     _is_rtl_hint,
 )
+from core.optional_deps import FEATURE_OCR, pip_install_command
 
 #: The optional Python packages the ``[ocr]`` extra installs (import names).
 OCR_DEPENDENCIES = ("pypdfium2", "pytesseract", "PIL")
@@ -298,8 +299,9 @@ def _require_dependencies() -> tuple[Any, Any]:
     except ImportError as error:  # pragma: no cover - environment dependent
         raise OcrUnavailableError(
             f"OCR needs the optional packages {', '.join(OCR_PIP_PACKAGES)}. Install them with "
-            f"`pip install {OCR_EXTRA}`. The {OCR_ENGINE_NAME} engine and its language data "
-            f"({OCR_SYSTEM_PACKAGES['binary']}, {OCR_SYSTEM_PACKAGES['eng']}, "
+            f"`pip install {OCR_EXTRA}` or, from a source checkout, "
+            f"`{pip_install_command(FEATURE_OCR)}`. The {OCR_ENGINE_NAME} engine and its language "
+            f"data ({OCR_SYSTEM_PACKAGES['binary']}, {OCR_SYSTEM_PACKAGES['eng']}, "
             f"{OCR_SYSTEM_PACKAGES['ara']}) are separate system packages."
         ) from error
     return pypdfium2, pytesseract
