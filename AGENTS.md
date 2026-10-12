@@ -312,10 +312,36 @@ Arabic is kept as secondary aliases where useful.
   the OCR path for both import buttons, and a **Retry with OCR** button appears
   when a run failed on scanned PDFs. An **Install OCR support…** button appears
   when the OCR packages are missing, running the bundled requirements file so a
-  desktop user never has to open a terminal. `core/document_reader.py` reads
+  desktop user never has to open a terminal. A **3. Import a SQL database**
+  section opens the SQL screen below. `core/document_reader.py` reads
   TXT/Markdown (streamed above 4 MB), CSV/TSV, JSON/JSONL, digital PDF, and DOCX;
   scanned PDFs go through the opt-in OCR path in `core/pdf_ocr.py`. Every reader
   only parses bytes — no macro or embedded instruction is ever executed.
+- `gui/sql_import.py` — the **SQL Database Import** engine (Tk-free): the
+  user-facing front end over the resumable SQL ingestion service the CLI's
+  `ingest sql-import` command uses. `SqlImportService` (`test_connection`,
+  `inspect`, `preview`, `run_import`, `resume_job`, `retry_job`, `job`,
+  `list_jobs`, `forget_job`, `stats`) drives `ingest.sql_job.SqlImportRunner`
+  unchanged, so the window, the CLI, and the pipeline share one read-only
+  connector, one dedup ledger, one durable checkpoint, and one job file under
+  `<store>/ingest/jobs-sql`. `DATABASE_TYPES` declares the enabled engines
+  (SQLite only, at this stage); `picker_filetypes()` is the one place the suffix
+  list lives. A column uncheck becomes the connector's `exclude_columns`, so an
+  excluded column is never in the projection, a preview, or the store.
+  `redact_secrets` strips a password/token or a credential-bearing URI from every
+  message, so no status line or dialog can leak one. `SqlImportJob.options` (in
+  `ingest/sql_job.py`) records the connector options, so a resume reproduces the
+  original table/column selection instead of a fresh guess.
+- `gui/sql_import_dialog.py` — the SQL Database Import **screen** (Tk, imported
+  lazily): 1. Database file (choose + read-only connection test + schema list) /
+  2. Tables and columns (table multi-select, per-column include/exclude with a
+  bounded preview) / 3. Start import (explicit, with a batch-size field) /
+  4. Import jobs (durable status, Resume / Retry / Forget). Long imports run on
+  a worker thread with readable progress (a determinate bar when a percent is
+  measurable) and a **Cancel** button that trips the service's cooperative
+  `should_cancel`; every status and result is secret-redacted before display.
+  Reachable from the composer's ＋ menu (**Import a SQL database (SQLite)…**) and
+  from the Import Center dialog.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
   Update the baseline with `python -m evaluation --update-baseline`.

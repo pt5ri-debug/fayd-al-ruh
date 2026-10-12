@@ -1594,6 +1594,9 @@ class FaydGUI:
         menu.add_command(
             label="Open Knowledge Import Center…", command=self._open_import_center
         )
+        menu.add_command(
+            label="Import a SQL database (SQLite)…", command=self._open_sql_import
+        )
         try:
             menu.tk_popup(
                 self._attach_button.winfo_rootx(),
@@ -1629,6 +1632,19 @@ class FaydGUI:
             font=self._font,
             mono=self._mono,
             on_close=lambda: setattr(self, "_import_dialog", None),
+        )
+
+    def _open_sql_import(self) -> None:
+        """Open the SQL Database Import screen as a separate window."""
+        from gui.sql_import_dialog import SqlImportDialog
+
+        self._sql_import_dialog = SqlImportDialog(
+            self.root,
+            self.service,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=lambda: setattr(self, "_sql_import_dialog", None),
         )
 
     def _on_install_ocr(self) -> None:
