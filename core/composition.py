@@ -192,6 +192,11 @@ def _tidy_marks(text: str) -> str:
     intact. A repeated word *or short phrase* ("the same the same", "the
     production forecast the production forecast") collapses to one, which is the
     model looping rather than a statement said twice.
+
+    The phrase collapse is applied until it stops changing: a single pass only
+    removes non-overlapping copies, so a longer run ("the casing the casing the
+    casing the casing") would keep every second copy. Repeating it collapses the
+    whole run to one, which is what the byte model's stalling actually is.
     """
     def _collapse(match: re.Match[str]) -> str:
         mark = match.group(1)
@@ -205,7 +210,11 @@ def _tidy_marks(text: str) -> str:
         return mark if mark in _TERMINAL else "."
 
     value = _REPEAT_MARK_RE.sub(_collapse, text)
-    value = _REPEATED_PHRASE_RE.sub(r"\1", value)
+    while True:
+        collapsed = _REPEATED_PHRASE_RE.sub(r"\1", value)
+        if collapsed == value:
+            break
+        value = collapsed
     # Close a gap the byte model leaves before punctuation ("flows . Then" ->
     # "flows. Then"); a hyphen or slash is untouched, so a range/formula keeps
     # its spacing.
