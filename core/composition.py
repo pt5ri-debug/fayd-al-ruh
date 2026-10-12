@@ -49,6 +49,15 @@ _MODEL_SENTENCE_RE = re.compile(r"(?<=[.!?])(?:\s+|(?=[A-Z\"\u201c]))")
 # hyphen ("10 - 20") and a slash ("q / A") are left alone, so a range or a
 # formula keeps its spacing.
 _SPACE_BEFORE_MARK_RE = re.compile(r"\s+([.!?,;:])")
+# The model echoes an ontology identifier verbatim ("pore_pressure",
+# "polymer_flooding", "co2_capture"): the training prose is built from concept
+# labels, and an id separator is a data-format artefact, not a word the model
+# chose. Rendering the underscore as a space is presentation, exactly like
+# collapsing the ")))))" stopping run -- the words are untouched, only the id
+# reads as the phrase it names. Only a whole token of letters/digits joined by
+# underscores is matched, so a lone underscore, a formula ("q / A"), a decimal
+# ("0.052") and a compound name ("5CT--spec") are all left as written.
+_SNAKE_TOKEN_RE = re.compile(r"(?<![\w])[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+(?![\w])")
 # Runs the byte-level model repeats, such as the ")))))" or "..." at a stopping
 # point; a repeated mark is collapsed to one. When that mark is not itself a
 # sentence end it becomes a period, so the run reads as a sentence boundary.
@@ -197,6 +206,10 @@ def _tidy_marks(text: str) -> str:
     removes non-overlapping copies, so a longer run ("the casing the casing the
     casing the casing") would keep every second copy. Repeating it collapses the
     whole run to one, which is what the byte model's stalling actually is.
+
+    An ontology identifier the model echoed ("pore_pressure") is read as the
+    phrase it names ("pore pressure") before the collapse runs; the words are the
+    model's own, only the data-format separator is presentation.
     """
     def _collapse(match: re.Match[str]) -> str:
         mark = match.group(1)
@@ -210,6 +223,10 @@ def _tidy_marks(text: str) -> str:
         return mark if mark in _TERMINAL else "."
 
     value = _REPEAT_MARK_RE.sub(_collapse, text)
+    # Read an ontology id ("pore_pressure") as the phrase it names before the
+    # repeat collapse, so a looping id ("pore_pressure pore_pressure") collapses
+    # the same way a looping phrase does.
+    value = _SNAKE_TOKEN_RE.sub(lambda m: m.group(0).replace("_", " "), value)
     while True:
         collapsed = _REPEATED_PHRASE_RE.sub(r"\1", value)
         if collapsed == value:
@@ -323,7 +340,8 @@ def compose_model_answer(raw: str, *, question: str = "") -> str:
     * prefer, as the opening, a sentence that names a word from the question, so
       the answer is centred on what was asked, and demote a bare section label
       ("Step 2 of ...") below the real statements;
-    * collapse repeated punctuation/doubled words, capitalise, and punctuate.
+    * collapse repeated punctuation/doubled words, read an ontology identifier
+      ("pore_pressure") as the phrase it names, capitalise, and punctuate.
 
     When ``question`` is given the model's answer is centred on it; ``raw`` alone
     still composes (the leading fragment and unfinished tail are dropped as
