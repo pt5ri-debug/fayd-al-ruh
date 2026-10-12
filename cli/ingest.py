@@ -593,22 +593,40 @@ def _sql_extra_options(args: argparse.Namespace) -> dict[str, str]:
     return extras
 
 
+def _redact_payload(value: object) -> object:
+    """Return ``value`` with every string run through :func:`redact_secrets`.
+
+    A job's ``source_uri``/``source_path`` and its failure list can carry a
+    credential-bearing path (or a URI), and the CLI prints them in both human and
+    ``--json`` form. Redacting the whole payload (not one field) means a new field
+    added later cannot leak a secret by omission.
+    """
+    if isinstance(value, str):
+        return redact_secrets(value)
+    if isinstance(value, dict):
+        return {key: _redact_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_payload(item) for item in value]
+    return value
+
+
 def _print_sql_report(report, as_json: bool, raw_job=None) -> int:
     """Print an import report and map its outcome to an exit code.
 
     ``--json`` keeps the durable job shape the CLI always emitted (the full
     :class:`ingest.sql_job.SqlImportJob`) rather than the display report, so an
-    existing consumer of ``sql-import --json`` keeps working.
+    existing consumer of ``sql-import --json`` keeps working. Every string is
+    secret-redacted first, so a credential in a source path never prints.
     """
     if as_json:
         payload = raw_job.as_dict() if raw_job is not None else report.as_dict()
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        print(json.dumps(_redact_payload(payload), ensure_ascii=False, indent=2))
     else:
-        print(report.summary())
+        print(redact_secrets(report.summary()))
         for table in report.tables:
             print(f"  {table.label}")
         for failure in report.failures:
-            print(f"  failed: {failure}")
+            print(f"  failed: {redact_secrets(failure)}")
         print(f"job {report.job_id}: {report.status}")
     if report.status == "done":
         return 0
@@ -696,20 +714,22 @@ def run_sql_preview(args: argparse.Namespace) -> int:
     if args.as_json:
         print(
             json.dumps(
-                {
-                    "table": preview.table,
-                    "columns": list(preview.columns),
-                    "rows": list(preview.rows),
-                    "truncated": preview.truncated,
-                    "message": preview.message,
-                },
+                _redact_payload(
+                    {
+                        "table": preview.table,
+                        "columns": list(preview.columns),
+                        "rows": list(preview.rows),
+                        "truncated": preview.truncated,
+                        "message": preview.message,
+                    }
+                ),
                 ensure_ascii=False,
                 indent=2,
             )
         )
         return 0
     if preview.message and not preview.rows:
-        print(preview.message)
+        print(redact_secrets(preview.message))
         return SQL_EXIT_CONNECTION if "No such" in preview.message else 0
     print(f"table {preview.table} — columns: {', '.join(preview.columns) or '(none)'}")
     for row in preview.rows:
@@ -760,27 +780,32 @@ def run_sql_status(args: argparse.Namespace) -> int:
             return SQL_EXIT_INVALID
         if args.as_json:
             raw = service.raw_job(args.job)
-            print(json.dumps(raw.as_dict() if raw else {}, ensure_ascii=False, indent=2))
+            payload = raw.as_dict() if raw else {}
+            print(json.dumps(_redact_payload(payload), ensure_ascii=False, indent=2))
             return 0
         print(f"{view.job_id}  [{view.status}]  {view.committed}/{view.target} rows")
-        print(f"  source     : {view.source_path or view.source}")
+        print(f"  source     : {redact_secrets(view.source_path or view.source)}")
         print(f"  batch size : {view.batch_size}")
         print(f"  updated    : {view.updated_at}")
         print(f"  resumable  : {'yes' if view.can_resume else 'no'}")
         for table in view.tables:
             print(f"    {table.label}")
         for failure in view.failures:
-            print(f"    failed: {failure}")
+            print(f"    failed: {redact_secrets(failure)}")
         return 0
     jobs = service.list_jobs()
     if args.as_json:
-        print(json.dumps([_job_view_dict(view) for view in jobs], ensure_ascii=False, indent=2))
+        payloads = [_job_view_dict(view) for view in jobs]
+        print(json.dumps(_redact_payload(payloads), ensure_ascii=False, indent=2))
         return 0
     if not jobs:
         print("No SQL import jobs recorded.")
         return 0
     for view in jobs:
-        print(f"{view.job_id} [{view.status}] {view.committed}/{view.target} rows — {view.source}")
+        print(
+            f"{view.job_id} [{view.status}] {view.committed}/{view.target} rows — "
+            f"{redact_secrets(view.source)}"
+        )
     return 0
 
 
@@ -853,13 +878,17 @@ def run_sql_jobs(args: argparse.Namespace) -> int:
     service = _sql_service(args)
     jobs = service.list_jobs()
     if args.as_json:
-        print(json.dumps([_job_view_dict(view) for view in jobs], ensure_ascii=False, indent=2))
+        payloads = [_job_view_dict(view) for view in jobs]
+        print(json.dumps(_redact_payload(payloads), ensure_ascii=False, indent=2))
         return 0
     if not jobs:
         print("No SQL import jobs recorded.")
         return 0
     for view in jobs:
-        print(f"{view.job_id} [{view.status}] {view.committed}/{view.target} rows — {view.source}")
+        print(
+            f"{view.job_id} [{view.status}] {view.committed}/{view.target} rows — "
+            f"{redact_secrets(view.source)}"
+        )
     return 0
 
 
