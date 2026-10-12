@@ -342,6 +342,20 @@ Arabic is kept as secondary aliases where useful.
   `should_cancel`; every status and result is secret-redacted before display.
   Reachable from the composer's ＋ menu (**Import a SQL database (SQLite)…**) and
   from the Import Center dialog.
+- `cli/ingest.py` — the ingestion CLI, including the **SQLite import** commands
+  (`sql-drivers`, `sql-inspect`, `sql-preview`, `sql-import`, `sql-status`,
+  `sql-resume`, `sql-cancel`, `sql-jobs`). They are the headless twin of the
+  window's SQL screen and drive the *same* `gui.sql_import.SqlImportService`, so
+  the CLI and GUI share one read-only connector, one ledger, one checkpoint, and
+  one job file — the CLI reimplements no import logic. Options: `--tables` /
+  `--exclude-tables` / `--columns` / `--exclude-columns` (exclusion wins),
+  `--batch-size` / `--row-group` / `--page` / `--timeout` (validated before the
+  source is touched), `--job`, `--schema-change`, `--quiet`, `--json`. A missing
+  or unreadable database fails safely (never created or written). Exit codes:
+  `0` success, `2` invalid configuration, `3` connection error, `4` incomplete
+  (cancelled/interrupted, resumable), `5` unrecoverable failure. A cross-process
+  cancel is a marker file (`SqlImportService.request_cancel`) that a running
+  import polls, so `sql-cancel` works from a separate invocation.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
   Update the baseline with `python -m evaluation --update-baseline`.

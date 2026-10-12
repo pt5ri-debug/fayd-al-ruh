@@ -20,6 +20,13 @@ Usage:
     python -m cli ingest add DOCS       # ingest files/folders/SQL (streaming)
     python -m cli ingest list-connectors # show the available connectors
     python -m cli ingest stats          # ingestion store + ledger status
+    python -m cli ingest sql-drivers    # list the supported SQL drivers
+    python -m cli ingest sql-inspect DB  # show a database's schema (no rows read)
+    python -m cli ingest sql-preview DB --table T  # preview how rows will be stored
+    python -m cli ingest sql-import DB --job J     # resumable SQLite import
+    python -m cli ingest sql-status J   # one SQL import job's status
+    python -m cli ingest sql-resume J   # continue an interrupted job
+    python -m cli ingest sql-cancel J   # ask a running job to stop safely
     python -m cli deps                  # show which optional features are installed
     python -m cli deps --install ocr    # install the OCR packages (scanned PDFs)
     python -m cli paths               # show asset/data locations

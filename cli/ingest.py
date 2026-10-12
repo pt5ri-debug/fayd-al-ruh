@@ -12,6 +12,35 @@
     python -m cli ingest stats
     python -m cli ingest search "hydraulic fracturing"
 
+SQLite import (the headless twin of the window's SQL Import screen):
+
+    python -m cli ingest sql-drivers
+    python -m cli ingest sql-inspect ./data/wells.db
+    python -m cli ingest sql-preview ./data/wells.db --table wells --columns id,name --limit 5
+    python -m cli ingest sql-import ./data/wells.db --job wells --batch-size 500 \\
+        --tables wells,logs --exclude-columns api_key
+    python -m cli ingest sql-status wells
+    python -m cli ingest sql-resume wells
+    python -m cli ingest sql-cancel wells
+
+Every SQL command drives the *same* service the window uses
+(:class:`gui.sql_import.SqlImportService` over :mod:`ingest.sql_job` and
+:mod:`ingest.connectors.sqlite`); none of them reimplement import logic. The
+database is opened **read-only** (`mode=ro` + ``PRAGMA query_only=ON``): a missing
+or unreadable file fails safely and is never created or written. Selections use
+``--tables``/``--exclude-tables``/``--columns``/``--exclude-columns`` (exclusion
+wins, and an excluded column is never read); ``--batch-size``/``--row-group``/
+``--page``/``--timeout`` are validated before the source is touched. A run never
+blocks on a prompt, reports progress to stderr, and prints final counts to stdout.
+
+Exit codes (SQL commands):
+
+* ``0`` success;
+* ``2`` invalid configuration (bad batch size / limit / selection / job id);
+* ``3`` the database could not be opened read-only;
+* ``4`` the import is incomplete (cancelled or interrupted; resumable);
+* ``5`` an unrecoverable failure (a source error, a schema change, an IO fault).
+
 Local sources run with no network and no extra dependency. A *digital* PDF needs
 the optional ``[pdf]`` extra (``pip install fayd-al-ruh[pdf]``); ``--pdf-password``
 unlocks an encrypted one. OCR for scanned PDF pages (Stage 3) is opt-in with
@@ -47,11 +76,14 @@ from core.knowledge_base import (
 from core.knowledge_index import KnowledgeTextIndex, build_index
 from core.permissions import Capability, PermissionPolicy
 from core.rag import BulkCorpusRetriever
+from gui.sql_import import SqlImportService, redact_secrets
 from ingest.dedup import DedupLedger
+from ingest.errors import ConnectorError
 from ingest.metadata import DocumentMetadataStore, metadata_path
 from ingest.pipeline import IngestionPipeline, ledger_path
 from ingest.records import SourceSpec
 from ingest.registry import build_default_registry
+from ingest.sql_job import SCHEMA_FAIL, SCHEMA_FULL_REIMPORT
 
 _WEB_TOOL = "ingest_web"
 
@@ -141,14 +173,84 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("jobs", parents=[common], help="List resumable ingestion jobs.")
 
+    _add_sql_parsers(sub, common)
+    return parser
+
+
+def _add_sql_parsers(
+    sub: argparse._SubParsersAction, common: argparse.ArgumentParser
+) -> None:
+    """Register the SQLite import commands (the headless twin of the GUI screen).
+
+    Every command drives the *same* :class:`gui.sql_import.SqlImportService` the
+    window's SQL Import screen uses, which in turn drives the one resumable
+    ingestion service (:mod:`ingest.sql_job` + :mod:`ingest.connectors.sqlite`).
+    None of them reimplement import logic.
+    """
+    select = argparse.ArgumentParser(add_help=False)
+    select.add_argument(
+        "--tables",
+        default="",
+        metavar="A,B",
+        help="Comma-separated tables to import (default: every table).",
+    )
+    select.add_argument(
+        "--exclude-tables",
+        default="",
+        metavar="A,B",
+        help="Comma-separated tables to skip.",
+    )
+    select.add_argument(
+        "--columns",
+        default="",
+        metavar="A,B",
+        help="Comma-separated columns to read (default: every column).",
+    )
+    select.add_argument(
+        "--exclude-columns",
+        default="",
+        metavar="A,B",
+        help="Comma-separated columns to never read (wins over --columns).",
+    )
+    batch = argparse.ArgumentParser(add_help=False)
+    batch.add_argument("--batch-size", type=int, default=500, help="Rows per committed batch.")
+    batch.add_argument("--row-group", type=int, default=None, help="Rows grouped into one stored record.")
+    batch.add_argument("--page", type=int, default=None, help="Connector page size (rows per read).")
+    batch.add_argument("--timeout", type=float, default=None, help="Seconds to wait for a locked database.")
+    batch.add_argument("--quiet", action="store_true", help="Suppress progress.")
+    batch.add_argument("--json", action="store_true", dest="as_json")
+
+    drivers = sub.add_parser(
+        "sql-drivers", parents=[common], help="List the supported SQL drivers."
+    )
+    drivers.add_argument("--json", action="store_true", dest="as_json")
+
+    inspect = sub.add_parser(
+        "sql-inspect", parents=[common], help="Show a database's schema without reading rows."
+    )
+    inspect.add_argument("source", help="A sqlite:// URI (or a .db/.sqlite path).")
+    inspect.add_argument("--json", action="store_true", dest="as_json")
+
+    preview = sub.add_parser(
+        "sql-preview", parents=[common], help="Preview how rows of one table will be stored."
+    )
+    preview.add_argument("source", help="A sqlite:// URI (or a .db/.sqlite path).")
+    preview.add_argument("--table", required=True, help="The table to preview.")
+    preview.add_argument("--columns", default="", metavar="A,B", help="Columns to preview.")
+    preview.add_argument("--limit", type=int, default=5, help="Rows to preview (max 50).")
+    preview.add_argument("--json", action="store_true", dest="as_json")
+
     sql_import = sub.add_parser(
         "sql-import",
-        parents=[common],
+        parents=[common, select, batch],
         help="Resumable, idempotent SQL import with durable progress.",
     )
     sql_import.add_argument("source", help="A sqlite:// URI (or a .db/.sqlite path).")
-    sql_import.add_argument("--job", required=True, help="Job id (reused to resume).")
-    sql_import.add_argument("--batch-size", type=int, default=500, help="Rows per committed batch.")
+    sql_import.add_argument(
+        "--job",
+        default=None,
+        help="Job id (reused to resume; derived from the path when omitted).",
+    )
     sql_import.add_argument(
         "--schema-change",
         choices=("fail", "full-reimport"),
@@ -156,14 +258,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="How to react when a table's structure changed (default: fail).",
     )
     sql_import.add_argument("--option", action="append", default=[], metavar="KEY=VALUE")
-    sql_import.add_argument("--quiet", action="store_true", help="Suppress progress.")
-    sql_import.add_argument("--json", action="store_true", dest="as_json")
+
+    status = sub.add_parser(
+        "sql-status", parents=[common], help="Show one SQL import job's status (or all)."
+    )
+    status.add_argument("job", nargs="?", default=None, help="Job id (omit to list all).")
+    status.add_argument("--json", action="store_true", dest="as_json")
+
+    resume = sub.add_parser(
+        "sql-resume", parents=[common, batch], help="Resume an interrupted SQL import job."
+    )
+    resume.add_argument("job", help="The durable job id to continue.")
+    resume.add_argument(
+        "--schema-change",
+        choices=("fail", "full-reimport"),
+        default="fail",
+        help="Recovery policy if a table's structure changed (default: fail).",
+    )
+
+    cancel = sub.add_parser(
+        "sql-cancel", parents=[common], help="Ask a running SQL import to stop safely."
+    )
+    cancel.add_argument("job", help="The durable job id to cancel.")
+    cancel.add_argument("--json", action="store_true", dest="as_json")
 
     sql_jobs = sub.add_parser(
         "sql-jobs", parents=[common], help="List resumable SQL import jobs."
     )
     sql_jobs.add_argument("--json", action="store_true", dest="as_json")
-    return parser
 
 
 def _resolve_dir(value: str | None):
@@ -397,69 +519,348 @@ def run_jobs(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_sql_import(args: argparse.Namespace) -> int:
-    from ingest.sql_job import (
-        SCHEMA_FAIL,
-        SCHEMA_FULL_REIMPORT,
-        SqlImportRunner,
-    )
+SQL_EXIT_INVALID = 2
+"""Bad configuration: a wrong batch size/limit, a bad selection, a bad job id."""
 
-    store_dir = _resolve_dir(args.store_dir)
-    options = _parse_options(args.option)
-    source = _sqlite_uri(args.source)
-    spec = SourceSpec(source, options=options)
-    progress = (
-        (lambda message: print(message, file=sys.stderr, flush=True))
-        if not args.quiet
-        else None
-    )
-    policy = SCHEMA_FULL_REIMPORT if args.schema_change == "full-reimport" else SCHEMA_FAIL
-    runner = SqlImportRunner(
-        store_dir,
-        batch_size=args.batch_size,
-        progress=progress,
-    )
-    job = runner.run(spec, job_id=args.job, schema_change=policy)
-    if args.as_json:
-        print(json.dumps(job.as_dict(), ensure_ascii=False, indent=2))
-        return 0 if job.status == "done" else 1
-    for name, table in sorted(job.tables.items()):
-        print(f"  {name}: {table.status} ({table.resume_count}/{table.target_rows} rows)")
-    if job.failures:
-        for failure in job.failures:
+SQL_EXIT_CONNECTION = 3
+"""The database could not be opened read-only (missing, locked, not a database)."""
+
+SQL_EXIT_INCOMPLETE = 4
+"""The import finished but is not complete (cancelled or interrupted; resumable)."""
+
+SQL_EXIT_FAILED = 5
+"""An unrecoverable failure (a source error, a schema change, an IO fault)."""
+
+
+def _sql_service(args: argparse.Namespace) -> SqlImportService:
+    """The shared SQL service, over the same store dir the window uses."""
+    return SqlImportService(store_dir=_resolve_dir(args.store_dir))
+
+
+def _split_names(value: str | None) -> tuple[str, ...]:
+    """Split a comma-separated option into names, trimming spaces."""
+    if not value:
+        return ()
+    return tuple(part.strip() for part in value.split(",") if part.strip())
+
+
+def _progress_printer(quiet: bool):
+    """A progress callback for the service (it emits :class:`SqlProgress` objects)."""
+    if quiet:
+        return None
+
+    def emit(progress: object) -> None:
+        message = getattr(progress, "message", None) or str(progress)
+        print(redact_secrets(str(message)), file=sys.stderr, flush=True)
+
+    return emit
+
+
+def _validate_sql_args(args: argparse.Namespace) -> str | None:
+    """Return a human message for an invalid argument, or ``None`` when valid.
+
+    Validation happens *before* the service touches the database, so a bad batch
+    size or limit never opens the source at all.
+    """
+    from ingest.sql_job import MAX_BATCH_SIZE
+
+    batch_size = getattr(args, "batch_size", None)
+    if batch_size is not None and not 1 <= batch_size <= MAX_BATCH_SIZE:
+        return f"--batch-size must be between 1 and {MAX_BATCH_SIZE}."
+    row_group = getattr(args, "row_group", None)
+    if row_group is not None and row_group < 1:
+        return "--row-group must be at least 1."
+    page = getattr(args, "page", None)
+    if page is not None and page < 1:
+        return "--page must be at least 1."
+    timeout = getattr(args, "timeout", None)
+    if timeout is not None and timeout < 0:
+        return "--timeout cannot be negative."
+    limit = getattr(args, "limit", None)
+    if limit is not None and limit < 1:
+        return "--limit must be at least 1."
+    return None
+
+
+def _sql_extra_options(args: argparse.Namespace) -> dict[str, str]:
+    """Connector options the view does not expose, forwarded through build_spec."""
+    extras: dict[str, str] = {}
+    if getattr(args, "page", None) is not None:
+        extras["page"] = str(args.page)
+    if getattr(args, "timeout", None) is not None:
+        extras["timeout"] = str(args.timeout)
+    extras.update(_parse_options(getattr(args, "option", []) or []))
+    return extras
+
+
+def _print_sql_report(report, as_json: bool, raw_job=None) -> int:
+    """Print an import report and map its outcome to an exit code.
+
+    ``--json`` keeps the durable job shape the CLI always emitted (the full
+    :class:`ingest.sql_job.SqlImportJob`) rather than the display report, so an
+    existing consumer of ``sql-import --json`` keeps working.
+    """
+    if as_json:
+        payload = raw_job.as_dict() if raw_job is not None else report.as_dict()
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(report.summary())
+        for table in report.tables:
+            print(f"  {table.label}")
+        for failure in report.failures:
             print(f"  failed: {failure}")
-    print(f"job {job.job_id}: {job.status}")
-    return 0 if job.status == "done" else 1
+        print(f"job {report.job_id}: {report.status}")
+    if report.status == "done":
+        return 0
+    if report.cancelled or report.interrupted:
+        return SQL_EXIT_INCOMPLETE
+    return SQL_EXIT_FAILED
 
 
-def run_sql_jobs(args: argparse.Namespace) -> int:
-    from ingest.sql_job import SqlJobStore, sql_jobs_dir
-
-    store_dir = _resolve_dir(args.store_dir)
-    jobs = SqlJobStore(sql_jobs_dir(store_dir)).list()
+def run_sql_drivers(args: argparse.Namespace) -> int:
+    rows = _sql_service(args).driver_summaries()
     if args.as_json:
-        print(json.dumps([job.as_dict() for job in jobs], ensure_ascii=False, indent=2))
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    for row in rows:
+        suffixes = ", ".join(row["suffixes"])  # type: ignore[arg-type]
+        schemes = ", ".join(row["schemes"])  # type: ignore[arg-type]
+        print(f"{row['name']}  (read-only)")
+        print(f"  schemes  : {schemes}")
+        print(f"  suffixes : {suffixes}")
+        print(f"  {row['description']}")
+        dependency = row.get("optional_dependency") or "none"
+        print(f"  extra    : {dependency}")
+    return 0
+
+
+def run_sql_inspect(args: argparse.Namespace) -> int:
+    service = _sql_service(args)
+    try:
+        tables = service.inspect(args.source)
+    except (ConnectorError, OSError, ValueError) as error:
+        print(f"error: {redact_secrets(str(error))}")
+        return SQL_EXIT_CONNECTION
+    if args.as_json:
+        payload = [
+            {
+                "table": info.name,
+                "row_count": info.row_count,
+                "primary_key": list(info.primary_key),
+                "stable_identity": info.stable_identity,
+                "resume_supported": info.resume_supported,
+                "without_rowid": info.without_rowid,
+                "reason": info.reason,
+                "columns": [
+                    {
+                        "name": column.name,
+                        "declared_type": column.declared_type,
+                        "primary_key": column.primary_key,
+                        "nullable": column.nullable,
+                        "hidden": column.hidden,
+                    }
+                    for column in info.columns
+                ],
+            }
+            for info in tables
+        ]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    if not tables:
+        print("No tables to import (every table was excluded or the database is empty).")
+        return 0
+    for info in tables:
+        print(info.label)
+        for column in info.columns:
+            pk = " PK" if column.primary_key else ""
+            nullable = "" if column.nullable else " not null"
+            hidden = " hidden" if column.hidden else ""
+            print(f"    {column.name}: {column.declared_type or '(untyped)'}{pk}{nullable}{hidden}")
+        if info.reason:
+            print(f"    limit: {info.reason}")
+    return 0
+
+
+def run_sql_preview(args: argparse.Namespace) -> int:
+    invalid = _validate_sql_args(args)
+    if invalid:
+        print(f"error: {invalid}")
+        return SQL_EXIT_INVALID
+    service = _sql_service(args)
+    preview = service.preview(
+        args.source,
+        table=args.table,
+        columns=_split_names(args.columns),
+        limit=args.limit,
+    )
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "table": preview.table,
+                    "columns": list(preview.columns),
+                    "rows": list(preview.rows),
+                    "truncated": preview.truncated,
+                    "message": preview.message,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if preview.message and not preview.rows:
+        print(preview.message)
+        return SQL_EXIT_CONNECTION if "No such" in preview.message else 0
+    print(f"table {preview.table} — columns: {', '.join(preview.columns) or '(none)'}")
+    for row in preview.rows:
+        print(row)
+    if preview.truncated:
+        print(f"(showing at most {args.limit} row(s))")
+    return 0
+
+
+def run_sql_import(args: argparse.Namespace) -> int:
+    invalid = _validate_sql_args(args)
+    if invalid:
+        print(f"error: {invalid}")
+        return SQL_EXIT_INVALID
+    service = _sql_service(args)
+    job_id = args.job or service.default_job_id(args.source)
+    try:
+        report = service.run_import(
+            args.source,
+            job_id=job_id,
+            tables=_split_names(args.tables),
+            exclude_tables=_split_names(args.exclude_tables),
+            include_columns=_split_names(args.columns),
+            exclude_columns=_split_names(args.exclude_columns),
+            batch_size=args.batch_size,
+            schema_change=(
+                SCHEMA_FULL_REIMPORT if args.schema_change == "full-reimport" else SCHEMA_FAIL
+            ),
+            row_group=args.row_group,
+            extra_options=_sql_extra_options(args),
+            progress=_progress_printer(args.quiet),
+            should_cancel=lambda: service.should_cancel(job_id),
+        )
+    except ValueError as error:
+        print(f"error: {error}")
+        return SQL_EXIT_INVALID
+    finally:
+        service.clear_cancel(job_id)
+    return _print_sql_report(report, args.as_json, raw_job=service.raw_job(job_id))
+
+
+def run_sql_status(args: argparse.Namespace) -> int:
+    service = _sql_service(args)
+    if args.job:
+        view = service.job(args.job)
+        if view is None:
+            print(f"error: no such SQL import job: {args.job}")
+            return SQL_EXIT_INVALID
+        if args.as_json:
+            raw = service.raw_job(args.job)
+            print(json.dumps(raw.as_dict() if raw else {}, ensure_ascii=False, indent=2))
+            return 0
+        print(f"{view.job_id}  [{view.status}]  {view.committed}/{view.target} rows")
+        print(f"  source     : {view.source_path or view.source}")
+        print(f"  batch size : {view.batch_size}")
+        print(f"  updated    : {view.updated_at}")
+        print(f"  resumable  : {'yes' if view.can_resume else 'no'}")
+        for table in view.tables:
+            print(f"    {table.label}")
+        for failure in view.failures:
+            print(f"    failed: {failure}")
+        return 0
+    jobs = service.list_jobs()
+    if args.as_json:
+        print(json.dumps([_job_view_dict(view) for view in jobs], ensure_ascii=False, indent=2))
         return 0
     if not jobs:
         print("No SQL import jobs recorded.")
         return 0
-    for job in jobs:
-        rows = sum(table.resume_count for table in job.tables.values())
-        target = sum(table.target_rows for table in job.tables.values())
-        print(f"{job.job_id} [{job.status}] {rows}/{target} rows — {job.source_uri}")
+    for view in jobs:
+        print(f"{view.job_id} [{view.status}] {view.committed}/{view.target} rows — {view.source}")
     return 0
 
 
-def _sqlite_uri(source: str) -> str:
-    """Accept a sqlite:// URI or a bare .db/.sqlite path and return a URI."""
-    if "://" in source:
-        return source
-    from pathlib import Path
+def _job_view_dict(view) -> dict[str, object]:
+    return {
+        "job_id": view.job_id,
+        "status": view.status,
+        "source": view.source,
+        "source_path": view.source_path,
+        "batch_size": view.batch_size,
+        "committed": view.committed,
+        "target": view.target,
+        "updated_at": view.updated_at,
+        "resumable": view.can_resume,
+        "tables": [
+            {
+                "table": table.name,
+                "status": table.status,
+                "committed": table.committed,
+                "target": table.target,
+            }
+            for table in view.tables
+        ],
+        "failures": list(view.failures),
+    }
 
-    path = Path(source).expanduser()
-    if not path.is_absolute():
-        path = path.resolve()
-    return f"sqlite://{path}"
+
+def run_sql_resume(args: argparse.Namespace) -> int:
+    invalid = _validate_sql_args(args)
+    if invalid:
+        print(f"error: {invalid}")
+        return SQL_EXIT_INVALID
+    service = _sql_service(args)
+    try:
+        report = service.resume_job(
+            args.job,
+            progress=_progress_printer(getattr(args, "quiet", False)),
+            should_cancel=lambda: service.should_cancel(args.job),
+            schema_change=(
+                SCHEMA_FULL_REIMPORT if args.schema_change == "full-reimport" else SCHEMA_FAIL
+            ),
+        )
+    except ValueError as error:
+        print(f"error: {error}")
+        return SQL_EXIT_INVALID
+    finally:
+        service.clear_cancel(args.job)
+    return _print_sql_report(
+        report, getattr(args, "as_json", False), raw_job=service.raw_job(args.job)
+    )
+
+
+def run_sql_cancel(args: argparse.Namespace) -> int:
+    service = _sql_service(args)
+    requested = service.request_cancel(args.job)
+    if args.as_json:
+        print(json.dumps({"job_id": args.job, "requested": requested}, indent=2))
+        return 0 if requested else SQL_EXIT_INVALID
+    if not requested:
+        print(f"error: no such SQL import job: {args.job}")
+        return SQL_EXIT_INVALID
+    print(
+        f"Cancel requested for {args.job}. A running import stops at the next "
+        "checkpoint; committed rows are kept."
+    )
+    return 0
+
+
+def run_sql_jobs(args: argparse.Namespace) -> int:
+    service = _sql_service(args)
+    jobs = service.list_jobs()
+    if args.as_json:
+        print(json.dumps([_job_view_dict(view) for view in jobs], ensure_ascii=False, indent=2))
+        return 0
+    if not jobs:
+        print("No SQL import jobs recorded.")
+        return 0
+    for view in jobs:
+        print(f"{view.job_id} [{view.status}] {view.committed}/{view.target} rows — {view.source}")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -478,8 +879,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_delete(args)
     if args.command == "jobs":
         return run_jobs(args)
+    if args.command == "sql-drivers":
+        return run_sql_drivers(args)
+    if args.command == "sql-inspect":
+        return run_sql_inspect(args)
+    if args.command == "sql-preview":
+        return run_sql_preview(args)
     if args.command == "sql-import":
         return run_sql_import(args)
+    if args.command == "sql-status":
+        return run_sql_status(args)
+    if args.command == "sql-resume":
+        return run_sql_resume(args)
+    if args.command == "sql-cancel":
+        return run_sql_cancel(args)
     if args.command == "sql-jobs":
         return run_sql_jobs(args)
     return 1
