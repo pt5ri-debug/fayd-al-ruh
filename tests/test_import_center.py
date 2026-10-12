@@ -455,3 +455,58 @@ def test_cli_import_center_formats_and_folder(tmp_path: Path, capsys) -> None:
     out = capsys.readouterr().out
     assert code == 0
     assert "1 succeeded" in out
+
+
+def test_cli_import_center_interactive_imports_a_path(tmp_path: Path, capsys) -> None:
+    # The numbered menu runs this with no path and no terminal, which must never
+    # be a silent no-op; with a path it imports for real.
+    from cli import import_center as cli_ic
+
+    folder = _docs(tmp_path)
+    (folder / "one.txt").write_text("Interactive import.\n", encoding="utf-8")
+
+    code = cli_ic.main(["--store-dir", str(tmp_path / "kb"), "interactive", str(folder)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Knowledge Import Center" in out
+    assert "1 succeeded" in out
+
+
+def test_cli_import_center_no_args_gives_guidance_when_headless(capsys) -> None:
+    from cli import import_center as cli_ic
+
+    # No subcommand and no path: in a non-tty it must explain how to pass a path
+    # rather than quietly printing only the formats.
+    code = cli_ic.main([])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "import-center files" in out or "import-center folder" in out
+
+
+def test_menu_import_center_entry_actually_imports(tmp_path: Path, monkeypatch, capsys) -> None:
+    # Regression: item 10 must not merely print the format list. Drive the menu
+    # choice and assert it entered the Import Center (not just `formats`).
+    import io
+
+    from cli import menu
+    from cli.menu import run_import_center
+
+    title, _action, argv = menu.visible_menu()[9]  # 1-based item 10
+    assert title == "Import files and folders (Knowledge Import Center)"
+    assert argv == ("interactive",)
+
+    # A deterministic non-tty stdin, so the entry shows the Import Center header
+    # and a way forward rather than only the format list, and never blocks.
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    code = menu.run_choice("10")
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Knowledge Import Center" in out
+
+    # And with a real path it imports.
+    folder = _docs(tmp_path)
+    (folder / "menu.txt").write_text("Menu-driven import.\n", encoding="utf-8")
+    code = run_import_center(("--store-dir", str(tmp_path / "kb"), "interactive", str(folder)))
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "1 succeeded" in out

@@ -1682,6 +1682,11 @@ class FaydGUI:
     def _on_action(self, action: GuiAction) -> None:
         if self._busy:
             return
+        # The Import Center has a real window, so the sidebar opens it instead of
+        # running the headless prompt (which has no terminal to read from here).
+        if action.key == "import-center":
+            self._open_import_center()
+            return
         argv = action.argv
         if action.needs_input:
             question = self._prompt_for_question(action.label)

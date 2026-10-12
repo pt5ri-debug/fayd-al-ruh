@@ -1080,6 +1080,7 @@ folders — TXT, Markdown, CSV/TSV, JSON/JSONL, PDF, and Word — the window's *
 control opens the **Knowledge Import Center**, and the CLI offers the same engine:
 
 ```bash
+python -m cli import-center                            # prompt for a file or folder
 python -m cli import-center files report.pdf notes.txt data.csv
 python -m cli import-center folder ./papers            # recursive, bounded batches
 python -m cli import-center folder ./papers --job papers   # resumable
@@ -1087,6 +1088,11 @@ python -m cli import-center resume papers              # continue an interrupted
 python -m cli import-center jobs                       # list jobs
 python -m cli import-center formats                    # supported / unsupported formats
 ```
+
+The portable menu's **10) Import files and folders (Knowledge Import Center)**
+entry runs the same interactive prompt, so it imports a path you type instead of
+only listing the formats; the GUI sidebar's **Import files and folders** action
+opens the window page instead.
 
 The window page (**Upload files** / **Import from a local folder** / **Import
 jobs**) and the CLI drive the *same* engine, `gui/import_center.py`

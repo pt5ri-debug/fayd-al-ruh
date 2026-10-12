@@ -290,9 +290,11 @@ Arabic is kept as secondary aliases where useful.
   `SUPPORTED_SUFFIXES` / `UNSUPPORTED_SUFFIXES` / `picker_filetypes()` are the one
   place the accepted formats are declared. It reuses `core.document_reader` and
   `core.knowledge_base` rather than reimplementing extraction. Reachable headless
-  as `python -m cli import-center files|folder|resume|jobs|stats|formats`
-  (`cli/import_center.py`), mirrored as GUI action `import-center` and opened
-  from the composer's ＋ menu.
+  as `python -m cli import-center [interactive]|files|folder|resume|jobs|stats|formats`
+  (`cli/import_center.py`); with no subcommand it prompts for a file or folder
+  (the menu's item 10 runs `interactive`, so it imports a typed path rather than
+  only listing formats). Mirrored as GUI action `import-center` — which the
+  window routes to the dialog below — and opened from the composer's ＋ menu.
 - `gui/import_dialog.py` — the Import Center **dialog** (Tk, imported lazily so
   `cli/` never imports Tk): Upload files / Import from a local folder / Import
   jobs, with a background worker thread, per-file results, retry, and a progress
