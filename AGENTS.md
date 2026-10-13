@@ -270,8 +270,10 @@ Arabic is kept as secondary aliases where useful.
   fallback; the internet connector is registered only with `allow_web=True`);
   `ingest.connectors.{files,sql,web}` stream TXT/Markdown/CSV/JSON/JSONL and
   digital PDFs (**Stage 2A adds `.pdf`**) and Word `.docx`/`.docm` (**Stage 2B**
-  adds Word); a scanned PDF is read with the opt-in OCR path
-  (**Stage 3**, `allow_ocr`/`--ocr`, via `core.pdf_ocr`), read-only
+  adds Word); a scanned PDF is read by the default auto-OCR path
+  (**Stage 3**, `allow_ocr`, via `core.pdf_ocr`), which turns on
+  automatically when the optional `[ocr]` extra is installed and can be forced
+  (`--ocr`) or refused (`--no-ocr`); read-only
   SQLite/driver DBs, and
   (denied by default, host-allow-listed or explicitly authorized) one HTTP(S)
   page. `ingest.pipeline.IngestionPipeline`
@@ -300,8 +302,10 @@ Arabic is kept as secondary aliases where useful.
   (`IngestionPipeline(retries=...)`) with the report counters rolled back so a
   retry never double-counts. A Word `.docx`/`.docm` (Stage 2B) is read through
   `core/docx_extract` and grouped into records along its own structure (a heading
-  opens a record). Scanned PDF pages (**Stage 3**) are OCR'd only when
-  `allow_ocr` is set (`--ocr`), through `core.pdf_ocr`: only the pages with no
+  opens a record). Scanned PDF pages (**Stage 3**) are OCR'd by default when
+  the optional `[ocr]` extra is present (`allow_ocr` defaults to automatic;
+  `--ocr` forces it on, `--no-ocr` refuses it), through `core.pdf_ocr`: only the
+  pages with no
   text layer are sent to OCR (a page with real text is never replaced), the work
   is bounded by `ocr_dpi`/`ocr_batch_size`/`ocr_max_pages`/`ocr_time_budget`
   limits, each record keeps its page number and an `ocr` flag, and a missing
@@ -328,22 +332,26 @@ Arabic is kept as secondary aliases where useful.
   as `python -m cli import-center [interactive]|files|folder|resume|jobs|stats|formats`
   (`cli/import_center.py`); with no subcommand it prompts for a file or folder
   (the menu's item 10 runs `interactive`, so it imports a typed path rather than
-  only listing formats). Scanned PDFs are reachable end to end: `--ocr` /
-  `--ocr-languages` / `--ocr-dpi` / `--ocr-max-pages` select the opt-in OCR path,
-  and any run that skipped a scanned PDF offers to retry it with OCR on a
+  only listing formats). Scanned PDFs are reachable end to end: scanned pages are
+  OCR'd automatically when the extra is present, `--ocr` / `--no-ocr` force or
+  refuse it, and `--ocr-languages` / `--ocr-dpi` / `--ocr-max-pages` tune it; any
+  run that skipped a scanned PDF offers to retry it with OCR on a
   terminal. Mirrored as GUI action `import-center` — which the
   window routes to the dialog below — and opened from the composer's ＋ menu.
 - `gui/import_dialog.py` — the Import Center **dialog** (Tk, imported lazily so
   `cli/` never imports Tk): Upload files / Import from a local folder / Import
   jobs, with a background worker thread, per-file results, retry, and a progress
-  line. A **Read scanned PDFs (OCR)** checkbox (with a language field) turns on
-  the OCR path for both import buttons, and a **Retry with OCR** button appears
+  line. A **Read scanned PDFs (OCR)** checkbox (with a *force low-text pages*
+  toggle and a language field) controls the OCR path for both import buttons:
+  checked means automatic (scanned pages only), unchecked means never, and the
+  force toggle OCRs every low-text page. A **Retry with OCR** button appears
   when a run failed on scanned PDFs. An **Install OCR support…** button appears
   when the OCR packages are missing, running the bundled requirements file so a
   desktop user never has to open a terminal. A **3. Import a SQL database**
   section opens the SQL screen below. `core/document_reader.py` reads
   TXT/Markdown (streamed above 4 MB), CSV/TSV, JSON/JSONL, digital PDF, and DOCX;
-  scanned PDFs go through the opt-in OCR path in `core/pdf_ocr.py`. Every reader
+  scanned PDFs go through the default auto-OCR path in `core/pdf_ocr.py`, which
+  turns itself on when the optional `[ocr]` extra is installed. Every reader
   only parses bytes — no macro or embedded instruction is ever executed.
 - `gui/sql_import.py` — the **SQL Database Import** engine (Tk-free): the
   user-facing front end over the resumable SQL ingestion service the CLI's

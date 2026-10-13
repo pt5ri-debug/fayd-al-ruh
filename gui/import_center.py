@@ -199,7 +199,7 @@ class KnowledgeImporter:
         recursive: bool = True,
         normalize: bool = True,
         fold_arabic: bool = False,
-        allow_ocr: bool = False,
+        allow_ocr: bool | None = None,
         ocr_languages: str = "eng",
         ocr_dpi: int | None = None,
         ocr_max_pages: int | None = None,
@@ -273,10 +273,13 @@ class KnowledgeImporter:
         options = {
             "normalize": "true" if self.normalize else "false",
             "fold_arabic": "true" if self.fold_arabic else "false",
-            "allow_ocr": "true" if use_ocr else "false",
             "ocr_languages": ocr_languages or self.ocr_languages,
             "recursive": "true" if (self.recursive if recursive is None else recursive) else "false",
         }
+        # ``None`` leaves the choice to the reader, which OCRs a scanned page when
+        # the extra is installed; True/False is an explicit opt-in/out.
+        if use_ocr is not None:
+            options["allow_ocr"] = "true" if use_ocr else "false"
         dpi = self.ocr_dpi if ocr_dpi is None else ocr_dpi
         max_pages = self.ocr_max_pages if ocr_max_pages is None else ocr_max_pages
         if dpi:
@@ -305,7 +308,7 @@ class KnowledgeImporter:
         report = ImportReport()
         started = time.monotonic()
         options = self._options(ocr=ocr, ocr_languages=ocr_languages)
-        ocr_enabled = options["allow_ocr"] == "true"
+        ocr_enabled = options.get("allow_ocr", "true") == "true"
         for raw in paths:
             path = Path(raw).expanduser()
             outcome = self._import_one(
@@ -361,7 +364,7 @@ class KnowledgeImporter:
                 job.position = 0
             report.job_id = job_id
         connector = self._registry.get("files") or self._registry.resolve(spec)
-        ocr_enabled = spec.option("allow_ocr", "false") in {"true", "1", "yes", "on"}
+        ocr_enabled = spec.option("allow_ocr", "true") in {"true", "1", "yes", "on"}
         collected: list[ItemOutcome] = []
         pipeline = self._pipeline(
             progress=progress, job=job, jobs=jobs, on_item=collected.append
@@ -506,10 +509,14 @@ def _ocr_hint(message: str, *, ocr_enabled: bool) -> str:
     from core.pdf_ocr import ocr_available
 
     if ocr_enabled:
+        if not ocr_available():
+            return message + (
+                " OCR is not installed; install the [ocr] extra and the Tesseract engine "
+                "to read scanned PDFs."
+            )
         return message + (
-            " OCR is on but found no readable text"
-            + ("" if ocr_available() else "; install the [ocr] extra and Tesseract")
-            + "."
+            " OCR is enabled but found no readable text; the page may be blank or too "
+            "low-quality to recognise."
         )
     return message + (
         " Enable OCR to read it: import this PDF again with the “Read scanned PDFs (OCR)” "

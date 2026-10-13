@@ -223,6 +223,27 @@ def _read_text_streamed(path: Path, *, encoding: str | None = None) -> DocumentT
     return _assemble(paragraphs, path, "text", truncated=truncated, encoding=chosen)
 
 
+def _auto_ocr_config() -> "OcrConfig | None":
+    """An OCR config for scanned pages, or ``None`` when OCR is not installed.
+
+    Returns ``None`` (importing nothing heavy) when the optional ``[ocr]`` extra
+    or the Tesseract engine is absent, so the base install keeps its
+    dependency-free behaviour and a scanned PDF is reported rather than mis-read.
+    When the extra *is* present, this is what makes scanned pages readable by
+    default instead of requiring an opt-in flag.
+
+    ``min_chars_per_page=1`` means only a page with **no** text layer is a
+    candidate, so a digital page that merely carries short text (a title, a
+    number) is left to native extraction; the explicit ``--ocr`` path keeps the
+    larger default threshold for genuinely low-text pages.
+    """
+    from core.pdf_ocr import OcrConfig, ocr_available
+
+    if not ocr_available():
+        return None
+    return OcrConfig(enabled=True, min_chars_per_page=1)
+
+
 def _read_pdf(
     path: Path,
     *,
@@ -232,23 +253,30 @@ def _read_pdf(
     ocr_engine: "PageOcrEngine | None" = None,
     password: str | None = None,
 ) -> DocumentText:
-    """Extract text from a PDF, optionally OCR-ing only the low-text pages.
+    """Extract text from a PDF, OCR-ing the low-text (scanned) pages.
 
-    Digital extraction is delegated to :mod:`core.pdf_extract`. Two OCR paths
-    exist, both off unless asked for:
-
-    * the modern per-page path (Stage 3, ``core.pdf_ocr``) when ``ocr_config`` is
-      enabled or an ``ocr_engine`` is supplied -- it OCRs only the pages whose
-      native text is too thin and keeps ``ocr_pages`` provenance; and
-    * the simple whole-file ``ocr`` callable (kept for compatibility).
+    Digital extraction is delegated to :mod:`core.pdf_extract`. The per-page OCR
+    path (Stage 3, ``core.pdf_ocr``) runs when ``ocr_config`` is enabled, an
+    ``ocr_engine`` is supplied, or -- with ``allow_ocr`` (the default) -- the
+    optional OCR extra is installed. It OCRs only the pages whose native text is
+    too thin and keeps ``ocr_pages`` provenance. A whole-file ``ocr`` callable is
+    still accepted for compatibility and takes precedence when given.
 
     A page that already carries real text is never sent to OCR, so valid extracted
-    text is never replaced with a lower-quality guess. OCR reads pixels; it never
+    text is never replaced with a lower-quality guess. Because low-text pages are
+    OCR'd rather than skipped, a *mixed* PDF (some digital pages, some scanned)
+    no longer silently drops its scanned pages. OCR reads pixels; it never
     executes the document.
     """
     from core.pdf_ocr import OcrConfig, extract_pdf_pages
 
-    wants_stage3_ocr = ocr_engine is not None or bool(ocr_config and ocr_config.enabled)
+    wants_stage3_ocr = bool(ocr_config and ocr_config.enabled) or ocr_engine is not None
+    if ocr_config is None and allow_ocr and ocr is None:
+        # Read scanned pages by default when the optional OCR extra is present. This
+        # is the conservative config (only pages with no text layer), so it is also
+        # what an injected engine gets when the caller supplied no explicit config.
+        ocr_config = _auto_ocr_config()
+        wants_stage3_ocr = wants_stage3_ocr or ocr_config is not None
     if wants_stage3_ocr:
         config = ocr_config or OcrConfig(enabled=True)
         try:
@@ -402,7 +430,7 @@ def read_document(
     normalize: bool = False,
     fold_arabic: bool = False,
     ocr: OCREngine | None = None,
-    allow_ocr: bool = False,
+    allow_ocr: bool = True,
     ocr_config: "OcrConfig | None" = None,
     ocr_engine: "PageOcrEngine | None" = None,
     encoding: str | None = None,
@@ -423,10 +451,14 @@ def read_document(
     forms). Normalization is off by default because it changes the text and hence
     its content hash.
 
-    OCR (Stage 3) is optional and **off by default**. Pass an enabled
-    :class:`core.pdf_ocr.OcrConfig` (or a ready ``ocr_engine``) to OCR only the
-    pages that carry no text layer; a page with real text is never replaced. The
-    older ``ocr`` whole-file callable is still accepted for compatibility.
+    Scanned PDFs (pages with no text layer) are read automatically when the
+    optional OCR extra is installed: ``allow_ocr`` defaults to ``True`` and the
+    reader enables the Stage 3 per-page OCR path on its own, so a mixed PDF's
+    scanned pages are recovered instead of silently dropped. Pass ``allow_ocr=False``
+    to refuse OCR (a scanned page is then reported, never mis-read), an enabled
+    :class:`core.pdf_ocr.OcrConfig` (or a ready ``ocr_engine``) to control it
+    explicitly, or a whole-file ``ocr`` callable for compatibility. A page with
+    real text is never sent to OCR.
     """
     source = Path(path).expanduser()
     if not source.exists():

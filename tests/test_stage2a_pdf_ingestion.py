@@ -351,10 +351,10 @@ def test_connector_flags_a_rtl_page(tmp_path):
     assert records[1].metadata["rtl_hint"] is True
 
 
-def test_connector_refuses_scanned_pdf_with_a_clear_error(tmp_path):
+def test_connector_refuses_scanned_pdf_when_ocr_is_disabled(tmp_path):
     path = write_pdf(tmp_path / "scan.pdf", [image_page()])
     with pytest.raises(ConnectorError) as error:
-        list(FileConnector().stream(SourceSpec(str(path))))
+        list(FileConnector().stream(SourceSpec(str(path), options={"allow_ocr": "false"})))
     assert "ocr" in str(error.value).lower()
 
 

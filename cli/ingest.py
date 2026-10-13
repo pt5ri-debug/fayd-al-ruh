@@ -122,7 +122,15 @@ def _build_parser() -> argparse.ArgumentParser:
     add.add_argument(
         "--ocr",
         action="store_true",
-        help="Enable OCR for scanned PDF pages (needs the [ocr] extra + Tesseract).",
+        help=(
+            "Force OCR for scanned PDF pages. Scanned pages are OCR'd automatically "
+            "when the [ocr] extra + Tesseract are installed; this forces it on."
+        ),
+    )
+    add.add_argument(
+        "--no-ocr",
+        action="store_true",
+        help="Never OCR; read only the PDF's text layer.",
     )
     add.add_argument(
         "--ocr-languages",
@@ -316,6 +324,8 @@ def run_add(args: argparse.Namespace) -> int:
         options.setdefault("pdf_password", args.pdf_password)
     if args.ocr:
         options.setdefault("allow_ocr", "true")
+    if args.no_ocr:
+        options.setdefault("allow_ocr", "false")
     if args.ocr_languages:
         options.setdefault("ocr_languages", args.ocr_languages)
     if args.ocr_dpi is not None:

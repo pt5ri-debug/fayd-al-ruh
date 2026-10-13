@@ -536,10 +536,9 @@ def _scanned_pdf(tmp_path: Path, name: str = "scan.pdf") -> Path:
     return pdf_fixtures.write_pdf(tmp_path / name, [pdf_fixtures.image_page()])
 
 
-def test_scanned_pdf_without_ocr_names_the_next_step(tmp_path: Path) -> None:
-    # The old message told a GUI user to "re-run with OCR enabled" without saying
-    # how; the failure must now name a real, reachable action.
-    report = _importer(tmp_path).import_files([_scanned_pdf(tmp_path)])
+def test_scanned_pdf_with_ocr_disabled_names_the_next_step(tmp_path: Path) -> None:
+    # With OCR turned off, the failure must name a real, reachable action.
+    report = _importer(tmp_path).import_files([_scanned_pdf(tmp_path)], ocr=False)
 
     assert report.failed == 1
     message = report.failures[0].message
@@ -564,7 +563,7 @@ def test_retry_failed_can_enable_ocr_for_a_scanned_pdf(tmp_path: Path) -> None:
     engine = _FakeOcrEngine(text="Permeability 250 mD")
     importer = _importer(tmp_path, ocr_engine=engine)
 
-    first = importer.import_files([_scanned_pdf(tmp_path)])
+    first = importer.import_files([_scanned_pdf(tmp_path)], ocr=False)
     assert first.failed == 1 and engine.seen == []
 
     retry = importer.retry_failed(first.failures, ocr=True)
@@ -623,7 +622,7 @@ def test_cli_ocr_flags_reach_the_importer() -> None:
 def test_cli_ocr_retry_offer_is_skipped_when_ocr_is_on(tmp_path: Path) -> None:
     from cli import import_center as cli_ic
 
-    report = _importer(tmp_path).import_files([_scanned_pdf(tmp_path)])
+    report = _importer(tmp_path).import_files([_scanned_pdf(tmp_path)], ocr=False)
     args = cli_ic._build_parser().parse_args(["--ocr", "files", str(tmp_path)])
 
     # Already asking for OCR: no second offer, and never a prompt.
@@ -635,7 +634,7 @@ def test_cli_ocr_retry_offer_declines_without_a_terminal(tmp_path: Path, monkeyp
 
     from cli import import_center as cli_ic
 
-    report = _importer(tmp_path).import_files([_scanned_pdf(tmp_path)])
+    report = _importer(tmp_path).import_files([_scanned_pdf(tmp_path)], ocr=False)
     args = cli_ic._build_parser().parse_args(["files", str(tmp_path)])
     monkeypatch.setattr("sys.stdin", io.StringIO(""))  # not a tty
 
@@ -647,7 +646,7 @@ def test_cli_ocr_retry_offer_retries_when_accepted(tmp_path: Path, monkeypatch, 
 
     scanned = _scanned_pdf(tmp_path)
     importer = _importer(tmp_path)
-    report = importer.import_files([scanned])
+    report = importer.import_files([scanned], ocr=False)
     assert report.failed == 1
 
     args = cli_ic._build_parser().parse_args(["files", str(scanned)])

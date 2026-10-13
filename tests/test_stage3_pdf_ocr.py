@@ -369,10 +369,10 @@ def test_reader_does_not_ocr_a_digital_pdf(tmp_path):
     assert engine.calls == []
 
 
-def test_reader_without_ocr_reports_a_scan_actionably(tmp_path):
+def test_reader_reports_a_scan_actionably_when_ocr_is_disabled(tmp_path):
     path = write_pdf(tmp_path / "scan.pdf", [image_page()])
     with pytest.raises(DocumentReadError) as error:
-        read_document(path)
+        read_document(path, allow_ocr=False)
     assert "scanned" in str(error.value).lower()
 
 
@@ -397,10 +397,10 @@ def test_reader_mixed_pdf_keeps_native_pages_and_marks_ocr(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
-def test_connector_without_ocr_refuses_a_scan(tmp_path):
+def test_connector_refuses_a_scan_when_ocr_is_disabled(tmp_path):
     path = write_pdf(tmp_path / "scan.pdf", [image_page()])
     with pytest.raises(ConnectorError) as error:
-        list(FileConnector().stream(SourceSpec(str(path))))
+        list(FileConnector().stream(SourceSpec(str(path), options={"allow_ocr": "false"})))
     assert "ocr" in str(error.value).lower()
 
 
@@ -427,6 +427,25 @@ def test_connector_with_ocr_emits_labelled_records(tmp_path):
     assert ocr_record.title.endswith("(p. 2)")
 
 
+def test_connector_auto_ocrs_a_scan_by_default_when_available(tmp_path, monkeypatch):
+    """A caller that never mentions OCR still gets a scanned PDF read."""
+    import ingest.connectors.files as files_module
+
+    monkeypatch.setattr(files_module, "ocr_available", lambda: True)
+    path = write_pdf(tmp_path / "scan.pdf", [image_page()])
+
+    records = list(FileConnector(ocr_engine=FakeOcrEngine()).stream(SourceSpec(str(path))))
+
+    assert [record.metadata["kind"] for record in records] == ["pdf-ocr"]
+    assert "OCR text for page 1" in records[0].text
+
+
+def test_connector_explicit_no_ocr_still_refuses_a_scan(tmp_path):
+    path = write_pdf(tmp_path / "scan.pdf", [image_page()])
+    with pytest.raises(ConnectorError):
+        list(FileConnector().stream(SourceSpec(str(path), options={"allow_ocr": "false"})))
+
+
 # --------------------------------------------------------------------------- #
 # CLI: opt-in flag and honest failure
 # --------------------------------------------------------------------------- #
@@ -438,9 +457,9 @@ def _run(argv):
     return ingest_cli.main(argv)
 
 
-def test_cli_scan_without_ocr_reports_actionably(tmp_path, capsys):
+def test_cli_scan_with_no_ocr_reports_actionably(tmp_path, capsys):
     path = write_pdf(tmp_path / "scan.pdf", [image_page()])
-    code = _run(["add", str(path), "--store-dir", str(tmp_path / "kb"), "--quiet"])
+    code = _run(["add", str(path), "--store-dir", str(tmp_path / "kb"), "--quiet", "--no-ocr"])
     assert code == 1
     assert "ocr" in capsys.readouterr().out.lower()
 
@@ -486,6 +505,20 @@ def test_real_tesseract_recovers_english_from_a_scan(tmp_path):
     assert document.scanned is True
     assert document.ocr_pages == (1,)
     assert "permeability" in document.text.lower()
+
+
+@pytest.mark.skipif(not ocr_available(), reason="the [ocr] extra + Tesseract are not installed")
+def test_real_tesseract_is_used_without_asking(tmp_path):
+    """The default reader path reads a scan: no flag, no explicit config."""
+    path = tmp_path / "scan.pdf"
+    _image_only_pdf(path, "Porosity is the void fraction of the rock")
+
+    document = read_document(path)
+
+    assert document.kind == "pdf-ocr"
+    assert document.scanned is True
+    assert document.ocr_pages == (1,)
+    assert "porosity" in document.text.lower()
 
 
 @pytest.mark.skipif(not ocr_available(), reason="the [ocr] extra + Tesseract are not installed")

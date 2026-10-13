@@ -79,7 +79,8 @@ class ImportCenterDialog:
         self._last_report: ImportReport | None = None
         self._folder_var = tk.StringVar()
         self._recursive_var = tk.BooleanVar(value=True)
-        self._ocr_var = tk.BooleanVar(value=False)
+        self._ocr_var = tk.BooleanVar(value=True)
+        self._ocr_force_var = tk.BooleanVar(value=False)
         self._ocr_languages_var = tk.StringVar(value="eng")
 
         self.window = tk.Toplevel(parent)
@@ -186,6 +187,13 @@ class ImportCenterDialog:
             font=(self.font, 9), highlightthickness=0, borderwidth=0, anchor="w",
         )
         self._ocr_check.pack(side="left")
+        self._ocr_force_check = tk.Checkbutton(
+            row3, text="force low-text pages", variable=self._ocr_force_var,
+            bg=theme.surface, fg=theme.text_secondary, selectcolor=theme.surface_raised,
+            activebackground=theme.surface, activeforeground=theme.contrast,
+            font=(self.font, 8), highlightthickness=0, borderwidth=0, anchor="w",
+        )
+        self._ocr_force_check.pack(side="left", padx=(8, 0))
         tk.Label(
             row3, text="languages", bg=theme.surface, fg=theme.text_secondary,
             font=(self.font, 9),
@@ -268,7 +276,7 @@ class ImportCenterDialog:
             return
         self._start("Importing %d file(s)…" % len(paths),
                     lambda progress: self.service.import_files(
-                        paths, ocr=self._ocr_var.get(), progress=progress))
+                        paths, ocr=self._ocr_choice(), progress=progress))
 
     def _on_choose_folder(self) -> None:
         folder = filedialog.askdirectory(
@@ -291,10 +299,21 @@ class ImportCenterDialog:
         self._start(
             f"Importing {folder}…",
             lambda progress: self.service.import_folder(
-                folder, recursive=recursive, ocr=self._ocr_var.get(),
+                folder, recursive=recursive, ocr=self._ocr_choice(),
                 ocr_languages=self._ocr_languages(), job_id=job_id, progress=progress
             ),
         )
+
+    def _ocr_choice(self) -> bool | None:
+        """The tri-state OCR choice from the two checkboxes.
+
+        ``Read scanned PDFs (OCR)`` unchecked means never OCR; checked means
+        automatic (only pages with no text layer); with ``force low-text pages``
+        it means force OCR on every low-text page.
+        """
+        if not self._ocr_var.get():
+            return False
+        return True if self._ocr_force_var.get() else None
 
     def _ocr_languages(self) -> str:
         """The language codes typed in the OCR row, or the engine default."""
@@ -306,7 +325,7 @@ class ImportCenterDialog:
         failures = self._last_report.failures
         if not failures:
             return
-        use_ocr = self._ocr_var.get() if ocr is None else ocr
+        use_ocr = self._ocr_choice() if ocr is None else ocr
         self._start(
             f"Retrying {len(failures)} file(s)…",
             lambda progress: self.service.retry_failed(

@@ -1144,8 +1144,9 @@ control opens the **Knowledge Import Center**, and the CLI offers the same engin
 
 ```bash
 python -m cli import-center                            # prompt for a file or folder
-python -m cli import-center files report.pdf notes.txt data.csv
-python -m cli import-center --ocr files scanned.pdf    # OCR a scanned PDF
+python -m cli import-center files report.pdf notes.txt data.csv  # scanned PDFs OCR'd automatically
+python -m cli import-center --ocr files scanned.pdf    # force OCR for low-text pages
+python -m cli import-center --no-ocr files digital.pdf # never OCR; text layer only
 python -m cli import-center folder ./papers            # recursive, bounded batches
 python -m cli import-center folder ./papers --job papers   # resumable
 python -m cli import-center resume papers              # continue an interrupted job
@@ -1169,14 +1170,17 @@ second ingestion path exists to drift.
   on your machine, so a folder the picker returns is a real local path the
   process can read — there is no server to upload to and no path is ever built
   from free text.
-- **Scanned PDFs are reachable, not a dead end.** A PDF with no text layer fails
-  with a message that names the real next step, and OCR is offered where the user
-  already is: the Import Center's **Read scanned PDFs (OCR)** checkbox (with a
-  language field, e.g. `ara+eng`), a **Retry with OCR** button on the failure, an
-  **Attach a scanned PDF (OCR)…** entry in the composer's **＋** menu, and
-  `--ocr` / `--ocr-languages` on the CLI (an interactive run also offers to retry
-  the scanned files it skipped). It needs the optional `fayd-al-ruh[ocr]` extra
-  plus Tesseract; a digital PDF is never OCR'd.
+- **Scanned PDFs are read by default, not a dead end.** A PDF with no text layer
+  is OCR'd automatically once the optional `fayd-al-ruh[ocr]` extra plus Tesseract
+  are installed — the scanned pages of a *mixed* PDF are recovered rather than
+  silently dropped, and a digital page that merely carries short text is never
+  OCR'd. OCR is also reachable where the user is when the extra is missing: the
+  Import Center's **Read scanned PDFs (OCR)** checkbox (with a *force low-text
+  pages* toggle and a language field, e.g. `ara+eng`), a **Retry with OCR** button
+  on a failure, an **Attach a scanned PDF (OCR)…** entry in the composer's **＋**
+  menu, and `--ocr` / `--no-ocr` / `--ocr-languages` on the CLI (an interactive
+  run also offers to retry the scanned files it skipped). `--no-ocr` refuses OCR
+  entirely; without the extra the file is reported, never mis-read.
 - **Bounded memory.** Nothing reads a whole dataset by default: CSV/JSONL are
   streamed row by row, a large TXT is read line by line under a hard cap, a PDF
   page by page, a DOCX block by block, and a folder is walked one directory at a
@@ -1204,9 +1208,11 @@ second ingestion path exists to drift.
 
 > **PDF and OCR.** A *digital* PDF needs the optional `fayd-al-ruh[pdf]` extra
 > (`pypdf`); without it, the file is reported, not mis-read. A scanned PDF with no
-> text layer needs the separate `fayd-al-ruh[ocr]` extra plus Tesseract, enabled
-> with `--ocr` (and `--ocr-languages ara+eng` for Arabic). OCR is a clearly
-> separated optional path; a digital PDF is never OCR'd.
+> text layer is OCR'd **automatically** once the separate `fayd-al-ruh[ocr]` extra
+> plus Tesseract are installed (force it with `--ocr`, refuse it with `--no-ocr`,
+> and set `--ocr-languages ara+eng` for Arabic). Without the extra the file is
+> reported honestly. OCR is a clearly separated optional path; a digital PDF is
+> never OCR'd.
 >
 > The project is not published on PyPI, so `pip install fayd-al-ruh[ocr]` cannot
 > work from a source checkout. Install the extras from the bundled requirements

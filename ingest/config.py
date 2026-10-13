@@ -75,12 +75,11 @@ class IngestConfig:
     turn it on only when matching the retriever's token normalization matters
     more than keeping the original forms.
     """
-    allow_ocr: bool = False
-    """Enable OCR for scanned PDF pages (Stage 3). Off by default.
-
-    OCR is a separate optional path: it needs the ``[ocr]`` extra and the
-    Tesseract engine, and runs only when a caller turns it on here (or passes
-    ``--ocr``). A digital PDF is never OCR'd.
+    allow_ocr: bool | None = None
+    """Whether to OCR scanned PDF pages (Stage 3). ``None`` (the default) means
+    automatic: a page with no text layer is OCR'd when the optional ``[ocr]``
+    extra and the Tesseract engine are installed. ``True`` forces OCR on for
+    low-text pages, ``False`` refuses it. A digital PDF is never OCR'd.
     """
     ocr_languages: str = "eng"
     """Tesseract language codes for OCR, e.g. ``"ara+eng"`` for Arabic + English."""
@@ -146,9 +145,10 @@ class IngestConfig:
 def _coerce(value: object, _type: object) -> object:
     """Coerce a stored/env string back to the field's declared type."""
     # ``from __future__ import annotations`` makes ``field.type`` a string, so we
-    # compare as text rather than relying on the resolved type object.
+    # compare as text rather than relying on the resolved type object. A union
+    # such as ``bool | None`` still reads as a boolean for a stored/env value.
     name = _type if isinstance(_type, str) else getattr(_type, "__name__", "")
-    if name.endswith("bool"):
+    if "bool" in name:
         return _as_bool(value)
     if name.endswith("int"):
         return int(str(value).strip())
