@@ -87,10 +87,14 @@ def _chunks(document: DocumentText) -> list[str]:
 def build_attachment(path: str | Path, *, ocr: bool = False) -> Attachment:
     """Read ``path`` and turn it into an :class:`Attachment` of citable documents.
 
-    ``ocr=True`` reads a scanned PDF (no text layer) with OCR; it needs the
-    optional ``[ocr]`` extra and the Tesseract engine. Raises
-    :class:`~core.document_reader.DocumentReadError` when the file cannot be read,
-    so the caller can show the message verbatim.
+    A scanned PDF (no text layer) is read automatically when the optional ``[ocr]``
+    extra and Tesseract are installed: the reader enables OCR on its own, so a
+    mixed PDF's scanned pages are recovered rather than dropped. ``ocr=True``
+    forces the OCR path on even before the availability check, and
+    ``ocr=False`` still lets the reader auto-OCR when it can (pass the reader an
+    explicit ``allow_ocr=False`` through :func:`core.document_reader.read_document`
+    to refuse OCR entirely). Raises :class:`~core.document_reader.DocumentReadError`
+    when the file cannot be read, so the caller can show the message verbatim.
     """
     source = Path(path).expanduser()
     ocr_config = None
@@ -98,7 +102,7 @@ def build_attachment(path: str | Path, *, ocr: bool = False) -> Attachment:
         from core.pdf_ocr import OcrConfig
 
         ocr_config = OcrConfig(enabled=True)
-    document = read_document(source, ocr_config=ocr_config, allow_ocr=ocr)
+    document = read_document(source, ocr_config=ocr_config, allow_ocr=True)
     slug = _slug(source.stem)
     chunks = _chunks(document)
     multiple = len(chunks) > 1

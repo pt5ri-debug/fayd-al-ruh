@@ -18,6 +18,8 @@ import pytest
 from core import document_reader
 from core.document_reader import DocumentReadError, _default_ocr_engine, read_document
 
+from . import pdf_fixtures
+
 
 class _EmptyPage:
     def extract_text(self) -> str:
@@ -123,6 +125,82 @@ def test_text_pdf_does_not_call_ocr(tmp_path, monkeypatch):
 
     assert document.kind == "pdf"
     assert calls == []
+
+
+def test_auto_ocr_is_none_when_the_extra_is_absent(monkeypatch):
+    import core.pdf_ocr as pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
+    assert document_reader._auto_ocr_config() is None
+
+
+def test_auto_ocr_targets_only_pages_with_no_text_layer(monkeypatch):
+    import core.pdf_ocr as pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: True)
+    config = document_reader._auto_ocr_config()
+
+    assert config is not None and config.enabled is True
+    # A page with any native text (even "Page 1") is left to extraction; only an
+    # image-only page is a candidate.
+    assert config.min_chars_per_page == 1
+
+
+def test_auto_ocr_reads_a_mixed_pdf_without_dropping_the_scanned_page(tmp_path, monkeypatch):
+    """The bug: a mixed PDF silently dropped its scanned pages when OCR was off."""
+    import core.pdf_ocr as pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: True)
+    path = pdf_fixtures.write_pdf(
+        tmp_path / "mixed.pdf",
+        [pdf_fixtures.latin_page("Native digital text about porosity."), pdf_fixtures.image_page()],
+    )
+
+    class _StubEngine:
+        def __init__(self):
+            self.seen: list[int] = []
+
+        def available_languages(self):
+            return ("eng",)
+
+        def recognize_page(self, path, number, *, languages, config):
+            self.seen.append(number)
+            return "Scanned page about water flooding"
+
+    engine = _StubEngine()
+    # Allow the reader to auto-enable OCR, and hand it a ready engine.
+    document = read_document(path, ocr_engine=engine)
+
+    assert engine.seen == [2]  # only the image-only page was OCR'd
+    assert document.ocr_pages == (2,)
+    assert "Native digital text about porosity." in document.text
+    assert "Scanned page about water flooding" in document.text
+
+
+def test_auto_ocr_does_not_ocr_a_short_native_page(tmp_path, monkeypatch):
+    """A digital page with only a page number must not be OCR'd automatically."""
+    import core.pdf_ocr as pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: True)
+    path = pdf_fixtures.write_pdf(tmp_path / "page_number.pdf", [pdf_fixtures.latin_page("Page 1")])
+
+    class _StubEngine:
+        def __init__(self):
+            self.seen: list[int] = []
+
+        def available_languages(self):
+            return ("eng",)
+
+        def recognize_page(self, path, number, *, languages, config):
+            self.seen.append(number)
+            return "should not run"
+
+    engine = _StubEngine()
+    document = read_document(path, ocr_engine=engine)
+
+    assert engine.seen == []
+    assert document.kind == "pdf"
+    assert document.text.strip() == "Page 1"
 
 
 def test_streaming_and_truncation_flags(tmp_path, monkeypatch):

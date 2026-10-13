@@ -42,7 +42,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ocr",
         action="store_true",
-        help="Read scanned PDFs with OCR (needs the [ocr] extra + Tesseract).",
+        help=(
+            "Force OCR for scanned PDF pages. Scanned pages are OCR'd automatically "
+            "when the [ocr] extra + Tesseract are installed; this forces it on."
+        ),
+    )
+    parser.add_argument(
+        "--no-ocr",
+        action="store_true",
+        help="Never OCR; read only the PDF's text layer.",
     )
     parser.add_argument(
         "--ocr-languages",
@@ -89,12 +97,23 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _ocr_choice(args: argparse.Namespace) -> bool | None:
+    """The tri-state OCR choice: True (--ocr), False (--no-ocr), None (automatic)."""
+    if getattr(args, "ocr", False):
+        return True
+    if getattr(args, "no_ocr", False):
+        return False
+    return None
+
+
 def _importer(args: argparse.Namespace) -> KnowledgeImporter:
+    # ``--ocr`` forces OCR on, ``--no-ocr`` forces it off, and neither leaves the
+    # choice to the reader (which OCRs a scanned page when the extra is present).
     return KnowledgeImporter(
         store_dir=args.store_dir,
         normalize=not args.no_normalize,
         fold_arabic=args.fold_arabic,
-        allow_ocr=args.ocr,
+        allow_ocr=_ocr_choice(args),
         ocr_languages=args.ocr_languages,
         ocr_dpi=args.ocr_dpi,
         ocr_max_pages=args.ocr_max_pages,
@@ -117,7 +136,7 @@ def _print_report(report, as_json: bool) -> int:
 def run_files(args: argparse.Namespace) -> int:
     importer = _importer(args)
     report = importer.import_files(
-        args.paths, ocr=args.ocr, ocr_languages=args.ocr_languages,
+        args.paths, ocr=_ocr_choice(args), ocr_languages=args.ocr_languages,
         progress=lambda m: print(m, flush=True),
     )
     return _finish(args, importer, report)
@@ -132,7 +151,7 @@ def run_folder(args: argparse.Namespace) -> int:
     report = importer.import_folder(
         target,
         recursive=not args.no_recursive,
-        ocr=args.ocr,
+        ocr=_ocr_choice(args),
         ocr_languages=args.ocr_languages,
         job_id=args.job,
         progress=lambda m: print(m, flush=True),
@@ -214,14 +233,14 @@ def run_interactive(args: argparse.Namespace) -> int:
     if path.is_dir():
         report = importer.import_folder(
             path,
-            ocr=args.ocr,
+            ocr=_ocr_choice(args),
             ocr_languages=args.ocr_languages,
             job_id=f"import:{path.name}",
             progress=lambda m: print(m, flush=True),
         )
     else:
         report = importer.import_files(
-            [path], ocr=args.ocr, ocr_languages=args.ocr_languages,
+            [path], ocr=_ocr_choice(args), ocr_languages=args.ocr_languages,
             progress=lambda m: print(m, flush=True),
         )
     return _finish(args, importer, report)
@@ -230,10 +249,13 @@ def run_interactive(args: argparse.Namespace) -> int:
 def _offer_ocr_retry(args: argparse.Namespace, importer: KnowledgeImporter, report) -> bool:
     """Offer to re-import scanned PDFs with OCR when the first pass skipped them.
 
-    Only in an interactive terminal, and only when OCR was off: a scanned PDF is
-    not a dead end, it is a file that needs a different reader.
+    Only in an interactive terminal, and only when OCR was not requested: a
+    scanned PDF is not a dead end, it is a file that needs a different reader.
+    ``--no-ocr`` is a deliberate opt-out, so the offer is suppressed for it.
     """
-    if getattr(args, "ocr", False) or getattr(args, "as_json", False):
+    if getattr(args, "ocr", False) or getattr(args, "no_ocr", False):
+        return False
+    if getattr(args, "as_json", False):
         return False
     failures = [
         outcome

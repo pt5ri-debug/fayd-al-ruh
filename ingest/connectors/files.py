@@ -88,6 +88,7 @@ from core.pdf_ocr import (
     OcrUnavailableError,
     PageOcrEngine,
     extract_pdf_pages,
+    ocr_available,
 )
 from core.text_encoding import EncodingDetectionError, decode_bytes, detect_encoding
 from ingest.errors import ConnectorError
@@ -137,7 +138,10 @@ class FileConnector:
         row_group = int(spec.option("row_group", 0) or 40)
         normalize = _flag(spec.option("normalize", True))
         fold_arabic = _flag(spec.option("fold_arabic", False))
-        allow_ocr = _flag(spec.option("allow_ocr", False))
+        # ``None`` means "let the reader decide": with the OCR extra installed a
+        # scanned page is OCR'd automatically; an explicit value is an opt-in/out.
+        raw_allow_ocr = spec.option("allow_ocr")
+        allow_ocr = None if raw_allow_ocr is None else _flag(raw_allow_ocr)
         ocr_languages = _ocr_languages(spec.option("ocr_languages"))
         ocr_dpi = int(spec.option("ocr_dpi", 0) or DEFAULT_OCR_DPI)
         ocr_batch_size = int(spec.option("ocr_batch_size", 0) or 1)
@@ -297,6 +301,14 @@ class FileConnector:
                 f"PDF support needs the optional '{PDF_EXTRA}' extra. Install it with "
                 f"`pip install {PDF_EXTRA}` and try again."
             )
+        # OCR a scanned page automatically when the caller did not decide: with the
+        # optional OCR extra installed, ``allow_ocr`` defaults to True so a scanned
+        # PDF is read (and a mixed PDF's scanned pages are not silently dropped);
+        # an explicit "false" is an opt-out, and without the extra it degrades to
+        # native extraction. A caller can force it with "true".
+        if metadata.get("allow_ocr") is None:
+            metadata["allow_ocr"] = ocr_available()
+            metadata["ocr_auto"] = True
         if bool(metadata.get("allow_ocr", False)):
             yield from self._stream_pdf_ocr(item, path, metadata)
             return
@@ -347,15 +359,7 @@ class FileConnector:
         ``ocr: True``) so OCR text is never mistaken for native text. Per-page OCR
         failures are reported in the record metadata; they never abort the file.
         """
-        config = OcrConfig(
-            enabled=True,
-            languages=tuple(metadata.get("ocr_languages") or ("eng",)),
-            dpi=int(metadata.get("ocr_dpi") or DEFAULT_OCR_DPI),
-            batch_size=int(metadata.get("ocr_batch_size") or 1),
-            max_pages=int(metadata.get("ocr_max_pages") or 0),
-            time_budget_seconds=float(metadata.get("ocr_time_budget") or 0.0),
-            min_chars_per_page=int(metadata.get("ocr_min_chars") or 0) or 16,
-        )
+        config = _ocr_config(metadata)
         try:
             result = extract_pdf_pages(
                 path,
@@ -688,6 +692,26 @@ def _ocr_languages(value: object) -> tuple[str, ...]:
         text = str(value).replace("+", ",")
         languages = tuple(part.strip() for part in text.split(",") if part.strip())
     return languages or ("eng",)
+
+
+def _ocr_config(metadata: dict) -> OcrConfig:
+    """Build the per-page OCR config from an item's metadata (Stage 3).
+
+    When the OCR was chosen *automatically* (``ocr_auto``), only a page with no
+    text layer is a candidate (``min_chars_per_page=1``), so a digital page with
+    short text is left alone; a caller who forced OCR with ``--ocr`` gets the
+    larger default threshold for genuinely low-text pages.
+    """
+    auto = _flag(metadata.get("ocr_auto", False))
+    return OcrConfig(
+        enabled=True,
+        languages=tuple(metadata.get("ocr_languages") or ("eng",)),
+        dpi=int(metadata.get("ocr_dpi") or DEFAULT_OCR_DPI),
+        batch_size=int(metadata.get("ocr_batch_size") or 1),
+        max_pages=int(metadata.get("ocr_max_pages") or 0),
+        time_budget_seconds=float(metadata.get("ocr_time_budget") or 0.0),
+        min_chars_per_page=int(metadata.get("ocr_min_chars") or 0) or (1 if auto else 16),
+    )
 
 
 def _skipped_name(name: str) -> bool:

@@ -17,7 +17,22 @@ def test_ingest_config_defaults_match_the_pipeline():
     config = IngestConfig()
     assert config.incremental is True
     assert config.allow_web is False  # deny by default
+    assert config.allow_ocr is None  # automatic: OCR'd only when the extra is present
     assert config.shard_bytes == DEFAULT_SHARD_BYTES
+
+
+def test_ingest_config_ocr_tristate_round_trips(tmp_path):
+    # ``None`` is automatic, ``True`` forces OCR, ``False`` refuses it.
+    for value in (None, True, False):
+        save_ingest_config(IngestConfig(allow_ocr=value), root=tmp_path)
+        assert load_ingest_config(root=tmp_path).allow_ocr is value
+
+
+def test_ingest_config_allow_ocr_environment_override(tmp_path):
+    loaded = load_ingest_config(
+        root=tmp_path, environ={f"{ENV_PREFIX}ALLOW_OCR": "false"}
+    )
+    assert loaded.allow_ocr is False
 
 
 def test_ingest_config_rejects_inconsistent_overlap():
