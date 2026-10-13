@@ -78,6 +78,15 @@ _SEPARATOR_RUN_RE = re.compile(r"([,;:/\\|])\s*\1+")
 _REPEATED_PHRASE_RE = re.compile(
     r"(?<!\w)(\w+(?:\s+\w+){0,3})(?:\s+\1\b)+", flags=re.IGNORECASE
 )
+# The byte model also stalls on a phrase with a conjunction between the copies
+# ("the stage complex and stage complex", "the static and the static travel").
+# The back-to-back matcher above never sees it, because the conjunction sits
+# between the copies. A repeated phrase joined by one "and"/"or" is the same
+# stall, so it collapses to one copy -- a real pair of different phrases
+# ("porosity and permeability") shares no words and is left alone.
+_REPEATED_PHRASE_AND_RE = re.compile(
+    r"(?<!\w)(\w+(?:\s+\w+){0,3})\s+(?:and|or)\s+\1\b", flags=re.IGNORECASE
+)
 # Leading/trailing decoration the model leaves around a sentence.
 _EDGE_CHARS = " \t\"'\u201c\u201d\u2018\u2019()[]{}*_-"
 
@@ -244,6 +253,15 @@ def _tidy_marks(text: str) -> str:
     value = _SNAKE_TOKEN_RE.sub(lambda m: m.group(0).replace("_", " "), value)
     while True:
         collapsed = _REPEATED_PHRASE_RE.sub(r"\1", value)
+        if collapsed == value:
+            break
+        value = collapsed
+    # A stall the model joins with a conjunction ("the static and the static
+    # travel") is the same loop; collapse the repeated phrase and the conjunction
+    # to one copy. A clean pair of different phrases ("porosity and permeability")
+    # shares no words and is untouched.
+    while True:
+        collapsed = _REPEATED_PHRASE_AND_RE.sub(r"\1", value)
         if collapsed == value:
             break
         value = collapsed

@@ -126,7 +126,10 @@ Arabic is kept as secondary aliases where useful.
   ("10--20", "5CT--spec") intact, capitalises and punctuates. The phrase collapse
   is applied until it stops changing, so a *run* the byte model stalls on ("the
   casing the casing the casing the casing") collapses all the way to one copy
-  rather than leaving every other copy. It also closes the
+  rather than leaving every other copy; a stall the model joins with a
+  conjunction ("the stage complex and stage complex") collapses the same way,
+  while a real pair of different phrases ("porosity and permeability") is left
+  alone. It also closes the
   two ragged boundaries the byte model leaves: a sentence that ran on past a
   boundary in lower case ("...mixed. and the slurry is pumped.") is capitalised
   (presentation only), and a space before a full stop or a glued-on next sentence
