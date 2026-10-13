@@ -23,6 +23,7 @@ from cli.menu import (
     run_deps,
     run_evaluation,
     run_import_center,
+    run_image,
     run_ingest,
     run_insight,
     run_internet_learner,
@@ -96,6 +97,7 @@ ACTIONS: tuple[GuiAction, ...] = (
         run_import_center,
         ("interactive",),
     ),
+    GuiAction("image", "Generate an image from text", run_image, ("backends",)),
     GuiAction(
         "deps",
         "Install optional PDF/OCR support",

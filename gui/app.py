@@ -1597,6 +1597,9 @@ class FaydGUI:
         menu.add_command(
             label="Import a SQL database (SQLite)…", command=self._open_sql_import
         )
+        menu.add_command(
+            label="Generate an image from text…", command=self._open_image_gen
+        )
         try:
             menu.tk_popup(
                 self._attach_button.winfo_rootx(),
@@ -1645,6 +1648,19 @@ class FaydGUI:
             font=self._font,
             mono=self._mono,
             on_close=lambda: setattr(self, "_sql_import_dialog", None),
+        )
+
+    def _open_image_gen(self) -> None:
+        """Open the text-to-image screen as a separate window."""
+        from gui.image_gen_dialog import ImageGenDialog
+
+        self._image_gen_dialog = ImageGenDialog(
+            self.root,
+            self.service,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=lambda: setattr(self, "_image_gen_dialog", None),
         )
 
     def _on_install_ocr(self) -> None:
@@ -1740,6 +1756,10 @@ class FaydGUI:
         # running the headless prompt (which has no terminal to read from here).
         if action.key == "import-center":
             self._open_import_center()
+            return
+        # The text-to-image screen likewise has its own window.
+        if action.key == "image":
+            self._open_image_gen()
             return
         argv = action.argv
         if action.needs_input:
