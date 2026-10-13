@@ -187,6 +187,35 @@ def test_compose_model_answer_keeps_a_word_that_survives_tidying():
     assert compose_model_answer("porosity") == "Porosity."
 
 
+def test_compose_model_answer_collapses_a_stall_joined_by_a_conjunction():
+    # The byte model also stalls on a phrase with a conjunction between the
+    # copies ("the stage complex and stage complex"); the back-to-back matcher
+    # never sees it, so the repeated phrase and the conjunction collapse to one.
+    assert (
+        compose_model_answer("Mud the screen and the stage complex and stage complex.")
+        == "Mud the screen and the stage complex."
+    )
+    assert (
+        compose_model_answer("the stress are the static and the static travel to the wellbore.")
+        == "The stress are the static travel to the wellbore."
+    )
+    # A whole run joined by the conjunction collapses all the way to one copy.
+    assert (
+        compose_model_answer("the stage complex and stage complex and stage complex.")
+        == "The stage complex."
+    )
+
+
+def test_compose_model_answer_keeps_a_real_pair_of_phrases():
+    # Two different phrases joined by "and" are a real list, not a stall; they
+    # share no words, so nothing is collapsed.
+    assert compose_model_answer("porosity and permeability") == "Porosity and permeability."
+    assert (
+        compose_model_answer("The rock and the fluid and the pressure.")
+        == "The rock and the fluid and the pressure."
+    )
+
+
 def test_compose_model_answer_preserves_decimals_and_the_models_words():
     text = compose_model_answer("the gradient is 0.052 psi/ft and the formula is q / A.")
     assert text == "The gradient is 0.052 psi/ft and the formula is q / A."
