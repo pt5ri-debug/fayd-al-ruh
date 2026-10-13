@@ -2,6 +2,13 @@
 requests==2.34.2
 numpy>=2.0
 
+# Optional ingestion dependencies, installed here so CI can exercise the PDF
+# path on a base install. They are *not* required at runtime: the reader imports
+# them lazily and reports clearly when they are absent (see requirements-pdf.txt
+# and requirements-ocr.txt). ``pypdf`` reads text-layer PDFs; the scanned-PDF
+# OCR path additionally needs the ``[ocr]`` extra plus the Tesseract engine.
+pypdf>=4.0
+
 # Test and quality dependencies
 pytest==9.1.1
 ruff==0.16.10

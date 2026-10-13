@@ -73,8 +73,9 @@ module = ["pypdf"]
 ignore_missing_imports = true
 
 # OCR is an optional extra (``pip install .[ocr]``); its imports are lazy too.
+# ``PIL`` is Pillow's import name.
 [[tool.mypy.overrides]]
-module = ["pypdfium2", "pytesseract"]
+module = ["pypdfium2", "pytesseract", "PIL"]
 ignore_missing_imports = true
 
 # The learned text-to-image backend is an optional extra
