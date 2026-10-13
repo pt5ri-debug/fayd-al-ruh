@@ -28,17 +28,20 @@ from typing import Any
 import tkinter as tk
 from tkinter import filedialog
 
+from core.imagegen_diffusion import DEFAULT_PRESET, PRESETS
 from core.optional_deps import FEATURE_IMAGE, pip_install_command
 
 TITLE = "Generate an image from text"
 SUBTITLE = (
     "Write a prompt and render it to a PNG. The default backend is a dependency-free "
     "procedural renderer: the same prompt and seed always give the same picture, and "
-    "the result is an abstract composition, not a learned depiction of the words."
+    "the result is an abstract composition, not a learned depiction of the words. "
+    "Choose Diffusion (learned) for a photorealistic picture from a real model."
 )
 HONESTY_LINE = (
-    "This build has no learned text-to-image model. Images are geometric compositions "
-    "derived from the prompt; treat them as decoration, not as a picture of the subject."
+    "Procedural output is a geometric composition, not a picture of the subject. "
+    "Diffusion output is drawn by a learned model; the Photorealistic preset is the "
+    "default and is tuned for clean, lifelike images."
 )
 
 
@@ -68,6 +71,7 @@ class ImageGenDialog:
         self._height_var = tk.StringVar(value="")
         self._seed_var = tk.StringVar(value="")
         self._backend_var = tk.StringVar(value=service.backend)
+        self._preset_var = tk.StringVar(value=DEFAULT_PRESET)
 
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
@@ -135,6 +139,38 @@ class ImageGenDialog:
         )
         self._backend_note.pack(fill="x", padx=12, pady=(0, 4))
 
+        preset_row = tk.Frame(options, bg=theme.surface)
+        preset_row.pack(fill="x", padx=12, pady=(2, 4))
+        tk.Label(
+            preset_row, text="Preset", bg=theme.surface, fg=theme.text_secondary,
+            font=(self.font, 9),
+        ).pack(side="left", padx=(0, 6))
+        for name, title in ((p.name, p.title) for p in PRESETS.values()):
+            tk.Radiobutton(
+                preset_row, text=title, value=name, variable=self._preset_var,
+                command=self._on_preset_change, bg=theme.surface, fg=theme.foreground,
+                selectcolor=theme.base, activebackground=theme.surface, font=(self.font, 9),
+                highlightthickness=0, borderwidth=0,
+            ).pack(side="left", padx=(0, 12))
+
+        negative_row = tk.Frame(options, bg=theme.surface)
+        negative_row.pack(fill="x", padx=12, pady=(2, 4))
+        tk.Label(
+            negative_row, text="Negative prompt", bg=theme.surface, fg=theme.text_secondary,
+            font=(self.font, 9),
+        ).pack(side="left", padx=(0, 6))
+        self._negative = tk.Entry(
+            negative_row, bg=theme.base, fg=theme.foreground, insertbackground=theme.primary,
+            relief="flat", highlightthickness=1, highlightbackground=theme.border,
+            font=(self.font, 9),
+        )
+        self._negative.pack(side="left", fill="x", expand=True)
+        tk.Label(
+            options,
+            text="(blank = the preset's photorealistic default: no cartoon, blur, or artefacts)",
+            bg=theme.surface, fg=theme.text_dim, font=(self.font, 8), anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 4))
+
         row = tk.Frame(options, bg=theme.surface)
         row.pack(fill="x", padx=12, pady=(2, 8))
         self._labelled_entry(row, "Width", self._width_var, 6)
@@ -198,12 +234,20 @@ class ImageGenDialog:
 
     def _service_for_backend(self) -> Any:
         backend = self._backend_var.get()
-        if backend == self.image_service.backend:
-            if self.image_service.available():
+        if backend == "procedural":
+            if self.image_service.backend == "procedural":
                 return self.image_service
-        return self.image_service.for_backend(backend)
+            return self.image_service.for_backend("procedural")
+        preset = self._preset_var.get()
+        negative = self._negative.get().strip() or None
+        return self.image_service.for_backend(
+            "diffusion", preset=preset, negative_prompt=negative
+        )
 
     def _on_backend_change(self) -> None:
+        self._refresh_backend_note()
+
+    def _on_preset_change(self) -> None:
         self._refresh_backend_note()
 
     def _refresh_backend_note(self) -> None:
@@ -215,6 +259,11 @@ class ImageGenDialog:
         else:
             self._download_button.pack(side="left", padx=(8, 0))
             self._download_button.configure(state="disabled" if self._busy else "normal")
+        if backend == "diffusion":
+            # Availability is per model: switching preset can change readiness.
+            available = self._service_for_backend().available()
+            preset = self._preset_var.get()
+            note = f"{note}  Selected preset: {preset}."
         prefix = "Ready." if available else "Not ready."
         self._backend_note.configure(text=f"{prefix}  {note}")
 
@@ -224,11 +273,13 @@ class ImageGenDialog:
         self._busy = True
         self._generate_button.configure(state="disabled")
         self._download_button.configure(state="disabled")
-        self._set_status("Downloading the model… (one-time, ~2.5 GB)")
+        self._set_status("Downloading the model… (one-time, ~4 GB)")
 
         def run() -> None:
             try:
-                report = self.image_service.download_model(approved=True)
+                report = self.image_service.download_model(
+                    approved=True, preset=self._preset_var.get()
+                )
                 self.window.after(0, partial(self._finish_download, report, None))
             except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
                 self.window.after(0, partial(self._finish_download, None, error))
@@ -269,6 +320,7 @@ class ImageGenDialog:
                 error=True,
             )
             return
+        negative = self._negative.get().strip() or None
         self._busy = True
         self._generate_button.configure(state="disabled")
         self._save_button.configure(state="disabled")
@@ -277,7 +329,7 @@ class ImageGenDialog:
         def run() -> None:
             try:
                 report = service.generate(
-                    prompt, width=width, height=height, seed=seed
+                    prompt, width=width, height=height, seed=seed, negative_prompt=negative
                 )
                 self.window.after(0, partial(self._finish, report, None))
             except Exception as error:  # noqa: BLE001 - shown, never crashes Tk

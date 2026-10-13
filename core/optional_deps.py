@@ -86,12 +86,12 @@ FEATURES: dict[str, OptionalFeature] = {
     FEATURE_IMAGE: OptionalFeature(
         key=FEATURE_IMAGE,
         title="Learned image backend",
-        summary="Generate an image with a real diffusion model (instead of the renderer).",
+        summary="Generate a photorealistic image with a real diffusion model (instead of the renderer).",
         requirements_file="requirements-image.txt",
         import_names=("torch", "diffusers"),
         system_note=(
             "The model weights are a separate one-time, human-approved download: "
-            "run `python -m cli image download --approve` (~2.5 GB)."
+            "run `python -m cli image download --approve` (~4 GB)."
         ),
         system_missing_note="the model weights are not cached yet.",
     ),

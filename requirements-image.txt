@@ -3,14 +3,16 @@
 # Install with:  python -m pip install -r requirements-image.txt
 #
 # This pulls torch (CPU wheels), Diffusers, and their support packages --
-# roughly a gigabyte of Python packages, plus ~2.5 GB of model weights the first
+# roughly a gigabyte of Python packages, plus ~4 GB of model weights the first
 # time you generate (see `python -m cli image download --approve`). The default
 # procedural renderer needs none of this.
 #
-# CPU torch is chosen on purpose: it needs no NVIDIA/CUDA packages (which would
-# add several more gigabytes), and the small default model runs on a CPU. To use
-# a GPU instead, install the CUDA build of torch from https://pytorch.org first,
-# then this file.
+# The default (photorealistic) model is an SD 1.5 fine-tune; a generation on a
+# CPU takes tens of seconds to a few minutes. A CUDA build of torch is much
+# faster. CPU torch is chosen on purpose: it needs no NVIDIA/CUDA packages (which
+# would add several more gigabytes), and the model runs on a CPU. To use a GPU
+# instead, install the CUDA build of torch from https://pytorch.org first, then
+# this file.
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch>=2.2
 diffusers>=0.27

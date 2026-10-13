@@ -781,7 +781,7 @@ download a real diffusion model once:
 
 ```bash
 python -m pip install -r requirements-image.txt   # torch (CPU) + Diffusers, ~1 GB
-python -m cli image download --approve            # one-time, ~2.5 GB from HuggingFace
+python -m cli image download --approve            # one-time, ~4 GB from HuggingFace
 python -m cli image generate "a drilling rig at dusk" --backend diffusion
 ```
 
@@ -790,12 +790,33 @@ work from a source checkout; install the bundled requirements file instead (or,
 in the window, the **＋** menu's *Install optional PDF/OCR/image support* entry,
 which runs the same command). The requirements file pulls **CPU** torch on
 purpose — the GPU/CUDA build would add several gigabytes of NVIDIA packages that
-the small default model does not need. To use a GPU instead, install the CUDA
-build of torch from <https://pytorch.org> first, then the requirements file.
+the default model does not need. To use a GPU instead, install the CUDA build of
+torch from <https://pytorch.org> first, then the requirements file.
 
-The default model is `stabilityai/sd-turbo` (1-4 steps, small enough for a CPU),
-and the weights are cached under `data/models` (git-ignored). Everything about
-this path follows the project's hard rules:
+**The default is tuned for photorealistic, clean pictures, not sketches.** The
+`realistic` preset (the default) uses the photorealistic SD 1.5 fine-tune
+`Lykon/dreamshaper-8-lcm`, sampled in a few LCM steps with guidance 1.5, and a
+built-in negative prompt that suppresses the usual "looks drawn" artefacts
+(cartoon, blur, grain, deformed anatomy, watermark). Three presets trade realism
+for speed:
+
+```bash
+python -m cli image presets                                   # list them
+python -m cli image generate "a portrait" --backend diffusion --preset realistic
+python -m cli image generate "a portrait" --backend diffusion --preset detailed --negative "rain, fog"
+```
+
+| preset | model | steps | best for |
+| --- | --- | --- | --- |
+| `fast` | `stabilityai/sd-turbo` | 2 | speed over detail |
+| `realistic` *(default)* | `Lykon/dreamshaper-8-lcm` | 6 | photorealistic pictures |
+| `detailed` | `Lykon/dreamshaper-8` | 30 | maximum detail (slow on CPU) |
+
+Realism has a cost on a CPU: the default model is ~4 GB and a generation takes
+tens of seconds to a few minutes. The weights are cached under `data/models`
+(git-ignored). Requested sizes are snapped to the model's 64px grid and resampled
+back with a high-quality filter, so the output is crisp rather than blocky.
+Everything about this path follows the project's hard rules:
 
 - It is **optional and additive**: the base install has no torch, and the import
   is lazy, so nothing heavy is pulled unless you actually use it.
@@ -807,12 +828,14 @@ this path follows the project's hard rules:
 - When the extra or the weights are missing, the request fails with a clear
   message (and the window falls back to the procedural renderer); nothing breaks.
 
-In the window, pick **Diffusion (learned)** in the text-to-image page, press
-**Download model…** once, then **Generate**.
+In the window, pick **Diffusion (learned)** in the text-to-image page, choose a
+**Preset** (Photorealistic is the default), optionally set a **Negative prompt**,
+press **Download model…** once, then **Generate**.
 
 A real model can be dropped in behind the `ImageGenerator` protocol without
-changing the window, the CLI, or the service; `--model`, `--steps`, and
-`--guidance` choose another Diffusers model.
+changing the window, the CLI, or the service; `--model`, `--preset`, `--steps`,
+`--guidance`, and `--negative` choose another Diffusers model or override the
+preset's settings.
 
 In the GUI, open the composer's **＋** menu and choose **Generate an image from
 text…**, or use the sidebar's **Generate an image from text**. Write a prompt (a
@@ -828,6 +851,7 @@ python -m cli image generate "a red spiral over a dark sea"
 python -m cli image generate "wellhead schematic 768x512" --output shot.png
 python -m cli image generate "the same again" --seed 42
 python -m cli image backends
+python -m cli image presets
 ```
 
 ## Continuous learning
