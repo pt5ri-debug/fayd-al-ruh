@@ -18,6 +18,7 @@ import pytest
 
 from core import optional_deps
 from core.optional_deps import (
+    FEATURE_IMAGE,
     FEATURE_OCR,
     FEATURE_PDF,
     FeatureStatus,
@@ -71,10 +72,39 @@ def test_missing_imports_names_only_the_absent_ones(monkeypatch):
     assert missing_imports(FEATURE_OCR) == ("pytesseract",)
 
 
+# --- the learned image backend has a second half (the weights) ------------
+
+
+def test_image_status_reports_missing_python_packages(monkeypatch):
+    monkeypatch.setattr(optional_deps, "missing_imports", lambda key: ("torch", "diffusers"))
+    state = status(FEATURE_IMAGE)
+    assert state.python_ok is False
+    assert state.system_ok is False
+    assert state.available is False
+    assert "not installed" in str(state)
+
+
+def test_image_status_reports_uncached_weights(monkeypatch):
+    # The packages are present, but the one-time weights download has not run.
+    monkeypatch.setattr(optional_deps, "missing_imports", lambda key: ())
+    monkeypatch.setattr(optional_deps, "_image_weights_cached", lambda: False)
+    state = status(FEATURE_IMAGE)
+    assert state.python_ok is True
+    assert state.system_ok is False
+    assert state.available is False
+    assert "weights" in str(state)
+
+
+def test_image_is_available_when_packages_and_weights_are_present(monkeypatch):
+    monkeypatch.setattr(optional_deps, "missing_imports", lambda key: ())
+    monkeypatch.setattr(optional_deps, "_image_weights_cached", lambda: True)
+    assert is_available(FEATURE_IMAGE) is True
+
+
 # --- the bundled requirements files are real and correct ------------------
 
 
-@pytest.mark.parametrize("key", [FEATURE_PDF, FEATURE_OCR])
+@pytest.mark.parametrize("key", [FEATURE_PDF, FEATURE_OCR, FEATURE_IMAGE])
 def test_requirements_file_exists_and_lists_its_imports(key):
     path = requirements_path(key)
     assert path.exists(), f"{path} must ship with the project"
@@ -199,6 +229,22 @@ def test_install_reports_the_system_note_when_ocr_engine_is_still_absent(monkeyp
     result = install(FEATURE_OCR, runner=lambda argv: (0, "ok"))
     assert result.ok is True
     assert "tesseract" in result.message.lower()
+
+
+def test_install_reports_the_download_step_when_image_weights_are_absent(monkeypatch):
+    monkeypatch.setattr(optional_deps, "missing_imports", lambda key: ())
+    monkeypatch.setattr(optional_deps, "_image_weights_cached", lambda: False)
+    result = install(FEATURE_IMAGE, runner=lambda argv: (0, "ok"))
+    assert result.ok is True
+    assert "download" in result.message.lower()
+
+
+def test_image_install_hint_names_the_working_command_and_the_download():
+    hint = install_hint(FEATURE_IMAGE)
+    assert "requirements-image.txt" in hint
+    assert "download" in hint.lower()
+    # It must not send the user to the unpublished package.
+    assert "fayd-al-ruh[" not in hint
 
 
 def test_install_passes_progress_lines(monkeypatch):

@@ -12,7 +12,7 @@ import pytest
 from cli import deps as deps_cli
 from cli import menu as cli_menu
 from core import optional_deps
-from core.optional_deps import FEATURE_OCR, FEATURE_PDF
+from core.optional_deps import FEATURE_IMAGE, FEATURE_OCR, FEATURE_PDF
 from gui import actions as gui_actions
 from gui.attachments import _ocr_attachment_hint
 
@@ -25,6 +25,7 @@ def test_deps_report_lists_every_feature(capsys):
     out = capsys.readouterr().out
     assert "PDF support" in out
     assert "OCR support" in out
+    assert "Learned image backend" in out
     # 0 when everything is present, 1 when something is missing -- never a crash.
     assert code in (0, 1)
 
@@ -96,7 +97,7 @@ def test_deps_is_registered_in_the_cli() -> None:
 
 def test_deps_is_in_the_visible_menu() -> None:
     labels = [title for title, _action, _args in cli_menu.visible_menu()]
-    assert any("optional PDF/OCR support" in label for label in labels)
+    assert any("optional PDF/OCR/image support" in label for label in labels)
 
 
 def test_deps_is_in_the_gui_sidebar() -> None:
@@ -128,6 +129,6 @@ def test_non_ocr_failure_is_returned_unchanged():
     assert _ocr_attachment_hint(message, ocr=False) == message
 
 
-@pytest.mark.parametrize("key", [FEATURE_PDF, FEATURE_OCR])
+@pytest.mark.parametrize("key", [FEATURE_PDF, FEATURE_OCR, FEATURE_IMAGE])
 def test_install_hint_never_names_the_unpublished_package(key):
     assert "fayd-al-ruh[" not in optional_deps.install_hint(key)

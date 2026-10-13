@@ -335,7 +335,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Import files and folders (Knowledge Import Center)", run_import_center, ("interactive",)),
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~2.5 GB)", run_image, ("download", "--approve")),
-    ("Install optional PDF/OCR support", run_deps, ()),
+    ("Install optional PDF/OCR/image support", run_deps, ()),
     ("Show the ingestion status (store + ledger)", run_ingest, ("stats",)),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--resume", "--episodes", "60")),
