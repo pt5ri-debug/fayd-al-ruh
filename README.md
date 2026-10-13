@@ -720,11 +720,12 @@ The window is a thin shell over the same code the CLI already runs:
   switching never clears the transcript.
 - The **composer** is a rounded, ChatGPT-like card: a multiline field (Enter
   sends, Shift+Enter inserts a newline), a send button, and a **＋** control that
-  opens three choices — **Attach a file to this chat** (the file's text joins
-  this conversation's evidence and shows as a removable chip, so a question can
-  cite it like the built-in corpus), **Attach a scanned PDF (OCR)…** (the same,
-  for a PDF with no text layer; needs the optional `[ocr]` extra), and **Open
-  Knowledge Import Center…** (the persistent path below).
+  opens the evidence and import choices — **Attach a file to this chat** (the
+  file's text joins this conversation's evidence and shows as a removable chip, so
+  a question can cite it like the built-in corpus), **Attach a scanned PDF
+  (OCR)…** (the same, for a PDF with no text layer; needs the optional `[ocr]`
+  extra), **Open Knowledge Import Center…** (the persistent path below), **Import
+  a SQL database (SQLite)…**, and **Generate an image from text…** (below).
 - In Jarvics Mode a message that would **change files** (a `write_file` plan) is
   previewed and held for confirmation — the plan's steps are shown with **Run** /
   **Cancel** — so a destructive tool never runs unreviewed. Read-only tools run
@@ -759,6 +760,37 @@ still run every CLI command; a missing display is reported with the suggestion t
 use `python -m cli chat`. The GUI code lives in `gui/` (`service.py`,
 `modes.py`, `markdown.py`, `actions.py`, `options.py`, `app.py`) and is included
 in the portable bundle.
+
+## Generating an image from text (optional)
+
+The window and the CLI can turn a written prompt into an image file. This is
+**optional and additive**, the counterpart to the perception layer in
+`core/vision.py`, and it adds **no dependency**: the default backend renders a
+valid PNG using only the standard library (`zlib` and `struct`).
+
+Being honest matters more than looking impressive, so the default is stated
+plainly: it is a *procedural renderer, not a learned text-to-image model*. It
+derives a seed from the prompt and paints a deterministic abstract composition
+from it — the same prompt always gives the same picture, and the result is a
+geometric pattern, not a depiction of the words. A real diffusion model can be
+dropped in behind the `ImageGenerator` protocol without changing the window, the
+CLI, or the service.
+
+In the GUI, open the composer's **＋** menu and choose **Generate an image from
+text…**, or use the sidebar's **Generate an image from text**. Write a prompt (a
+trailing size such as `768x512` sets the dimensions), optionally set the width,
+height, and seed, and press **Generate**; the picture is shown and saved under the
+writable data folder (`data/images`), and **Save a copy…** writes it wherever you
+choose.
+
+The CLI is the headless twin:
+
+```bash
+python -m cli image generate "a red spiral over a dark sea"
+python -m cli image generate "wellhead schematic 768x512" --output shot.png
+python -m cli image generate "the same again" --seed 42
+python -m cli image backends
+```
 
 ## Continuous learning
 
