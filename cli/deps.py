@@ -1,4 +1,4 @@
-"""Install the optional features (PDF, OCR) from the command line.
+"""Install the optional features (PDF, OCR, learned image) from the command line.
 
     python -m cli deps               # show what is installed and what is missing
     python -m cli deps --install ocr # install the OCR packages
@@ -8,7 +8,8 @@ The installer is the same one the window offers (:mod:`core.optional_deps`): it
 runs the bundled ``requirements-<feature>.txt`` with the interpreter that is
 running this program, which is the command that actually works from a source
 checkout. It never claims to install the Tesseract *system* package -- that is
-reported separately, because pip cannot install it.
+reported separately, because pip cannot install it. The learned image backend's
+model weights are a similar separate step (a one-time download).
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from core import optional_deps
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m cli deps",
-        description="Install the optional PDF and OCR features.",
+        description="Install the optional PDF, OCR, and learned-image features.",
     )
     parser.add_argument(
         "--install",
@@ -30,7 +31,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=sorted(optional_deps.FEATURES),
         default=[],
         metavar="FEATURE",
-        help="install a feature's Python packages (pdf or ocr); repeatable.",
+        help="install a feature's Python packages (pdf, ocr, or image); repeatable.",
     )
     parser.add_argument(
         "--check",

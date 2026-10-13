@@ -38,6 +38,7 @@ from core.imagegen import (
     ImageRequest,
     encode_png,
 )
+from core.optional_deps import FEATURE_IMAGE, pip_install_command
 from core.paths import models_dir
 from core.permissions import Capability, PermissionPolicy
 
@@ -79,7 +80,7 @@ def _require_extra() -> tuple[Any, Any]:
     except ImportError as error:  # pragma: no cover - depends on the install
         raise DiffusionUnavailable(
             "The learned text-to-image backend needs the optional image extra. "
-            "Install it with:  pip install .[image]"
+            f"Install it with:  {pip_install_command(FEATURE_IMAGE)}"
         ) from error
     return diffusers, torch
 

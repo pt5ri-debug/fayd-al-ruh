@@ -311,6 +311,8 @@ def image_backend_status(root: Path | None = None) -> tuple[tuple[str, bool, str
     status: list[tuple[str, bool, str]] = [
         ("procedural", True, "Dependency-free deterministic renderer (not a model).")
     ]
+    from core.optional_deps import FEATURE_IMAGE, pip_install_command
+
     try:
         from core.imagegen_diffusion import (
             DEFAULT_MODEL,
@@ -329,7 +331,8 @@ def image_backend_status(root: Path | None = None) -> tuple[tuple[str, bool, str
             (
                 "diffusion",
                 False,
-                "Learned backend needs the optional extra: pip install .[image]",
+                "Learned backend needs the optional extra: "
+                + pip_install_command(FEATURE_IMAGE),
             )
         )
         return tuple(status)

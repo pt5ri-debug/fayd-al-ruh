@@ -100,7 +100,7 @@ ACTIONS: tuple[GuiAction, ...] = (
     GuiAction("image", "Generate an image from text", run_image, ("backends",)),
     GuiAction(
         "deps",
-        "Install optional PDF/OCR support",
+        "Install optional PDF/OCR/image support",
         run_deps,
         ("--install", "pdf", "--install", "ocr"),
     ),

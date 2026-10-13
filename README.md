@@ -780,10 +780,18 @@ For a genuinely learned text-to-image result, install the optional extra and
 download a real diffusion model once:
 
 ```bash
-pip install .[image]                     # torch (CPU) + Diffusers, ~gigabytes
-python -m cli image download --approve   # one-time, ~2.5 GB from HuggingFace
+python -m pip install -r requirements-image.txt   # torch (CPU) + Diffusers, ~1 GB
+python -m cli image download --approve            # one-time, ~2.5 GB from HuggingFace
 python -m cli image generate "a drilling rig at dusk" --backend diffusion
 ```
+
+The project is not published on PyPI, so `pip install fayd-al-ruh[image]` cannot
+work from a source checkout; install the bundled requirements file instead (or,
+in the window, the **＋** menu's *Install optional PDF/OCR/image support* entry,
+which runs the same command). The requirements file pulls **CPU** torch on
+purpose — the GPU/CUDA build would add several gigabytes of NVIDIA packages that
+the small default model does not need. To use a GPU instead, install the CUDA
+build of torch from <https://pytorch.org> first, then the requirements file.
 
 The default model is `stabilityai/sd-turbo` (1-4 steps, small enough for a CPU),
 and the weights are cached under `data/models` (git-ignored). Everything about

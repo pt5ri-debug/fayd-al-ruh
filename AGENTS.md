@@ -241,7 +241,10 @@ Arabic is kept as secondary aliases where useful.
 - `core/imagegen_diffusion.py` — the optional **learned** text-to-image backend:
   a real Diffusers diffusion model (`stabilityai/sd-turbo` by default, 1-4 steps)
   that runs on CPU. Everything heavy is lazy: torch/diffusers are imported only
-  when generating, so a base install never needs them (`pip install .[image]`).
+  when generating, so a base install never needs them (`python -m pip install -r
+  requirements-image.txt`, wired as the `image` feature in `core/optional_deps.py`;
+  the `pip install .[image]` form cannot work from a source checkout, since the
+  project is not on PyPI and the checkout has no setuptools package discovery).
   Weights download only through the project's permission + human-approval gates
   (`DOWNLOAD_TOOL`, denied by default; `python -m cli image download --approve`)
   and are cached under `data/models` (git-ignored). `DiffusionImageGenerator`

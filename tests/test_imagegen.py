@@ -324,7 +324,9 @@ def test_diffusion_unavailable_names_the_install_command(tmp_path):
     try:
         generator.generate(ImageRequest("anything"))
     except DiffusionUnavailable as error:
-        assert "[image]" in str(error) or "download" in str(error)
+        # The message must point at a command that works from a source checkout,
+        # not the unpublished ``pip install .[image]``.
+        assert "requirements-image.txt" in str(error) or "download" in str(error)
     else:  # pragma: no cover - only when the extra is installed and cached
         pytest.skip("the image extra is installed and the model is cached")
 

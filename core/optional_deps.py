@@ -44,6 +44,7 @@ from core.paths import bundle_root, is_frozen
 #: Feature keys used across the app.
 FEATURE_PDF = "pdf"
 FEATURE_OCR = "ocr"
+FEATURE_IMAGE = "image"
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,8 @@ class OptionalFeature:
     import_names: tuple[str, ...]
     #: The system package(s) pip cannot install ("" when there are none).
     system_note: str = ""
+    #: How to phrase "installed, but one more step is needed" for this feature.
+    system_missing_note: str = "the system engine is not available."
 
 
 FEATURES: dict[str, OptionalFeature] = {
@@ -79,6 +82,18 @@ FEATURES: dict[str, OptionalFeature] = {
             "The Tesseract engine and its language data are separate system packages "
             "(e.g. `apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara`)."
         ),
+    ),
+    FEATURE_IMAGE: OptionalFeature(
+        key=FEATURE_IMAGE,
+        title="Learned image backend",
+        summary="Generate an image with a real diffusion model (instead of the renderer).",
+        requirements_file="requirements-image.txt",
+        import_names=("torch", "diffusers"),
+        system_note=(
+            "The model weights are a separate one-time, human-approved download: "
+            "run `python -m cli image download --approve` (~2.5 GB)."
+        ),
+        system_missing_note="the model weights are not cached yet.",
     ),
 }
 
@@ -111,7 +126,7 @@ class FeatureStatus:
                 f"{spec.title}: the Python packages {', '.join(self.missing_python)} "
                 "are not installed."
             )
-        return f"{spec.title}: installed, but the system engine is not available."
+        return f"{spec.title}: installed, but {spec.system_missing_note}"
 
     @property
     def available(self) -> bool:
@@ -135,12 +150,25 @@ def _ocr_system_ok() -> bool:
     return True
 
 
+def _image_weights_cached() -> bool:
+    """Whether the learned image model's weights are already on disk.
+
+    The extra installs the packages; the weights are a separate one-time
+    download, so this is the second half of "usable right now".
+    """
+    from core.imagegen_diffusion import DEFAULT_MODEL, model_is_cached
+
+    return model_is_cached(DEFAULT_MODEL)
+
+
 def status(key: str) -> FeatureStatus:
     """Check one optional feature without importing its heavy packages eagerly."""
     missing = missing_imports(key)
     python_ok = not missing
     if key == FEATURE_OCR:
         system_ok = _ocr_system_ok() if python_ok else False
+    elif key == FEATURE_IMAGE:
+        system_ok = _image_weights_cached() if python_ok else False
     else:
         system_ok = True
     return FeatureStatus(key=key, python_ok=python_ok, system_ok=system_ok, missing_python=missing)
@@ -267,6 +295,8 @@ def install(
         message = f"{spec.title} installed."
         if key == FEATURE_OCR and not _ocr_system_ok():
             message += " " + spec.system_note
+        elif key == FEATURE_IMAGE and not _image_weights_cached():
+            message += " " + spec.system_note
     elif returncode != 0:
         tail = output.strip().splitlines()[-1] if output.strip() else "pip failed."
         message = f"Could not install {spec.title.lower()}: {tail}"
@@ -286,6 +316,7 @@ def install(
 
 
 __all__ = [
+    "FEATURE_IMAGE",
     "FEATURE_OCR",
     "FEATURE_PDF",
     "FEATURES",

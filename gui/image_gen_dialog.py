@@ -28,6 +28,8 @@ from typing import Any
 import tkinter as tk
 from tkinter import filedialog
 
+from core.optional_deps import FEATURE_IMAGE, pip_install_command
+
 TITLE = "Generate an image from text"
 SUBTITLE = (
     "Write a prompt and render it to a PNG. The default backend is a dependency-free "
@@ -261,8 +263,9 @@ class ImageGenDialog:
         service = self._service_for_backend()
         if backend == "diffusion" and not service.available():
             self._set_status(
-                "The learned backend is not ready — install the [image] extra and "
-                "download the model, or choose Procedural.",
+                "The learned backend is not ready — install its packages with "
+                f"{pip_install_command(FEATURE_IMAGE)} and download the model, "
+                "or choose Procedural.",
                 error=True,
             )
             return
