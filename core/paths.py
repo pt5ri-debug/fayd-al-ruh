@@ -74,6 +74,15 @@ def checkpoints_dir() -> Path:
     return data_dir() / "ml" / "llm" / "checkpoints"
 
 
+def models_dir() -> Path:
+    """Where optional learned models (e.g. a diffusion checkpoint) are cached.
+
+    Kept under the writable data folder (git-ignored), never in the repository, so
+    a downloaded model never dirties the working tree or bloats a program update.
+    """
+    return data_dir() / "models"
+
+
 def bundled_artifacts_dir() -> Path:
     """Read-only artifacts inside the code or bundle, used as a fallback."""
     return bundle_root() / "ml" / "artifacts"
@@ -137,6 +146,7 @@ __all__ = [
     "data_dir",
     "artifacts_dir",
     "checkpoints_dir",
+    "models_dir",
     "bundled_artifacts_dir",
     "bundled_checkpoints_dir",
     "default_checkpoint",

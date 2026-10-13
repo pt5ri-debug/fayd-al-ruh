@@ -53,7 +53,11 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["pytest", "mypy", "ruff", "PyInstaller"],
+    # ``torch``/``diffusers`` back the optional learned text-to-image extra. They
+    # are far too large for the portable bundle and are imported lazily, so the
+    # bundle omits them: the procedural renderer stays, and the diffusion backend
+    # honestly reports itself unavailable inside a frozen build.
+    excludes=["pytest", "mypy", "ruff", "PyInstaller", "torch", "diffusers", "transformers", "accelerate"],
     noarchive=False,
 )
 

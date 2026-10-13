@@ -1656,7 +1656,7 @@ class FaydGUI:
 
         self._image_gen_dialog = ImageGenDialog(
             self.root,
-            self.service,
+            self.service.image_gen,
             theme=self._theme,
             font=self._font,
             mono=self._mono,

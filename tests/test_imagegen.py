@@ -227,7 +227,13 @@ def test_cli_backends_lists_the_procedural_renderer(capsys):
     assert image_main(["backends"]) == 0
     out = capsys.readouterr().out
     assert "procedural: available" in out
-    assert "not a learned" in out
+    assert "not a model" in out
+    assert "diffusion:" in out
+
+
+def test_cli_download_without_approve_is_refused(capsys):
+    assert image_main(["download"]) == 1
+    assert "--approve" in capsys.readouterr().out
 
 
 def test_cli_seed_reproduces_the_same_file(tmp_path):
@@ -258,3 +264,97 @@ def test_cli_menu_and_dispatch_include_image():
     assert any(label == "Generate an image from text" for label, _action, _args in MENU)
     assert any(label == "Generate an image from text" for label, _a, _b in visible_menu())
     assert "image" in _COMMANDS
+
+
+# ---------------------------------------------------------------------------
+# optional learned backend (a fake runner stands in for Diffusers: no torch)
+# ---------------------------------------------------------------------------
+
+
+class _FakeRunner:
+    """A stand-in diffusion runner: fills the image with one flat colour."""
+
+    def __init__(self, colour: tuple[int, int, int] = (10, 20, 30)) -> None:
+        self.colour = colour
+        self.calls: list[tuple] = []
+
+    def __call__(self, model, prompt, width, height, steps, guidance, seed):
+        self.calls.append((model, prompt, width, height, steps, guidance, seed))
+        row = bytes(self.colour) * width
+        return [row for _ in range(height)]
+
+
+def test_diffusion_generator_labels_output_as_learned(tmp_path):
+    from core.imagegen_diffusion import DEFAULT_MODEL, DiffusionImageGenerator
+
+    runner = _FakeRunner()
+    generator = DiffusionImageGenerator(root=tmp_path, runner=runner, steps=4, guidance=0.0)
+    image = generator.generate(ImageRequest("a drilling rig at dusk", width=8, height=6))
+    assert image.learned is True
+    assert image.backend == "diffusion"
+    assert DEFAULT_MODEL in image.description
+    assert "4 step" in image.description
+    assert image.width == 8 and image.height == 6
+    # A valid PNG whose pixels are the runner's colour.
+    assert image.png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert runner.calls[0][1] == "a drilling rig at dusk"
+    assert runner.calls[0][4] == 4
+
+
+def test_diffusion_is_available_with_an_injected_runner(tmp_path):
+    """An injected runner bypasses the extra check, so tests need no torch."""
+    from core.imagegen_diffusion import DiffusionImageGenerator
+
+    assert DiffusionImageGenerator(root=tmp_path, runner=_FakeRunner()).is_available()
+
+
+def test_diffusion_without_the_extra_is_unavailable(tmp_path):
+    """On a base install (no torch) the real backend reports itself unavailable."""
+    from core.imagegen_diffusion import DiffusionImageGenerator
+
+    generator = DiffusionImageGenerator(root=tmp_path)  # no runner, no extra
+    # Either the extra is absent (unavailable) or present but weights uncached.
+    assert generator.is_available() is False
+
+
+def test_diffusion_unavailable_names_the_install_command(tmp_path):
+    from core.imagegen_diffusion import DiffusionImageGenerator, DiffusionUnavailable
+
+    generator = DiffusionImageGenerator(root=tmp_path)
+    try:
+        generator.generate(ImageRequest("anything"))
+    except DiffusionUnavailable as error:
+        assert "[image]" in str(error) or "download" in str(error)
+    else:  # pragma: no cover - only when the extra is installed and cached
+        pytest.skip("the image extra is installed and the model is cached")
+
+
+def test_load_image_generator_builds_the_diffusion_backend(tmp_path):
+    runner = _FakeRunner()
+    generator = load_image_generator("diffusion", root=tmp_path, runner=runner, steps=2)
+    assert generator.name == "diffusion"
+    assert getattr(generator, "learned", False) is True
+
+
+def test_backend_status_lists_both_backends():
+    from core.imagegen import image_backend_status
+
+    status = dict((name, available) for name, available, _note in image_backend_status())
+    assert status["procedural"] is True
+    assert "diffusion" in status  # availability depends on the install
+
+
+def test_service_for_backend_keeps_the_same_root(tmp_path):
+    service = ImageGenerationService(root=tmp_path / "images")
+    other = service.for_backend("diffusion")
+    assert other.root == service.root
+    assert other.backend == "diffusion"
+
+
+def test_service_reports_unavailable_diffusion_without_raising(tmp_path):
+    service = ImageGenerationService(root=tmp_path, backend="diffusion")
+    report = service.generate("a prompt")
+    if report.ok:  # pragma: no cover - only when the real model is cached
+        pytest.skip("the learned model is cached and usable")
+    assert report.ok is False
+    assert report.learned is True
