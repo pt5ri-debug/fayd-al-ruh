@@ -138,6 +138,7 @@ def test_check_raster_limits_refuses_over_budget():
 
 
 def test_write_bounded_png_refuses_an_over_budget_raster():
+    pytest.importorskip("PIL", reason="Pillow (the [ocr] extra) is not installed")
     image = _tiny_image()
     try:
         with pytest.raises(OcrLimitError):
