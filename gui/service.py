@@ -23,6 +23,7 @@ from core.jarvis import JarvisMode, JarvisTurn
 from core.paths import data_dir
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
 from gui.import_center import ImportReport, KnowledgeImporter
+from gui.image_gen import ImageGenerationService
 from gui.sql_import import SqlImportService
 from gui.modes import (
     AnswerOnlyRouter,
@@ -101,6 +102,7 @@ class ChatService:
         operating_mode: str | None = None,
         data_root: Path | None = None,
         import_store_dir: str | Path | None = None,
+        image_store_dir: str | Path | None = None,
     ) -> None:
         self.mode = mode or build_session(
             root=root,
@@ -144,6 +146,9 @@ class ChatService:
         # service the CLI's `ingest sql-import` command uses, writing to the same
         # store and the same `<store>/ingest/jobs-sql` job files.
         self._sql_import = SqlImportService(store_dir=import_store_dir)
+        # The optional text-to-image page. The default backend renders a PNG with
+        # only the standard library, under the data folder; no model is required.
+        self._image_gen = ImageGenerationService(root=image_store_dir)
 
     # ------------------------------------------------------------ operating mode
 
@@ -414,6 +419,11 @@ class ChatService:
     def sql_import(self) -> SqlImportService:
         """The SQL Database Import engine (the resumable SQL ingestion service)."""
         return self._sql_import
+
+    @property
+    def image_gen(self) -> ImageGenerationService:
+        """The optional text-to-image engine (default: the procedural renderer)."""
+        return self._image_gen
 
     def _retriever(self):
         """The grounded assistant's retriever, when one is wired in.

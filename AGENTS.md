@@ -214,6 +214,18 @@ Arabic is kept as secondary aliases where useful.
   (PPM P6), measurable `ImageFeatures`, `HeuristicVisionEncoder`, and a
   `MultimodalAssistant` that grounds an image description in the RAG store. A real
   encoder can implement the `VisionEncoder` protocol without touching the assistant.
+- `core/imagegen.py` — optional **text-to-image**, the counterpart to
+  `core/vision.py`. Dependency-free: `encode_png` writes a valid PNG with only
+  `zlib`+`struct`, and the default `ProceduralImageGenerator` renders a
+  deterministic abstract composition from a prompt-derived seed (`ImageRequest` /
+  `GeneratedImage`, `ImageGenerator` protocol, `load_image_generator`,
+  `image_filename`, `default_image_dir`). It is a *renderer, not a model*, and
+  every `GeneratedImage` says so (`learned=False`, an honest `description`); a
+  real diffusion backend can implement `ImageGenerator` without the caller
+  changing. `gui/image_gen.py` adds the Tk-free `ImageGenerationService`
+  (`parse_size` reads a trailing `WxH`; `ImageReport`) and
+  `gui/image_gen_dialog.py` is the window's page (＋ menu → "Generate an image
+  from text…", a sidebar action, and `python -m cli image generate`).
 - `core/knowledge_base.py` — the **bulk knowledge base**: a keyless
   `WikipediaFetcher` (batched MediaWiki API, `Retry-After`-aware), `chunk_text`,
   and a sharded JSONL `KnowledgeBaseStore`. `build_knowledge_base(store_dir,
@@ -342,6 +354,13 @@ Arabic is kept as secondary aliases where useful.
   `should_cancel`; every status and result is secret-redacted before display.
   Reachable from the composer's ＋ menu (**Import a SQL database (SQLite)…**) and
   from the Import Center dialog.
+- `gui/image_gen_dialog.py` — the **Generate an image from text** screen (Tk,
+  imported lazily): a prompt box (a trailing `WxH` sets the size), optional
+  width/height/seed fields, **Generate** (worker thread, then a `tk.PhotoImage`
+  preview), and **Save a copy…**. It says plainly that this build has no learned
+  text-to-image model and the picture is a geometric composition. Reachable from
+  the composer's ＋ menu (**Generate an image from text…**) and the sidebar
+  (**Generate an image from text**).
 - `cli/ingest.py` — the ingestion CLI, including the **SQLite import** commands
   (`sql-drivers`, `sql-inspect`, `sql-preview`, `sql-import`, `sql-status`,
   `sql-resume`, `sql-cancel`, `sql-jobs`). They are the headless twin of the
@@ -361,7 +380,9 @@ Arabic is kept as secondary aliases where useful.
   Update the baseline with `python -m evaluation --update-baseline`.
 - `cli/` — portable front end. `menu.py` holds actions + `MENU`; `__main__.py`
   dispatches commands and reconfigures stdout/stderr to UTF-8 (Arabic-safe on
-  legacy Windows consoles).
+  legacy Windows consoles). `cli/image.py` is the text-to-image command:
+  `python -m cli image generate "prompt" [--width/--height/--seed/--output/--json]`
+  and `python -m cli image backends`.
 - `gui/` — ChatGPT-style desktop window, an alternative *front end* to `cli/`,
   never a replacement. `service.py` reuses the text `chat` session
   (`ai.jarvis.build_session(text_only=True)`) + `ai.chat.ModelSwitcher` and adds
@@ -571,7 +592,9 @@ clone, each optional so the base system still runs without it:
   `core/tool_agent.py`).
 - Phase 4 — continuous learning from explicit feedback + regression monitor
   (`core/knowledge_update.py`, `core/continuous_learning.py`).
-- Phase 5 — optional multimodal perception (`core/vision.py`).
+- Phase 5 — optional multimodal perception (`core/vision.py`) and its
+  counterpart, optional text-to-image (`core/imagegen.py`): a dependency-free
+  PNG renderer with an honest procedural default and a swappable `ImageGenerator`.
 - Phase 6 — Jarvis mode: wake-word gate (`core/wake_word.py`), natural-language
   command routing to sandboxed tools (`core/command_router.py`), persistent user
   preferences (`core/preferences.py`), real system speech engines
