@@ -772,9 +772,39 @@ Being honest matters more than looking impressive, so the default is stated
 plainly: it is a *procedural renderer, not a learned text-to-image model*. It
 derives a seed from the prompt and paints a deterministic abstract composition
 from it — the same prompt always gives the same picture, and the result is a
-geometric pattern, not a depiction of the words. A real diffusion model can be
-dropped in behind the `ImageGenerator` protocol without changing the window, the
-CLI, or the service.
+geometric pattern, not a depiction of the words.
+
+### The learned backend (optional, real model)
+
+For a genuinely learned text-to-image result, install the optional extra and
+download a real diffusion model once:
+
+```bash
+pip install .[image]                     # torch (CPU) + Diffusers, ~gigabytes
+python -m cli image download --approve   # one-time, ~2.5 GB from HuggingFace
+python -m cli image generate "a drilling rig at dusk" --backend diffusion
+```
+
+The default model is `stabilityai/sd-turbo` (1-4 steps, small enough for a CPU),
+and the weights are cached under `data/models` (git-ignored). Everything about
+this path follows the project's hard rules:
+
+- It is **optional and additive**: the base install has no torch, and the import
+  is lazy, so nothing heavy is pulled unless you actually use it.
+- The download **leaves the machine**, so it is an external action behind the
+  same permission and human-approval gates as a web search — denied by default,
+  granted with `--approve`. A cached model needs no download.
+- Every image from it is labelled `learned=True` and names the model, the step
+  count, and the seed — no pretending.
+- When the extra or the weights are missing, the request fails with a clear
+  message (and the window falls back to the procedural renderer); nothing breaks.
+
+In the window, pick **Diffusion (learned)** in the text-to-image page, press
+**Download model…** once, then **Generate**.
+
+A real model can be dropped in behind the `ImageGenerator` protocol without
+changing the window, the CLI, or the service; `--model`, `--steps`, and
+`--guidance` choose another Diffusers model.
 
 In the GUI, open the composer's **＋** menu and choose **Generate an image from
 text…**, or use the sidebar's **Generate an image from text**. Write a prompt (a

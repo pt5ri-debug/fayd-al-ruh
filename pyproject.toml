@@ -19,6 +19,20 @@ pdf = ["pypdf>=4.0"]
 # extra is never required by the base install. ``pypdf`` is included because OCR
 # runs on top of native page extraction.
 ocr = ["pypdf>=4.0", "pypdfium2>=4.0", "pytesseract>=0.3.10", "Pillow>=10.0"]
+# A *learned* text-to-image backend is a separate optional extra. The default
+# renderer is dependency-free (`core/imagegen.py`); this extra adds a real
+# diffusion model (Diffusers + a CPU torch) that can be dropped in behind the
+# same `ImageGenerator` protocol. It is never required by the base install, the
+# import is lazy, and the model weights (~2.5 GB) download only after an
+# explicit, human-approved request (see `core/imagegen_diffusion.py`).
+image = [
+    "torch>=2.2",
+    "diffusers>=0.27",
+    "transformers>=4.40",
+    "accelerate>=0.30",
+    "safetensors>=0.4",
+    "Pillow>=10.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -61,4 +75,11 @@ ignore_missing_imports = true
 # OCR is an optional extra (``pip install .[ocr]``); its imports are lazy too.
 [[tool.mypy.overrides]]
 module = ["pypdfium2", "pytesseract"]
+ignore_missing_imports = true
+
+# The learned text-to-image backend is an optional extra
+# (``pip install .[image]``); it imports torch/diffusers lazily, so a base
+# install must still type-check. torch ships its own stubs; diffusers has none.
+[[tool.mypy.overrides]]
+module = ["diffusers"]
 ignore_missing_imports = true

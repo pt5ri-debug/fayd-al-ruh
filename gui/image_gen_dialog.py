@@ -65,6 +65,7 @@ class ImageGenDialog:
         self._width_var = tk.StringVar(value="")
         self._height_var = tk.StringVar(value="")
         self._seed_var = tk.StringVar(value="")
+        self._backend_var = tk.StringVar(value=service.backend)
 
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
@@ -109,6 +110,29 @@ class ImageGenDialog:
         ).pack(fill="x", padx=12, pady=(0, 8))
 
         options = self._section("2.  Options")
+        backend_row = tk.Frame(options, bg=theme.surface)
+        backend_row.pack(fill="x", padx=12, pady=(2, 4))
+        tk.Label(
+            backend_row, text="Backend", bg=theme.surface, fg=theme.text_secondary,
+            font=(self.font, 9),
+        ).pack(side="left", padx=(0, 6))
+        for name, label in (("procedural", "Procedural (default)"), ("diffusion", "Diffusion (learned)")):
+            tk.Radiobutton(
+                backend_row, text=label, value=name, variable=self._backend_var,
+                command=self._on_backend_change, bg=theme.surface, fg=theme.foreground,
+                selectcolor=theme.base, activebackground=theme.surface, font=(self.font, 9),
+                highlightthickness=0, borderwidth=0,
+            ).pack(side="left", padx=(0, 12))
+        self._download_button = self._button(
+            backend_row, "Download model…", self._on_download_model
+        )
+        self._download_button.pack(side="left", padx=(8, 0))
+        self._backend_note = tk.Label(
+            options, text="", bg=theme.surface, fg=theme.text_dim, font=(self.font, 8),
+            anchor="w", justify="left", wraplength=700,
+        )
+        self._backend_note.pack(fill="x", padx=12, pady=(0, 4))
+
         row = tk.Frame(options, bg=theme.surface)
         row.pack(fill="x", padx=12, pady=(2, 8))
         self._labelled_entry(row, "Width", self._width_var, 6)
@@ -118,6 +142,7 @@ class ImageGenDialog:
             row, text="(blank = size from the prompt / a seed from the prompt)",
             bg=theme.surface, fg=theme.text_dim, font=(self.font, 8), anchor="w",
         ).pack(side="left", padx=(8, 0))
+        self._refresh_backend_note()
 
         actions = tk.Frame(self.window, bg=theme.base)
         actions.pack(fill="x", padx=20, pady=(6, 4))
@@ -169,6 +194,56 @@ class ImageGenDialog:
 
     # -- behaviour --------------------------------------------------------
 
+    def _service_for_backend(self) -> Any:
+        backend = self._backend_var.get()
+        if backend == self.image_service.backend:
+            if self.image_service.available():
+                return self.image_service
+        return self.image_service.for_backend(backend)
+
+    def _on_backend_change(self) -> None:
+        self._refresh_backend_note()
+
+    def _refresh_backend_note(self) -> None:
+        backend = self._backend_var.get()
+        status = dict((name, (available, note)) for name, available, note in self.image_service.backend_status())
+        available, note = status.get(backend, (False, "Unknown backend."))
+        if backend == "procedural":
+            self._download_button.pack_forget()
+        else:
+            self._download_button.pack(side="left", padx=(8, 0))
+            self._download_button.configure(state="disabled" if self._busy else "normal")
+        prefix = "Ready." if available else "Not ready."
+        self._backend_note.configure(text=f"{prefix}  {note}")
+
+    def _on_download_model(self) -> None:
+        if self._busy:
+            return
+        self._busy = True
+        self._generate_button.configure(state="disabled")
+        self._download_button.configure(state="disabled")
+        self._set_status("Downloading the model… (one-time, ~2.5 GB)")
+
+        def run() -> None:
+            try:
+                report = self.image_service.download_model(approved=True)
+                self.window.after(0, partial(self._finish_download, report, None))
+            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+                self.window.after(0, partial(self._finish_download, None, error))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _finish_download(self, report: Any, error: Exception | None) -> None:
+        self._busy = False
+        self._generate_button.configure(state="normal")
+        if error is not None:
+            self._set_status(f"Could not download the model: {error}", error=True)
+        elif not report.ok:
+            self._set_status(report.message, error=True)
+        else:
+            self._set_status(report.message)
+        self._refresh_backend_note()
+
     def _on_generate(self) -> None:
         if self._busy:
             return
@@ -182,6 +257,15 @@ class ImageGenDialog:
         if width is False or height is False or seed is False:
             self._set_status("Width, height, and seed must be whole numbers.", error=True)
             return
+        backend = self._backend_var.get()
+        service = self._service_for_backend()
+        if backend == "diffusion" and not service.available():
+            self._set_status(
+                "The learned backend is not ready — install the [image] extra and "
+                "download the model, or choose Procedural.",
+                error=True,
+            )
+            return
         self._busy = True
         self._generate_button.configure(state="disabled")
         self._save_button.configure(state="disabled")
@@ -189,7 +273,7 @@ class ImageGenDialog:
 
         def run() -> None:
             try:
-                report = self.image_service.generate(
+                report = service.generate(
                     prompt, width=width, height=height, seed=seed
                 )
                 self.window.after(0, partial(self._finish, report, None))

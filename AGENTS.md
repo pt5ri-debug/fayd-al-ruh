@@ -222,13 +222,26 @@ Arabic is kept as secondary aliases where useful.
   `zlib`+`struct`, and the default `ProceduralImageGenerator` renders a
   deterministic abstract composition from a prompt-derived seed (`ImageRequest` /
   `GeneratedImage`, `ImageGenerator` protocol, `load_image_generator`,
-  `image_filename`, `default_image_dir`). It is a *renderer, not a model*, and
-  every `GeneratedImage` says so (`learned=False`, an honest `description`); a
-  real diffusion backend can implement `ImageGenerator` without the caller
-  changing. `gui/image_gen.py` adds the Tk-free `ImageGenerationService`
-  (`parse_size` reads a trailing `WxH`; `ImageReport`) and
-  `gui/image_gen_dialog.py` is the window's page (＋ menu → "Generate an image
-  from text…", a sidebar action, and `python -m cli image generate`).
+  `image_backend_names` / `image_backend_status`, `image_filename`,
+  `default_image_dir`). It is a *renderer, not a model*, and every
+  `GeneratedImage` says so (`learned=False`, an honest `description`).
+  `load_image_generator("diffusion", ...)` builds the optional learned backend.
+  `gui/image_gen.py` adds the Tk-free `ImageGenerationService`
+  (`parse_size` reads a trailing `WxH`; `ImageReport`; `for_backend`,
+  `backend_status`, `download_model`) and `gui/image_gen_dialog.py` is the
+  window's page (＋ menu → "Generate an image from text…", a sidebar action, a
+  backend selector, and `python -m cli image`).
+- `core/imagegen_diffusion.py` — the optional **learned** text-to-image backend:
+  a real Diffusers diffusion model (`stabilityai/sd-turbo` by default, 1-4 steps)
+  that runs on CPU. Everything heavy is lazy: torch/diffusers are imported only
+  when generating, so a base install never needs them (`pip install .[image]`).
+  Weights download only through the project's permission + human-approval gates
+  (`DOWNLOAD_TOOL`, denied by default; `python -m cli image download --approve`)
+  and are cached under `data/models` (git-ignored). `DiffusionImageGenerator`
+  implements `ImageGenerator` with `learned=True` and a `description` that names
+  the model, steps, and seed; `DiffusionUnavailable` is raised when the extra or
+  the weights are missing so the caller can fall back to the procedural renderer.
+  `DiffusionPipelineRunner` is the seam a test injects (no torch needed).
 - `core/knowledge_base.py` — the **bulk knowledge base**: a keyless
   `WikipediaFetcher` (batched MediaWiki API, `Retry-After`-aware), `chunk_text`,
   and a sharded JSONL `KnowledgeBaseStore`. `build_knowledge_base(store_dir,

@@ -27,7 +27,7 @@ import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 RGB = tuple[int, int, int]
 
@@ -276,13 +276,75 @@ def _blend_circle(
                 canvas[offset + channel] = int(round(base * (1 - alpha) + colour[channel] * alpha))
 
 
-def load_image_generator(name: str = "procedural") -> ImageGenerator:
-    """Return the named backend; raises ``ValueError`` for one this build lacks."""
+def load_image_generator(name: str = "procedural", **options: Any) -> ImageGenerator:
+    """Return the named backend; raises ``ValueError`` for one this build lacks.
+
+    ``procedural`` is always available. ``diffusion`` is the optional learned
+    backend and is imported lazily, so this module never pulls torch on a base
+    install; ``options`` are forwarded to it (``model``, ``steps``, ``guidance``,
+    ``root``, ``runner``).
+    """
     if name == "procedural":
         return ProceduralImageGenerator()
+    if name == "diffusion":
+        from core.imagegen_diffusion import DiffusionImageGenerator
+
+        return DiffusionImageGenerator(**options)
     raise ValueError(
-        f"Image generator {name!r} is not available in this build; use 'procedural'."
+        f"Image generator {name!r} is not available in this build; "
+        "use 'procedural' or 'diffusion'."
     )
+
+
+def image_backend_names() -> tuple[str, ...]:
+    """The backend names this build knows about, the learned one included."""
+    return ("procedural", "diffusion")
+
+
+def image_backend_status(root: Path | None = None) -> tuple[tuple[str, bool, str], ...]:
+    """Report each backend as ``(name, available_now, note)``.
+
+    ``procedural`` is always available. ``diffusion`` reports whether the optional
+    extra is installed *and* its weights are cached; the note says what is missing
+    so the CLI and the window can tell the user exactly what to do.
+    """
+    status: list[tuple[str, bool, str]] = [
+        ("procedural", True, "Dependency-free deterministic renderer (not a model).")
+    ]
+    try:
+        from core.imagegen_diffusion import (
+            DEFAULT_MODEL,
+            DiffusionUnavailable,
+            DiffusionImageGenerator,
+            _require_extra,
+        )
+    except ImportError:  # pragma: no cover - the module ships with the project
+        status.append(("diffusion", False, "The learned backend module is missing."))
+        return tuple(status)
+    generator = DiffusionImageGenerator(root=root)
+    try:
+        _require_extra()
+    except DiffusionUnavailable:
+        status.append(
+            (
+                "diffusion",
+                False,
+                "Learned backend needs the optional extra: pip install .[image]",
+            )
+        )
+        return tuple(status)
+    if generator.is_available():
+        status.append(("diffusion", True, f"Learned model {DEFAULT_MODEL!r} is cached and ready."))
+    else:
+        status.append(
+            (
+                "diffusion",
+                False,
+                f"Extra installed; model {DEFAULT_MODEL!r} is not cached yet "
+                "(run: python -m cli image download --approve).",
+            )
+        )
+    return tuple(status)
 
 
 # --------------------------------------------------------------------------- storage
@@ -314,6 +376,8 @@ __all__ = [
     "RGB",
     "default_image_dir",
     "encode_png",
+    "image_backend_names",
+    "image_backend_status",
     "image_filename",
     "load_image_generator",
 ]

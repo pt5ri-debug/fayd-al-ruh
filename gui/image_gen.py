@@ -15,6 +15,7 @@ honest description and a ``learned`` flag that is ``False`` for it.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from core.imagegen import (
     ImageGenerator,
     ImageRequest,
     default_image_dir,
+    image_backend_status,
     image_filename,
     load_image_generator,
 )
@@ -86,9 +88,25 @@ class ImageGenerationService:
         root: Path | str | None = None,
         generator: ImageGenerator | None = None,
         backend: str = "procedural",
+        model: str | None = None,
+        steps: int = 1,
+        guidance: float = 0.0,
+        on_progress: Callable[[str], None] | None = None,
     ) -> None:
         self._root = Path(root) if root is not None else None
-        self._generator = generator if generator is not None else load_image_generator(backend)
+        self._backend_name = backend
+        self._on_progress = on_progress
+        if generator is not None:
+            self._generator = generator
+        else:
+            options: dict[str, object] = {}
+            if backend == "diffusion":
+                if model is not None:
+                    options["model"] = model
+                options["steps"] = steps
+                options["guidance"] = guidance
+                options["root"] = self._root
+            self._generator = load_image_generator(backend, **options)
 
     @property
     def backend(self) -> str:
@@ -102,6 +120,38 @@ class ImageGenerationService:
     def image_dir(self) -> Path:
         """Where generated images are written when no explicit path is given."""
         return default_image_dir(self._root)
+
+    @property
+    def root(self) -> Path | None:
+        """The explicit storage root, or ``None`` for the default data folder."""
+        return self._root
+
+    def for_backend(
+        self,
+        backend: str,
+        *,
+        model: str | None = None,
+        steps: int = 1,
+        guidance: float = 0.0,
+    ) -> ImageGenerationService:
+        """A service on the same storage root that uses a different backend."""
+        return ImageGenerationService(
+            root=self._root,
+            backend=backend,
+            model=model,
+            steps=steps,
+            guidance=guidance,
+            on_progress=self._on_progress,
+        )
+
+    def backend_status(self) -> tuple[tuple[str, bool, str], ...]:
+        """Every backend and whether it can run now, for a menu or a status line."""
+        return image_backend_status(self._root)
+
+    def available(self) -> bool:
+        """True when the selected backend can actually run (so a menu can fall back)."""
+        checker = getattr(self._generator, "is_available", None)
+        return True if not callable(checker) else bool(checker())
 
     def generate(
         self,
@@ -126,9 +176,39 @@ class ImageGenerationService:
             image = self._generator.generate(request)
             target = Path(output) if output is not None else self._default_path(image)
             image.save(target)
-        except (ValueError, OSError) as error:
-            return ImageReport(ok=False, prompt=text, message=str(error))
+        except (ValueError, OSError, RuntimeError) as error:
+            return ImageReport(
+                ok=False,
+                prompt=text,
+                message=str(error),
+                backend=self.backend,
+                learned=self.learned,
+            )
         return self._to_report(image, target)
+
+    def download_model(self, *, approved: bool = False, model: str | None = None) -> ImageReport:
+        """Download the learned model's weights (external action; needs approval)."""
+        from core.imagegen_diffusion import DEFAULT_MODEL, DiffusionUnavailable, download_model
+
+        name = model or DEFAULT_MODEL
+        try:
+            path = download_model(
+                name, root=self._root, approved=approved, progress=self._progress
+            )
+        except (DiffusionUnavailable, ValueError, OSError) as error:
+            return ImageReport(ok=False, prompt=name, message=str(error))
+        return ImageReport(
+            ok=True,
+            prompt=name,
+            message=f"Model {name!r} is cached at {path}.",
+            path=str(path),
+            backend="diffusion",
+            learned=True,
+        )
+
+    def _progress(self, message: str) -> None:
+        if self._on_progress is not None:
+            self._on_progress(message)
 
     def _default_path(self, image: GeneratedImage) -> Path:
         return self.image_dir / image_filename(image.prompt, image.seed)
