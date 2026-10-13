@@ -40,16 +40,21 @@ MAX_DIMENSION = 2048
 
 @dataclass(frozen=True)
 class ImageRequest:
-    """One image request: the prompt, an optional size, and an optional seed.
+    """One image request: the prompt, an optional size, an optional seed, and a
+    negative prompt.
 
     ``seed`` overrides the prompt-derived seed, so the same picture can be
     reproduced or varied on demand; ``None`` means "derive it from the prompt".
+    ``negative_prompt`` names what to steer away from (the learned backend uses a
+    photorealistic default when it is ``None``); the dependency-free renderer
+    ignores it.
     """
 
     prompt: str
     width: int = DEFAULT_WIDTH
     height: int = DEFAULT_HEIGHT
     seed: int | None = None
+    negative_prompt: str | None = None
 
     def __post_init__(self) -> None:
         if not self.prompt.strip():
@@ -316,14 +321,17 @@ def image_backend_status(root: Path | None = None) -> tuple[tuple[str, bool, str
     try:
         from core.imagegen_diffusion import (
             DEFAULT_MODEL,
+            DEFAULT_PRESET,
             DiffusionUnavailable,
             DiffusionImageGenerator,
             _require_extra,
+            preset_names,
         )
     except ImportError:  # pragma: no cover - the module ships with the project
         status.append(("diffusion", False, "The learned backend module is missing."))
         return tuple(status)
     generator = DiffusionImageGenerator(root=root)
+    presets = ", ".join(preset_names())
     try:
         _require_extra()
     except DiffusionUnavailable:
@@ -332,19 +340,28 @@ def image_backend_status(root: Path | None = None) -> tuple[tuple[str, bool, str
                 "diffusion",
                 False,
                 "Learned backend needs the optional extra: "
-                + pip_install_command(FEATURE_IMAGE),
+                + pip_install_command(FEATURE_IMAGE)
+                + f"  Presets: {presets}.",
             )
         )
         return tuple(status)
     if generator.is_available():
-        status.append(("diffusion", True, f"Learned model {DEFAULT_MODEL!r} is cached and ready."))
+        status.append(
+            (
+                "diffusion",
+                True,
+                f"Learned model {DEFAULT_MODEL!r} (preset {DEFAULT_PRESET!r}) is cached "
+                f"and ready. Presets: {presets}.",
+            )
+        )
     else:
         status.append(
             (
                 "diffusion",
                 False,
-                f"Extra installed; model {DEFAULT_MODEL!r} is not cached yet "
-                "(run: python -m cli image download --approve).",
+                f"Extra installed; model {DEFAULT_MODEL!r} (preset {DEFAULT_PRESET!r}) "
+                "is not cached yet (run: python -m cli image download --approve). "
+                f"Presets: {presets}.",
             )
         )
     return tuple(status)

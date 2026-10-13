@@ -239,19 +239,24 @@ Arabic is kept as secondary aliases where useful.
   window's page (＋ menu → "Generate an image from text…", a sidebar action, a
   backend selector, and `python -m cli image`).
 - `core/imagegen_diffusion.py` — the optional **learned** text-to-image backend:
-  a real Diffusers diffusion model (`stabilityai/sd-turbo` by default, 1-4 steps)
-  that runs on CPU. Everything heavy is lazy: torch/diffusers are imported only
-  when generating, so a base install never needs them (`python -m pip install -r
-  requirements-image.txt`, wired as the `image` feature in `core/optional_deps.py`;
-  the `pip install .[image]` form cannot work from a source checkout, since the
-  project is not on PyPI and the checkout has no setuptools package discovery).
-  Weights download only through the project's permission + human-approval gates
-  (`DOWNLOAD_TOOL`, denied by default; `python -m cli image download --approve`)
-  and are cached under `data/models` (git-ignored). `DiffusionImageGenerator`
-  implements `ImageGenerator` with `learned=True` and a `description` that names
-  the model, steps, and seed; `DiffusionUnavailable` is raised when the extra or
-  the weights are missing so the caller can fall back to the procedural renderer.
-  `DiffusionPipelineRunner` is the seam a test injects (no torch needed).
+  a real Diffusers diffusion model, tuned for photorealistic, clean pictures.
+  `ImageModelPreset` + `PRESETS` (`fast` sd-turbo / `realistic` *(default)*
+  dreamshaper-8-lcm / `detailed` dreamshaper-8) bundle the model, sampler
+  settings, and a negative prompt; `resolve_preset` / `preset_names` /
+  `preset_summaries` expose them. `DiffusionImageGenerator` takes
+  `preset`/`model`/`steps`/`guidance`/`negative_prompt` (explicit values override
+  the preset); its runner receives a negative prompt and snaps the size to the
+  64px grid, resampling back with a high-quality filter. Weights download through
+  the permission/approval gates (`download_model`, `--approve`), cached under
+  `data/models` (git-ignored). Everything heavy is lazy: torch/diffusers are
+  imported only when generating, so a base install never needs them (`python -m
+  pip install -r requirements-image.txt`, wired as the `image` feature in
+  `core/optional_deps.py`; the `pip install .[image]` form cannot work from a
+  source checkout, since the project is not on PyPI and the checkout has no
+  setuptools package discovery). `DiffusionUnavailable` is raised when the extra
+  or the weights are missing so the caller can fall back to the procedural
+  renderer. `DiffusionPipelineRunner` is the seam a test injects (no torch
+  needed).
 - `core/knowledge_base.py` — the **bulk knowledge base**: a keyless
   `WikipediaFetcher` (batched MediaWiki API, `Retry-After`-aware), `chunk_text`,
   and a sharded JSONL `KnowledgeBaseStore`. `build_knowledge_base(store_dir,

@@ -89,8 +89,10 @@ class ImageGenerationService:
         generator: ImageGenerator | None = None,
         backend: str = "procedural",
         model: str | None = None,
-        steps: int = 1,
-        guidance: float = 0.0,
+        preset: str | None = None,
+        steps: int | None = None,
+        guidance: float | None = None,
+        negative_prompt: str | None = None,
         on_progress: Callable[[str], None] | None = None,
     ) -> None:
         self._root = Path(root) if root is not None else None
@@ -103,8 +105,14 @@ class ImageGenerationService:
             if backend == "diffusion":
                 if model is not None:
                     options["model"] = model
-                options["steps"] = steps
-                options["guidance"] = guidance
+                if preset is not None:
+                    options["preset"] = preset
+                if steps is not None:
+                    options["steps"] = steps
+                if guidance is not None:
+                    options["guidance"] = guidance
+                if negative_prompt is not None:
+                    options["negative_prompt"] = negative_prompt
                 options["root"] = self._root
             self._generator = load_image_generator(backend, **options)
 
@@ -131,16 +139,20 @@ class ImageGenerationService:
         backend: str,
         *,
         model: str | None = None,
-        steps: int = 1,
-        guidance: float = 0.0,
+        preset: str | None = None,
+        steps: int | None = None,
+        guidance: float | None = None,
+        negative_prompt: str | None = None,
     ) -> ImageGenerationService:
         """A service on the same storage root that uses a different backend."""
         return ImageGenerationService(
             root=self._root,
             backend=backend,
             model=model,
+            preset=preset,
             steps=steps,
             guidance=guidance,
+            negative_prompt=negative_prompt,
             on_progress=self._on_progress,
         )
 
@@ -160,6 +172,7 @@ class ImageGenerationService:
         width: int | None = None,
         height: int | None = None,
         seed: int | None = None,
+        negative_prompt: str | None = None,
         output: str | Path | None = None,
     ) -> ImageReport:
         """Render ``prompt`` and save the PNG; never raises for a bad request."""
@@ -172,6 +185,7 @@ class ImageGenerationService:
                 width=width if width is not None else parsed_width,
                 height=height if height is not None else parsed_height,
                 seed=seed,
+                negative_prompt=negative_prompt,
             )
             image = self._generator.generate(request)
             target = Path(output) if output is not None else self._default_path(image)
@@ -186,11 +200,24 @@ class ImageGenerationService:
             )
         return self._to_report(image, target)
 
-    def download_model(self, *, approved: bool = False, model: str | None = None) -> ImageReport:
+    def download_model(
+        self,
+        *,
+        approved: bool = False,
+        model: str | None = None,
+        preset: str | None = None,
+    ) -> ImageReport:
         """Download the learned model's weights (external action; needs approval)."""
-        from core.imagegen_diffusion import DEFAULT_MODEL, DiffusionUnavailable, download_model
+        from core.imagegen_diffusion import (
+            DiffusionUnavailable,
+            download_model,
+            resolve_preset,
+        )
 
-        name = model or DEFAULT_MODEL
+        try:
+            name = model or resolve_preset(preset).model
+        except ValueError as error:
+            return ImageReport(ok=False, prompt="", message=str(error))
         try:
             path = download_model(
                 name, root=self._root, approved=approved, progress=self._progress

@@ -278,8 +278,10 @@ class _FakeRunner:
         self.colour = colour
         self.calls: list[tuple] = []
 
-    def __call__(self, model, prompt, width, height, steps, guidance, seed):
-        self.calls.append((model, prompt, width, height, steps, guidance, seed))
+    def __call__(self, model, prompt, negative_prompt, width, height, steps, guidance, seed):
+        self.calls.append(
+            (model, prompt, negative_prompt, width, height, steps, guidance, seed)
+        )
         row = bytes(self.colour) * width
         return [row for _ in range(height)]
 
@@ -294,11 +296,104 @@ def test_diffusion_generator_labels_output_as_learned(tmp_path):
     assert image.backend == "diffusion"
     assert DEFAULT_MODEL in image.description
     assert "4 step" in image.description
+    assert "realistic" in image.description  # the photorealistic preset is named
     assert image.width == 8 and image.height == 6
     # A valid PNG whose pixels are the runner's colour.
     assert image.png[:8] == b"\x89PNG\r\n\x1a\n"
     assert runner.calls[0][1] == "a drilling rig at dusk"
-    assert runner.calls[0][4] == 4
+    assert runner.calls[0][5] == 4
+
+
+def test_realistic_preset_is_the_default_and_carries_a_negative_prompt():
+    from core.imagegen_diffusion import DEFAULT_NEGATIVE_PROMPT, DEFAULT_PRESET, PRESETS
+
+    assert DEFAULT_PRESET == "realistic"
+    preset = PRESETS[DEFAULT_PRESET]
+    # Photorealistic by default: a real sampler, not one no-guidance step.
+    assert preset.steps >= 4
+    assert preset.guidance > 0
+    assert preset.negative_prompt == DEFAULT_NEGATIVE_PROMPT
+    assert "cartoon" in preset.negative_prompt  # steers away from the "looks drawn" tells
+
+
+def test_resolve_preset_rejects_an_unknown_name():
+    import pytest
+
+    from core.imagegen_diffusion import resolve_preset
+
+    assert resolve_preset(None).name == "realistic"
+    assert resolve_preset("FAST").name == "fast"
+    with pytest.raises(ValueError):
+        resolve_preset("nope")
+
+
+def test_generator_uses_the_preset_and_forwards_the_negative_prompt(tmp_path):
+    from core.imagegen_diffusion import DiffusionImageGenerator
+
+    runner = _FakeRunner()
+    generator = DiffusionImageGenerator(root=tmp_path, runner=runner, preset="detailed")
+    generator.generate(ImageRequest("a portrait"))
+    model, _prompt, negative, _w, _h, steps, guidance, _seed = runner.calls[0]
+    assert steps == 30 and guidance == 7.0
+    assert "cartoon" in negative
+    # An explicit negative prompt overrides the preset's default.
+    generator.generate(ImageRequest("a portrait", negative_prompt="rain"))
+    assert runner.calls[1][2] == "rain"
+
+
+def test_explicit_settings_override_the_preset(tmp_path):
+    from core.imagegen_diffusion import DiffusionImageGenerator
+
+    generator = DiffusionImageGenerator(
+        root=tmp_path, runner=_FakeRunner(), preset="realistic", steps=1, guidance=0.0
+    )
+    assert generator.steps == 1
+    assert generator.guidance == 0.0
+
+
+def test_preset_names_and_summaries_are_stable():
+    from core.imagegen_diffusion import preset_names, preset_summaries
+
+    assert preset_names() == ("fast", "realistic", "detailed")
+    summaries = dict((name, model) for name, model, _summary in preset_summaries())
+    assert summaries["realistic"] == "Lykon/dreamshaper-8-lcm"
+    assert "photorealistic" in dict(
+        (name, summary) for name, _model, summary in preset_summaries()
+    )["realistic"].lower()
+
+
+def test_the_realistic_preset_installs_an_lcm_scheduler():
+    from core.imagegen_diffusion import PRESETS, _install_scheduler
+
+    assert PRESETS["realistic"].scheduler == "lcm"
+
+    class _Scheduler:
+        def __init__(self) -> None:
+            self.config = {"_class_name": "PNDMScheduler"}
+
+    class _Pipeline:
+        def __init__(self) -> None:
+            self.scheduler = _Scheduler()
+
+    class _LCM(_Scheduler):
+        @classmethod
+        def from_config(cls, config):
+            instance = cls()
+            instance.config = config
+            return instance
+
+    class _Diffusers:
+        LCMScheduler = _LCM
+
+    pipeline = _Pipeline()
+    _install_scheduler(pipeline, _Diffusers, "lcm")
+    assert isinstance(pipeline.scheduler, _LCM)
+
+    # An empty scheduler name leaves the pipeline's own sampler alone.
+    untouched = _Pipeline()
+    original = untouched.scheduler
+    _install_scheduler(untouched, _Diffusers, "")
+    assert untouched.scheduler is original
 
 
 def test_diffusion_is_available_with_an_injected_runner(tmp_path):
@@ -360,3 +455,52 @@ def test_service_reports_unavailable_diffusion_without_raising(tmp_path):
         pytest.skip("the learned model is cached and usable")
     assert report.ok is False
     assert report.learned is True
+
+
+def test_service_forwards_preset_and_negative_prompt_to_the_generator(tmp_path):
+    from core.imagegen_diffusion import DiffusionImageGenerator
+
+    runner = _FakeRunner()
+    generator = DiffusionImageGenerator(root=tmp_path, runner=runner, preset="detailed")
+    service = ImageGenerationService(root=tmp_path, generator=generator)
+    report = service.generate("a portrait", negative_prompt="rain, fog")
+    assert report.ok
+    _model, _prompt, negative, _w, _h, steps, _g, _seed = runner.calls[0]
+    assert negative == "rain, fog"
+    assert steps == 30  # the preset's step count, not a single step
+
+
+def test_service_download_model_accepts_a_preset(tmp_path):
+    service = ImageGenerationService(root=tmp_path, backend="diffusion")
+    report = service.download_model(approved=False, preset="detailed")
+    # Denied by default (no approval), but the preset must resolve to a real model
+    # rather than raising an unknown-preset error.
+    assert report.ok is False
+    assert "preset" not in report.message.lower()
+
+
+def test_cli_presets_lists_the_photorealistic_default(capsys):
+    assert image_main(["presets"]) == 0
+    out = capsys.readouterr().out
+    assert "realistic (default)" in out
+    assert "fast" in out and "detailed" in out
+
+
+def test_cli_generate_accepts_preset_and_negative(tmp_path):
+    # On a base install the learned backend is unavailable, so this exercises the
+    # flag plumbing and the honest failure -- not a real generation.
+    code = image_main(
+        [
+            "--output-dir",
+            str(tmp_path),
+            "generate",
+            "a prompt",
+            "--backend",
+            "diffusion",
+            "--preset",
+            "fast",
+            "--negative",
+            "blur",
+        ]
+    )
+    assert code == 1  # no extra/weights in the test environment
