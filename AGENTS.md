@@ -9,6 +9,13 @@ Arabic is kept as secondary aliases where useful.
 - ALWAYS work on a feature branch; never commit to `main`.
 - Before finishing: `python -m pytest -q`, `python -m ruff check .`, `python -m mypy`,
   `python -m evaluation` (must print PASS, no regression).
+- CI (`.github/workflows/ci.yml`) installs **only `requirements.txt`** — no
+  optional extras. So that file must carry every dependency the tests need
+  (it already bundles `pytest`/`ruff`/`mypy`, and now `pypdf`); tests over an
+  optional extra must skip when it is absent (`pdf_available()`,
+  `ocr_available()`, `pytest.importorskip`), and `pyproject.toml`'s mypy
+  overrides must ignore every optional import name (`pypdf`, `pypdfium2`,
+  `pytesseract`, `PIL`, `diffusers`).
 - Push branches and open PRs with the `create_pr` tool. Merge only on the user's
   explicit approval ("نعم قم بالدمج").
 
