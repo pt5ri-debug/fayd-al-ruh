@@ -171,6 +171,11 @@ _MAX_BUBBLE_LINES = 40
 #: transcript reads like a centred conversation (OpenHands caps it the same way).
 _COLUMN_MAX = 820
 
+#: A bubble hugs its text: it never wraps before this width, and assistant
+#: bubbles wrap at 80% of the column so the amount of text drives the box size.
+_BUBBLE_MIN_WIDTH = 96
+_BUBBLE_WRAP_FRACTION = 0.8
+
 
 def _pick_font() -> str:
     """A clean UI font, falling back to whatever Tk offers."""
@@ -258,6 +263,17 @@ class RoundedBox(tk.Canvas):
         if wanted > 2 and self.winfo_reqheight() != wanted:
             self.configure(height=wanted)
 
+    def fit_width(self) -> None:
+        """Match the canvas width to its content, for a content-sized card.
+
+        The interior is placed, not packed, so it never contributes to the
+        canvas's requested width; a bubble that hugs its text asks for the
+        interior's width plus the padding instead.
+        """
+        wanted = self.inner.winfo_reqwidth() + self._pad_x * 2
+        if wanted > 2 and self.winfo_reqwidth() != wanted:
+            self.configure(width=wanted)
+
     def _redraw(self, _event: tk.Event | None = None) -> None:
         self.delete("shape")
         w, h = self.winfo_width(), self.winfo_height()
@@ -283,6 +299,54 @@ class RoundedBox(tk.Canvas):
             points, smooth=True, splinesteps=24,
             fill=self._fill, outline=self._outline, width=1,
         )
+
+
+class RoundButton(tk.Canvas):
+    """A circular button: a filled disc with a glyph, sized to one diameter.
+
+    Tk buttons are always rectangular, so a circular send control is a Canvas
+    that draws a disc and its glyph and reacts to the pointer itself.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        glyph: str,
+        command: Callable[[], Any],
+        fill: str,
+        fg: str,
+        font: tuple,
+        diameter: int = 34,
+        parent_bg: str | None = None,
+    ) -> None:
+        super().__init__(
+            parent, width=diameter, height=diameter,
+            bg=parent_bg or fill, highlightthickness=0, borderwidth=0,
+            takefocus=1, cursor="hand2",
+        )
+        self._enabled = True
+        self._command = command
+        self._disc = self.create_oval(
+            0, 0, diameter - 1, diameter - 1, fill=fill, outline=fill
+        )
+        self._glyph = self.create_text(
+            diameter // 2, diameter // 2 + 1, text=glyph, fill=fg, font=font
+        )
+        self.bind("<Button-1>", self._on_click)
+        self.bind("<Return>", self._on_click)
+        self.bind("<space>", self._on_click)
+
+    def _on_click(self, _event: tk.Event) -> None:
+        if self._enabled:
+            self._command()
+
+    def configure_fill(self, fill: str, fg: str, *, enabled: bool) -> None:
+        """Recolour the disc and glyph, and gate the click."""
+        self._enabled = enabled
+        self.itemconfigure(self._disc, fill=fill, outline=fill)
+        self.itemconfigure(self._glyph, fill=fg)
+        self.configure(cursor="hand2" if enabled else "arrow")
 
 
 class _Tooltip:
@@ -898,11 +962,29 @@ class FaydGUI:
             return 20
         return max(16, (width - _COLUMN_MAX) // 2)
 
-    def _user_width(self, text: str) -> int:
-        """A width for a right-aligned bubble: fit the longest line, capped."""
-        font = tkfont.Font(family=self._font, size=12)
-        widest = max((font.measure(line) for line in text.split("\n")), default=0)
-        return max(120, min(widest + 40, int(_COLUMN_MAX * 0.84)))
+    def _bubble_wrap_width(self) -> int:
+        """The pixel width at which a bubble's text starts wrapping.
+
+        A fixed fraction of the chat column, so a bubble grows with its text up
+        to this width and only then wraps onto another line.
+        """
+        column = min(_COLUMN_MAX, self._transcript.winfo_width() - 2 * self._column_pad())
+        return max(_BUBBLE_MIN_WIDTH, int(column * _BUBBLE_WRAP_FRACTION))
+
+    def _bubble_width_chars(self, text: str, *, pad: int = 6) -> int:
+        """The Text width (in characters) that makes a bubble hug its text.
+
+        The longest line's measured width sets the size, capped at the wrap
+        width, so a short message is a small box and a long one wraps at the cap
+        instead of stretching across the whole column. ``pad`` is the Text's
+        own per-side padding, which the widget adds on top of the text columns.
+        """
+        font = tkfont.Font(family=self._font, size=11)
+        char = max(1, font.measure("0"))
+        cap = max(8, (self._bubble_wrap_width() - 2 * pad) // char)
+        longest = max(text.split("\n"), key=len, default="")
+        needed = -(-font.measure(longest) // char)  # ceil
+        return max(4, min(needed, cap))
 
     def _show_hero(self) -> None:
         """The welcome/empty state, shown whenever the transcript is empty."""
@@ -964,13 +1046,14 @@ class FaydGUI:
             widget = tk.Text(
                 card.inner, height=1, wrap="word", relief="flat", borderwidth=0,
                 highlightthickness=0, bg=self._theme.user_bubble, fg=self._theme.user_bubble_fg,
-                font=(self._font, 11), padx=14, pady=8, cursor="xterm", takefocus=1, width=0,
+                font=(self._font, 11), padx=14, pady=8, cursor="xterm", takefocus=1,
+                width=self._bubble_width_chars(text, pad=14),
             )
             widget.insert("1.0", text)
             self._make_read_only(widget)
             widget.pack(fill="both", expand=True)
             self._fit_height(widget)
-            card.configure(width=self._user_width(text))
+            card.fit_width()
         else:
             bg = self._theme.base
             head = tk.Frame(row, bg=bg)
@@ -990,10 +1073,11 @@ class FaydGUI:
                 highlightthickness=0, bg=bg, fg=fg, font=(self._font, 11),
                 padx=(6 if role != "note" else 0), pady=0, cursor="xterm", takefocus=1,
                 spacing1=1, spacing3=1,
+                width=self._bubble_width_chars(text, pad=6 if role != "note" else 0),
             )
             self._insert_rich(widget, f"{text}\n\n{extra}" if extra else text)
             self._make_read_only(widget)
-            widget.pack(fill="x")
+            widget.pack(anchor="w")
             self._fit_height(widget)
 
         for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
@@ -1139,11 +1223,12 @@ class FaydGUI:
         for row in self._row_frames:
             row.pack_configure(padx=(pad, pad))
         for entry in self._rows:
-            if entry.role == "user":
-                self._fit_height(entry.widget)
-                box = entry.widget.master.master if entry.widget.master is not None else None
-                if isinstance(box, RoundedBox):
-                    box.configure(width=self._user_width(entry.text))
+            text_pad = 14 if entry.role == "user" else (0 if entry.role == "note" else 6)
+            entry.widget.configure(width=self._bubble_width_chars(entry.text, pad=text_pad))
+            self._fit_height(entry.widget)
+            card = entry.widget.master.master if entry.role == "user" else None
+            if isinstance(card, RoundedBox):
+                card.fit_width()
 
     @staticmethod
     def _role_label(role: str) -> str:
@@ -1353,17 +1438,14 @@ class FaydGUI:
         self._entry.pack(side="left", fill="both", expand=True)
         self._entry.bind("<Return>", self._on_enter)
         self._entry.bind("<Shift-Return>", lambda _e: None)
-        self._entry.bind("<FocusIn>", lambda _e: self._composer_box.set_outline(self._theme.primary))
-        self._entry.bind("<FocusOut>", lambda _e: self._composer_box.set_outline(self._theme.border))
 
-        self._send = tk.Button(
-            field, text="↑", command=self._on_send, bg=self._theme.primary,
-            fg=self._theme.primary_foreground, activebackground=self._theme.primary,
-            activeforeground=self._theme.primary_foreground,
-            font=(self._font, 14, "bold"), relief="flat", borderwidth=0,
-            padx=0, pady=2, width=2, cursor="hand2",
+        self._send = RoundButton(
+            field, glyph="↑", command=self._on_send, fill=self._theme.primary,
+            fg=self._theme.primary_foreground, font=(self._font, 14, "bold"),
+            diameter=34, parent_bg=self._theme.surface,
         )
-        self._send.pack(side="right", padx=(6, 2), pady=8)
+        self._send.pack(side="right", padx=(6, 4), pady=6)
+        _Tooltip(self._send, "Send", self._theme, self._font)
         self._render_attachment_chips()
         self._entry.focus_set()
 
@@ -1874,10 +1956,10 @@ class FaydGUI:
         threading.Thread(target=run, daemon=True).start()
 
     def _set_send_enabled(self, enabled: bool) -> None:
-        self._send.configure(
-            state="normal" if enabled else "disabled",
-            bg=self._theme.primary if enabled else self._theme.disabled,
-            cursor="hand2" if enabled else "arrow",
+        self._send.configure_fill(
+            self._theme.primary if enabled else self._theme.disabled,
+            self._theme.primary_foreground,
+            enabled=enabled,
         )
 
     def _pump(self) -> None:

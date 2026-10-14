@@ -802,3 +802,83 @@ def test_window_messages_are_centred_in_a_readable_column() -> None:
         assert box.winfo_x() > 0  # pushed toward the right within its row
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_send_button_is_circular() -> None:
+    """The send control is a round disc, not a rectangular Tk button."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI, RoundButton
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.geometry("1200x780")
+        for _ in range(10):
+            root.update()
+        assert isinstance(app._send, RoundButton)
+        assert app._send.winfo_width() == app._send.winfo_height()
+        # The disc is drawn as an oval that fills the square canvas.
+        ovals = [i for i in app._send.find_all() if app._send.type(i) == "oval"]
+        assert ovals
+        x1, y1, x2, y2 = app._send.bbox(ovals[0])
+        assert abs((x2 - x1) - (y2 - y1)) <= 2  # round, not a square
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_composer_has_no_gold_focus_outline() -> None:
+    """Focusing the input never paints the composer's border gold."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.geometry("1200x780")
+        for _ in range(10):
+            root.update()
+        # The composer border stays the neutral theme border even while focused.
+        assert app._composer_box._outline == app._theme.border
+        app._entry.focus_set()
+        root.update()
+        assert app._composer_box._outline == app._theme.border
+        assert app._composer_box._outline != app._theme.primary
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_bubbles_hug_their_text() -> None:
+    """A bubble's width follows the text: short is small, long wraps at the cap."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.geometry("1200x780")
+        for _ in range(10):
+            root.update()
+        short = app._add_bubble("user", "Hi")
+        long = app._add_bubble("user", "a much longer message that needs more room " * 4)
+        assistant = app._add_bubble("assistant", "Short answer.")
+        for _ in range(10):
+            root.update()
+        # More text, a wider box; but never wider than the wrap cap.
+        assert short.winfo_width() < long.winfo_width()
+        cap = app._bubble_wrap_width()
+        assert long.winfo_width() <= cap
+        # A short assistant answer is a small box, not a full-width line.
+        assert assistant.winfo_width() < app._column_pad() + 400
+        # The card around a user bubble matches the text inside it.
+        card = short.master.master
+        assert card is not None
+        assert card.winfo_width() <= cap
+    finally:
+        root.destroy()
+

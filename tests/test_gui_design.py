@@ -397,3 +397,59 @@ def test_image_dialog_puts_the_preview_on_the_right(tmp_path) -> None:
     finally:
         root.destroy()
 
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_image_dialog_preview_is_thirty_percent_of_the_window(tmp_path) -> None:
+    """The preview box is 30% of the window width, before and after generating."""
+    import os
+    import tkinter as tk
+
+    from core.imagegen import encode_png
+    from gui.app import DARK_THEME
+    from gui.image_gen import ImageGenerationService
+    from gui.image_gen_dialog import ImageGenDialog
+
+    root = tk.Tk()
+    try:
+        service = ImageGenerationService(root=tmp_path)
+        dialog = ImageGenDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        for _ in range(15):
+            dialog.window.update()
+            dialog.window.update_idletasks()
+        width = dialog.window.winfo_width()
+        target = int(width * 0.3)
+        # Before any image, the empty preview box is already 30% of the window.
+        assert abs(dialog._preview.winfo_width() - target) <= 2
+
+        # A real, wide PNG: it is scaled down to the preview width, not shown full.
+        src_w, src_h = 768, 512
+        rows = [
+            bytes(channel for x in range(src_w) for channel in ((x * 3) % 256, (y * 5) % 256, 128))
+            for y in range(src_h)
+        ]
+        path = os.path.join(str(tmp_path), "sample.png")
+        with open(path, "wb") as handle:
+            handle.write(encode_png(src_w, src_h, rows))
+        dialog._show_preview(path)
+        for _ in range(15):
+            dialog.window.update()
+            dialog.window.update_idletasks()
+        # The generated image width equals the preview width (both 30%).
+        assert dialog._photo is not None
+        assert dialog._photo.width() <= target
+        assert dialog._photo.width() <= dialog._preview.winfo_width()
+
+        # Resizing keeps the preview at 30% of the new window width.
+        dialog.window.geometry("900x560")
+        for _ in range(15):
+            dialog.window.update()
+            dialog.window.update_idletasks()
+        new_target = int(dialog.window.winfo_width() * 0.3)
+        assert abs(dialog._preview.winfo_width() - new_target) <= 3
+        assert dialog._photo.width() <= new_target
+    finally:
+        root.destroy()
+
+

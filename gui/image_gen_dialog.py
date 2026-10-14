@@ -44,6 +44,17 @@ HONESTY_LINE = (
     "default and is tuned for clean, lifelike images."
 )
 
+#: The preview column is this share of the window width, and the generated image
+#: is shown at the same width, so the picture never spills past its column.
+PREVIEW_WIDTH_FRACTION = 0.3
+
+#: Padding around the preview box inside its column, so the *visible* preview
+#: (not the column) is 30% of the window. ``_PREVIEW_SECTION_PAD`` is the frame's
+#: side padding and ``_PREVIEW_INNER_PAD`` the preview label's own padding.
+_PREVIEW_SECTION_PAD = 20
+_PREVIEW_INNER_PAD = 12
+_PREVIEW_CHROME = 2 * (_PREVIEW_SECTION_PAD + _PREVIEW_INNER_PAD)
+
 
 class ImageGenDialog:
     """A window that renders a text prompt to an image file."""
@@ -65,6 +76,7 @@ class ImageGenDialog:
         self._on_close = on_close
         self._busy = False
         self._photo: tk.PhotoImage | None = None
+        self._preview_source: tk.PhotoImage | None = None
         self._last_path: str = ""
 
         self._width_var = tk.StringVar(value="")
@@ -101,20 +113,20 @@ class ImageGenDialog:
             font=(self.font, 8), anchor="w", justify="left", wraplength=980,
         ).pack(fill="x", pady=(6, 0))
 
-        # Two columns: the controls on the left, the preview on the right. A grid
-        # (not pack) keeps the preview its natural width while the controls take
-        # the remaining space.
+        # Two columns: the controls on the left, the preview on the right. The
+        # preview column is 30% of the window; the controls take the rest.
         body = tk.Frame(self.window, bg=theme.base)
         body.pack(fill="both", expand=True)
         body.rowconfigure(0, weight=1)
-        body.columnconfigure(0, weight=1)
-        body.columnconfigure(1, weight=0)
+        body.columnconfigure(0, weight=7)
+        body.columnconfigure(1, weight=3)
         controls = tk.Frame(body, bg=theme.base)
         controls.grid(row=0, column=0, sticky="nsew")
         side = tk.Frame(body, bg=theme.base)
         side.grid(row=0, column=1, sticky="nsew")
         self._controls_column = controls
         self._side_column = side
+        self._body = body
 
         prompt_frame = self._section("1.  Prompt", parent=controls)
         self._prompt = tk.Text(
@@ -213,10 +225,13 @@ class ImageGenDialog:
         preview = self._section("3.  Preview", parent=side)
         self._preview = tk.Label(
             preview, bg=theme.surface, fg=theme.text_dim, font=(self.font, 9),
-            width=44, height=18, anchor="center", justify="center",
+            height=18, anchor="center", justify="center",
         )
         self._preview.pack(fill="both", expand=True, padx=12, pady=(2, 10))
         self._preview.configure(text="No image yet.")
+        self._preview.bind("<Configure>", self._on_preview_configure)
+        self.window.bind("<Configure>", self._on_window_configure, add="+")
+        self._size_preview_column(self.window.winfo_width())
 
     def _section(self, title: str, *, parent: tk.Misc | None = None) -> tk.Frame:
         theme = self.theme
@@ -383,18 +398,94 @@ class ImageGenDialog:
             f"{report.size_bytes} bytes  ·  {report.backend}"
         )
 
+    # -- preview sizing ---------------------------------------------------
+
+    def _preview_target_width(self, window_width: int) -> int:
+        """The preview width: 30% of the window, with a small floor."""
+        if window_width <= 1:
+            window_width = self.window.winfo_reqwidth()
+        return max(1, int(window_width * PREVIEW_WIDTH_FRACTION))
+
+    def _size_preview_column(self, window_width: int) -> None:
+        """Keep the visible preview box at 30% of the window width.
+
+        The preview column holds the section frame and the preview label, both of
+        which add padding, so the column's minimum width includes that chrome and
+        the label inside it lands exactly on 30%.
+        """
+        if window_width <= 1:
+            window_width = self.window.winfo_reqwidth()
+        target = self._preview_target_width(window_width)
+        self._body.columnconfigure(0, minsize=max(1, window_width - target - _PREVIEW_CHROME))
+        self._body.columnconfigure(1, minsize=target + _PREVIEW_CHROME)
+
+    def _on_window_configure(self, event: tk.Event) -> None:
+        if event.widget is not self.window:
+            return
+        self._size_preview_column(event.width)
+        self._render_scaled_preview()
+
+    def _on_preview_configure(self, _event: tk.Event) -> None:
+        self._render_scaled_preview()
+
+    def _scaled_photo(self, source: tk.PhotoImage, target_width: int) -> tk.PhotoImage:
+        """A copy of ``source`` scaled to at most ``target_width`` px, Tk-native.
+
+        Tk has no arbitrary resize, so scaling is a ``zoom``/``subsample`` fraction.
+        Tk sizes the result as ``ceil(width / subsample) * zoom``, so the closest
+        fraction is found by search rather than by approximating the ratio.
+        """
+        source_width = source.width()
+        if source_width <= 0 or target_width <= 0:
+            return source
+        best: tuple[int, int, int] | None = None
+        for subsample in range(1, 65):
+            cell = -(-source_width // subsample)  # ceil(width / subsample)
+            zoom = target_width // cell
+            if zoom < 1:
+                continue
+            result = cell * zoom
+            if best is None or result > best[0]:
+                best = (result, zoom, subsample)
+        if best is None:
+            best = (-(-source_width // 64), 1, 64)
+        _, zoom, subsample = best
+        scaled = tk.PhotoImage(master=self._preview)
+        try:
+            scaled.tk.call(
+                scaled, "copy", source, "-zoom", zoom, "-subsample", subsample
+            )
+        except tk.TclError:
+            return source
+        return scaled
+
+    def _render_scaled_preview(self) -> None:
+        """Show the generated image at 30% of the window width, or the placeholder.
+
+        The target comes from the window, not the label's current width: a Label
+        requests the size of its image, so scaling to the label's width would let
+        the picture hold its own column open and never shrink with the window.
+        """
+        source = self._preview_source
+        if source is None:
+            return
+        target = self._preview_target_width(self.window.winfo_width())
+        self._photo = self._scaled_photo(source, target)
+        self._preview.configure(image=self._photo, text="")
+
     def _show_preview(self, path: str) -> None:
         try:
             photo = tk.PhotoImage(file=path)
         except tk.TclError:
             self._photo = None
+            self._preview_source = None
             self._preview.configure(
                 image="", text=f"Preview unavailable in this Tk build.\nFile: {path}"
             )
             return
         # Keep a reference so Tk does not garbage-collect the image.
-        self._photo = photo
-        self._preview.configure(image=photo, text="")
+        self._preview_source = photo
+        self._render_scaled_preview()
 
     def _on_save_copy(self) -> None:
         if not self._last_path:
