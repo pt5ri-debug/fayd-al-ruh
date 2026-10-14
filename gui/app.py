@@ -407,6 +407,7 @@ class FaydGUI:
         self._retry_text = ""
         self._pending_message: str | None = None
         self._confirm_bar: tk.Frame | None = None
+        self._composer_lift = 0
         self._history_query = tk.StringVar()
 
         # The theme is read from the user's saved preference unless one was passed
@@ -1282,10 +1283,28 @@ class FaydGUI:
 
     # ------------------------------------------------------------- composer
 
+    def _on_composer_configure(self, _event: tk.Event | None = None) -> None:
+        """Lift the composer by half the input box's height.
+
+        The lift is extra bottom padding under the composer, so it moves the
+        input box (and everything above it) up by half the box's own height
+        without changing the layout that already pins the composer to the bottom.
+        """
+        box_height = self._composer_box.winfo_height()
+        if box_height <= 1:
+            return
+        lift = box_height // 2
+        if lift != self._composer_lift:
+            self._composer_lift = lift
+            self._composer_wrap.pack_configure(pady=(8, 14 + lift))
+
     def _build_composer(self, main: tk.Frame) -> None:
         composer = tk.Frame(main, bg=self._theme.base)
         composer.pack(fill="x", padx=self._column_pad(), pady=(8, 14))
         self._composer_wrap = composer
+        # Raise the whole composer (input box, chips, buttons) by half the input
+        # box's own height, measured once it has a real size.
+        composer.bind("<Configure>", self._on_composer_configure)
 
         self._confirm_bar = tk.Frame(composer, bg=self._theme.surface_raised)
         self._confirm_label = tk.Label(
