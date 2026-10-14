@@ -76,7 +76,7 @@ class ImageGenDialog:
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("1040x720")
+        self.window.geometry("1040x576")
         self.window.minsize(820, 560)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
