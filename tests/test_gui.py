@@ -749,6 +749,31 @@ def test_window_composer_is_a_rounded_card() -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_composer_is_lifted_by_half_its_box_height() -> None:
+    """The composer sits half an input box above the bottom of the transcript."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.geometry("1200x780")
+        for _ in range(10):
+            root.update()
+        box_height = app._composer_box.winfo_height()
+        assert box_height > 1
+        # The lift equals half the input box height, and the composer box keeps
+        # that much extra space below it inside the main column.
+        assert app._composer_lift == box_height // 2
+        main_bottom = app._main_frame.winfo_rooty() + app._main_frame.winfo_height()
+        box_bottom = app._composer_box.winfo_rooty() + app._composer_box.winfo_height()
+        assert main_bottom - box_bottom >= box_height // 2
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_messages_are_centred_in_a_readable_column() -> None:
     """Rows are indented into a centred column; user bubbles sit on the right."""
     import tkinter as tk
