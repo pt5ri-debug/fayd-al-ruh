@@ -76,8 +76,8 @@ class ImageGenDialog:
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("760x720")
-        self.window.minsize(560, 520)
+        self.window.geometry("1040x720")
+        self.window.minsize(820, 560)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._build()
@@ -94,14 +94,29 @@ class ImageGenDialog:
         ).pack(fill="x")
         tk.Label(
             header, text=SUBTITLE, bg=theme.base, fg=theme.text_secondary,
-            font=(self.font, 9), anchor="w", justify="left", wraplength=700,
+            font=(self.font, 9), anchor="w", justify="left", wraplength=980,
         ).pack(fill="x", pady=(4, 0))
         tk.Label(
             header, text=HONESTY_LINE, bg=theme.base, fg=theme.text_dim,
-            font=(self.font, 8), anchor="w", justify="left", wraplength=700,
+            font=(self.font, 8), anchor="w", justify="left", wraplength=980,
         ).pack(fill="x", pady=(6, 0))
 
-        prompt_frame = self._section("1.  Prompt")
+        # Two columns: the controls on the left, the preview on the right. A grid
+        # (not pack) keeps the preview its natural width while the controls take
+        # the remaining space.
+        body = tk.Frame(self.window, bg=theme.base)
+        body.pack(fill="both", expand=True)
+        body.rowconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=0)
+        controls = tk.Frame(body, bg=theme.base)
+        controls.grid(row=0, column=0, sticky="nsew")
+        side = tk.Frame(body, bg=theme.base)
+        side.grid(row=0, column=1, sticky="nsew")
+        self._controls_column = controls
+        self._side_column = side
+
+        prompt_frame = self._section("1.  Prompt", parent=controls)
         self._prompt = tk.Text(
             prompt_frame, height=3, wrap="word", relief="flat", borderwidth=0,
             highlightthickness=1, highlightbackground=theme.border,
@@ -115,7 +130,7 @@ class ImageGenDialog:
             bg=theme.surface, fg=theme.text_dim, font=(self.font, 8), anchor="w",
         ).pack(fill="x", padx=12, pady=(0, 8))
 
-        options = self._section("2.  Options")
+        options = self._section("2.  Options", parent=controls)
         backend_row = tk.Frame(options, bg=theme.surface)
         backend_row.pack(fill="x", padx=12, pady=(2, 4))
         tk.Label(
@@ -135,7 +150,7 @@ class ImageGenDialog:
         self._download_button.pack(side="left", padx=(8, 0))
         self._backend_note = tk.Label(
             options, text="", bg=theme.surface, fg=theme.text_dim, font=(self.font, 8),
-            anchor="w", justify="left", wraplength=700,
+            anchor="w", justify="left", wraplength=560,
         )
         self._backend_note.pack(fill="x", padx=12, pady=(0, 4))
 
@@ -195,14 +210,17 @@ class ImageGenDialog:
         )
         self._status.pack(side="left", padx=12)
 
-        preview = self._section("3.  Preview")
-        self._preview = tk.Label(preview, bg=theme.surface, fg=theme.text_dim, font=(self.font, 9))
+        preview = self._section("3.  Preview", parent=side)
+        self._preview = tk.Label(
+            preview, bg=theme.surface, fg=theme.text_dim, font=(self.font, 9),
+            width=44, height=18, anchor="center", justify="center",
+        )
         self._preview.pack(fill="both", expand=True, padx=12, pady=(2, 10))
         self._preview.configure(text="No image yet.")
 
-    def _section(self, title: str) -> tk.Frame:
+    def _section(self, title: str, *, parent: tk.Misc | None = None) -> tk.Frame:
         theme = self.theme
-        frame = tk.Frame(self.window, bg=theme.surface)
+        frame = tk.Frame(parent or self.window, bg=theme.surface)
         frame.pack(fill="x", padx=20, pady=(10, 0))
         tk.Label(
             frame, text=title, bg=theme.surface, fg=theme.contrast,

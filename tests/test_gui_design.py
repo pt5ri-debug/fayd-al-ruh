@@ -373,3 +373,27 @@ def test_window_tools_section_reflects_the_mode(tmp_path) -> None:
         assert any("Available in Jarvics Mode" in text for text in labels)
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_image_dialog_puts_the_preview_on_the_right(tmp_path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.image_gen import ImageGenerationService
+    from gui.image_gen_dialog import ImageGenDialog
+
+    root = tk.Tk()
+    try:
+        service = ImageGenerationService(root=tmp_path)
+        dialog = ImageGenDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        root.update()
+        # The preview lives in its own column, to the right of the controls.
+        assert int(dialog._controls_column.grid_info()["column"]) == 0
+        assert int(dialog._side_column.grid_info()["column"]) == 1
+        assert dialog._side_column.master is dialog._controls_column.master
+    finally:
+        root.destroy()
+
