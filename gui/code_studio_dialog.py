@@ -88,7 +88,7 @@ class CodeStudioDialog:
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("1180x760")
+        self.window.geometry("1180x608")
         self.window.minsize(900, 600)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
