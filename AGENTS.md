@@ -265,6 +265,21 @@ Arabic is kept as secondary aliases where useful.
   or the weights are missing so the caller can fall back to the procedural
   renderer. `DiffusionPipelineRunner` is the seam a test injects (no torch
   needed).
+- `core/imagegen_diffusion.py` also carries the optional **learned image
+  editor**: `InstructionImageEditor` runs `timbrooks/instruct-pix2pix` (an
+  instruction-following diffusion model) over an existing image, so it can make
+  a *semantic* change the deterministic pixel operations cannot — an expression
+  ("make the person smile"), a pose, or the movement. `ImageEditPreset` +
+  `EDIT_PRESETS` (`subtle` / `balanced` *(default)* / `strong`) bundle the two
+  guidance scales and a negative prompt (`resolve_edit_preset` /
+  `edit_preset_names` / `edit_preset_summaries`); lower `image_guidance` lets the
+  model move further from the input. The pipeline loads with `safety_checker=None`
+  (the model's own documentation): the checker blanks a picture it misreads
+  instead of editing it, which would silently destroy the user's image. Edits run
+  at the input size capped to 512px (snapped to the 64px grid, resized back), and
+  `ImageEditRunner` is the seam a test injects. Weights download through the same
+  permission/approval gates (`download_edit_model`, `--approve`), cached under
+  `data/models` (git-ignored).
 - `core/imageedit.py` — optional **image editing from text**, the counterpart to
   `core/imagegen.py`: it changes an image the user already has, from a written
   instruction. Dependency-free: a real PNG decoder (all five scanline filters,
@@ -277,11 +292,15 @@ Arabic is kept as secondary aliases where useful.
   model*: it applies the operations in the order the words appear and returns the
   words it did not understand (`EditPlan.unknown`) rather than guessing. `Raster`
   bridges to `core.vision.ImageBuffer`. `gui/image_edit.py` adds the Tk-free
-  `ImageEditService` (`load` → `EditSession`, `apply`, `save_copy`,
-  `render_working`, `ImageEditReport` with `learned=False`), and
-  `gui/image_edit_dialog.py` is the window's page (＋ menu → "Edit an image from
-  text…"; upload, an instruction box, Apply/Undo/Save a copy, and a 30%-width
-  preview), plus `python -m cli image edit <file> "<instruction>"`.
+  `ImageEditService` with two backends — `deterministic` (this keyword engine)
+  and `learned` (the InstructPix2Pix editor above) — via `load` → `EditSession`,
+  `apply`, `undo` (a snapshot stack, so it works for the non-replayable learned
+  edits), `save_copy`, `render_working`, and an `ImageEditReport` that carries the
+  `learned` flag and an honest `description`. `gui/image_edit_dialog.py` is the
+  window's page (＋ menu → "Edit an image from text…"; upload, an instruction box,
+  a backend selector with a model-download button, Apply/Undo/Save a copy, and a
+  30%-width preview), plus `python -m cli image edit <file> "<instruction>"
+  [--backend learned]` and `python -m cli image edit-model --approve`.
 - `gui/image_preview.py` — the shared preview-scaling helper used by both image
   pages (`load_scaled`: Pillow when present for an exact resize, Tk `subsample`
   otherwise).
@@ -676,6 +695,13 @@ clone, each optional so the base system still runs without it:
   changes an uploaded picture from a written instruction, with an honest list of
   the words it did not understand. Wired as the ＋ menu's "Edit an image from
   text…" window (`gui/image_edit_dialog.py`) and `python -m cli image edit`.
+- Phase 5c — a *learned* image editor: `core/imagegen_diffusion.py`'s
+  `InstructionImageEditor` (InstructPix2Pix) makes semantic changes the keyword
+  interpreter cannot — an expression, a pose, the movement — from an instruction.
+  The edit window and `python -m cli image edit --backend learned` offer it beside
+  the deterministic backend, with a `subtle`/`balanced`/`strong` preset, a
+  model-download button, and snapshot undo; the weights download only through the
+  approval gate (`python -m cli image edit-model --approve`).
 - Phase 6 — Jarvis mode: wake-word gate (`core/wake_word.py`), natural-language
   command routing to sandboxed tools (`core/command_router.py`), persistent user
   preferences (`core/preferences.py`), real system speech engines

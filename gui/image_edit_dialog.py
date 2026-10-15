@@ -4,17 +4,19 @@ Reached from the ＋ menu, this page turns a written instruction into an edit of
 picture the user already has:
 
 * **Choose an image…** -- loads a PNG or PPM into the page;
-* an instruction box, e.g. "rotate 90 and brighten, then crop to a square";
-* **Apply** -- interprets the instruction and edits the current picture, then
-  shows the result in the page and saves it under the data folder;
-* **Undo** -- steps back to the previous version;
+* an instruction box, e.g. "rotate 90 and brighten" or "make the person smile";
+* a **backend** choice -- *Deterministic* (the dependency-free keyword editor) or
+  *Learned* (an InstructPix2Pix diffusion model), which is the only one that can
+  make a *semantic* change: an expression, a pose, the movement;
+* **Apply** -- edits the current picture on a worker thread, shows the result, and
+  saves it under the data folder;
+* **Undo** -- steps back to the previous version (works for both backends);
 * **Save a copy…** -- writes the current picture wherever the user chooses.
 
-It is a thin view over :class:`gui.image_edit.ImageEditService`. The editor is a
-deterministic keyword interpreter, not a learned instruction-following model, and
-the page says so plainly: it lists the operations it understood and names the
-words it did not, so nothing is silently ignored. A learned editor could be
-dropped in behind the same service without touching this page.
+It is a thin view over :class:`gui.image_edit.ImageEditService`. The page says
+plainly which backend ran: the deterministic editor lists the operations it
+understood and names the words it did not, and the learned editor states the
+model, the preset, and the sampler settings, and warns that a CPU edit is slow.
 
 The class is Tk-only and imported lazily with the rest of the window, so the CLI
 never touches it.
@@ -31,25 +33,36 @@ from typing import Any
 import tkinter as tk
 from tkinter import filedialog
 
-from core.imageedit import apply_plan
-from gui.image_edit import EXAMPLE_INSTRUCTION, READABLE_SUFFIXES, ImageEditService
+from core.imagegen_diffusion import DEFAULT_EDIT_PRESET, EDIT_PRESETS
+from core.optional_deps import FEATURE_IMAGE, pip_install_command
+from gui.image_edit import (
+    BACKEND_DETERMINISTIC,
+    BACKEND_LEARNED,
+    EXAMPLE_INSTRUCTION,
+    LEARNED_EXAMPLE_INSTRUCTION,
+    READABLE_SUFFIXES,
+    ImageEditService,
+)
 from gui.image_preview import load_scaled
 
 TITLE = "Edit an image from text"
 SUBTITLE = (
-    "Upload a picture, then describe the change in words. This editor is a "
-    "deterministic keyword interpreter, not a learned model: it understands a "
-    "documented set of operations (rotate, flip, resize, crop, brightness, "
-    "contrast, saturation, grayscale, invert, sepia, warm/cool, blur, sharpen, "
-    "threshold) and applies them in the order you write them."
+    "Upload a picture, then describe the change in words. Choose Deterministic for "
+    "exact pixel operations (rotate, crop, brightness…), or Learned for a real "
+    "instruction-following model that can change an expression, a pose, or the "
+    "movement — “make the person smile”, “change the pose to a wave”."
 )
 HONESTY_LINE = (
-    "Every edit is a plain pixel operation on your file; the original is never "
-    "modified. Words the editor does not recognise are reported, not guessed at."
+    "Deterministic edits are plain pixel operations on your file; the original is "
+    "never modified, and words it does not recognise are reported, not guessed at. "
+    "Learned edits are drawn by a diffusion model: they re-synthesise the picture, "
+    "take tens of seconds to a few minutes on a CPU, and are a plausible edit, not a "
+    "guaranteed faithful one."
 )
 INSTRUCTION_HINT = (
-    "Examples: “rotate 90”, “flip horizontally”, “resize to 512x512”, "
-    "“crop to a square”, “grayscale”, “brighten 20%”, “blur 3”, “invert”."
+    "Deterministic examples: “rotate 90”, “crop to a square”, “grayscale”, "
+    "“brighten 20%”.  Learned examples: “make the person smile”, “change the pose "
+    "to a wave”, “turn the sky to a sunset”."
 )
 
 #: The preview column (and so the shown picture) is this fraction of the window
@@ -86,21 +99,21 @@ class ImageEditDialog:
         self._session: Any = None
         #: Edits run on a worker thread; the result arrives through this queue and
         #: is applied on the main thread by the poll pump, as Tk requires.
-        self._results: queue.Queue[tuple[Any, Exception | None]] = queue.Queue()
+        self._results: queue.Queue[tuple[str, Any, Exception | None]] = queue.Queue()
         self._photo: tk.PhotoImage | None = None
         self._preview_source: str = ""
         #: The column width the shown image was last fitted to, so a resize only
         #: rescales when the width actually changed.
         self._preview_fit_width: int = 0
-        self._original_raster: Any = None
 
-        self._instruction_var = tk.StringVar(value="")
+        self._backend_var = tk.StringVar(value=BACKEND_DETERMINISTIC)
+        self._preset_var = tk.StringVar(value=DEFAULT_EDIT_PRESET)
 
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("1040x620")
-        self.window.minsize(820, 580)
+        self.window.geometry("1040x660")
+        self.window.minsize(820, 600)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._build()
@@ -157,7 +170,47 @@ class ImageEditDialog:
             bg=theme.surface, fg=theme.text_dim, font=(self.font, 8), anchor="w",
         ).pack(fill="x", padx=12, pady=(0, 8))
 
-        instruction_frame = self._section("2.  Instruction", parent=controls)
+        options = self._section("2.  Editor", parent=controls)
+        backend_row = tk.Frame(options, bg=theme.surface)
+        backend_row.pack(fill="x", padx=12, pady=(2, 4))
+        tk.Label(
+            backend_row, text="Backend", bg=theme.surface, fg=theme.text_secondary,
+            font=(self.font, 9),
+        ).pack(side="left", padx=(0, 6))
+        for name, label in (
+            (BACKEND_DETERMINISTIC, "Deterministic (default)"),
+            (BACKEND_LEARNED, "Learned (model)"),
+        ):
+            tk.Radiobutton(
+                backend_row, text=label, value=name, variable=self._backend_var,
+                command=self._on_backend_change, bg=theme.surface, fg=theme.foreground,
+                selectcolor=theme.base, activebackground=theme.surface, font=(self.font, 9),
+                highlightthickness=0, borderwidth=0,
+            ).pack(side="left", padx=(0, 12))
+        self._download_button = self._button(
+            backend_row, "Download model…", self._on_download_model
+        )
+        self._backend_note = tk.Label(
+            options, text="", bg=theme.surface, fg=theme.text_dim, font=(self.font, 8),
+            anchor="w", justify="left", wraplength=560,
+        )
+        self._backend_note.pack(fill="x", padx=12, pady=(0, 4))
+
+        preset_row = tk.Frame(options, bg=theme.surface)
+        preset_row.pack(fill="x", padx=12, pady=(2, 8))
+        tk.Label(
+            preset_row, text="Change size", bg=theme.surface, fg=theme.text_secondary,
+            font=(self.font, 9),
+        ).pack(side="left", padx=(0, 6))
+        for name, title in ((p.name, p.title) for p in EDIT_PRESETS.values()):
+            tk.Radiobutton(
+                preset_row, text=title, value=name, variable=self._preset_var,
+                command=self._on_preset_change, bg=theme.surface, fg=theme.foreground,
+                selectcolor=theme.base, activebackground=theme.surface, font=(self.font, 9),
+                highlightthickness=0, borderwidth=0,
+            ).pack(side="left", padx=(0, 12))
+
+        instruction_frame = self._section("3.  Instruction", parent=controls)
         self._instruction = tk.Text(
             instruction_frame, height=3, wrap="word", relief="flat", borderwidth=0,
             highlightthickness=1, highlightbackground=theme.border,
@@ -188,7 +241,7 @@ class ImageEditDialog:
         )
         self._status.pack(side="left", padx=12)
 
-        preview = self._section("3.  Preview", parent=side)
+        preview = self._section("4.  Preview", parent=side)
         preview.pack_configure(fill="both", expand=True)
         self._preview = tk.Label(
             preview, bg=theme.surface, fg=theme.text_dim, font=(self.font, 9),
@@ -196,6 +249,7 @@ class ImageEditDialog:
         )
         self._preview.pack(fill="both", expand=True, padx=12, pady=(2, 10))
         self._preview.configure(text="No image yet.")
+        self._refresh_backend_note()
         self._layout_columns()
 
     # -- preview geometry -------------------------------------------------
@@ -252,6 +306,55 @@ class ImageEditDialog:
             font=(self.font, 9, "bold"), padx=12, pady=4, cursor="hand2",
         )
 
+    # -- backend selection ------------------------------------------------
+
+    def _service_for_backend(self) -> ImageEditService:
+        backend = self._backend_var.get()
+        if backend == self.edit_service.backend:
+            return self.edit_service
+        return self.edit_service.for_backend(backend, preset=self._preset_var.get())
+
+    def _on_backend_change(self) -> None:
+        self._refresh_backend_note()
+
+    def _on_preset_change(self) -> None:
+        self._refresh_backend_note()
+
+    def _refresh_backend_note(self) -> None:
+        backend = self._backend_var.get()
+        status = dict(
+            (name, (available, note))
+            for name, available, note in self.edit_service.backend_status()
+        )
+        available, note = status.get(backend, (False, "Unknown backend."))
+        if backend == BACKEND_LEARNED:
+            self._download_button.pack(side="left", padx=(8, 0))
+            self._download_button.configure(state="disabled" if self._busy else "normal")
+            available = self._service_for_backend().available()
+            note = f"{note}  Selected change size: {self._preset_var.get()}."
+        else:
+            self._download_button.pack_forget()
+        prefix = "Ready." if available else "Not ready."
+        self._backend_note.configure(text=f"{prefix}  {note}")
+
+    def _on_download_model(self) -> None:
+        if self._busy:
+            return
+        self._busy = True
+        self._apply_button.configure(state="disabled")
+        self._download_button.configure(state="disabled")
+        self._set_status("Downloading the editing model… (one-time, ~4 GB)")
+
+        def run() -> None:
+            try:
+                report = self.edit_service.download_model(approved=True)
+                self._results.put(("download", report, None))
+            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+                self._results.put(("download", None, error))
+
+        threading.Thread(target=run, daemon=True).start()
+        self.window.after(60, self._pump)
+
     # -- behaviour --------------------------------------------------------
 
     def _on_choose(self) -> None:
@@ -274,7 +377,6 @@ class ImageEditDialog:
         except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
             self._set_status(f"Could not open that image: {error}", error=True)
             return
-        self._original_raster = self._session.raster.copy()
         self._source_label.configure(
             text=f"{Path(path).name}  ·  {self._session.raster.width}×{self._session.raster.height}",
             fg=self.theme.foreground,
@@ -294,16 +396,26 @@ class ImageEditDialog:
         if not instruction:
             self._set_status("Write an instruction first.", error=True)
             return
+        service = self._service_for_backend()
+        if service.learned and not service.available():
+            self._set_status(
+                "The learned editor is not ready — install its packages with "
+                f"{pip_install_command(FEATURE_IMAGE)} and download the model, "
+                "or choose Deterministic.",
+                error=True,
+            )
+            return
         self._busy = True
         self._apply_button.configure(state="disabled")
+        self._download_button.configure(state="disabled")
         self._set_status("Editing…")
 
         def run() -> None:
             try:
-                report = self.edit_service.apply(self._session, instruction)
-                self._results.put((report, None))
+                report = service.apply(self._session, instruction)
+                self._results.put(("apply", report, None))
             except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
-                self._results.put((None, error))
+                self._results.put(("apply", None, error))
 
         threading.Thread(target=run, daemon=True).start()
         self.window.after(60, self._pump)
@@ -311,16 +423,31 @@ class ImageEditDialog:
     def _pump(self) -> None:
         """Collect a finished edit on the main thread and update the window."""
         try:
-            report, error = self._results.get_nowait()
+            kind, report, error = self._results.get_nowait()
         except queue.Empty:
             if self._busy:
                 self.window.after(60, self._pump)
             return
-        self._finish(report, error)
+        if kind == "download":
+            self._finish_download(report, error)
+        else:
+            self._finish(report, error)
+
+    def _finish_download(self, report: Any, error: Exception | None) -> None:
+        self._busy = False
+        self._apply_button.configure(state="normal")
+        if error is not None:
+            self._set_status(f"Could not download the model: {error}", error=True)
+        elif not report.ok:
+            self._set_status(report.message, error=True)
+        else:
+            self._set_status(report.message)
+        self._refresh_backend_note()
 
     def _finish(self, report: Any, error: Exception | None) -> None:
         self._busy = False
         self._apply_button.configure(state="normal")
+        self._download_button.configure(state="disabled" if not self._backend_var.get() == BACKEND_LEARNED else "normal")
         if error is not None:
             self._set_status(f"Could not edit the image: {error}", error=True)
             return
@@ -330,9 +457,12 @@ class ImageEditDialog:
             return
         self._show_preview(report.path)
         self._undo_button.configure(state="normal")
-        note = f"Applied: {', '.join(report.operations)}."
-        if report.unknown:
-            note += f"  Not understood: {', '.join(report.unknown)}."
+        if report.learned:
+            note = report.description or "learned model edit."
+        else:
+            note = f"Applied: {', '.join(report.operations)}."
+            if report.unknown:
+                note += f"  Not understood: {', '.join(report.unknown)}."
         self._set_status(
             f"Saved to {report.path}  ·  {report.width}×{report.height}  ·  {note}"
         )
@@ -340,17 +470,11 @@ class ImageEditDialog:
     def _on_undo(self) -> None:
         if self._busy or self._session is None:
             return
-        if not self._session.history:
+        if not self.edit_service.undo(self._session):
             self._set_status("Nothing to undo.", error=True)
             return
-        self._session.history.pop()
-        # Replay the remaining instructions from the original image.
-        raster = self._original_raster.copy()
-        for plan in self._session.history:
-            raster = apply_plan(raster, plan)
-        self._session.raster = raster
         self._undo_button.configure(
-            state="normal" if self._session.history else "disabled"
+            state="normal" if self._session.undo_stack else "disabled"
         )
         self._render_raster()
         self._set_status("Undid the last edit.")
@@ -407,6 +531,7 @@ __all__ = [
     "HONESTY_LINE",
     "ImageEditDialog",
     "INSTRUCTION_HINT",
+    "LEARNED_EXAMPLE_INSTRUCTION",
     "PREVIEW_FRACTION",
     "SUBTITLE",
     "TITLE",
