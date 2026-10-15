@@ -36,6 +36,9 @@ from typing import Sequence
 
 from core.paths import studio_workspaces_dir
 
+#: The folder the Studio keeps inside a checkout's own data directory.
+_WORKSPACES_SUBDIR = Path("studio") / "workspaces"
+
 #: The branch every workspace is created from, and merged back into.
 DEFAULT_BASE_BRANCH = "main"
 
@@ -203,11 +206,27 @@ class CodeStudio:
         max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
     ) -> None:
         self.root = Path(root).resolve()
-        self.workspaces_dir = Path(
-            workspaces_dir if workspaces_dir is not None else studio_workspaces_dir()
+        self.workspaces_dir = (
+            Path(workspaces_dir) if workspaces_dir is not None else self._default_workspaces_dir()
         )
         self.base_branch = base_branch
         self.max_file_bytes = max_file_bytes
+
+    def _default_workspaces_dir(self) -> Path:
+        """Where a checkout's own worktrees live when no folder is given.
+
+        The folder must belong to the checkout the Studio is editing: a shared
+        folder would register another repository's worktree in this one's state.
+        So the project's own checkout keeps its worktrees in the bundled data
+        directory (git-ignored, beside the code), and any *other* checkout keeps
+        them under its own root.
+        """
+        try:
+            if self.root == Path(studio_workspaces_dir()).resolve().parents[2]:
+                return studio_workspaces_dir()
+        except (OSError, IndexError):  # pragma: no cover - defensive only
+            pass
+        return self.root / "data" / _WORKSPACES_SUBDIR
 
     # --- git plumbing ---------------------------------------------------
     def _git(

@@ -95,6 +95,21 @@ class BrokenCoder(FakeCoder):
 # --- workspace lifecycle ---------------------------------------------------
 
 
+def test_default_workspaces_dir_belongs_to_the_checkout(project: Path, tmp_path: Path) -> None:
+    """A checkout must never share another checkout's worktree folder.
+
+    A shared folder registered a foreign repository's worktree in this project's
+    state file, so ``--root /elsewhere`` listed a workspace whose files lived in
+    the other checkout. The project's own checkout keeps its worktrees in the
+    bundled data directory; any other checkout keeps them under its own root.
+    """
+    from core.paths import studio_workspaces_dir
+
+    other = CodeStudio(tmp_path / "elsewhere")
+    assert other.workspaces_dir == tmp_path / "elsewhere" / "data" / "studio" / "workspaces"
+    assert other.workspaces_dir != studio_workspaces_dir()
+
+
 def test_create_makes_a_worktree_on_its_own_branch(studio: CodeStudio) -> None:
     workspace = studio.create("Add a --json flag")
     assert workspace.slug == "add-a-json-flag"
