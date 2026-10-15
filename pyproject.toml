@@ -33,6 +33,14 @@ image = [
     "safetensors>=0.4",
     "Pillow>=10.0",
 ]
+# Ultron, the general local language model, is a separate optional extra. It runs
+# a GGUF model locally through llama-cpp-python (nothing leaves the machine); the
+# weights are a separate one-time, human-approved download. Never required by the
+# base install, and imported lazily.
+ultron = [
+    "llama-cpp-python>=0.3",
+    "huggingface_hub>=0.23",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -83,4 +91,11 @@ ignore_missing_imports = true
 # install must still type-check. torch ships its own stubs; diffusers has none.
 [[tool.mypy.overrides]]
 module = ["diffusers"]
+ignore_missing_imports = true
+
+# Ultron is an optional extra (``pip install .[ultron]``); it imports
+# llama-cpp-python and huggingface_hub lazily, so a base install must still
+# type-check.
+[[tool.mypy.overrides]]
+module = ["llama_cpp", "huggingface_hub"]
 ignore_missing_imports = true

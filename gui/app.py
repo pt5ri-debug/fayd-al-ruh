@@ -1792,6 +1792,22 @@ class FaydGUI:
             on_close=lambda: setattr(self, "_image_edit_dialog", None),
         )
 
+    def _open_ultron(self) -> None:
+        """Open Ultron -- the general, advanced local model -- as a chat window."""
+        from core.ultron import UltronEngine
+        from gui.ultron_dialog import UltronDialog
+
+        if getattr(self, "_ultron_engine", None) is None:
+            self._ultron_engine = UltronEngine()
+        self._ultron_dialog = UltronDialog(
+            self.root,
+            self._ultron_engine,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=lambda: setattr(self, "_ultron_dialog", None),
+        )
+
     def _on_install_ocr(self) -> None:
         """Install the optional OCR packages from within the window.
 
@@ -1889,6 +1905,10 @@ class FaydGUI:
         # The text-to-image screen likewise has its own window.
         if action.key == "image":
             self._open_image_gen()
+            return
+        # Ultron is a general chat window of its own, not a headless command.
+        if action.key == "ultron":
+            self._open_ultron()
             return
         argv = action.argv
         if action.needs_input:

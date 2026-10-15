@@ -112,6 +112,11 @@ def run_jarvis(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.jarvis", argv)
 
 
+def run_ultron(argv: Sequence[str] = ()) -> int:
+    """Run Ultron: a general, advanced local model that speaks on any subject."""
+    return _run_module("ai.ultron", argv)
+
+
 def run_chat(argv: Sequence[str] = ()) -> int:
     """Talk with the AI in text, like Jarvis without the voice."""
     return _run_module("ai.chat", argv)
@@ -319,6 +324,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("One voice turn", run_voice, ("--write-wav", "voice-turn.wav", "water")),
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Jarvis mode (listen, act, speak)", run_jarvis, ()),
+    ("Ultron (general local model, any subject)", run_ultron, ()),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
@@ -457,6 +463,7 @@ __all__ = [
     "run_voice",
     "run_agent",
     "run_jarvis",
+    "run_ultron",
     "run_chat",
     "run_mind_chat",
     "run_learn",

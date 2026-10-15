@@ -234,7 +234,7 @@ def test_every_action_is_callable_and_has_a_unique_key() -> None:
         assert action.label
 
 
-def test_actions_cover_numbered_menu_items_five_through_eleven() -> None:
+def test_actions_cover_the_mirrored_menu_items() -> None:
     """Learn, insight, internet, web, and both knowledge entries are present."""
     keys = {action.key for action in gui_actions.ACTIONS}
     for key in (
@@ -248,11 +248,15 @@ def test_actions_cover_numbered_menu_items_five_through_eleven() -> None:
         assert key in keys, f"missing action {key!r}"
 
 
-def test_action_labels_match_cli_menu_items_five_to_eleven() -> None:
-    """Every numbered CLI item from 5 to 11 appears once, with the same label."""
+def test_action_labels_match_cli_menu_items_six_to_twelve() -> None:
+    """Every numbered CLI item from 6 to 12 appears once, with the same label.
+
+    The window owns the first five menu entries (GUI, Jarvis, Ultron, text chat,
+    and the trained-model chat), so the sidebar mirrors the next block instead.
+    """
     from cli.menu import visible_menu
 
-    cli_items = visible_menu()[4:11]  # 1-based items 5..11
+    cli_items = visible_menu()[5:12]  # 1-based items 6..12
     gui_labels = [action.label for action in gui_actions.ACTIONS]
     for title, _command, _argv in cli_items:
         assert gui_labels.count(title) == 1, f"{title!r} must appear exactly once"
