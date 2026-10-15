@@ -516,3 +516,160 @@ def test_cli_edit_reports_a_missing_file(tmp_path, capsys):
     )
     assert code == 1
     assert "could not open" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# the learned editor (a fake runner stands in for the diffusion model)
+# ---------------------------------------------------------------------------
+
+
+class _FakeEditRunner:
+    """Records its calls and returns a picture that differs from the input.
+
+    It is not a mock of the code under test: it stands in for the *external*
+    diffusion pipeline, so the editor's plumbing -- the raster/rows conversion,
+    the honest labelling, the shape check -- runs for real.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def __call__(
+        self, model, image, instruction, negative_prompt, width, height,
+        steps, guidance, image_guidance, seed,
+    ):
+        self.calls.append(
+            (model, instruction, negative_prompt, width, height, steps,
+             guidance, image_guidance, seed)
+        )
+        # A uniform grey, so the result is provably different from the input.
+        return [bytes([128, 128, 128] * width) for _ in range(height)]
+
+
+def _editor(runner=None, **kwargs):
+    from core.imagegen_diffusion import InstructionImageEditor
+
+    return InstructionImageEditor(runner=runner or _FakeEditRunner(), **kwargs)
+
+
+def _small_raster() -> Raster:
+    return Raster(4, 3, bytearray([10, 20, 30] * 12))
+
+
+def test_learned_editor_runs_the_runner_and_returns_a_raster():
+    runner = _FakeEditRunner()
+    editor = _editor(runner)
+    result = editor.edit(_small_raster(), "make the person smile")
+    assert (result.width, result.height) == (4, 3)
+    assert result.data != _small_raster().data
+    model, instruction, _neg, w, h, steps, guidance, img_guidance, _seed = runner.calls[0]
+    assert model == "timbrooks/instruct-pix2pix"
+    assert instruction == "make the person smile"
+    assert (w, h) == (4, 3)
+    assert steps == 12 and guidance == 7.5 and img_guidance == 1.5
+
+
+def test_learned_editor_presets_change_the_dials():
+    runner = _FakeEditRunner()
+    editor = _editor(runner, preset="strong")
+    editor.edit(_small_raster(), "change the pose to a wave")
+    _model, _ins, _neg, _w, _h, _steps, guidance, img_guidance, _seed = runner.calls[0]
+    assert guidance == 8.5 and img_guidance == 1.0  # a bigger change
+
+
+def test_learned_editor_refuses_an_empty_instruction():
+    editor = _editor()
+    with pytest.raises(ImageEditError):
+        editor.edit(_small_raster(), "   ")
+
+
+def test_learned_editor_rejects_a_wrong_sized_runner_result():
+    editor = _editor(runner=lambda *a: [b"\x00\x00\x00"])  # too few bytes
+    with pytest.raises(ImageEditError):
+        editor.edit(_small_raster(), "make him smile")
+
+
+def test_learned_editor_is_available_with_a_runner():
+    assert _editor().is_available() is True
+
+
+def test_learned_editor_describes_itself_honestly():
+    description = _editor(preset="subtle").describe("make him smile")
+    assert "instruct-pix2pix" in description
+    assert "learned model" in description
+    assert "subtle" in description
+
+
+def test_edit_presets_resolve_and_reject_unknown():
+    from core.imagegen_diffusion import (
+        DEFAULT_EDIT_PRESET,
+        edit_preset_names,
+        resolve_edit_preset,
+    )
+
+    assert DEFAULT_EDIT_PRESET == "balanced"
+    assert set(edit_preset_names()) == {"subtle", "balanced", "strong"}
+    assert resolve_edit_preset(None).name == "balanced"
+    with pytest.raises(ValueError):
+        resolve_edit_preset("nope")
+
+
+def test_learned_service_edits_and_labels_the_report(tmp_path):
+    source = _source_image(tmp_path)
+    service = ImageEditService(root=tmp_path / "images", editor=_editor())
+    session = service.load(source)
+    report = service.apply(session, "make the person smile")
+    assert report.ok
+    assert report.learned is True
+    assert "learned edit" in report.operations[0]
+    assert Path(report.path).exists()
+    assert (session.raster.width, session.raster.height) == (40, 24)
+    assert session.learned_used is True
+
+
+def test_learned_service_report_summary_names_the_model(tmp_path):
+    source = _source_image(tmp_path)
+    service = ImageEditService(root=tmp_path / "images", editor=_editor())
+    session = service.load(source)
+    report = service.apply(session, "make him smile")
+    summary = report.summary()
+    assert "instruct-pix2pix" in summary
+    assert "not a learned model" not in summary
+
+
+def test_learned_service_undo_restores_the_previous_raster(tmp_path):
+    source = _source_image(tmp_path)
+    service = ImageEditService(root=tmp_path / "images", editor=_editor())
+    session = service.load(source)
+    before = session.raster.copy()
+    assert service.apply(session, "make him smile").ok
+    assert session.raster.data != before.data
+    assert service.undo(session) is True
+    assert session.raster.data == before.data
+    assert session.applied == ()
+
+
+def test_service_backend_status_reports_both_backends(tmp_path):
+    service = ImageEditService(root=tmp_path / "images")
+    status = dict((name, available) for name, available, _note in service.backend_status())
+    assert status["deterministic"] is True
+    assert "learned" in status  # availability depends on the install
+
+
+def test_cli_edit_accepts_the_learned_backend(tmp_path, capsys):
+    source = _source_image(tmp_path)
+    # The output dir is used as the model cache root, so the weights are never
+    # found there: the learned backend reports honestly (exit 1) instead of running
+    # a multi-minute CPU edit. Either way the --backend flag is accepted.
+    code = image_main(
+        ["--output-dir", str(tmp_path / "out"), "edit", str(source),
+         "make the person smile", "--backend", "learned"]
+    )
+    assert code == 1
+    assert capsys.readouterr().out.strip()  # a report, not a crash
+
+
+def test_cli_edit_model_requires_approval(tmp_path, capsys):
+    code = image_main(["--output-dir", str(tmp_path / "out"), "edit-model"])
+    assert code == 1
+    assert "--approve" in capsys.readouterr().out

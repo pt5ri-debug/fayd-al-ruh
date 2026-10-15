@@ -9,6 +9,8 @@
     python -m cli image download --approve           # one-time, ~4 GB
     python -m cli image backends
     python -m cli image edit photo.png "rotate 90 and brighten, then crop square"
+    python -m cli image edit photo.png "make the person smile" --backend learned
+    python -m cli image edit-model --approve          # one-time, ~5 GB
 
 The default backend renders a PNG with only the standard library and states
 plainly that it is a geometric composition, not a learned depiction. The
@@ -18,9 +20,13 @@ the ``[image]`` extra and a one-time, human-approved weights download. Generated
 files are written under the writable data directory (``data/images`` by default,
 overridable with ``FAYD_DATA_DIR``) unless ``--output`` names a path.
 
-The ``edit`` subcommand is different in kind: it changes an image the user already
-has, from a written instruction, with the dependency-free keyword interpreter in
-:mod:`core.imageedit` (not a learned model). It reads PNG and binary PPM files.
+The ``edit`` subcommand has two backends: ``deterministic`` (default) changes an
+image the user already has with the dependency-free keyword interpreter in
+:mod:`core.imageedit` (rotate, crop, brightness…); ``learned`` runs an
+InstructPix2Pix model that can make a *semantic* change -- an expression, a pose,
+the movement -- from an instruction like "make the person smile". It reads PNG
+and binary PPM files. The learned backend needs the ``[image]`` extra and its
+weights (``python -m cli image edit-model --approve``).
 """
 
 from __future__ import annotations
@@ -29,9 +35,10 @@ import argparse
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from gui.image_edit import ImageEditService
-from gui.image_gen import ImageGenerationService, ImageReport
+from gui.image_gen import ImageGenerationService
 from core.imagegen import DEFAULT_HEIGHT, DEFAULT_WIDTH, MAX_DIMENSION, image_backend_status
 
 
@@ -107,12 +114,43 @@ def _build_parser() -> argparse.ArgumentParser:
     edit.add_argument("source", help="The image file to edit.")
     edit.add_argument(
         "instruction",
-        help="What to change, e.g. 'rotate 90 and brighten, then crop to a square'.",
+        help=(
+            "What to change, e.g. 'rotate 90 and brighten, then crop to a square' "
+            "(deterministic) or 'make the person smile' (learned)."
+        ),
+    )
+    edit.add_argument(
+        "--backend",
+        default="deterministic",
+        help="Edit backend: deterministic (default, keyword pixel ops) or learned (model).",
+    )
+    edit.add_argument(
+        "--preset",
+        default=None,
+        help="Learned change size: subtle, balanced (default), or strong.",
+    )
+    edit.add_argument("--seed", type=int, default=None, help="Reproduce or vary a learned edit.")
+    edit.add_argument(
+        "--negative",
+        default=None,
+        help="Learned: what to steer away from (overrides the default).",
     )
     edit.add_argument(
         "--output", default=None, help="Exact file to write (default: <data>/images)."
     )
     edit.add_argument(
+        "--json", dest="as_json", action="store_true", help="Print the report as JSON."
+    )
+
+    edit_model = sub.add_parser(
+        "edit-model", help="Download the learned editing model's weights (one-time)."
+    )
+    edit_model.add_argument(
+        "--approve",
+        action="store_true",
+        help="Grant the external capability and record human approval for the download.",
+    )
+    edit_model.add_argument(
         "--json", dest="as_json", action="store_true", help="Print the report as JSON."
     )
     return parser
@@ -132,7 +170,7 @@ def _service(args: argparse.Namespace) -> ImageGenerationService:
     )
 
 
-def _emit(report: ImageReport, *, as_json: bool, summary: bool = True) -> int:
+def _emit(report: Any, *, as_json: bool, summary: bool = True) -> int:
     if as_json:
         import json
 
@@ -195,13 +233,24 @@ def run_presets(args: argparse.Namespace) -> int:
 
 def run_edit(args: argparse.Namespace) -> int:
     root = Path(args.output_dir) if args.output_dir else None
-    service = ImageEditService(root=root, on_progress=lambda message: print(message, file=sys.stderr))
+    service = ImageEditService(
+        root=root,
+        backend=args.backend,
+        preset=getattr(args, "preset", None),
+        on_progress=lambda message: print(message, file=sys.stderr),
+    )
     try:
         session = service.load(args.source)
     except Exception as error:  # noqa: BLE001 - reported, never a traceback
         print(f"error: could not open {args.source}: {error}")
         return 1
-    report = service.apply(session, args.instruction, output=args.output)
+    report = service.apply(
+        session,
+        args.instruction,
+        output=args.output,
+        seed=getattr(args, "seed", None),
+        negative_prompt=getattr(args, "negative", None),
+    )
     if args.as_json:
         import json
 
@@ -209,6 +258,23 @@ def run_edit(args: argparse.Namespace) -> int:
     else:
         print(report.summary())
     return 0 if report.ok else 1
+
+
+def run_edit_model(args: argparse.Namespace) -> int:
+    if not args.approve:
+        print(
+            "error: downloading the editing model weights is an external action and "
+            "needs --approve (it fetches ~4 GB from the internet)."
+        )
+        return 1
+    root = Path(args.output_dir) if args.output_dir else None
+    service = ImageEditService(
+        root=root,
+        backend="learned",
+        on_progress=lambda message: print(message, file=sys.stderr),
+    )
+    report = service.download_model(approved=True)
+    return _emit(report, as_json=args.as_json, summary=False)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -223,6 +289,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_presets(args)
     if args.command == "edit":
         return run_edit(args)
+    if args.command == "edit-model":
+        return run_edit_model(args)
     return 1
 
 

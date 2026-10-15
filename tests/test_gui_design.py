@@ -611,6 +611,65 @@ def test_edit_dialog_reports_an_unrecognised_instruction(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_edit_dialog_offers_the_learned_backend(tmp_path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.image_edit import ImageEditService
+    from gui.image_edit_dialog import ImageEditDialog
+
+    root = tk.Tk()
+    try:
+        service = ImageEditService(root=tmp_path)
+        dialog = ImageEditDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        root.update()
+        # Deterministic is the default, so the download button is hidden.
+        assert dialog._backend_var.get() == "deterministic"
+        assert not dialog._download_button.winfo_ismapped()
+        # Switching to the learned backend reveals the download button and names
+        # the model honestly.
+        dialog._backend_var.set("learned")
+        dialog._on_backend_change()
+        root.update()
+        assert dialog._download_button.winfo_ismapped()
+        note = dialog._backend_note.cget("text")
+        assert "instruct-pix2pix" in note
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_edit_dialog_learned_backend_without_the_model_reports_honestly(tmp_path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.image_edit import ImageEditService
+    from gui.image_edit_dialog import ImageEditDialog
+
+    root = tk.Tk()
+    try:
+        # The service's root is the tmp dir, so the cached weights are not found:
+        # applying a learned edit must say so instead of running a CPU edit.
+        service = ImageEditService(root=tmp_path)
+        dialog = ImageEditDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        dialog._load_source(str(_sample_image(tmp_path)))
+        dialog._backend_var.set("learned")
+        dialog._on_backend_change()
+        dialog._instruction.delete("1.0", "end")
+        dialog._instruction.insert("1.0", "make the person smile")
+        dialog._on_apply()
+        root.update()
+        assert "not ready" in dialog._status.cget("text")
+        assert dialog._status.cget("fg") == DARK_THEME.danger
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_attach_menu_offers_image_editing(tmp_path) -> None:
     """The ＋ menu has a labelled entry that opens the edit window."""
     import tkinter as tk
