@@ -10,6 +10,8 @@ Usage:
     python -m cli ultron "who wrote Hamlet?"   # one question, answered locally
     python -m cli ultron download --approve    # one-time: fetch Ultron's model (~5 GB)
     python -m cli chat                # chat with the AI in text (Jarvis, no voice)
+    python -m cli chat --ultron       # chat answering from Ultron (general local model)
+    python -m cli ultron-chat         # the same, from the menu/CLI command
     python -m cli mind-chat           # chat answering from the trained model (no sources)
     python -m cli learn               # continuous learning + regression gate
     python -m cli insight             # what the AI can do and what it has learned
@@ -78,6 +80,7 @@ from cli.menu import (
     run_selfcheck,
     run_update,
     run_ultron,
+    run_ultron_chat,
     run_voice,
     run_web,
 )
@@ -90,6 +93,7 @@ _COMMANDS = {
     "chat": run_chat,
     "gui": run_gui,
     "mind-chat": run_mind_chat,
+    "ultron-chat": run_ultron_chat,
     "learn": run_learn,
     "insight": run_insight,
     "internet-learner": run_internet_learner,

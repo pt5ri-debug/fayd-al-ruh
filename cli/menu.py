@@ -130,6 +130,14 @@ def run_mind_chat(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.chat", args)
 
 
+def run_ultron_chat(argv: Sequence[str] = ()) -> int:
+    """Talk with the AI in text, answering from Ultron (the general local model)."""
+    args = list(argv)
+    if "--ultron" not in args:
+        args.insert(0, "--ultron")
+    return _run_module("ai.chat", args)
+
+
 def run_learn(argv: Sequence[str] = ()) -> int:
     """Demonstrate continuous learning and the regression gate."""
     return _run_module("ai.learn_demo", argv)
@@ -466,6 +474,7 @@ __all__ = [
     "run_ultron",
     "run_chat",
     "run_mind_chat",
+    "run_ultron_chat",
     "run_learn",
     "run_insight",
     "run_internet_learner",

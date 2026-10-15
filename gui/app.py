@@ -35,8 +35,10 @@ from tkinter import filedialog
 from tkinter import font as tkfont
 from tkinter import simpledialog
 
+from ai import chat as chat_module
 from core import optional_deps
 from core.paths import data_dir
+from core.ultron import UltronUnavailable
 from core.version import __version__
 from gui import markdown as md
 from gui.actions import ACTIONS, GuiAction
@@ -51,6 +53,17 @@ from gui.modes import (
 )
 from gui.options import build_parser
 from gui.service import ChatReply, ChatService
+
+#: The answering mouths the header's model selector offers, in order. The label
+#: is what the user reads; the key is the value :class:`ChatService` expects.
+#: Ultron is a mouth *inside* this chat, exactly like the other two, so a
+#: conversation with it happens in the project's own window, not a separate one.
+MOUTH_CHOICES: tuple[tuple[str, str], ...] = (
+    (chat_module.MOUTH_SOURCES, "From sources (cited)"),
+    (chat_module.MOUTH_MODEL, "From trained model"),
+    (chat_module.MOUTH_ULTRON, "Ultron (general local model)"),
+)
+MOUTH_LABELS: dict[str, str] = {key: label for key, label in MOUTH_CHOICES}
 
 # ------------------------------------------------------- OpenHands design tokens
 #
@@ -452,6 +465,10 @@ class FaydGUI:
         self._sidebar_visible = True
         self._auto_hidden = False
         self._settings_open = False
+        # The settings-panel radio only exists once the panel is expanded; the
+        # mouth can still be switched from the header before that, so the
+        # variable is created here and the radio simply attaches to it.
+        self._source_var = tk.StringVar(value=self.service.source)
         self._action_buttons: list[tk.Widget] = []
         self._retry_text = ""
         self._pending_message: str | None = None
@@ -823,9 +840,9 @@ class FaydGUI:
             panel, text="Answering mouth", bg=self._theme.surface, fg=self._theme.text_secondary,
             font=(self._font, 8, "bold"), anchor="w", padx=18,
         ).pack(fill="x", pady=(6, 2))
-        self._source_var = tk.StringVar(value=self.service.source)
-        for value, label in (("sources", "From sources (cited)"), ("model", "From trained model")):
-            self._radio(panel, label, value).pack(fill="x", padx=14, pady=1)
+        self._source_var.set(self.service.source)
+        for key, label in MOUTH_CHOICES:
+            self._radio(panel, label, key).pack(fill="x", padx=14, pady=1)
         self._sidebar_button(
             panel, "⤓   Save conversation", self._on_save, small=True
         ).pack(fill="x", padx=12, pady=(6, 0))
@@ -914,7 +931,7 @@ class FaydGUI:
         self._source_var_menu = tk.StringVar(value=self._source_choice_label())
         self._source_menu = tk.OptionMenu(
             inner, self._source_var_menu,
-            "From sources (cited)", "From trained model", command=self._on_source_menu,
+            *[label for _key, label in MOUTH_CHOICES], command=self._on_source_menu,
         )
         self._source_menu.configure(
             bg=self._theme.base, fg=self._theme.foreground, activebackground=self._theme.surface_raised,
@@ -1466,7 +1483,7 @@ class FaydGUI:
         self._mode_menu.configure(fg=self._theme.contrast)
 
     def _source_choice_label(self) -> str:
-        return "From trained model" if self.service.source == "model" else "From sources (cited)"
+        return MOUTH_LABELS.get(self.service.source, MOUTH_LABELS[chat_module.MOUTH_SOURCES])
 
     def _status_text(self) -> str:
         return (
@@ -1498,29 +1515,10 @@ class FaydGUI:
         self._update_status()
 
     def _on_source_menu(self, label: str) -> None:
-        want = "model" if label.startswith("From trained") else "sources"
-        if want == self.service.source:
-            return
-        try:
-            if want == "model":
-                self.service.use_model()
-            else:
-                self.service.use_sources()
-        except (FileNotFoundError, OSError, ValueError) as error:
-            self._source_menu_var_reset()
-            self._add_bubble(
-                "note",
-                f"Could not load the trained model: {error}\n"
-                "Train it first with the “Train the language model” action.",
-            )
-            return
-        self._source_menu_var_reset()
-        self._add_bubble(
-            "note",
-            "Now answering from the trained model (no sources)."
-            if want == "model"
-            else "Now answering from sources, with citations.",
-        )
+        """The header's model selector: swap the answering mouth in this chat."""
+        want = next((key for key, text in MOUTH_CHOICES if text == label), None)
+        if want is not None:
+            self._switch_mouth(want)
 
     def _source_menu_var_reset(self) -> None:
         """Keep the model selector's shown value in step with the real mouth."""
@@ -1528,29 +1526,33 @@ class FaydGUI:
 
     def _on_source_change(self) -> None:
         """The settings-panel radio, mirroring the header's model selector."""
-        want = self._source_var.get()
+        self._switch_mouth(self._source_var.get())
+
+    def _switch_mouth(self, want: str) -> None:
+        """Swap the mouth the *same* chat answers from, reporting a failure plainly.
+
+        All three mouths -- sources, the trained model, and Ultron -- answer in
+        this conversation; only ``mode.assistant`` changes, so the transcript, the
+        session, and the controls are untouched. A mouth that cannot load leaves
+        the current one in place and shows the real next step instead.
+        """
         if want == self.service.source:
             return
         try:
-            if want == "model":
+            if want == chat_module.MOUTH_MODEL:
                 self.service.use_model()
+            elif want == chat_module.MOUTH_ULTRON:
+                self.service.use_ultron()
             else:
                 self.service.use_sources()
-        except (FileNotFoundError, OSError, ValueError) as error:
+        except (FileNotFoundError, OSError, ValueError, UltronUnavailable) as error:
             self._source_var.set(self.service.source)
-            self._add_bubble(
-                "note",
-                f"Could not load the trained model: {error}\n"
-                "Train it first with the “Train the language model” action.",
-            )
+            self._source_menu_var_reset()
+            self._add_bubble("note", chat_module.switch_failure_message(want, error))
             return
+        self._source_var.set(self.service.source)
         self._source_menu_var_reset()
-        self._add_bubble(
-            "note",
-            "Now answering from the trained model (no sources)."
-            if want == "model"
-            else "Now answering from sources, with citations.",
-        )
+        self._add_bubble("note", chat_module.mouth_switched_message(want))
 
     def _on_enter(self, _event: tk.Event) -> str:
         self._on_send()
@@ -1792,21 +1794,15 @@ class FaydGUI:
             on_close=lambda: setattr(self, "_image_edit_dialog", None),
         )
 
-    def _open_ultron(self) -> None:
-        """Open Ultron -- the general, advanced local model -- as a chat window."""
-        from core.ultron import UltronEngine
-        from gui.ultron_dialog import UltronDialog
+    def _select_ultron_mouth(self) -> None:
+        """Switch this chat to the Ultron mouth from the sidebar action.
 
-        if getattr(self, "_ultron_engine", None) is None:
-            self._ultron_engine = UltronEngine()
-        self._ultron_dialog = UltronDialog(
-            self.root,
-            self._ultron_engine,
-            theme=self._theme,
-            font=self._font,
-            mono=self._mono,
-            on_close=lambda: setattr(self, "_ultron_dialog", None),
-        )
+        Ultron answers in the *same* conversation -- no separate window -- so this
+        just drives the header's model selector. When the optional runtime or a
+        model file is missing, the honest next step is shown in the transcript
+        instead of opening a mouth that could not answer.
+        """
+        self._switch_mouth(chat_module.MOUTH_ULTRON)
 
     def _on_install_ocr(self) -> None:
         """Install the optional OCR packages from within the window.
@@ -1906,9 +1902,10 @@ class FaydGUI:
         if action.key == "image":
             self._open_image_gen()
             return
-        # Ultron is a general chat window of its own, not a headless command.
+        # Ultron answers in this same chat (the header's model selector), so the
+        # sidebar entry switches the mouth rather than opening a window of its own.
         if action.key == "ultron":
-            self._open_ultron()
+            self._select_ultron_mouth()
             return
         argv = action.argv
         if action.needs_input:
@@ -2081,6 +2078,7 @@ def main(argv: list[str] | None = None) -> int:
         root=Path(args.root) if args.root else None,
         read_write=args.read_write,
         model_checkpoint=args.model_checkpoint,
+        ultron_model=args.ultron_model,
         session=args.session,
         operating_mode=args.mode,
     )
@@ -2089,6 +2087,12 @@ def main(argv: list[str] | None = None) -> int:
             service.use_model()
         except (FileNotFoundError, OSError, ValueError) as error:
             print(f"Could not load the trained model: {error}")
+            return 1
+    if args.ultron:
+        try:
+            service.use_ultron()
+        except (UltronUnavailable, OSError, ValueError) as error:
+            print(f"Could not load Ultron: {error}")
             return 1
 
     FaydGUI(root, service=service)
