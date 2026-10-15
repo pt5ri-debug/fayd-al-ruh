@@ -106,6 +106,78 @@ def test_compose_model_answer_closes_a_separator_gap_without_joining_a_slash():
     assert compose_model_answer("The value is 10 - 20 m.") == "The value is 10 - 20 m."
 
 
+def test_compose_model_answer_drops_a_leading_stray_separator():
+    # The byte model can start a continuation with a leftover separator (", the
+    # well is cased."); it is decoration, not part of the sentence, so it is
+    # dropped -- the same edge tidy the trailing decoration already gets. The
+    # model's own words and any decimal are untouched.
+    assert compose_model_answer(", the well is cased.") == "The well is cased."
+    assert compose_model_answer("; porosity controls the flow.") == (
+        "Porosity controls the flow."
+    )
+    assert compose_model_answer(": the mud weight is 1.2 sg.") == (
+        "The mud weight is 1.2 sg."
+    )
+    # A leading dot or hyphen before a digit is the model's number, not a mark.
+    assert compose_model_answer(".5 times the gradient.") == ".5 times the gradient."
+
+
+def test_compose_model_answer_drops_a_stray_separator_before_a_full_stop():
+    # A separator left right before a boundary ("flows , .") is a stutter at the
+    # edge, not the model's own mark; it is dropped so the boundary does not read
+    # as "flows,.". A separator the model really meant stays where it is a real
+    # list ("2,,3", "saturation, , are").
+    assert compose_model_answer("The well flows , . Then it stops.") == (
+        "The well flows. Then it stops."
+    )
+    assert compose_model_answer("The well flows ; . Then it stops.") == (
+        "The well flows. Then it stops."
+    )
+    assert compose_model_answer("The well flows : . Then it flows.") == (
+        "The well flows. Then it flows."
+    )
+
+
+def test_compose_model_answer_trims_a_trailing_stray_separator():
+    # A continuation that ends on a bare separator ("The well is cased ,") is the
+    # trailing twin; the composer ends the sentence with the model's period, not
+    # with "cased,.".
+    assert compose_model_answer("The well is cased ,") == "The well is cased."
+    assert compose_model_answer("The well is cased ;") == "The well is cased."
+    assert compose_model_answer("The well is cased :") == "The well is cased."
+    assert compose_model_answer("The well is cased , .") == "The well is cased."
+
+
+def test_compose_model_answer_drops_a_stray_separator_after_a_boundary():
+    # A separator the model leaves right after a boundary ("flows. , then") would
+    # otherwise open the next sentence as ", then"; it is dropped, the boundary
+    # keeps its space, and a comma the model really meant (a list) stays.
+    assert compose_model_answer("The well flows. , then it stops.") == (
+        "The well flows. Then it stops."
+    )
+    assert compose_model_answer("The well flows. ; then it stops.") == (
+        "The well flows. Then it stops."
+    )
+    assert compose_model_answer("The well flows , and then it stops.") == (
+        "The well flows, and then it stops."
+    )
+
+
+def test_compose_model_answer_collapses_a_run_of_the_same_full_stop():
+    # Closing a gap can leave two full stops touching ("flows. ."); the model's
+    # own mark is kept once, so a sentence does not end "..".
+    assert compose_model_answer("The well flows. . Then it stops.") == (
+        "The well flows. Then it stops."
+    )
+    assert compose_model_answer("The well flows! ! Then it stops.") == (
+        "The well flows! Then it stops."
+    )
+    # Different marks are the model's own punctuation and are left alone.
+    assert compose_model_answer("Is the well flowing?! The pump is running.") == (
+        "Is the well flowing?! The pump is running."
+    )
+
+
 def test_compose_model_answer_collapses_a_repeated_phrase():
     # The byte model loops on a whole phrase, not only a single word; the repeat
     # is the model stalling, so it is shown once.
