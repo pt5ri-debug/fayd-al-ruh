@@ -63,6 +63,9 @@ from gui.service import ChatReply, ChatService
 RADIUS_SMALL = 5
 RADIUS_LARGE = 20
 
+#: The send control is a disc, so its side length is a single diameter in pixels.
+SEND_BUTTON_SIZE = 36
+
 #: Below this width the sidebar starts hidden (a drawer), like ChatGPT on mobile.
 _COMPACT_WIDTH = 900
 #: The sidebar's expanded width and its collapsed rail width.
@@ -267,12 +270,6 @@ class RoundedBox(tk.Canvas):
         # Draw first, then push it behind the interior frame.
         self.tag_lower(self._shape)
 
-    def set_outline(self, colour: str) -> None:
-        """Recolour the border — used to show focus on the composer."""
-        self._outline = colour
-        if self._shape is not None:
-            self.itemconfigure(self._shape, outline=colour)
-
     def _rounded(self, x1: int, y1: int, x2: int, y2: int, r: int) -> int:
         points = [
             x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
@@ -283,6 +280,56 @@ class RoundedBox(tk.Canvas):
             points, smooth=True, splinesteps=24,
             fill=self._fill, outline=self._outline, width=1,
         )
+
+
+class CircleButton(tk.Canvas):
+    """A circular button: a canvas-painted disc that still behaves like a button.
+
+    Tk's ``Button`` cannot be round, so the send control is a Canvas that draws a
+    filled circle and a glyph, and forwards clicks to a command. ``enabled`` (and
+    the fill/ink) can be changed later without rebuilding it, which is how the
+    window greys the control out while it is busy.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        size: int,
+        bg: str,
+        fill: str,
+        ink: str,
+        text: str,
+        command: Callable[[], Any],
+    ) -> None:
+        super().__init__(
+            parent, width=size, height=size, bg=bg, highlightthickness=0,
+            borderwidth=0, takefocus=0, cursor="hand2",
+        )
+        self._size = size
+        self._fill = fill
+        self._ink = ink
+        self._command = command
+        self._enabled = True
+        self._shape = self.create_oval(1, 1, size - 1, size - 1, fill=fill, outline="")
+        self._glyph = self.create_text(
+            size // 2, size // 2, text=text, fill=ink,
+            font=("TkDefaultFont", max(11, size // 3), "bold"),
+        )
+        self.bind("<Button-1>", self._on_click)
+
+    def _on_click(self, _event: tk.Event) -> None:
+        if self._enabled:
+            self._command()
+
+    def set_state(self, *, enabled: bool, fill: str, ink: str) -> None:
+        """Repaint the disc for an enabled/disabled state."""
+        self._enabled = enabled
+        self._fill = fill
+        self._ink = ink
+        self.itemconfigure(self._shape, fill=fill)
+        self.itemconfigure(self._glyph, fill=ink)
+        self.configure(cursor="hand2" if enabled else "arrow")
 
 
 class _Tooltip:
@@ -360,6 +407,8 @@ class _Row:
     widget: tk.Text
     row: tk.Frame
     text: str
+    #: The full rendered text (``text`` plus any ``extra``), used to size the bubble.
+    body: str = ""
 
 
 class FaydGUI:
@@ -898,11 +947,49 @@ class FaydGUI:
             return 20
         return max(16, (width - _COLUMN_MAX) // 2)
 
-    def _user_width(self, text: str) -> int:
-        """A width for a right-aligned bubble: fit the longest line, capped."""
-        font = tkfont.Font(family=self._font, size=12)
-        widest = max((font.measure(line) for line in text.split("\n")), default=0)
-        return max(120, min(widest + 40, int(_COLUMN_MAX * 0.84)))
+    def _bubble_fonts(self) -> tuple[tkfont.Font, tkfont.Font]:
+        """The proportional and mono fonts a bubble measures its text with."""
+        return (
+            tkfont.Font(family=self._font, size=11),
+            tkfont.Font(family=self._mono, size=10),
+        )
+
+    def _available_column(self) -> int:
+        """The transcript column's pixel width, capped for readability."""
+        canvas = getattr(self, "_canvas", None)
+        width = canvas.winfo_width() if canvas is not None else 0
+        if width <= 1:
+            return _COLUMN_MAX
+        return max(160, min(_COLUMN_MAX, width - 2 * self._column_pad()))
+
+    def _bubble_content_width(self, text: str, *, role: str) -> int:
+        """The pixel width a bubble's text may occupy: fit the widest line, capped.
+
+        The height is set separately by :meth:`_fit_height`; together the two make a
+        bubble grow with the amount of text it holds instead of being a fixed box.
+        A user bubble is right-aligned and a little narrower than the column; an
+        assistant bubble may use the full column but never overflows it.
+        """
+        normal, mono = self._bubble_fonts()
+        widest = 0
+        for line in md.iter_styled_lines(text):
+            font = mono if line.in_code else normal
+            widest = max(widest, font.measure(line.text))
+        if role == "user":
+            return max(80, min(widest, int(_COLUMN_MAX * 0.84) - 52))
+        pad = 6 if role != "note" else 0
+        return max(120, min(widest, self._available_column() - 2 * pad))
+
+    def _bubble_text_width(self, text: str, *, role: str) -> int:
+        """The ``Text`` width, in characters, that yields the content width."""
+        normal, _mono = self._bubble_fonts()
+        char_px = max(1, normal.measure("0"))
+        content = self._bubble_content_width(text, role=role)
+        return max(1, -(-content // char_px))
+
+    def _bubble_card_width(self, text: str) -> int:
+        """The pixel width of a user bubble's rounded card, chrome included."""
+        return self._bubble_content_width(text, role="user") + 52
 
     def _show_hero(self) -> None:
         """The welcome/empty state, shown whenever the transcript is empty."""
@@ -969,8 +1056,9 @@ class FaydGUI:
             widget.insert("1.0", text)
             self._make_read_only(widget)
             widget.pack(fill="both", expand=True)
+            card.configure(width=self._bubble_card_width(text))
             self._fit_height(widget)
-            card.configure(width=self._user_width(text))
+            body = text
         else:
             bg = self._theme.base
             head = tk.Frame(row, bg=bg)
@@ -991,9 +1079,11 @@ class FaydGUI:
                 padx=(6 if role != "note" else 0), pady=0, cursor="xterm", takefocus=1,
                 spacing1=1, spacing3=1,
             )
-            self._insert_rich(widget, f"{text}\n\n{extra}" if extra else text)
+            body = f"{text}\n\n{extra}" if extra else text
+            self._insert_rich(widget, body)
             self._make_read_only(widget)
-            widget.pack(fill="x")
+            widget.configure(width=self._bubble_text_width(body, role=role))
+            widget.pack(anchor="w")
             self._fit_height(widget)
 
         for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
@@ -1014,7 +1104,7 @@ class FaydGUI:
         else:
             self._copy_label(footer, "⧉ Copy", widget)
 
-        self._rows.append(_Row(role=role, widget=widget, row=row, text=text))
+        self._rows.append(_Row(role=role, widget=widget, row=row, text=text, body=body))
         self._scroll_to_bottom()
         return widget
 
@@ -1140,10 +1230,13 @@ class FaydGUI:
             row.pack_configure(padx=(pad, pad))
         for entry in self._rows:
             if entry.role == "user":
-                self._fit_height(entry.widget)
                 box = entry.widget.master.master if entry.widget.master is not None else None
                 if isinstance(box, RoundedBox):
-                    box.configure(width=self._user_width(entry.text))
+                    box.configure(width=self._bubble_card_width(entry.body))
+                self._fit_height(entry.widget)
+            else:
+                entry.widget.configure(width=self._bubble_text_width(entry.body, role=entry.role))
+                self._fit_height(entry.widget)
 
     @staticmethod
     def _role_label(role: str) -> str:
@@ -1353,17 +1446,13 @@ class FaydGUI:
         self._entry.pack(side="left", fill="both", expand=True)
         self._entry.bind("<Return>", self._on_enter)
         self._entry.bind("<Shift-Return>", lambda _e: None)
-        self._entry.bind("<FocusIn>", lambda _e: self._composer_box.set_outline(self._theme.primary))
-        self._entry.bind("<FocusOut>", lambda _e: self._composer_box.set_outline(self._theme.border))
 
-        self._send = tk.Button(
-            field, text="↑", command=self._on_send, bg=self._theme.primary,
-            fg=self._theme.primary_foreground, activebackground=self._theme.primary,
-            activeforeground=self._theme.primary_foreground,
-            font=(self._font, 14, "bold"), relief="flat", borderwidth=0,
-            padx=0, pady=2, width=2, cursor="hand2",
+        self._send = CircleButton(
+            field, size=SEND_BUTTON_SIZE, bg=self._theme.surface,
+            fill=self._theme.primary, ink=self._theme.primary_foreground,
+            text="↑", command=self._on_send,
         )
-        self._send.pack(side="right", padx=(6, 2), pady=8)
+        self._send.pack(side="right", padx=(6, 6), pady=6)
         self._render_attachment_chips()
         self._entry.focus_set()
 
@@ -1874,10 +1963,10 @@ class FaydGUI:
         threading.Thread(target=run, daemon=True).start()
 
     def _set_send_enabled(self, enabled: bool) -> None:
-        self._send.configure(
-            state="normal" if enabled else "disabled",
-            bg=self._theme.primary if enabled else self._theme.disabled,
-            cursor="hand2" if enabled else "arrow",
+        self._send.set_state(
+            enabled=enabled,
+            fill=self._theme.primary if enabled else self._theme.disabled,
+            ink=self._theme.primary_foreground if enabled else self._theme.text_dim,
         )
 
     def _pump(self) -> None:

@@ -802,3 +802,79 @@ def test_window_messages_are_centred_in_a_readable_column() -> None:
         assert box.winfo_x() > 0  # pushed toward the right within its row
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_send_button_is_a_circle() -> None:
+    """The chat send control is a circular disc, not a rectangular button."""
+    import tkinter as tk
+
+    from gui.app import SEND_BUTTON_SIZE, CircleButton, FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.geometry("1200x780")
+        for _ in range(10):
+            root.update()
+        assert isinstance(app._send, CircleButton)
+        # A square side length is what makes the drawn oval a circle.
+        assert app._send.winfo_width() == app._send.winfo_height() == SEND_BUTTON_SIZE
+        # It stays inside the composer card, beside the input.
+        assert app._send.master is app._composer_box.inner
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_composer_has_no_gold_focus_outline() -> None:
+    """Focusing the input does not paint a gold border around the composer."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI, RoundedBox
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.geometry("1200x780")
+        for _ in range(10):
+            root.update()
+        # The composer's border is the neutral stroke; there is no focus recolour.
+        assert isinstance(app._composer_box, RoundedBox)
+        assert app._composer_box._outline == app._theme.border
+        app._entry.focus_force()
+        root.update()
+        assert app._composer_box._outline == app._theme.border
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_bubbles_size_to_their_text() -> None:
+    """A bubble's width and height follow the amount of text it holds."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.geometry("1200x780")
+        for _ in range(10):
+            root.update()
+        short = app._add_bubble("user", "hi")
+        longer = app._add_bubble("user", "what is the permeability of this core sample")
+        root.update()
+        # A longer question makes a wider bubble than a two-character one.
+        assert longer.winfo_width() > short.winfo_width()
+        # Both stay inside the readable column.
+        assert longer.winfo_width() <= app._available_column()
+
+        brief = app._add_bubble("assistant", "ok")
+        tall = app._add_bubble("assistant", "a sentence about rock. " * 30)
+        root.update()
+        # More text wraps to more lines, so the bubble is taller.
+        assert int(tall.cget("height")) > int(brief.cget("height"))
+        assert tall.winfo_width() <= app._available_column()
+    finally:
+        root.destroy()
