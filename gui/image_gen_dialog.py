@@ -23,7 +23,7 @@ import threading
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import tkinter as tk
 from tkinter import filedialog
@@ -43,6 +43,17 @@ HONESTY_LINE = (
     "Diffusion output is drawn by a learned model; the Photorealistic preset is the "
     "default and is tuned for clean, lifelike images."
 )
+
+#: The preview column (and so the rendered picture) is this fraction of the
+#: window's width, both before a render and after one.
+PREVIEW_FRACTION = 0.30
+
+#: Horizontal padding, in pixels: the side padding of every section card, and the
+#: extra padding inside the preview card. They are named so the preview column can
+#: be sized so the *visible* preview box is exactly ``PREVIEW_FRACTION`` of the
+#: window width.
+SECTION_PAD = 20
+PREVIEW_PAD = 12
 
 
 class ImageGenDialog:
@@ -66,6 +77,10 @@ class ImageGenDialog:
         self._busy = False
         self._photo: tk.PhotoImage | None = None
         self._last_path: str = ""
+        self._preview_source: str = ""
+        #: The column width the shown image was last fitted to, so a resize only
+        #: rescales when the width actually changed.
+        self._preview_fit_width: int = 0
 
         self._width_var = tk.StringVar(value="")
         self._height_var = tk.StringVar(value="")
@@ -101,9 +116,10 @@ class ImageGenDialog:
             font=(self.font, 8), anchor="w", justify="left", wraplength=980,
         ).pack(fill="x", pady=(6, 0))
 
-        # Two columns: the controls on the left, the preview on the right. A grid
-        # (not pack) keeps the preview its natural width while the controls take
-        # the remaining space.
+        # Two columns: the controls on the left, the preview on the right. The
+        # preview column is pinned to PREVIEW_FRACTION of the window width (see
+        # _layout_columns), so the picture that appears there is the same width
+        # before and after a render.
         body = tk.Frame(self.window, bg=theme.base)
         body.pack(fill="both", expand=True)
         body.rowconfigure(0, weight=1)
@@ -115,6 +131,8 @@ class ImageGenDialog:
         side.grid(row=0, column=1, sticky="nsew")
         self._controls_column = controls
         self._side_column = side
+        self._body = body
+        body.bind("<Configure>", self._on_body_configure)
 
         prompt_frame = self._section("1.  Prompt", parent=controls)
         self._prompt = tk.Text(
@@ -211,12 +229,59 @@ class ImageGenDialog:
         self._status.pack(side="left", padx=12)
 
         preview = self._section("3.  Preview", parent=side)
+        preview.pack_configure(fill="both", expand=True)
         self._preview = tk.Label(
             preview, bg=theme.surface, fg=theme.text_dim, font=(self.font, 9),
-            width=44, height=18, anchor="center", justify="center",
+            width=1, height=1, anchor="center", justify="center",
         )
         self._preview.pack(fill="both", expand=True, padx=12, pady=(2, 10))
         self._preview.configure(text="No image yet.")
+        self._layout_columns()
+
+    # -- preview geometry -------------------------------------------------
+
+    def _on_body_configure(self, _event: tk.Event | None = None) -> None:
+        self._layout_columns()
+
+    def _layout_columns(self) -> None:
+        """Pin the preview column to ``PREVIEW_FRACTION`` of the window width.
+
+        The window's own width is what the fraction is taken from, so the preview
+        (and therefore the image inside it) is the same width before a render and
+        after one, and it follows the window when the user resizes it.
+        """
+        try:
+            width = self.window.winfo_width()
+        except tk.TclError:  # the window is closing
+            return
+        if width <= 1:
+            return
+        # The column is sized so the *visible* preview box (the column minus the
+        # section and preview padding) is PREVIEW_FRACTION of the window width.
+        self._body.columnconfigure(
+            1, minsize=max(160, int(width * PREVIEW_FRACTION) + 2 * SECTION_PAD + 2 * PREVIEW_PAD)
+        )
+        # Re-fit an image that is already on screen once the new column geometry
+        # has settled (deferred, so the measured width is the updated one).
+        if self._preview_source:
+            self.window.after_idle(self._refit_preview)
+
+    def _refit_preview(self) -> None:
+        """Rescale the shown image when the preview column width has changed."""
+        if not self._preview_source:
+            return
+        self.window.update_idletasks()
+        width = self._preview_pixel_width()
+        if width > 1 and width != self._preview_fit_width:
+            self._show_preview(self._preview_source)
+
+    def _preview_pixel_width(self) -> int:
+        """The width, in pixels, the rendered image is scaled to fit."""
+        try:
+            available = self._preview.winfo_width()
+        except tk.TclError:
+            return 0
+        return max(1, available)
 
     def _section(self, title: str, *, parent: tk.Misc | None = None) -> tk.Frame:
         theme = self.theme
@@ -384,9 +449,15 @@ class ImageGenDialog:
         )
 
     def _show_preview(self, path: str) -> None:
-        try:
-            photo = tk.PhotoImage(file=path)
-        except tk.TclError:
+        """Scale the rendered image to the preview column's width and show it.
+
+        The picture is fitted to the same width the empty preview occupies, so the
+        generated image is exactly as wide as the preview box before it appeared.
+        """
+        self._preview_source = path
+        width = self._preview_pixel_width()
+        photo = self._load_scaled(path, width)
+        if photo is None:
             self._photo = None
             self._preview.configure(
                 image="", text=f"Preview unavailable in this Tk build.\nFile: {path}"
@@ -394,7 +465,42 @@ class ImageGenDialog:
             return
         # Keep a reference so Tk does not garbage-collect the image.
         self._photo = photo
+        self._preview_fit_width = width
         self._preview.configure(image=photo, text="")
+
+    def _load_scaled(self, path: str, width: int) -> tk.PhotoImage | None:
+        """Load ``path`` scaled to about ``width`` pixels, or ``None`` if unreadable.
+
+        Pillow is used when present for a smooth, exact resize. Without it the
+        image is reduced with Tk's own ``subsample`` so it still fits the preview
+        instead of overflowing, which keeps a base install usable.
+        """
+        try:
+            photo = tk.PhotoImage(file=path)
+        except tk.TclError:
+            return None
+        if width <= 1 or photo.width() <= width:
+            return photo
+        try:
+            from PIL import Image, ImageTk
+        except ImportError:
+            return self._subsample_to(photo, width)
+        try:
+            image = Image.open(path)
+            ratio = width / max(1, image.width)
+            height = max(1, round(image.height * ratio))
+            resized = image.resize((width, height), Image.Resampling.LANCZOS)
+            # ImageTk's image is a Tk image at runtime; its stub type is not a
+            # tkinter.PhotoImage, so cast to keep the return type honest.
+            return cast(tk.PhotoImage, ImageTk.PhotoImage(resized))
+        except (OSError, ValueError):
+            return self._subsample_to(photo, width)
+
+    @staticmethod
+    def _subsample_to(photo: tk.PhotoImage, width: int) -> tk.PhotoImage:
+        """Reduce a Tk image with integer ``subsample`` until it fits ``width``."""
+        factor = max(1, -(-photo.width() // max(1, width)))
+        return photo.subsample(factor) if factor > 1 else photo
 
     def _on_save_copy(self) -> None:
         if not self._last_path:
@@ -424,4 +530,4 @@ class ImageGenDialog:
         self.window.destroy()
 
 
-__all__ = ["HONESTY_LINE", "ImageGenDialog", "SUBTITLE", "TITLE"]
+__all__ = ["HONESTY_LINE", "ImageGenDialog", "PREVIEW_FRACTION", "SUBTITLE", "TITLE"]

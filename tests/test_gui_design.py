@@ -258,6 +258,14 @@ def _display_available() -> bool:
     return True
 
 
+def _pillow_available() -> bool:
+    try:
+        import PIL  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
 @pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_mode_switch_preserves_messages(tmp_path) -> None:
     import tkinter as tk
@@ -397,3 +405,55 @@ def test_image_dialog_puts_the_preview_on_the_right(tmp_path) -> None:
     finally:
         root.destroy()
 
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_image_dialog_preview_is_a_third_of_the_window(tmp_path) -> None:
+    """The preview column is 30% of the window width, before and after a render."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.image_gen import ImageGenerationService
+    from gui.image_gen_dialog import PREVIEW_FRACTION, ImageGenDialog
+
+    root = tk.Tk()
+    try:
+        root.geometry("1600x1000")
+        service = ImageGenerationService(root=tmp_path)
+        dialog = ImageGenDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        for _ in range(20):
+            root.update()
+        window_width = dialog.window.winfo_width()
+        assert PREVIEW_FRACTION == 0.30
+        # The visible preview box is 30% of the window width, before any render.
+        preview_before = dialog._preview.winfo_width()
+        assert preview_before > 1
+        assert abs(preview_before - int(window_width * PREVIEW_FRACTION)) <= 2
+
+        report = service.generate("a red spiral 512x512")
+        assert report.ok
+        dialog._show_preview(report.path)
+        for _ in range(20):
+            root.update()
+        # The generated image fits the preview's own width -- unchanged by the
+        # render, so the picture is as wide as the box it replaced. With Pillow
+        # (the [image]/[ocr] extra) the fit is exact; Tk's integer ``subsample``
+        # fallback can only round down, so it is never wider.
+        assert dialog._photo is not None
+        assert dialog._photo.width() <= preview_before
+        assert dialog._preview.winfo_width() == preview_before
+        if _pillow_available():
+            assert dialog._photo.width() == preview_before
+
+        # Resizing the window re-fits the picture to the new 30% preview box.
+        dialog.window.geometry("800x600")
+        for _ in range(40):
+            root.update()
+        resized = dialog.window.winfo_width()
+        assert abs(dialog._preview.winfo_width() - int(resized * PREVIEW_FRACTION)) <= 2
+        assert dialog._photo.width() <= dialog._preview.winfo_width()
+        assert dialog._photo.width() < preview_before
+    finally:
+        root.destroy()
