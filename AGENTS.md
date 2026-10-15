@@ -613,7 +613,11 @@ Arabic is kept as secondary aliases where useful.
   code safely. `CodeStudio(root, workspaces_dir=..., base_branch="main")` makes a
   **`git worktree`** per change under `data/studio/workspaces/<slug>` on its own
   `studio/<slug>` branch cut from `main`, so the running checkout is never edited
-  and a half-finished change cannot break the program. A `Workspace` (slug,
+  and a half-finished change cannot break the program. The worktree folder
+  belongs to the checkout being edited: the project's own checkout uses the
+  bundled, git-ignored `data/studio/workspaces`, and any other root keeps its
+  worktrees under its own `data/` (a shared folder would register another
+  repository's worktree in this one's state). A `Workspace` (slug,
   branch, path, base revision, task, check state) is persisted in a small state
   file, and `create`/`get`/`list_workspaces`/`remove` manage its life cycle.
   `read_file`/`write_file`/`list_files`/`changed_files`/`diff`/`commit` work
