@@ -1338,6 +1338,59 @@ second ingestion path exists to drift.
 > UB-Mannheim installer on Windows. `python -m cli deps` reports what is present
 > and what is missing for each feature.
 
+## Code Studio (change the project's own code safely)
+
+The Code Studio is the project's own "code host in a window": it edits the
+project's **own source files** with a local coding model, then lets you test and
+merge the change — without ever touching the running program until you say so.
+
+```bash
+python -m cli studio status          # coding-model + workspace status
+python -m cli studio coder           # is qwen2.5-coder:7b pulled?
+python -m cli studio new "add a --json flag to the report command"
+python -m cli studio list
+python -m cli studio files  add-a-json-flag
+python -m cli studio read   add-a-json-flag cli/report.py
+python -m cli studio write  add-a-json-flag cli/report.py --file /tmp/new.py
+python -m cli studio ask    add-a-json-flag "add a --json flag, keep the text output"
+python -m cli studio diff   add-a-json-flag
+python -m cli studio check  add-a-json-flag     # runs the project's tests inside the workspace
+python -m cli studio merge  add-a-json-flag     # refused unless the checks passed
+python -m cli studio discard add-a-json-flag
+```
+
+In the window, the composer's **＋** menu and the sidebar both open the **Code
+Studio** page. The sidebar entry mirrors the CLI menu's *Code Studio* item, and
+the window and the CLI drive the **same** engine (`gui/code_studio.py` over
+`core/code_studio.py`), so they share one set of workspaces, one diff, and one
+merge gate. The CLI never reimplements git or agent logic.
+
+How it works, and why it is safe:
+
+- **A workspace is an isolated copy.** *New workspace* makes a `git worktree`
+  under `data/studio/workspaces/<slug>` on its own `studio/<slug>` branch, cut
+  from `main`. Every change — yours or the model's — lands there, so the running
+  checkout is never edited and a half-finished change cannot break the program.
+- **The coding model edits it.** *Ask the model* sends a plain-language request
+  to a local coding model (`qwen2.5-coder:7b` through Ollama by default). It may
+  `list_files`, `read_file`, `write_file`, or declare itself `done` — a strict
+  JSON protocol, and every step it takes is shown so its work is reviewable
+  rather than magic. Its writes are confined to the workspace by a
+  deny-by-default path check and a text-extension allow-list, so it cannot escape
+  the folder or drop a binary into the project.
+- **Test, review, merge.** *Run checks* runs the project's own test command
+  (`python -m pytest -q`) inside the workspace; *Show diff* is the change as a
+  unified diff; and **Merge** is offered only when the checks have passed *and*
+  `main` has not moved on, so a merge can never overwrite newer work. *Discard*
+  throws the whole change away.
+
+The coding model is a *local* model with a real, honest cost: it is only as good
+as the model you pull, and the Studio says so rather than pretending. When Ollama
+is not running, or the model is not pulled, every entry point reports the real
+next step (`ollama pull qwen2.5-coder:7b`) instead of failing obscurely. Nothing
+is downloaded behind your back: the model is fetched by `ollama pull`, which you
+run yourself.
+
 ## Multimodal perception (optional)
 
 Perception is an optional add-on, not a requirement: the core and the assistant

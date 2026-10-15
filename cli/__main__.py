@@ -32,6 +32,12 @@ Usage:
     python -m cli ingest sql-status J   # one SQL import job's status
     python -m cli ingest sql-resume J   # continue an interrupted job
     python -m cli ingest sql-cancel J   # ask a running job to stop safely
+    python -m cli studio status         # Code Studio: workspaces + coding-model status
+    python -m cli studio new "task"     # make an isolated workspace (a git worktree)
+    python -m cli studio ask <slug> "…" # ask qwen2.5-coder:7b to change the workspace
+    python -m cli studio diff <slug>    # review the change as a unified diff
+    python -m cli studio check <slug>   # run the project's tests inside the workspace
+    python -m cli studio merge <slug>   # merge it into the project (gated by checks)
     python -m cli deps                  # show which optional features are installed
     python -m cli deps --install ocr    # install the OCR packages (scanned PDFs)
     python -m cli paths               # show asset/data locations
@@ -59,6 +65,7 @@ from cli.menu import (
     missing_dependency_message,
     run_agent,
     run_chat,
+    run_code_studio,
     run_curriculum,
     run_demo,
     run_deps,
@@ -101,6 +108,7 @@ _COMMANDS = {
     "knowledge": run_knowledge,
     "ingest": run_ingest,
     "import-center": run_import_center,
+    "studio": run_code_studio,
     "image": run_image,
     "deps": run_deps,
     "demo": run_demo,

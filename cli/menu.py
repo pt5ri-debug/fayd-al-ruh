@@ -253,6 +253,11 @@ def run_import_center(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.import_center", argv)
 
 
+def run_code_studio(argv: Sequence[str] = ()) -> int:
+    """Edit, test, and merge the project's own code in isolated workspaces."""
+    return _run_module("cli.studio", argv)
+
+
 def run_image(argv: Sequence[str] = ()) -> int:
     """Generate an image from a text prompt (optional, dependency-free backend)."""
     return _run_module("cli.image", argv)
@@ -347,6 +352,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Show the bulk knowledge base status", run_knowledge, ("stats",)),
     ("Ingest sources: files, SQL, authorized web", run_ingest, ("list-connectors",)),
     ("Import files and folders (Knowledge Import Center)", run_import_center, ("interactive",)),
+    ("Code Studio: edit and merge the project's own code", run_code_studio, ("status",)),
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~4 GB)", run_image, ("download", "--approve")),
     ("Install optional PDF/OCR/image support", run_deps, ()),
