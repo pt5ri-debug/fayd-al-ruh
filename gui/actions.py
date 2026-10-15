@@ -18,6 +18,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from cli.menu import (
+    run_code_studio,
     run_curriculum,
     run_demo,
     run_deps,
@@ -103,6 +104,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         "Import files and folders (Knowledge Import Center)",
         run_import_center,
         ("interactive",),
+    ),
+    GuiAction(
+        "code-studio",
+        "Code Studio: edit and merge the project's own code",
+        run_code_studio,
+        ("status",),
     ),
     GuiAction("image", "Generate an image from text", run_image, ("backends",)),
     GuiAction(

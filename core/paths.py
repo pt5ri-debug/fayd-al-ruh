@@ -95,6 +95,23 @@ def ultron_models_dir() -> Path:
     return data_dir() / "ultron"
 
 
+def studio_dir() -> Path:
+    """Where the Code Studio keeps its own state (git worktrees, run logs).
+
+    The Studio edits the project through *git worktrees* under this folder: one
+    branch per change, checked out beside the code so it can be tested in
+    isolation and merged back with a button. The folder is git-ignored, so a
+    half-finished change never dirties the working tree and a program update
+    (which only fast-forwards tracked files) never touches it.
+    """
+    return data_dir() / "studio"
+
+
+def studio_workspaces_dir() -> Path:
+    """The parent folder of every Studio worktree (one directory per change)."""
+    return studio_dir() / "workspaces"
+
+
 def bundled_artifacts_dir() -> Path:
     """Read-only artifacts inside the code or bundle, used as a fallback."""
     return bundle_root() / "ml" / "artifacts"
@@ -160,6 +177,8 @@ __all__ = [
     "checkpoints_dir",
     "models_dir",
     "ultron_models_dir",
+    "studio_dir",
+    "studio_workspaces_dir",
     "bundled_artifacts_dir",
     "bundled_checkpoints_dir",
     "default_checkpoint",

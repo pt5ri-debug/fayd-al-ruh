@@ -1724,6 +1724,11 @@ class FaydGUI:
         menu.add_command(
             label="Edit an image from text…", command=self._open_image_edit
         )
+        menu.add_separator()
+        menu.add_command(
+            label="Code Studio — edit and merge the project's own code…",
+            command=self._open_code_studio,
+        )
         return menu
 
     def _attach_one_file(self, *, ocr: bool = False) -> None:
@@ -1792,6 +1797,32 @@ class FaydGUI:
             font=self._font,
             mono=self._mono,
             on_close=lambda: setattr(self, "_image_edit_dialog", None),
+        )
+
+    def _open_code_studio(self) -> None:
+        """Open the Code Studio: edit, test, and merge the project's own code.
+
+        The Studio works in isolated git worktrees, so nothing it changes reaches
+        the running project until the user presses Merge there.
+        """
+        from gui.code_studio import CodeStudioService
+        from gui.code_studio_dialog import CodeStudioDialog
+
+        existing = getattr(self, "_code_studio_dialog", None)
+        if existing is not None:
+            existing.window.deiconify()
+            existing.window.lift()
+            return
+        from core.paths import executable_dir
+
+        service = CodeStudioService(executable_dir())
+        self._code_studio_dialog = CodeStudioDialog(
+            self.root,
+            service,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=lambda: setattr(self, "_code_studio_dialog", None),
         )
 
     def _select_ultron_mouth(self) -> None:
@@ -1901,6 +1932,11 @@ class FaydGUI:
         # The text-to-image screen likewise has its own window.
         if action.key == "image":
             self._open_image_gen()
+            return
+        # The Code Studio has its own window (and its own service), so the sidebar
+        # opens it rather than running the headless status command.
+        if action.key == "code-studio":
+            self._open_code_studio()
             return
         # Ultron answers in this same chat (the header's model selector), so the
         # sidebar entry switches the mouth rather than opening a window of its own.

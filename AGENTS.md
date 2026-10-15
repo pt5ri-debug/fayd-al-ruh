@@ -46,7 +46,10 @@ Arabic is kept as secondary aliases where useful.
   knowledge base, learned documents) in a git-ignored `data/` folder beside the
   code, so retraining never dirties the working tree; the committed `ml/artifacts`
   and `ml/llm/checkpoints` copies stay as the read-only fallback. `ensure_data_layout`
-  copies any pre-upgrade in-repo data into `data/` on first run.
+  copies any pre-upgrade in-repo data into `data/` on first run. `studio_dir()`
+  (`data/studio`) and `studio_workspaces_dir()` (`data/studio/workspaces`) are
+  where the Code Studio keeps its git worktrees, git-ignored like the rest of
+  `data/`.
   `core/version.py` — the single version string.
 - `core/updater.py` — program updates for a source checkout. `check_for_updates`
   fetches the remote (never touching the working tree) and reports how many
@@ -508,6 +511,19 @@ Arabic is kept as secondary aliases where useful.
   (cancelled/interrupted, resumable), `5` unrecoverable failure. A cross-process
   cancel is a marker file (`SqlImportService.request_cancel`) that a running
   import polls, so `sql-cancel` works from a separate invocation.
+- `cli/studio.py` — the **Code Studio CLI**, the headless twin of the Studio
+  window: `status`/`coder`/`new`/`list`/`files`/`read`/`write`/`ask`/`diff`/
+  `check`/`merge`/`discard` (`python -m cli studio …`, wired in `cli/menu.py` as
+  `run_code_studio` and in the menu as *Code Studio: edit and merge the project's
+  own code*). It drives the *same* `gui.code_studio.CodeStudioService`, so the CLI
+  and the window share one set of workspaces, one diff, and one merge gate — the
+  CLI reimplements no git or agent logic. `--root` selects the checkout (default:
+  the current directory), `--base-branch` the branch workspaces cut from and merge
+  into, `--max-steps` how many model turns one `ask` may take, `--check-command`
+  the command `check` runs (one shell string, default `python -m pytest -q`), and
+  `--json` for machine-readable output. Exit codes: `0` success, `2` invalid
+  arguments, `3` the coding model is not available, `4` a workspace/gate refused
+  the operation, `5` an unexpected failure.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
   Update the baseline with `python -m evaluation --update-baseline`.
@@ -578,7 +594,69 @@ Arabic is kept as secondary aliases where useful.
   save. A small animated "Thinking…" indicator shows while an answer is pending.
   Live training output is queued and rendered at a bounded rate (coalesced into
   one widget update every ~0.15 s, fully drained before the result), so a fast
-  training loop never freezes the window.
+  training loop never freezes the window. The composer's **＋** menu also opens
+  the **Code Studio** (below).
+- `core/coder_model.py` — the coding-model client, the one place the code model
+  is named. `DEFAULT_CODER_MODEL = "qwen2.5-coder:7b"` (a local **Ollama** model),
+  `CoderMessage` (a validated chat turn), the `CoderClient` protocol
+  (`list_models`/`chat`), and `OllamaCoderClient` — a thin, dependency-free
+  `urllib` client for Ollama's `/api/tags` and `/api/chat` (**no `requests`**),
+  so the base install pulls nothing new. `CoderUnavailable` is raised when the
+  server is unreachable or the model is missing, and `coder_status` reports the
+  truth as a `CoderStatus` (`available`, `server_reachable`, `installed`,
+  `models`, and the real next step in `hint`): a missing server and a missing
+  *model* are distinguished, and `_model_present` accepts Ollama's implicit
+  `:latest` tag but never claims a different size of the same family is present.
+  `PULL_HINT` is the one string every surface shows for the next step.
+- `core/code_studio.py` — the **Code Studio** engine: change the project's *own*
+  code safely. `CodeStudio(root, workspaces_dir=..., base_branch="main")` makes a
+  **`git worktree`** per change under `data/studio/workspaces/<slug>` on its own
+  `studio/<slug>` branch cut from `main`, so the running checkout is never edited
+  and a half-finished change cannot break the program. A `Workspace` (slug,
+  branch, path, base revision, task, check state) is persisted in a small state
+  file, and `create`/`get`/`list_workspaces`/`remove` manage its life cycle.
+  `read_file`/`write_file`/`list_files`/`changed_files`/`diff`/`commit` work
+  inside it; every path goes through a **deny-by-default confinement** check
+  (`../escape.py`, an absolute path, and a path that climbs out all raise) plus a
+  text-extension allow-list and a size cap, so the model cannot escape the folder
+  or drop a binary into the project. `run_checks` runs the project's own test
+  command *inside the workspace* and records the verdict; `can_merge` is the gate
+  — it refuses while the checks have not passed, when the workspace is empty, when
+  `main` has moved on (so a merge can never overwrite newer work), when the
+  checkout is on another branch, and with uncommitted changes — and `merge`
+  fast-forwards `main` to the workspace's commit. `_git` runs git
+  non-interactively and supplies a commit identity **only for its own commits**
+  (`_noninteractive_env(identity=True)`), so a machine with no global git identity
+  still works. `StudioError` is the one failure type.
+- `core/code_agent.py` — the coding agent: drives a `CoderClient` over a workspace
+  through a strict JSON action protocol (`list_files`, `read_file`, `write_file`,
+  `done`), validating `path`/`content` per action and returning an `AgentTrace`
+  (one `AgentStep` per turn, the writes, the summary, and the reason it stopped).
+  It tolerates a fenced reply and surrounding prose, pushes back on a bad reply
+  rather than dying, truncates a large read (`read_chars`), stops at `max_steps`,
+  and reports an unreachable model honestly. A refused write is a *failed step in
+  the trace*, never a crash — the confinement in `core/code_studio.py` is what
+  actually holds, and the agent only surfaces it.
+- `gui/code_studio.py` — the Code Studio **service** (Tk-free): `CodeStudioService`
+  wraps the engine, the coder client, and the check command, and returns plain
+  reports (`create_workspace`, `list_files`, `read_file`, `save_file`,
+  `changed_files`, `diff`, `run_checks`, `can_merge`, `merge`, `remove_workspace`,
+  `run_agent`, `state`, `status`). It is the one engine the window and the CLI
+  share, so both see one set of workspaces, one diff, and one merge gate. The
+  coder client is built lazily, so constructing the service never reaches Ollama.
+- `gui/code_studio_dialog.py` — the Code Studio **window** (Tk, imported lazily):
+  a workspace list + *New workspace*, an editor page (file list, an editable
+  `tk.Text`, Save), a model page (a request box, *Ask the model*, and the step
+  trace), and a review page (*Show diff*, *Run checks*, the diff/check text), with
+  *Merge into the project* and *Discard workspace* on the action bar. Long work
+  runs on a worker thread whose result is handed back through a **queue the UI
+  thread drains** (`_schedule_pump`), because calling Tk's `after` from a worker
+  thread races with the main loop; Merge stays disabled until the gate allows it,
+  and a message the user just needs to read (a save, a model run) is not
+  overwritten by the merge hint (`_refresh_merge_state(keep_note=True)`).
+  Reachable from the composer's **＋** menu (**Code Studio — edit and merge the
+  project's own code…**) and the sidebar action; the headless twin is
+  `python -m cli studio`.
 - `core/document_reader.py` — read text out of a Word file with no third-party
   dependency: a `.docx`/`.docm` is an Office Open XML package (a ZIP holding
   `word/document.xml`), read through **`core/docx_extract.py`** (Stage 2B), which
