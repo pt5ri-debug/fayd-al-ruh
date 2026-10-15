@@ -743,6 +743,18 @@ download catalog, and the gates); `ai/ultron.py` is the CLI entry point; and
 project's own conversation (`from ultron` in text, the model selector in the
 window).
 
+Ultron has no retriever, so a file you attach is read the other way: the file's
+whole text is written into the conversation as reference material (a `CONTEXT`
+turn in `core/conversation.py`) and put in front of your question for the model.
+That is what makes "attach a document, then ask Ultron about it" work inside the
+same chat. The grounded mouth is unaffected — it already retrieves the file's
+chunks and cites them — and the conversation's own transcript (`render`) leaves
+reference material out, so a file is never counted twice. Reference material is
+the last thing evicted from the bounded window, so an attachment stays readable
+for many turns; the prompt is capped at `ai.ultron_mouth.DEFAULT_REFERENCE_CHARS`
+(8000) with a visible marker, so a very long file cannot overflow the model's
+context window.
+
 ## Graphical interface (ChatGPT-style)
 
 A desktop window that looks and reads like ChatGPT ships **next to** the command
@@ -782,8 +794,10 @@ The window is a thin shell over the same code the CLI already runs:
 - The **composer** is a rounded, ChatGPT-like card: a multiline field (Enter
   sends, Shift+Enter inserts a newline), a send button, and a **＋** control that
   opens the evidence and import choices — **Attach a file to this chat** (the
-  file's text joins this conversation's evidence and shows as a removable chip, so
-  a question can cite it like the built-in corpus), **Attach a scanned PDF
+  file's text joins this conversation's evidence *and* is written into the
+  conversation itself as reference material, so a question can cite it like the
+  built-in corpus and Ultron — which never retrieves — can read it too; it shows
+  as a removable chip), **Attach a scanned PDF
   (OCR)…** (the same, for a PDF with no text layer; needs the optional `[ocr]`
   extra), **Open Knowledge Import Center…** (the persistent path below), **Import
   a SQL database (SQLite)…**, and **Generate an image from text…** (below).

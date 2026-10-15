@@ -130,6 +130,69 @@ def test_service_attach_file_reports_failure(tmp_path) -> None:
     assert service.attachments == []
 
 
+def test_service_attach_file_puts_the_text_in_the_conversation(tmp_path) -> None:
+    """A mouth that never retrieves (Ultron) still sees an attached file's text."""
+    import zipfile
+
+    from core.assistant import build_default_assistant
+    from core.conversation import Conversation
+
+    session = FakeSession()
+    session.assistant = build_default_assistant()
+    session._conversation = cast(Any, Conversation(title="real"))
+    service = ChatService(mode=cast(JarvisMode, session))
+    docx = tmp_path / "well.docx"
+    body = "<w:p><w:r><w:t>Zephyrium-9 flowed at 4200 barrels per day.</w:t></w:r></w:p>"
+    xml = (
+        '<?xml version="1.0"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{body}</w:body></w:document>"
+    )
+    with zipfile.ZipFile(docx, "w") as archive:
+        archive.writestr("word/document.xml", xml)
+
+    notice = service.attach_file(docx)
+
+    assert notice.ok is True
+    conversation = session.conversation
+    # The whole file's text is reference material in the conversation itself.
+    assert len(conversation.context_messages()) == 1
+    assert "Zephyrium-9" in conversation.render_context()
+
+    # Detaching takes both the evidence and the reference material back out.
+    service.remove_attachment(service.attachments[0])
+
+    assert conversation.context_messages() == ()
+    assert conversation.render_context() == ""
+
+
+def test_service_new_conversation_drops_attachment_reference_material(tmp_path) -> None:
+    import zipfile
+
+    from core.assistant import build_default_assistant
+    from core.conversation import Conversation
+
+    session = FakeSession()
+    session.assistant = build_default_assistant()
+    session._conversation = cast(Any, Conversation(title="real"))
+    service = ChatService(mode=cast(JarvisMode, session))
+    docx = tmp_path / "well.docx"
+    body = "<w:p><w:r><w:t>Zephyrium-9 flowed at 4200 barrels per day.</w:t></w:r></w:p>"
+    xml = (
+        '<?xml version="1.0"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{body}</w:body></w:document>"
+    )
+    with zipfile.ZipFile(docx, "w") as archive:
+        archive.writestr("word/document.xml", xml)
+    service.attach_file(docx)
+
+    service.new_conversation()
+
+    # The reference-material turns belonged to the previous conversation.
+    assert service._context_turns == []
+
+
 def test_service_answers_and_renders_sources() -> None:
     turn = JarvisTurn(
         heard="what is porosity?",

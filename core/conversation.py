@@ -8,7 +8,10 @@ Design choices:
 
 * A :class:`Conversation` is an ordered list of :class:`Message` turns. History
   is bounded by ``max_turns`` so the prompt sent to a model cannot grow without
-  limit; the oldest turns are dropped, the newest kept.
+  limit; the oldest turns are dropped, the newest kept. A ``CONTEXT`` turn -- the
+  text of a file the user attached -- is reference material rather than part of
+  the exchange, so it is the *last* thing evicted: the conversation ages out
+  first, which keeps an attachment readable for many turns after it was added.
 * Messages carry the citations that grounded them, so a later turn can still say
   where an earlier answer came from.
 * Persistence uses the project's :class:`storage.json_store.JsonStore`, so a
@@ -37,6 +40,7 @@ class Role(str, Enum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
+    CONTEXT = "context"
 
 
 @dataclass(frozen=True)
@@ -98,10 +102,25 @@ class Conversation:
         """Append a turn, dropping the oldest once the window is full."""
         message = Message(role=role, text=text, citations=tuple(citations))
         self._messages.append(message)
-        overflow = len(self._messages) - self.max_turns
-        if overflow > 0:
-            del self._messages[:overflow]
+        self._evict()
         return message
+
+    def _evict(self) -> None:
+        """Trim the window to ``max_turns``, keeping attached reference material.
+
+        A context turn is a file the user attached on purpose, so it is the last
+        thing dropped: conversational turns age out first. When only context
+        remains the oldest of those goes, so the window still cannot grow without
+        bound.
+        """
+        overflow = len(self._messages) - self.max_turns
+        while overflow > 0:
+            index = next(
+                (i for i, message in enumerate(self._messages) if message.role is not Role.CONTEXT),
+                0,
+            )
+            del self._messages[index]
+            overflow -= 1
 
     def add_user(self, text: str) -> Message:
         return self.add(Role.USER, text)
@@ -111,6 +130,35 @@ class Conversation:
 
     def add_system(self, text: str) -> Message:
         return self.add(Role.SYSTEM, text)
+
+    def add_context(self, text: str) -> Message:
+        """Add reference material (an attached file's text) to the conversation.
+
+        A context turn is the full text of a document the user attached, so every
+        mouth -- the grounded assistant, the trained model, and Ultron -- sees it
+        in the same conversation instead of only the retrieval store. It carries
+        no role of its own in a chat transcript, so callers render it separately.
+        """
+        return self.add(Role.CONTEXT, text)
+
+    def context_messages(self) -> tuple[Message, ...]:
+        """The context turns (attached reference material), oldest first."""
+        return tuple(message for message in self._messages if message.role is Role.CONTEXT)
+
+    def remove_context(self, message: Message) -> bool:
+        """Drop one context turn; returns whether it was present."""
+        for index, candidate in enumerate(self._messages):
+            if candidate is message:
+                del self._messages[index]
+                return True
+        return False
+
+    def render_context(self) -> str:
+        """The attached reference material as one labelled block, or ``""``."""
+        blocks = [message.text for message in self.context_messages() if message.text.strip()]
+        if not blocks:
+            return ""
+        return "\n\n".join(blocks)
 
     @property
     def messages(self) -> tuple[Message, ...]:
@@ -140,9 +188,17 @@ class Conversation:
         return None
 
     def render(self, *, include_system: bool = True) -> str:
-        """Render the window as a plain transcript for a model prompt."""
+        """Render the *exchange* as a plain transcript for a model prompt.
+
+        Reference material (:attr:`render_context`) is deliberately left out: it is
+        delivered on its own -- by retrieval for the grounded assistant, and by
+        :func:`ai.ultron_mouth._context_prompt` for Ultron -- so including it here
+        would send the same file twice and crowd out the passages that cite it.
+        """
         lines: list[str] = []
         for message in self._messages:
+            if message.role is Role.CONTEXT:
+                continue
             if not include_system and message.role is Role.SYSTEM:
                 continue
             prefix = {

@@ -57,6 +57,19 @@ SWITCH_TO_ULTRON = (
     "من ألترون", "ألترون", "استخدم ألترون",
 )
 
+#: Opens the reference block when the conversation carries an attached file, so
+#: the model is told the text below is the user's own material rather than its
+#: own earlier words.
+REFERENCE_LABEL = "Reference material the user attached:"
+
+#: How much of an attached file's text is handed to the model in one prompt. The
+#: conversation keeps the whole file; the model's context window is finite
+#: (``core.ultron.DEFAULT_CONTEXT``), so a longer file is cut here with a visible
+#: marker instead of overflowing the window and failing the reply.
+DEFAULT_REFERENCE_CHARS = 8000
+
+_REFERENCE_CUT = "\n… [the rest of the attached file is not shown here]"
+
 #: The honesty header a mouth writes above its answer. Dropped from a previous
 #: assistant turn before it is fed back to the model, so Ultron is not prompted
 #: with a label it did not produce.
@@ -102,6 +115,23 @@ def _history(conversation: Conversation) -> list[tuple[str, str]]:
     return pairs
 
 
+def _context_prompt(conversation: Conversation, question: str, *, limit: int) -> str:
+    """Attach the conversation's reference material to ``question``, when present.
+
+    The project's conversation renders reference material in its own block, so it
+    is passed the same way here: the model is told, in the prompt, that the text
+    below is material the user attached. A conversation with no attachment returns
+    ``question`` unchanged. ``limit`` bounds how much text is sent (``<= 0`` sends
+    all of it); a cut is marked so the model does not mistake it for the file's end.
+    """
+    reference = conversation.render_context()
+    if not reference:
+        return question
+    if 0 < limit < len(reference):
+        reference = reference[:limit].rstrip() + _REFERENCE_CUT
+    return f"{REFERENCE_LABEL}\n{reference}\n\nQuestion: {question}"
+
+
 class UltronAssistant:
     """Answers from Ultron, the general local model, without retrieval or citations.
 
@@ -117,10 +147,12 @@ class UltronAssistant:
         *,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        reference_chars: int = DEFAULT_REFERENCE_CHARS,
     ) -> None:
         self.engine = engine
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.reference_chars = reference_chars
         # Kept for the grounded assistant's shape; Ultron never retrieves, so
         # there is nothing to persist here.
         self.memory = None
@@ -163,15 +195,19 @@ class UltronAssistant:
 
         The history is taken *before* the question is appended, so the model is
         asked to continue the conversation rather than to complete its own prompt.
-        The answer carries no citations on purpose -- it is the model's own words.
+        Any reference material the conversation carries -- the text of a file the
+        user attached -- is put in front of the question, so Ultron can read it
+        like the grounded mouth does. The answer carries no citations on purpose:
+        it is the model's own words.
         """
         if not question.strip():
             raise ValueError("Question cannot be empty.")
         if conversation is None:
             conversation = Conversation(title=question.strip()[:40])
         history = _history(conversation)
+        prompt = _context_prompt(conversation, question, limit=self.reference_chars)
         conversation.add_user(question)
-        body = self.answer(question, history=history) or ULTRON_EMPTY
+        body = self.answer(prompt, history=history) or ULTRON_EMPTY
         text = f"{ULTRON_HEADER}\n\n{body}"
         conversation.add_assistant(text, ())
         return AssistantAnswer(
@@ -189,6 +225,7 @@ def load_ultron_assistant(
     *,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    reference_chars: int = DEFAULT_REFERENCE_CHARS,
 ) -> UltronAssistant:
     """Build the Ultron mouth and check it can answer.
 
@@ -201,12 +238,15 @@ def load_ultron_assistant(
         UltronEngine(model_path=model_path),
         max_tokens=max_tokens,
         temperature=temperature,
+        reference_chars=reference_chars,
     )
     assistant.ensure_available()
     return assistant
 
 
 __all__ = [
+    "DEFAULT_REFERENCE_CHARS",
+    "REFERENCE_LABEL",
     "SWITCH_TO_ULTRON",
     "ULTRON_EMPTY",
     "ULTRON_HELP",

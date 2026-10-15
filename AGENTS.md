@@ -109,7 +109,14 @@ Arabic is kept as secondary aliases where useful.
   automatically. BPE compresses the corpus ~3x vs raw bytes; merges are learned from
   a bounded 300k-char prefix. `--tokenizer-kind byte` restores the old byte behaviour.
 - `core/conversation.py` — multi-turn memory (sessions, roles, bounded window,
-  `JsonStore` persistence). `core/documents.py` — citable documents + knowledge
+  `JsonStore` persistence). `Role` carries a `CONTEXT` turn for reference
+  material — the whole text of a file the user attached — so a mouth that never
+  retrieves (Ultron) still reads it; `add_context`/`context_messages`/
+  `remove_context`/`render_context` manage it, `render` deliberately omits it (a
+  file is not part of the exchange and the grounded mouth already retrieves its
+  chunks), and it is the *last* turn evicted from the bounded window so an
+  attachment stays readable for many turns.
+  `core/documents.py` — citable documents + knowledge
   corpus from the seeds (disciplines, courses, and the petroleum corpus).
   `core/rag.py` — fuses lexical coverage (Arabic-normalised),
   hashed semantic, and multi-hop ontology signals into `RetrievedPassage` with
@@ -194,6 +201,11 @@ Arabic is kept as secondary aliases where useful.
   model*, plus the sidebar **Answer from Ultron** action; the conversation stays
   in the same transcript and session, never a separate window. Every answer is
   labelled as the local general model's own, not grounded in cited sources.
+  `UltronAssistant.ask` reads an attached file from the conversation's `CONTEXT`
+  turns (`_context_prompt`): the file's whole text is put in front of the
+  question, capped at `DEFAULT_REFERENCE_CHARS` (8000) with a visible marker, so
+  Ultron — which has no retriever — can answer about a document the user attached
+  to the same chat.
   `ai/ultron.py` is the CLI entry point
   (`chat` default, `download`, `models`, `status`, `--session` persistence).
 - `core/composition.py` — the deterministic composer: dependency-free rules that
@@ -687,7 +699,10 @@ Arabic is kept as secondary aliases where useful.
   (success + preview, or the reader's error verbatim); the chunks become
   `Document`s under the `attachment:` namespace and are indexed into the
   assistant's own store, so an answer can retrieve and **cite** them like the
-  built-in corpus. `ocr=True` reads a scanned PDF through the same opt-in OCR
+  built-in corpus. `ChatService.attach_file` also writes the file's *whole* text
+  into the conversation as a `CONTEXT` turn, so Ultron (no retriever) reads it
+  too; detaching (`remove_attachment`), a new chat, and a resume drop that turn
+  with the documents. `ocr=True` reads a scanned PDF through the same opt-in OCR
   path, and a scanned-PDF failure names the real next step (enable OCR, or use
   the Import Center) instead of the reader's CLI-only flag. `remove_documents`
   detaches them again. Kept out of the Tk window so the logic is testable without
