@@ -33,7 +33,7 @@ from cli.menu import (
     run_ml,
     run_release,
     run_selfcheck,
-    run_ultron,
+    run_ultron_chat,
     run_update,
     run_web,
 )
@@ -67,9 +67,9 @@ class SessionItem:
 ACTIONS: tuple[GuiAction, ...] = (
     GuiAction(
         "ultron",
-        "Ultron (general local model, any subject)",
-        run_ultron,
-        ("status",),
+        "Answer from Ultron (general local model)",
+        run_ultron_chat,
+        (),
     ),
     GuiAction("learn", "Continuous learning and regression gate", run_learn, ()),
     GuiAction(

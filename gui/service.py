@@ -17,6 +17,7 @@ from typing import Any, TYPE_CHECKING
 
 from ai import chat as chat_module
 from ai import mind as mind_module
+from ai import ultron_mouth
 from ai.jarvis import build_session
 from core.command_router import RouteKind, RoutedCommand
 from core.jarvis import JarvisMode, JarvisTurn
@@ -82,6 +83,7 @@ class ChatService:
 
     - ``"sources"`` -- grounded answers with citations (default).
     - ``"model"`` -- answers from the trained language model, no citations.
+    - ``"ultron"`` -- answers from the general local model, no citations.
 
     ``mode`` selects the *operating mode* (see :mod:`gui.modes`). In **AI Mode**
     the message is answered conversationally and no tool can run. In **Jarvics
@@ -99,6 +101,9 @@ class ChatService:
         read_write: bool = False,
         model_checkpoint: str | None = None,
         max_new_tokens: int = 96,
+        ultron_model: str | None = None,
+        ultron_tokens: int | None = None,
+        ultron_temperature: float | None = None,
         session: str | None = None,
         operating_mode: str | None = None,
         data_root: Path | None = None,
@@ -119,6 +124,11 @@ class ChatService:
                 max_new_tokens=max_new_tokens,
             ),
             max_new_tokens=max_new_tokens,
+            ultron_loader=lambda: ultron_mouth.load_ultron_assistant(
+                ultron_model,
+                max_tokens=ultron_tokens,
+                temperature=ultron_temperature,
+            ),
         )
         self.session = session
         if session and not self.mode.resume_session(session):
@@ -221,12 +231,20 @@ class ChatService:
 
     @property
     def source(self) -> str:
-        """Which mouth currently answers: ``"model"`` or ``"sources"``."""
-        return "model" if self.switcher.active else "sources"
+        """Which mouth currently answers: ``"model"``, ``"ultron"``, or ``"sources"``."""
+        return self.switcher.mouth
 
     def use_model(self) -> None:
         """Answer from the trained model. Raises when the checkpoint is missing."""
         self.switcher.use_model()
+
+    def use_ultron(self) -> None:
+        """Answer from Ultron, the general local model.
+
+        Raises :class:`~core.ultron.UltronUnavailable` when the optional runtime
+        or a model file is missing, so the caller can report the real next step.
+        """
+        self.switcher.use_ultron()
 
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations."""

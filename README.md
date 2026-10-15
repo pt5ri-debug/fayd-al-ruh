@@ -639,6 +639,7 @@ python -m cli chat                          # interactive conversation
 python -m cli chat "what is porosity?"      # one question, then exit
 python -m cli chat --no-web                 # answer only from what it knows
 python -m cli chat --mind                   # answer from the trained model, not the sources
+python -m cli chat --ultron                 # answer from Ultron, the general local model
 python -m cli chat --session demo           # resume/autosave a named session
 python -m cli chat --list-sessions          # show saved conversations
 python -m cli chat --json "what is porosity?"   # machine-readable turn
@@ -675,15 +676,16 @@ model. A missing checkpoint is reported plainly, with the command to train one
 (`python -m cli llm`).
 
 Inside an interactive session you can switch mouths without restarting: type
-`from the model` to answer from the model, or `from the sources` for cited,
-retrieved answers again. When the sources cannot answer a question, the chat
-prints a short hint pointing at `from the model`. Those phrases are recognised by
-`chat` alone — they are **not** Jarvis controls, so the Jarvis command's wording
-is unchanged.
+`from the model` to answer from the model, `from ultron` for the general local
+model (see below), or `from the sources` for cited, retrieved answers again. When
+the sources cannot answer a question, the chat prints a short hint pointing at
+the other two mouths. Those phrases are recognised by `chat` alone — they are
+**not** Jarvis controls, so the Jarvis command's wording is unchanged.
 
 The model mouth is wired only in `ai/chat.py` (`ai/mind.py` holds the logic) and
 never touches `ai/jarvis.py`, `core/jarvis.py`, or the session builder, so Jarvis
-mode is unaffected.
+mode is unaffected. The Ultron mouth follows the same rule
+(`ai/ultron_mouth.py`), so all three mouths answer in one session.
 
 ### Ultron: a general, advanced local model (optional)
 
@@ -695,7 +697,8 @@ life*: science, history, technology, art, everyday advice, anything the user
 raises, with no subject filter.
 
 ```bash
-python -m cli ultron                              # interactive chat (type 'quit' to exit)
+python -m cli chat --ultron                       # chat answering from Ultron (same window, same session)
+python -m cli ultron                              # Ultron on its own (type 'quit' to exit)
 python -m cli ultron "explain how a jet engine works"     # one question, answered locally
 python -m cli ultron --session demo "and who invented it?"   # keep context across runs
 python -m cli ultron --no-stream --max-tokens 800 "write a short poem about rain"
@@ -704,8 +707,16 @@ python -m cli ultron status                       # what is installed and presen
 python -m cli ultron download --approve           # one-time: fetch a model (~5 GB)
 ```
 
-It is wired **directly below Jarvis** in the numbered menu, and the window has an
-**Ultron** entry in the sidebar that opens a plain chat window of its own.
+It is a **mouth inside the project's own chat**: the window's model selector
+(the one above the transcript, beside the mode switch) and the settings panel's
+*Answering mouth* both list **Ultron (general local model)** beside *From sources
+(cited)* and *From trained model*, and the sidebar's **Answer from Ultron**
+entry selects it. Whichever way you pick it, the conversation continues in the
+**same transcript, the same session, and with the same conversation controls** as
+the other two mouths — there is no separate window. In the text chat, type
+`from ultron` (or `from the sources` to switch back). It is still wired
+**directly below Jarvis** in the numbered menu as its own program
+(`python -m cli ultron`).
 
 The model is a **GGUF file under the writable data folder** (`data/ultron` by
 default), not an in-project checkpoint: drop any `.gguf` there and Ultron uses
@@ -727,7 +738,10 @@ Every Ultron answer is labelled `[ultron] answered by the local general model;
 not grounded in cited sources.` It is the model's own prose, not a cited extract,
 and it is never checked against the corpus — the same honesty rule the other
 mouths follow. `core/ultron.py` holds the engine (an injectable runner, the
-download catalog, and the gates); `ai/ultron.py` is the CLI entry point.
+download catalog, and the gates); `ai/ultron.py` is the CLI entry point; and
+`ai/ultron_mouth.py` is the chat mouth that lets Ultron answer inside the
+project's own conversation (`from ultron` in text, the model selector in the
+window).
 
 ## Graphical interface (ChatGPT-style)
 
@@ -739,6 +753,7 @@ numbered menu, and every `python -m cli <command>` behaves exactly as before.
 python -m cli gui                       # from the menu/CLI command
 python -m gui                           # the same window, directly
 python -m cli gui --mind                # start answering from the trained model
+python -m cli gui --ultron              # start answering from Ultron (general local model)
 python -m cli gui --session demo        # resume a saved conversation
 python -m cli gui --no-web              # answer only from internal knowledge
 python -m cli gui --mode jarvics        # start with sandboxed tools enabled
@@ -759,9 +774,11 @@ The window is a thin shell over the same code the CLI already runs:
   command. **Jarvics Mode** keeps the real `NaturalLanguageRouter`, so an
   explicit request (“list the files in notes/”, “calculate 2 * (3 + 4)”) can run
   in the sandbox under every existing guarantee. The header shows the active mode
-  by name and switches with one control; the sidebar lists the sandbox tools and
-  dims them in AI Mode. The chosen mode persists (see `gui/modes.py`), and
-  switching never clears the transcript.
+  by name and switches with one control, and beside it sits the **model
+  selector** — *From sources (cited)*, *From trained model*, and *Ultron (general
+  local model)* — so the answering mouth changes inside the *same* chat. The
+  sidebar lists the sandbox tools and dims them in AI Mode. The chosen mode
+  persists (see `gui/modes.py`), and switching never clears the transcript.
 - The **composer** is a rounded, ChatGPT-like card: a multiline field (Enter
   sends, Shift+Enter inserts a newline), a send button, and a **＋** control that
   opens the evidence and import choices — **Attach a file to this chat** (the

@@ -4,6 +4,7 @@
     python -m cli chat "what is porosity?"      # one question, then exit
     python -m cli chat --no-web                 # answer only from what it knows
     python -m cli chat --mind                   # answer from the trained model, not the sources
+    python -m cli chat --ultron                 # answer from the general local model (any subject)
     python -m cli chat --session demo           # resume/autosave a named session
     python -m cli chat --list-sessions          # show saved conversations
 
@@ -18,10 +19,17 @@ over, "save" persists the session, "sessions" lists saved ones, "web on"/"web
 off" toggle internet lookups, "that's right" and "that's wrong, it's ..." teach it
 from explicit feedback, and "help" lists them. Type "quit" to leave.
 
-With ``--mind`` the answer comes from the trained language model itself -- no
-retrieval, no citations -- so the quality of what it has learned is visible. That
-mouth is swapped in **here**, in this module, without touching the Jarvis loop or
-the session builder, so Jarvis mode is unaffected.
+Three mouths answer in the *same* conversation, swapped in **here**, in this
+module, without touching the Jarvis loop or the session builder, so Jarvis mode
+is unaffected:
+
+* the sources (default) -- retrieved passages, with citations;
+* ``--mind`` -- the small in-project trained language model, no citations;
+* ``--ultron`` -- the real, general local model (``llama-cpp-python``), which
+  talks about every field of life, no citations.
+
+Type "from the model", "from ultron", or "from the sources" to switch mouths
+mid-conversation.
 """
 
 from __future__ import annotations
@@ -29,17 +37,21 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from ai import mind as mind_module
+from ai import ultron_mouth
 from ai.jarvis import build_session
 from core.composition import sources_block
 from core.jarvis import JarvisMode, JarvisTurn
+from core.ultron import UltronUnavailable
 
 INTRO = "Chat with the project's AI. Ask a question, or type 'help' for controls; 'quit' to exit."
 MIND_HINT = (
     "AI: (the sources could not answer; type 'from the model' to answer from the "
-    "trained model instead, or 'from the sources' to go back)"
+    "trained model, 'from ultron' for the general local model, or 'from the sources' "
+    "to go back)"
 )
 
 # The composer's wording when retrieval found nothing to stand on.
@@ -48,6 +60,12 @@ _NO_SOURCE_MARKER = "not enough evidence"
 # Strips punctuation so "From the model." and "model on" match the same phrase.
 _NON_WORD = re.compile(r"[^\w\s]", flags=re.UNICODE)
 
+#: The three answering mouths. The sources are the grounded default; ``model`` is
+#: the small in-project checkpoint; ``ultron`` is the general local model.
+MOUTH_SOURCES = "sources"
+MOUTH_MODEL = "model"
+MOUTH_ULTRON = "ultron"
+
 
 def _normalize(text: str) -> str:
     cleaned = _NON_WORD.sub(" ", text.strip().casefold())
@@ -55,19 +73,21 @@ def _normalize(text: str) -> str:
 
 
 def _match_switch(text: str) -> str | None:
-    """Return "model" or "sources" when the line is a mouth switch, else ``None``.
+    """Return the mouth a switch line selects, else ``None``.
 
     Recognised only for the whole line, so an ordinary question is never captured.
-    The phrases live in :mod:`ai.mind`, not in the shared Jarvis controls, so the
-    Jarvis command's wording never changes.
+    The phrases live in :mod:`ai.mind` and :mod:`ai.ultron_mouth`, not in the
+    shared Jarvis controls, so the Jarvis command's wording never changes.
     """
     normalized = _normalize(text)
     if not normalized:
         return None
     if normalized in _normalize_set(mind_module.SWITCH_TO_MODEL):
-        return "model"
+        return MOUTH_MODEL
+    if normalized in _normalize_set(ultron_mouth.SWITCH_TO_ULTRON):
+        return MOUTH_ULTRON
     if normalized in _normalize_set(mind_module.SWITCH_TO_SOURCES):
-        return "sources"
+        return MOUTH_SOURCES
     return None
 
 
@@ -76,24 +96,48 @@ def _normalize_set(phrases: tuple[str, ...]) -> set[str]:
 
 
 class ModelSwitcher:
-    """Swaps the session's answering mouth between the model and the sources.
+    """Swaps the session's answering mouth between the sources and a model.
 
-    The grounded assistant and its help text are kept so switching back is exact.
+    Three mouths are offered: the grounded sources (default), the small
+    in-project trained model, and **Ultron**, the general local model. The
+    grounded assistant and its help text are kept so switching back is exact.
     Only ``mode.assistant``/``mode.voice.assistant``/``mode.help_text`` change;
-    nothing in the Jarvis loop, the controls, or the session builder is touched.
+    nothing in the Jarvis loop, the controls, or the session builder is touched,
+    so Jarvis mode is unaffected.
 
-    The model is loaded lazily on the first switch to it, so an interactive chat
-    that never asks for the model never pays for loading one.
+    A model is loaded lazily on the first switch to it, so an interactive chat
+    that never asks for one never pays for loading it -- and a *failed* load
+    raises before the mouth is swapped, so the chat keeps answering from the
+    mouth that already works.
     """
 
-    def __init__(self, mode: JarvisMode, *, loader, max_new_tokens: int = 96) -> None:
+    def __init__(
+        self,
+        mode: JarvisMode,
+        *,
+        loader,
+        max_new_tokens: int = 96,
+        ultron_loader: Callable[[], "ultron_mouth.UltronAssistant"] | None = None,
+    ) -> None:
         self.mode = mode
         self.grounded = mode.assistant
         self.grounded_help = mode.help_text
         self._loader = loader
+        self._ultron_loader = ultron_loader or ultron_mouth.load_ultron_assistant
         self._max_new_tokens = max_new_tokens
         self._mind: mind_module.MindAssistant | None = None
-        self.active = False
+        self._ultron: ultron_mouth.UltronAssistant | None = None
+        self._mouth = MOUTH_SOURCES
+
+    @property
+    def mouth(self) -> str:
+        """Which mouth currently answers: ``"sources"``, ``"model"``, ``"ultron"``."""
+        return self._mouth
+
+    @property
+    def active(self) -> bool:
+        """True when a model answers instead of the grounded sources."""
+        return self._mouth != MOUTH_SOURCES
 
     @property
     def mind(self) -> mind_module.MindAssistant:
@@ -101,19 +145,35 @@ class ModelSwitcher:
             self._mind = mind_module.MindAssistant(self._loader(), max_new_tokens=self._max_new_tokens)
         return self._mind
 
-    def use_model(self) -> None:
-        """Activate the model mouth. Raises when the checkpoint cannot be loaded."""
-        assistant = self.mind  # load now, so a failure is reported before switching
+    @property
+    def ultron(self) -> ultron_mouth.UltronAssistant:
+        if self._ultron is None:
+            self._ultron = self._ultron_loader()
+        return self._ultron
+
+    def _swap(self, assistant, mouth: str, help_suffix: str) -> None:
+        """Point the session at ``assistant`` and record which mouth is active."""
         self.mode.assistant = assistant
         self.mode.voice.assistant = assistant
-        self.mode.help_text = f"{self.grounded_help} {mind_module.MIND_HELP}"
-        self.active = True
+        self.mode.help_text = f"{self.grounded_help} {help_suffix}"
+        self._mouth = mouth
+
+    def use_model(self) -> None:
+        """Activate the trained-model mouth. Raises when the checkpoint cannot load."""
+        assistant = self.mind  # load now, so a failure is reported before switching
+        self._swap(assistant, MOUTH_MODEL, mind_module.MIND_HELP)
+
+    def use_ultron(self) -> None:
+        """Activate the Ultron mouth. Raises when the runtime or model is missing."""
+        assistant = self.ultron  # load/check now, before the swap
+        self._swap(assistant, MOUTH_ULTRON, ultron_mouth.ULTRON_HELP)
 
     def use_sources(self) -> None:
+        """Answer from retrieved passages with citations again."""
         self.mode.assistant = self.grounded
         self.mode.voice.assistant = self.grounded
         self.mode.help_text = self.grounded_help
-        self.active = False
+        self._mouth = MOUTH_SOURCES
 
 
 def format_turn(turn: JarvisTurn) -> str:
@@ -175,18 +235,72 @@ def _print_switch(kind: str, *, as_json: bool) -> None:
     if as_json:
         print(json.dumps({"routed": "switch", "mode": kind}, ensure_ascii=False))
         return
-    if kind == "model":
+    if kind == MOUTH_MODEL:
         print("AI: [model] Now answering from the trained model only (no sources).")
+    elif kind == MOUTH_ULTRON:
+        print("AI: [ultron] Now answering from the general local model (any subject, no sources).")
     else:
         print("AI: [sources] Now answering from retrieved passages with citations.")
     print()
 
 
+#: What to say when a mouth could not be loaded, and how to fix it. Ultron's
+#: message names its own real next step (install the extra, or fetch a model),
+#: so a failed switch is never a dead end.
+_MOUTH_FAILURE = {
+    MOUTH_MODEL: (
+        "Could not load the trained model: {error}",
+        "Train it first with `python -m cli llm` (or point --model-checkpoint at one).",
+    ),
+    MOUTH_ULTRON: (
+        "Could not load Ultron: {error}",
+        "Install the optional runtime with `python -m pip install -r requirements-ultron.txt`, "
+        "then fetch a model with `python -m cli ultron download --approve`.",
+    ),
+}
+
+#: The confirmation shown once a mouth is active. Shared by the text loop and the
+#: window, so both describe the swap with the same words.
+_MOUTH_SWITCHED = {
+    MOUTH_MODEL: "Now answering from the trained model (no sources).",
+    MOUTH_ULTRON: "Now answering from Ultron, the general local model (any subject, no citations).",
+    MOUTH_SOURCES: "Now answering from sources, with citations.",
+}
+
+
+def switch_failure_message(kind: str, error: Exception) -> str:
+    """A short, actionable message for a mouth that could not be loaded."""
+    lines = _MOUTH_FAILURE.get(kind)
+    if lines is None:
+        return f"Could not switch mouths: {error}"
+    return "\n".join(line.format(error=error) for line in lines)
+
+
+def mouth_switched_message(kind: str) -> str:
+    """The confirmation shown once ``kind`` is the active mouth."""
+    return _MOUTH_SWITCHED.get(kind, _MOUTH_SWITCHED[MOUTH_SOURCES])
+
+
+def _apply_switch(switcher, kind: str) -> str:
+    """Swap the session's mouth. Returns an error message, or ``""`` on success."""
+    try:
+        if kind == MOUTH_MODEL:
+            switcher.use_model()
+        elif kind == MOUTH_ULTRON:
+            switcher.use_ultron()
+        else:
+            switcher.use_sources()
+    except (FileNotFoundError, OSError, ValueError, UltronUnavailable) as error:
+        return switch_failure_message(kind, error)
+    return ""
+
+
 def run_loop(mode, *, as_json: bool, autosave: bool = False, switcher=None) -> int:
     """Read questions from the terminal and answer until 'quit' or EOF.
 
-    With a ``switcher`` the typed controls "from the model" / "from the sources"
-    change which mouth answers; without one the loop is exactly as before.
+    With a ``switcher`` the typed controls "from the model", "from ultron", and
+    "from the sources" change which mouth answers; without one the loop is
+    exactly as before.
     """
     if not as_json:
         print(INTRO)
@@ -200,12 +314,10 @@ def run_loop(mode, *, as_json: bool, autosave: bool = False, switcher=None) -> i
             return 0
         if switcher is not None:
             switch = _match_switch(line)
-            if switch in {"model", "sources"}:
-                try:
-                    switcher.use_model() if switch == "model" else switcher.use_sources()
-                except (FileNotFoundError, OSError, ValueError) as error:
-                    print(f"Could not load the trained model: {error}")
-                    print("Train it first with `python -m cli llm` (or point --model-checkpoint at one).")
+            if switch is not None:
+                failure = _apply_switch(switcher, switch)
+                if failure:
+                    print(failure)
                     print()
                     continue
                 _print_switch(switch, as_json=as_json)
@@ -250,6 +362,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model-checkpoint", default=None, help="path to a language-model checkpoint to answer with")
     parser.add_argument("--mind-temperature", type=float, default=0.0, help="sampling temperature for model answers (0 = deterministic)")
     parser.add_argument("--mind-tokens", type=int, default=96, help="maximum tokens to generate per model answer")
+    parser.add_argument(
+        "--ultron",
+        action="store_true",
+        help="answer from Ultron, the general local model (any subject, no citations), not from the sources",
+    )
+    parser.add_argument("--ultron-model", default=None, help="a specific .gguf file for Ultron to load")
+    parser.add_argument("--ultron-tokens", type=int, default=None, help="maximum tokens per Ultron answer")
+    parser.add_argument("--ultron-temperature", type=float, default=None, help="sampling temperature for Ultron answers")
     args = parser.parse_args(argv)
 
     if args.list_sessions:
@@ -280,16 +400,26 @@ def main(argv: list[str] | None = None) -> int:
             max_new_tokens=args.mind_tokens,
         ),
         max_new_tokens=args.mind_tokens,
+        ultron_loader=lambda: ultron_mouth.load_ultron_assistant(
+            args.ultron_model,
+            max_tokens=args.ultron_tokens,
+            temperature=args.ultron_temperature,
+        ),
     )
     if args.mind:
-        try:
-            switcher.use_model()
-        except (FileNotFoundError, OSError, ValueError) as error:
-            print(f"Could not load the trained model: {error}")
-            print("Train it first with `python -m cli llm` (or point --model-checkpoint at one).")
+        failure = _apply_switch(switcher, MOUTH_MODEL)
+        if failure:
+            print(failure)
             return 1
         if not args.json:
             print(mind_module.status_line(mind_module.mind_status(args.model_checkpoint)))
+    if args.ultron:
+        failure = _apply_switch(switcher, MOUTH_ULTRON)
+        if failure:
+            print(failure)
+            return 1
+        if not args.json:
+            print(switcher.ultron.describe())
 
     if args.session:
         if not mode.resume_session(args.session):
@@ -310,11 +440,16 @@ def main(argv: list[str] | None = None) -> int:
 
 __all__ = [
     "INTRO",
+    "MOUTH_MODEL",
+    "MOUTH_SOURCES",
+    "MOUTH_ULTRON",
     "ModelSwitcher",
     "format_turn",
     "main",
+    "mouth_switched_message",
     "print_turn",
     "run_loop",
+    "switch_failure_message",
     "turn_payload",
 ]
 

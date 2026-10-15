@@ -1,20 +1,25 @@
-"""Ultron: the general local language model, its CLI, menu, and GUI wiring.
+"""Ultron: the general local language model, its CLI, menu, and chat/GUI wiring.
 
 Everything heavy is injected, so these tests need neither ``llama-cpp-python``
 nor a multi-gigabyte model file: the engine is exercised through a fake runner,
-and the CLI/menu/GUI wiring is checked by import and dispatch.
+and the CLI/menu/chat/GUI wiring is checked by import and dispatch.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from ai import ultron as ultron_cli
+from ai import ultron_mouth
+from ai.chat import MOUTH_MODEL, MOUTH_SOURCES, MOUTH_ULTRON
 from cli import menu as cli_menu
 from core import optional_deps
+from core.conversation import Conversation
 from core.optional_deps import FEATURE_ULTRON
 from core.ultron import (
     CATALOG,
@@ -319,17 +324,250 @@ def test_gui_sidebar_has_an_ultron_action() -> None:
     keys = {action.key for action in gui_actions.ACTIONS}
     assert "ultron" in keys
     action = gui_actions.action_by_key("ultron")
-    assert action.command is cli_menu.run_ultron
+    # The sidebar entry is the *chat mouth*, so it runs the chat with --ultron
+    # rather than a separate Ultron program.
+    assert action.command is cli_menu.run_ultron_chat
 
 
-def test_gui_ultron_action_is_not_a_plain_command() -> None:
-    """The window opens its own Ultron chat, so the sidebar entry is a real window."""
-    # The entry must exist in the actions list so the window can special-case it.
+def test_gui_ultron_action_selects_the_mouth_in_the_same_chat() -> None:
+    """Ultron answers in the project's own chat, so the sidebar entry switches the mouth."""
     labels = [action.label for action in gui_actions.ACTIONS]
+    assert "Answer from Ultron (general local model)" in labels
+
+
+def test_menu_offers_the_ultron_chat_mouth() -> None:
+    """Ultron is reachable as a *chat mouth* too, not only as the separate program."""
+    labels = [title for title, _action, _argv in cli_menu.visible_menu()]
     assert "Ultron (general local model, any subject)" in labels
+    assert cli_menu.run_ultron_chat.__module__ == "cli.menu"
 
 
-# --- GUI window (needs a display) ------------------------------------------
+def test_run_ultron_chat_adds_the_flag_once(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_module(name: str, argv) -> int:
+        captured["name"] = name
+        captured["argv"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(cli_menu, "_run_module", fake_run_module)
+    assert cli_menu.run_ultron_chat([]) == 0
+    assert captured["name"] == "ai.chat"
+    assert captured["argv"] == ["--ultron"]
+    # A caller that already passed the flag is left exactly as it was.
+    cli_menu.run_ultron_chat(["--ultron", "--json"])
+    assert captured["argv"] == ["--ultron", "--json"]
+
+
+# --- the Ultron mouth inside the chat --------------------------------------
+
+
+class FakeSession:
+    """A stand-in for ``JarvisMode`` that the chat's switcher can swap a mouth into."""
+
+    def __init__(self) -> None:
+        self.assistant: Any = SimpleNamespace(name="grounded")
+        self.help_text = "help"
+        self.voice = SimpleNamespace(assistant=self.assistant)
+
+
+def _ultron_assistant(reply: str = "Ultron says hello.") -> ultron_mouth.UltronAssistant:
+    return ultron_mouth.UltronAssistant(UltronEngine(runner=FakeRunner(reply)))
+
+
+def _switcher(reply: str = "Ultron says hello."):
+    from ai.chat import ModelSwitcher
+
+    session = FakeSession()
+    switcher = ModelSwitcher(
+        cast(Any, session),
+        loader=lambda: (_ for _ in ()).throw(AssertionError("the trained model must not load")),
+        ultron_loader=lambda: _ultron_assistant(reply),
+    )
+    return session, switcher
+
+
+def test_switcher_starts_on_the_sources() -> None:
+    _session, switcher = _switcher()
+    assert switcher.mouth == MOUTH_SOURCES
+    assert switcher.active is False
+
+
+def test_switcher_ultron_swaps_the_mouth_and_keeps_the_grounded_one() -> None:
+    session, switcher = _switcher()
+    grounded = switcher.grounded
+    grounded_help = switcher.grounded_help
+
+    switcher.use_ultron()
+
+    assert switcher.mouth == MOUTH_ULTRON
+    assert switcher.active is True
+    assert session.assistant is switcher.ultron
+    assert session.voice.assistant is switcher.ultron
+    assert session.help_text != grounded_help
+    assert ultron_mouth.ULTRON_HELP in session.help_text
+
+    switcher.use_sources()
+    assert switcher.mouth == MOUTH_SOURCES
+    assert session.assistant is grounded
+    assert session.help_text == grounded_help
+
+
+def test_switcher_loads_ultron_lazily_and_reuses_it() -> None:
+    from ai.chat import ModelSwitcher
+
+    session = FakeSession()
+    calls: list[int] = []
+
+    def _loader():
+        calls.append(1)
+        return _ultron_assistant()
+
+    switcher = ModelSwitcher(
+        cast(Any, session),
+        loader=lambda: None,
+        ultron_loader=_loader,
+    )
+    assert calls == []
+    switcher.use_ultron()
+    switcher.use_ultron()
+    assert calls == [1]
+
+
+def test_switch_recognises_the_ultron_phrases() -> None:
+    from ai import chat
+
+    assert chat._match_switch("from ultron") == MOUTH_ULTRON
+    assert chat._match_switch("Ultron on.") == MOUTH_ULTRON
+    assert chat._match_switch("من ألترون") == MOUTH_ULTRON
+    assert chat._match_switch("from the model") == MOUTH_MODEL
+    assert chat._match_switch("from the sources") == MOUTH_SOURCES
+    # A real question is never captured as a switch.
+    assert chat._match_switch("how does ultron work?") is None
+
+
+def test_ultron_assistant_records_the_turn_and_carries_no_citations() -> None:
+    assistant = _ultron_assistant("The answer is 42.")
+    conversation = Conversation(title="t")
+    answer = assistant.ask("meaning of life?", conversation=conversation)
+
+    assert "The answer is 42." in answer.text
+    assert HEADER in answer.text
+    assert answer.citations == ()
+    assert answer.used_model is True
+    # Both the question and the answer are in the same session, so a follow-up
+    # keeps context and the chat's own transcript shows them.
+    assert [message.text for message in conversation.messages][0] == "meaning of life?"
+
+
+def test_ultron_assistant_passes_prior_turns_to_the_model() -> None:
+    runner = FakeRunner("Paris.")
+    assistant = ultron_mouth.UltronAssistant(UltronEngine(runner=runner))
+    conversation = Conversation(title="t")
+    conversation.add_user("What is the capital of France?")
+    conversation.add_assistant(f"{HEADER}\n\nParis.")
+
+    assistant.ask("and its river?", conversation=conversation)
+
+    messages, _kwargs = runner.calls[-1]
+    # The system prompt, the prior exchange (with the honesty header stripped),
+    # then the new question.
+    assert messages[0]["role"] == "system"
+    assert messages[1] == {"role": "user", "content": "What is the capital of France?"}
+    assert messages[2] == {"role": "assistant", "content": "Paris."}
+    assert messages[-1] == {"role": "user", "content": "and its river?"}
+
+
+def test_ultron_assistant_reports_an_empty_reply_honestly() -> None:
+    assistant = _ultron_assistant("")
+    answer = assistant.ask("anything?", conversation=Conversation(title="t"))
+    assert ultron_mouth.ULTRON_EMPTY in answer.text
+
+
+def test_load_ultron_assistant_raises_when_unavailable(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    with pytest.raises(UltronUnavailable):
+        ultron_mouth.load_ultron_assistant()
+
+
+def test_chat_main_reports_a_missing_ultron_honestly(tmp_path: Path, monkeypatch, capsys) -> None:
+    """``chat --ultron`` without the extra/model exits non-zero with the real next step."""
+    from ai import chat
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert chat.main(["--ultron", "--no-web"]) == 1
+    out = capsys.readouterr().out
+    assert "Could not load Ultron" in out
+    assert "requirements-ultron.txt" in out
+
+
+def test_chat_accepts_the_ultron_options(tmp_path: Path, monkeypatch, capsys) -> None:
+    """The Ultron flags are real; ``--list-sessions`` returns before a mouth loads."""
+    from ai import chat
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    code = chat.main(
+        [
+            "--list-sessions",
+            "--ultron",
+            "--ultron-model",
+            "x.gguf",
+            "--ultron-tokens",
+            "64",
+            "--ultron-temperature",
+            "0.2",
+        ]
+    )
+    assert code == 0
+    assert "sessions" in capsys.readouterr().out.lower()
+
+
+def test_run_loop_switches_to_ultron_and_back(monkeypatch, capsys) -> None:
+    from ai import chat
+    from core.jarvis import JarvisTurn
+
+    session, switcher = _switcher()
+
+    class _Mode:
+        def handle(self, *a, **k):
+            return JarvisTurn(
+                heard="hi", response="Ultron says hello.", woke=True, routed="answer"
+            )
+
+    answers = iter(["from ultron", "hi", "from the sources", "quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    assert chat.run_loop(_Mode(), as_json=False, switcher=switcher) == 0
+    out = capsys.readouterr().out
+    assert "[ultron] Now answering from the general local model" in out
+    assert "[sources] Now answering from retrieved passages" in out
+
+
+def test_run_loop_reports_a_missing_ultron_without_switching(monkeypatch, capsys) -> None:
+    from ai import chat
+    from core.jarvis import JarvisTurn
+
+    session = FakeSession()
+    switcher = chat.ModelSwitcher(
+        cast(Any, session),
+        loader=lambda: None,
+        ultron_loader=lambda: (_ for _ in ()).throw(UltronUnavailable("no model file")),
+    )
+
+    class _Mode:
+        def handle(self, *a, **k):
+            return JarvisTurn(heard="hi", response="ok", woke=True, routed="answer")
+
+    answers = iter(["from ultron", "quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    assert chat.run_loop(_Mode(), as_json=False, switcher=switcher) == 0
+    out = capsys.readouterr().out
+    assert "Could not load Ultron" in out
+    assert "requirements-ultron.txt" in out
+    # The failed switch left the grounded mouth in place.
+    assert switcher.mouth == MOUTH_SOURCES
+
+
+# --- the window's model selector (needs a display) -------------------------
 
 
 def _display_available() -> bool:
@@ -343,29 +581,143 @@ def _display_available() -> bool:
     return True
 
 
+def _gui_service() -> Any:
+    from gui.service import ChatService
+
+    return ChatService(
+        mode=cast(Any, FakeSession()),
+        data_root=Path.cwd(),
+        ultron_model=None,
+    )
+
+
 @pytest.mark.skipif(not _display_available(), reason="no display available")
-def test_ultron_dialog_builds_and_replies(tmp_path) -> None:
+def test_window_model_selector_offers_ultron(tmp_path) -> None:
     import tkinter as tk
 
-    from gui.app import DARK_THEME
-    from gui.ultron_dialog import UltronDialog
+    from gui.app import MOUTH_CHOICES, MOUTH_LABELS, FaydGUI
 
     root = tk.Tk()
-    root.withdraw()
     try:
-        engine = UltronEngine(runner=FakeRunner("A windowed reply."))
-        dialog = UltronDialog(root, engine, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont")
-        dialog._input.insert("1.0", "hello")
-        dialog._on_send()
-        # The worker thread posts the result; drain it on the main thread.
-        import time
+        app = FaydGUI(root, service=_gui_service())
+        root.update()
+        # The header's selector lists all three mouths, Ultron included.
+        labels = [
+            app._source_menu["menu"].entrycget(i, "label")
+            for i in range(app._source_menu["menu"].index("end") + 1)
+        ]
+        assert MOUTH_LABELS[MOUTH_ULTRON] in labels
+        assert [label for _key, label in MOUTH_CHOICES] == labels
+    finally:
+        root.destroy()
 
-        for _ in range(400):
-            dialog.window.update()
-            if not dialog._busy:
-                break
-            time.sleep(0.01)
-        assert "A windowed reply." in dialog._transcript.get("1.0", "end")
-        dialog.window.destroy()
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_switches_to_ultron_in_the_same_chat(tmp_path) -> None:
+    import tkinter as tk
+
+    from gui.app import MOUTH_LABELS, FaydGUI
+
+    root = tk.Tk()
+    try:
+        service = _gui_service()
+        service.switcher._ultron_loader = lambda: _ultron_assistant("A windowed reply.")
+        app = FaydGUI(root, service=service)
+        root.update()
+        app._add_bubble("assistant", "keep me across the mouth switch")
+
+        app._on_source_menu(MOUTH_LABELS[MOUTH_ULTRON])
+        root.update()
+
+        # The same chat now answers from Ultron: no new window, transcript intact.
+        assert service.source == MOUTH_ULTRON
+        assert app._source_choice_label() == MOUTH_LABELS[MOUTH_ULTRON]
+        texts = [entry.text for entry in app._rows]
+        assert any("keep me across the mouth switch" in text for text in texts)
+        assert any("Ultron" in text for text in texts)
+
+        # And back to the sources.
+        app._on_source_menu(MOUTH_LABELS[MOUTH_SOURCES])
+        root.update()
+        assert service.source == MOUTH_SOURCES
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_reports_a_missing_ultron_in_the_transcript(tmp_path) -> None:
+    import tkinter as tk
+
+    from gui.app import MOUTH_LABELS, FaydGUI
+
+    root = tk.Tk()
+    try:
+        service = _gui_service()
+        service.switcher._ultron_loader = lambda: (_ for _ in ()).throw(
+            UltronUnavailable("no model file")
+        )
+        app = FaydGUI(root, service=service)
+        root.update()
+
+        app._on_source_menu(MOUTH_LABELS[MOUTH_ULTRON])
+        root.update()
+
+        # The mouth did not change, and the real next step is shown.
+        assert service.source == MOUTH_SOURCES
+        assert app._source_choice_label() == MOUTH_LABELS[MOUTH_SOURCES]
+        texts = [entry.text for entry in app._rows]
+        assert any("Could not load Ultron" in text for text in texts)
+        assert any("requirements-ultron.txt" in text for text in texts)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_ultron_sidebar_action_switches_the_mouth(tmp_path) -> None:
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+    from gui.actions import action_by_key
+
+    root = tk.Tk()
+    try:
+        service = _gui_service()
+        service.switcher._ultron_loader = lambda: _ultron_assistant()
+        app = FaydGUI(root, service=service)
+        root.update()
+
+        app._on_action(action_by_key("ultron"))
+        root.update()
+
+        assert service.source == MOUTH_ULTRON
+        # No separate window was opened.
+        assert getattr(app, "_ultron_dialog", None) is None
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_switches_mouth_before_the_settings_panel_is_opened(tmp_path) -> None:
+    """The header selector works on a fresh window, before Settings is expanded."""
+    import tkinter as tk
+
+    from gui.app import MOUTH_LABELS, FaydGUI
+
+    root = tk.Tk()
+    try:
+        service = _gui_service()
+        service.switcher._ultron_loader = lambda: _ultron_assistant()
+        app = FaydGUI(root, service=service)
+        root.update()
+        assert app._settings_open is False
+
+        app._on_source_menu(MOUTH_LABELS[MOUTH_ULTRON])
+        root.update()
+        assert service.source == MOUTH_ULTRON
+
+        # Opening Settings afterwards shows the radio on the same mouth.
+        app._toggle_settings()
+        root.update()
+        assert app._source_var.get() == MOUTH_ULTRON
     finally:
         root.destroy()

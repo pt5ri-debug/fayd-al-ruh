@@ -164,8 +164,9 @@ Arabic is kept as secondary aliases where useful.
   GUI would otherwise draw a blank bubble carrying only its Copy button.
   `load_mind_model` /
   `mind_status` load and describe the checkpoint. Wired **only** into
-  `python -m cli chat --mind` (and the `from the model` / `from the sources`
-  switch, matched in `ai/chat.py`; the portable menu reaches it through
+  `python -m cli chat --mind` (and the `from the model` / `from ultron` /
+  `from the sources` switch, matched in `ai/chat.py`; the portable menu reaches
+  it through
   `cli.menu.run_mind_chat`, command `python -m cli mind-chat`); it deliberately never touches
   `ai/jarvis.py`, `core/jarvis.py`, `JarvisMode`, `build_session`, or the shared
   `JarvisControls`, so Jarvis is unaffected. Every model answer is labelled as
@@ -186,9 +187,14 @@ Arabic is kept as secondary aliases where useful.
   approval gates (`--approve`), like a web search or the image model; `CATALOG`
   names the fetchable general models (default `qwen2.5-7b`). Wired **directly
   below Jarvis** in the menu (`cli.menu.run_ultron`), CLI
-  (`python -m cli ultron`), and the GUI sidebar, which opens its own chat window
-  (`gui/ultron_dialog.py`). Every answer is labelled as the local general model's
-  own, not grounded in cited sources. `ai/ultron.py` is the CLI entry point
+  (`python -m cli ultron`), and — as a **mouth inside the project's own chat**
+  (`ai/ultron_mouth.py`, the headless twin `python -m cli ultron-chat`) — the
+  window's header model selector (`MOUTH_CHOICES` in `gui/app.py`) and settings
+  *Answering mouth* radio, beside *From sources (cited)* and *From trained
+  model*, plus the sidebar **Answer from Ultron** action; the conversation stays
+  in the same transcript and session, never a separate window. Every answer is
+  labelled as the local general model's own, not grounded in cited sources.
+  `ai/ultron.py` is the CLI entry point
   (`chat` default, `download`, `models`, `status`, `--session` persistence).
 - `core/composition.py` — the deterministic composer: dependency-free rules that
   render evidence (retrieved passages, web sources, causal/reasoning/decision
@@ -506,7 +512,8 @@ Arabic is kept as secondary aliases where useful.
   gate for a mutating tool); `actions.py` maps the sidebar to `cli.menu.run_*` —
   the **Actions** list mirrors numbered CLI items 6..12 (never repeating the
   window's own controls, which cover items 1..5 — the window, Jarvis, **Ultron**,
-  and the two chat modes); `options.py` has the argument parser (`--mode ai|jarvics`);
+  and the two chat modes); `options.py` has the argument parser (`--mode ai|jarvics`,
+  and the three mouth starts `--mind` / `--ultron` / default);
   `app.py` is the Tkinter window (imported lazily, so `cli/` never imports Tk).
   Reachable as `python -m cli gui` and `python -m gui`.
 - `gui/modes.py` — the two operating modes. **AI Mode** (`allows_tools=False`)
@@ -541,7 +548,9 @@ Arabic is kept as secondary aliases where useful.
   box, **Conversations** grouped by date, the sandbox tools, **Settings** with
   the answering-mouth switch and the **Actions** list) behind a scrollbar that
   appears only when the content overflows, a header showing the active mode by
-  name (one switch) plus the model selector, and a centred hero/empty state that
+  name (one switch) plus the **model selector** (`MOUTH_CHOICES`: *From sources
+  (cited)* / *From trained model* / *Ultron (general local model)*, matched to the
+  mouth keys `ai.chat` uses), and a centred hero/empty state that
   gives way to the first message (and returns when the transcript is cleared).
   On a narrow (mobile-sized) window the sidebar becomes a drawer that
   `_toggle_sidebar` shows or hides and that is restored when the window widens.
