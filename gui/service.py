@@ -23,6 +23,7 @@ from core.jarvis import JarvisMode, JarvisTurn
 from core.paths import data_dir
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
 from gui.import_center import ImportReport, KnowledgeImporter
+from gui.image_edit import ImageEditService
 from gui.image_gen import ImageGenerationService
 from gui.sql_import import SqlImportService
 from gui.modes import (
@@ -149,6 +150,10 @@ class ChatService:
         # The optional text-to-image page. The default backend renders a PNG with
         # only the standard library, under the data folder; no model is required.
         self._image_gen = ImageGenerationService(root=image_store_dir)
+        # The optional "edit an uploaded image from text" page. It reuses the same
+        # storage folder and needs no model: the default editor is a deterministic
+        # keyword interpreter (see core/imageedit.py).
+        self._image_edit = ImageEditService(root=image_store_dir)
 
     # ------------------------------------------------------------ operating mode
 
@@ -424,6 +429,11 @@ class ChatService:
     def image_gen(self) -> ImageGenerationService:
         """The optional text-to-image engine (default: the procedural renderer)."""
         return self._image_gen
+
+    @property
+    def image_edit(self) -> ImageEditService:
+        """The optional image-editing engine (default: the keyword interpreter)."""
+        return self._image_edit
 
     def _retriever(self):
         """The grounded assistant's retriever, when one is wired in.

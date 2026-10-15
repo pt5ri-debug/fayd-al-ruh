@@ -1681,6 +1681,17 @@ class FaydGUI:
         writes into the knowledge base through the ingestion pipeline, so the
         imported documents are available to every future chat.
         """
+        menu = self._build_attach_menu()
+        try:
+            menu.tk_popup(
+                self._attach_button.winfo_rootx(),
+                self._attach_button.winfo_rooty() + self._attach_button.winfo_height(),
+            )
+        finally:
+            menu.grab_release()
+
+    def _build_attach_menu(self) -> tk.Menu:
+        """Build the ＋ menu (kept separate so tests can read its entries)."""
         theme = self._theme
         menu = tk.Menu(
             self.root, tearoff=0, bg=theme.surface, fg=theme.foreground,
@@ -1708,13 +1719,10 @@ class FaydGUI:
         menu.add_command(
             label="Generate an image from text…", command=self._open_image_gen
         )
-        try:
-            menu.tk_popup(
-                self._attach_button.winfo_rootx(),
-                self._attach_button.winfo_rooty() + self._attach_button.winfo_height(),
-            )
-        finally:
-            menu.grab_release()
+        menu.add_command(
+            label="Edit an image from text…", command=self._open_image_edit
+        )
+        return menu
 
     def _attach_one_file(self, *, ocr: bool = False) -> None:
         path = filedialog.askopenfilename(
@@ -1769,6 +1777,19 @@ class FaydGUI:
             font=self._font,
             mono=self._mono,
             on_close=lambda: setattr(self, "_image_gen_dialog", None),
+        )
+
+    def _open_image_edit(self) -> None:
+        """Open the image-editing screen as a separate window."""
+        from gui.image_edit_dialog import ImageEditDialog
+
+        self._image_edit_dialog = ImageEditDialog(
+            self.root,
+            self.service.image_edit,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=lambda: setattr(self, "_image_edit_dialog", None),
         )
 
     def _on_install_ocr(self) -> None:

@@ -8,6 +8,7 @@
     python -m cli image presets                      # list the quality/speed presets
     python -m cli image download --approve           # one-time, ~4 GB
     python -m cli image backends
+    python -m cli image edit photo.png "rotate 90 and brighten, then crop square"
 
 The default backend renders a PNG with only the standard library and states
 plainly that it is a geometric composition, not a learned depiction. The
@@ -16,6 +17,10 @@ photorealistic, clean pictures (the ``realistic`` preset is the default); it nee
 the ``[image]`` extra and a one-time, human-approved weights download. Generated
 files are written under the writable data directory (``data/images`` by default,
 overridable with ``FAYD_DATA_DIR``) unless ``--output`` names a path.
+
+The ``edit`` subcommand is different in kind: it changes an image the user already
+has, from a written instruction, with the dependency-free keyword interpreter in
+:mod:`core.imageedit` (not a learned model). It reads PNG and binary PPM files.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from gui.image_edit import ImageEditService
 from gui.image_gen import ImageGenerationService, ImageReport
 from core.imagegen import DEFAULT_HEIGHT, DEFAULT_WIDTH, MAX_DIMENSION, image_backend_status
 
@@ -94,6 +100,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("backends", help="List the image backends available in this build.")
     sub.add_parser("presets", help="List the learned backend's quality/speed presets.")
+
+    edit = sub.add_parser(
+        "edit", help="Edit an existing image (PNG or PPM) from a written instruction."
+    )
+    edit.add_argument("source", help="The image file to edit.")
+    edit.add_argument(
+        "instruction",
+        help="What to change, e.g. 'rotate 90 and brighten, then crop to a square'.",
+    )
+    edit.add_argument(
+        "--output", default=None, help="Exact file to write (default: <data>/images)."
+    )
+    edit.add_argument(
+        "--json", dest="as_json", action="store_true", help="Print the report as JSON."
+    )
     return parser
 
 
@@ -172,6 +193,24 @@ def run_presets(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_edit(args: argparse.Namespace) -> int:
+    root = Path(args.output_dir) if args.output_dir else None
+    service = ImageEditService(root=root, on_progress=lambda message: print(message, file=sys.stderr))
+    try:
+        session = service.load(args.source)
+    except Exception as error:  # noqa: BLE001 - reported, never a traceback
+        print(f"error: could not open {args.source}: {error}")
+        return 1
+    report = service.apply(session, args.instruction, output=args.output)
+    if args.as_json:
+        import json
+
+        print(json.dumps(report.__dict__, ensure_ascii=False, indent=2))
+    else:
+        print(report.summary())
+    return 0 if report.ok else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else sys.argv[1:])
     if args.command == "generate":
@@ -182,6 +221,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_backends(args)
     if args.command == "presets":
         return run_presets(args)
+    if args.command == "edit":
+        return run_edit(args)
     return 1
 
 

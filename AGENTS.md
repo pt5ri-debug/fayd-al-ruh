@@ -265,6 +265,26 @@ Arabic is kept as secondary aliases where useful.
   or the weights are missing so the caller can fall back to the procedural
   renderer. `DiffusionPipelineRunner` is the seam a test injects (no torch
   needed).
+- `core/imageedit.py` — optional **image editing from text**, the counterpart to
+  `core/imagegen.py`: it changes an image the user already has, from a written
+  instruction. Dependency-free: a real PNG decoder (all five scanline filters,
+  colour types 0/2/3/4/6, bit depths 1/2/4/8/16, non-interlaced) plus binary PPM,
+  and a deterministic keyword interpreter (`plan_edits` → ordered `EditOp`s,
+  `apply_plan` / `apply_op` over a `Raster`, `Raster.to_png` reusing
+  `imagegen.encode_png`). Operations: rotate/flip, resize (bilinear), crop,
+  brightness/contrast/saturation, grayscale, invert, sepia, warm/cool, blur
+  (separable box), sharpen, threshold. It is a *keyword interpreter, not a learned
+  model*: it applies the operations in the order the words appear and returns the
+  words it did not understand (`EditPlan.unknown`) rather than guessing. `Raster`
+  bridges to `core.vision.ImageBuffer`. `gui/image_edit.py` adds the Tk-free
+  `ImageEditService` (`load` → `EditSession`, `apply`, `save_copy`,
+  `render_working`, `ImageEditReport` with `learned=False`), and
+  `gui/image_edit_dialog.py` is the window's page (＋ menu → "Edit an image from
+  text…"; upload, an instruction box, Apply/Undo/Save a copy, and a 30%-width
+  preview), plus `python -m cli image edit <file> "<instruction>"`.
+- `gui/image_preview.py` — the shared preview-scaling helper used by both image
+  pages (`load_scaled`: Pillow when present for an exact resize, Tk `subsample`
+  otherwise).
 - `core/knowledge_base.py` — the **bulk knowledge base**: a keyless
   `WikipediaFetcher` (batched MediaWiki API, `Retry-After`-aware), `chunk_text`,
   and a sharded JSONL `KnowledgeBaseStore`. `build_knowledge_base(store_dir,
@@ -408,6 +428,15 @@ Arabic is kept as secondary aliases where useful.
   text-to-image model and the picture is a geometric composition. Reachable from
   the composer's ＋ menu (**Generate an image from text…**) and the sidebar
   (**Generate an image from text**).
+- `gui/image_edit_dialog.py` — the **Edit an image from text** screen (Tk,
+  imported lazily): **Choose an image…** (PNG or PPM) loads it, an instruction
+  box describes the change, and **Apply** edits the current picture (worker
+  thread, then a preview scaled to the 30%-width right column), with **Undo**
+  (replays the remaining instructions from the original) and **Save a copy…**. It
+  says plainly that this is a deterministic keyword interpreter, not a learned
+  model, and reports the operations it understood and the words it did not.
+  Reachable from the composer's ＋ menu (**Edit an image from text…**); the
+  headless twin is `python -m cli image edit`.
 - `cli/ingest.py` — the ingestion CLI, including the **SQLite import** commands
   (`sql-drivers`, `sql-inspect`, `sql-preview`, `sql-import`, `sql-status`,
   `sql-resume`, `sql-cancel`, `sql-jobs`). They are the headless twin of the
@@ -642,6 +671,11 @@ clone, each optional so the base system still runs without it:
 - Phase 5 — optional multimodal perception (`core/vision.py`) and its
   counterpart, optional text-to-image (`core/imagegen.py`): a dependency-free
   PNG renderer with an honest procedural default and a swappable `ImageGenerator`.
+- Phase 5b — optional image *editing* from text (`core/imageedit.py`): a
+  dependency-free PNG/PPM decoder and a deterministic keyword interpreter that
+  changes an uploaded picture from a written instruction, with an honest list of
+  the words it did not understand. Wired as the ＋ menu's "Edit an image from
+  text…" window (`gui/image_edit_dialog.py`) and `python -m cli image edit`.
 - Phase 6 — Jarvis mode: wake-word gate (`core/wake_word.py`), natural-language
   command routing to sandboxed tools (`core/command_router.py`), persistent user
   preferences (`core/preferences.py`), real system speech engines

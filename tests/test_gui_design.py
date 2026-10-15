@@ -457,3 +457,188 @@ def test_image_dialog_preview_is_a_third_of_the_window(tmp_path) -> None:
         assert dialog._photo.width() < preview_before
     finally:
         root.destroy()
+
+
+def _sample_image(tmp_path):
+    """A real PNG on disk, written by the project's own generator (no Pillow needed)."""
+    from core.imagegen import ImageRequest, ProceduralImageGenerator
+
+    image = ProceduralImageGenerator().generate(
+        ImageRequest(prompt="a blue rig", width=512, height=384)
+    )
+    path = tmp_path / "source.png"
+    path.write_bytes(image.png)
+    return path
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_edit_dialog_puts_the_preview_on_the_right(tmp_path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.image_edit import ImageEditService
+    from gui.image_edit_dialog import ImageEditDialog
+
+    root = tk.Tk()
+    try:
+        service = ImageEditService(root=tmp_path)
+        dialog = ImageEditDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        root.update()
+        assert int(dialog._controls_column.grid_info()["column"]) == 0
+        assert int(dialog._side_column.grid_info()["column"]) == 1
+        assert dialog._side_column.master is dialog._controls_column.master
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_edit_dialog_preview_is_a_third_of_the_window(tmp_path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.image_edit import ImageEditService
+    from gui.image_edit_dialog import PREVIEW_FRACTION, ImageEditDialog
+
+    root = tk.Tk()
+    try:
+        root.geometry("1600x1000")
+        service = ImageEditService(root=tmp_path)
+        dialog = ImageEditDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        for _ in range(20):
+            root.update()
+        window_width = dialog.window.winfo_width()
+        assert PREVIEW_FRACTION == 0.30
+        preview_before = dialog._preview.winfo_width()
+        assert preview_before > 1
+        assert abs(preview_before - int(window_width * PREVIEW_FRACTION)) <= 2
+
+        # Loading a picture scales it to the preview's own width, unchanged by the
+        # load -- the picture is as wide as the box it sits in.
+        dialog._load_source(str(_sample_image(tmp_path)))
+        for _ in range(20):
+            root.update()
+        assert dialog._photo is not None
+        assert dialog._photo.width() <= preview_before
+        assert dialog._preview.winfo_width() == preview_before
+        if _pillow_available():
+            assert dialog._photo.width() == preview_before
+
+        # Resizing the window re-fits the picture to the new 30% preview box.
+        dialog.window.geometry("800x600")
+        for _ in range(40):
+            root.update()
+        resized = dialog.window.winfo_width()
+        assert abs(dialog._preview.winfo_width() - int(resized * PREVIEW_FRACTION)) <= 2
+        assert dialog._photo.width() <= dialog._preview.winfo_width()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_edit_dialog_applies_an_instruction_and_undoes_it(tmp_path) -> None:
+    import time
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.image_edit import ImageEditService
+    from gui.image_edit_dialog import ImageEditDialog
+
+    root = tk.Tk()
+    try:
+        service = ImageEditService(root=tmp_path)
+        dialog = ImageEditDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        dialog._load_source(str(_sample_image(tmp_path)))
+        root.update()
+        assert dialog._apply_button.cget("state") == "normal"
+        assert dialog._undo_button.cget("state") == "disabled"
+
+        dialog._instruction.delete("1.0", "end")
+        dialog._instruction.insert("1.0", "rotate 90 and grayscale")
+        dialog._on_apply()
+        for _ in range(200):
+            root.update()
+            time.sleep(0.01)
+        assert "Saved to" in dialog._status.cget("text")
+        assert "rotate 90°" in dialog._status.cget("text")
+        assert dialog._undo_button.cget("state") == "normal"
+        assert dialog._photo is not None
+        assert (dialog._session.raster.width, dialog._session.raster.height) == (384, 512)
+
+        dialog._on_undo()
+        root.update()
+        assert "Undid" in dialog._status.cget("text")
+        assert dialog._undo_button.cget("state") == "disabled"
+        assert (dialog._session.raster.width, dialog._session.raster.height) == (512, 384)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_edit_dialog_reports_an_unrecognised_instruction(tmp_path) -> None:
+    import time
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.image_edit import ImageEditService
+    from gui.image_edit_dialog import ImageEditDialog
+
+    root = tk.Tk()
+    try:
+        service = ImageEditService(root=tmp_path)
+        dialog = ImageEditDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        dialog._load_source(str(_sample_image(tmp_path)))
+        root.update()
+        dialog._instruction.delete("1.0", "end")
+        dialog._instruction.insert("1.0", "paint the sky purple")
+        dialog._on_apply()
+        for _ in range(200):
+            root.update()
+            time.sleep(0.01)
+        # The failure is shown in the danger colour, and the image is unchanged.
+        assert "could not find an edit" in dialog._status.cget("text")
+        assert dialog._status.cget("fg") == DARK_THEME.danger
+        assert dialog._undo_button.cget("state") == "disabled"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_attach_menu_offers_image_editing(tmp_path) -> None:
+    """The ＋ menu has a labelled entry that opens the edit window."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        # The ＋ menu names the entry, next to the generate one.
+        menu = app._build_attach_menu()
+        end = menu.index("end")
+        assert end is not None
+        labels = [
+            menu.entrycget(index, "label")
+            for index in range(end + 1)
+            if menu.type(index) == "command"
+        ]
+        assert "Generate an image from text…" in labels
+        assert "Edit an image from text…" in labels
+        # The opener builds the window without raising.
+        app._open_image_edit()
+        root.update()
+        assert app._image_edit_dialog is not None
+        assert app._image_edit_dialog.window.title() == "Edit an image from text"
+        app._image_edit_dialog._close()
+        root.update()
+        assert app._image_edit_dialog is None
+    finally:
+        root.destroy()
