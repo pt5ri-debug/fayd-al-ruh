@@ -1,0 +1,15 @@
+# Optional: Ultron, the general local language model (the [ultron] extra).
+#
+# Install with:  python -m pip install -r requirements-ultron.txt
+#
+# This pulls ``llama-cpp-python``, which runs a GGUF model locally on the CPU
+# (no server, nothing sent off the machine), and ``huggingface_hub``, used only
+# to fetch the weights. On a machine with no prebuilt wheel, ``llama-cpp-python``
+# compiles from source and needs a C/C++ compiler.
+#
+# The model weights are a *separate* one-time, human-approved download:
+#     python -m cli ultron download --approve
+# or drop any `.gguf` file into the data/ultron folder. The base install needs
+# none of this; the import is lazy and the app reports clearly when it is absent.
+llama-cpp-python>=0.3
+huggingface_hub>=0.23

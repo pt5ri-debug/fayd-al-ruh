@@ -33,6 +33,7 @@ from cli.menu import (
     run_ml,
     run_release,
     run_selfcheck,
+    run_ultron,
     run_update,
     run_web,
 )
@@ -64,6 +65,12 @@ class SessionItem:
 
 # Numbered CLI menu items 5..11, plus the training entries the sidebar already had.
 ACTIONS: tuple[GuiAction, ...] = (
+    GuiAction(
+        "ultron",
+        "Ultron (general local model, any subject)",
+        run_ultron,
+        ("status",),
+    ),
     GuiAction("learn", "Continuous learning and regression gate", run_learn, ()),
     GuiAction(
         "insight",

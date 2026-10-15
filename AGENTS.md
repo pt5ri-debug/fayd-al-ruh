@@ -170,6 +170,26 @@ Arabic is kept as secondary aliases where useful.
   `ai/jarvis.py`, `core/jarvis.py`, `JarvisMode`, `build_session`, or the shared
   `JarvisControls`, so Jarvis is unaffected. Every model answer is labelled as
   ungrounded on purpose.
+- `core/ultron.py` — **Ultron**, the project's *general* mouth: a real, advanced
+  model that runs **locally** through `llama-cpp-python` and speaks on every
+  field of life (no subject filter), unlike the petroleum-grounded assistant and
+  the small in-project `--mind` checkpoint. `UltronEngine` builds the chat
+  messages (system prompt + history + prompt) and delegates to an injectable
+  `UltronRunner` (the default `LlamaCppRunner` is a thin, lazy
+  `create_chat_completion` wrapper; a test injects its own runner, so the engine
+  is exercised with no extra and no model). The model is a **GGUF file under
+  `data/ultron`** (`core.paths.ultron_models_dir`, git-ignored): `find_model_file`
+  prefers the file named in the registry (`model.json`, written on download),
+  else the largest `*.gguf`. The runtime and `huggingface_hub` are the optional
+  `[ultron]` extra (`core.optional_deps.FEATURE_ULTRON`, `requirements-ultron.txt`),
+  imported lazily. `download_model` runs only through the permission + human
+  approval gates (`--approve`), like a web search or the image model; `CATALOG`
+  names the fetchable general models (default `qwen2.5-7b`). Wired **directly
+  below Jarvis** in the menu (`cli.menu.run_ultron`), CLI
+  (`python -m cli ultron`), and the GUI sidebar, which opens its own chat window
+  (`gui/ultron_dialog.py`). Every answer is labelled as the local general model's
+  own, not grounded in cited sources. `ai/ultron.py` is the CLI entry point
+  (`chat` default, `download`, `models`, `status`, `--session` persistence).
 - `core/composition.py` — the deterministic composer: dependency-free rules that
   render evidence (retrieved passages, web sources, causal/reasoning/decision
   traces) into clean attributed prose. Shared by the assistant's extractive
@@ -484,8 +504,9 @@ Arabic is kept as secondary aliases where useful.
   `list_sessions`/`resume`, `saved_session_summaries` (dated `HistoryItem`s for
   the sidebar), `set_operating_mode`, and `preview_execution` (the confirmation
   gate for a mutating tool); `actions.py` maps the sidebar to `cli.menu.run_*` —
-  the **Actions** list mirrors numbered CLI items 5..11 (never repeating the
-  window's own controls); `options.py` has the argument parser (`--mode ai|jarvics`);
+  the **Actions** list mirrors numbered CLI items 6..12 (never repeating the
+  window's own controls, which cover items 1..5 — the window, Jarvis, **Ultron**,
+  and the two chat modes); `options.py` has the argument parser (`--mode ai|jarvics`);
   `app.py` is the Tkinter window (imported lazily, so `cli/` never imports Tk).
   Reachable as `python -m cli gui` and `python -m gui`.
 - `gui/modes.py` — the two operating modes. **AI Mode** (`allows_tools=False`)

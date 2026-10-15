@@ -6,6 +6,9 @@ Usage:
     python -m cli voice "your question" # one voice turn
     python -m cli agent               # tool-agent demo in the safety sandbox
     python -m cli jarvis              # Jarvis mode: listen, understand, act, speak
+    python -m cli ultron              # Ultron: a general, advanced local model (any subject)
+    python -m cli ultron "who wrote Hamlet?"   # one question, answered locally
+    python -m cli ultron download --approve    # one-time: fetch Ultron's model (~5 GB)
     python -m cli chat                # chat with the AI in text (Jarvis, no voice)
     python -m cli mind-chat           # chat answering from the trained model (no sources)
     python -m cli learn               # continuous learning + regression gate
@@ -74,6 +77,7 @@ from cli.menu import (
     run_release,
     run_selfcheck,
     run_update,
+    run_ultron,
     run_voice,
     run_web,
 )
@@ -82,6 +86,7 @@ _COMMANDS = {
     "voice": run_voice,
     "agent": run_agent,
     "jarvis": run_jarvis,
+    "ultron": run_ultron,
     "chat": run_chat,
     "gui": run_gui,
     "mind-chat": run_mind_chat,

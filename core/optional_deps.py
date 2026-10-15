@@ -45,6 +45,7 @@ from core.paths import bundle_root, is_frozen
 FEATURE_PDF = "pdf"
 FEATURE_OCR = "ocr"
 FEATURE_IMAGE = "image"
+FEATURE_ULTRON = "ultron"
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,19 @@ FEATURES: dict[str, OptionalFeature] = {
             "run `python -m cli image download --approve` (~4 GB)."
         ),
         system_missing_note="the model weights are not cached yet.",
+    ),
+    FEATURE_ULTRON: OptionalFeature(
+        key=FEATURE_ULTRON,
+        title="Ultron (general local model)",
+        summary="Talk with a general, advanced local model on any subject (Ultron).",
+        requirements_file="requirements-ultron.txt",
+        import_names=("llama_cpp", "huggingface_hub"),
+        system_note=(
+            "The model weights are a separate one-time, human-approved download: "
+            "run `python -m cli ultron download --approve` (~5 GB), or drop a `.gguf` "
+            "file into the data/ultron folder."
+        ),
+        system_missing_note="no `.gguf` model file is present yet.",
     ),
 }
 
@@ -161,6 +175,18 @@ def _image_weights_cached() -> bool:
     return model_is_cached(DEFAULT_MODEL)
 
 
+def _ultron_model_cached() -> bool:
+    """Whether at least one Ultron model file (a ``.gguf``) is already on disk.
+
+    As with the image backend, the extra installs the runtime; the model file is
+    a separate one-time download (or a file the user drops in), so this is the
+    second half of "usable right now".
+    """
+    from core.ultron import model_is_cached
+
+    return model_is_cached()
+
+
 def status(key: str) -> FeatureStatus:
     """Check one optional feature without importing its heavy packages eagerly."""
     missing = missing_imports(key)
@@ -169,6 +195,8 @@ def status(key: str) -> FeatureStatus:
         system_ok = _ocr_system_ok() if python_ok else False
     elif key == FEATURE_IMAGE:
         system_ok = _image_weights_cached() if python_ok else False
+    elif key == FEATURE_ULTRON:
+        system_ok = _ultron_model_cached() if python_ok else False
     else:
         system_ok = True
     return FeatureStatus(key=key, python_ok=python_ok, system_ok=system_ok, missing_python=missing)
@@ -297,6 +325,8 @@ def install(
             message += " " + spec.system_note
         elif key == FEATURE_IMAGE and not _image_weights_cached():
             message += " " + spec.system_note
+        elif key == FEATURE_ULTRON and not _ultron_model_cached():
+            message += " " + spec.system_note
     elif returncode != 0:
         tail = output.strip().splitlines()[-1] if output.strip() else "pip failed."
         message = f"Could not install {spec.title.lower()}: {tail}"
@@ -319,6 +349,7 @@ __all__ = [
     "FEATURE_IMAGE",
     "FEATURE_OCR",
     "FEATURE_PDF",
+    "FEATURE_ULTRON",
     "FEATURES",
     "FeatureStatus",
     "InstallResult",

@@ -685,6 +685,50 @@ The model mouth is wired only in `ai/chat.py` (`ai/mind.py` holds the logic) and
 never touches `ai/jarvis.py`, `core/jarvis.py`, or the session builder, so Jarvis
 mode is unaffected.
 
+### Ultron: a general, advanced local model (optional)
+
+The two mouths above are both *narrow*: the grounded assistant answers only from
+the petroleum corpus it was seeded with, and `--mind` speaks the small in-project
+checkpoint. **Ultron** is a third mouth that is deliberately different — a real,
+general, advanced model that runs **locally** and talks about *every field of
+life*: science, history, technology, art, everyday advice, anything the user
+raises, with no subject filter.
+
+```bash
+python -m cli ultron                              # interactive chat (type 'quit' to exit)
+python -m cli ultron "explain how a jet engine works"     # one question, answered locally
+python -m cli ultron --session demo "and who invented it?"   # keep context across runs
+python -m cli ultron --no-stream --max-tokens 800 "write a short poem about rain"
+python -m cli ultron models                       # list the models it can fetch
+python -m cli ultron status                       # what is installed and present
+python -m cli ultron download --approve           # one-time: fetch a model (~5 GB)
+```
+
+It is wired **directly below Jarvis** in the numbered menu, and the window has an
+**Ultron** entry in the sidebar that opens a plain chat window of its own.
+
+The model is a **GGUF file under the writable data folder** (`data/ultron` by
+default), not an in-project checkpoint: drop any `.gguf` there and Ultron uses
+it, or run `download --approve` to fetch a known-good general model
+(`qwen2.5-7b` by default; `qwen2.5-3b` and `llama-3.2-3b` are lighter choices).
+The folder is git-ignored, so a multi-gigabyte model never dirties the working
+tree or bloats a program update.
+
+Ultron runs entirely on this machine through `llama-cpp-python`; nothing is sent
+to a remote server. That runtime and `huggingface_hub` are an **optional extra**
+(`pip install -r requirements-ultron.txt`, or the `[ultron]` extra), imported
+lazily, so a base install keeps working and reports clearly when they are absent.
+Downloading the weights is an external action that leaves the machine, so it
+runs only through the same permission and human-approval gates as a web search or
+the image model — denied by default, and granted with `--approve` (or the
+window's **Download model…** button).
+
+Every Ultron answer is labelled `[ultron] answered by the local general model;
+not grounded in cited sources.` It is the model's own prose, not a cited extract,
+and it is never checked against the corpus — the same honesty rule the other
+mouths follow. `core/ultron.py` holds the engine (an injectable runner, the
+download catalog, and the gates); `ai/ultron.py` is the CLI entry point.
+
 ## Graphical interface (ChatGPT-style)
 
 A desktop window that looks and reads like ChatGPT ships **next to** the command
@@ -742,11 +786,11 @@ The window is a thin shell over the same code the CLI already runs:
   restored when the window widens.
 - The sidebar's **Actions** buttons and the **Saved chats** list call the
   `cli.menu` `run_*` functions the numbered menu calls. The **Actions** section
-  adds numbered CLI items **5 through 11** — learn, insight, Internet learner,
+  adds numbered CLI items **6 through 12** — learn, insight, Internet learner,
   web verify, the two knowledge-base entries, and the Import Center — with the
   same labels and default arguments, so nothing is offered twice: the window's
-  own controls and the composer already cover items 1–4 (the window, Jarvis, and
-  the two chat modes).
+  own controls cover the first five menu items (the window, Jarvis, **Ultron**,
+  and the two chat modes).
   The training and evaluation entries that already lived in the sidebar are kept
   here too, even though they are hidden from the numbered CLI menu.
 - Answers run on a **worker thread** and are posted back through a queue, so the

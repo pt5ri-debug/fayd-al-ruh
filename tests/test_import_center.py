@@ -484,21 +484,27 @@ def test_cli_import_center_no_args_gives_guidance_when_headless(capsys) -> None:
 
 
 def test_menu_import_center_entry_actually_imports(tmp_path: Path, monkeypatch, capsys) -> None:
-    # Regression: item 10 must not merely print the format list. Drive the menu
-    # choice and assert it entered the Import Center (not just `formats`).
+    # Regression: the Import Center menu entry must not merely print the format
+    # list. Find its numbered position and drive the menu choice, asserting it
+    # entered the Import Center (not just `formats`).
     import io
 
     from cli import menu
     from cli.menu import run_import_center
 
-    title, _action, argv = menu.visible_menu()[9]  # 1-based item 10
+    position = next(
+        index
+        for index, (title, _action, _argv) in enumerate(menu.visible_menu(), start=1)
+        if title == "Import files and folders (Knowledge Import Center)"
+    )
+    title, _action, argv = menu.visible_menu()[position - 1]
     assert title == "Import files and folders (Knowledge Import Center)"
     assert argv == ("interactive",)
 
     # A deterministic non-tty stdin, so the entry shows the Import Center header
     # and a way forward rather than only the format list, and never blocks.
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
-    code = menu.run_choice("10")
+    code = menu.run_choice(str(position))
     out = capsys.readouterr().out
     assert code == 0
     assert "Knowledge Import Center" in out

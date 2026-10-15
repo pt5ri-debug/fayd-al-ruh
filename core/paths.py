@@ -83,6 +83,18 @@ def models_dir() -> Path:
     return data_dir() / "models"
 
 
+def ultron_models_dir() -> Path:
+    """Where the Ultron general-language models (GGUF files) live.
+
+    Ultron's model is *not* an in-project checkpoint: it is a general, advanced
+    model the user drops into ``data/ultron`` (or downloads there with
+    ``python -m cli ultron download --approve``). The folder is git-ignored, so a
+    multi-gigabyte model never dirties the working tree or bloats a program
+    update. ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "ultron"
+
+
 def bundled_artifacts_dir() -> Path:
     """Read-only artifacts inside the code or bundle, used as a fallback."""
     return bundle_root() / "ml" / "artifacts"
@@ -147,6 +159,7 @@ __all__ = [
     "artifacts_dir",
     "checkpoints_dir",
     "models_dir",
+    "ultron_models_dir",
     "bundled_artifacts_dir",
     "bundled_checkpoints_dir",
     "default_checkpoint",
