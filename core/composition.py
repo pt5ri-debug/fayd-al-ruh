@@ -71,6 +71,29 @@ _REPEAT_MARK_RE = re.compile(r"([^\w\s,;:/\\|])\1+")
 # model stutters, but a comma/colon/slash is not a sentence end, so the surplus
 # copies are dropped and the model's own mark (its first) is kept.
 _SEPARATOR_RUN_RE = re.compile(r"([,;:/\\|])\s*\1+")
+# A separator (comma/semicolon/colon) left touching a boundary mark on either
+# side ("flows , . Then" -> "flows,." -> "flows."; "flows. , then" -> "flows.,
+# then" -> "flows. then") is a stutter at the boundary, not the model's own mark,
+# so it is dropped and the boundary itself is kept, so the sentence still ends.
+# The after-boundary rule leaves a space, so the boundary still splits. A slash
+# is not touched (it belongs to a formula such as "q / A"), and a separator
+# before a comma or a semicolon ("2,,3") is handled above, not here.
+_SEPARATOR_BEFORE_TERMINAL_RE = re.compile(r"([,;:]+)\s*(?=[.!?])")
+_SEPARATOR_AFTER_TERMINAL_RE = re.compile(r"(?<=[.!?])\s*[,;:]+")
+# Closing a gap before a boundary can leave two boundaries touching ("flows. ."
+# -> "flows.."), which is a stutter, not the model's punctuation; a run of the
+# same terminal mark collapses to one, the same way ``_REPEAT_MARK_RE`` already
+# collapses an adjacent run. Different marks ("?!") are left alone.
+_TERMINAL_RUN_RE = re.compile(r"([.!?])\1+")
+# A separator the byte model leaves at the very start or the very end of a
+# continuation (", the well is cased." / "the well is cased ,") is decoration,
+# not part of the sentence, so it is dropped from the edges -- the leading/trailing
+# twin of what ``_EDGE_CHARS`` already removes from a split sentence. Without the
+# trailing rule the fallback path would punctuate a bare comma into "cased,.".
+# A leading dot or hyphen is kept when a digit follows, so a decimal (".5") or a
+# negative number ("-20") is not mistaken for edge decoration.
+_LEAD_SEPARATOR_RE = re.compile(r"^(?:[,;:!?]|[.\-](?=\D)|\s)+")
+_TRAIL_SEPARATOR_RE = re.compile(r"[,;:]+\s*$")
 # A word or short phrase (up to four words) the model loops on: "well well",
 # "the same the same", "the production forecast the production forecast". Only a
 # phrase repeated back-to-back with nothing between it counts, so a word reused
@@ -88,7 +111,7 @@ _REPEATED_PHRASE_AND_RE = re.compile(
     r"(?<!\w)(\w+(?:\s+\w+){0,3})\s+(?:and|or)\s+\1\b", flags=re.IGNORECASE
 )
 # Leading/trailing decoration the model leaves around a sentence.
-_EDGE_CHARS = " \t\"'\u201c\u201d\u2018\u2019()[]{}*_-"
+_EDGE_CHARS = " \t\"'\u201c\u201d\u2018\u2019()[]{}*_-,;:"
 
 # A sentence the byte model leaves ending on one of these is an unfinished clause
 # ("... and", "... the rock and"), not a statement, so the composer drops it when
@@ -269,6 +292,22 @@ def _tidy_marks(text: str) -> str:
     # "flows. Then"); a hyphen or slash is untouched, so a range/formula keeps
     # its spacing.
     value = _SPACE_BEFORE_MARK_RE.sub(r"\1", value)
+    # Drop a separator the model stutters right before a full stop ("flows , ."
+    # -> "flows."), so a boundary does not read as "flows,."; the boundary mark
+    # stays and a slash (a formula) is untouched.
+    value = _SEPARATOR_BEFORE_TERMINAL_RE.sub("", value)
+    # Collapse a run of the same boundary mark the gap-close may have left
+    # touching ("flows. ." -> "flows."), so a sentence does not end "..".
+    value = _TERMINAL_RUN_RE.sub(r"\1", value)
+    # Drop a separator the model stutters right after a boundary ("flows. , then"
+    # -> "flows. then"), keeping a space so the boundary still splits; otherwise
+    # the separator would start the next sentence as ", then".
+    value = _SEPARATOR_AFTER_TERMINAL_RE.sub(" ", value)
+    # Drop a separator or stray mark the model leaves at the very start or end of
+    # the continuation (", the well is cased." / "the well is cased ,"), the
+    # edge decoration ``_EDGE_CHARS`` already removes from a split sentence.
+    value = _LEAD_SEPARATOR_RE.sub("", value)
+    value = _TRAIL_SEPARATOR_RE.sub("", value)
     return clean(value)
 
 

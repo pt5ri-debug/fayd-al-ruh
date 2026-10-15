@@ -144,7 +144,15 @@ Arabic is kept as secondary aliases where useful.
   hyphenated range, and a formula ("q / A") keep their spacing. A *stuttered
   separator* ("2,,3", "3:1::1", "saturation, , are") is trimmed to the model's own
   mark rather than turned into a full stop, so the model's number or list is not
-  corrupted. The mouth also
+  corrupted. A separator the model leaves at the *edge* of the continuation
+  (", the well is cased.", "The well is cased ,") or touching a boundary on
+  either side ("flows , . Then", "flows. , then") is stray, so it is dropped --
+  the leading/trailing twin of the decoration ``_EDGE_CHARS`` already removes
+  from a split sentence -- while a leading dot/hyphen before a digit (".5",
+  "-20") is the model's number and is kept. Closing the gap before a boundary can
+  leave two full stops touching ("flows. ."); a run of the *same* boundary mark
+  collapses to one, but different marks ("?!") are left as the model's own
+  punctuation. The mouth also
   forwards the checkpoint's `temperature`/`seed` to the generator, so
   `--mind-temperature 0` really is greedy and reproducible (the generator's own
   0.8/unseeded defaults no longer override it).
