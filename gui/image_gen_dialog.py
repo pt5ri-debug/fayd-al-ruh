@@ -23,13 +23,14 @@ import threading
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import tkinter as tk
 from tkinter import filedialog
 
 from core.imagegen_diffusion import DEFAULT_PRESET, PRESETS
 from core.optional_deps import FEATURE_IMAGE, pip_install_command
+from gui.image_preview import load_scaled
 
 TITLE = "Generate an image from text"
 SUBTITLE = (
@@ -471,36 +472,10 @@ class ImageGenDialog:
     def _load_scaled(self, path: str, width: int) -> tk.PhotoImage | None:
         """Load ``path`` scaled to about ``width`` pixels, or ``None`` if unreadable.
 
-        Pillow is used when present for a smooth, exact resize. Without it the
-        image is reduced with Tk's own ``subsample`` so it still fits the preview
-        instead of overflowing, which keeps a base install usable.
+        Delegates to :func:`gui.image_preview.load_scaled`, which both image pages
+        share so their previews scale identically.
         """
-        try:
-            photo = tk.PhotoImage(file=path)
-        except tk.TclError:
-            return None
-        if width <= 1 or photo.width() <= width:
-            return photo
-        try:
-            from PIL import Image, ImageTk
-        except ImportError:
-            return self._subsample_to(photo, width)
-        try:
-            image = Image.open(path)
-            ratio = width / max(1, image.width)
-            height = max(1, round(image.height * ratio))
-            resized = image.resize((width, height), Image.Resampling.LANCZOS)
-            # ImageTk's image is a Tk image at runtime; its stub type is not a
-            # tkinter.PhotoImage, so cast to keep the return type honest.
-            return cast(tk.PhotoImage, ImageTk.PhotoImage(resized))
-        except (OSError, ValueError):
-            return self._subsample_to(photo, width)
-
-    @staticmethod
-    def _subsample_to(photo: tk.PhotoImage, width: int) -> tk.PhotoImage:
-        """Reduce a Tk image with integer ``subsample`` until it fits ``width``."""
-        factor = max(1, -(-photo.width() // max(1, width)))
-        return photo.subsample(factor) if factor > 1 else photo
+        return load_scaled(path, width)
 
     def _on_save_copy(self) -> None:
         if not self._last_path:
