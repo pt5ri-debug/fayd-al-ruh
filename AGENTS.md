@@ -521,9 +521,10 @@ Arabic is kept as secondary aliases where useful.
   the current directory), `--base-branch` the branch workspaces cut from and merge
   into, `--max-steps` how many model turns one `ask` may take, `--check-command`
   the command `check` runs (one shell string, default `python -m pytest -q`), and
-  `--json` for machine-readable output. Exit codes: `0` success, `2` invalid
-  arguments, `3` the coding model is not available, `4` a workspace/gate refused
-  the operation, `5` an unexpected failure.
+  `--json` for machine-readable output. Exit codes: `0` success (a `status`
+  report succeeds even when the model is missing — it *states* the next step),
+  `2` invalid arguments, `3` the coding model is not available (`coder`, `ask`),
+  `4` a workspace/gate refused the operation, `5` an unexpected failure.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
   Update the baseline with `python -m evaluation --update-baseline`.
