@@ -53,6 +53,39 @@ def test_conversation_rejects_empty_message_and_bad_window():
         conversation.add_user("   ")
 
 
+def test_context_turns_carry_reference_material():
+    conversation = Conversation(title="t")
+    message = conversation.add_context("Attached file: well.docx\n\nFlowed at 4200 bopd.")
+
+    assert conversation.context_messages() == (message,)
+    assert "4200" in conversation.render_context()
+    # Reference material is not part of the exchange a transcript renders.
+    assert "4200" not in conversation.render()
+
+
+def test_context_survives_the_window_that_drops_chat_turns():
+    conversation = Conversation(title="t", max_turns=3)
+    reference = conversation.add_context("Attached file: well.docx\n\nThe pressure was 5120 psi.")
+    for index in range(5):
+        conversation.add_user(f"question {index}")
+
+    # Chat turns aged out, but the attached file is still readable.
+    assert len(conversation.messages) == 3
+    assert conversation.context_messages() == (reference,)
+    assert "5120 psi" in conversation.render_context()
+
+
+def test_remove_context_takes_the_reference_material_out():
+    conversation = Conversation(title="t")
+    message = conversation.add_context("Attached file: well.docx\n\nSome text.")
+    conversation.add_user("a question")
+
+    assert conversation.remove_context(message) is True
+    assert conversation.context_messages() == ()
+    assert conversation.render_context() == ""
+    assert conversation.remove_context(message) is False
+
+
 def test_conversation_round_trips_through_primitives():
     conversation = Conversation(title="session")
     conversation.add_user("What is a reservoir?")

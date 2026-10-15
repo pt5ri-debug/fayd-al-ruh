@@ -76,6 +76,19 @@ class ExecutionPreview:
 _DESTRUCTIVE_TOOLS = frozenset({"write_file"})
 
 
+def _context_text(attachment: Attachment) -> str:
+    """The attachment's whole text, labelled so the model knows what it is.
+
+    A file's text joins the conversation as reference material; the header names
+    the file so a reader (and the model) can tell which document the text belongs
+    to when more than one is attached.
+    """
+    body = attachment.text.strip()
+    if not body:
+        return ""
+    return f"Attached file: {attachment.filename}\n\n{body}"
+
+
 class ChatService:
     """Owns one conversation session and answers questions for the GUI.
 
@@ -134,9 +147,14 @@ class ChatService:
         if session and not self.mode.resume_session(session):
             self.session = None
         # Files the user attached to this conversation, kept so they can be listed
-        # in the UI and detached again. Their text is already in the assistant's
-        # store (see attach_file), so they need no separate retrieval path.
+        # in the UI and detached again. Their text is in the assistant's store
+        # (see attach_file) *and* in the conversation as reference material, so
+        # both the grounded mouth and Ultron can read it.
         self.attachments: list[Attachment] = []
+        # (attachment, its reference-material turn), so detaching can take the
+        # text back out of the conversation. Kept here because Attachment is
+        # frozen and its turn belongs to one conversation.
+        self._context_turns: list[tuple[Attachment, Any]] = []
 
         # The operating mode. The *real* router is kept so Jarvics Mode can run
         # tools; AI Mode swaps in an answer-only router that never plans one.
@@ -266,6 +284,8 @@ class ChatService:
         """Start a fresh session and return its id."""
         conversation = self.mode.reset_conversation()
         self.session = None
+        # The reference-material turns belonged to the old conversation.
+        self._context_turns = []
         return conversation.id
 
     def list_sessions(self) -> tuple[str, ...]:
@@ -314,9 +334,11 @@ class ChatService:
         """Read a file, index its text, and remember it as an attachment.
 
         The document's chunks join the assistant's own store, so a question can
-        retrieve and cite them exactly like the built-in corpus. A read failure
-        comes back as ``ok=False`` with a message, never as an exception.
-        ``ocr=True`` reads a scanned PDF (needs the ``[ocr]`` extra + Tesseract).
+        retrieve and cite them exactly like the built-in corpus. Its *whole* text
+        is also added to the conversation as reference material, so a mouth that
+        never retrieves -- Ultron -- reads the file too. A read failure comes back
+        as ``ok=False`` with a message, never as an exception. ``ocr=True`` reads a
+        scanned PDF (needs the ``[ocr]`` extra + Tesseract).
         """
         notice = attach_document(path, ocr=ocr)
         if not notice.ok or not notice.attachments:
@@ -338,8 +360,20 @@ class ChatService:
                         ok=False,
                         message=f"Could not index the file: {error}",
                     )
+            self._add_context(attachment)
             self.attachments.append(attachment)
         return notice
+
+    def _add_context(self, attachment: Attachment) -> None:
+        """Put an attachment's whole text in the conversation as reference material."""
+        conversation = getattr(self.mode, "conversation", None)
+        add_context = getattr(conversation, "add_context", None)
+        if not callable(add_context):
+            return
+        text = _context_text(attachment)
+        if not text:
+            return
+        self._context_turns.append((attachment, add_context(text)))
 
     def attach_document(self, attachment: Attachment) -> None:
         """Index an already-read :class:`Attachment` (used when wiring in tests)."""
@@ -348,14 +382,27 @@ class ChatService:
             raise ValueError("Attachments need the source assistant, which is not available here.")
         for document in attachment.documents:
             retriever.index_document(document)
+        self._add_context(attachment)
         self.attachments.append(attachment)
 
     def remove_attachment(self, attachment: Attachment) -> int:
-        """Detach a file: drop its documents from the store. Returns how many left."""
+        """Detach a file: drop its documents, and its reference material, from the chat."""
         retriever = self._retriever()
         removed = remove_documents(retriever, attachment) if retriever is not None else 0
+        self._drop_context(attachment)
         self.attachments = [item for item in self.attachments if item is not attachment]
         return removed
+
+    def _drop_context(self, attachment: Attachment) -> None:
+        """Take an attachment's reference material back out of the conversation."""
+        conversation = getattr(self.mode, "conversation", None)
+        remove_context = getattr(conversation, "remove_context", None)
+        if not callable(remove_context):
+            return
+        for item, message in list(self._context_turns):
+            if item is attachment:
+                remove_context(message)
+                self._context_turns.remove((item, message))
 
     def clear_attachments(self) -> int:
         """Detach every file; returns how many were removed."""
@@ -468,6 +515,10 @@ class ChatService:
         if not self.mode.resume_session(session_id):
             return False
         self.session = session_id
+        # Attachments and their reference turns belong to the conversation they
+        # were added to, so a resume starts from a clean slate.
+        self.attachments = []
+        self._context_turns = []
         return True
 
     def _to_reply(self, turn: JarvisTurn) -> ChatReply:

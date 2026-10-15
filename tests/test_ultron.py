@@ -484,6 +484,47 @@ def test_ultron_assistant_reports_an_empty_reply_honestly() -> None:
     assert ultron_mouth.ULTRON_EMPTY in answer.text
 
 
+def test_ultron_assistant_reads_an_attached_file_from_the_conversation() -> None:
+    runner = FakeRunner("Zephyrium-9 flowed at 4200 barrels per day.")
+    assistant = ultron_mouth.UltronAssistant(UltronEngine(runner=runner))
+    conversation = Conversation(title="t")
+    conversation.add_context(
+        "Attached file: well.docx\n\nZephyrium-9 flowed at 4200 barrels per day."
+    )
+
+    assistant.ask("What did Zephyrium-9 flow at?", conversation=conversation)
+
+    messages, _kwargs = runner.calls[-1]
+    prompt = messages[-1]["content"]
+    # The attached file's text reaches the model, in front of the question, so
+    # Ultron can read it without any retriever of its own.
+    assert ultron_mouth.REFERENCE_LABEL in prompt
+    assert "Zephyrium-9" in prompt
+    assert prompt.rstrip().endswith("What did Zephyrium-9 flow at?")
+
+
+def test_ultron_assistant_sends_the_bare_question_without_an_attachment() -> None:
+    runner = FakeRunner()
+    assistant = ultron_mouth.UltronAssistant(UltronEngine(runner=runner))
+
+    assistant.ask("hello", conversation=Conversation(title="t"))
+
+    messages, _kwargs = runner.calls[-1]
+    assert messages[-1] == {"role": "user", "content": "hello"}
+
+
+def test_ultron_assistant_marks_a_cut_attachment() -> None:
+    runner = FakeRunner()
+    assistant = ultron_mouth.UltronAssistant(UltronEngine(runner=runner), reference_chars=20)
+    conversation = Conversation(title="t")
+    conversation.add_context("Attached file: long.docx\n\n" + "word " * 50)
+
+    assistant.ask("summarise it", conversation=conversation)
+
+    prompt = runner.calls[-1][0][-1]["content"]
+    assert "not shown here" in prompt
+
+
 def test_load_ultron_assistant_raises_when_unavailable(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
     with pytest.raises(UltronUnavailable):
