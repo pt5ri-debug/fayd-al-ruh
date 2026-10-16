@@ -82,11 +82,19 @@ class CoderStatus:
     models: tuple[str, ...] = ()
     detail: str = ""
     hint: str = PULL_HINT
+    #: Which runtime this describes: ``"ollama"`` (a server) or ``"in-process"``
+    #: (a GGUF loaded in this process). Only the wording of :meth:`summary`
+    #: depends on it, so the two runtimes are reported accurately.
+    backend: str = "ollama"
 
     def summary(self) -> str:
         """A one-line, plain-language status for the window and the CLI."""
         if self.available:
+            if self.backend == "in-process":
+                return f"Coding model ready: {self.model} (in-process, no server)."
             return f"Coding model ready: {self.model} (Ollama)."
+        if self.backend == "in-process":
+            return self.detail or "The in-process coding model is not ready."
         if not self.server_reachable:
             return (
                 f"Ollama is not running, so the coding model cannot answer. "
@@ -197,9 +205,13 @@ def coder_status(client: CoderClient | None = None) -> CoderStatus:
     """Report whether the coding model can answer, without pretending.
 
     A missing server and a missing model are reported separately, because the
-    next step differs: start Ollama, or pull the model.
+    next step differs: start Ollama, or pull the model. A client that runs the
+    model *in this process* declares ``backend = "in-process"`` and supplies its
+    own ``missing_detail()``, so the wording never tells an in-process user to
+    start a server that does not exist.
     """
     client = client or OllamaCoderClient()
+    backend = str(getattr(client, "backend", "ollama"))
     try:
         models = client.list_models()
     except CoderUnavailable as error:
@@ -209,15 +221,27 @@ def coder_status(client: CoderClient | None = None) -> CoderStatus:
             model=client.model,
             installed=False,
             detail=str(error),
+            backend=backend,
         )
     installed = _model_present(client.model, models)
+    is_installed = getattr(client, "is_installed", None)
+    if callable(is_installed):
+        installed = bool(is_installed())
+    if installed:
+        detail = ""
+    elif backend == "in-process":
+        missing = getattr(client, "missing_detail", None)
+        detail = missing() if callable(missing) else "No coding model file is present."
+    else:
+        detail = f"`{client.model}` is not pulled."
     return CoderStatus(
         available=installed,
         server_reachable=True,
         model=client.model,
         installed=installed,
         models=models,
-        detail="" if installed else f"`{client.model}` is not pulled.",
+        detail=detail,
+        backend=backend,
     )
 
 

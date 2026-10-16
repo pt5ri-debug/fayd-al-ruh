@@ -1,0 +1,16 @@
+# Optional: the Code Studio's in-process coding model (the [coder] extra).
+#
+# Install with:  python -m pip install -r requirements-coder.txt
+#
+# This pulls ``llama-cpp-python``, which runs a GGUF coding model locally inside
+# this process -- no ``ollama serve`` daemon has to sit in the background holding
+# RAM -- and ``huggingface_hub``, used only to fetch the weights. On a machine
+# with no prebuilt wheel, ``llama-cpp-python`` compiles from source and needs a
+# C/C++ compiler.
+#
+# The model weights are a *separate* one-time, human-approved download:
+#     python -m cli studio download --approve
+# or drop any coding `.gguf` file into the data/coder folder. The base install
+# needs none of this; the import is lazy and the app reports clearly when absent.
+llama-cpp-python>=0.3
+huggingface_hub>=0.23

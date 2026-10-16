@@ -95,6 +95,19 @@ def ultron_models_dir() -> Path:
     return data_dir() / "ultron"
 
 
+def coder_models_dir() -> Path:
+    """Where the Code Studio's in-process coding models (GGUF files) live.
+
+    Like Ultron's models, these are *not* in-project checkpoints: they are GGUF
+    files the user drops into ``data/coder`` (or downloads there with
+    ``python -m cli studio download --approve``). Running the model in-process
+    means no ``ollama serve`` daemon has to sit in the background holding RAM.
+    The folder is git-ignored, so a multi-gigabyte model never dirties the
+    working tree or bloats a program update.
+    """
+    return data_dir() / "coder"
+
+
 def studio_dir() -> Path:
     """Where the Code Studio keeps its own state (git worktrees, run logs).
 
@@ -177,6 +190,7 @@ __all__ = [
     "checkpoints_dir",
     "models_dir",
     "ultron_models_dir",
+    "coder_models_dir",
     "studio_dir",
     "studio_workspaces_dir",
     "bundled_artifacts_dir",

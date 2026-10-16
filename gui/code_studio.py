@@ -27,6 +27,11 @@ from core.code_studio import (
     default_check_command,
 )
 from core.coder_model import CoderClient, CoderStatus, CoderUnavailable, coder_status
+from core.coder_llama import (
+    BackendStatus,
+    LlamaCppCoderClient,
+    coder_backend_status,
+)
 
 
 @dataclass(frozen=True)
@@ -47,15 +52,18 @@ class StudioState:
     repository: bool = False
     base_branch: str = "main"
     base_revision: str = ""
+    backend: BackendStatus | None = None
 
 
 class CodeStudioService:
     """Drives the Studio's workspaces, editor, agent, checks, and merge.
 
     ``client`` is injectable so a test (or a user with a different local runtime)
-    can supply the coding model; when it is omitted, the default Ollama client for
-    ``qwen2.5-coder:7b`` is built lazily on first use, so constructing the service
-    never touches the network.
+    can supply the coding model. When it is omitted, an **in-process** client is
+    built lazily on first use -- a GGUF file loaded in this process, so no
+    ``ollama serve`` daemon has to sit in the background holding RAM. A user who
+    already runs Ollama is still served: :meth:`resolve_client` falls back to it
+    when no in-process model is ready, so an existing setup keeps working.
     """
 
     def __init__(
@@ -66,25 +74,49 @@ class CodeStudioService:
         client: CoderClient | None = None,
         check_command: tuple[str, ...] | None = None,
         max_steps: int = 12,
+        prefer_in_process: bool = True,
     ) -> None:
         self.studio = studio or CodeStudio(root)
         self._client = client
+        self._explicit_client = client is not None
         self.check_command = check_command or default_check_command(root)
         self.max_steps = max_steps
+        self.prefer_in_process = prefer_in_process
 
     # --- model ----------------------------------------------------------
+    def resolve_client(self) -> CoderClient:
+        """The coding model client, built on first use (never at construction).
+
+        The in-process model is preferred; when it cannot run, a reachable Ollama
+        server is used instead, so an existing Ollama setup is not discarded.
+        """
+        if self._client is not None:
+            return self._client
+        if self.prefer_in_process:
+            candidate = LlamaCppCoderClient()
+            if candidate.is_installed():
+                self._client = candidate
+                return self._client
+        from core.coder_model import OllamaCoderClient
+
+        self._client = OllamaCoderClient()
+        return self._client
+
     @property
     def client(self) -> CoderClient:
-        """The coding model client, built on first use (never at construction)."""
-        if self._client is None:
-            from core.coder_model import OllamaCoderClient
+        """The resolved coding model client."""
+        return self.resolve_client()
 
-            self._client = OllamaCoderClient()
-        return self._client
+    def backend(self) -> BackendStatus:
+        """Which runtime can answer, and the next step when none can."""
+        if self._explicit_client:
+            status = self.status()
+            return BackendStatus("injected", status.available, detail=status.summary())
+        return coder_backend_status(probe_ollama=True)
 
     def status(self) -> CoderStatus:
         """An honest report of whether the coding model can answer."""
-        return coder_status(self.client)
+        return coder_status(self.resolve_client())
 
     def state(self) -> StudioState:
         """A snapshot of the Studio for the window to render."""
@@ -101,6 +133,7 @@ class CodeStudioService:
             repository=repository,
             base_branch=self.studio.base_branch,
             base_revision=base_revision,
+            backend=self.backend(),
         )
 
     # --- workspaces -----------------------------------------------------
@@ -149,6 +182,29 @@ class CodeStudioService:
     def changed_files(self, slug: str) -> tuple[str, ...]:
         return self.studio.changed_files(self.workspace(slug))
 
+    def search(self, slug: str, query: str, *, relative: str = "") -> StudioReport:
+        """Find a literal string in the workspace, for the window's search box."""
+        try:
+            hits = self.studio.search(self.workspace(slug), query, relative=relative, context_lines=1)
+        except StudioError as error:
+            return StudioReport(False, str(error))
+        if not hits:
+            return StudioReport(True, f"No matches for {query!r}.", detail="(no matches)")
+        detail = "\n--\n".join(hit.render() for hit in hits)
+        return StudioReport(True, f"{len(hits)} match(es) for {query!r}.", detail=detail)
+
+    def edit_file(
+        self, slug: str, relative: str, old: str, new: str, *, replace_all: bool = False
+    ) -> StudioReport:
+        """Replace one exact snippet in a file, without rewriting the whole file."""
+        try:
+            made = self.studio.edit_file(
+                self.workspace(slug), relative, old, new, replace_all=replace_all
+            )
+        except StudioError as error:
+            return StudioReport(False, str(error))
+        return StudioReport(True, f"Replaced {made} occurrence(s) in {relative}.")
+
     def diff(self, slug: str) -> StudioReport:
         """The workspace's change as a unified diff."""
         try:
@@ -182,7 +238,12 @@ class CodeStudioService:
             except StudioError:
                 context = ""
 
-        agent = CodingAgent(self.studio, self.client, max_steps=self.max_steps)
+        agent = CodingAgent(
+            self.studio,
+            self.resolve_client(),
+            max_steps=self.max_steps,
+            check_command=self.check_command,
+        )
         try:
             trace = agent.run(workspace, task, context=context)
         except AgentError as error:
@@ -227,6 +288,34 @@ class CodeStudioService:
             f"$ {' '.join(command.argv)}  (exit {command.returncode})" for command in result.commands
         )
         return StudioReport(result.ok, result.message, detail=detail)
+
+    # --- in-process model management -------------------------------------
+    def available_models(self) -> tuple[tuple[str, str, float, str], ...]:
+        """The coding models ``download_model`` can fetch, for a menu."""
+        from core.coder_llama import spec_summaries
+
+        return spec_summaries()
+
+    def download_model(self, spec_key: str = "", *, approved: bool = False) -> StudioReport:
+        """Download a coding model's weights for the in-process runtime.
+
+        Leaves the machine, so it runs only with ``approved=True`` (the window's
+        explicit button, or the CLI's ``--approve``).
+        """
+        from core.coder_llama import DEFAULT_SPEC_KEY, CoderModelUnavailable, download_model
+
+        try:
+            path = download_model(spec_key or DEFAULT_SPEC_KEY, approved=approved)
+        except CoderModelUnavailable as error:
+            return StudioReport(False, str(error))
+        return StudioReport(True, f"Coding model ready: {path}")
+
+    def local_model_file(self) -> str:
+        """The in-process model file on disk, or an empty string."""
+        from core.coder_llama import find_model_file
+
+        found = find_model_file()
+        return str(found) if found is not None else ""
 
 
 __all__ = [

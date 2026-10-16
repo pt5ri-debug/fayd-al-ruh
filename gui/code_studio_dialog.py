@@ -30,9 +30,19 @@ from collections.abc import Callable
 from typing import Any
 
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 from core.coder_model import PULL_HINT
+from gui import markdown as md
+from gui.app import RADIUS_LARGE, RoundedBox
+
+#: The Studio reads as a centred conversation, capped like the chat window's
+#: transcript so long lines stay readable on a wide screen.
+_COLUMN_MAX = 820
+
+#: A message taller than this scrolls inside its own card rather than the column.
+_MAX_BUBBLE_LINES = 40
 
 TITLE = "Code Studio"
 SUBTITLE = (
@@ -97,199 +107,470 @@ class CodeStudioDialog:
 
     # -- layout -----------------------------------------------------------
 
+    # -- layout -----------------------------------------------------------
+
     def _build(self) -> None:
+        """Assemble the window the way the chat window is assembled.
+
+        A slim header, a sidebar for the workspace, and a centred conversation
+        column with its composer pinned to the bottom -- the same shape and the
+        same theme tokens as the main chat window, so the Studio reads as part of
+        the program rather than a separate tool.
+        """
         theme = self.theme
-        header = tk.Frame(self.window, bg=theme.base)
-        header.pack(fill="x", padx=20, pady=(18, 6))
-        tk.Label(
-            header, text=TITLE, bg=theme.base, fg=theme.contrast,
-            font=(self.font, 15, "bold"), anchor="w",
-        ).pack(fill="x")
-        tk.Label(
-            header, text=SUBTITLE, bg=theme.base, fg=theme.text_secondary,
-            font=(self.font, 9), anchor="w", justify="left", wraplength=1120,
-        ).pack(fill="x", pady=(4, 0))
-        self._status_line = tk.Label(
-            header, text=DEFAULT_MODEL_NOTE, bg=theme.base, fg=theme.text_dim,
-            font=(self.font, 8), anchor="w", justify="left", wraplength=1120,
-        )
-        self._status_line.pack(fill="x", pady=(6, 0))
+        # Set the first time the model's work is shown; the tests read them after.
+        self._trace: Any = None
+        self._review: Any = None
+        self._row_frames: list[tk.Frame] = []
+
+        self._build_header()
 
         body = tk.Frame(self.window, bg=theme.base)
-        body.pack(fill="both", expand=True, padx=20, pady=(6, 0))
+        body.pack(fill="both", expand=True)
         body.rowconfigure(0, weight=1)
-        body.columnconfigure(0, weight=0, minsize=300)
+        body.columnconfigure(0, weight=0, minsize=280)
         body.columnconfigure(1, weight=1)
 
-        self._build_workspaces(body)
-        self._build_work_area(body)
-        self._build_action_bar()
+        self._build_sidebar(body)
+        self._build_conversation(body)
 
-    def _build_workspaces(self, parent: tk.Misc) -> None:
+    def _build_header(self) -> None:
         theme = self.theme
-        column = tk.Frame(parent, bg=theme.surface, highlightthickness=1,
-                          highlightbackground=theme.border_subtle)
-        column.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        tk.Label(
-            column, text="1.  Workspaces", bg=theme.surface, fg=theme.contrast,
-            font=(self.font, 10, "bold"), anchor="w",
-        ).pack(fill="x", padx=12, pady=(10, 2))
+        bar = tk.Frame(self.window, bg=theme.base)
+        bar.pack(fill="x")
+        inner = tk.Frame(bar, bg=theme.base)
+        inner.pack(fill="x", padx=16, pady=(12, 8))
 
-        self._workspace_list = tk.Listbox(
-            column, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
-            selectforeground=theme.contrast, relief="flat", highlightthickness=1,
-            highlightbackground=theme.border, font=(self.font, 9), height=10,
-            activestyle="none",
+        titles = tk.Frame(inner, bg=theme.base)
+        titles.pack(side="left", anchor="w")
+        tk.Label(
+            titles, text=TITLE, bg=theme.base, fg=theme.contrast,
+            font=(self.font, 14, "bold"), anchor="w",
+        ).pack(anchor="w")
+        tk.Label(
+            titles, text=SUBTITLE, bg=theme.base, fg=theme.text_secondary,
+            font=(self.font, 8), anchor="w", justify="left", wraplength=760,
+        ).pack(anchor="w", pady=(2, 0))
+
+        self._spinner = ttk.Progressbar(inner, mode="indeterminate", length=120)
+        tk.Frame(self.window, bg=theme.border_subtle, height=1).pack(fill="x")
+
+    # -- sidebar ----------------------------------------------------------
+
+    def _section_label(self, parent: tk.Misc, text: str) -> None:
+        tk.Label(
+            parent, text=text.upper(), bg=self.theme.surface, fg=self.theme.text_dim,
+            font=(self.font, 8, "bold"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(10, 2))
+
+    def _build_sidebar(self, parent: tk.Frame) -> None:
+        theme = self.theme
+        sidebar = tk.Frame(parent, bg=theme.surface)
+        sidebar.grid(row=0, column=0, sticky="nsew")
+
+        brand = tk.Frame(sidebar, bg=theme.surface)
+        brand.pack(fill="x", padx=14, pady=(14, 4))
+        dot = tk.Canvas(brand, width=24, height=24, bg=theme.surface, highlightthickness=0)
+        dot.create_oval(1, 1, 23, 23, fill=theme.primary, outline="")
+        dot.create_text(12, 13, text="ف", fill=theme.primary_foreground, font=(self.font, 10, "bold"))
+        dot.pack(side="left")
+        tk.Label(
+            brand, text=TITLE, bg=theme.surface, fg=theme.contrast,
+            font=(self.font, 12, "bold"), anchor="w",
+        ).pack(side="left", padx=(8, 0))
+
+        self._status_line = tk.Label(
+            sidebar, text=DEFAULT_MODEL_NOTE, bg=theme.surface, fg=theme.text_dim,
+            font=(self.font, 8), anchor="w", justify="left", wraplength=248,
         )
-        self._workspace_list.pack(fill="both", expand=True, padx=12, pady=(2, 6))
+        self._status_line.pack(fill="x", padx=14, pady=(0, 2))
+
+        self._section_label(sidebar, "Workspaces")
+        self._workspace_list = tk.Listbox(
+            sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
+            selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
+            font=(self.font, 9), height=6, activestyle="none",
+        )
+        self._workspace_list.pack(fill="x", padx=14, pady=(0, 6))
         self._workspace_list.bind("<<ListboxSelect>>", self._on_workspace_select)
 
         tk.Label(
-            column, text="Describe the change, then create its workspace:",
+            sidebar, text="Describe the change, then create its workspace:",
             bg=theme.surface, fg=theme.text_secondary, font=(self.font, 8),
-            anchor="w", justify="left", wraplength=270,
-        ).pack(fill="x", padx=12, pady=(2, 2))
+            anchor="w", justify="left", wraplength=248,
+        ).pack(fill="x", padx=14, pady=(0, 3))
         tk.Entry(
-            column, textvariable=self._task_var, bg=theme.base, fg=theme.foreground,
-            insertbackground=theme.primary, relief="flat", highlightthickness=1,
-            highlightbackground=theme.border, font=(self.font, 9),
-        ).pack(fill="x", padx=12, pady=(0, 4))
-        row = tk.Frame(column, bg=theme.surface)
-        row.pack(fill="x", padx=12, pady=(0, 10))
+            sidebar, textvariable=self._task_var, bg=theme.base, fg=theme.foreground,
+            insertbackground=theme.primary, relief="flat", highlightthickness=0,
+            font=(self.font, 9),
+        ).pack(fill="x", padx=14, pady=(0, 4), ipady=4)
+        row = tk.Frame(sidebar, bg=theme.surface)
+        row.pack(fill="x", padx=14, pady=(0, 6))
         self._button(row, "New workspace", self._on_create_workspace).pack(side="left")
         self._button(row, "Refresh", self.refresh).pack(side="left", padx=(6, 0))
 
-    def _build_work_area(self, parent: tk.Misc) -> None:
-        theme = self.theme
-        area = tk.Frame(parent, bg=theme.base)
-        area.grid(row=0, column=1, sticky="nsew")
-
         self._workspace_label = tk.Label(
-            area, text="No workspace selected.", bg=theme.base, fg=theme.text_secondary,
-            font=(self.font, 10, "bold"), anchor="w",
+            sidebar, text="No workspace selected.", bg=theme.surface, fg=theme.text_secondary,
+            font=(self.font, 9, "bold"), anchor="w", justify="left", wraplength=248,
         )
-        self._workspace_label.pack(fill="x", pady=(0, 4))
+        self._workspace_label.pack(fill="x", padx=14, pady=(0, 2))
 
-        notebook = ttk.Notebook(area)
-        notebook.pack(fill="both", expand=True)
-        self._notebook = notebook
-
-        self._build_editor_tab(notebook)
-        self._build_model_tab(notebook)
-        self._build_review_tab(notebook)
-
-    def _build_editor_tab(self, notebook: ttk.Notebook) -> None:
-        theme = self.theme
-        tab = tk.Frame(notebook, bg=theme.surface)
-        notebook.add(tab, text="  2.  Files and editor  ")
-        tab.rowconfigure(0, weight=1)
-        tab.columnconfigure(0, weight=0, minsize=230)
-        tab.columnconfigure(1, weight=1)
-
+        self._section_label(sidebar, "Files")
         self._file_list = tk.Listbox(
-            tab, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
-            selectforeground=theme.contrast, relief="flat", highlightthickness=1,
-            highlightbackground=theme.border, font=(self.mono, 8), activestyle="none",
+            sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
+            selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
+            font=(self.mono, 8), height=8, activestyle="none",
         )
-        self._file_list.grid(row=0, column=0, sticky="nsew", padx=(12, 8), pady=10)
+        self._file_list.pack(fill="both", expand=True, padx=14, pady=(0, 6))
         self._file_list.bind("<<ListboxSelect>>", self._on_file_select)
 
-        right = tk.Frame(tab, bg=theme.surface)
-        right.grid(row=0, column=1, sticky="nsew", padx=(0, 12), pady=10)
-        right.rowconfigure(1, weight=1)
-        right.columnconfigure(0, weight=1)
-        self._file_label = tk.Label(
-            right, text="Select a file to open it.", bg=theme.surface, fg=theme.text_secondary,
-            font=(self.mono, 9), anchor="w",
-        )
-        self._file_label.grid(row=0, column=0, sticky="ew", pady=(0, 4))
-        self._editor = tk.Text(
-            right, wrap="none", undo=True, bg=theme.base, fg=theme.foreground,
-            insertbackground=theme.primary, relief="flat", highlightthickness=1,
-            highlightbackground=theme.border, font=(self.mono, 9), padx=6, pady=6,
-        )
-        self._editor.grid(row=1, column=0, sticky="nsew")
-        self._editor.bind("<<Modified>>", self._on_editor_modified)
-        save_row = tk.Frame(right, bg=theme.surface)
-        save_row.grid(row=2, column=0, sticky="ew", pady=(6, 0))
-        self._button(save_row, "Save file", self._on_save_file).pack(side="left")
-        tk.Label(
-            save_row, text="Edits go to the workspace, not to the running program.",
-            bg=theme.surface, fg=theme.text_dim, font=(self.font, 8),
-        ).pack(side="left", padx=8)
-
-    def _build_model_tab(self, notebook: ttk.Notebook) -> None:
-        theme = self.theme
-        tab = tk.Frame(notebook, bg=theme.surface)
-        notebook.add(tab, text="  3.  Ask the coding model  ")
-        tab.rowconfigure(2, weight=1)
-        tab.columnconfigure(0, weight=1)
-
-        tk.Label(
-            tab, text="Describe what to change in plain language. The model reads and writes "
-            "files inside this workspace only.",
-            bg=theme.surface, fg=theme.text_secondary, font=(self.font, 9), anchor="w",
-            justify="left", wraplength=760,
-        ).grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 4))
-        entry_row = tk.Frame(tab, bg=theme.surface)
-        entry_row.grid(row=1, column=0, sticky="ew", padx=12)
-        entry_row.columnconfigure(0, weight=1)
-        tk.Entry(
-            entry_row, textvariable=self._request_var, bg=theme.base, fg=theme.foreground,
-            insertbackground=theme.primary, relief="flat", highlightthickness=1,
-            highlightbackground=theme.border, font=(self.font, 10),
-        ).grid(row=0, column=0, sticky="ew")
-        self._ask_button = self._button(entry_row, "Ask the model", self._on_ask_model)
-        self._ask_button.grid(row=0, column=1, padx=(8, 0))
-
-        self._trace = tk.Text(
-            tab, wrap="word", bg=theme.base, fg=theme.foreground, relief="flat",
-            highlightthickness=1, highlightbackground=theme.border,
-            font=(self.mono, 8), padx=6, pady=6,
-        )
-        self._trace.grid(row=2, column=0, sticky="nsew", padx=12, pady=10)
-        self._trace.configure(state="disabled")
-
-    def _build_review_tab(self, notebook: ttk.Notebook) -> None:
-        theme = self.theme
-        tab = tk.Frame(notebook, bg=theme.surface)
-        notebook.add(tab, text="  4.  Diff and checks  ")
-        tab.rowconfigure(1, weight=1)
-        tab.columnconfigure(0, weight=1)
-
-        row = tk.Frame(tab, bg=theme.surface)
-        row.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 4))
-        self._button(row, "Show diff", self._on_show_diff).pack(side="left")
-        self._checks_button = self._button(row, "Run checks (tests)", self._on_run_checks)
-        self._checks_button.pack(side="left", padx=6)
-        self._checks_label = tk.Label(
-            row, text="Checks have not run yet.", bg=theme.surface, fg=theme.text_dim,
-            font=(self.font, 8),
-        )
-        self._checks_label.pack(side="left", padx=8)
-
-        self._review = tk.Text(
-            tab, wrap="none", bg=theme.base, fg=theme.foreground, relief="flat",
-            highlightthickness=1, highlightbackground=theme.border,
-            font=(self.mono, 8), padx=6, pady=6,
-        )
-        self._review.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 10))
-        self._review.configure(state="disabled")
-
-    def _build_action_bar(self) -> None:
-        theme = self.theme
-        bar = tk.Frame(self.window, bg=theme.base)
-        bar.pack(fill="x", padx=20, pady=(8, 12))
-        self._merge_button = self._button(bar, "Merge into the project", self._on_merge)
+        self._section_label(sidebar, "Review and merge")
+        gate = tk.Frame(sidebar, bg=theme.surface)
+        gate.pack(fill="x", padx=14, pady=(0, 4))
+        self._merge_button = self._button(gate, "Merge into the project", self._on_merge)
         self._merge_button.pack(side="left")
         self._merge_button.configure(state="disabled")
-        self._button(bar, "Discard workspace", self._on_discard).pack(side="left", padx=6)
-        self._merge_note = tk.Label(
-            bar, text="", bg=theme.base, fg=theme.text_secondary, font=(self.font, 9),
-            anchor="w", justify="left", wraplength=560,
+        self._button(gate, "Discard workspace", self._on_discard).pack(side="left", padx=(6, 0))
+        self._checks_label = tk.Label(
+            sidebar, text="Checks have not run yet.", bg=theme.surface, fg=theme.text_dim,
+            font=(self.font, 8), anchor="w", justify="left", wraplength=248,
         )
-        self._merge_note.pack(side="left", padx=10)
-        self._spinner = ttk.Progressbar(bar, mode="indeterminate", length=140)
+        self._checks_label.pack(fill="x", padx=14)
+        self._merge_note = tk.Label(
+            sidebar, text="", bg=theme.surface, fg=theme.text_secondary, font=(self.font, 8),
+            anchor="w", justify="left", wraplength=248,
+        )
+        self._merge_note.pack(fill="x", padx=14, pady=(4, 14))
+
+    # -- conversation -----------------------------------------------------
+
+    def _build_conversation(self, parent: tk.Frame) -> None:
+        theme = self.theme
+        col = tk.Frame(parent, bg=theme.base)
+        col.grid(row=0, column=1, sticky="nsew")
+
+        self._build_composer(col)
+        self._build_editor_panel(col)
+
+        container = tk.Frame(col, bg=theme.base)
+        container.pack(fill="both", expand=True)
+        self._canvas = tk.Canvas(container, bg=theme.base, highlightthickness=0)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        self._scrollbar = tk.Scrollbar(container, command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=self._scrollbar.set)
+
+        self._transcript = tk.Frame(self._canvas, bg=theme.base)
+        self._window = self._canvas.create_window((0, 0), window=self._transcript, anchor="nw")
+        self._transcript.bind("<Configure>", self._on_transcript_configure)
+        self._canvas.bind("<Configure>", self._on_canvas_configure)
+        for widget in (self._canvas, self._transcript):
+            widget.bind("<MouseWheel>", self._on_mousewheel)
+            widget.bind("<Button-4>", self._on_mousewheel)
+            widget.bind("<Button-5>", self._on_mousewheel)
+
+        self._add_message("note", HONESTY_LINE)
+
+    def _build_composer(self, parent: tk.Frame) -> None:
+        """The rounded composer card, pinned to the bottom like the chat window."""
+        theme = self.theme
+        wrap = tk.Frame(parent, bg=theme.base)
+        wrap.pack(side="bottom", fill="x", padx=self._column_pad(), pady=(8, 12))
+        card = RoundedBox(
+            wrap, bg=theme.base, fill=theme.surface, outline=theme.border_subtle,
+            corner=RADIUS_LARGE, parent_bg=theme.base,
+        )
+        card.pack(fill="x")
+        inner = card.inner
+        entry = tk.Entry(
+            inner, textvariable=self._request_var, bg=theme.surface, fg=theme.foreground,
+            insertbackground=theme.primary, relief="flat", highlightthickness=0,
+            font=(self.font, 11),
+        )
+        entry.pack(fill="x", padx=14, pady=(12, 6))
+        entry.bind("<Return>", lambda _event: self._on_ask_model())
+
+        actions = tk.Frame(inner, bg=theme.surface)
+        actions.pack(fill="x", padx=12, pady=(0, 10))
+        self._ask_button = self._button(actions, "Ask the model", self._on_ask_model)
+        self._ask_button.pack(side="right")
+        self._checks_button = self._button(actions, "Run checks", self._on_run_checks)
+        self._checks_button.pack(side="right", padx=(0, 6))
+        self._button(actions, "Show diff", self._on_show_diff).pack(side="right", padx=(0, 6))
+        self._button(actions, "Save file", self._on_save_file).pack(side="right", padx=(0, 6))
+
+    def _build_editor_panel(self, parent: tk.Frame) -> None:
+        """The file editor, revealed in the column when a file is opened."""
+        theme = self.theme
+        panel = tk.Frame(parent, bg=theme.surface)
+        head = tk.Frame(panel, bg=theme.surface)
+        head.pack(fill="x", padx=12, pady=(10, 4))
+        self._file_label = tk.Label(
+            head, text="Select a file to open it.", bg=theme.surface, fg=theme.text_secondary,
+            font=(self.mono, 9), anchor="w",
+        )
+        self._file_label.pack(side="left")
+        self._button(head, "Close", self._hide_editor).pack(side="right")
+        self._button(head, "Save file", self._on_save_file).pack(side="right", padx=(0, 6))
+
+        self._editor = tk.Text(
+            panel, wrap="none", undo=True, bg=theme.base, fg=theme.foreground,
+            insertbackground=theme.primary, relief="flat", highlightthickness=0,
+            font=(self.mono, 9), padx=8, pady=8, height=14,
+        )
+        self._editor.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self._editor.bind("<<Modified>>", self._on_editor_modified)
+        self._editor_panel = panel
+
+    def _show_editor(self) -> None:
+        if not self._editor_panel.winfo_ismapped():
+            self._editor_panel.pack(side="bottom", fill="x", padx=self._column_pad(), pady=(0, 6))
+
+    def _hide_editor(self) -> None:
+        self._editor_panel.pack_forget()
+
+    # -- transcript -------------------------------------------------------
+
+    def _column_pad(self) -> int:
+        """Side padding that centres the transcript in a readable column."""
+        width = self._canvas.winfo_width() if hasattr(self, "_canvas") else 0
+        if width <= 1:
+            return 16
+        return max(16, (width - _COLUMN_MAX) // 2)
+
+    def _available_column(self) -> int:
+        width = self._canvas.winfo_width()
+        if width <= 1:
+            return _COLUMN_MAX
+        return max(160, min(_COLUMN_MAX, width - 2 * self._column_pad()))
+
+    def _bubble_fonts(self) -> tuple[tkfont.Font, tkfont.Font]:
+        return tkfont.Font(font=(self.font, 11)), tkfont.Font(font=(self.mono, 9))
+
+    def _bubble_width(self, text: str, *, role: str = "model") -> int:
+        normal, mono = self._bubble_fonts()
+        widest = 0
+        for line in md.iter_styled_lines(text or " "):
+            font = mono if line.in_code else normal
+            widest = max(widest, font.measure(line.text))
+        if role == "user":
+            return max(80, min(widest, int(_COLUMN_MAX * 0.84) - 52))
+        return max(160, min(widest, self._available_column()))
+
+    def _add_message(
+        self, role: str, text: str, *, title: str = "", mono_body: bool = False, rich: bool = True
+    ) -> tk.Text:
+        """Add one message row in the chat window's style and return its widget."""
+        theme = self.theme
+        pad = self._column_pad()
+        row = tk.Frame(self._transcript, bg=theme.base)
+        row.pack(fill="x", padx=(pad, pad), pady=6)
+        self._row_frames.append(row)
+
+        if role == "user":
+            card = RoundedBox(
+                row, bg=theme.user_bubble, fill=theme.user_bubble, outline=theme.user_bubble,
+                corner=RADIUS_LARGE, parent_bg=theme.base,
+            )
+            card.pack(side="right", anchor="e")
+            widget = tk.Text(
+                card.inner, height=1, wrap="word", relief="flat", borderwidth=0,
+                highlightthickness=0, bg=theme.user_bubble, fg=theme.user_bubble_fg,
+                font=(self.font, 11), padx=14, pady=8, cursor="xterm", takefocus=1, width=0,
+            )
+            widget.insert("1.0", text)
+            widget.pack(fill="both", expand=True)
+            card.configure(width=self._bubble_width(text, role="user"))
+        else:
+            head = tk.Frame(row, bg=theme.base)
+            head.pack(fill="x", pady=(0, 4))
+            if role == "model":
+                self._avatar(head)
+                padx = (6, 0)
+            else:
+                padx = (0, 0)
+            tk.Label(
+                head, text=title or ("Coding model" if role == "model" else "Status"),
+                bg=theme.base, fg=theme.text_dim, font=(self.font, 9, "bold"), anchor="w",
+            ).pack(side="left", padx=padx)
+            widget = tk.Text(
+                row, height=1, wrap="word", relief="flat", borderwidth=0, highlightthickness=0,
+                bg=theme.base, fg=theme.foreground,
+                font=(self.mono, 9) if mono_body else (self.font, 11),
+                padx=0, pady=0, cursor="xterm", takefocus=1, spacing1=1, spacing3=1,
+            )
+            if rich and not mono_body:
+                self._insert_rich(widget, text)
+            else:
+                widget.insert("1.0", text)
+            widget.pack(anchor="w")
+            widget.configure(width=self._bubble_width(text))
+
+        self._make_read_only(widget)
+        for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(wheel, self._on_bubble_wheel, add="+")
+        self._fit_height(widget)
+        self._scroll_to_bottom()
+        return widget
+
+    def _avatar(self, parent: tk.Misc) -> None:
+        badge = tk.Canvas(parent, width=24, height=24, bg=self.theme.base, highlightthickness=0)
+        badge.create_oval(1, 1, 23, 23, fill=self.theme.primary, outline="")
+        badge.create_text(
+            12, 13, text="ف", fill=self.theme.primary_foreground, font=(self.font, 10, "bold")
+        )
+        badge.pack(side="left")
+
+    def _fit_height(self, widget: tk.Text) -> None:
+        widget.update_idletasks()
+        measured = widget.count("1.0", "end", "displaylines")
+        lines = int(measured[0]) if measured else 1
+        widget.configure(height=min(max(lines, 1), _MAX_BUBBLE_LINES))
+
+    @staticmethod
+    def _make_read_only(widget: tk.Text) -> None:
+        """Read-only but still selectable and copyable, like a chat message."""
+
+        def block(event: tk.Event) -> str:
+            if int(event.state) & 0x0004 or int(event.state) & 0x0008:
+                return ""
+            if event.keysym in {"Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next"}:
+                return ""
+            return "break"
+
+        for sequence in ("<Key>", "<<Paste>>", "<<Cut>>", "<<Clear>>"):
+            widget.bind(sequence, block)
+
+    def _on_bubble_wheel(self, event: tk.Event) -> str:
+        widget = event.widget
+        spans = widget.yview() if isinstance(widget, tk.Text) else (0.0, 1.0)
+        if spans[0] <= 0.0 and spans[1] >= 1.0:
+            self._on_mousewheel(event)
+            return "break"
+        return ""
+
+    def _on_transcript_configure(self, _event: tk.Event) -> None:
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        self._toggle_scrollbar()
+
+    def _on_canvas_configure(self, event: tk.Event) -> None:
+        self._canvas.itemconfigure(self._window, width=event.width)
+        self._reflow()
+
+    def _reflow(self) -> None:
+        pad = self._column_pad()
+        for row in self._row_frames:
+            row.pack_configure(padx=(pad, pad))
+
+    def _toggle_scrollbar(self) -> None:
+        first, last = self._canvas.yview()
+        if first <= 0.0 and last >= 1.0:
+            self._scrollbar.pack_forget()
+        else:
+            self._scrollbar.pack(side="right", fill="y")
+
+    def _on_mousewheel(self, event: tk.Event) -> None:
+        delta = -1 * (event.delta // 120) if getattr(event, "delta", 0) else (
+            -1 if getattr(event, "num", 0) == 4 else 1
+        )
+        self._canvas.yview_scroll(delta, "units")
+        self._toggle_scrollbar()
+
+    def _scroll_to_bottom(self) -> None:
+        self._canvas.update_idletasks()
+        self._canvas.yview_moveto(1.0)
+        self._toggle_scrollbar()
+
+    # -- markdown rendering ----------------------------------------------
+
+    def _insert_rich(self, widget: tk.Text, text: str) -> None:
+        self._configure_tags(widget)
+        for index, styled in enumerate(md.iter_styled_lines(text)):
+            if index:
+                widget.insert("end", "\n")
+            self._insert_styled_line(widget, styled)
+
+    def _configure_tags(self, widget: tk.Text) -> None:
+        theme = self.theme
+        widget.tag_configure(
+            "heading", font=(self.font, 15, "bold"), foreground=theme.contrast, spacing1=6, spacing3=4
+        )
+        widget.tag_configure(
+            "heading3", font=(self.font, 12, "bold"), foreground=theme.contrast, spacing1=4, spacing3=3
+        )
+        widget.tag_configure("bullet", lmargin1=16, lmargin2=30)
+        widget.tag_configure(
+            "quote", lmargin1=16, lmargin2=16, foreground=theme.text_secondary, background=theme.surface_raised
+        )
+        widget.tag_configure(
+            "code", font=(self.mono, 10), background=theme.code_bg, foreground=theme.code_fg,
+            lmargin1=10, lmargin2=10, spacing1=2, spacing3=2,
+        )
+        widget.tag_configure("table", font=(self.mono, 10), foreground=theme.foreground, lmargin1=8)
+        widget.tag_configure("rule", foreground=theme.border)
+        widget.tag_configure("bold", font=(self.font, 11, "bold"), foreground=theme.contrast)
+        widget.tag_configure(
+            "inline_code", font=(self.mono, 10), background=theme.code_bg, foreground=theme.code_fg
+        )
+        widget.tag_configure("kw", foreground=theme.primary)
+        widget.tag_configure("str", foreground=theme.success)
+        widget.tag_configure("cmt", foreground=theme.text_dim)
+
+    def _insert_styled_line(self, widget: tk.Text, styled: md.StyledLine) -> None:
+        start = widget.index("end-1c")
+        widget.insert("end", styled.text)
+        end = widget.index("end-1c")
+        tag = None
+        if styled.in_code:
+            tag = "code"
+        elif styled.kind == md.HEADING:
+            tag = "heading" if styled.level <= 2 else "heading3"
+        elif styled.kind in (md.BULLET, md.NUMBER):
+            tag = "bullet"
+        elif styled.kind == md.QUOTE:
+            tag = "quote"
+        elif styled.kind == md.TABLE:
+            tag = "table"
+        elif styled.kind == md.RULE:
+            tag = "rule"
+        if tag:
+            widget.tag_add(tag, start, end)
+        if styled.in_code:
+            self._highlight_code_line(widget, styled.text, start)
+        elif styled.kind not in (md.CODE, md.RULE):
+            self._inline_tags(widget, styled.text, start)
+
+    def _inline_tags(self, widget: tk.Text, line: str, line_start: str) -> None:
+        row = line_start.split(".")[0]
+        for segment in md.parse_inline(line):
+            if segment.kind == "bold":
+                token = f"**{segment.text}**"
+                idx = line.find(token)
+                if idx >= 0:
+                    widget.tag_add("bold", f"{row}.{idx}", f"{row}.{idx + len(token)}")
+        position = 0
+        while True:
+            opening = line.find("`", position)
+            if opening < 0:
+                break
+            closing = line.find("`", opening + 1)
+            if closing < 0:
+                break
+            widget.tag_add("inline_code", f"{row}.{opening}", f"{row}.{closing + 1}")
+            position = closing + 1
+
+    def _highlight_code_line(self, widget: tk.Text, line: str, start: str) -> None:
+        row = start.split(".")[0]
+        for segment in md.highlight_code(line):
+            if segment.kind == "plain" or segment.text == "\n":
+                continue
+            tag = {"keyword": "kw", "string": "str", "comment": "cmt"}.get(segment.kind)
+            if tag is None:
+                continue
+            idx = line.find(segment.text)
+            if idx >= 0:
+                widget.tag_add(tag, f"{row}.{idx}", f"{row}.{idx + len(segment.text)}")
+
+    # -- widgets ----------------------------------------------------------
 
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
         theme = self.theme
@@ -414,6 +695,7 @@ class CodeStudioDialog:
             return
         self._current_file = relative
         self._file_label.configure(text=relative)
+        self._show_editor()
         self._editor.delete("1.0", "end")
         self._editor.insert("1.0", report.detail)
         self._editor.edit_modified(False)
@@ -478,7 +760,6 @@ class CodeStudioDialog:
             return
         report = self.service.diff(self._current_slug)
         self._set_review(report.detail if report.ok else report.message)
-        self._notebook.select(2)
 
     def _on_run_checks(self) -> None:
         if not self._current_slug:
@@ -600,16 +881,16 @@ class CodeStudioDialog:
             self._refresh_merge_state()
 
     def _set_trace(self, text: str) -> None:
-        self._trace.configure(state="normal")
-        self._trace.delete("1.0", "end")
-        self._trace.insert("1.0", text)
-        self._trace.configure(state="disabled")
+        """Show the model's work as a transcript message, not a bare panel."""
+        if not text:
+            return
+        self._trace = self._add_message("model", text, title="Coding model", mono_body=True)
 
     def _set_review(self, text: str) -> None:
-        self._review.configure(state="normal")
-        self._review.delete("1.0", "end")
-        self._review.insert("1.0", text)
-        self._review.configure(state="disabled")
+        """Show a diff (or a checks result) as a monospaced transcript message."""
+        if not text:
+            return
+        self._review = self._add_message("note", text, title="Diff and checks", mono_body=True)
 
     def _set_merge_note(self, message: str, *, error: bool = False) -> None:
         self._merge_note.configure(

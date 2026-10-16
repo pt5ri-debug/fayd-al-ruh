@@ -105,6 +105,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="Show the model status, workspaces, and base revision.")
     sub.add_parser("coder", help="Show whether the coding model is installed.")
+    sub.add_parser("backend", help="Show which coding runtime is ready (in-process or Ollama).")
+
+    models = sub.add_parser("models", help="List the coding models that can be downloaded.")
+    models.set_defaults(_models=True)
+
+    download = sub.add_parser("download", help="Download a coding model for the in-process runtime.")
+    download.add_argument("--spec", default="", help="Which model to fetch (default: qwen2.5-coder-7b).")
+    download.add_argument("--approve", action="store_true", help="Approve the download (it leaves the machine).")
 
     new = sub.add_parser("new", help="Create an isolated workspace for a change.")
     new.add_argument("task", help="A short description of the change.")
@@ -124,6 +132,18 @@ def _build_parser() -> argparse.ArgumentParser:
     write.add_argument("path")
     write.add_argument("--file", default=None, help="Read the content from this local file (default: stdin).")
     write.add_argument("--content", default=None, help="Write this literal content instead.")
+
+    edit = sub.add_parser("edit", help="Replace one exact snippet in a workspace file.")
+    edit.add_argument("slug")
+    edit.add_argument("path")
+    edit.add_argument("--old", required=True, help="The exact text to replace.")
+    edit.add_argument("--new", required=True, help="The replacement text.")
+    edit.add_argument("--all", action="store_true", help="Replace every occurrence (default: require a unique match).")
+
+    search = sub.add_parser("search", help="Find a literal string in a workspace.")
+    search.add_argument("slug")
+    search.add_argument("query")
+    search.add_argument("--path", default="", help="Limit the search to one file or subfolder.")
 
     ask = sub.add_parser("ask", help="Ask the coding model to change the workspace.")
     ask.add_argument("slug")
@@ -264,6 +284,79 @@ def _run_write(service: CodeStudioService, args: argparse.Namespace) -> int:
     return 0 if report.ok else 4
 
 
+def _run_edit(service: CodeStudioService, args: argparse.Namespace) -> int:
+    report = service.edit_file(args.slug, args.path, args.old, args.new, replace_all=args.all)
+    _print_report(report, as_json=args.as_json)
+    return 0 if report.ok else 4
+
+
+def _run_search(service: CodeStudioService, args: argparse.Namespace) -> int:
+    report = service.search(args.slug, args.query, relative=args.path)
+    if args.as_json:
+        payload = {"ok": report.ok, "message": report.message, "detail": report.detail}
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0 if report.ok else 4
+    print(report.detail or report.message)
+    return 0 if report.ok else 4
+
+
+def _run_backend(service: CodeStudioService, args: argparse.Namespace) -> int:
+    backend = service.backend()
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "backend": backend.backend,
+                    "available": backend.available,
+                    "detail": backend.detail,
+                    "hint": backend.hint,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0 if backend.available else 3
+    print(backend.summary())
+    if not backend.available and backend.hint:
+        print(f"Next step: {backend.hint}")
+    return 0 if backend.available else 3
+
+
+def _run_models(service: CodeStudioService, args: argparse.Namespace) -> int:
+    rows = service.available_models()
+    if args.as_json:
+        print(
+            json.dumps(
+                [
+                    {"key": key, "title": title, "size_gb": size, "summary": summary}
+                    for key, title, size, summary in rows
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    print("Coding models you can download:")
+    for key, title, size, summary in rows:
+        print(f"  {key:22s} {title}  (~{size:.1f} GB)")
+        print(f"      {summary}")
+    print()
+    print("Download one with: python -m cli studio download --spec <key> --approve")
+    return 0
+
+
+def _run_download(service: CodeStudioService, args: argparse.Namespace) -> int:
+    if not args.approve:
+        print(
+            "Downloading a model leaves the machine, so it needs --approve.",
+            file=sys.stderr,
+        )
+        return 2
+    report = service.download_model(args.spec, approved=True)
+    _print_report(report, as_json=args.as_json)
+    return 0 if report.ok else 3
+
+
 def _run_ask(service: CodeStudioService, args: argparse.Namespace) -> int:
     report, trace = service.run_agent(args.slug, args.request)
     if args.as_json:
@@ -318,11 +411,16 @@ def _run_discard(service: CodeStudioService, args: argparse.Namespace) -> int:
 _HANDLERS = {
     "status": _run_status,
     "coder": _run_coder,
+    "backend": _run_backend,
+    "models": _run_models,
+    "download": _run_download,
     "new": _run_new,
     "list": _run_list,
     "files": _run_files,
     "read": _run_read,
     "write": _run_write,
+    "edit": _run_edit,
+    "search": _run_search,
     "ask": _run_ask,
     "diff": _run_diff,
     "check": _run_check,
