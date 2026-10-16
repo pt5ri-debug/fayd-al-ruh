@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -45,6 +44,10 @@ DEFAULT_BASE_BRANCH = "main"
 #: The branch-name prefix that marks a Studio workspace. Kept distinctive so a
 #: workspace branch is never mistaken for a release or feature branch.
 BRANCH_PREFIX = "studio/"
+
+#: Workspaces are named automatically, in order: ``PR1``, ``PR2``, ... The user
+#: never has to invent a name; :meth:`CodeStudio.create` assigns the next number.
+SERIAL_PREFIX = "PR"
 
 #: Text files the Studio will write. Anything else is refused, so the editor and
 #: the agent cannot drop a binary or an executable into the project by accident.
@@ -194,11 +197,21 @@ class MergeResult:
     commands: list[GitCommand] = field(default_factory=list)
 
 
-def _slugify(text: str) -> str:
-    """A short, safe directory/branch name derived from a change's title."""
-    cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower()).strip("-")
-    cleaned = cleaned[:40].strip("-")
-    return cleaned or "change"
+#: The reserved key under which the monotonic workspace counter is kept in the
+#: state file. It is not a workspace, so every reader skips it.
+_SERIAL_KEY = "__next_serial__"
+
+
+def _newest_first(workspace: "Workspace") -> tuple[str, int, str]:
+    """A sort key that orders workspaces newest first, deterministically.
+
+    The timestamp has second resolution, so two workspaces made in the same second
+    would otherwise tie. The auto-assigned serial number (``PR12``) is the honest
+    tie-breaker, and the slug breaks any remaining tie.
+    """
+    tail = workspace.slug[len(SERIAL_PREFIX):]
+    serial = int(tail) if tail.isdigit() else 0
+    return (workspace.created_at, serial, workspace.slug)
 
 
 def _noninteractive_env(*, identity: bool = False) -> dict[str, str]:
@@ -331,16 +344,46 @@ class CodeStudio:
         state[workspace.slug] = workspace.as_dict()
         self._save_state(state)
 
+    @staticmethod
+    def _workspaces_only(state: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+        """The state without the reserved counter entry, which is not a workspace."""
+        return {slug: entry for slug, entry in state.items() if slug != _SERIAL_KEY}
+
+    def _next_slug(self) -> str:
+        """The next auto-assigned workspace name: ``PR1``, ``PR2``, ...
+
+        The counter only ever moves forward, so a discarded workspace's number is
+        never handed out again -- the numbering stays stable and predictable.
+        """
+        state = self._load_state()
+        stored = state.get(_SERIAL_KEY)
+        value = stored.get("value") if isinstance(stored, dict) else None
+        current = value if isinstance(value, int) else 0
+        serial = max(current, self._highest_existing_serial()) + 1
+        state[_SERIAL_KEY] = {"value": serial}
+        self._save_state(state)
+        return f"{SERIAL_PREFIX}{serial}"
+
+    def _highest_existing_serial(self) -> int:
+        """The largest ``prN`` number any recorded workspace already uses."""
+        highest = 0
+        for slug in self._workspaces_only(self._load_state()):
+            if slug.startswith(SERIAL_PREFIX) and slug[len(SERIAL_PREFIX):].isdigit():
+                highest = max(highest, int(slug[len(SERIAL_PREFIX):]))
+        return highest
+
     # --- lifecycle ------------------------------------------------------
     def create(self, task: str = "", *, slug: str | None = None) -> Workspace:
         """Create a new isolated workspace on its own branch.
 
         The branch is cut from :attr:`base_branch` at its current commit, so the
-        workspace starts from exactly what is published. ``task`` is the plain
+        workspace starts from exactly what is published. The workspace is named
+        automatically in order -- ``PR1``, ``PR2``, ... -- unless ``slug`` is
+        given, so the user never has to invent a name. ``task`` is the plain
         description of the change, kept so the window can list it.
         """
         self._require_repository()
-        slug = slug or _slugify(task)
+        slug = slug or self._next_slug()
         branch = f"{BRANCH_PREFIX}{slug}"
         path = self.workspaces_dir / slug
         if path.exists():
@@ -370,13 +413,13 @@ class CodeStudio:
 
     def list_workspaces(self) -> tuple[Workspace, ...]:
         """Every workspace the Studio knows about, newest first."""
-        state = self._load_state()
+        state = self._workspaces_only(self._load_state())
         items = [Workspace.from_dict(entry) for entry in state.values()]
-        return tuple(sorted(items, key=lambda item: item.created_at, reverse=True))
+        return tuple(sorted(items, key=_newest_first, reverse=True))
 
     def get(self, slug: str) -> Workspace:
         """One workspace by slug, or raise :class:`StudioError`."""
-        state = self._load_state()
+        state = self._workspaces_only(self._load_state())
         if slug not in state:
             raise StudioError(f"No workspace named `{slug}`.")
         return Workspace.from_dict(state[slug])

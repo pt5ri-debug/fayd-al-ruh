@@ -126,7 +126,7 @@ def _all_text_widgets(parent) -> list:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
-def test_dialog_builds_and_shows_the_model_status(project: Path, tmp_path: Path) -> None:
+def test_dialog_builds_and_opens_a_workspace_for_you(project: Path, tmp_path: Path) -> None:
     import tkinter as tk
 
     from gui.app import DARK_THEME
@@ -140,14 +140,19 @@ def test_dialog_builds_and_shows_the_model_status(project: Path, tmp_path: Path)
         root.update()
         assert dialog.window.title() == TITLE
         assert "ready" in dialog._status_line.cget("text")
-        assert dialog._workspace_list.size() == 0
+        # Opening the Studio opens the first workspace for the user, named PR1.
+        assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
+        assert dialog._workspace_list.get(0) == "PR1"
+        assert dialog._current_slug == "PR1"
         assert dialog._merge_button.cget("state") == "disabled"
+        assert dialog._apply_button.cget("state") == "disabled"
     finally:
         root.destroy()
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
-def test_dialog_creates_a_workspace_and_lists_its_files(project: Path, tmp_path: Path) -> None:
+def test_dialog_lists_the_projects_files_by_default(project: Path, tmp_path: Path) -> None:
+    """The project's own files are present without the user adding anything."""
     import tkinter as tk
 
     from gui.app import DARK_THEME
@@ -159,18 +164,33 @@ def test_dialog_creates_a_workspace_and_lists_its_files(project: Path, tmp_path:
             root, _service(project, tmp_path), theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
         )
         root.update()
-        dialog._task_var.set("Add a feature")
-        dialog._on_create_workspace()
-        assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
-        assert "add-a-feature" in dialog._workspace_list.get(0)
-        # Selecting it loads the workspace's file list into the editor page.
-        dialog._workspace_list.selection_set(0)
-        dialog._on_workspace_select()
-        root.update()
-        assert dialog._current_slug == "add-a-feature"
-        assert dialog._file_list.size() >= 1
+        assert _wait_until(root, lambda: dialog._file_list.size() >= 1)
         names = [dialog._file_list.get(i) for i in range(dialog._file_list.size())]
         assert "core/app.py" in names
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_dialog_starts_a_new_change_named_in_order(project: Path, tmp_path: Path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.code_studio_dialog import CodeStudioDialog
+
+    root = tk.Tk()
+    try:
+        dialog = CodeStudioDialog(
+            root, _service(project, tmp_path), theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        root.update()
+        assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
+        dialog._on_new_change()
+        assert _wait_until(root, lambda: dialog._workspace_list.size() == 2)
+        labels = [dialog._workspace_list.get(i) for i in range(dialog._workspace_list.size())]
+        # Newest first, so PR2 is at the top and both numbers exist.
+        assert "PR2" in labels and "PR1" in labels
+        assert dialog._current_slug == "PR2"
     finally:
         root.destroy()
 
@@ -188,12 +208,8 @@ def test_dialog_opens_a_file_and_saves_an_edit(project: Path, tmp_path: Path) ->
             root, _service(project, tmp_path), theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
         )
         root.update()
-        dialog._task_var.set("Editor")
-        dialog._on_create_workspace()
         assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
-        dialog._workspace_list.selection_set(0)
-        dialog._on_workspace_select()
-        root.update()
+        assert _wait_until(root, lambda: dialog._file_list.size() >= 1)
 
         index = [dialog._file_list.get(i) for i in range(dialog._file_list.size())].index("core/app.py")
         dialog._file_list.selection_set(index)
@@ -208,7 +224,7 @@ def test_dialog_opens_a_file_and_saves_an_edit(project: Path, tmp_path: Path) ->
         dialog._on_save_file()
         root.update()
         assert "Saved core/app.py" in dialog._merge_note.cget("text")
-        assert (dialog.service.workspace("editor").path / "core" / "app.py").read_text(
+        assert (dialog.service.workspace("PR1").path / "core" / "app.py").read_text(
             encoding="utf-8"
         ) == "x = 3\n"
     finally:
@@ -236,20 +252,18 @@ def test_dialog_asks_the_model_and_shows_the_trace(project: Path, tmp_path: Path
             mono="TkFixedFont",
         )
         root.update()
-        dialog._task_var.set("Set x to 6")
-        dialog._on_create_workspace()
         assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
-        dialog._workspace_list.selection_set(0)
-        dialog._on_workspace_select()
-        root.update()
 
         dialog._request_var.set("set x to 6")
         dialog._on_ask_model()
-        assert _wait_until(root, lambda: "Done:" in dialog._trace.get("1.0", "end"))
+        assert _wait_until(
+            root,
+            lambda: dialog._trace is not None and "Done:" in dialog._trace.get("1.0", "end"),
+        )
         trace_text = dialog._trace.get("1.0", "end")
         assert "write_file" in trace_text
         assert "set x to 6" in trace_text
-        assert (dialog.service.workspace("set-x-to-6").path / "core" / "app.py").read_text(
+        assert (dialog.service.workspace("PR1").path / "core" / "app.py").read_text(
             encoding="utf-8"
         ) == "x = 6\n"
     finally:
@@ -285,12 +299,7 @@ def test_dialog_shows_the_question_and_streams_steps_live(project: Path, tmp_pat
             mono="TkFixedFont",
         )
         root.update()
-        dialog._task_var.set("Live")
-        dialog._on_create_workspace()
         assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
-        dialog._workspace_list.selection_set(0)
-        dialog._on_workspace_select()
-        root.update()
 
         dialog._request_var.set("make x five")
         dialog._on_ask_model()
@@ -312,9 +321,93 @@ def test_dialog_shows_the_question_and_streams_steps_live(project: Path, tmp_pat
             and "read_file" in dialog._live.get("1.0", "end")
             and "write_file" in dialog._live.get("1.0", "end"),
         )
-        assert _wait_until(root, lambda: "Done:" in dialog._trace.get("1.0", "end"))
+        assert _wait_until(
+            root,
+            lambda: dialog._trace is not None and "Done:" in dialog._trace.get("1.0", "end"),
+        )
         # Once the run ends, the final trace supersedes the live bubble.
         assert dialog._live is None
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_dialog_runs_the_checks_and_offers_to_apply(project: Path, tmp_path: Path) -> None:
+    """The whole flow: describe the change, the model edits, checks pass, then approve."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.code_studio_dialog import CodeStudioDialog
+
+    script = [
+        '{"action": "write_file", "path": "core/app.py", "content": "x = 8\\n"}',
+        '{"action": "done", "summary": "set x to 8"}',
+    ]
+    root = tk.Tk()
+    try:
+        dialog = CodeStudioDialog(
+            root,
+            _service(project, tmp_path, script),
+            theme=DARK_THEME,
+            font="TkDefaultFont",
+            mono="TkFixedFont",
+        )
+        root.update()
+        assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
+
+        dialog._request_var.set("set x to 8")
+        dialog._on_ask_model()
+        # The checks run automatically after the model, and passing enables Apply.
+        assert _wait_until(root, lambda: dialog._apply_button.cget("state") == "normal")
+        # The change is only in the workspace, not in the project yet.
+        assert (project / "core" / "app.py").read_text(encoding="utf-8") == "x = 1\n"
+
+        dialog._on_merge()
+        assert _wait_until(root, lambda: "Applied" in dialog._merge_note.cget("text"))
+        assert (project / "core" / "app.py").read_text(encoding="utf-8") == "x = 8\n"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_dialog_does_not_offer_to_apply_a_failing_change(project: Path, tmp_path: Path) -> None:
+    """A change that fails the checks is never offered for applying."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.code_studio_dialog import CodeStudioDialog
+
+    script = [
+        '{"action": "write_file", "path": "core/app.py", "content": "x = 9\\n"}',
+        '{"action": "done", "summary": "set x to 9"}',
+    ]
+    root = tk.Tk()
+    try:
+        service = CodeStudioService(
+            project,
+            studio=CodeStudio(project, workspaces_dir=tmp_path / "ws"),
+            client=FakeCoder(script),
+            # A command that fails, standing in for a failing test suite.
+            check_command=("python", "-c", "raise SystemExit(1)"),
+        )
+        dialog = CodeStudioDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        root.update()
+        assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
+
+        dialog._request_var.set("set x to 9")
+        dialog._on_ask_model()
+        assert _wait_until(
+            root,
+            lambda: any(
+                "checks failed" in child.get("1.0", "end")
+                for child in _all_text_widgets(dialog._transcript)
+            ),
+        )
+        assert dialog._apply_button.cget("state") == "disabled"
+        # Nothing reached the project.
+        assert (project / "core" / "app.py").read_text(encoding="utf-8") == "x = 1\n"
     finally:
         root.destroy()
 
@@ -332,18 +425,13 @@ def test_dialog_shows_the_diff_and_gates_merge_on_the_checks(project: Path, tmp_
             root, _service(project, tmp_path), theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
         )
         root.update()
-        dialog._task_var.set("Gate")
-        dialog._on_create_workspace()
         assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
-        dialog._workspace_list.selection_set(0)
-        dialog._on_workspace_select()
-        root.update()
-        dialog.service.save_file("gate", "core/app.py", "x = 12\n")
+        dialog.service.save_file("PR1", "core/app.py", "x = 12\n")
 
         dialog._on_show_diff()
         root.update()
         assert "+x = 12" in dialog._review.get("1.0", "end")
-        # Merge is still refused: the checks have not run.
+        # Apply is still refused: the checks have not run.
         dialog._refresh_merge_state()
         assert dialog._merge_button.cget("state") == "disabled"
 
@@ -352,10 +440,10 @@ def test_dialog_shows_the_diff_and_gates_merge_on_the_checks(project: Path, tmp_
         assert _wait_until(root, lambda: dialog._merge_button.cget("state") == "normal")
 
         dialog._on_merge()
-        assert _wait_until(root, lambda: "Merged" in dialog._merge_note.cget("text"))
+        assert _wait_until(root, lambda: "Applied" in dialog._merge_note.cget("text"))
         assert (project / "core" / "app.py").read_text(encoding="utf-8") == "x = 12\n"
-        # The merged workspace is gone, so Merge goes back to disabled.
-        assert dialog._merge_button.cget("state") == "disabled"
+        # The applied workspace is gone and a fresh one is opened, so Apply is off.
+        assert _wait_until(root, lambda: dialog._apply_button.cget("state") == "disabled")
     finally:
         root.destroy()
 
@@ -373,18 +461,14 @@ def test_dialog_discards_a_workspace(project: Path, tmp_path: Path) -> None:
             root, _service(project, tmp_path), theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
         )
         root.update()
-        dialog._task_var.set("Throwaway")
-        dialog._on_create_workspace()
         assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
-        dialog._workspace_list.selection_set(0)
-        dialog._on_workspace_select()
-        root.update()
 
         dialog._on_discard()
         root.update()
-        assert dialog._workspace_list.size() == 0
         assert "Discarded" in dialog._merge_note.cget("text")
-        assert dialog.service.state().workspaces == ()
+        # A fresh workspace is opened automatically for the next change.
+        assert _wait_until(root, lambda: dialog._current_slug == "PR2")
+        assert (project / "core" / "app.py").read_text(encoding="utf-8") == "x = 1\n"
     finally:
         root.destroy()
 
@@ -414,13 +498,7 @@ def test_dialog_reports_an_unreachable_model_honestly(project: Path, tmp_path: P
         )
         root.update()
         assert "not running" in dialog._status_line.cget("text")
-
-        dialog._task_var.set("No model")
-        dialog._on_create_workspace()
         assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
-        dialog._workspace_list.selection_set(0)
-        dialog._on_workspace_select()
-        root.update()
 
         dialog._request_var.set("do something")
         dialog._on_ask_model()

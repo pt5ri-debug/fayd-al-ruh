@@ -1,7 +1,7 @@
 """Command line for the Code Studio (the headless twin of the Studio window).
 
     python -m cli studio status                 # model + workspaces + base revision
-    python -m cli studio new "fix the CLI flag" # make a workspace (isolated worktree)
+    python -m cli studio new ["fix the CLI flag"]  # make a workspace (named PR1, PR2, ...)
     python -m cli studio list                   # the workspaces so far
     python -m cli studio files <slug>           # the editable files in a workspace
     python -m cli studio read <slug> <path>     # print one file
@@ -115,9 +115,9 @@ def _build_parser() -> argparse.ArgumentParser:
     download.add_argument("--spec", default="", help="Which model to fetch (default: qwen2.5-coder-7b).")
     download.add_argument("--approve", action="store_true", help="Approve the download (it leaves the machine).")
 
-    new = sub.add_parser("new", help="Create an isolated workspace for a change.")
-    new.add_argument("task", help="A short description of the change.")
-    new.add_argument("--slug", default=None, help="Force the workspace name.")
+    new = sub.add_parser("new", help="Create an isolated workspace for a change (named for you).")
+    new.add_argument("task", nargs="?", default="", help="A short description of the change (optional).")
+    new.add_argument("--slug", default=None, help="Force the workspace name (default: PR1, PR2, ...).")
 
     sub.add_parser("list", help="List the workspaces.")
 
