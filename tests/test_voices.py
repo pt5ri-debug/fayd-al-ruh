@@ -347,15 +347,24 @@ def test_install_speech_engine_reports_a_failed_command(monkeypatch):
 
 
 def test_reader_refresh_rediscovers_a_newly_installed_engine(monkeypatch):
-    from core import speech
+    from core import reading
     from core.reading import TextReader
 
+    class _FakeSynth:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def synthesize(self, text: str):  # pragma: no cover - not called here
+            raise NotImplementedError
+
+    state = {"name": "silent"}
+    monkeypatch.setattr(reading, "load_synthesizer", lambda *a, **k: _FakeSynth(state["name"]))
+
     # A reader built while no engine existed reports silent...
-    monkeypatch.setattr(speech, "discover_synthesizer_name", lambda: "silent")
     reader = TextReader()
     assert reader.available() is False
     # ...and a refresh (after the user installs one) finds the real engine.
-    monkeypatch.setattr(speech, "discover_synthesizer_name", lambda: "espeak-ng")
+    state["name"] = "espeak-ng"
     reader.refresh()
     assert reader.available() is True
 
