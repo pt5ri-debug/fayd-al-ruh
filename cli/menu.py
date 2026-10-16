@@ -122,6 +122,11 @@ def run_ultron(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.ultron", argv)
 
 
+def run_vision(argv: Sequence[str] = ()) -> int:
+    """Run Vision: a petroleum-engineering local model that answers on oil and gas."""
+    return _run_module("ai.vision_model", argv)
+
+
 def run_chat(argv: Sequence[str] = ()) -> int:
     """Talk with the AI in text, like Jarvis without the voice."""
     return _run_module("ai.chat", argv)
@@ -140,6 +145,14 @@ def run_ultron_chat(argv: Sequence[str] = ()) -> int:
     args = list(argv)
     if "--ultron" not in args:
         args.insert(0, "--ultron")
+    return _run_module("ai.chat", args)
+
+
+def run_vision_chat(argv: Sequence[str] = ()) -> int:
+    """Talk with the AI in text, answering from Vision (the petroleum local model)."""
+    args = list(argv)
+    if "--vision" not in args:
+        args.insert(0, "--vision")
     return _run_module("ai.chat", args)
 
 
@@ -344,6 +357,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Jarvis mode (listen, act, speak)", run_jarvis, ()),
     ("Ultron (general local model, any subject)", run_ultron, ()),
+    ("Vision (petroleum local model: reservoir, drilling, PVT)", run_vision, ()),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
@@ -484,9 +498,11 @@ __all__ = [
     "run_agent",
     "run_jarvis",
     "run_ultron",
+    "run_vision",
     "run_chat",
     "run_mind_chat",
     "run_ultron_chat",
+    "run_vision_chat",
     "run_learn",
     "run_insight",
     "run_internet_learner",

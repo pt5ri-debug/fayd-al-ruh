@@ -41,6 +41,7 @@ from core import optional_deps
 from core import speech
 from core.paths import data_dir
 from core.ultron import UltronUnavailable
+from core.vision_model import VisionUnavailable
 from core.version import __version__
 from gui import markdown as md
 from gui.actions import ACTIONS, GuiAction
@@ -58,12 +59,13 @@ from gui.service import ChatReply, ChatService
 
 #: The answering mouths the header's model selector offers, in order. The label
 #: is what the user reads; the key is the value :class:`ChatService` expects.
-#: Ultron is a mouth *inside* this chat, exactly like the other two, so a
-#: conversation with it happens in the project's own window, not a separate one.
+#: Ultron and Vision are mouths *inside* this chat, exactly like the other two, so
+#: a conversation with either happens in the project's own window, not a separate one.
 MOUTH_CHOICES: tuple[tuple[str, str], ...] = (
     (chat_module.MOUTH_SOURCES, "From sources (cited)"),
     (chat_module.MOUTH_MODEL, "From trained model"),
     (chat_module.MOUTH_ULTRON, "Ultron (general local model)"),
+    (chat_module.MOUTH_VISION, "Vision (petroleum local model)"),
 )
 MOUTH_LABELS: dict[str, str] = {key: label for key, label in MOUTH_CHOICES}
 
@@ -1193,7 +1195,8 @@ class FaydGUI:
             self._empty,
             text=(
                 "Answering mouth: “From sources” cites passages · “From trained model” "
-                "shows what it learned · “Ultron” answers anything, locally (no citations)"
+                "shows what it learned · “Ultron” answers anything, locally · “Vision” "
+                "is the petroleum local model (no citations)"
             ),
             bg=self._theme.base, fg=self._theme.text_dim, font=(self._font, 9), justify="center",
             wraplength=560,
@@ -1769,8 +1772,8 @@ class FaydGUI:
     def _switch_mouth(self, want: str) -> None:
         """Swap the mouth the *same* chat answers from, reporting a failure plainly.
 
-        All three mouths -- sources, the trained model, and Ultron -- answer in
-        this conversation; only ``mode.assistant`` changes, so the transcript, the
+        All four mouths -- sources, the trained model, Ultron, and Vision -- answer
+        in this conversation; only ``mode.assistant`` changes, so the transcript, the
         session, and the controls are untouched. A mouth that cannot load leaves
         the current one in place and shows the real next step instead.
         """
@@ -1781,9 +1784,11 @@ class FaydGUI:
                 self.service.use_model()
             elif want == chat_module.MOUTH_ULTRON:
                 self.service.use_ultron()
+            elif want == chat_module.MOUTH_VISION:
+                self.service.use_vision()
             else:
                 self.service.use_sources()
-        except (FileNotFoundError, OSError, ValueError, UltronUnavailable) as error:
+        except (FileNotFoundError, OSError, ValueError, UltronUnavailable, VisionUnavailable) as error:
             self._source_var.set(self.service.source)
             self._source_menu_var_reset()
             self._add_bubble("note", chat_module.switch_failure_message(want, error))
@@ -2073,6 +2078,16 @@ class FaydGUI:
         """
         self._switch_mouth(chat_module.MOUTH_ULTRON)
 
+    def _select_vision_mouth(self) -> None:
+        """Switch this chat to the Vision mouth from the sidebar action.
+
+        Vision answers in the *same* conversation -- no separate window -- so this
+        just drives the header's model selector. When the optional runtime or a
+        model file is missing, the honest next step is shown in the transcript
+        instead of opening a mouth that could not answer.
+        """
+        self._switch_mouth(chat_module.MOUTH_VISION)
+
     def _on_install_ocr(self) -> None:
         """Install the optional OCR packages from within the window.
 
@@ -2183,10 +2198,13 @@ class FaydGUI:
         if action.key == "code-studio":
             self._open_code_studio()
             return
-        # Ultron answers in this same chat (the header's model selector), so the
-        # sidebar entry switches the mouth rather than opening a window of its own.
+        # Ultron and Vision answer in this same chat (the header's model selector),
+        # so the sidebar entry switches the mouth rather than opening a window.
         if action.key == "ultron":
             self._select_ultron_mouth()
+            return
+        if action.key == "vision":
+            self._select_vision_mouth()
             return
         argv = action.argv
         if action.needs_input:
@@ -2367,6 +2385,7 @@ def main(argv: list[str] | None = None) -> int:
         read_write=args.read_write,
         model_checkpoint=args.model_checkpoint,
         ultron_model=args.ultron_model,
+        vision_model=args.vision_model,
         session=args.session,
         operating_mode=args.mode,
     )
@@ -2381,6 +2400,12 @@ def main(argv: list[str] | None = None) -> int:
             service.use_ultron()
         except (UltronUnavailable, OSError, ValueError) as error:
             print(f"Could not load Ultron: {error}")
+            return 1
+    if args.vision:
+        try:
+            service.use_vision()
+        except (VisionUnavailable, OSError, ValueError) as error:
+            print(f"Could not load Vision: {error}")
             return 1
 
     FaydGUI(root, service=service)

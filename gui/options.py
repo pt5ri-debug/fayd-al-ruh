@@ -26,6 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="start answering from Ultron, the general local model (any subject)",
     )
     parser.add_argument("--ultron-model", default=None, help="a specific .gguf file for Ultron to load")
+    parser.add_argument(
+        "--vision",
+        action="store_true",
+        help="start answering from Vision, the petroleum local model (reservoir, drilling, PVT)",
+    )
+    parser.add_argument("--vision-model", default=None, help="a specific .gguf file for Vision to load")
     parser.add_argument("--session", default=None, help="resume a saved session by id")
     parser.add_argument(
         "--mode",

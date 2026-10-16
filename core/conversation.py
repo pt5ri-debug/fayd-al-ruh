@@ -135,9 +135,10 @@ class Conversation:
         """Add reference material (an attached file's text) to the conversation.
 
         A context turn is the full text of a document the user attached, so every
-        mouth -- the grounded assistant, the trained model, and Ultron -- sees it
-        in the same conversation instead of only the retrieval store. It carries
-        no role of its own in a chat transcript, so callers render it separately.
+        mouth -- the grounded assistant, the trained model, Ultron, and Vision --
+        sees it in the same conversation instead of only the retrieval store. It
+        carries no role of its own in a chat transcript, so callers render it
+        separately.
         """
         return self.add(Role.CONTEXT, text)
 
@@ -192,8 +193,9 @@ class Conversation:
 
         Reference material (:attr:`render_context`) is deliberately left out: it is
         delivered on its own -- by retrieval for the grounded assistant, and by
-        :func:`ai.ultron_mouth._context_prompt` for Ultron -- so including it here
-        would send the same file twice and crowd out the passages that cite it.
+        :func:`ai.ultron_mouth._context_prompt` / :func:`ai.vision_mouth._context_prompt`
+        for Ultron and Vision -- so including it here would send the same file twice
+        and crowd out the passages that cite it.
         """
         lines: list[str] = []
         for message in self._messages:
