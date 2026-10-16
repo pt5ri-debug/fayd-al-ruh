@@ -22,13 +22,14 @@ from __future__ import annotations
 import contextlib
 import io
 import queue
+import re
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import tkinter as tk
 from tkinter import filedialog
@@ -228,6 +229,74 @@ def save_theme_name(name: str) -> None:
         pass
 
 
+_VOICE_KEY = "reading_voice"
+_SPEAK_KEY = "auto_speak"
+
+
+def load_reading_voice() -> str:
+    """The saved reading-voice key, defaulting to the catalog default."""
+    from storage.json_store import JsonStore
+    from core.voices import VOICE_CATALOG, DEFAULT_VOICE_KEY
+
+    valid = {voice.key for voice in VOICE_CATALOG}
+    try:
+        saved = JsonStore(data_dir()).load(_THEME_NAMESPACE, _VOICE_KEY)
+    except Exception:
+        return DEFAULT_VOICE_KEY
+    key = saved.get("voice") if isinstance(saved, dict) else None
+    return key if key in valid else DEFAULT_VOICE_KEY
+
+
+def save_reading_voice(key: str) -> None:
+    """Persist the chosen reading voice; a store error is silently ignored."""
+    from storage.json_store import JsonStore
+
+    try:
+        JsonStore(data_dir()).save(_THEME_NAMESPACE, _VOICE_KEY, {"voice": key})
+    except Exception:
+        pass
+
+
+def load_auto_speak() -> bool:
+    """Whether new assistant answers should be read aloud automatically."""
+    from storage.json_store import JsonStore
+
+    try:
+        saved = JsonStore(data_dir()).load(_THEME_NAMESPACE, _SPEAK_KEY)
+    except Exception:
+        return False
+    enabled = saved.get("enabled") if isinstance(saved, dict) else None
+    return enabled if isinstance(enabled, bool) else False
+
+
+def save_auto_speak(enabled: bool) -> None:
+    """Persist the auto-speak choice; a store error is silently ignored."""
+    from storage.json_store import JsonStore
+
+    try:
+        JsonStore(data_dir()).save(_THEME_NAMESPACE, _SPEAK_KEY, {"enabled": bool(enabled)})
+    except Exception:
+        pass
+
+
+def _strip_markdown(text: str) -> str:
+    """Turn rendered Markdown back into plain prose, so a reader speaks words.
+
+    A speech engine should not read ``**``, backticks, or a list bullet aloud, so
+    the markers are removed while the words and the code are kept.
+    """
+    text = re.sub(r"```[^\n]*\n?", "", text)          # fenced code markers
+    text = re.sub(r"`([^`]*)`", r"\1", text)          # inline code
+    text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.MULTILINE)  # headings
+    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)       # bullets
+    text = re.sub(r"^\s*\d+[.)]\s+", "", text, flags=re.MULTILINE)     # ordered lists
+    text = re.sub(r"^\s*>\s?", "", text, flags=re.MULTILINE)           # block quotes
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)               # links -> label
+    text = re.sub(r"(\*\*|__|\*|_|~~)", "", text)                      # emphasis
+    text = re.sub(r"^\s*[-*_]{3,}\s*$", "", text, flags=re.MULTILINE)  # rules
+    return text
+
+
 class RoundedBox(tk.Canvas):
     """A canvas that paints a rounded-rectangle surface, then holds real widgets.
 
@@ -424,6 +493,13 @@ class _Row:
     body: str = ""
 
 
+@dataclass(frozen=True)
+class _SpokenNote:
+    """The transcript line a finished reading produces (rendered as a note)."""
+
+    text: str
+
+
 class FaydGUI:
     """The application window and its wiring to :class:`ChatService`."""
 
@@ -480,6 +556,17 @@ class FaydGUI:
         # in; both toggle later through _toggle_theme.
         name = theme if theme in THEMES else load_theme_name()
         self._theme = THEMES[name]
+
+        # Reading aloud: the saved voice is authoritative, so the window and the
+        # service agree from the first message. Auto-speak is opt-in.
+        self._voice_key = load_reading_voice()
+        try:
+            self.service.set_voice(self._voice_key)
+        except ValueError:
+            self._voice_key = self.service.voice_key()
+        self._auto_speak = tk.BooleanVar(value=load_auto_speak())
+        self._speak_var = tk.StringVar(value=self._voice_key)
+        self._speaking = False
 
         # The transcript is selectable and copyable; Delete clears it, Ctrl+C
         # copies the selection, Ctrl+A selects the whole transcript, and a
@@ -843,6 +930,10 @@ class FaydGUI:
         self._source_var.set(self.service.source)
         for key, label in MOUTH_CHOICES:
             self._radio(panel, label, key).pack(fill="x", padx=14, pady=1)
+
+        self._section_label(panel, "Reading voice (text to speech)", top=8)
+        self._build_voice_picker(panel)
+
         self._sidebar_button(
             panel, "⤓   Save conversation", self._on_save, small=True
         ).pack(fill="x", padx=12, pady=(6, 0))
@@ -865,6 +956,48 @@ class FaydGUI:
             activeforeground=self._theme.foreground, font=(self._font, 10),
             anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
         )
+
+    def _build_voice_picker(self, panel: tk.Misc) -> None:
+        """The reading-voice menu (grouped by category) plus the auto-speak toggle."""
+        from core.voices import voice_categories, voices_for
+
+        note = self.service.reading_status()
+        tk.Label(
+            panel, text=note, bg=self._theme.surface, fg=self._theme.text_dim,
+            font=(self._font, 8), anchor="w", padx=20, pady=2, wraplength=232, justify="left",
+        ).pack(fill="x")
+
+        for category, label_en, _label_ar in voice_categories():
+            tk.Label(
+                panel, text=label_en, bg=self._theme.surface, fg=self._theme.text_secondary,
+                font=(self._font, 8), anchor="w", padx=22,
+            ).pack(fill="x", pady=(4, 0))
+            for voice in voices_for(category):
+                tk.Radiobutton(
+                    panel, text=f"{voice.label_en}  ·  {voice.label_ar}",
+                    value=voice.key, variable=self._speak_var,
+                    command=partial(self._on_voice_change, voice.key),
+                    bg=self._theme.surface, fg=self._theme.foreground,
+                    selectcolor=self._theme.surface, activebackground=self._theme.surface,
+                    activeforeground=self._theme.foreground, font=(self._font, 9),
+                    anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
+                ).pack(fill="x", padx=22, pady=0)
+
+        tk.Checkbutton(
+            panel, text="Read new answers aloud automatically", variable=self._auto_speak,
+            command=self._on_auto_speak_toggle, bg=self._theme.surface, fg=self._theme.foreground,
+            selectcolor=self._theme.surface, activebackground=self._theme.surface,
+            activeforeground=self._theme.foreground, font=(self._font, 9),
+            anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
+        ).pack(fill="x", padx=16, pady=(6, 0))
+        self._sidebar_button(
+            panel, "▷   Test the reading voice", self._test_voice, small=True
+        ).pack(fill="x", padx=12, pady=(4, 0))
+
+    def _test_voice(self) -> None:
+        """Speak a short sample so the user can hear the chosen voice."""
+        sample = "مرحبا، هذه قراءة تجريبية بصوت فيض الروح."
+        self._speak_text(sample)
 
     # -------------------------------------------------------------------- main
 
@@ -1120,6 +1253,7 @@ class FaydGUI:
             retry.bind("<Leave>", lambda _e: retry.configure(fg=self._theme.text_dim))
         else:
             self._copy_label(footer, "⧉ Copy", widget)
+        self._speak_label(footer, body, side="left")
 
         self._rows.append(_Row(role=role, widget=widget, row=row, text=text, body=body))
         self._scroll_to_bottom()
@@ -1134,6 +1268,81 @@ class FaydGUI:
         copy.bind("<Button-1>", lambda _e: self._copy_widget(widget))
         copy.bind("<Enter>", lambda _e: copy.configure(fg=self._theme.foreground))
         copy.bind("<Leave>", lambda _e: copy.configure(fg=self._theme.text_dim))
+
+    # ------------------------------------------------------------- reading
+
+    def _speak_label(
+        self, footer: tk.Frame, text: str, *, side: Literal["left", "right", "top", "bottom"] = "left"
+    ) -> None:
+        """Add a "Read aloud" control that speaks this message with the chosen voice."""
+        if not text.strip():
+            return
+        label = tk.Label(
+            footer, text="🔊 Read aloud", bg=self._theme.base, fg=self._theme.text_dim,
+            font=(self._font, 8), cursor="hand2",
+        )
+        label.pack(side=side, padx=(10, 0))
+        label.bind("<Button-1>", lambda _e: self._speak_text(text))
+        label.bind("<Enter>", lambda _e: label.configure(fg=self._theme.foreground))
+        label.bind("<Leave>", lambda _e: label.configure(fg=self._theme.text_dim))
+
+    def _speak_text(self, text: str) -> None:
+        """Read ``text`` aloud in the background, reporting honestly if it cannot."""
+        clean = _strip_markdown(text).strip()
+        if not clean:
+            return
+        if not self.service.reading_available():
+            self._add_bubble(
+                "note",
+                "No speech engine is installed, so I cannot speak. Install espeak-ng "
+                "(or espeak) and try again.",
+            )
+            return
+        if self._speaking:
+            return
+        self._speaking = True
+        self._status.configure(text="Speaking…")
+        self._start_work(lambda: self._speak_worker(clean))
+
+    def _speak_worker(self, text: str):
+        """Render and play the clip, returning an honest note for the transcript."""
+        clip = self.service.read_aloud(text)
+        if clip.is_silent:
+            note = "The speech engine produced no audio (it may be missing the voice or language data)."
+        else:
+            note = f"🔊 Spoke {clip.duration_seconds:.1f} s with the {self._voice_label()} voice."
+        return _SpokenNote(note)
+
+    def _voice_label(self) -> str:
+        from core.voices import find_voice
+
+        try:
+            voice = find_voice(self._voice_key)
+        except ValueError:
+            return self._voice_key
+        return f"{voice.category_label()} “{voice.label()}”"
+
+    def _on_voice_change(self, key: str) -> None:
+        """Apply the chosen reading voice, persist it, and say which one is active."""
+        try:
+            voice = self.service.set_voice(key)
+        except ValueError as error:
+            self._add_bubble("note", f"Could not use that voice: {error}")
+            return
+        self._voice_key = voice.key
+        self._speak_var.set(voice.key)
+        save_reading_voice(voice.key)
+        self._add_bubble("note", f"Reading voice set to {voice.category_label()} “{voice.label()}”.")
+
+    def _on_auto_speak_toggle(self) -> None:
+        """Persist the auto-speak choice and confirm it."""
+        enabled = bool(self._auto_speak.get())
+        save_auto_speak(enabled)
+        self._add_bubble(
+            "note",
+            "Auto-speak is on: new answers will be read aloud." if enabled
+            else "Auto-speak is off.",
+        )
 
     def _insert_rich(self, widget: tk.Text, text: str) -> None:
         """Insert Markdown-styled text into a Text widget, tags included.
@@ -2054,6 +2263,7 @@ class FaydGUI:
             self._drain_lines(cap=None)
             self._flush_progress(force=True)
             self._hide_thinking()
+            self._speaking = False
             if kind == "ok":
                 self._render_result(payload)
             else:
@@ -2077,6 +2287,8 @@ class FaydGUI:
     def _render_result(self, payload: Any) -> None:
         if isinstance(payload, optional_deps.InstallResult):
             self._render_install_result(payload)
+        elif isinstance(payload, _SpokenNote):
+            self._add_bubble("note", payload.text)
         elif isinstance(payload, ChatReply):
             if payload.steps:
                 self._add_bubble("assistant", self._render_steps(payload))
@@ -2084,6 +2296,8 @@ class FaydGUI:
                 self._add_bubble("assistant", payload.text)
             if payload.hint:
                 self._add_bubble("note", payload.hint)
+            if self._auto_speak.get() and payload.text.strip():
+                self._speak_text(payload.text)
         else:
             self._add_bubble("assistant", str(payload))
         self._entry.focus_set()

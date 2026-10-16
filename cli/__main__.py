@@ -4,6 +4,8 @@ Usage:
     python -m cli                     # interactive numbered menu
     python -m cli gui                 # open the ChatGPT-style graphical interface
     python -m cli voice "your question" # one voice turn
+    python -m cli speak "text" --voice man-1  # read text aloud with a chosen voice
+    python -m cli voices              # list the reading voices (men/women/boys/girls)
     python -m cli agent               # tool-agent demo in the safety sandbox
     python -m cli jarvis              # Jarvis mode: listen, understand, act, speak
     python -m cli ultron              # Ultron: a general, advanced local model (any subject)
@@ -85,6 +87,7 @@ from cli.menu import (
     run_petroleum,
     run_release,
     run_selfcheck,
+    run_speak,
     run_update,
     run_ultron,
     run_ultron_chat,
@@ -94,6 +97,8 @@ from cli.menu import (
 
 _COMMANDS = {
     "voice": run_voice,
+    "speak": run_speak,
+    "voices": run_speak,
     "agent": run_agent,
     "jarvis": run_jarvis,
     "ultron": run_ultron,

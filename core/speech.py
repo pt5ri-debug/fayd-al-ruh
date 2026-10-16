@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from core.model_interface import CognitiveModel, ModelRequest
+from core.voices import Voice, default_voice, detect_language, find_voice
 
 SAMPLE_RATE = 16_000
 
@@ -126,10 +127,12 @@ class SilentSynthesizer:
         return AudioClip.silence(seconds)
 
 
-# System TTS engines tried in order: (name, executable, argv builder). Each
-# builder returns the argv that renders ``text`` to the WAV file ``path``. These
-# are ordinary programs already present on many desktops, so no pip package and
-# no network access is needed; when none exists the silent synthesizer is used.
+# System TTS engines tried in order: (name, executable, argv builder, voice-option
+# builder). Each argv builder returns the argv that renders ``text`` to the WAV
+# file ``path``; the voice-option builder returns the extra engine flags for a
+# chosen :class:`~core.voices.Voice` (empty when the engine has no such control).
+# These are ordinary programs already present on many desktops, so no pip package
+# and no network access is needed; when none exists the silent synthesizer is used.
 def _espeak_argv(executable: str, text: str, path: Path) -> list[str]:
     return [executable, "-w", str(path), text]
 
@@ -143,17 +146,36 @@ def _say_argv(executable: str, text: str, path: Path) -> list[str]:
     return [executable, "-o", str(path), text]
 
 
-TTS_ENGINES: tuple[tuple[str, str, "object"], ...] = (
-    ("espeak-ng", "espeak-ng", _espeak_argv),
-    ("espeak", "espeak", _espeak_argv),
-    ("flite", "flite", _flite_argv),
-    ("say", "say", _say_argv),
+def _espeak_voice_options(voice: Voice | None, language: str) -> tuple[str, ...]:
+    """The ``espeak-ng`` flags that select a catalog voice (gender variant, pitch, speed)."""
+    if voice is None:
+        return ()
+    return voice.espeak_options(language)
+
+
+def _say_voice_options(voice: Voice | None, language: str) -> tuple[str, ...]:
+    """``say`` has no gender variant, so only the speaking rate carries over."""
+    if voice is None:
+        return ()
+    return ("-r", str(voice.speed))
+
+
+def _flite_voice_options(_voice: Voice | None, _language: str) -> tuple[str, ...]:
+    """``flite`` exposes no voice controls here, so a chosen voice is engine-default."""
+    return ()
+
+
+TTS_ENGINES: tuple[tuple[str, str, "object", "object"], ...] = (
+    ("espeak-ng", "espeak-ng", _espeak_argv, _espeak_voice_options),
+    ("espeak", "espeak", _espeak_argv, _espeak_voice_options),
+    ("flite", "flite", _flite_argv, _flite_voice_options),
+    ("say", "say", _say_argv, _say_voice_options),
 )
 
 
 def discover_synthesizer_name() -> str:
     """Return the first system TTS engine available, or ``'silent'``."""
-    for name, executable, _builder in TTS_ENGINES:
+    for name, executable, _builder, _voice_options in TTS_ENGINES:
         if shutil.which(executable):
             return name
     return "silent"
@@ -166,12 +188,35 @@ class CommandSynthesizer:
     temporary WAV, read it back as an :class:`AudioClip`, and never require a pip
     dependency. If the engine fails for any reason, synthesis falls back to a
     silent clip so a voice turn can still complete.
+
+    ``voice`` is an optional :class:`~core.voices.Voice` from the catalog; its
+    engine flags are inserted after the executable. ``language`` pins the spoken
+    language, and when it is ``None`` the language is taken from the text (Arabic
+    script -> ``ar``, otherwise ``en``), so one voice reads both.
     """
 
-    def __init__(self, name: str, executable: str, builder) -> None:
+    def __init__(
+        self,
+        name: str,
+        executable: str,
+        builder,
+        *,
+        voice: Voice | None = None,
+        language: str | None = None,
+        voice_options=None,
+    ) -> None:
         self.name = name
         self.executable = executable
         self._builder = builder
+        self.voice = voice
+        self.language = language
+        self._voice_options = voice_options
+
+    def _options_for(self, text: str) -> tuple[str, ...]:
+        if self.voice is None or self._voice_options is None:
+            return ()
+        language = self.language or detect_language(text)
+        return tuple(self._voice_options(self.voice, language))
 
     def synthesize(self, text: str) -> AudioClip:
         if not text.strip():
@@ -179,6 +224,11 @@ class CommandSynthesizer:
         with tempfile.TemporaryDirectory(prefix="fayd-tts-") as folder:
             target = Path(folder) / "speech.wav"
             argv = self._builder(self.executable, text, target)
+            options = self._options_for(text)
+            if options:
+                # Options sit between the executable and its own arguments, which
+                # every engine here accepts.
+                argv = [argv[0], *options, *argv[1:]]
             try:
                 completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
                     argv,
@@ -293,20 +343,35 @@ def load_recognizer(name: str = "transcript", **options) -> SpeechRecognizer:
 
 
 def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
-    """Load a named TTS engine.
+    """Load a named TTS engine, optionally with a chosen catalog voice.
 
     ``name='auto'`` picks the first installed system engine (``espeak``,
     ``say``, ...), else the silent synthesizer. An explicitly named engine that
     is unavailable raises, so the caller never mistakes silence for speech.
+
+    ``voice`` selects a :class:`~core.voices.Voice` from the catalog, by key or
+    object; ``language`` pins the spoken language (``None`` lets the engine's text
+    decide, so Arabic is read as Arabic). A voice can only be *applied* by an
+    engine that supports one -- the silent synthesizer ignores it, and its
+    ``name`` stays ``'silent'`` so a caller can tell it apart from real speech.
     """
     if name == "auto":
         name = discover_synthesizer_name()
     if name == "silent":
         return SilentSynthesizer()
-    for engine_name, executable, builder in TTS_ENGINES:
+    voice = _resolve_voice(options.get("voice"))
+    language = options.get("language")
+    for engine_name, executable, builder, voice_options in TTS_ENGINES:
         if name == engine_name:
             if shutil.which(executable):
-                return CommandSynthesizer(engine_name, executable, builder)
+                return CommandSynthesizer(
+                    engine_name,
+                    executable,
+                    builder,
+                    voice=voice,
+                    language=language,
+                    voice_options=voice_options,
+                )
             raise ValueError(
                 f"TTS engine {name!r} is not installed. Use --tts auto or --tts silent."
             )
@@ -314,6 +379,20 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
         f"TTS engine {name!r} is not available in this build. "
         "Install a speech backend or use the silent synthesizer."
     )
+
+
+def _resolve_voice(value) -> Voice | None:
+    """Coerce a voice key or object into a :class:`~core.voices.Voice`.
+
+    ``None`` returns the default catalog voice so a plain ``--tts espeak-ng``
+    still speaks with a real, named timbre; an unknown key raises, so a typo is
+    reported rather than silently replaced.
+    """
+    if value is None:
+        return default_voice()
+    if isinstance(value, Voice):
+        return value
+    return find_voice(str(value))
 
 
 class MicrophoneRecorder:
@@ -480,6 +559,7 @@ __all__ = [
     "Speaker",
     "SpeechRecognizer",
     "SpeechSynthesizer",
+    "TTS_ENGINES",
     "TranscriptRecognizer",
     "VoiceAssistant",
     "VoiceTurn",

@@ -22,6 +22,8 @@ from ai.jarvis import build_session
 from core.command_router import RouteKind, RoutedCommand
 from core.jarvis import JarvisMode, JarvisTurn
 from core.paths import data_dir
+from core.reading import TextReader
+from core.voices import Voice, voice_keys
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
 from gui.import_center import ImportReport, KnowledgeImporter
 from gui.image_edit import ImageEditService
@@ -122,6 +124,8 @@ class ChatService:
         data_root: Path | None = None,
         import_store_dir: str | Path | None = None,
         image_store_dir: str | Path | None = None,
+        voice: str | None = None,
+        tts_engine: str = "auto",
     ) -> None:
         self.mode = mode or build_session(
             root=root,
@@ -182,6 +186,10 @@ class ChatService:
         # storage folder and needs no model: the default editor is a deterministic
         # keyword interpreter (see core/imageedit.py).
         self._image_edit = ImageEditService(root=image_store_dir)
+        # The text-to-speech reader: it reads the chat's own text aloud with a
+        # chosen catalog voice (core/voices.py). It is always available; when no
+        # speech engine is installed it reports honestly instead of pretending.
+        self._reader = TextReader(engine=tts_engine, voice=voice)
 
     # ------------------------------------------------------------ operating mode
 
@@ -499,6 +507,45 @@ class ChatService:
     def image_edit(self) -> ImageEditService:
         """The optional image-editing engine (default: the keyword interpreter)."""
         return self._image_edit
+
+    # --------------------------------------------------------------- reading
+
+    @property
+    def reader(self) -> TextReader:
+        """The text-to-speech reader that reads chat text aloud."""
+        return self._reader
+
+    def read_aloud(self, text: str):
+        """Read ``text`` aloud with the chosen voice and return the audio clip.
+
+        The clip is always rendered; playback is best-effort, so a machine with no
+        audio player still gets the audio (and can save it) rather than an error.
+        """
+        return self._reader.speak(text)
+
+    def save_speech(self, text: str, path: str | Path) -> Path:
+        """Render ``text`` to a WAV file with the chosen voice and return the path."""
+        return self._reader.save(text, path)
+
+    def voice_key(self) -> str:
+        """The key of the voice currently used to read."""
+        return self._reader.voice.key
+
+    def set_voice(self, key: str) -> Voice:
+        """Choose a reading voice by key; raises for an unknown key."""
+        return self._reader.set_voice(key)
+
+    def voice_keys(self) -> tuple[str, ...]:
+        """Every selectable voice key, in catalog order."""
+        return voice_keys()
+
+    def reading_status(self) -> str:
+        """An honest, human-readable status of the reader."""
+        return self._reader.describe()
+
+    def reading_available(self) -> bool:
+        """True when a real speech engine is installed."""
+        return self._reader.available()
 
     def _retriever(self):
         """The grounded assistant's retriever, when one is wired in.

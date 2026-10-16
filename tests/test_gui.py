@@ -311,18 +311,42 @@ def test_actions_cover_the_mirrored_menu_items() -> None:
         assert key in keys, f"missing action {key!r}"
 
 
-def test_action_labels_match_cli_menu_items_six_to_twelve() -> None:
-    """Every numbered CLI item from 6 to 12 appears once, with the same label.
+#: The visible CLI menu entries the window provides through its own controls
+#: (the window itself, the reading-voice picker, Jarvis, Ultron, and the two
+#: text-chat mouths). The sidebar mirrors a later block instead of repeating them.
+_WINDOW_OWNED_MENU_LABELS = frozenset(
+    {
+        "Open the graphical interface (ChatGPT-style)",
+        "Read text aloud: choose a voice (men, women, boys, girls)",
+        "Jarvis mode (listen, act, speak)",
+        "Ultron (general local model, any subject)",
+        "Chat with the AI (text, like Jarvis without voice)",
+        "Chat with the AI (trained model, no sources)",
+    }
+)
 
-    The window owns the first five menu entries (GUI, Jarvis, Ultron, text chat,
-    and the trained-model chat), so the sidebar mirrors the next block instead.
+#: The visible CLI entries the sidebar mirrors, in order (the first one after the
+#: window-owned controls through the Code Studio screen).
+_MIRRORED_MENU_START = 6
+_MIRRORED_MENU_STOP = 13
+
+
+def test_action_labels_match_the_mirrored_cli_menu_block() -> None:
+    """The sidebar mirrors the CLI menu block the window has no control for.
+
+    The window owns its own controls for the GUI, the reading voice, Jarvis,
+    Ultron, and the two text-chat mouths, so it mirrors the next block instead.
+    Each mirrored entry appears once, with the CLI's own label, and no
+    window-owned label leaks into the sidebar.
     """
     from cli.menu import visible_menu
 
-    cli_items = visible_menu()[5:12]  # 1-based items 6..12
+    mirrored = visible_menu()[_MIRRORED_MENU_START:_MIRRORED_MENU_STOP]
     gui_labels = [action.label for action in gui_actions.ACTIONS]
-    for title, _command, _argv in cli_items:
+    for title, _command, _argv in mirrored:
         assert gui_labels.count(title) == 1, f"{title!r} must appear exactly once"
+    for title in _WINDOW_OWNED_MENU_LABELS:
+        assert title not in gui_labels, f"{title!r} is a window control, not a sidebar action"
 
 
 def test_actions_never_duplicate_a_gui_control() -> None:
@@ -945,3 +969,105 @@ def test_window_bubbles_size_to_their_text() -> None:
         assert tall.winfo_width() <= app._available_column()
     finally:
         root.destroy()
+
+
+# --- reading aloud (text to speech) ---------------------------------------
+
+
+class _FakeVoiceEngine:
+    """A synthesizer that claims a real engine and returns non-silent audio."""
+
+    name = "fake-engine"
+
+    def synthesize(self, text):
+        from core.speech import AudioClip
+
+        return AudioClip(tuple([1000, -1000] * 400), sample_rate=16_000)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_reads_a_message_aloud_and_picks_a_voice() -> None:
+    """The reading controls: a per-message button, a voice picker, honest notes."""
+    import time
+    import tkinter as tk
+
+    from core.voices import VOICE_CATALOG
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        # A fake real engine, so the test never depends on a system voice.
+        app.service.reader._synthesizer = _FakeVoiceEngine()
+        root.update()
+
+        # The settings panel exposes one radio per catalog voice, grouped.
+        app._toggle_settings()
+        root.update()
+
+        def walk(widget, out):
+            for child in widget.winfo_children():
+                out.append(child)
+                walk(child, out)
+
+        widgets: list = []
+        walk(app._settings_panel, widgets)
+        keys = {voice.key for voice in VOICE_CATALOG}
+        radios = [
+            w for w in widgets
+            if isinstance(w, tk.Radiobutton) and w.cget("value") in keys
+        ]
+        assert len(radios) == len(VOICE_CATALOG)
+
+        # Choosing a voice applies it to the service and persists the key.
+        app._on_voice_change("girl-3")
+        assert app._voice_key == "girl-3"
+        assert app.service.voice_key() == "girl-3"
+
+        # The auto-speak toggle persists too.
+        app._auto_speak.set(True)
+        app._on_auto_speak_toggle()
+        assert app._auto_speak.get() is True
+
+        # Reading a message speaks it and reports the duration honestly.
+        app._speak_text("porosity is the fraction of pore space")
+        for _ in range(80):
+            root.update()
+            if not app._busy:
+                break
+            time.sleep(0.02)
+        root.update()
+        notes = [entry.text for entry in app._rows if entry.role == "note"]
+        assert any("spoke" in note.lower() for note in notes)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_speaks_honestly_when_no_engine_is_installed() -> None:
+    import tkinter as tk
+
+    from core.speech import SilentSynthesizer
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        app.service.reader._synthesizer = SilentSynthesizer()
+        root.update()
+        app._speak_text("hello there")
+        root.update()
+        notes = [entry.text for entry in app._rows if entry.role == "note"]
+        assert any("install espeak" in note.lower() for note in notes)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_markdown_is_stripped_before_reading() -> None:
+    from gui.app import _strip_markdown
+
+    spoken = _strip_markdown("# Title\n\n**bold** and `code`\n\n- item one\n- item two")
+    assert "#" not in spoken and "**" not in spoken and "`" not in spoken
+    assert "bold" in spoken and "code" in spoken and "item one" in spoken
+
