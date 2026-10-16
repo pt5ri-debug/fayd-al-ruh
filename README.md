@@ -530,10 +530,27 @@ can be plugged in later without touching the core. Use `--tts auto` / `--asr aut
 to pick the best installed engine, or name one explicitly (`--tts espeak`); an
 explicitly named engine that is missing raises rather than faking audio.
 
+The TTS engine itself is an ordinary *system* program, not a Python package, so
+`pip` cannot install it — exactly like Tesseract for OCR. On a machine with no
+engine the window's **Read aloud** control and the CLI report that honestly and
+offer the next step. Install it with the platform package manager:
+
+```bash
+sudo apt install espeak-ng     # Debian/Ubuntu (also the name on Fedora/Arch/Alpine)
+```
+
+The project can also run that for you: `python -m cli speak --install-engine`
+runs the platform's package manager (through `sudo`), and `python -m cli deps`
+reports the speech engine beside the other optional features. macOS already has
+`say`; the project also accepts `espeak`, `flite`, and `say`.
+
 ```bash
 python -m cli voice "What is the relationship between porosity and permeability?"  # a voice turn
 python -m ai.voice --write-wav out.wav "permeability"                              # and write a WAV
 python -m ai.voice --tts auto "permeability"                                       # speak with a real engine
+python -m ai.speak list                                                            # the reading-voice catalog
+python -m ai.speak "Hello there" --voice girl-2 --write-wav out.wav                # read aloud in a chosen voice
+python -m ai.speak --install-engine                                                # install a real speech engine
 ```
 
 ## Tools and agents

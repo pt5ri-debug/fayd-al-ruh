@@ -268,7 +268,105 @@ def test_speak_module_reports_a_missing_engine(monkeypatch, capsys):
     monkeypatch.setattr(TextReader, "available", lambda self: False)
     code = speak.main(["hello", "--voice", "man-1"])
     assert code == 2
-    assert "install espeak-ng" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "No speech engine is installed" in out
+    assert "espeak-ng" in out
+
+
+def test_speak_module_can_install_the_engine(monkeypatch, capsys):
+    from ai import speak
+    from core import speech
+
+    calls = []
+
+    def fake_install(*, runner=None):
+        calls.append(runner)
+        return speech.SpeechInstallResult(ok=True, message="Installed a speech engine.")
+
+    monkeypatch.setattr(speak, "speech_available", lambda: False)
+    monkeypatch.setattr(speak, "install_speech_engine", fake_install)
+    assert speak.main(["--install-engine"]) == 0
+    assert calls == [None]
+    assert "Installed a speech engine" in capsys.readouterr().out
+
+
+# ------------------------------------------------------- installing the engine
+
+
+def test_speech_install_plan_knows_a_linux_package_manager(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(speech.shutil, "which", lambda name: "/usr/bin/apt-get" if name == "apt-get" else None)
+    plan = speech.speech_install_plan()
+    assert plan.can_install
+    assert plan.command[:3] == ("sudo", "apt-get", "install")
+    assert plan.command[-1] == "espeak-ng"
+
+
+def test_speech_install_plan_is_honest_when_it_cannot_install(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(speech.shutil, "which", lambda name: None)
+    plan = speech.speech_install_plan()
+    assert not plan.can_install
+    assert "espeak-ng" in plan.hint
+
+
+def test_install_speech_engine_runs_the_plan_with_an_injected_runner(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(speech.shutil, "which", lambda name: "/usr/bin/apt-get" if name == "apt-get" else None)
+    state = {"installed": False}
+    monkeypatch.setattr(speech, "speech_available", lambda: state["installed"])
+    seen = []
+
+    def runner(argv):
+        seen.append(tuple(argv))
+        state["installed"] = True  # the package manager succeeded
+        return 0, "ok"
+
+    result = speech.install_speech_engine(runner=runner)
+    assert seen == [("sudo", "apt-get", "install", "-y", "espeak-ng")]
+    assert result.ok is True
+
+
+def test_install_speech_engine_reports_a_failed_command(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(speech.shutil, "which", lambda name: "/usr/bin/apt-get" if name == "apt-get" else None)
+    monkeypatch.setattr(speech, "speech_available", lambda: False)
+    monkeypatch.setattr(speech, "discover_synthesizer_name", lambda: "silent")
+    result = speech.install_speech_engine(runner=lambda argv: (100, "no permission"))
+    assert result.ok is False
+    assert result.returncode == 100
+    assert "failed" in result.message.lower()
+
+
+def test_reader_refresh_rediscovers_a_newly_installed_engine(monkeypatch):
+    from core import reading
+    from core.reading import TextReader
+
+    class _FakeSynth:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def synthesize(self, text: str):  # pragma: no cover - not called here
+            raise NotImplementedError
+
+    state = {"name": "silent"}
+    monkeypatch.setattr(reading, "load_synthesizer", lambda *a, **k: _FakeSynth(state["name"]))
+
+    # A reader built while no engine existed reports silent...
+    reader = TextReader()
+    assert reader.available() is False
+    # ...and a refresh (after the user installs one) finds the real engine.
+    state["name"] = "espeak-ng"
+    reader.refresh()
+    assert reader.available() is True
 
 
 def test_cli_exposes_the_speak_and_voices_commands():

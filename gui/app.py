@@ -38,6 +38,7 @@ from tkinter import simpledialog
 
 from ai import chat as chat_module
 from core import optional_deps
+from core import speech
 from core.paths import data_dir
 from core.ultron import UltronUnavailable
 from core.version import __version__
@@ -993,6 +994,28 @@ class FaydGUI:
         self._sidebar_button(
             panel, "▷   Test the reading voice", self._test_voice, small=True
         ).pack(fill="x", padx=12, pady=(4, 0))
+        if not self.service.reading_available():
+            self._sidebar_button(
+                panel, "⤓   Install a speech engine (espeak-ng)…", self._on_install_speech,
+                small=True,
+            ).pack(fill="x", padx=12, pady=(2, 0))
+
+    def _on_install_speech(self) -> None:
+        """Install a real speech engine (a system package), on the worker thread."""
+        from core.speech import speech_install_plan
+
+        plan = speech_install_plan()
+        if plan.can_install:
+            self._add_bubble("note", f"Installing a speech engine: {' '.join(plan.command)}")
+        else:
+            self._add_bubble("note", plan.hint)
+        self._start_work(self._install_speech_worker)
+
+    def _install_speech_worker(self):
+        """Run the install and return the result for :meth:`_render_result`."""
+        from core.speech import install_speech_engine
+
+        return install_speech_engine()
 
     def _test_voice(self) -> None:
         """Speak a short sample so the user can hear the chosen voice."""
@@ -1294,8 +1317,9 @@ class FaydGUI:
         if not self.service.reading_available():
             self._add_bubble(
                 "note",
-                "No speech engine is installed, so I cannot speak. Install espeak-ng "
-                "(or espeak) and try again.",
+                "No speech engine is installed, so I cannot speak. Use "
+                "“Install a speech engine (espeak-ng)…” in the settings panel, or run "
+                "`python -m cli speak --install-engine`.",
             )
             return
         if self._speaking:
@@ -2071,6 +2095,13 @@ class FaydGUI:
                 "You can now attach a scanned PDF with “Attach a scanned PDF (OCR)…”.",
             )
 
+    def _render_speech_install(self, result: "speech.SpeechInstallResult") -> None:
+        """Show the outcome of installing a speech engine (a system package)."""
+        self._add_bubble("note", result.message)
+        if result.ok:
+            self.service.refresh_reading()
+            self._add_bubble("note", "You can now use “Read aloud” with the chosen voice.")
+
     def _on_attach(self, path: str, *, ocr: bool = False) -> AttachmentNotice:
         notice = self.service.attach_file(path, ocr=ocr)
         if not notice.ok:
@@ -2287,6 +2318,8 @@ class FaydGUI:
     def _render_result(self, payload: Any) -> None:
         if isinstance(payload, optional_deps.InstallResult):
             self._render_install_result(payload)
+        elif isinstance(payload, speech.SpeechInstallResult):
+            self._render_speech_install(payload)
         elif isinstance(payload, _SpokenNote):
             self._add_bubble("note", payload.text)
         elif isinstance(payload, ChatReply):
