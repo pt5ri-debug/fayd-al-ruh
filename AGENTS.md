@@ -224,6 +224,26 @@ Arabic is kept as secondary aliases where useful.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. CLI:
   `python -m ai.voice` / `python -m cli voice`.
+- `core/voices.py` — the text-to-speech **voice catalog**: 16 `Voice`s in four
+  categories (`man`/`woman`/`boy`/`girl`, four each), each naming a timbre
+  (engine `variant` `m1`..`m6` / `f1`..`f4`), a pitch, and a speed.
+  `CATEGORY_LABELS`/`voice_categories`, `voices_for`, `voice_keys`, `find_voice`
+  (raises on an unknown key), `default_voice`/`DEFAULT_VOICE_KEY`, `voice_summaries`,
+  and `detect_language` (Arabic script → `ar`, else `en`) so one voice reads both
+  languages. Honest by construction: a `Voice` is *settings*, not a recording, and
+  `description` says so — `espeak-ng` has no true child voice, so `boy`/`girl` are
+  a raised pitch on a male/female variant and say that plainly.
+  `core/speech.py`'s `CommandSynthesizer`/`load_synthesizer` take that voice and
+  insert its engine flags after the executable (`_espeak_voice_options`; `say`
+  carries only the rate; `flite` has none), and `load_synthesizer("auto")` still
+  falls to `silent` when nothing is installed.
+- `core/reading.py` — `TextReader`: read the chat's text aloud. Ties a catalog
+  `Voice`, a `SpeechSynthesizer`, and a `Speaker` together behind `render`/
+  `speak` (playback is best-effort, so a machine with no player still gets the
+  clip)/`save` (WAV), `set_voice`, `available`, and an honest `describe()` that
+  names the voice and says when no engine exists rather than pretending. CLI:
+  `python -m ai.speak [list] "<text>" --voice <key> [--write-wav f] [--no-play]`
+  / `python -m cli speak` and `python -m cli voices`.
 - `core/jarvis.py` — the unified Jarvis loop over the assistant, the tool router,
   and speech; it keeps one `Conversation` per run (persisted through the memory's
   `JsonStore` when one is configured) and a mute state.
@@ -601,6 +621,18 @@ Arabic is kept as secondary aliases where useful.
   one widget update every ~0.15 s, fully drained before the result), so a fast
   training loop never freezes the window. The composer's **＋** menu also opens
   the **Code Studio** (below).
+  The window also **reads text aloud**: every message footer carries a
+  "🔊 Read aloud" control (`_speak_label`/`_speak_text`), and the Settings panel
+  holds the reading-voice menu (`_build_voice_picker`) — every catalog voice,
+  grouped under Men/Women/Boys/Girls with its English and Arabic name — plus an
+  opt-in **auto-speak** check and a "Test the reading voice" button. The chosen
+  voice and the auto-speak flag persist through `JsonStore`
+  (`load_reading_voice`/`save_reading_voice`, `load_auto_speak`/`save_auto_speak`,
+  the same `gui`/`appearance` namespace as the theme), the window and the service
+  agree from the first message (`ChatService.set_voice`), and Markdown is stripped
+  (`_strip_markdown`) so the engine speaks words, not `**`/backticks. Reading runs
+  on the worker thread and reports honestly: a missing engine says to install
+  espeak-ng, and a silent render is named as such rather than shown as success.
 - `core/coder_model.py` — the coding-model client, the one place the code model
   is named. `DEFAULT_CODER_MODEL = "qwen2.5-coder:7b"` (a local **Ollama** model),
   `CoderMessage` (a validated chat turn), the `CoderClient` protocol
@@ -873,6 +905,12 @@ clone, each optional so the base system still runs without it:
   the last exchange to the learner, and the retriever is re-indexed so a corrected
   statement changes the very next answer. The `--no-feedback` flag disables it, and
   a session with no learner refuses honestly instead of recording dead feedback.
+- Phase 10 — read the chat aloud (text to speech): `core/voices.py` is a 16-voice
+  catalog (men, women, boys, girls ×4), `core/reading.py`'s `TextReader` speaks any
+  text with a chosen voice through the installed system engine, and the window
+  gains a per-message "Read aloud" control, a grouped voice menu, an opt-in
+  auto-speak flag (all persisted), and `python -m cli speak|voices`. Every voice is
+  honestly described as engine settings, not a recording.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

@@ -1,0 +1,146 @@
+"""Read the chat's text aloud: text-to-speech with a chosen voice.
+
+This is the "make the written words audible" layer. It ties three existing pieces
+together -- a :class:`~core.voices.Voice` from the catalog, a
+:class:`~core.speech.SpeechSynthesizer` (a real system engine when one is
+installed), and a :class:`~core.speech.Speaker` that plays the clip -- behind one
+small, testable object, :class:`TextReader`.
+
+The project's honesty rule applies here too: if no speech engine is installed the
+reader still *runs*, but it says so. :meth:`TextReader.available` is False, the
+synthesizer's name is ``'silent'``, and :meth:`TextReader.describe` explains that
+no real voice can be produced on this machine rather than pretending otherwise.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from core.speech import (
+    AudioClip,
+    SilentSynthesizer,
+    Speaker,
+    SpeechSynthesizer,
+    load_synthesizer,
+)
+from core.voices import Voice, default_voice, find_voice
+
+
+class TextReader:
+    """Reads text aloud through the system speech engine, with a catalog voice.
+
+    ``engine`` is a synthesizer name (``'auto'`` picks the best installed system
+    engine, else the silent stand-in). ``voice`` is a catalog key or
+    :class:`~core.voices.Voice`; ``language`` pins the spoken language and
+    ``None`` lets the engine decide from the text, so Arabic is read as Arabic.
+    """
+
+    def __init__(
+        self,
+        *,
+        engine: str = "auto",
+        voice: str | Voice | None = None,
+        language: str | None = None,
+        speaker: Speaker | None = None,
+        synthesizer: SpeechSynthesizer | None = None,
+    ) -> None:
+        self.engine = engine
+        self.language = language
+        self._speaker = speaker
+        self._voice = _as_voice(voice)
+        self._synthesizer = synthesizer
+        if synthesizer is not None:
+            self._engine = synthesizer.name
+
+    # ------------------------------------------------------------------ voice
+
+    @property
+    def voice(self) -> Voice:
+        """The voice currently used to read."""
+        return self._voice
+
+    def set_voice(self, voice: str | Voice) -> Voice:
+        """Choose a different catalog voice and rebuild the engine for it."""
+        self._voice = _as_voice(voice)
+        self._synthesizer = None  # rebuilt lazily with the new voice
+        return self._voice
+
+    # ------------------------------------------------------------- synthesizer
+
+    @property
+    def synthesizer(self) -> SpeechSynthesizer:
+        """The engine that turns text into audio, built once and cached."""
+        if self._synthesizer is None:
+            self._synthesizer = load_synthesizer(
+                self.engine, voice=self._voice, language=self.language
+            )
+            self._engine = self._synthesizer.name
+        return self._synthesizer
+
+    @property
+    def engine_name(self) -> str:
+        """The resolved engine name (``'silent'`` when nothing real is installed)."""
+        return self.synthesizer.name
+
+    def available(self) -> bool:
+        """True when a real speech engine is installed (so audio is not silent)."""
+        return self.synthesizer.name != SilentSynthesizer.name
+
+    @property
+    def speaker(self) -> Speaker:
+        if self._speaker is None:
+            self._speaker = Speaker()
+        return self._speaker
+
+    def can_play(self) -> bool:
+        """True when the machine can actually play the rendered audio."""
+        return self.speaker.available()
+
+    # -------------------------------------------------------------- reading
+
+    def render(self, text: str) -> AudioClip:
+        """Synthesize ``text`` and return the clip without playing it."""
+        return self.synthesizer.synthesize(text)
+
+    def speak(self, text: str) -> AudioClip:
+        """Read ``text`` aloud and return the clip that was spoken.
+
+        The clip is always rendered. Playback is best-effort: when the machine has
+        no audio player the clip is returned without playing, so the caller can
+        still save it or show its duration rather than failing.
+        """
+        clip = self.render(text)
+        if self.speaker.available():
+            self.speaker.play(clip)
+        return clip
+
+    def save(self, text: str, path: str | Path) -> Path:
+        """Render ``text`` and write it to a WAV file, returning the path."""
+        clip = self.render(text)
+        target = Path(path)
+        clip.write_wav(target)
+        return target
+
+    def describe(self) -> str:
+        """An honest, human-readable status of this reader."""
+        if not self.available():
+            return (
+                "No speech engine is installed, so text is read silently. Install "
+                "espeak-ng (or espeak) to hear a real voice."
+            )
+        played = "played through the speakers" if self.can_play() else "saved but not played (no audio player)"
+        return (
+            f"Reading with the {self._voice.category_label()} voice “{self._voice.label()}” "
+            f"through {self.engine_name}; audio is {played}."
+        )
+
+
+def _as_voice(value: str | Voice | None) -> Voice:
+    if value is None:
+        return default_voice()
+    if isinstance(value, Voice):
+        return value
+    return find_voice(str(value))
+
+
+__all__ = ["TextReader"]

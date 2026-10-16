@@ -102,6 +102,11 @@ def run_voice(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.voice", argv)
 
 
+def run_speak(argv: Sequence[str] = ()) -> int:
+    """Read text aloud with a chosen voice (men, women, boys, girls)."""
+    return _run_module("ai.speak", argv)
+
+
 def run_agent(argv: Sequence[str] = ()) -> int:
     """Run a tool plan inside the safety sandbox."""
     return _run_module("ai.agent_demo", argv)
@@ -335,6 +340,7 @@ def run_curriculum(argv: Sequence[str] = ()) -> int:
 MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Open the graphical interface (ChatGPT-style)", run_gui, ()),
     ("One voice turn", run_voice, ("--write-wav", "voice-turn.wav", "water")),
+    ("Read text aloud: choose a voice (men, women, boys, girls)", run_speak, ("list",)),
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Jarvis mode (listen, act, speak)", run_jarvis, ()),
     ("Ultron (general local model, any subject)", run_ultron, ()),
