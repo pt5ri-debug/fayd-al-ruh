@@ -396,6 +396,59 @@ def test_the_realistic_preset_installs_an_lcm_scheduler():
     assert untouched.scheduler is original
 
 
+def test_text_to_image_loader_disables_the_safety_checker():
+    """The rendered pipeline is built with ``safety_checker=None``.
+
+    The default ``realistic`` preset's model ships a real checker, which blanks a
+    picture it misreads (a stylised prompt is a common false positive) to solid
+    black. Loading it would make the window's preview black, so the loader must
+    disable it -- and must keep doing so across the diffusers ``dtype`` rename.
+    """
+    from core.imagegen_diffusion import _load_pipeline
+
+    calls: list[dict] = []
+
+    class _Pipeline:
+        pass
+
+    class _Auto:
+        @staticmethod
+        def from_pretrained(model_dir, **kwargs):
+            calls.append({"model_dir": model_dir, **kwargs})
+            return _Pipeline()
+
+    class _Diffusers:
+        AutoPipelineForText2Image = _Auto
+
+    class _Torch:
+        float32 = "float32"
+
+    _load_pipeline(_Diffusers, "some/model", _Torch)
+    assert len(calls) == 1
+    assert calls[0]["safety_checker"] is None
+    assert calls[0]["dtype"] == "float32"
+
+    # When the installed diffusers rejects ``dtype`` (the pre-1.0 name), the loader
+    # falls back to ``torch_dtype``, still disabling the checker.
+    calls.clear()
+
+    class _OldAuto:
+        @staticmethod
+        def from_pretrained(model_dir, **kwargs):
+            if "dtype" in kwargs:
+                raise TypeError("unexpected keyword argument 'dtype'")
+            calls.append({"model_dir": model_dir, **kwargs})
+            return _Pipeline()
+
+    class _OldDiffusers:
+        AutoPipelineForText2Image = _OldAuto
+
+    _load_pipeline(_OldDiffusers, "some/model", _Torch)
+    assert len(calls) == 1
+    assert calls[0]["safety_checker"] is None
+    assert calls[0]["torch_dtype"] == "float32"
+
+
 def test_diffusion_is_available_with_an_injected_runner(tmp_path):
     """An injected runner bypasses the extra check, so tests need no torch."""
     from core.imagegen_diffusion import DiffusionImageGenerator
