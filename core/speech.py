@@ -167,6 +167,67 @@ def _flite_voice_options(_voice: Voice | None, _language: str) -> tuple[str, ...
     return ()
 
 
+#: Windows ships its own speech engine (SAPI, reached through ``System.Speech``);
+#: this is the name the project gives it, and the shell that drives it.
+_WINDOWS_SAPI = "windows-sapi"
+_WINDOWS_SHELL = "powershell"
+
+
+def _ps_quote(value: str) -> str:
+    """Escape ``value`` for a single-quoted Windows PowerShell string literal."""
+    return value.replace("'", "''")
+
+
+def _sapi_rate(voice: Voice | None) -> int:
+    """Map a catalog voice's speed onto SAPI's ``-10..10`` rate (175 wpm is neutral)."""
+    if voice is None:
+        return 0
+    return max(-10, min(10, round((voice.speed - 175) / 20)))
+
+
+def _sapi_select_voice(voice: Voice | None) -> str:
+    """A PowerShell fragment that picks a SAPI voice by the catalog voice's gender.
+
+    SAPI voices are named and installed by the OS, so a catalog entry cannot choose
+    an exact timbre. It maps as far as SAPI allows: the variant's letter picks a
+    male or female installed voice, and the trailing number picks among them. When
+    no voice of that gender exists the engine keeps its default rather than failing.
+    """
+    if voice is None:
+        return ""
+    gender = "Male" if voice.variant[:1].lower() == "m" else "Female"
+    digits = "".join(character for character in voice.variant if character.isdigit())
+    index = max(0, int(digits) - 1) if digits else 0
+    return (
+        "$v=@($s.GetInstalledVoices()|?{$_.Enabled});"
+        f"$g=@($v|?{{$_.VoiceInfo.Gender -eq '{gender}'}});"
+        "if($g.Count -eq 0){$g=$v};"
+        f"if($g.Count -gt 0){{$s.SelectVoice($g[{index} % $g.Count].VoiceInfo.Name)}};"
+    )
+
+
+def _windows_sapi_script(text: str, target: Path, voice: Voice | None) -> str:
+    """The one-line PowerShell that renders ``text`` to the WAV file ``target``."""
+    script = [
+        "$ErrorActionPreference='Stop';",
+        "Add-Type -AssemblyName System.Speech;",
+        "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;",
+        f"$s.Rate={_sapi_rate(voice)};",
+    ]
+    selection = _sapi_select_voice(voice)
+    if selection:
+        script.append(selection)
+    script.append(f"$s.SetOutputToWaveFile('{_ps_quote(str(target))}');")
+    script.append(f"$s.Speak('{_ps_quote(text)}');")
+    script.append("$s.Dispose()")
+    return " ".join(script)
+
+
+def windows_speech_available() -> bool:
+    """True when Windows' built-in speech engine can be driven here (SAPI/PowerShell)."""
+    return platform.system().lower() == "windows" and shutil.which(_WINDOWS_SHELL) is not None
+
+
 TTS_ENGINES: tuple[tuple[str, str, "object", "object"], ...] = (
     ("espeak-ng", "espeak-ng", _espeak_argv, _espeak_voice_options),
     ("espeak", "espeak", _espeak_argv, _espeak_voice_options),
@@ -207,7 +268,7 @@ class SpeechInstallPlan:
 
 
 def _package_manager_command() -> tuple[str, ...]:
-    """A ``sudo`` package-manager command for this OS, or empty when unknown."""
+    """A package-manager command for this OS, or empty when the app knows none."""
     system = platform.system().lower()
     if system == "linux":
         if shutil.which("apt-get"):
@@ -221,12 +282,29 @@ def _package_manager_command() -> tuple[str, ...]:
         return ()
     if system == "darwin" and shutil.which("brew"):
         return ("brew", "install", SPEECH_SYSTEM_PACKAGES["macos"])
+    if system == "windows":
+        if shutil.which("winget"):
+            return ("winget", "install", "-e", "--id", "eSpeak-NG.eSpeak-NG")
+        if shutil.which("choco"):
+            return ("choco", "install", "-y", SPEECH_SYSTEM_PACKAGES["windows"])
     return ()
 
 
 def speech_install_plan() -> SpeechInstallPlan:
-    """The platform-aware way to install a real speech engine (usually ``espeak-ng``)."""
+    """The platform-aware way to install a real speech engine (usually ``espeak-ng``).
+
+    Windows is the special case: it already ships a speech engine (SAPI), so the
+    plan reports that there is nothing to install and ``can_install`` stays False,
+    with a hint that says so instead of sending the user off to download a build.
+    """
     system = platform.system().lower()
+    if system == "windows" and windows_speech_available():
+        return SpeechInstallPlan(
+            system,
+            (),
+            "Windows already provides a speech engine (SAPI), so read-aloud works "
+            "without installing anything.",
+        )
     command = _package_manager_command()
     if command:
         return SpeechInstallPlan(system, command, " ".join(command))
@@ -241,8 +319,10 @@ def speech_install_plan() -> SpeechInstallPlan:
         return SpeechInstallPlan(
             system,
             (),
-            "Download the espeak-ng Windows build and put `espeak-ng.exe` on PATH; "
-            "the project also speaks through macOS `say` and Linux espeak-ng/espeak/flite.",
+            "Install espeak-ng with `winget install -e --id eSpeak-NG.eSpeak-NG` (or "
+            "`choco install espeak-ng`), then open a new terminal so it is on PATH; "
+            "Windows' built-in speech engine is used automatically when PowerShell "
+            "is available.",
         )
     return SpeechInstallPlan(
         system,
@@ -325,10 +405,16 @@ SpeechCommandRunner = Callable[[Sequence[str]], tuple[int, str]]
 
 
 def discover_synthesizer_name() -> str:
-    """Return the first system TTS engine available, or ``'silent'``."""
+    """Return the first system TTS engine available, or ``'silent'``.
+
+    Windows' own engine (SAPI through PowerShell) is checked too, so a Windows
+    machine with no command-line engine still reads aloud instead of going silent.
+    """
     for name, executable, _builder, _voice_options in TTS_ENGINES:
         if shutil.which(executable):
             return name
+    if windows_speech_available():
+        return _WINDOWS_SAPI
     return "silent"
 
 
@@ -385,6 +471,55 @@ class CommandSynthesizer:
                     argv,
                     capture_output=True,
                     timeout=30,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return SilentSynthesizer().synthesize(text)
+            if completed.returncode != 0 or not target.exists():
+                return SilentSynthesizer().synthesize(text)
+            try:
+                return AudioClip.read_wav(target)
+            except (OSError, ValueError):
+                return SilentSynthesizer().synthesize(text)
+
+
+class WindowsSapiSynthesizer:
+    """A real TTS engine using the speech engine Windows already ships (SAPI).
+
+    Windows bundles SAPI, reachable from ``System.Speech`` through PowerShell, so a
+    Windows user does **not** need to install ``espeak-ng`` at all: this is the
+    engine the project uses when no command-line engine is on PATH. It renders
+    ``text`` to a WAV with ``SetOutputToWaveFile``/``Speak`` and reads it back, so
+    the same :class:`~core.reading.TextReader` works unchanged. A chosen catalog
+    voice maps as far as SAPI allows (gender variant + rate); Arabic may be voiced
+    only when an Arabic SAPI voice is installed, which the engine itself decides.
+    """
+
+    name = _WINDOWS_SAPI
+    executable = _WINDOWS_SHELL
+
+    def __init__(self, *, voice: Voice | None = None, language: str | None = None) -> None:
+        self.voice = voice
+        self.language = language
+
+    def synthesize(self, text: str) -> AudioClip:
+        if not text.strip():
+            raise ValueError("Cannot synthesize empty text.")
+        with tempfile.TemporaryDirectory(prefix="fayd-tts-") as folder:
+            target = Path(folder) / "speech.wav"
+            script = _windows_sapi_script(text, target, self.voice)
+            argv = [
+                self.executable,
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+            ]
+            try:
+                completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                    argv,
+                    capture_output=True,
+                    timeout=60,
                     check=False,
                 )
             except (OSError, subprocess.SubprocessError):
@@ -512,6 +647,13 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
         return SilentSynthesizer()
     voice = _resolve_voice(options.get("voice"))
     language = options.get("language")
+    if name == _WINDOWS_SAPI:
+        if windows_speech_available():
+            return WindowsSapiSynthesizer(voice=voice, language=language)
+        raise ValueError(
+            "The Windows speech engine (SAPI) is not available here. "
+            "Use --tts auto or --tts silent."
+        )
     for engine_name, executable, builder, voice_options in TTS_ENGINES:
         if name == engine_name:
             if shutil.which(executable):
@@ -594,8 +736,10 @@ class Speaker:
     """Plays a clip through the system speakers, when a player exists.
 
     Uses ``aplay`` (Linux/ALSA), ``afplay`` (macOS), or ``sox``/``play`` if
-    installed. :meth:`available` reports honestly, and :meth:`play` raises when
-    no player exists so the caller can fall back to text. No pip package needed.
+    installed. On Windows, where none of those exist, it falls back to the
+    built-in ``SoundPlayer`` through PowerShell so read-aloud is actually audible.
+    :meth:`available` reports honestly, and :meth:`play` raises when no player
+    exists so the caller can fall back to text. No pip package needed.
     """
 
     def __init__(self, *, sample_rate: int = SAMPLE_RATE) -> None:
@@ -606,6 +750,8 @@ class Speaker:
         for executable in ("aplay", "afplay", "play", "sox"):
             if shutil.which(executable):
                 return executable
+        if windows_speech_available():
+            return _WINDOWS_SHELL
         return None
 
     def available(self) -> bool:
@@ -624,6 +770,12 @@ class Speaker:
                 argv = ["afplay", str(target)]
             elif player == "play":
                 argv = ["play", "-q", str(target)]
+            elif player == _WINDOWS_SHELL:
+                # Windows: play the WAV through the built-in SoundPlayer.
+                script = (
+                    f"(New-Object System.Media.SoundPlayer '{_ps_quote(str(target))}').PlaySync()"
+                )
+                argv = [player, "-NoProfile", "-NonInteractive", "-Command", script]
             else:  # sox
                 argv = ["sox", str(target), "-d"]
             try:
@@ -719,6 +871,7 @@ __all__ = [
     "VoiceAssistant",
     "VoiceTurn",
     "WhisperRecognizer",
+    "WindowsSapiSynthesizer",
     "discover_recognizer_name",
     "discover_synthesizer_name",
     "install_speech_engine",
@@ -726,4 +879,5 @@ __all__ = [
     "load_synthesizer",
     "speech_available",
     "speech_install_plan",
+    "windows_speech_available",
 ]

@@ -97,7 +97,8 @@ def _install_speech(failed: bool) -> bool:
         print("The speech engine is already installed.")
         return failed
     plan = speech_install_plan()
-    print(f"Installing a speech engine: {' '.join(plan.command)}" if plan.can_install else plan.hint)
+    if plan.can_install:
+        print(f"Installing a speech engine: {' '.join(plan.command)}")
     result = install_speech_engine()
     print(result.message)
     return failed or not result.ok

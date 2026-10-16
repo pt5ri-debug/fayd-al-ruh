@@ -49,8 +49,6 @@ def _install_engine() -> int:
     plan = speech_install_plan()
     if plan.can_install:
         print(f"Installing a speech engine: {' '.join(plan.command)}")
-    else:
-        print(plan.hint)
     result = install_speech_engine()
     print(result.message)
     return 0 if result.ok else 1

@@ -996,7 +996,7 @@ class FaydGUI:
         ).pack(fill="x", padx=12, pady=(4, 0))
         if not self.service.reading_available():
             self._sidebar_button(
-                panel, "⤓   Install a speech engine (espeak-ng)…", self._on_install_speech,
+                panel, "⤓   Install a speech engine…", self._on_install_speech,
                 small=True,
             ).pack(fill="x", padx=12, pady=(2, 0))
 
@@ -1005,10 +1005,10 @@ class FaydGUI:
         from core.speech import speech_install_plan
 
         plan = speech_install_plan()
+        # The result message carries the plan's hint when it cannot install, so only
+        # the "starting" line is announced here to avoid printing the hint twice.
         if plan.can_install:
             self._add_bubble("note", f"Installing a speech engine: {' '.join(plan.command)}")
-        else:
-            self._add_bubble("note", plan.hint)
         self._start_work(self._install_speech_worker)
 
     def _install_speech_worker(self):
@@ -1315,11 +1315,13 @@ class FaydGUI:
         if not clean:
             return
         if not self.service.reading_available():
+            from core.speech import speech_install_plan
+
             self._add_bubble(
                 "note",
-                "No speech engine is installed, so I cannot speak. Use "
-                "“Install a speech engine (espeak-ng)…” in the settings panel, or run "
-                "`python -m cli speak --install-engine`.",
+                "No speech engine is installed, so I cannot speak. "
+                + speech_install_plan().hint
+                + " Or run `python -m cli speak --install-engine`.",
             )
             return
         if self._speaking:
