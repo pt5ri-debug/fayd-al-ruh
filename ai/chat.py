@@ -5,6 +5,7 @@
     python -m cli chat --no-web                 # answer only from what it knows
     python -m cli chat --mind                   # answer from the trained model, not the sources
     python -m cli chat --ultron                 # answer from the general local model (any subject)
+    python -m cli chat --vision                 # answer from the petroleum local model (reservoir, drilling, PVT)
     python -m cli chat --session demo           # resume/autosave a named session
     python -m cli chat --list-sessions          # show saved conversations
 
@@ -26,10 +27,12 @@ is unaffected:
 * the sources (default) -- retrieved passages, with citations;
 * ``--mind`` -- the small in-project trained language model, no citations;
 * ``--ultron`` -- the real, general local model (``llama-cpp-python``), which
-  talks about every field of life, no citations.
+  talks about every field of life, no citations;
+* ``--vision`` -- the real, petroleum-engineering local model
+  (``llama-cpp-python``, built on OGAI Reasoner), no citations.
 
-Type "from the model", "from ultron", or "from the sources" to switch mouths
-mid-conversation.
+Type "from the model", "from ultron", "from vision", or "from the sources" to
+switch mouths mid-conversation.
 """
 
 from __future__ import annotations
@@ -42,16 +45,18 @@ from pathlib import Path
 
 from ai import mind as mind_module
 from ai import ultron_mouth
+from ai import vision_mouth
 from ai.jarvis import build_session
 from core.composition import sources_block
 from core.jarvis import JarvisMode, JarvisTurn
 from core.ultron import UltronUnavailable
+from core.vision_model import VisionUnavailable
 
 INTRO = "Chat with the project's AI. Ask a question, or type 'help' for controls; 'quit' to exit."
 MIND_HINT = (
     "AI: (the sources could not answer; type 'from the model' to answer from the "
-    "trained model, 'from ultron' for the general local model, or 'from the sources' "
-    "to go back)"
+    "trained model, 'from ultron' for the general local model, 'from vision' for the "
+    "petroleum local model, or 'from the sources' to go back)"
 )
 
 # The composer's wording when retrieval found nothing to stand on.
@@ -60,11 +65,13 @@ _NO_SOURCE_MARKER = "not enough evidence"
 # Strips punctuation so "From the model." and "model on" match the same phrase.
 _NON_WORD = re.compile(r"[^\w\s]", flags=re.UNICODE)
 
-#: The three answering mouths. The sources are the grounded default; ``model`` is
-#: the small in-project checkpoint; ``ultron`` is the general local model.
+#: The four answering mouths. The sources are the grounded default; ``model`` is
+#: the small in-project checkpoint; ``ultron`` is the general local model;
+#: ``vision`` is the petroleum-engineering local model.
 MOUTH_SOURCES = "sources"
 MOUTH_MODEL = "model"
 MOUTH_ULTRON = "ultron"
+MOUTH_VISION = "vision"
 
 
 def _normalize(text: str) -> str:
@@ -76,8 +83,9 @@ def _match_switch(text: str) -> str | None:
     """Return the mouth a switch line selects, else ``None``.
 
     Recognised only for the whole line, so an ordinary question is never captured.
-    The phrases live in :mod:`ai.mind` and :mod:`ai.ultron_mouth`, not in the
-    shared Jarvis controls, so the Jarvis command's wording never changes.
+    The phrases live in :mod:`ai.mind`, :mod:`ai.ultron_mouth`, and
+    :mod:`ai.vision_mouth`, not in the shared Jarvis controls, so the Jarvis
+    command's wording never changes.
     """
     normalized = _normalize(text)
     if not normalized:
@@ -86,6 +94,8 @@ def _match_switch(text: str) -> str | None:
         return MOUTH_MODEL
     if normalized in _normalize_set(ultron_mouth.SWITCH_TO_ULTRON):
         return MOUTH_ULTRON
+    if normalized in _normalize_set(vision_mouth.SWITCH_TO_VISION):
+        return MOUTH_VISION
     if normalized in _normalize_set(mind_module.SWITCH_TO_SOURCES):
         return MOUTH_SOURCES
     return None
@@ -98,8 +108,9 @@ def _normalize_set(phrases: tuple[str, ...]) -> set[str]:
 class ModelSwitcher:
     """Swaps the session's answering mouth between the sources and a model.
 
-    Three mouths are offered: the grounded sources (default), the small
-    in-project trained model, and **Ultron**, the general local model. The
+    Four mouths are offered: the grounded sources (default), the small
+    in-project trained model, **Ultron**, the general local model, and **Vision**,
+    the petroleum-engineering local model. The
     grounded assistant and its help text are kept so switching back is exact.
     Only ``mode.assistant``/``mode.voice.assistant``/``mode.help_text`` change;
     nothing in the Jarvis loop, the controls, or the session builder is touched,
@@ -118,20 +129,23 @@ class ModelSwitcher:
         loader,
         max_new_tokens: int = 96,
         ultron_loader: Callable[[], "ultron_mouth.UltronAssistant"] | None = None,
+        vision_loader: Callable[[], "vision_mouth.VisionAssistant"] | None = None,
     ) -> None:
         self.mode = mode
         self.grounded = mode.assistant
         self.grounded_help = mode.help_text
         self._loader = loader
         self._ultron_loader = ultron_loader or ultron_mouth.load_ultron_assistant
+        self._vision_loader = vision_loader or vision_mouth.load_vision_assistant
         self._max_new_tokens = max_new_tokens
         self._mind: mind_module.MindAssistant | None = None
         self._ultron: ultron_mouth.UltronAssistant | None = None
+        self._vision: vision_mouth.VisionAssistant | None = None
         self._mouth = MOUTH_SOURCES
 
     @property
     def mouth(self) -> str:
-        """Which mouth currently answers: ``"sources"``, ``"model"``, ``"ultron"``."""
+        """Which mouth currently answers: ``"sources"``, ``"model"``, ``"ultron"``, ``"vision"``."""
         return self._mouth
 
     @property
@@ -151,6 +165,12 @@ class ModelSwitcher:
             self._ultron = self._ultron_loader()
         return self._ultron
 
+    @property
+    def vision(self) -> vision_mouth.VisionAssistant:
+        if self._vision is None:
+            self._vision = self._vision_loader()
+        return self._vision
+
     def _swap(self, assistant, mouth: str, help_suffix: str) -> None:
         """Point the session at ``assistant`` and record which mouth is active."""
         self.mode.assistant = assistant
@@ -167,6 +187,11 @@ class ModelSwitcher:
         """Activate the Ultron mouth. Raises when the runtime or model is missing."""
         assistant = self.ultron  # load/check now, before the swap
         self._swap(assistant, MOUTH_ULTRON, ultron_mouth.ULTRON_HELP)
+
+    def use_vision(self) -> None:
+        """Activate the Vision mouth. Raises when the runtime or model is missing."""
+        assistant = self.vision  # load/check now, before the swap
+        self._swap(assistant, MOUTH_VISION, vision_mouth.VISION_HELP)
 
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations again."""
@@ -239,14 +264,16 @@ def _print_switch(kind: str, *, as_json: bool) -> None:
         print("AI: [model] Now answering from the trained model only (no sources).")
     elif kind == MOUTH_ULTRON:
         print("AI: [ultron] Now answering from the general local model (any subject, no sources).")
+    elif kind == MOUTH_VISION:
+        print("AI: [vision] Now answering from the petroleum local model (reservoir, drilling, PVT; no sources).")
     else:
         print("AI: [sources] Now answering from retrieved passages with citations.")
     print()
 
 
-#: What to say when a mouth could not be loaded, and how to fix it. Ultron's
-#: message names its own real next step (install the extra, or fetch a model),
-#: so a failed switch is never a dead end.
+#: What to say when a mouth could not be loaded, and how to fix it. Ultron's and
+#: Vision's messages name their own real next step (install the extra, or fetch a
+#: model), so a failed switch is never a dead end.
 _MOUTH_FAILURE = {
     MOUTH_MODEL: (
         "Could not load the trained model: {error}",
@@ -257,6 +284,11 @@ _MOUTH_FAILURE = {
         "Install the optional runtime with `python -m pip install -r requirements-ultron.txt`, "
         "then fetch a model with `python -m cli ultron download --approve`.",
     ),
+    MOUTH_VISION: (
+        "Could not load Vision: {error}",
+        "Install the optional runtime with `python -m pip install -r requirements-vision.txt`, "
+        "then fetch a model with `python -m cli vision download --approve`.",
+    ),
 }
 
 #: The confirmation shown once a mouth is active. Shared by the text loop and the
@@ -264,6 +296,7 @@ _MOUTH_FAILURE = {
 _MOUTH_SWITCHED = {
     MOUTH_MODEL: "Now answering from the trained model (no sources).",
     MOUTH_ULTRON: "Now answering from Ultron, the general local model (any subject, no citations).",
+    MOUTH_VISION: "Now answering from Vision, the petroleum local model (reservoir, drilling, PVT; no citations).",
     MOUTH_SOURCES: "Now answering from sources, with citations.",
 }
 
@@ -288,9 +321,11 @@ def _apply_switch(switcher, kind: str) -> str:
             switcher.use_model()
         elif kind == MOUTH_ULTRON:
             switcher.use_ultron()
+        elif kind == MOUTH_VISION:
+            switcher.use_vision()
         else:
             switcher.use_sources()
-    except (FileNotFoundError, OSError, ValueError, UltronUnavailable) as error:
+    except (FileNotFoundError, OSError, ValueError, UltronUnavailable, VisionUnavailable) as error:
         return switch_failure_message(kind, error)
     return ""
 
@@ -370,6 +405,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ultron-model", default=None, help="a specific .gguf file for Ultron to load")
     parser.add_argument("--ultron-tokens", type=int, default=None, help="maximum tokens per Ultron answer")
     parser.add_argument("--ultron-temperature", type=float, default=None, help="sampling temperature for Ultron answers")
+    parser.add_argument(
+        "--vision",
+        action="store_true",
+        help="answer from Vision, the petroleum local model (reservoir, drilling, production, PVT; no citations), not from the sources",
+    )
+    parser.add_argument("--vision-model", default=None, help="a specific .gguf file for Vision to load")
+    parser.add_argument("--vision-tokens", type=int, default=None, help="maximum tokens per Vision answer")
+    parser.add_argument("--vision-temperature", type=float, default=None, help="sampling temperature for Vision answers")
     args = parser.parse_args(argv)
 
     if args.list_sessions:
@@ -405,6 +448,11 @@ def main(argv: list[str] | None = None) -> int:
             max_tokens=args.ultron_tokens,
             temperature=args.ultron_temperature,
         ),
+        vision_loader=lambda: vision_mouth.load_vision_assistant(
+            args.vision_model,
+            max_tokens=args.vision_tokens,
+            temperature=args.vision_temperature,
+        ),
     )
     if args.mind:
         failure = _apply_switch(switcher, MOUTH_MODEL)
@@ -420,6 +468,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if not args.json:
             print(switcher.ultron.describe())
+    if args.vision:
+        failure = _apply_switch(switcher, MOUTH_VISION)
+        if failure:
+            print(failure)
+            return 1
+        if not args.json:
+            print(switcher.vision.describe())
 
     if args.session:
         if not mode.resume_session(args.session):
@@ -443,6 +498,7 @@ __all__ = [
     "MOUTH_MODEL",
     "MOUTH_SOURCES",
     "MOUTH_ULTRON",
+    "MOUTH_VISION",
     "ModelSwitcher",
     "format_turn",
     "main",

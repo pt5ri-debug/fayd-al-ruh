@@ -18,6 +18,7 @@ from typing import Any, TYPE_CHECKING
 from ai import chat as chat_module
 from ai import mind as mind_module
 from ai import ultron_mouth
+from ai import vision_mouth
 from ai.jarvis import build_session
 from core.command_router import RouteKind, RoutedCommand
 from core.jarvis import JarvisMode, JarvisTurn
@@ -99,6 +100,7 @@ class ChatService:
     - ``"sources"`` -- grounded answers with citations (default).
     - ``"model"`` -- answers from the trained language model, no citations.
     - ``"ultron"`` -- answers from the general local model, no citations.
+    - ``"vision"`` -- answers from the petroleum local model, no citations.
 
     ``mode`` selects the *operating mode* (see :mod:`gui.modes`). In **AI Mode**
     the message is answered conversationally and no tool can run. In **Jarvics
@@ -119,6 +121,9 @@ class ChatService:
         ultron_model: str | None = None,
         ultron_tokens: int | None = None,
         ultron_temperature: float | None = None,
+        vision_model: str | None = None,
+        vision_tokens: int | None = None,
+        vision_temperature: float | None = None,
         session: str | None = None,
         operating_mode: str | None = None,
         data_root: Path | None = None,
@@ -145,6 +150,11 @@ class ChatService:
                 ultron_model,
                 max_tokens=ultron_tokens,
                 temperature=ultron_temperature,
+            ),
+            vision_loader=lambda: vision_mouth.load_vision_assistant(
+                vision_model,
+                max_tokens=vision_tokens,
+                temperature=vision_temperature,
             ),
         )
         self.session = session
@@ -257,7 +267,7 @@ class ChatService:
 
     @property
     def source(self) -> str:
-        """Which mouth currently answers: ``"model"``, ``"ultron"``, or ``"sources"``."""
+        """Which mouth currently answers: ``"model"``, ``"ultron"``, ``"vision"``, or ``"sources"``."""
         return self.switcher.mouth
 
     def use_model(self) -> None:
@@ -271,6 +281,15 @@ class ChatService:
         or a model file is missing, so the caller can report the real next step.
         """
         self.switcher.use_ultron()
+
+    def use_vision(self) -> None:
+        """Answer from Vision, the petroleum local model.
+
+        Raises :class:`~core.vision_model.VisionUnavailable` when the optional
+        runtime or a model file is missing, so the caller can report the real next
+        step.
+        """
+        self.switcher.use_vision()
 
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations."""

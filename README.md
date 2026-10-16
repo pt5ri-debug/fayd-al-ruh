@@ -664,6 +664,7 @@ python -m cli chat "what is porosity?"      # one question, then exit
 python -m cli chat --no-web                 # answer only from what it knows
 python -m cli chat --mind                   # answer from the trained model, not the sources
 python -m cli chat --ultron                 # answer from Ultron, the general local model
+python -m cli chat --vision                 # answer from Vision, the petroleum local model
 python -m cli chat --session demo           # resume/autosave a named session
 python -m cli chat --list-sessions          # show saved conversations
 python -m cli chat --json "what is porosity?"   # machine-readable turn
@@ -701,15 +702,17 @@ model. A missing checkpoint is reported plainly, with the command to train one
 
 Inside an interactive session you can switch mouths without restarting: type
 `from the model` to answer from the model, `from ultron` for the general local
-model (see below), or `from the sources` for cited, retrieved answers again. When
+model, `from vision` for the petroleum local model (both below), or `from the
+sources` for cited, retrieved answers again. When
 the sources cannot answer a question, the chat prints a short hint pointing at
-the other two mouths. Those phrases are recognised by `chat` alone — they are
+the other mouths. Those phrases are recognised by `chat` alone — they are
 **not** Jarvis controls, so the Jarvis command's wording is unchanged.
 
 The model mouth is wired only in `ai/chat.py` (`ai/mind.py` holds the logic) and
 never touches `ai/jarvis.py`, `core/jarvis.py`, or the session builder, so Jarvis
-mode is unaffected. The Ultron mouth follows the same rule
-(`ai/ultron_mouth.py`), so all three mouths answer in one session.
+mode is unaffected. The Ultron (`ai/ultron_mouth.py`) and Vision
+(`ai/vision_mouth.py`) mouths follow the same rule, so all four mouths answer in
+one session.
 
 ### Ultron: a general, advanced local model (optional)
 
@@ -779,6 +782,70 @@ for many turns; the prompt is capped at `ai.ultron_mouth.DEFAULT_REFERENCE_CHARS
 (8000) with a visible marker, so a very long file cannot overflow the model's
 context window.
 
+### Vision: a petroleum-engineering local model (optional)
+
+**Vision** is Ultron's *specialist* counterpart, added the same way and living in
+the same places. Where Ultron is a general model that talks about every field of
+life, Vision is a real, advanced model that runs **locally** and specialises in
+**petroleum engineering** — reservoir, drilling, production, petrophysics, PVT,
+well testing, and oil-and-gas facilities — built on the **OGAI Reasoner** weights
+(a DeepSeek-architecture engineering system for oil and gas operations).
+
+```bash
+python -m cli chat --vision                       # chat answering from Vision (same window, same session)
+python -m cli vision                              # Vision on its own (type 'quit' to exit)
+python -m cli vision "what is the material balance equation?"   # one question, answered locally
+python -m cli vision --session demo "and for a gas cap?"   # keep context across runs
+python -m cli vision models                       # list the models it can fetch
+python -m cli vision status                       # what is installed and present
+python -m cli vision download --approve           # one-time: fetch a model (~5 GB)
+```
+
+Like Ultron, it is a **mouth inside the project's own chat**: the window's model
+selector (the one above the transcript, beside the mode switch) and the settings
+panel's *Answering mouth* both list **Vision (petroleum local model)** beside
+*From sources (cited)*, *From trained model*, and *Ultron (general local model)*,
+and the sidebar's **Answer from Vision** entry selects it. Whichever way you pick
+it, the conversation continues in the **same transcript, the same session, and
+with the same conversation controls** — there is no separate window. In the text
+chat, type `from vision` (or `from the sources` to switch back). It is wired
+**directly below Ultron** in the numbered menu as its own program
+(`python -m cli vision`).
+
+The model is a **GGUF file under the writable data folder** (`data/vision` by
+default), not an in-project checkpoint: drop any petroleum `.gguf` there and
+Vision uses it, or run `download --approve` to fetch a known-good model
+(`ogai-reasoner` by default; `ogai-8x7b` is the larger mixture-of-experts
+choice). The folder is git-ignored, so a multi-gigabyte model never dirties the
+working tree or bloats a program update. The default `ogai-reasoner` repo is
+**gated** on Hugging Face: accept its licence and sign in (`huggingface-cli
+login`) before downloading, and the CLI says so if the fetch is refused.
+
+Vision runs entirely on this machine through `llama-cpp-python`; nothing is sent
+to a remote server. That runtime and `huggingface_hub` are an **optional extra**
+(`pip install -r requirements-vision.txt`, or the `[vision]` extra) — the *same*
+runtime Ultron uses, so a machine that already has Ultron needs nothing new;
+it is imported lazily, so a base install keeps working and reports clearly when
+it is absent. Downloading the weights is an external action that leaves the
+machine, so it runs only through the same permission and human-approval gates as
+a web search or the image model — denied by default, and granted with `--approve`.
+
+Every Vision answer is labelled `[vision] answered by the local petroleum model;
+not grounded in cited sources.` It is the model's own prose, not a cited extract,
+and it is never checked against the corpus — the same honesty rule the other
+mouths follow. `core/vision_model.py` holds the engine (an injectable runner, the
+download catalog, and the gates); `ai/vision_model.py` is the CLI entry point;
+and `ai/vision_mouth.py` is the chat mouth that lets Vision answer inside the
+project's own conversation (`from vision` in text, the model selector in the
+window).
+
+Vision has no retriever, so a file you attach is read the other way: the file's
+whole text is written into the conversation as reference material (a `CONTEXT`
+turn in `core/conversation.py`) and put in front of your question for the model.
+That is what makes "attach a document, then ask Vision about it" work inside the
+same chat. The grounded mouth is unaffected — it already retrieves the file's
+chunks and cites them.
+
 ## Graphical interface (ChatGPT-style)
 
 A desktop window that looks and reads like ChatGPT ships **next to** the command
@@ -790,6 +857,7 @@ python -m cli gui                       # from the menu/CLI command
 python -m gui                           # the same window, directly
 python -m cli gui --mind                # start answering from the trained model
 python -m cli gui --ultron              # start answering from Ultron (general local model)
+python -m cli gui --vision              # start answering from Vision (petroleum local model)
 python -m cli gui --session demo        # resume a saved conversation
 python -m cli gui --no-web              # answer only from internal knowledge
 python -m cli gui --mode jarvics        # start with sandboxed tools enabled
@@ -811,8 +879,9 @@ The window is a thin shell over the same code the CLI already runs:
   explicit request (“list the files in notes/”, “calculate 2 * (3 + 4)”) can run
   in the sandbox under every existing guarantee. The header shows the active mode
   by name and switches with one control, and beside it sits the **model
-  selector** — *From sources (cited)*, *From trained model*, and *Ultron (general
-  local model)* — so the answering mouth changes inside the *same* chat. The
+  selector** — *From sources (cited)*, *From trained model*, *Ultron (general
+  local model)*, and *Vision (petroleum local model)* — so the answering mouth
+  changes inside the *same* chat. The
   sidebar lists the sandbox tools and dims them in AI Mode. The chosen mode
   persists (see `gui/modes.py`), and switching never clears the transcript.
 - The **composer** is a rounded, ChatGPT-like card: a multiline field (Enter
@@ -845,7 +914,7 @@ The window is a thin shell over the same code the CLI already runs:
   web verify, the two knowledge-base entries, and the Import Center — with the
   same labels and default arguments, so nothing is offered twice: the window's
   own controls cover the first five menu items (the window, Jarvis, **Ultron**,
-  and the two chat modes).
+  **Vision**, and the two chat modes).
   The training and evaluation entries that already lived in the sidebar are kept
   here too, even though they are hidden from the numbered CLI menu.
 - Answers run on a **worker thread** and are posted back through a queue, so the

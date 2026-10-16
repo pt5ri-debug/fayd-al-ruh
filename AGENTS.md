@@ -175,7 +175,8 @@ Arabic is kept as secondary aliases where useful.
   `load_mind_model` /
   `mind_status` load and describe the checkpoint. Wired **only** into
   `python -m cli chat --mind` (and the `from the model` / `from ultron` /
-  `from the sources` switch, matched in `ai/chat.py`; the portable menu reaches
+  `from vision` / `from the sources` switch, matched in `ai/chat.py`; the
+  portable menu reaches
   it through
   `cli.menu.run_mind_chat`, command `python -m cli mind-chat`); it deliberately never touches
   `ai/jarvis.py`, `core/jarvis.py`, `JarvisMode`, `build_session`, or the shared
@@ -211,6 +212,40 @@ Arabic is kept as secondary aliases where useful.
   to the same chat.
   `ai/ultron.py` is the CLI entry point
   (`chat` default, `download`, `models`, `status`, `--session` persistence).
+- `core/vision_model.py` — **Vision**, the project's *petroleum* mouth: Ultron's
+  specialist counterpart, added the same way and living in the same places. It is
+  a real, advanced model that runs **locally** through `llama-cpp-python` and
+  specialises in petroleum engineering (reservoir, drilling, production,
+  petrophysics, PVT, well testing, facilities), built on the **OGAI Reasoner**
+  weights (a DeepSeek-architecture oil-and-gas engineering system).
+  `VisionEngine` mirrors `UltronEngine` exactly: it builds the chat messages
+  (system prompt + history + prompt) and delegates to an injectable
+  `VisionRunner` (the default `LlamaCppRunner` is the same thin, lazy
+  `create_chat_completion` wrapper; a test injects its own runner, so the engine
+  is exercised with no extra and no model). The model is a **GGUF file under
+  `data/vision`** (`core.paths.vision_models_dir`, git-ignored): `find_model_file`
+  prefers the file named in the registry (`model.json`, written on download),
+  else the largest `*.gguf`. The runtime and `huggingface_hub` are the optional
+  `[vision]` extra (`core.optional_deps.FEATURE_VISION`,
+  `requirements-vision.txt`) — the *same* runtime Ultron uses — imported lazily.
+  `download_model` runs only through the permission + human approval gates
+  (`--approve`), like a web search or the image model; `CATALOG` names the
+  fetchable petroleum models (default `ogai-reasoner`, whose HF repo is gated, so
+  the fetch needs a signed-in user who accepted the licence). Wired **directly
+  below Ultron** in the menu (`cli.menu.run_vision`), CLI
+  (`python -m cli vision`), and — as a **mouth inside the project's own chat**
+  (`ai/vision_mouth.py`, the headless twin `python -m cli vision-chat`) — the
+  window's header model selector (`MOUTH_CHOICES` in `gui/app.py`) and settings
+  *Answering mouth* radio, beside *From sources (cited)*, *From trained model*,
+  and Ultron, plus the sidebar **Answer from Vision** action; the conversation
+  stays in the same transcript and session, never a separate window. Every answer
+  is labelled as the local petroleum model's own, not grounded in cited sources.
+  `VisionAssistant.ask` reads an attached file from the conversation's `CONTEXT`
+  turns exactly as Ultron does (`_context_prompt`), capped at
+  `DEFAULT_REFERENCE_CHARS` (8000). `ai/vision_model.py` is the CLI entry point
+  (`chat` default, `download`, `models`, `status`, `--session` persistence).
+  The modules are named `vision_model`/`vision_mouth` on purpose, because
+  `core/vision.py` is already the unrelated optional multimodal perception.
 - `core/composition.py` — the deterministic composer: dependency-free rules that
   render evidence (retrieved passages, web sources, causal/reasoning/decision
   traces) into clean attributed prose. Shared by the assistant's extractive

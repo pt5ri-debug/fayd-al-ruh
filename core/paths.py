@@ -95,6 +95,19 @@ def ultron_models_dir() -> Path:
     return data_dir() / "ultron"
 
 
+def vision_models_dir() -> Path:
+    """Where the Vision petroleum-engineering models (GGUF files) live.
+
+    Vision is the project's *petroleum* local model (built on the OGAI Reasoner
+    weights): like Ultron it is *not* an in-project checkpoint, but a GGUF file
+    the user drops into ``data/vision`` (or downloads there with
+    ``python -m cli vision download --approve``). The folder is git-ignored, so a
+    multi-gigabyte model never dirties the working tree or bloats a program
+    update. ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "vision"
+
+
 def coder_models_dir() -> Path:
     """Where the Code Studio's in-process coding models (GGUF files) live.
 

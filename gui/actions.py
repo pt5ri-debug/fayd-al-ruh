@@ -36,6 +36,7 @@ from cli.menu import (
     run_selfcheck,
     run_ultron_chat,
     run_update,
+    run_vision_chat,
     run_web,
 )
 
@@ -70,6 +71,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         "ultron",
         "Answer from Ultron (general local model)",
         run_ultron_chat,
+        (),
+    ),
+    GuiAction(
+        "vision",
+        "Answer from Vision (petroleum local model)",
+        run_vision_chat,
         (),
     ),
     GuiAction("learn", "Continuous learning and regression gate", run_learn, ()),

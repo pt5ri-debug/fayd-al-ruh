@@ -1,0 +1,19 @@
+# Optional: Vision, the petroleum-engineering local model (the [vision] extra).
+#
+# Install with:  python -m pip install -r requirements-vision.txt
+#
+# This pulls ``llama-cpp-python``, which runs the OGAI Reasoner GGUF locally on
+# the CPU (no server, nothing sent off the machine), and ``huggingface_hub``,
+# used only to fetch the weights. On a machine with no prebuilt wheel,
+# ``llama-cpp-python`` compiles from source and needs a C/C++ compiler.
+#
+# It is the *same* runtime as Ultron (the [ultron] extra), so a machine that
+# already has Ultron needs nothing new here.
+#
+# The model weights are a *separate* one-time, human-approved download:
+#     python -m cli vision download --approve
+# or drop any petroleum `.gguf` file into the data/vision folder. The base
+# install needs none of this; the import is lazy and the app reports clearly
+# when it is absent.
+llama-cpp-python>=0.3
+huggingface_hub>=0.23

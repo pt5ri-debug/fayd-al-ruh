@@ -49,6 +49,14 @@ coder = [
     "llama-cpp-python>=0.3",
     "huggingface_hub>=0.23",
 ]
+# Vision, the petroleum-engineering local model, is a separate optional extra. It
+# runs the OGAI Reasoner GGUF locally through llama-cpp-python (nothing leaves the
+# machine); the weights are a separate one-time, human-approved download. Same
+# runtime as Ultron, so a machine that already has `[ultron]` needs nothing new.
+vision = [
+    "llama-cpp-python>=0.3",
+    "huggingface_hub>=0.23",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
