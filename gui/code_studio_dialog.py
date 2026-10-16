@@ -11,7 +11,9 @@ good -- and implements it with the project's own ``git``:
 * **The coding model edits it.** *Ask the model* sends a plain-language request to
   a local coding model (``qwen2.5-coder:7b`` through Ollama by default) which reads
   and writes files *inside the workspace only*, through a strict JSON protocol.
-  Every step it takes is shown, so its work is reviewable rather than magic.
+  The request appears as the user's own message, and every step the model takes is
+  shown live in the transcript as it happens -- first by first, like the project's
+  own chat window -- so its work is reviewable rather than magic.
 * **Test, review, merge.** *Run checks* runs the project's own test command inside
   the workspace; *Show diff* is the change as a unified diff; and **Merge** appears
   only when the checks have passed and ``main`` has not moved on, so a merge can
@@ -91,6 +93,10 @@ class CodeStudioDialog:
         self._results: queue.Queue[tuple[Callable[[Any, Exception | None], None], Any, Exception | None]] = (
             queue.Queue()
         )
+        # Live agent steps, pushed from the worker thread and drained on the UI
+        # thread (Tk is not thread-safe), so the model's work appears as it happens.
+        self._steps: queue.Queue[Any] = queue.Queue()
+        self._live: tk.Text | None = None
 
         self._task_var = tk.StringVar(value="")
         self._request_var = tk.StringVar(value="")
@@ -731,14 +737,45 @@ class CodeStudioDialog:
             return
         if self._busy:
             return
-        self._set_trace("Asking the coding model…\n")
+        # Show the request as the user's own message, then clear the composer, so
+        # the conversation reads like a chat: question first, then the model's work.
+        self._add_message("user", request)
+        self._request_var.set("")
+        # A live bubble the model's steps are appended to as they happen.
+        self._live = self._add_message("model", "", title="Coding model", mono_body=True)
         self._run_background(
             "The coding model is working…",
-            lambda: self.service.run_agent(self._current_slug, request),
+            lambda: self.service.run_agent(self._current_slug, request, on_step=self._on_agent_step),
             self._after_ask,
         )
 
+    def _on_agent_step(self, step: Any) -> None:
+        """Queue one live step; the UI thread renders it (never touch Tk here)."""
+        self._steps.put(step)
+
+    def _drain_steps(self) -> None:
+        """Append any queued agent steps to the live bubble."""
+        appended = False
+        while True:
+            try:
+                step = self._steps.get_nowait()
+            except queue.Empty:
+                break
+            lines = step.live_lines()
+            if not lines:
+                continue
+            if self._live is not None:
+                text = self._live.get("1.0", "end-1c")
+                prefix = "\n" if text.strip() else ""
+                self._live.insert("end", prefix + "\n".join(lines))
+                appended = True
+        if appended and self._live is not None:
+            self._fit_height(self._live)
+            self._scroll_to_bottom()
+
     def _after_ask(self, result: Any, error: Exception | None) -> None:
+        self._drain_steps()
+        self._live = None
         if error is not None:
             self._set_trace(f"The coding model failed: {error}")
             return
@@ -861,6 +898,9 @@ class CodeStudioDialog:
             self.window.after(60, self._schedule_pump)
 
     def _pump_results(self) -> None:
+        # Render the model's live steps first, so the transcript keeps pace with
+        # the worker even before the run finishes.
+        self._drain_steps()
         while True:
             try:
                 finish, result, error = self._results.get_nowait()
