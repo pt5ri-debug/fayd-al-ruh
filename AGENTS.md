@@ -656,6 +656,10 @@ Arabic is kept as secondary aliases where useful.
   `run_agent`, `state`, `status`). It is the one engine the window and the CLI
   share, so both see one set of workspaces, one diff, and one merge gate. The
   coder client is built lazily, so constructing the service never reaches Ollama.
+  `status` is derived from the **backend** it resolves once, so the in-process
+  model is offered first and a machine with no Ollama is never told to start a
+  server it never needed (`test_service_status_offers_the_in_process_model_first`);
+  the Ollama wording appears only when Ollama is the runtime that can answer.
 - `gui/code_studio_dialog.py` — the Code Studio **window** (Tk, imported lazily):
   built the way the chat window is built, so the Studio reads as part of the
   program rather than a separate tool — a slim header, a left **sidebar** (the

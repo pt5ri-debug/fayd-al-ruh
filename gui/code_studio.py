@@ -26,7 +26,13 @@ from core.code_studio import (
     Workspace,
     default_check_command,
 )
-from core.coder_model import CoderClient, CoderStatus, CoderUnavailable, coder_status
+from core.coder_model import (
+    DEFAULT_CODER_MODEL,
+    CoderClient,
+    CoderStatus,
+    CoderUnavailable,
+    coder_status,
+)
 from core.coder_llama import (
     BackendStatus,
     LlamaCppCoderClient,
@@ -115,7 +121,39 @@ class CodeStudioService:
         return coder_backend_status(probe_ollama=True)
 
     def status(self) -> CoderStatus:
-        """An honest report of whether the coding model can answer."""
+        """An honest report of whether the coding model can answer.
+
+        The preferred runtime is the **in-process** model, which needs no
+        background daemon, so a machine with no Ollama at all is not told to
+        start a server it never needed. Ollama is only named when it is the
+        runtime that can actually answer, or when the in-process model is not
+        ready *and* Ollama is the only thing left to fall back to. The backend is
+        resolved once, so this never probes the same server twice.
+        """
+        if self.prefer_in_process and not self._explicit_client:
+            backend = self.backend()
+            if backend.backend == "ollama":
+                return CoderStatus(
+                    available=backend.available,
+                    server_reachable=True,
+                    model=DEFAULT_CODER_MODEL,
+                    installed=backend.available,
+                    detail="" if backend.available else backend.detail,
+                    hint=backend.hint,
+                    backend="ollama",
+                )
+            # Either the in-process model is the answer, or neither runtime is
+            # ready -- and then ``backend.detail`` already names the in-process
+            # step first, so Ollama is never presented as the only way.
+            return CoderStatus(
+                available=backend.available,
+                server_reachable=True,
+                model=DEFAULT_CODER_MODEL,
+                installed=backend.available,
+                detail=backend.detail,
+                hint=backend.hint,
+                backend="in-process",
+            )
         return coder_status(self.resolve_client())
 
     def state(self) -> StudioState:

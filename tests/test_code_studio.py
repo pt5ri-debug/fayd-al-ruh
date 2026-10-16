@@ -800,6 +800,42 @@ def test_service_status_is_honest_without_a_model(project: Path, tmp_path: Path)
     assert service.state().repository
 
 
+def test_service_status_offers_the_in_process_model_first(
+    project: Path, tmp_path: Path, monkeypatch
+) -> None:
+    """A machine with no Ollama is told about the in-process model, not a server.
+
+    The in-process model is the preferred runtime and needs no daemon, so the
+    status must not present "start `ollama serve`" as the only way forward.
+    """
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path / "data"))
+    service = CodeStudioService(project, studio=CodeStudio(project, workspaces_dir=tmp_path / "ws"))
+    summary = service.status().summary()
+    assert service.status().backend == "in-process"
+    assert "requirements-coder.txt" in summary
+    assert not summary.startswith("Ollama is not running")
+
+
+def test_service_status_reports_ollama_when_it_is_the_runtime(
+    project: Path, tmp_path: Path, monkeypatch
+) -> None:
+    """An Ollama-only machine still gets the Ollama wording it needs."""
+    from core.coder_llama import BackendStatus
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path / "data"))
+    service = CodeStudioService(project, studio=CodeStudio(project, workspaces_dir=tmp_path / "ws"))
+    monkeypatch.setattr(
+        service,
+        "backend",
+        lambda: BackendStatus("ollama", True, detail="Coding model ready (ollama)."),
+    )
+    status = service.status()
+    assert status.available
+    assert status.server_reachable
+    assert status.backend == "ollama"
+    assert "ready" in status.summary()
+
+
 def test_service_full_flow_create_ask_check_merge(project: Path, tmp_path: Path) -> None:
     coder = FakeCoder(
         [
