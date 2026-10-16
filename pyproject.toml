@@ -41,6 +41,14 @@ ultron = [
     "llama-cpp-python>=0.3",
     "huggingface_hub>=0.23",
 ]
+# The Code Studio's in-process coding model is a separate optional extra, so the
+# Studio can write code with no Ollama server left running in the background.
+# Same runtime as Ultron (llama-cpp-python, CPU by default); the weights are a
+# separate one-time, human-approved download. Never required by the base install.
+coder = [
+    "llama-cpp-python>=0.3",
+    "huggingface_hub>=0.23",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

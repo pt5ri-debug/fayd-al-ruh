@@ -634,14 +634,21 @@ Arabic is kept as secondary aliases where useful.
   (`_noninteractive_env(identity=True)`), so a machine with no global git identity
   still works. `StudioError` is the one failure type.
 - `core/code_agent.py` — the coding agent: drives a `CoderClient` over a workspace
-  through a strict JSON action protocol (`list_files`, `read_file`, `write_file`,
-  `done`), validating `path`/`content` per action and returning an `AgentTrace`
-  (one `AgentStep` per turn, the writes, the summary, and the reason it stopped).
-  It tolerates a fenced reply and surrounding prose, pushes back on a bad reply
-  rather than dying, truncates a large read (`read_chars`), stops at `max_steps`,
-  and reports an unreachable model honestly. A refused write is a *failed step in
-  the trace*, never a crash — the confinement in `core/code_studio.py` is what
-  actually holds, and the agent only surfaces it.
+  through a strict JSON action protocol (`list_files`, `find_files`, `search`,
+  `read_file`, `write_file`, `edit_file`, `diff`, `done`), validating `path`/
+  `content`/`old`/`new`/`query` per action and returning an `AgentTrace` (one
+  `AgentStep` per turn, the writes, the summary, and the reason it stopped).
+  `search` greps the workspace and `find_files` matches a glob, so the model can
+  locate code before it changes it, and `edit_file` replaces an exact `old`
+  snippet with `new` — a targeted edit that cannot silently rewrite a whole file
+  the way a stale `write_file` payload can (a duplicate write of identical content
+  is reported, not re-written, so it never shows up twice in the diff). `diff`
+  lets the agent review its own work before calling `done`. It tolerates a fenced
+  reply and surrounding prose, pushes back on a bad reply rather than dying,
+  truncates a large read (`read_chars`), stops at `max_steps`, and reports an
+  unreachable model honestly. A refused write is a *failed step in the trace*,
+  never a crash — the confinement in `core/code_studio.py` is what actually
+  holds, and the agent only surfaces it.
 - `gui/code_studio.py` — the Code Studio **service** (Tk-free): `CodeStudioService`
   wraps the engine, the coder client, and the check command, and returns plain
   reports (`create_workspace`, `list_files`, `read_file`, `save_file`,
@@ -650,14 +657,21 @@ Arabic is kept as secondary aliases where useful.
   share, so both see one set of workspaces, one diff, and one merge gate. The
   coder client is built lazily, so constructing the service never reaches Ollama.
 - `gui/code_studio_dialog.py` — the Code Studio **window** (Tk, imported lazily):
-  a workspace list + *New workspace*, an editor page (file list, an editable
-  `tk.Text`, Save), a model page (a request box, *Ask the model*, and the step
-  trace), and a review page (*Show diff*, *Run checks*, the diff/check text), with
-  *Merge into the project* and *Discard workspace* on the action bar. Long work
-  runs on a worker thread whose result is handed back through a **queue the UI
-  thread drains** (`_schedule_pump`), because calling Tk's `after` from a worker
-  thread races with the main loop; Merge stays disabled until the gate allows it,
-  and a message the user just needs to read (a save, a model run) is not
+  built the way the chat window is built, so the Studio reads as part of the
+  program rather than a separate tool — a slim header, a left **sidebar** (the
+  rougher `surface` tone) for the workspace list + *New workspace*, the file list,
+  and *Merge into the project* / *Discard workspace* / *Run checks* with their
+  state, and a centred conversation column with the rounded composer card pinned
+  to the bottom (`_COLUMN_MAX`/`_column_pad`, the same theme tokens and
+  `RoundedBox`). The model's step trace and the diff/check output are transcript
+  messages like a chat reply, not separate tabs: `_set_trace` adds a "Coding
+  model" row and `_set_review` a "Diff and checks" row, both monospaced, through
+  the same `_add_message`/`_fit_height` path the chat window uses. The file editor
+  is a slide-in panel above the composer (`_show_editor`/`_hide_editor`). Long
+  work runs on a worker thread whose result is handed back through a **queue the
+  UI thread drains** (`_schedule_pump`), because calling Tk's `after` from a
+  worker thread races with the main loop; Merge stays disabled until the gate
+  allows it, and a message the user just needs to read (a save, a model run) is
   overwritten by the merge hint (`_refresh_merge_state(keep_note=True)`).
   Reachable from the composer's **＋** menu (**Code Studio — edit and merge the
   project's own code…**) and the sidebar action; the headless twin is

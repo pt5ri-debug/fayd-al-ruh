@@ -203,6 +203,99 @@ def test_list_files_skips_run_state_and_binaries(studio: CodeStudio) -> None:
     assert "__pycache__/cached.py" not in listed
 
 
+# --- surgical edits and search ---------------------------------------------
+
+
+def test_edit_file_replaces_one_snippet_and_keeps_the_rest(studio: CodeStudio) -> None:
+    workspace = studio.create("Edit")
+    studio.write_file(workspace, "core/app.py", "a = 1\nb = 2\nc = 3\n")
+    made = studio.edit_file(workspace, "core/app.py", "b = 2", "b = 20")
+    assert made == 1
+    assert studio.read_file(workspace, "core/app.py") == "a = 1\nb = 20\nc = 3\n"
+
+
+def test_edit_file_refuses_an_ambiguous_match_and_changes_nothing(studio: CodeStudio) -> None:
+    workspace = studio.create("Ambiguous")
+    original = "x = 1\ny = 2\nx = 1\n"
+    studio.write_file(workspace, "core/app.py", original)
+    with pytest.raises(StudioError, match="2 times"):
+        studio.edit_file(workspace, "core/app.py", "x = 1", "x = 9")
+    assert studio.read_file(workspace, "core/app.py") == original
+
+
+def test_edit_file_replace_all_changes_every_occurrence(studio: CodeStudio) -> None:
+    workspace = studio.create("Replace all")
+    studio.write_file(workspace, "core/app.py", "x = 1\ny = 2\nx = 1\n")
+    made = studio.edit_file(workspace, "core/app.py", "x = 1", "x = 9", replace_all=True)
+    assert made == 2
+    assert studio.read_file(workspace, "core/app.py") == "x = 9\ny = 2\nx = 9\n"
+
+
+def test_edit_file_reports_a_missing_snippet(studio: CodeStudio) -> None:
+    workspace = studio.create("Missing")
+    studio.write_file(workspace, "core/app.py", "a = 1\n")
+    with pytest.raises(StudioError, match="was not found"):
+        studio.edit_file(workspace, "core/app.py", "zzz", "b")
+
+
+def test_edit_file_refuses_an_empty_old(studio: CodeStudio) -> None:
+    workspace = studio.create("Empty old")
+    with pytest.raises(StudioError, match="cannot be empty"):
+        studio.edit_file(workspace, "core/app.py", "", "b")
+
+
+def test_edit_file_cannot_escape_the_workspace(studio: CodeStudio) -> None:
+    workspace = studio.create("Escape")
+    with pytest.raises(StudioError, match="escapes"):
+        studio.edit_file(workspace, "../outside.py", "a", "b")
+
+
+def test_search_finds_lines_with_context(studio: CodeStudio) -> None:
+    workspace = studio.create("Search")
+    studio.write_file(workspace, "core/app.py", "alpha\nbeta target\ngamma\n")
+    hits = studio.search(workspace, "target", context_lines=1)
+    assert len(hits) == 1
+    assert hits[0].path == "core/app.py"
+    assert hits[0].line == 2
+    assert "beta target" in hits[0].text
+    assert hits[0].before == "alpha"
+    assert hits[0].after == "gamma"
+    assert "core/app.py:2:" in hits[0].render()
+
+
+def test_search_is_case_insensitive_and_literal(studio: CodeStudio) -> None:
+    workspace = studio.create("Literal")
+    studio.write_file(workspace, "core/app.py", "def main():\n    pass\n")
+    assert len(studio.search(workspace, "DEF MAIN")) == 1
+    assert studio.search(workspace, "def.*(") == ()  # not a regex
+
+
+def test_search_can_narrow_to_one_file(studio: CodeStudio) -> None:
+    workspace = studio.create("Narrow")
+    studio.write_file(workspace, "core/app.py", "needle\n")
+    studio.write_file(workspace, "core/other.py", "needle\n")
+    hits = studio.search(workspace, "needle", relative="core/app.py")
+    assert [hit.path for hit in hits] == ["core/app.py"]
+
+
+def test_search_refuses_an_empty_query_and_an_escape(studio: CodeStudio) -> None:
+    workspace = studio.create("Bad search")
+    with pytest.raises(StudioError, match="cannot be empty"):
+        studio.search(workspace, "   ")
+    with pytest.raises(StudioError, match="escapes"):
+        studio.search(workspace, "x", relative="../")
+
+
+def test_search_skips_binaries_and_run_state(studio: CodeStudio) -> None:
+    workspace = studio.create("Skip")
+    studio.write_file(workspace, "notes.md", "needle\n")
+    (workspace.path / "blob.bin").write_bytes(b"needle")
+    (workspace.path / "__pycache__").mkdir()
+    (workspace.path / "__pycache__" / "c.py").write_text("needle\n", encoding="utf-8")
+    hits = studio.search(workspace, "needle")
+    assert [hit.path for hit in hits] == ["notes.md"]
+
+
 # --- change inspection -----------------------------------------------------
 
 
@@ -248,6 +341,28 @@ def test_failing_checks_block_the_merge(studio: CodeStudio) -> None:
     allowed, reason = studio.can_merge(workspace)
     assert not allowed
     assert "checks" in reason
+
+
+def test_editing_after_a_pass_invalidates_the_check(studio: CodeStudio) -> None:
+    """A pass describes one revision; changing a file must not keep it valid."""
+    workspace = studio.create("Stale pass")
+    studio.write_file(workspace, "core/app.py", "x = 2\n")
+    studio.run_checks(workspace, ["python", "-c", "print('fine')"])
+    assert studio.get(workspace.slug).checks_passed is True
+
+    studio.write_file(workspace, "core/app.py", "x = 3\n")
+    assert studio.get(workspace.slug).checks_passed is None
+    allowed, reason = studio.can_merge(workspace)
+    assert not allowed
+    assert "checks" in reason
+
+
+def test_edit_file_after_a_pass_invalidates_the_check(studio: CodeStudio) -> None:
+    workspace = studio.create("Stale pass via edit")
+    studio.write_file(workspace, "core/app.py", "x = 2\n")
+    studio.run_checks(workspace, ["python", "-c", "print('fine')"])
+    studio.edit_file(workspace, "core/app.py", "x = 2", "x = 3")
+    assert studio.get(workspace.slug).checks_passed is None
 
 
 def test_merge_is_refused_before_checks_run(studio: CodeStudio) -> None:
@@ -340,6 +455,39 @@ def test_parse_action_accepts_the_four_actions() -> None:
     assert done.name == "done" and done.summary == "did it"
 
 
+def test_parse_action_accepts_the_new_actions() -> None:
+    search = parse_action('{"action": "search", "query": "def main"}')
+    assert search.name == "search" and search.query == "def main"
+    found = parse_action('{"action": "find_files", "pattern": "**/*.py"}')
+    assert found.name == "find_files" and found.pattern == "**/*.py"
+    edit = parse_action(
+        '{"action": "edit_file", "path": "a.py", "old": "x = 1", "new": "x = 2"}'
+    )
+    assert edit.name == "edit_file" and edit.old == "x = 1" and edit.new == "x = 2"
+    assert edit.replace_all is False
+    every = parse_action(
+        '{"action": "edit_file", "path": "a.py", "old": "a", "new": "b", "replace_all": true}'
+    )
+    assert every.replace_all is True
+    assert parse_action('{"action": "run_checks"}').name == "run_checks"
+    assert parse_action('{"action": "diff"}').name == "diff"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        '{"action": "search"}',  # no query
+        '{"action": "find_files"}',  # no pattern
+        '{"action": "edit_file", "path": "a.py", "new": "b"}',  # no old
+        '{"action": "edit_file", "path": "a.py", "old": "", "new": "b"}',  # empty old
+        '{"action": "edit_file", "old": "a", "new": "b"}',  # no path
+    ],
+)
+def test_parse_action_rejects_incomplete_new_actions(reply: str) -> None:
+    with pytest.raises(AgentError):
+        parse_action(reply)
+
+
 def test_parse_action_tolerates_a_fenced_reply() -> None:
     reply = '```json\n{"action": "done", "summary": "ok"}\n```'
     assert parse_action(reply).name == "done"
@@ -398,6 +546,143 @@ def test_agent_reports_a_bad_reply_and_keeps_going(studio: CodeStudio) -> None:
     assert trace.ok
     assert any(step.action == "invalid" for step in trace.steps)
     assert studio.read_file(workspace, "core/app.py") == "x = 8\n"
+
+
+def test_agent_can_search_then_edit_one_snippet(studio: CodeStudio) -> None:
+    """The OpenHands-style loop: locate, then change one exact snippet."""
+    workspace = studio.create("Surgical")
+    studio.write_file(workspace, "core/app.py", "a = 1\nb = 2\nc = 3\n")
+    coder = FakeCoder(
+        [
+            '{"action": "search", "query": "b = 2"}',
+            '{"action": "edit_file", "path": "core/app.py", "old": "b = 2", "new": "b = 20"}',
+            '{"action": "done", "summary": "changed b"}',
+        ]
+    )
+    trace = CodingAgent(studio, coder).run(workspace, "change b")
+    assert trace.ok
+    assert trace.writes == ["core/app.py"]
+    # The search result reached the model, so it could edit the right place.
+    assert any("core/app.py:2:" in message.content for message in coder.calls[2])
+    # And only that one line changed.
+    assert studio.read_file(workspace, "core/app.py") == "a = 1\nb = 20\nc = 3\n"
+
+
+def test_agent_can_find_files(studio: CodeStudio) -> None:
+    workspace = studio.create("Find")
+    coder = FakeCoder(
+        [
+            '{"action": "find_files", "pattern": "**/*.py"}',
+            '{"action": "done", "summary": "listed"}',
+        ]
+    )
+    trace = CodingAgent(studio, coder).run(workspace, "list python files")
+    assert trace.ok
+    assert any("core/app.py" in step.result for step in trace.steps)
+
+
+def test_agent_find_files_refuses_an_escape(studio: CodeStudio) -> None:
+    workspace = studio.create("Find escape")
+    coder = FakeCoder(
+        [
+            '{"action": "find_files", "pattern": "../*.py"}',
+            '{"action": "done", "summary": "tried"}',
+        ]
+    )
+    trace = CodingAgent(studio, coder).run(workspace, "escape")
+    assert any(step.result.startswith("ERROR:") for step in trace.steps)
+
+
+def test_agent_surfaces_an_edit_error_and_can_retry(studio: CodeStudio) -> None:
+    workspace = studio.create("Retry")
+    studio.write_file(workspace, "core/app.py", "a = 1\n")
+    coder = FakeCoder(
+        [
+            '{"action": "edit_file", "path": "core/app.py", "old": "NOPE", "new": "x"}',
+            '{"action": "edit_file", "path": "core/app.py", "old": "a = 1", "new": "a = 2"}',
+            '{"action": "done", "summary": "fixed"}',
+        ]
+    )
+    trace = CodingAgent(studio, coder).run(workspace, "fix a")
+    assert any(step.result.startswith("ERROR:") for step in trace.steps)
+    assert studio.read_file(workspace, "core/app.py") == "a = 2\n"
+
+
+def test_agent_runs_checks_and_records_the_outcome(studio: CodeStudio) -> None:
+    workspace = studio.create("Checks")
+    coder = FakeCoder(
+        [
+            '{"action": "run_checks"}',
+            '{"action": "done", "summary": "checked"}',
+        ]
+    )
+    agent = CodingAgent(studio, coder, check_command=("python", "-c", "print('ok')"))
+    trace = agent.run(workspace, "run the checks")
+    assert trace.checked is True
+    assert trace.checks_ok is True
+    assert "Checks: passed" in trace.render()
+
+
+def test_agent_can_be_denied_the_checks(studio: CodeStudio) -> None:
+    workspace = studio.create("No checks")
+    coder = FakeCoder(
+        [
+            '{"action": "run_checks"}',
+            '{"action": "done", "summary": "done"}',
+        ]
+    )
+    agent = CodingAgent(studio, coder, allow_checks=False)
+    trace = agent.run(workspace, "run the checks")
+    assert trace.checked is False
+    assert any(step.result.startswith("ERROR:") for step in trace.steps)
+
+
+def test_agent_edit_file_does_not_duplicate_a_write(studio: CodeStudio) -> None:
+    workspace = studio.create("One write")
+    studio.write_file(workspace, "core/app.py", "a = 1\n")
+    coder = FakeCoder(
+        [
+            '{"action": "edit_file", "path": "core/app.py", "old": "a = 1", "new": "a = 2"}',
+            '{"action": "edit_file", "path": "core/app.py", "old": "a = 2", "new": "a = 3"}',
+            '{"action": "done", "summary": "twice"}',
+        ]
+    )
+    trace = CodingAgent(studio, coder).run(workspace, "twice")
+    assert trace.writes == ["core/app.py"]
+
+
+def test_agent_can_review_its_own_diff(studio: CodeStudio) -> None:
+    """The OpenHands habit: look at the change before calling it done."""
+    workspace = studio.create("Review")
+    studio.write_file(workspace, "core/app.py", "a = 1\n")
+    coder = FakeCoder(
+        [
+            '{"action": "edit_file", "path": "core/app.py", "old": "a = 1", "new": "a = 2"}',
+            '{"action": "diff"}',
+            '{"action": "done", "summary": "reviewed"}',
+        ]
+    )
+    trace = CodingAgent(studio, coder).run(workspace, "change a")
+    assert trace.ok
+    diff_step = next(step for step in trace.steps if step.action == "diff")
+    assert "a = 2" in diff_step.result
+
+
+def test_agent_records_a_failing_check_honestly(studio: CodeStudio) -> None:
+    """A failing test run is a normal observation, not an ``ERROR:`` line."""
+    workspace = studio.create("Failing checks")
+    coder = FakeCoder(
+        [
+            '{"action": "run_checks"}',
+            '{"action": "done", "summary": "done anyway"}',
+        ]
+    )
+    agent = CodingAgent(studio, coder, check_command=("python", "-c", "raise SystemExit(1)"))
+    trace = agent.run(workspace, "run the checks")
+    assert trace.checked is True
+    assert trace.checks_ok is False
+    assert "Checks: failed" in trace.render()
+    assert not any(step.result.startswith("ERROR:") for step in trace.steps)
 
 
 def test_agent_refuses_a_write_outside_the_workspace(studio: CodeStudio) -> None:
@@ -707,6 +992,70 @@ def test_cli_json_output(project: Path, tmp_path: Path, monkeypatch, capsys) -> 
     assert payload["base_branch"] == "main"
     assert payload["repository"] is True
     assert payload["workspaces"] == []
+
+
+def test_cli_edit_and_search(project: Path, tmp_path: Path, monkeypatch, capsys) -> None:
+    from cli import studio as studio_cli
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path / "data"))
+    root = ["--root", str(project), "--base-branch", "main"]
+    assert studio_cli.main([*root, "new", "edit me"]) == 0
+    capsys.readouterr()
+
+    assert studio_cli.main([*root, "search", "edit-me", "x = 1"]) == 0
+    assert "core/app.py:1:" in capsys.readouterr().out
+
+    assert studio_cli.main(
+        [*root, "edit", "edit-me", "core/app.py", "--old", "x = 1", "--new", "x = 5"]
+    ) == 0
+    assert "Replaced 1 occurrence" in capsys.readouterr().out
+    assert (project / "core" / "app.py").read_text(encoding="utf-8") == "x = 1\n"  # worktree only
+
+    # An ambiguous edit is refused with a non-zero exit, not silently applied.
+    assert studio_cli.main(
+        [*root, "write", "edit-me", "core/app.py", "--content", "a = 1\nb = 2\na = 1\n"]
+    ) == 0
+    capsys.readouterr()
+    assert studio_cli.main(
+        [*root, "edit", "edit-me", "core/app.py", "--old", "a = 1", "--new", "a = 9"]
+    ) == 4
+    capsys.readouterr()
+
+    # --all opts into replacing every occurrence.
+    assert studio_cli.main(
+        [*root, "edit", "edit-me", "core/app.py", "--old", "a = 1", "--new", "a = 9", "--all"]
+    ) == 0
+    assert "Replaced 2 occurrence" in capsys.readouterr().out
+
+
+def test_cli_models_and_download_gate(project: Path, tmp_path: Path, monkeypatch, capsys) -> None:
+    from cli import studio as studio_cli
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path / "data"))
+    root = ["--root", str(project), "--base-branch", "main"]
+    assert studio_cli.main([*root, "models"]) == 0
+    out = capsys.readouterr().out
+    assert "qwen2.5-coder-7b" in out
+
+    # Without --approve the download is refused before it can leave the machine.
+    assert studio_cli.main([*root, "download"]) == 2
+    assert "--approve" in capsys.readouterr().err
+
+
+def test_cli_backend_reports_the_runtime(project: Path, tmp_path: Path, monkeypatch, capsys) -> None:
+    import json
+
+    from cli import studio as studio_cli
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path / "data"))
+    root = ["--root", str(project), "--base-branch", "main", "--json"]
+    # No model and no server in the test environment: honest, non-zero, actionable.
+    code = studio_cli.main([*root, "backend"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 3
+    assert payload["available"] is False
+    assert payload["backend"] in {"in-process", "ollama", "none"}
+    assert payload["hint"]
 
 
 def test_cli_without_a_subcommand_prints_help(capsys) -> None:

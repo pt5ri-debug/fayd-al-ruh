@@ -46,6 +46,7 @@ FEATURE_PDF = "pdf"
 FEATURE_OCR = "ocr"
 FEATURE_IMAGE = "image"
 FEATURE_ULTRON = "ultron"
+FEATURE_CODER = "coder"
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,19 @@ FEATURES: dict[str, OptionalFeature] = {
             "file into the data/ultron folder."
         ),
         system_missing_note="no `.gguf` model file is present yet.",
+    ),
+    FEATURE_CODER: OptionalFeature(
+        key=FEATURE_CODER,
+        title="Code Studio coding model (in-process)",
+        summary="Let the Code Studio write code with a local model, with no Ollama server running.",
+        requirements_file="requirements-coder.txt",
+        import_names=("llama_cpp", "huggingface_hub"),
+        system_note=(
+            "The model weights are a separate one-time, human-approved download: "
+            "run `python -m cli studio download --approve` (~5 GB), or drop a `.gguf` "
+            "file into the data/coder folder."
+        ),
+        system_missing_note="no `.gguf` coding model file is present yet.",
     ),
 }
 
@@ -187,6 +201,18 @@ def _ultron_model_cached() -> bool:
     return model_is_cached()
 
 
+def _coder_model_cached() -> bool:
+    """Whether at least one coding model file (a ``.gguf``) is already on disk.
+
+    The extra installs the runtime; the model file is a separate one-time
+    download (or a file the user drops in), so this is the second half of
+    "usable right now".
+    """
+    from core.coder_llama import model_is_cached
+
+    return model_is_cached()
+
+
 def status(key: str) -> FeatureStatus:
     """Check one optional feature without importing its heavy packages eagerly."""
     missing = missing_imports(key)
@@ -197,6 +223,8 @@ def status(key: str) -> FeatureStatus:
         system_ok = _image_weights_cached() if python_ok else False
     elif key == FEATURE_ULTRON:
         system_ok = _ultron_model_cached() if python_ok else False
+    elif key == FEATURE_CODER:
+        system_ok = _coder_model_cached() if python_ok else False
     else:
         system_ok = True
     return FeatureStatus(key=key, python_ok=python_ok, system_ok=system_ok, missing_python=missing)

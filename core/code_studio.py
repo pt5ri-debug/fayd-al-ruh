@@ -67,6 +67,12 @@ DEFAULT_MAX_FILE_BYTES = 512_000
 #: A hard ceiling on how much of the tree one listing will return.
 DEFAULT_MAX_LISTED_FILES = 4000
 
+#: A ceiling on the files one search walks, so a query cannot stall on a huge tree.
+DEFAULT_MAX_SEARCHED_FILES = 4000
+
+#: A ceiling on the hits one search returns, so the model's prompt stays bounded.
+DEFAULT_MAX_SEARCH_HITS = 200
+
 _GIT_TIMEOUT = 120.0
 
 
@@ -137,6 +143,27 @@ class FileEntry:
 
     path: str
     size: int
+
+
+@dataclass(frozen=True)
+class SearchHit:
+    """One matching line found by :meth:`CodeStudio.search`."""
+
+    path: str
+    line: int
+    text: str
+    before: str = ""
+    after: str = ""
+
+    def render(self) -> str:
+        """``path:line: text``, with optional context lines, for the model."""
+        lines = []
+        if self.before:
+            lines.append(self.before)
+        lines.append(f"{self.path}:{self.line}: {self.text}")
+        if self.after:
+            lines.append(self.after)
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -441,7 +468,146 @@ class CodeStudio:
             raise StudioError("The content is larger than the Studio's size limit.")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+        self._invalidate_checks(workspace)
         return len(encoded)
+
+    def _invalidate_checks(self, workspace: Workspace) -> None:
+        """Forget a recorded check result, because the files have changed since.
+
+        A check result is evidence about one revision. Editing a file afterwards
+        makes it stale, and a stale *pass* must never authorise a merge, so the
+        result is cleared and Merge waits for a fresh run.
+        """
+        if workspace.checks_passed is None and not workspace.checks_summary:
+            return
+        workspace.checks_passed = None
+        workspace.checks_summary = ""
+        self._record(workspace)
+
+    def edit_file(
+        self,
+        workspace: Workspace,
+        relative: str,
+        old: str,
+        new: str,
+        *,
+        replace_all: bool = False,
+    ) -> int:
+        """Replace ``old`` with ``new`` in one file; returns the replacements made.
+
+        This is the *surgical* edit a whole-file rewrite cannot express: a large
+        file is changed at one site without the model having to reproduce every
+        other line. The match is exact and literal (never a regular expression),
+        and the file is left untouched unless the match is unambiguous:
+
+        * ``old`` must be non-empty, and must occur exactly once -- unless
+          ``replace_all`` is set, in which case every occurrence is replaced.
+        * No match, or an ambiguous one, raises :class:`StudioError` and changes
+          nothing, so a mistaken edit cannot silently corrupt the file.
+        """
+        if not old:
+            raise StudioError("The `old` text to replace cannot be empty.")
+        path = self.resolve(workspace, relative)
+        self._check_suffix(path)
+        if not path.is_file():
+            raise StudioError(f"Not a file: {relative}")
+        if path.stat().st_size > self.max_file_bytes:
+            raise StudioError(f"`{relative}` is larger than the editor's size limit.")
+        text = path.read_text(encoding="utf-8", errors="replace")
+        count = text.count(old)
+        if count == 0:
+            raise StudioError(f"The `old` text was not found in {relative}.")
+        if count > 1 and not replace_all:
+            raise StudioError(
+                f"The `old` text appears {count} times in {relative}, so the edit is "
+                "ambiguous. Include more surrounding context to make it unique, or "
+                "set `replace_all` to true."
+            )
+        updated = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+        encoded = updated.encode("utf-8")
+        if len(encoded) > self.max_file_bytes:
+            raise StudioError("The edited file would be larger than the Studio's size limit.")
+        path.write_text(updated, encoding="utf-8")
+        self._invalidate_checks(workspace)
+        return count if replace_all else 1
+
+    def search(
+        self,
+        workspace: Workspace,
+        query: str,
+        *,
+        relative: str = "",
+        limit: int = DEFAULT_MAX_SEARCH_HITS,
+        context_lines: int = 0,
+    ) -> tuple[SearchHit, ...]:
+        """Find a literal string in the workspace's text files.
+
+        Case-insensitive and literal (never a regular expression), so a search for
+        ``def foo(`` finds exactly that. ``relative`` narrows the walk to one file
+        or subfolder. Returns at most ``limit`` hits, each with its line number and
+        an optional line of context, so the model can locate code before editing it.
+        """
+        needle = query.strip()
+        if not needle:
+            raise StudioError("The search query cannot be empty.")
+        root = workspace.path.resolve()
+        start = self.resolve(workspace, relative) if relative.strip() else root
+        if start.is_file():
+            candidates = [start]
+        else:
+            candidates = []
+            for path in sorted(start.rglob("*")):
+                if len(candidates) >= DEFAULT_MAX_SEARCHED_FILES:
+                    break
+                if not path.is_file():
+                    continue
+                rel = path.relative_to(root)
+                if any(part in SKIP_DIRS for part in rel.parts):
+                    continue
+                try:
+                    self._check_suffix(path)
+                except StudioError:
+                    continue
+                candidates.append(path)
+
+        lowered = needle.casefold()
+        hits: list[SearchHit] = []
+        for path in candidates:
+            if len(hits) >= limit:
+                break
+            try:
+                if path.stat().st_size > self.max_file_bytes:
+                    continue
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            relative_path = path.relative_to(root).as_posix()
+            for number, line in enumerate(lines, start=1):
+                if lowered in line.casefold():
+                    before, after = self._context(lines, number, context_lines)
+                    hits.append(
+                        SearchHit(
+                            path=relative_path,
+                            line=number,
+                            text=line.strip()[:240],
+                            before=before,
+                            after=after,
+                        )
+                    )
+                    if len(hits) >= limit:
+                        break
+        return tuple(hits)
+
+    @staticmethod
+    def _context(lines: Sequence[str], number: int, context_lines: int) -> tuple[str, str]:
+        """The lines just before and after ``number`` (1-based), if asked for."""
+        if context_lines <= 0:
+            return "", ""
+        start = max(0, number - 1 - context_lines)
+        end = min(len(lines), number + context_lines)
+        before = "\n".join(line.rstrip() for line in lines[start : number - 1])
+        after = "\n".join(line.rstrip() for line in lines[number:end])
+        return before, after
 
     # --- change inspection ----------------------------------------------
     def changed_files(self, workspace: Workspace) -> tuple[str, ...]:
@@ -631,6 +797,8 @@ __all__ = [
     "BRANCH_PREFIX",
     "DEFAULT_BASE_BRANCH",
     "DEFAULT_MAX_FILE_BYTES",
+    "DEFAULT_MAX_SEARCHED_FILES",
+    "DEFAULT_MAX_SEARCH_HITS",
     "SKIP_DIRS",
     "WRITABLE_SUFFIXES",
     "CheckResult",
@@ -638,6 +806,7 @@ __all__ = [
     "FileEntry",
     "GitCommand",
     "MergeResult",
+    "SearchHit",
     "StudioError",
     "Workspace",
     "default_check_command",
