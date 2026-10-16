@@ -1191,7 +1191,10 @@ class FaydGUI:
         ).pack(pady=(10, 0))
         tk.Label(
             self._empty,
-            text="Answering mouth: “From sources” cites passages · “From trained model” shows what it learned",
+            text=(
+                "Answering mouth: “From sources” cites passages · “From trained model” "
+                "shows what it learned · “Ultron” answers anything, locally (no citations)"
+            ),
             bg=self._theme.base, fg=self._theme.text_dim, font=(self._font, 9), justify="center",
             wraplength=560,
         ).pack(pady=(16, 0))
