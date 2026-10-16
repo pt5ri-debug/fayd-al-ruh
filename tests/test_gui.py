@@ -1058,7 +1058,39 @@ def test_window_speaks_honestly_when_no_engine_is_installed() -> None:
         app._speak_text("hello there")
         root.update()
         notes = [entry.text for entry in app._rows if entry.role == "note"]
-        assert any("install espeak" in note.lower() for note in notes)
+        assert any("install a speech engine" in note.lower() for note in notes)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_offers_to_install_the_speech_engine() -> None:
+    import tkinter as tk
+
+    from core import speech
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.update()
+        # The sidebar offers the install entry while no engine is present.
+        if not app.service.reading_available():
+            app._toggle_settings()
+            root.update()
+            labels = [w.cget("text") for w in app._settings_panel.winfo_children() if "text" in w.keys()]
+            assert any("Install a speech engine" in label for label in labels)
+
+        # Rendering a successful install refreshes the reader and confirms it.
+        refreshed = []
+        app.service.refresh_reading = lambda: refreshed.append(True)  # type: ignore[method-assign]
+        app._render_speech_install(
+            speech.SpeechInstallResult(ok=True, message="Installed a speech engine (espeak-ng).")
+        )
+        root.update()
+        notes = [entry.text for entry in app._rows if entry.role == "note"]
+        assert any("Installed a speech engine" in note for note in notes)
+        assert refreshed == [True]
     finally:
         root.destroy()
 

@@ -547,6 +547,10 @@ class ChatService:
         """True when a real speech engine is installed."""
         return self._reader.available()
 
+    def refresh_reading(self) -> None:
+        """Re-discover the speech engine (after one is installed mid-session)."""
+        self._reader.refresh()
+
     def _retriever(self):
         """The grounded assistant's retriever, when one is wired in.
 

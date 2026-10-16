@@ -86,6 +86,15 @@ class TextReader:
         """True when a real speech engine is installed (so audio is not silent)."""
         return self.synthesizer.name != SilentSynthesizer.name
 
+    def refresh(self) -> None:
+        """Drop the cached engine and speaker, so a newly installed engine is found.
+
+        The synthesizer is built once and cached; after the user installs a speech
+        engine mid-session this re-discovers it instead of keeping the silent one.
+        """
+        self._synthesizer = None
+        self._speaker = None
+
     @property
     def speaker(self) -> Speaker:
         if self._speaker is None:

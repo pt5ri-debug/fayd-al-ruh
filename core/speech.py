@@ -17,9 +17,11 @@ conversation flow is exercised end to end on a fresh clone.
 
 from __future__ import annotations
 
+import platform
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -171,6 +173,155 @@ TTS_ENGINES: tuple[tuple[str, str, "object", "object"], ...] = (
     ("flite", "flite", _flite_argv, _flite_voice_options),
     ("say", "say", _say_argv, _say_voice_options),
 )
+
+
+#: The system package a Debian/Ubuntu machine needs for a real voice engine.
+SPEECH_SYSTEM_PACKAGES: dict[str, str] = {
+    "debian": "espeak-ng",
+    "fedora": "espeak-ng",
+    "arch": "espeak-ng",
+    "alpine": "espeak-ng",
+    "macos": "espeak-ng",  # `brew install espeak-ng`; macOS also has its own `say`
+    "windows": "espeak-ng",  # download the Windows build, or use `pyttsx3`
+}
+
+
+@dataclass(frozen=True)
+class SpeechInstallPlan:
+    """How to get a real speech engine, honest about what pip cannot do.
+
+    A speech engine (``espeak-ng`` and friends) is an ordinary *system* program,
+    not a Python package, so ``pip`` cannot install it -- the same distinction
+    the OCR path makes for Tesseract. ``command`` is a ready-to-run package-manager
+    command on this platform, or empty when the app does not know one (so the
+    caller shows ``hint`` instead of pretending it can install).
+    """
+
+    platform: str
+    command: tuple[str, ...]
+    hint: str
+
+    @property
+    def can_install(self) -> bool:
+        return bool(self.command)
+
+
+def _package_manager_command() -> tuple[str, ...]:
+    """A ``sudo`` package-manager command for this OS, or empty when unknown."""
+    system = platform.system().lower()
+    if system == "linux":
+        if shutil.which("apt-get"):
+            return ("sudo", "apt-get", "install", "-y", SPEECH_SYSTEM_PACKAGES["debian"])
+        if shutil.which("dnf"):
+            return ("sudo", "dnf", "install", "-y", SPEECH_SYSTEM_PACKAGES["fedora"])
+        if shutil.which("pacman"):
+            return ("sudo", "pacman", "-S", "--noconfirm", SPEECH_SYSTEM_PACKAGES["arch"])
+        if shutil.which("apk"):
+            return ("sudo", "apk", "add", SPEECH_SYSTEM_PACKAGES["alpine"])
+        return ()
+    if system == "darwin" and shutil.which("brew"):
+        return ("brew", "install", SPEECH_SYSTEM_PACKAGES["macos"])
+    return ()
+
+
+def speech_install_plan() -> SpeechInstallPlan:
+    """The platform-aware way to install a real speech engine (usually ``espeak-ng``)."""
+    system = platform.system().lower()
+    command = _package_manager_command()
+    if command:
+        return SpeechInstallPlan(system, command, " ".join(command))
+    if system == "darwin":
+        return SpeechInstallPlan(
+            system,
+            (),
+            "Install espeak-ng with Homebrew (`brew install espeak-ng`); macOS `say` "
+            "already provides a voice.",
+        )
+    if system == "windows":
+        return SpeechInstallPlan(
+            system,
+            (),
+            "Download the espeak-ng Windows build and put `espeak-ng.exe` on PATH; "
+            "the project also speaks through macOS `say` and Linux espeak-ng/espeak/flite.",
+        )
+    return SpeechInstallPlan(
+        system,
+        (),
+        "Install espeak-ng with your system package manager "
+        "(e.g. `sudo apt install espeak-ng`).",
+    )
+
+
+@dataclass(frozen=True)
+class SpeechInstallResult:
+    """The outcome of an attempted speech-engine install, ready to show the user."""
+
+    ok: bool
+    command: tuple[str, ...] = ()
+    returncode: int | None = None
+    output: str = ""
+    message: str = ""
+    ran: bool = True
+
+
+def speech_available() -> bool:
+    """Whether any real TTS engine is installed (the same check the reader uses)."""
+    return discover_synthesizer_name() != "silent"
+
+
+def install_speech_engine(
+    *,
+    runner: "SpeechCommandRunner | None" = None,
+) -> SpeechInstallResult:
+    """Try to install a real speech engine as a system package. Never raises.
+
+    ``pip`` cannot install ``espeak-ng`` (it is an OS package, like Tesseract), so
+    this runs the platform's package manager through ``sudo`` when the app knows
+    one. If it succeeds and the engine is now on PATH, ``ok`` is True. When the app
+    does not know an install command (or the runner fails), ``ran``/``ok`` are
+    False and ``message`` carries the manual hint instead of a false promise.
+    """
+    if speech_available():
+        return SpeechInstallResult(
+            ok=True, ran=False, message="A speech engine is already installed."
+        )
+    plan = speech_install_plan()
+    if not plan.can_install:
+        return SpeechInstallResult(ok=False, ran=False, message=plan.hint)
+    run = runner or _default_speech_runner
+    returncode, output = run(plan.command)
+    ok = returncode == 0 and speech_available()
+    if ok:
+        message = f"Installed a speech engine ({SPEECH_SYSTEM_PACKAGES['debian']})."
+    elif returncode == 0:
+        message = (
+            "The package manager reported success, but no speech engine is on PATH yet. "
+            + plan.hint
+        )
+    else:
+        message = f"The install command failed.\n{plan.hint}"
+    return SpeechInstallResult(
+        ok=ok,
+        command=plan.command,
+        returncode=returncode,
+        output=output,
+        message=message,
+    )
+
+
+def _default_speech_runner(argv: Sequence[str]) -> tuple[int, str]:
+    completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        list(argv),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    combined = (completed.stdout or "") + (completed.stderr or "")
+    return completed.returncode, combined
+
+
+#: Runs one install command and returns ``(returncode, combined_output)``.
+SpeechCommandRunner = Callable[[Sequence[str]], tuple[int, str]]
 
 
 def discover_synthesizer_name() -> str:
@@ -551,12 +702,16 @@ class AudioModel:
 
 __all__ = [
     "SAMPLE_RATE",
+    "SPEECH_SYSTEM_PACKAGES",
     "AudioClip",
     "AudioModel",
     "CommandSynthesizer",
     "MicrophoneRecorder",
     "SilentSynthesizer",
     "Speaker",
+    "SpeechCommandRunner",
+    "SpeechInstallPlan",
+    "SpeechInstallResult",
     "SpeechRecognizer",
     "SpeechSynthesizer",
     "TTS_ENGINES",
@@ -566,6 +721,9 @@ __all__ = [
     "WhisperRecognizer",
     "discover_recognizer_name",
     "discover_synthesizer_name",
+    "install_speech_engine",
     "load_recognizer",
     "load_synthesizer",
+    "speech_available",
+    "speech_install_plan",
 ]

@@ -222,8 +222,15 @@ Arabic is kept as secondary aliases where useful.
   an ontology identifier the model echoed ("pore_pressure") as the phrase it names
   — without rewriting the model's words — and is used by `ai/mind.py`.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
-  (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. CLI:
-  `python -m ai.voice` / `python -m cli voice`.
+  (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
+  engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
+  package, so pip cannot install it — like Tesseract for OCR. `speech_available`,
+  `speech_install_plan` (a platform-aware package-manager command, or an honest
+  hint when the app knows none), and `install_speech_engine` (never raises; an
+  injected `runner` makes it testable with no real install) give the app a real
+  next step when no engine is present. CLI: `python -m ai.voice` / `python -m cli
+  voice`; `python -m ai.speak --install-engine` / `python -m cli deps --install
+  speech` run it.
 - `core/voices.py` — the text-to-speech **voice catalog**: 16 `Voice`s in four
   categories (`man`/`woman`/`boy`/`girl`, four each), each naming a timbre
   (engine `variant` `m1`..`m6` / `f1`..`f4`), a pitch, and a speed.
@@ -240,8 +247,9 @@ Arabic is kept as secondary aliases where useful.
 - `core/reading.py` — `TextReader`: read the chat's text aloud. Ties a catalog
   `Voice`, a `SpeechSynthesizer`, and a `Speaker` together behind `render`/
   `speak` (playback is best-effort, so a machine with no player still gets the
-  clip)/`save` (WAV), `set_voice`, `available`, and an honest `describe()` that
-  names the voice and says when no engine exists rather than pretending. CLI:
+  clip)/`save` (WAV), `set_voice`, `available`, `refresh` (re-discovers the engine
+  after one is installed mid-session), and an honest `describe()` that names the
+  voice and says when no engine exists rather than pretending. CLI:
   `python -m ai.speak [list] "<text>" --voice <key> [--write-wav f] [--no-play]`
   / `python -m cli speak` and `python -m cli voices`.
 - `core/jarvis.py` — the unified Jarvis loop over the assistant, the tool router,
@@ -910,7 +918,10 @@ clone, each optional so the base system still runs without it:
   text with a chosen voice through the installed system engine, and the window
   gains a per-message "Read aloud" control, a grouped voice menu, an opt-in
   auto-speak flag (all persisted), and `python -m cli speak|voices`. Every voice is
-  honestly described as engine settings, not a recording.
+  honestly described as engine settings, not a recording. The engine is a system
+  package, so when it is absent the window's sidebar and the CLI offer to install
+  it (`install_speech_engine`, `python -m cli speak --install-engine`) instead of
+  only naming it, and `python -m cli deps` reports it beside the other features.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
