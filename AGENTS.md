@@ -305,7 +305,11 @@ Arabic is kept as secondary aliases where useful.
   setuptools package discovery). `DiffusionUnavailable` is raised when the extra
   or the weights are missing so the caller can fall back to the procedural
   renderer. `DiffusionPipelineRunner` is the seam a test injects (no torch
-  needed).
+  needed). The text-to-image pipeline loads with `safety_checker=None`, like the
+  editor below: the default `realistic` preset's model ships a real checker, and
+  it blanks a picture it misreads (a stylised prompt is a common false positive)
+  to a solid black frame, which is exactly the "black preview" the window would
+  otherwise show.
 - `core/imagegen_diffusion.py` also carries the optional **learned image
   editor**: `InstructionImageEditor` runs `timbrooks/instruct-pix2pix` (an
   instruction-following diffusion model) over an existing image, so it can make

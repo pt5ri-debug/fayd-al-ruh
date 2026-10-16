@@ -396,17 +396,23 @@ def _accepts(pipeline: Any, name: str) -> bool:
 def _load_pipeline(diffusers: Any, model_dir: str, torch: Any) -> Any:
     """Load a text-to-image pipeline in float32, tolerating the dtype rename.
 
-    Diffusers renamed ``torch_dtype`` to ``dtype`` (1.0); try the new name first
-    and fall back, so the backend works across versions.
+    ``safety_checker=None`` mirrors :func:`_load_edit_pipeline`: the checker blanks
+    a picture it misreads (an abstract or stylised prompt is a common false
+    positive) to a solid black frame instead of drawing it. The default
+    ``realistic`` preset's model ships a real checker, so without this the window's
+    preview shows black. Diffusers renamed ``torch_dtype`` to ``dtype`` (1.0); try
+    the new name first and fall back, so the backend works across versions.
     """
     for keyword in ("dtype", "torch_dtype"):
         try:
             return diffusers.AutoPipelineForText2Image.from_pretrained(
-                model_dir, **{keyword: torch.float32}
+                model_dir, safety_checker=None, **{keyword: torch.float32}
             )
         except TypeError:
             continue
-    return diffusers.AutoPipelineForText2Image.from_pretrained(model_dir)
+    return diffusers.AutoPipelineForText2Image.from_pretrained(
+        model_dir, safety_checker=None
+    )
 
 
 def _install_scheduler(pipeline: Any, diffusers: Any, name: str) -> None:
