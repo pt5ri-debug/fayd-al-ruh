@@ -762,3 +762,33 @@ def test_window_switches_mouth_before_the_settings_panel_is_opened(tmp_path) -> 
         assert app._source_var.get() == MOUTH_ULTRON
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_hero_names_all_three_mouths(tmp_path) -> None:
+    """The welcome hint must not forget Ultron now that it is a mouth here too."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_gui_service())
+        root.update()
+
+        def walk(widget, out):
+            for child in widget.winfo_children():
+                out.append(child)
+                walk(child, out)
+
+        widgets: list = []
+        walk(app._empty, widgets)
+        hints = [
+            w.cget("text")
+            for w in widgets
+            if isinstance(w, tk.Label) and "Answering mouth" in str(w.cget("text"))
+        ]
+        assert hints, "the hero must explain the answering mouths"
+        assert "Ultron" in hints[0]
+    finally:
+        root.destroy()
