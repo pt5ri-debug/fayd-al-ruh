@@ -14,10 +14,11 @@ asks for one and the gates in the engine allow it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.code_agent import AgentError, AgentTrace, CodingAgent
+from core.code_agent import AgentError, AgentStep, AgentTrace, CodingAgent
 from core.code_studio import (
     CheckResult,
     CodeStudio,
@@ -252,11 +253,20 @@ class CodeStudioService:
         return StudioReport(True, "Diff ready.", detail=text)
 
     # --- agent ----------------------------------------------------------
-    def run_agent(self, slug: str, task: str, *, use_diff_context: bool = True) -> tuple[StudioReport, AgentTrace | None]:
+    def run_agent(
+        self,
+        slug: str,
+        task: str,
+        *,
+        use_diff_context: bool = True,
+        on_step: Callable[[AgentStep], None] | None = None,
+    ) -> tuple[StudioReport, AgentTrace | None]:
         """Ask the coding model to carry out ``task`` in the workspace.
 
         Returns the report *and* the trace, so the window can show every step the
-        model took. A missing model is reported honestly instead of failing.
+        model took. ``on_step`` is forwarded to the agent, so a caller can render
+        each step live as the run proceeds. A missing model is reported honestly
+        instead of failing.
         """
         try:
             workspace = self.workspace(slug)
@@ -283,7 +293,7 @@ class CodeStudioService:
             check_command=self.check_command,
         )
         try:
-            trace = agent.run(workspace, task, context=context)
+            trace = agent.run(workspace, task, context=context, on_step=on_step)
         except AgentError as error:
             return StudioReport(False, str(error)), None
         except CoderUnavailable as error:

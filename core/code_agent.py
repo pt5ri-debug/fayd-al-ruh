@@ -28,6 +28,7 @@ test drives the whole agent with a scripted fake and needs no Ollama.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -107,6 +108,31 @@ class AgentStep:
     detail: str = ""
     result: str = ""
     ok: bool = True
+
+    def live_lines(self, *, max_result_lines: int = 12) -> list[str]:
+        """A short, human-readable rendering of this step for a live transcript.
+
+        The window shows one of these per turn as the model works, so the reader
+        sees the same shape as a code host's agent chat: the action it took, then
+        what came back. A long observation is trimmed, so one big file read cannot
+        flood the transcript.
+        """
+        if self.action == "done":
+            return [f"✓ Done: {self.detail}"]
+        if self.action == "invalid":
+            return [f"⚠ Asked the model to reply again: {self.detail}"]
+        mark = "→" if self.ok else "✗"
+        head = f"{mark} {self.action} {self.detail}".rstrip()
+        lines = [head]
+        body = (self.result or "").rstrip()
+        if body:
+            observed = body.splitlines()
+            if len(observed) > max_result_lines:
+                kept = observed[:max_result_lines]
+                kept.append(f"… [{len(observed) - max_result_lines} more line(s)]")
+                observed = kept
+            lines.extend(f"   {line}" for line in observed)
+        return lines
 
 
 @dataclass
@@ -352,11 +378,20 @@ class CodingAgent:
         first = result.splitlines()[0] if result.strip() else ""
         return first.startswith("Checks passed")
 
-    def run(self, workspace: Workspace, task: str, *, context: str = "") -> AgentTrace:
+    def run(
+        self,
+        workspace: Workspace,
+        task: str,
+        *,
+        context: str = "",
+        on_step: Callable[[AgentStep], None] | None = None,
+    ) -> AgentTrace:
         """Carry out ``task`` in ``workspace``, returning the full trace.
 
         ``context`` is extra, optional background (for example the workspace's
-        current diff) placed in the first message.
+        current diff) placed in the first message. ``on_step``, when given, is
+        called with each :class:`AgentStep` as it happens, so a caller can show the
+        model's work live instead of only when the run ends.
         """
         if not task.strip():
             raise AgentError("The task cannot be empty.")
@@ -366,6 +401,11 @@ class CodingAgent:
         if context.strip():
             first += f"\n\nContext:\n{context.strip()}"
         messages.append(CoderMessage("user", first))
+
+        def report(step: AgentStep) -> None:
+            trace.steps.append(step)
+            if on_step is not None:
+                on_step(step)
 
         for index in range(1, self.max_steps + 1):
             try:
@@ -377,9 +417,7 @@ class CodingAgent:
             try:
                 action = parse_action(reply)
             except AgentError as error:
-                trace.steps.append(
-                    AgentStep(index, "invalid", detail=str(error), result="asked again", ok=False)
-                )
+                report(AgentStep(index, "invalid", detail=str(error), result="asked again", ok=False))
                 messages.append(CoderMessage("assistant", reply))
                 messages.append(
                     CoderMessage(
@@ -391,7 +429,7 @@ class CodingAgent:
 
             if action.name == "done":
                 trace.summary = action.summary or "The model reported the task complete."
-                trace.steps.append(AgentStep(index, "done", detail=trace.summary))
+                report(AgentStep(index, "done", detail=trace.summary))
                 return trace
 
             result = self._observe(workspace, action)
@@ -402,9 +440,7 @@ class CodingAgent:
             if action.name == "run_checks" and self.allow_checks:
                 trace.checked = True
                 trace.checks_ok = ok and self._checks_ok(result)
-            trace.steps.append(
-                AgentStep(index, action.name, detail=action.describe(), result=result, ok=ok)
-            )
+            report(AgentStep(index, action.name, detail=action.describe(), result=result, ok=ok))
             messages.append(CoderMessage("assistant", reply))
             messages.append(CoderMessage("user", result))
 

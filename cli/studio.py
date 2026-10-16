@@ -29,6 +29,7 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from core.code_studio import DEFAULT_BASE_BRANCH, StudioError
 from gui.code_studio import CodeStudioService
@@ -358,7 +359,14 @@ def _run_download(service: CodeStudioService, args: argparse.Namespace) -> int:
 
 
 def _run_ask(service: CodeStudioService, args: argparse.Namespace) -> int:
-    report, trace = service.run_agent(args.slug, args.request)
+    # Stream each step as the model takes it, so the terminal shows the work
+    # first-by-first like the window does. With --json, stdout stays clean, so the
+    # steps are dropped rather than printed.
+    def live(step: Any) -> None:
+        for line in step.live_lines():
+            print(line, flush=True)
+
+    report, trace = service.run_agent(args.slug, args.request, on_step=None if args.as_json else live)
     if args.as_json:
         payload: dict[str, object] = {
             "ok": report.ok,

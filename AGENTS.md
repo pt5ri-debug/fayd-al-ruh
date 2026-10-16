@@ -697,8 +697,10 @@ Arabic is kept as secondary aliases where useful.
   lets the agent review its own work before calling `done`. It tolerates a fenced
   reply and surrounding prose, pushes back on a bad reply rather than dying,
   truncates a large read (`read_chars`), stops at `max_steps`, and reports an
-  unreachable model honestly. A refused write is a *failed step in the trace*,
-  never a crash — the confinement in `core/code_studio.py` is what actually
+  unreachable model honestly. `run(..., on_step=...)` calls the callback with each
+  `AgentStep` as it happens, so the window and the CLI can show the work live
+  instead of only when the run ends. A refused write is a *failed step in the
+  trace*, never a crash — the confinement in `core/code_studio.py` is what actually
   holds, and the agent only surfaces it.
 - `gui/code_studio.py` — the Code Studio **service** (Tk-free): `CodeStudioService`
   wraps the engine, the coder client, and the check command, and returns plain
@@ -721,8 +723,14 @@ Arabic is kept as secondary aliases where useful.
   `RoundedBox`). The model's step trace and the diff/check output are transcript
   messages like a chat reply, not separate tabs: `_set_trace` adds a "Coding
   model" row and `_set_review` a "Diff and checks" row, both monospaced, through
-  the same `_add_message`/`_fit_height` path the chat window uses. The file editor
-  is a slide-in panel above the composer (`_show_editor`/`_hide_editor`). Long
+  the same `_add_message`/`_fit_height` path the chat window uses. *Ask the model*
+  now reads as a chat turn: `_add_message("user", request)` echoes the request as
+  the user's own bubble (and clears the composer), then `_run_background` passes
+  `on_step=self._on_agent_step`, and `_drain_steps` appends each `AgentStep`'s
+  `live_lines()` into a live "Coding model" bubble as the run proceeds — the same
+  first-by-first detail the OpenHands chat shows — before the final `_set_trace`
+  supersedes it. The file editor is a slide-in panel above the composer
+  (`_show_editor`/`_hide_editor`). Long
   work runs on a worker thread whose result is handed back through a **queue the
   UI thread drains** (`_schedule_pump`), because calling Tk's `after` from a
   worker thread races with the main loop; Merge stays disabled until the gate

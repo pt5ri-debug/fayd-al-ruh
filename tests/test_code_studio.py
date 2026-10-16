@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from core.code_agent import AgentError, CodingAgent, parse_action
+from core.code_agent import AgentError, AgentStep, CodingAgent, parse_action
 from core.code_studio import CodeStudio, StudioError
 from core.coder_model import (
     CoderMessage,
@@ -531,6 +531,46 @@ def test_agent_reads_then_writes_then_finishes(studio: CodeStudio) -> None:
     assert studio.read_file(workspace, "core/app.py") == "x = 7\n"
     # The model was told what it read, so it could act on it.
     assert any("x = 1" in message.content for message in coder.calls[1])
+
+
+def test_agent_reports_each_step_live(studio: CodeStudio) -> None:
+    """``on_step`` fires as the work happens, in order, and matches the trace."""
+    workspace = studio.create("Live steps")
+    coder = FakeCoder(
+        [
+            '{"action": "read_file", "path": "core/app.py"}',
+            '{"action": "write_file", "path": "core/app.py", "content": "x = 9\\n"}',
+            '{"action": "done", "summary": "set x to 9"}',
+        ]
+    )
+    live: list[AgentStep] = []
+    trace = CodingAgent(studio, coder).run(workspace, "set x to 9", on_step=live.append)
+    # Every step reached the callback, in the same order as the trace.
+    assert [step.action for step in live] == ["read_file", "write_file", "done"]
+    assert live == trace.steps
+
+
+def test_agent_step_live_lines_show_action_and_observation() -> None:
+    step = AgentStep(1, "write_file", detail="core/app.py", result="Wrote 6 bytes to core/app.py.")
+    lines = step.live_lines()
+    assert lines[0] == "→ write_file core/app.py"
+    assert "Wrote 6 bytes" in lines[1]
+
+
+def test_agent_step_live_lines_mark_a_failure_and_trim_a_long_read() -> None:
+    failed = AgentStep(2, "read_file", detail="missing.py", result="ERROR: not found", ok=False)
+    assert failed.live_lines()[0].startswith("✗ read_file missing.py")
+    big = AgentStep(3, "read_file", detail="big.py", result="\n".join(str(i) for i in range(50)))
+    lines = big.live_lines()
+    # The head plus the cap, then one honest "more lines" note.
+    assert len(lines) == 1 + 12 + 1
+    assert lines[-1] == "   … [38 more line(s)]"
+
+
+def test_agent_step_live_lines_render_done_and_invalid() -> None:
+    assert AgentStep(4, "done", detail="all good").live_lines() == ["✓ Done: all good"]
+    invalid = AgentStep(5, "invalid", detail="not JSON", ok=False)
+    assert "not JSON" in invalid.live_lines()[0]
 
 
 def test_agent_reports_a_bad_reply_and_keeps_going(studio: CodeStudio) -> None:

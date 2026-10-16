@@ -72,6 +72,20 @@ class FakeCoder:
         return self.script.pop(0)
 
 
+class SlowCoder(FakeCoder):
+    """A scripted model that pauses before each turn, so live steps are observable."""
+
+    def __init__(self, script: list[str], *, delay: float = 0.5) -> None:
+        super().__init__(script)
+        self.delay = delay
+
+    def chat(self, messages, *, temperature: float = 0.2) -> str:
+        import time
+
+        time.sleep(self.delay)
+        return super().chat(messages, temperature=temperature)
+
+
 def _service(project: Path, tmp_path: Path, script: list[str] | None = None) -> CodeStudioService:
     return CodeStudioService(
         project,
@@ -97,6 +111,18 @@ def _wait_until(root, predicate, *, timeout: float = 10.0) -> bool:
         root.update()
         time.sleep(0.01)
     return predicate()
+
+
+def _all_text_widgets(parent) -> list:
+    """Every ``tk.Text`` under ``parent``, so a test can search the whole transcript."""
+    import tkinter as tk
+
+    found = []
+    for child in parent.winfo_children():
+        if isinstance(child, tk.Text):
+            found.append(child)
+        found.extend(_all_text_widgets(child))
+    return found
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
@@ -226,6 +252,69 @@ def test_dialog_asks_the_model_and_shows_the_trace(project: Path, tmp_path: Path
         assert (dialog.service.workspace("set-x-to-6").path / "core" / "app.py").read_text(
             encoding="utf-8"
         ) == "x = 6\n"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_dialog_shows_the_question_and_streams_steps_live(project: Path, tmp_path: Path) -> None:
+    """The request appears as a user bubble, and the model's steps appear as it works."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.code_studio_dialog import CodeStudioDialog
+
+    script = [
+        '{"action": "read_file", "path": "core/app.py"}',
+        '{"action": "write_file", "path": "core/app.py", "content": "x = 5\\n"}',
+        '{"action": "done", "summary": "set x to 5"}',
+    ]
+    root = tk.Tk()
+    try:
+        service = CodeStudioService(
+            project,
+            studio=CodeStudio(project, workspaces_dir=tmp_path / "ws"),
+            client=SlowCoder(script),
+            check_command=("python", "-c", "pass"),
+        )
+        dialog = CodeStudioDialog(
+            root,
+            service,
+            theme=DARK_THEME,
+            font="TkDefaultFont",
+            mono="TkFixedFont",
+        )
+        root.update()
+        dialog._task_var.set("Live")
+        dialog._on_create_workspace()
+        assert _wait_until(root, lambda: dialog._workspace_list.size() == 1)
+        dialog._workspace_list.selection_set(0)
+        dialog._on_workspace_select()
+        root.update()
+
+        dialog._request_var.set("make x five")
+        dialog._on_ask_model()
+        # The request is echoed as the user's own message and the composer clears.
+        assert dialog._request_var.get() == ""
+        assert _wait_until(
+            root,
+            lambda: any(
+                "make x five" in child.get("1.0", "end")
+                for child in _all_text_widgets(dialog._transcript)
+            ),
+        )
+
+        # The live bubble fills in with the model's steps as the run proceeds: the
+        # read the model did, then the write, both before the run finishes.
+        assert _wait_until(
+            root,
+            lambda: dialog._live is not None
+            and "read_file" in dialog._live.get("1.0", "end")
+            and "write_file" in dialog._live.get("1.0", "end"),
+        )
+        assert _wait_until(root, lambda: "Done:" in dialog._trace.get("1.0", "end"))
+        # Once the run ends, the final trace supersedes the live bubble.
+        assert dialog._live is None
     finally:
         root.destroy()
 
