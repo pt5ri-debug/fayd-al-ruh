@@ -1,23 +1,29 @@
-"""The Code Studio window: edit the project's own code, test it, then merge.
+"""The Code Studio window: change the project's own code from a chat, test it, apply it.
 
 This is the project's "code host in a window". It borrows the model a developer
-already uses on a code host -- a branch per change, reviewed and merged when it is
+already uses on a code host -- a branch per change, reviewed and applied when it is
 good -- and implements it with the project's own ``git``:
 
-* **A workspace is an isolated copy.** *New workspace* makes a ``git worktree``
-  under ``data/studio/workspaces/<slug>`` on its own ``studio/<slug>`` branch, cut
-  from ``main``. Everything you and the coding model change happens there, so the
-  running checkout is never touched and a broken change cannot stop the program.
-* **The coding model edits it.** *Ask the model* sends a plain-language request to
-  a local coding model (``qwen2.5-coder:7b`` through Ollama by default) which reads
-  and writes files *inside the workspace only*, through a strict JSON protocol.
-  The request appears as the user's own message, and every step the model takes is
-  shown live in the transcript as it happens -- first by first, like the project's
-  own chat window -- so its work is reviewable rather than magic.
-* **Test, review, merge.** *Run checks* runs the project's own test command inside
-  the workspace; *Show diff* is the change as a unified diff; and **Merge** appears
-  only when the checks have passed and ``main`` has not moved on, so a merge can
-  never overwrite newer work. *Discard* throws the whole change away.
+* **A workspace is created for you.** Opening the Studio opens a workspace (a
+  ``git worktree`` under ``data/studio/workspaces/<slug>`` on its own
+  ``studio/<slug>`` branch, cut from ``main``), named automatically in order:
+  ``PR1``, ``PR2``, ... You never have to invent a name. Everything you and the
+  coding model change happens there, so the running checkout is never touched and
+  a broken change cannot stop the program.
+* **You just describe the change in the chat.** Type what you want changed in the
+  project's own code in the box below and press *Send*. *Start a new change*
+  opens the next workspace when you want a fresh one.
+* **The coding model edits it, live.** A local coding model
+  (``qwen2.5-coder:7b`` through Ollama by default) reads and writes files *inside
+  the workspace only*, through a strict JSON protocol. The request appears as the
+  user's own message, and every step the model takes is shown in the transcript as
+  it happens -- first by first, like the project's own chat window -- so its work
+  is reviewable rather than magic.
+* **Test, then ask to apply.** When the model finishes, the project's own test
+  command runs *inside the workspace*. Only when it passes does the window ask for
+  your approval to apply the change to the real project (the **Apply to the
+  project** button); a failing or unapproved change never reaches it. *Show diff*
+  is the change as a unified diff; *Discard change* throws it away.
 
 The window is a thin view over :class:`gui.code_studio.CodeStudioService`, so all
 of the logic is testable with no display. Tk is imported lazily with the rest of
@@ -29,7 +35,7 @@ from __future__ import annotations
 import queue
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import tkinter as tk
 from tkinter import font as tkfont
@@ -46,17 +52,22 @@ _COLUMN_MAX = 820
 #: A message taller than this scrolls inside its own card rather than the column.
 _MAX_BUBBLE_LINES = 40
 
+#: A sentinel queued when the model has finished and the checks are about to run,
+#: so the live bubble can say so. It is identity-compared, never a real step.
+CHECKS_MARKER = object()
+
 TITLE = "Code Studio"
 SUBTITLE = (
-    "Change the project's own code safely: every change gets its own isolated workspace (a "
-    "git worktree on its own branch). Ask the local coding model to make the change, review "
-    "the diff, run the tests, then merge — or discard it. The running program is never edited "
-    "directly, so a half-finished change can never break it."
+    "Change the project's own code safely: type what you want in the chat below, and the "
+    "coding model makes the change in an isolated workspace (a git worktree on its own "
+    "branch). Every step is shown live. When the change passes the tests, you are asked to "
+    "approve applying it to the project — the running program is never edited directly, so a "
+    "half-finished change can never break it."
 )
 HONESTY_LINE = (
-    "The coding model's edits are real file writes inside the workspace, and nothing it writes "
-    "reaches the project until you press Merge — which is refused unless the checks pass and "
-    "the base branch has not moved on."
+    "Type the change you want in the box below and press Send. The coding model's edits are "
+    "real file writes, but they happen in an isolated workspace and nothing reaches the "
+    "project until the checks pass and you approve applying the change."
 )
 
 #: The default coding model, shown in the status line so the choice is explicit.
@@ -97,8 +108,18 @@ class CodeStudioDialog:
         # thread (Tk is not thread-safe), so the model's work appears as it happens.
         self._steps: queue.Queue[Any] = queue.Queue()
         self._live: tk.Text | None = None
+        # Set when a run finished with a passing change, so the window can offer to
+        # apply it to the real project (the user's explicit approval).
+        self._pending_apply: str = ""
+        # True while the automatic first workspace is being opened, so its message
+        # does not overwrite one the user is reading.
+        self._auto_open = False
+        # True while the running job's own result is the message to keep, so the
+        # button refresh does not replace it.
+        self._quiet_job = False
+        # The slug being applied, so the result message names it after the run.
+        self._applying_slug = ""
 
-        self._task_var = tk.StringVar(value="")
         self._request_var = tk.StringVar(value="")
 
         self.window = tk.Toplevel(parent)
@@ -110,6 +131,7 @@ class CodeStudioDialog:
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._build()
         self.refresh()
+        self._ensure_workspace()
 
     # -- layout -----------------------------------------------------------
 
@@ -201,18 +223,13 @@ class CodeStudioDialog:
         self._workspace_list.bind("<<ListboxSelect>>", self._on_workspace_select)
 
         tk.Label(
-            sidebar, text="Describe the change, then create its workspace:",
+            sidebar, text="Workspaces are named for you, in order (PR1, PR2, …).",
             bg=theme.surface, fg=theme.text_secondary, font=(self.font, 8),
             anchor="w", justify="left", wraplength=248,
-        ).pack(fill="x", padx=14, pady=(0, 3))
-        tk.Entry(
-            sidebar, textvariable=self._task_var, bg=theme.base, fg=theme.foreground,
-            insertbackground=theme.primary, relief="flat", highlightthickness=0,
-            font=(self.font, 9),
-        ).pack(fill="x", padx=14, pady=(0, 4), ipady=4)
+        ).pack(fill="x", padx=14, pady=(0, 4))
         row = tk.Frame(sidebar, bg=theme.surface)
         row.pack(fill="x", padx=14, pady=(0, 6))
-        self._button(row, "New workspace", self._on_create_workspace).pack(side="left")
+        self._button(row, "Start a new change", self._on_new_change).pack(side="left")
         self._button(row, "Refresh", self.refresh).pack(side="left", padx=(6, 0))
 
         self._workspace_label = tk.Label(
@@ -230,13 +247,13 @@ class CodeStudioDialog:
         self._file_list.pack(fill="both", expand=True, padx=14, pady=(0, 6))
         self._file_list.bind("<<ListboxSelect>>", self._on_file_select)
 
-        self._section_label(sidebar, "Review and merge")
+        self._section_label(sidebar, "Review and apply")
         gate = tk.Frame(sidebar, bg=theme.surface)
         gate.pack(fill="x", padx=14, pady=(0, 4))
-        self._merge_button = self._button(gate, "Merge into the project", self._on_merge)
+        self._merge_button = self._button(gate, "Apply to the project", self._on_merge)
         self._merge_button.pack(side="left")
         self._merge_button.configure(state="disabled")
-        self._button(gate, "Discard workspace", self._on_discard).pack(side="left", padx=(6, 0))
+        self._button(gate, "Discard change", self._on_discard).pack(side="left", padx=(6, 0))
         self._checks_label = tk.Label(
             sidebar, text="Checks have not run yet.", bg=theme.surface, fg=theme.text_dim,
             font=(self.font, 8), anchor="w", justify="left", wraplength=248,
@@ -297,12 +314,14 @@ class CodeStudioDialog:
 
         actions = tk.Frame(inner, bg=theme.surface)
         actions.pack(fill="x", padx=12, pady=(0, 10))
-        self._ask_button = self._button(actions, "Ask the model", self._on_ask_model)
+        self._ask_button = self._button(actions, "Send", self._on_ask_model)
         self._ask_button.pack(side="right")
+        self._apply_button = self._button(actions, "Apply to the project", self._on_merge)
+        self._apply_button.pack(side="right", padx=(0, 6))
+        self._apply_button.configure(state="disabled")
         self._checks_button = self._button(actions, "Run checks", self._on_run_checks)
         self._checks_button.pack(side="right", padx=(0, 6))
         self._button(actions, "Show diff", self._on_show_diff).pack(side="right", padx=(0, 6))
-        self._button(actions, "Save file", self._on_save_file).pack(side="right", padx=(0, 6))
 
     def _build_editor_panel(self, parent: tk.Frame) -> None:
         """The file editor, revealed in the column when a file is opened."""
@@ -618,7 +637,7 @@ class CodeStudioDialog:
 
     # -- workspaces -------------------------------------------------------
 
-    def _on_workspace_select(self, _event: tk.Event | None = None) -> None:
+    def _on_workspace_select(self, _event: tk.Event | None = None, *, keep_note: bool = False) -> None:
         slug = self._selected_slug()
         if not slug:
             return
@@ -634,46 +653,88 @@ class CodeStudioDialog:
             fg=self.theme.text_secondary if workspace.checks_passed else self.theme.text_dim,
         )
         self._refresh_files()
-        self._refresh_merge_state()
+        self._refresh_merge_state(keep_note=keep_note)
         self._set_trace(workspace.task or "")
 
-    def _on_create_workspace(self) -> None:
-        task = self._task_var.get().strip()
-        if not task:
-            self._set_merge_note("Describe the change first.", error=True)
+    def _ensure_workspace(self) -> None:
+        """Open a workspace automatically, so the composer is ready to use.
+
+        The Studio only edits the project's own code, so a fresh window opens a
+        workspace (``PR1``, the next number) rather than making the user press a
+        button first. When the checkout is not a git repository, or a workspace is
+        already open, this does nothing.
+        """
+        if self._current_slug:
             return
+        state = self.service.state()
+        if not state.repository:
+            return
+        existing = state.workspaces
+        if existing:
+            self._select_workspace(existing[0].slug, keep_note=self._auto_open)
+            return
+        self._auto_open = True
+        self._run_background(
+            "Opening the first workspace…",
+            lambda: self.service.create_workspace(""),
+            self._after_create,
+            note=False,
+        )
+
+    def _select_workspace(self, slug: str, *, keep_note: bool = False) -> None:
+        """Select ``slug`` in the list and load it, as a click would."""
+        for index, workspace in enumerate(self._workspaces):
+            if workspace.slug == slug:
+                self._workspace_list.selection_clear(0, "end")
+                self._workspace_list.selection_set(index)
+                self._workspace_list.see(index)
+                self._on_workspace_select(keep_note=keep_note)
+                return
+
+    def _on_new_change(self) -> None:
+        """Start a fresh workspace for the next change (named automatically)."""
         if self._busy:
             return
         self._run_background(
-            "Creating the workspace…",
-            lambda: self.service.create_workspace(task),
+            "Starting a new change…",
+            lambda: self.service.create_workspace(""),
             self._after_create,
         )
 
     def _after_create(self, report: Any, error: Exception | None) -> None:
+        auto = self._auto_open
+        self._auto_open = False
         if error is not None:
             self._set_merge_note(f"Could not create the workspace: {error}", error=True)
             return
         if not report.ok:
             self._set_merge_note(report.message, error=True)
             return
-        self._task_var.set("")
         self.refresh()
-        self._set_merge_note(report.message)
+        # The new workspace is the newest, so it is first in the list.
+        if self._workspaces:
+            self._select_workspace(self._workspaces[0].slug, keep_note=auto)
+        if not auto:
+            self._set_merge_note(f"{report.message} Describe the change in the chat below.")
 
     def _on_discard(self) -> None:
         slug = self._current_slug or self._selected_slug()
         if not slug:
-            self._set_merge_note("Select a workspace to discard.", error=True)
+            self._set_merge_note("Select a change to discard.", error=True)
             return
         report = self.service.remove_workspace(slug)
         self._current_slug = ""
         self._current_file = ""
+        self._pending_apply = ""
         self._editor.delete("1.0", "end")
         self._file_list.delete(0, "end")
         self._set_review("")
         self.refresh()
         self._set_merge_note(report.message, error=not report.ok)
+        # Keep a workspace open, so the next request can be sent right away. Its own
+        # message stays on screen, so this step is silent.
+        self._auto_open = True
+        self._ensure_workspace()
 
     # -- editor -----------------------------------------------------------
 
@@ -729,29 +790,47 @@ class CodeStudioDialog:
 
     def _on_ask_model(self) -> None:
         request = self._request_var.get().strip()
-        if not self._current_slug:
-            self._set_merge_note("Select a workspace first.", error=True)
-            return
         if not request:
-            self._set_merge_note("Describe the change you want the model to make.", error=True)
+            self._set_merge_note("Type what you want changed in the chat below.", error=True)
             return
         if self._busy:
+            return
+        if not self._current_slug:
+            # The window opens a workspace on start; if it is missing (a discarded
+            # one, or a race), open one before sending so the request is not lost.
+            self._set_merge_note("Opening a workspace…")
+            self._run_background(
+                "Opening a workspace…",
+                lambda: self.service.create_workspace(""),
+                self._after_create,
+            )
             return
         # Show the request as the user's own message, then clear the composer, so
         # the conversation reads like a chat: question first, then the model's work.
         self._add_message("user", request)
         self._request_var.set("")
+        self._pending_apply = ""
+        self._apply_button.configure(state="disabled")
         # A live bubble the model's steps are appended to as they happen.
         self._live = self._add_message("model", "", title="Coding model", mono_body=True)
         self._run_background(
             "The coding model is working…",
-            lambda: self.service.run_agent(self._current_slug, request, on_step=self._on_agent_step),
+            lambda: self.service.run_change(
+                self._current_slug,
+                request,
+                on_step=self._on_agent_step,
+                on_checks=self._on_checks_starting,
+            ),
             self._after_ask,
         )
 
     def _on_agent_step(self, step: Any) -> None:
         """Queue one live step; the UI thread renders it (never touch Tk here)."""
         self._steps.put(step)
+
+    def _on_checks_starting(self) -> None:
+        """Called on the worker thread before the checks run; queue a marker."""
+        self._steps.put(CHECKS_MARKER)
 
     def _drain_steps(self) -> None:
         """Append any queued agent steps to the live bubble."""
@@ -761,7 +840,10 @@ class CodeStudioDialog:
                 step = self._steps.get_nowait()
             except queue.Empty:
                 break
-            lines = step.live_lines()
+            if step is CHECKS_MARKER:
+                lines = ["— The model is done; running the project's checks…"]
+            else:
+                lines = step.live_lines()
             if not lines:
                 continue
             if self._live is not None:
@@ -779,15 +861,66 @@ class CodeStudioDialog:
         if error is not None:
             self._set_trace(f"The coding model failed: {error}")
             return
-        report, trace = result
+        change = result
+        trace = change.trace
         if trace is not None:
             self._set_trace(trace.render())
         else:
-            self._set_trace(report.message)
-        self._set_merge_note(report.message, error=not report.ok)
+            self._set_trace(change.report.message)
+        if change.checks is not None:
+            self._set_review(change.checks.detail or change.checks.message)
+        self._set_merge_note(change.report.message, error=not change.report.ok)
         self.refresh()
         self._refresh_files()
         self._refresh_merge_state(keep_note=True)
+        self._offer_apply(change)
+
+    def _offer_apply(self, change: Any) -> None:
+        """Ask for the user's approval when a change is ready to apply.
+
+        This is the gate the user asked for: the model's edits live in an isolated
+        workspace, and nothing reaches the real project until the checks pass *and*
+        the user explicitly approves applying the change.
+        """
+        if not change.report.ok:
+            # The run failed (an unreachable model, a refused edit); its own message
+            # is the honest one, so it is left in place.
+            self._pending_apply = ""
+            self._apply_button.configure(state="disabled")
+            return
+        if not change.changed:
+            self._pending_apply = ""
+            self._apply_button.configure(state="disabled")
+            self._add_message(
+                "note", "The model made no changes to the project.", title="No change"
+            )
+            self._set_merge_note("The model made no changes to the project.", error=True)
+            return
+        if change.ready_to_apply:
+            self._pending_apply = self._current_slug
+            self._apply_button.configure(state="normal")
+            self._add_message(
+                "note",
+                f"The change passed the checks ({', '.join(change.changed)}). "
+                "Press **Apply to the project** to put it into فِيض الرُّوح, or "
+                "*Discard change* to throw it away.",
+                title="Ready to apply",
+            )
+            self._set_merge_note(
+                "The change passed the checks — approve applying it to the project.",
+                error=False,
+            )
+        else:
+            self._pending_apply = ""
+            self._apply_button.configure(state="disabled")
+            failed = change.checks is not None and not change.checks.ok
+            reason = (
+                "The checks failed, so the change is not applied. Fix it and send again."
+                if failed
+                else "The change is not ready to apply yet."
+            )
+            self._add_message("note", reason, title="Not applied")
+            self._set_merge_note(reason, error=True)
 
     # -- diff and checks --------------------------------------------------
 
@@ -826,7 +959,12 @@ class CodeStudioDialog:
     # -- merge ------------------------------------------------------------
 
     def _refresh_merge_state(self, *, keep_note: bool = False) -> None:
-        """Enable Merge only when the gate allows it.
+        """Enable **Apply to the project** only when the gate allows it.
+
+        The gate is the checks passing and the base branch not having moved on
+        (``can_merge``), so a change can never reach the real project on a stale or
+        failing run. The button itself is the user's approval: nothing is applied
+        until it is pressed.
 
         ``keep_note`` leaves the current message alone, so a caller that has just
         reported something to the user (a save, a model run) does not have its
@@ -834,11 +972,14 @@ class CodeStudioDialog:
         """
         if not self._current_slug:
             self._merge_button.configure(state="disabled")
+            self._apply_button.configure(state="disabled")
             if not keep_note:
                 self._merge_note.configure(text="")
             return
         report = self.service.can_merge(self._current_slug)
-        self._merge_button.configure(state="normal" if report.ok else "disabled")
+        state: Literal["normal", "disabled"] = "normal" if report.ok else "disabled"
+        self._merge_button.configure(state=state)
+        self._apply_button.configure(state=state)
         if not keep_note:
             self._merge_note.configure(
                 text=report.message, fg=self.theme.text_secondary if report.ok else self.theme.text_dim
@@ -848,35 +989,64 @@ class CodeStudioDialog:
         if not self._current_slug or self._busy:
             return
         slug = self._current_slug
+        self._applying_slug = slug
         self._run_background(
-            f"Merging `{slug}` into the project…",
+            f"Applying `{slug}` to the project…",
             lambda: self.service.merge(slug),
             self._after_merge,
         )
 
     def _after_merge(self, report: Any, error: Exception | None) -> None:
+        slug = self._applying_slug
+        self._applying_slug = ""
         if error is not None:
-            self._set_merge_note(f"Merge failed: {error}", error=True)
+            self._set_merge_note(f"Apply failed: {error}", error=True)
             return
-        self._set_merge_note(report.message, error=not report.ok)
         if report.ok:
+            self._set_merge_note(f"Applied `{slug}` to the project.", error=False)
             self._set_review(report.detail)
+            self._add_message(
+                "note", "The change is now part of فِيض الرُّوح.", title="Applied"
+            )
             self._current_slug = ""
             self._current_file = ""
             self._editor.delete("1.0", "end")
             self._file_list.delete(0, "end")
-            self._workspace_label.configure(text="Merged. Create a new workspace for the next change.")
+            self._workspace_label.configure(
+                text="Applied. Start a new change for the next request."
+            )
+        else:
+            self._set_merge_note(report.message, error=True)
         self.refresh()
-        # A merged workspace is gone, so Merge must go back to disabled rather than
-        # stay lit for a selection that no longer exists.
+        # An applied workspace is gone, so Apply must go back to disabled rather
+        # than stay lit for a selection that no longer exists.
         self._refresh_merge_state(keep_note=True)
+        if report.ok:
+            # Keep a workspace open for the next request, without replacing the
+            # "Applied" confirmation the user is still reading.
+            self._auto_open = True
+            self._ensure_workspace()
 
     # -- helpers ----------------------------------------------------------
 
-    def _run_background(self, message: str, job: Callable[[], Any], finish: Callable[[Any, Exception | None], None]) -> None:
-        """Run ``job`` on a worker thread, then hand its result back on the UI thread."""
+    def _run_background(
+        self,
+        message: str,
+        job: Callable[[], Any],
+        finish: Callable[[Any, Exception | None], None],
+        *,
+        note: bool = True,
+    ) -> None:
+        """Run ``job`` on a worker thread, then hand its result back on the UI thread.
+
+        ``note=False`` leaves the status line alone, so an automatic step (opening a
+        workspace after a merge or a discard) does not replace the message the user
+        is still reading.
+        """
         self._busy = True
-        self._set_merge_note(message)
+        self._quiet_job = not note
+        if note:
+            self._set_merge_note(message)
         self._set_buttons_enabled(False)
         self._spinner.pack(side="right", padx=8)
         self._spinner.start(12)
@@ -907,18 +1077,21 @@ class CodeStudioDialog:
             except queue.Empty:
                 return
             self._busy = False
+            quiet = self._quiet_job
+            self._quiet_job = False
             self._spinner.stop()
             self._spinner.pack_forget()
-            self._set_buttons_enabled(True)
+            self._set_buttons_enabled(True, keep_note=quiet)
             finish(result, error)
 
-    def _set_buttons_enabled(self, enabled: bool) -> None:
+    def _set_buttons_enabled(self, enabled: bool, *, keep_note: bool = False) -> None:
         self._ask_button.configure(state="normal" if enabled else "disabled")
         self._checks_button.configure(state="normal" if enabled else "disabled")
         if not enabled:
             self._merge_button.configure(state="disabled")
+            self._apply_button.configure(state="disabled")
         else:
-            self._refresh_merge_state()
+            self._refresh_merge_state(keep_note=keep_note)
 
     def _set_trace(self, text: str) -> None:
         """Show the model's work as a transcript message, not a bare panel."""
@@ -944,4 +1117,11 @@ class CodeStudioDialog:
         self.window.destroy()
 
 
-__all__ = ["DEFAULT_MODEL_NOTE", "HONESTY_LINE", "SUBTITLE", "TITLE", "CodeStudioDialog"]
+__all__ = [
+    "CHECKS_MARKER",
+    "DEFAULT_MODEL_NOTE",
+    "HONESTY_LINE",
+    "SUBTITLE",
+    "TITLE",
+    "CodeStudioDialog",
+]

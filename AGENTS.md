@@ -554,7 +554,9 @@ Arabic is kept as secondary aliases where useful.
   window: `status`/`coder`/`new`/`list`/`files`/`read`/`write`/`ask`/`diff`/
   `check`/`merge`/`discard` (`python -m cli studio …`, wired in `cli/menu.py` as
   `run_code_studio` and in the menu as *Code Studio: edit and merge the project's
-  own code*). It drives the *same* `gui.code_studio.CodeStudioService`, so the CLI
+  own code*). `new`'s `task` is optional and the workspace is named for you
+  (`PR1`, `PR2`, …) unless `--slug` forces a name. It drives the *same*
+  `gui.code_studio.CodeStudioService`, so the CLI
   and the window share one set of workspaces, one diff, and one merge gate — the
   CLI reimplements no git or agent logic. `--root` selects the checkout (default:
   the current directory), `--base-branch` the branch workspaces cut from and merge
@@ -668,9 +670,18 @@ Arabic is kept as secondary aliases where useful.
   belongs to the checkout being edited: the project's own checkout uses the
   bundled, git-ignored `data/studio/workspaces`, and any other root keeps its
   worktrees under its own `data/` (a shared folder would register another
-  repository's worktree in this one's state). A `Workspace` (slug,
+  repository's worktree in this one's state). A workspace is **named
+  automatically, in order** — `PR1`, `PR2`, … — so the user never invents one:
+  `create(task, slug=None)` calls `_next_slug`, whose monotonic counter lives
+  under a reserved `__next_serial__` state key (never a workspace, so every
+  reader skips it via `_workspaces_only`) and only ever moves forward (a
+  discarded number is never reused); an explicit `slug` is still honoured. A
+  `Workspace` (slug,
   branch, path, base revision, task, check state) is persisted in a small state
   file, and `create`/`get`/`list_workspaces`/`remove` manage its life cycle.
+  `list_workspaces` orders newest first with `_newest_first` (the timestamp, then
+  the auto serial, then the slug — so same-second workspaces still sort
+  honestly).
   `read_file`/`write_file`/`list_files`/`changed_files`/`diff`/`commit` work
   inside it; every path goes through a **deny-by-default confinement** check
   (`../escape.py`, an absolute path, and a path that climbs out all raise) plus a
@@ -706,7 +717,14 @@ Arabic is kept as secondary aliases where useful.
   wraps the engine, the coder client, and the check command, and returns plain
   reports (`create_workspace`, `list_files`, `read_file`, `save_file`,
   `changed_files`, `diff`, `run_checks`, `can_merge`, `merge`, `remove_workspace`,
-  `run_agent`, `state`, `status`). It is the one engine the window and the CLI
+  `run_agent`, `state`, `status`). `create_workspace(task="", slug=None)` needs no
+  name and may open the workspace before the first request. `run_change(slug,
+  task, on_step=…, on_checks=…)` is **one whole chat turn**: it runs the agent
+  (streaming each step through `on_step`), then — when the model actually changed
+  something — calls `on_checks` and runs the project's checks, returning a
+  `ChangeResult` whose `ready_to_apply` (a real change *and* passing checks) is the
+  honest gate the window turns into the user's approval. It is the one engine the
+  window and the CLI
   share, so both see one set of workspaces, one diff, and one merge gate. The
   coder client is built lazily, so constructing the service never reaches Ollama.
   `status` is derived from the **backend** it resolves once, so the in-process
@@ -715,27 +733,36 @@ Arabic is kept as secondary aliases where useful.
   the Ollama wording appears only when Ollama is the runtime that can answer.
 - `gui/code_studio_dialog.py` — the Code Studio **window** (Tk, imported lazily):
   built the way the chat window is built, so the Studio reads as part of the
-  program rather than a separate tool — a slim header, a left **sidebar** (the
-  rougher `surface` tone) for the workspace list + *New workspace*, the file list,
-  and *Merge into the project* / *Discard workspace* / *Run checks* with their
+  program rather than a separate tool — a slim header, a left **sidebar** for the
+  workspace list + *Start a new change*, the file list,
+  and *Apply to the project* / *Discard change* / *Run checks* with their
   state, and a centred conversation column with the rounded composer card pinned
   to the bottom (`_COLUMN_MAX`/`_column_pad`, the same theme tokens and
-  `RoundedBox`). The model's step trace and the diff/check output are transcript
+  `RoundedBox`). Opening the window **opens the first workspace for you**
+  (`_ensure_workspace`, named `PR1`), so the composer is ready to use and there is
+  no name field; after an apply or a discard it opens the next one silently, and
+  the sidebar hint says the names are assigned in order. The model's step trace and
+  the diff/check output are transcript
   messages like a chat reply, not separate tabs: `_set_trace` adds a "Coding
   model" row and `_set_review` a "Diff and checks" row, both monospaced, through
-  the same `_add_message`/`_fit_height` path the chat window uses. *Ask the model*
-  now reads as a chat turn: `_add_message("user", request)` echoes the request as
+  the same `_add_message`/`_fit_height` path the chat window uses. *Send* now
+  reads as a chat turn: `_add_message("user", request)` echoes the request as
   the user's own bubble (and clears the composer), then `_run_background` passes
   `on_step=self._on_agent_step`, and `_drain_steps` appends each `AgentStep`'s
   `live_lines()` into a live "Coding model" bubble as the run proceeds — the same
   first-by-first detail the OpenHands chat shows — before the final `_set_trace`
-  supersedes it. The file editor is a slide-in panel above the composer
+  supersedes it. The run drives `run_change`, so the checks follow the model in
+  the same turn, and `_offer_apply` then asks for the user's approval (it enables
+  **Apply to the project** and posts a "Ready to apply" note only when
+  `ready_to_apply`; a failing or empty run says why and applies nothing). The file
+  editor is a slide-in panel above the composer
   (`_show_editor`/`_hide_editor`). Long
   work runs on a worker thread whose result is handed back through a **queue the
   UI thread drains** (`_schedule_pump`), because calling Tk's `after` from a
-  worker thread races with the main loop; Merge stays disabled until the gate
-  allows it, and a message the user just needs to read (a save, a model run) is
-  overwritten by the merge hint (`_refresh_merge_state(keep_note=True)`).
+  worker thread races with the main loop; Apply stays disabled until the gate
+  allows it, and a message the user just needs to read (a save, a model run, an
+  automatic workspace open) is kept rather than overwritten by the gate hint
+  (`_refresh_merge_state(keep_note=True)`; `_run_background(note=False)`).
   Reachable from the composer's **＋** menu (**Code Studio — edit and merge the
   project's own code…**) and the sidebar action; the headless twin is
   `python -m cli studio`.

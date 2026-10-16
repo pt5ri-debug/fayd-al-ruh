@@ -110,19 +110,38 @@ def test_default_workspaces_dir_belongs_to_the_checkout(project: Path, tmp_path:
     assert other.workspaces_dir != studio_workspaces_dir()
 
 
-def test_create_makes_a_worktree_on_its_own_branch(studio: CodeStudio) -> None:
-    workspace = studio.create("Add a --json flag")
+def test_create_names_the_workspace_for_you_in_order(studio: CodeStudio) -> None:
+    """A workspace is named automatically: PR1, PR2, ... in increasing order."""
+    first = studio.create("Add a --json flag")
+    assert first.slug == "PR1"
+    assert first.branch == "studio/PR1"
+    assert first.path.is_dir()
+    assert (first.path / "core" / "app.py").is_file()
+    assert studio.base_revision() == first.base_revision
+
+    second = studio.create("Another change")
+    assert second.slug == "PR2"
+
+
+def test_auto_names_never_repeat_a_discarded_number(studio: CodeStudio) -> None:
+    """The counter only moves forward, so a discarded number is not reused."""
+    first = studio.create("First")
+    assert first.slug == "PR1"
+    studio.remove(first.slug)
+    second = studio.create("Second")
+    assert second.slug == "PR2"
+
+
+def test_an_explicit_slug_is_still_honoured(studio: CodeStudio) -> None:
+    workspace = studio.create("Add a --json flag", slug="add-a-json-flag")
     assert workspace.slug == "add-a-json-flag"
     assert workspace.branch == "studio/add-a-json-flag"
-    assert workspace.path.is_dir()
-    assert (workspace.path / "core" / "app.py").is_file()
-    assert studio.base_revision() == workspace.base_revision
 
 
 def test_create_refuses_a_duplicate_workspace(studio: CodeStudio) -> None:
-    studio.create("First change")
+    studio.create("First change", slug="dupe")
     with pytest.raises(StudioError, match="already exists"):
-        studio.create("First change")
+        studio.create("First change", slug="dupe")
 
 
 def test_list_and_get_round_trip_through_the_state_file(studio: CodeStudio) -> None:
@@ -1075,7 +1094,7 @@ def test_cli_edit_and_search(project: Path, tmp_path: Path, monkeypatch, capsys)
 
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path / "data"))
     root = ["--root", str(project), "--base-branch", "main"]
-    assert studio_cli.main([*root, "new", "edit me"]) == 0
+    assert studio_cli.main([*root, "new", "edit me", "--slug", "edit-me"]) == 0
     capsys.readouterr()
 
     assert studio_cli.main([*root, "search", "edit-me", "x = 1"]) == 0

@@ -62,6 +62,27 @@ class StudioState:
     backend: BackendStatus | None = None
 
 
+@dataclass(frozen=True)
+class ChangeResult:
+    """One whole chat turn: the model's run *and* the checks that follow it.
+
+    The window shows a request as a chat turn, so the service runs the agent and
+    then the project's checks as one unit and hands back everything the window
+    needs to decide whether to ask the user to apply the change. ``ready_to_apply``
+    is the honest signal: there is a change, and the checks passed.
+    """
+
+    report: StudioReport
+    trace: AgentTrace | None = None
+    checks: StudioReport | None = None
+    changed: tuple[str, ...] = ()
+
+    @property
+    def ready_to_apply(self) -> bool:
+        """True when there is a real change and the checks passed."""
+        return bool(self.changed) and self.checks is not None and self.checks.ok
+
+
 class CodeStudioService:
     """Drives the Studio's workspaces, editor, agent, checks, and merge.
 
@@ -176,8 +197,13 @@ class CodeStudioService:
         )
 
     # --- workspaces -----------------------------------------------------
-    def create_workspace(self, task: str, *, slug: str | None = None) -> StudioReport:
-        """Create a new isolated workspace for ``task``."""
+    def create_workspace(self, task: str = "", *, slug: str | None = None) -> StudioReport:
+        """Create a new isolated workspace for ``task``.
+
+        The name is assigned automatically (``PR1``, ``PR2``, ...) unless ``slug``
+        is given, so the caller never has to invent one. ``task`` may be empty when
+        the workspace is opened ahead of the first request.
+        """
         try:
             workspace = self.studio.create(task, slug=slug)
         except StudioError as error:
@@ -308,6 +334,37 @@ class CodeStudioService:
             message += f" Changed files: {', '.join(changed)}."
         return StudioReport(trace.ok, message, detail=trace.render()), trace
 
+    def run_change(
+        self,
+        slug: str,
+        task: str,
+        *,
+        on_step: Callable[[AgentStep], None] | None = None,
+        on_checks: Callable[[], None] | None = None,
+    ) -> ChangeResult:
+        """Run one chat turn: the model edits, then the project's checks run.
+
+        This is the whole flow the window's composer drives. The model's steps are
+        streamed through ``on_step``; ``on_checks`` is called once the model has
+        finished and the checks are about to run, so the window can say so. The
+        result carries ``ready_to_apply``, the honest gate for asking the user to
+        apply the change to the real project.
+        """
+        report, trace = self.run_agent(slug, task, on_step=on_step)
+        try:
+            changed = tuple(self.changed_files(slug))
+        except StudioError:
+            changed = ()
+        if not changed:
+            return ChangeResult(report=report, trace=trace, checks=None, changed=())
+
+        if on_checks is not None:
+            on_checks()
+        checks_report, _result = self.run_checks(slug)
+        return ChangeResult(
+            report=report, trace=trace, checks=checks_report, changed=changed
+        )
+
     # --- checks and merge -----------------------------------------------
     def run_checks(self, slug: str) -> tuple[StudioReport, CheckResult | None]:
         """Run the project's checks inside the workspace, in the background."""
@@ -367,6 +424,7 @@ class CodeStudioService:
 
 
 __all__ = [
+    "ChangeResult",
     "CodeStudioService",
     "StudioReport",
     "StudioState",
