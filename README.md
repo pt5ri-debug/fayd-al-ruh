@@ -522,9 +522,13 @@ are in `core/speech.py`:
 
 Engines are loaded by name on demand. Real engines are ordinary system programs,
 so no pip package and no network access is needed: TTS uses `espeak-ng`,
-`espeak`, `flite`, or macOS `say`; ASR uses `whisper` when it is installed. If
-none is present, the project can still run a complete *text loop*: the recognizer
-returns supplied text, and the synthesizer produces a real silent WAV clip. This
+`espeak`, `flite`, or macOS `say`; ASR uses `whisper` when it is installed. On
+**Windows** the project uses the speech engine the OS already ships (SAPI, reached
+through `System.Speech` in PowerShell), so read-aloud works with nothing to
+install; Windows also plays the rendered WAV through the built-in `SoundPlayer`.
+If none is present, the project can still run a complete *text loop*: the
+recognizer returns supplied text, and the synthesizer produces a real silent WAV
+clip. This
 way the whole voice path is tested on a fresh clone, and a real ASR/TTS engine
 can be plugged in later without touching the core. Use `--tts auto` / `--asr auto`
 to pick the best installed engine, or name one explicitly (`--tts espeak`); an
@@ -536,13 +540,16 @@ engine the window's **Read aloud** control and the CLI report that honestly and
 offer the next step. Install it with the platform package manager:
 
 ```bash
-sudo apt install espeak-ng     # Debian/Ubuntu (also the name on Fedora/Arch/Alpine)
+sudo apt install espeak-ng                          # Debian/Ubuntu (also Fedora/Arch/Alpine)
+winget install -e --id eSpeak-NG.eSpeak-NG          # Windows (or: choco install espeak-ng)
 ```
 
-The project can also run that for you: `python -m cli speak --install-engine`
-runs the platform's package manager (through `sudo`), and `python -m cli deps`
-reports the speech engine beside the other optional features. macOS already has
-`say`; the project also accepts `espeak`, `flite`, and `say`.
+On Windows this is usually unnecessary: the built-in SAPI engine is used when no
+command-line engine is on `PATH`, so **Read aloud** just works. The project can
+also run the install for you: `python -m cli speak --install-engine` runs the
+platform's package manager, and `python -m cli deps` reports the speech engine
+beside the other optional features. macOS already has `say`; the project also
+accepts `espeak`, `flite`, and `say`.
 
 ```bash
 python -m cli voice "What is the relationship between porosity and permeability?"  # a voice turn

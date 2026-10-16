@@ -225,10 +225,17 @@ Arabic is kept as secondary aliases where useful.
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
   package, so pip cannot install it — like Tesseract for OCR. `speech_available`,
-  `speech_install_plan` (a platform-aware package-manager command, or an honest
-  hint when the app knows none), and `install_speech_engine` (never raises; an
+  `speech_install_plan` (a platform-aware package-manager command — incl. winget/
+  choco on Windows — or an honest hint when the app knows none), and
+  `install_speech_engine` (never raises; an
   injected `runner` makes it testable with no real install) give the app a real
-  next step when no engine is present. CLI: `python -m ai.voice` / `python -m cli
+  next step when no engine is present. **Windows needs no install**: the OS ships
+  SAPI, so `WindowsSapiSynthesizer` renders through `System.Speech` in PowerShell
+  (`windows_speech_available`; `discover_synthesizer_name` falls back to it, and
+  `load_synthesizer("windows-sapi")` loads it), and `Speaker` plays the WAV through
+  the built-in `SoundPlayer` when no aplay/afplay/sox exists. The install path
+  prints its hint *once* (`install_speech_engine`'s message already carries it).
+  CLI: `python -m ai.voice` / `python -m cli
   voice`; `python -m ai.speak --install-engine` / `python -m cli deps --install
   speech` run it.
 - `core/voices.py` — the text-to-speech **voice catalog**: 16 `Voice`s in four

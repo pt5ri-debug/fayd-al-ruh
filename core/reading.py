@@ -22,6 +22,7 @@ from core.speech import (
     Speaker,
     SpeechSynthesizer,
     load_synthesizer,
+    speech_install_plan,
 )
 from core.voices import Voice, default_voice, find_voice
 
@@ -134,8 +135,8 @@ class TextReader:
         """An honest, human-readable status of this reader."""
         if not self.available():
             return (
-                "No speech engine is installed, so text is read silently. Install "
-                "espeak-ng (or espeak) to hear a real voice."
+                "No speech engine is installed, so text is read silently. "
+                + speech_install_plan().hint
             )
         played = "played through the speakers" if self.can_play() else "saved but not played (no audio player)"
         return (

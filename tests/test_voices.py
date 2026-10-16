@@ -290,6 +290,26 @@ def test_speak_module_can_install_the_engine(monkeypatch, capsys):
     assert "Installed a speech engine" in capsys.readouterr().out
 
 
+def test_speak_module_prints_the_hint_only_once_when_it_cannot_install(monkeypatch, capsys):
+    """A platform the app cannot install on must not print the same hint twice."""
+    from ai import speak
+    from core import speech
+
+    hint = "Install espeak-ng with winget, then reopen the terminal."
+    monkeypatch.setattr(speak, "speech_available", lambda: False)
+    monkeypatch.setattr(speak, "speech_install_plan", lambda: speech.SpeechInstallPlan("windows", (), hint))
+    # install_speech_engine returns the plan's own hint when it cannot install.
+    monkeypatch.setattr(
+        speak,
+        "install_speech_engine",
+        lambda **kwargs: speech.SpeechInstallResult(ok=False, ran=False, message=hint),
+    )
+    code = speak.main(["--install-engine"])
+    assert code == 1
+    out = capsys.readouterr().out
+    assert out.count(hint) == 1
+
+
 # ------------------------------------------------------- installing the engine
 
 
@@ -312,6 +332,112 @@ def test_speech_install_plan_is_honest_when_it_cannot_install(monkeypatch):
     plan = speech.speech_install_plan()
     assert not plan.can_install
     assert "espeak-ng" in plan.hint
+
+
+def test_speech_install_plan_uses_winget_on_windows(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    # No PowerShell (so no built-in SAPI), but winget is available.
+    monkeypatch.setattr(speech.shutil, "which", lambda name: "winget" if name == "winget" else None)
+    plan = speech.speech_install_plan()
+    assert plan.can_install
+    assert plan.command == ("winget", "install", "-e", "--id", "eSpeak-NG.eSpeak-NG")
+
+
+def test_windows_builtin_engine_needs_no_install(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None)
+    # Windows ships SAPI, so the plan honestly says there is nothing to install...
+    plan = speech.speech_install_plan()
+    assert not plan.can_install
+    assert "already provides a speech engine" in plan.hint
+    # ...the built-in engine is discovered and loaded without any install...
+    assert speech.windows_speech_available() is True
+    assert speech.discover_synthesizer_name() == "windows-sapi"
+    synth = speech.load_synthesizer("auto")
+    assert isinstance(synth, speech.WindowsSapiSynthesizer)
+    # ...and the built-in Windows player is used to make it audible.
+    assert speech.Speaker().available() is True
+
+
+def test_windows_sapi_script_renders_text_and_selects_a_gendered_voice():
+    from pathlib import Path
+
+    from core import speech
+    from core.voices import find_voice
+
+    script = speech._windows_sapi_script("hello", Path("C:/tmp/a.wav"), find_voice("girl-2"))
+    assert "System.Speech" in script
+    assert "SetOutputToWaveFile('C:/tmp/a.wav')" in script
+    assert "$s.Speak('hello')" in script
+    assert "Female" in script  # girl-2 maps onto a female SAPI voice
+    assert "$s.Rate=1" in script  # speed 186 -> rate 1
+
+    male = speech._windows_sapi_script("x", Path("C:/tmp/b.wav"), find_voice("man-4"))
+    assert "Male" in male
+
+
+def test_windows_sapi_script_escapes_single_quotes():
+    from pathlib import Path
+
+    from core import speech
+
+    script = speech._windows_sapi_script("it's fine", Path("C:/tmp/a.wav"), None)
+    assert "$s.Speak('it''s fine')" in script
+
+
+def test_windows_sapi_synthesizer_falls_back_when_powershell_fails(monkeypatch):
+    from core import speech
+
+    synth = speech.WindowsSapiSynthesizer()
+    monkeypatch.setattr(
+        speech.subprocess,
+        "run",
+        lambda *a, **k: speech.subprocess.CompletedProcess(a[0], 1, b"", b"boom"),
+    )
+    clip = synth.synthesize("hello")
+    assert clip.is_silent  # honest fallback, never fabricated audio
+
+
+def test_windows_sapi_synthesizer_rejects_empty_text():
+    from core import speech
+
+    with pytest.raises(ValueError):
+        speech.WindowsSapiSynthesizer().synthesize("   ")
+
+
+def test_windows_speaker_plays_through_powershell(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None)
+    seen: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        seen.append(list(argv))
+        return speech.subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    Speech = speech.Speaker()
+    assert Speech.available() is True
+    Speech.play(speech.AudioClip.silence(0.1))
+    assert seen and seen[0][0] == "powershell"
+    assert "System.Media.SoundPlayer" in seen[0][-1]
+
+
+def test_silent_engine_still_reports_the_platform_hint(monkeypatch):
+    from core import speech
+    from core.reading import TextReader
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(speech.shutil, "which", lambda name: None)
+    reader = TextReader(synthesizer=speech.SilentSynthesizer())
+    # On Windows the honest hint names a real install command (winget), not a bare
+    # "download a build" instruction.
+    assert "winget" in reader.describe().lower()
 
 
 def test_install_speech_engine_runs_the_plan_with_an_injected_runner(monkeypatch):

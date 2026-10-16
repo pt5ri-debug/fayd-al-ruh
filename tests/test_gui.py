@@ -1058,7 +1058,10 @@ def test_window_speaks_honestly_when_no_engine_is_installed() -> None:
         app._speak_text("hello there")
         root.update()
         notes = [entry.text for entry in app._rows if entry.role == "note"]
-        assert any("install a speech engine" in note.lower() for note in notes)
+        assert any("no speech engine is installed" in note.lower() for note in notes)
+        # The note names the real next step (the platform's install command), not a
+        # vague "go install something".
+        assert any("install-engine" in note for note in notes)
     finally:
         root.destroy()
 
