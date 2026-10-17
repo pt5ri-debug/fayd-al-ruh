@@ -43,7 +43,9 @@ from tkinter import ttk
 
 from core.coder_model import PULL_HINT
 from gui import markdown as md
+from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
+from gui.typography import resolve
 
 #: The Studio reads as a centred conversation, capped like the chat window's
 #: transcript so long lines stay readable on a wide screen.
@@ -91,6 +93,7 @@ class CodeStudioDialog:
         self.theme = theme
         self.font = font
         self.mono = mono
+        self._type = resolve(parent, ui_family=font, mono_family=mono)
         self._on_close = on_close
         self._busy = False
         self._closed = False
@@ -173,11 +176,11 @@ class CodeStudioDialog:
         titles.pack(side="left", anchor="w")
         tk.Label(
             titles, text=TITLE, bg=theme.base, fg=theme.contrast,
-            font=(self.font, 14, "bold"), anchor="w",
+            font=self._type.font("heading3", weight="bold"), anchor="w",
         ).pack(anchor="w")
         tk.Label(
             titles, text=SUBTITLE, bg=theme.base, fg=theme.text_secondary,
-            font=(self.font, 8), anchor="w", justify="left", wraplength=760,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=760,
         ).pack(anchor="w", pady=(2, 0))
 
         self._spinner = ttk.Progressbar(inner, mode="indeterminate", length=120)
@@ -188,7 +191,7 @@ class CodeStudioDialog:
     def _section_label(self, parent: tk.Misc, text: str) -> None:
         tk.Label(
             parent, text=text.upper(), bg=self.theme.surface, fg=self.theme.text_dim,
-            font=(self.font, 8, "bold"), anchor="w",
+            font=self._type.font("2xs", weight="bold"), anchor="w",
         ).pack(fill="x", padx=14, pady=(10, 2))
 
     def _build_sidebar(self, parent: tk.Frame) -> None:
@@ -200,16 +203,16 @@ class CodeStudioDialog:
         brand.pack(fill="x", padx=14, pady=(14, 4))
         dot = tk.Canvas(brand, width=24, height=24, bg=theme.surface, highlightthickness=0)
         dot.create_oval(1, 1, 23, 23, fill=theme.primary, outline="")
-        dot.create_text(12, 13, text="ف", fill=theme.primary_foreground, font=(self.font, 10, "bold"))
+        dot.create_text(12, 13, text="ف", fill=theme.primary_foreground, font=self._type.font("sm", weight="bold"))
         dot.pack(side="left")
         tk.Label(
             brand, text=TITLE, bg=theme.surface, fg=theme.contrast,
-            font=(self.font, 12, "bold"), anchor="w",
+            font=self._type.font("heading3", weight="bold"), anchor="w",
         ).pack(side="left", padx=(8, 0))
 
         self._status_line = tk.Label(
             sidebar, text=DEFAULT_MODEL_NOTE, bg=theme.surface, fg=theme.text_dim,
-            font=(self.font, 8), anchor="w", justify="left", wraplength=248,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=248,
         )
         self._status_line.pack(fill="x", padx=14, pady=(0, 2))
 
@@ -217,14 +220,14 @@ class CodeStudioDialog:
         self._workspace_list = tk.Listbox(
             sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
-            font=(self.font, 9), height=6, activestyle="none",
+            font=self._type.font("xs"), height=6, activestyle="none",
         )
         self._workspace_list.pack(fill="x", padx=14, pady=(0, 6))
         self._workspace_list.bind("<<ListboxSelect>>", self._on_workspace_select)
 
         tk.Label(
             sidebar, text="Workspaces are named for you, in order (PR1, PR2, …).",
-            bg=theme.surface, fg=theme.text_secondary, font=(self.font, 8),
+            bg=theme.surface, fg=theme.text_secondary, font=self._type.font("2xs"),
             anchor="w", justify="left", wraplength=248,
         ).pack(fill="x", padx=14, pady=(0, 4))
         row = tk.Frame(sidebar, bg=theme.surface)
@@ -234,7 +237,7 @@ class CodeStudioDialog:
 
         self._workspace_label = tk.Label(
             sidebar, text="No workspace selected.", bg=theme.surface, fg=theme.text_secondary,
-            font=(self.font, 9, "bold"), anchor="w", justify="left", wraplength=248,
+            font=self._type.font("xs", weight="bold"), anchor="w", justify="left", wraplength=248,
         )
         self._workspace_label.pack(fill="x", padx=14, pady=(0, 2))
 
@@ -242,7 +245,7 @@ class CodeStudioDialog:
         self._file_list = tk.Listbox(
             sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
-            font=(self.mono, 8), height=8, activestyle="none",
+            font=self._type.mono("2xs"), height=8, activestyle="none",
         )
         self._file_list.pack(fill="both", expand=True, padx=14, pady=(0, 6))
         self._file_list.bind("<<ListboxSelect>>", self._on_file_select)
@@ -256,11 +259,11 @@ class CodeStudioDialog:
         self._button(gate, "Discard change", self._on_discard).pack(side="left", padx=(6, 0))
         self._checks_label = tk.Label(
             sidebar, text="Checks have not run yet.", bg=theme.surface, fg=theme.text_dim,
-            font=(self.font, 8), anchor="w", justify="left", wraplength=248,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=248,
         )
         self._checks_label.pack(fill="x", padx=14)
         self._merge_note = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.text_secondary, font=(self.font, 8),
+            sidebar, text="", bg=theme.surface, fg=theme.text_secondary, font=self._type.font("2xs"),
             anchor="w", justify="left", wraplength=248,
         )
         self._merge_note.pack(fill="x", padx=14, pady=(4, 14))
@@ -307,7 +310,7 @@ class CodeStudioDialog:
         entry = tk.Entry(
             inner, textvariable=self._request_var, bg=theme.surface, fg=theme.foreground,
             insertbackground=theme.primary, relief="flat", highlightthickness=0,
-            font=(self.font, 11),
+            font=self._type.font("body"),
         )
         entry.pack(fill="x", padx=14, pady=(12, 6))
         entry.bind("<Return>", lambda _event: self._on_ask_model())
@@ -331,7 +334,7 @@ class CodeStudioDialog:
         head.pack(fill="x", padx=12, pady=(10, 4))
         self._file_label = tk.Label(
             head, text="Select a file to open it.", bg=theme.surface, fg=theme.text_secondary,
-            font=(self.mono, 9), anchor="w",
+            font=self._type.mono("code"), anchor="w",
         )
         self._file_label.pack(side="left")
         self._button(head, "Close", self._hide_editor).pack(side="right")
@@ -340,7 +343,7 @@ class CodeStudioDialog:
         self._editor = tk.Text(
             panel, wrap="none", undo=True, bg=theme.base, fg=theme.foreground,
             insertbackground=theme.primary, relief="flat", highlightthickness=0,
-            font=(self.mono, 9), padx=8, pady=8, height=14,
+            font=self._type.mono("code"), padx=8, pady=8, height=14,
         )
         self._editor.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         self._editor.bind("<<Modified>>", self._on_editor_modified)
@@ -369,7 +372,7 @@ class CodeStudioDialog:
         return max(160, min(_COLUMN_MAX, width - 2 * self._column_pad()))
 
     def _bubble_fonts(self) -> tuple[tkfont.Font, tkfont.Font]:
-        return tkfont.Font(font=(self.font, 11)), tkfont.Font(font=(self.mono, 9))
+        return tkfont.Font(font=self._type.font("body")), tkfont.Font(font=self._type.mono("code"))
 
     def _bubble_width(self, text: str, *, role: str = "model") -> int:
         normal, mono = self._bubble_fonts()
@@ -400,7 +403,7 @@ class CodeStudioDialog:
             widget = tk.Text(
                 card.inner, height=1, wrap="word", relief="flat", borderwidth=0,
                 highlightthickness=0, bg=theme.user_bubble, fg=theme.user_bubble_fg,
-                font=(self.font, 11), padx=14, pady=8, cursor="xterm", takefocus=1, width=0,
+                font=self._type.font("body"), padx=14, pady=8, cursor="xterm", takefocus=1, width=0,
             )
             widget.insert("1.0", text)
             widget.pack(fill="both", expand=True)
@@ -415,14 +418,15 @@ class CodeStudioDialog:
                 padx = (0, 0)
             tk.Label(
                 head, text=title or ("Coding model" if role == "model" else "Status"),
-                bg=theme.base, fg=theme.text_dim, font=(self.font, 9, "bold"), anchor="w",
+                bg=theme.base, fg=theme.text_dim, font=self._type.font("xs", weight="bold"), anchor="w",
             ).pack(side="left", padx=padx)
             widget = tk.Text(
                 row, height=1, wrap="word", relief="flat", borderwidth=0, highlightthickness=0,
                 bg=theme.base, fg=theme.foreground,
-                font=(self.mono, 9) if mono_body else (self.font, 11),
-                padx=0, pady=0, cursor="xterm", takefocus=1, spacing1=1, spacing3=1,
+                font=self._type.mono("code") if mono_body else self._type.font("body"),
+                padx=0, pady=0, cursor="xterm", takefocus=1,
             )
+            rich_text.apply_body_spacing(widget, self._type)
             if rich and not mono_body:
                 self._insert_rich(widget, text)
             else:
@@ -441,7 +445,7 @@ class CodeStudioDialog:
         badge = tk.Canvas(parent, width=24, height=24, bg=self.theme.base, highlightthickness=0)
         badge.create_oval(1, 1, 23, 23, fill=self.theme.primary, outline="")
         badge.create_text(
-            12, 13, text="ف", fill=self.theme.primary_foreground, font=(self.font, 10, "bold")
+            12, 13, text="ف", fill=self.theme.primary_foreground, font=self._type.font("sm", weight="bold")
         )
         badge.pack(side="left")
 
@@ -508,94 +512,8 @@ class CodeStudioDialog:
     # -- markdown rendering ----------------------------------------------
 
     def _insert_rich(self, widget: tk.Text, text: str) -> None:
-        self._configure_tags(widget)
-        for index, styled in enumerate(md.iter_styled_lines(text)):
-            if index:
-                widget.insert("end", "\n")
-            self._insert_styled_line(widget, styled)
-
-    def _configure_tags(self, widget: tk.Text) -> None:
-        theme = self.theme
-        widget.tag_configure(
-            "heading", font=(self.font, 15, "bold"), foreground=theme.contrast, spacing1=6, spacing3=4
-        )
-        widget.tag_configure(
-            "heading3", font=(self.font, 12, "bold"), foreground=theme.contrast, spacing1=4, spacing3=3
-        )
-        widget.tag_configure("bullet", lmargin1=16, lmargin2=30)
-        widget.tag_configure(
-            "quote", lmargin1=16, lmargin2=16, foreground=theme.text_secondary, background=theme.surface_raised
-        )
-        widget.tag_configure(
-            "code", font=(self.mono, 10), background=theme.code_bg, foreground=theme.code_fg,
-            lmargin1=10, lmargin2=10, spacing1=2, spacing3=2,
-        )
-        widget.tag_configure("table", font=(self.mono, 10), foreground=theme.foreground, lmargin1=8)
-        widget.tag_configure("rule", foreground=theme.border)
-        widget.tag_configure("bold", font=(self.font, 11, "bold"), foreground=theme.contrast)
-        widget.tag_configure(
-            "inline_code", font=(self.mono, 10), background=theme.code_bg, foreground=theme.code_fg
-        )
-        widget.tag_configure("kw", foreground=theme.primary)
-        widget.tag_configure("str", foreground=theme.success)
-        widget.tag_configure("cmt", foreground=theme.text_dim)
-
-    def _insert_styled_line(self, widget: tk.Text, styled: md.StyledLine) -> None:
-        start = widget.index("end-1c")
-        widget.insert("end", styled.text)
-        end = widget.index("end-1c")
-        tag = None
-        if styled.in_code:
-            tag = "code"
-        elif styled.kind == md.HEADING:
-            tag = "heading" if styled.level <= 2 else "heading3"
-        elif styled.kind in (md.BULLET, md.NUMBER):
-            tag = "bullet"
-        elif styled.kind == md.QUOTE:
-            tag = "quote"
-        elif styled.kind == md.TABLE:
-            tag = "table"
-        elif styled.kind == md.RULE:
-            tag = "rule"
-        if tag:
-            widget.tag_add(tag, start, end)
-        if styled.in_code:
-            self._highlight_code_line(widget, styled.text, start)
-        elif styled.kind not in (md.CODE, md.RULE):
-            self._inline_tags(widget, styled.text, start)
-
-    def _inline_tags(self, widget: tk.Text, line: str, line_start: str) -> None:
-        row = line_start.split(".")[0]
-        for segment in md.parse_inline(line):
-            if segment.kind == "bold":
-                token = f"**{segment.text}**"
-                idx = line.find(token)
-                if idx >= 0:
-                    widget.tag_add("bold", f"{row}.{idx}", f"{row}.{idx + len(token)}")
-        position = 0
-        while True:
-            opening = line.find("`", position)
-            if opening < 0:
-                break
-            closing = line.find("`", opening + 1)
-            if closing < 0:
-                break
-            widget.tag_add("inline_code", f"{row}.{opening}", f"{row}.{closing + 1}")
-            position = closing + 1
-
-    def _highlight_code_line(self, widget: tk.Text, line: str, start: str) -> None:
-        row = start.split(".")[0]
-        for segment in md.highlight_code(line):
-            if segment.kind == "plain" or segment.text == "\n":
-                continue
-            tag = {"keyword": "kw", "string": "str", "comment": "cmt"}.get(segment.kind)
-            if tag is None:
-                continue
-            idx = line.find(segment.text)
-            if idx >= 0:
-                widget.tag_add(tag, f"{row}.{idx}", f"{row}.{idx + len(segment.text)}")
-
-    # -- widgets ----------------------------------------------------------
+        """Render Markdown into a bubble (the window's shared renderer)."""
+        rich_text.insert_markdown(widget, text, theme=self.theme, typography=self._type)
 
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
         theme = self.theme
@@ -603,7 +521,7 @@ class CodeStudioDialog:
             parent, text=text, command=command, bg=theme.surface_raised,
             fg=theme.foreground, activebackground=theme.interactive_active,
             activeforeground=theme.contrast, relief="flat", borderwidth=0,
-            font=(self.font, 9, "bold"), padx=12, pady=4, cursor="hand2",
+            font=self._type.font("xs", weight="bold"), padx=12, pady=4, cursor="hand2",
         )
 
     # -- state ------------------------------------------------------------

@@ -38,6 +38,7 @@ from gui.import_center import (
     ImportReport,
     picker_filetypes,
 )
+from gui.typography import resolve
 
 #: The header line, kept as the page title.
 TITLE = "Knowledge Import Center"
@@ -74,6 +75,7 @@ class ImportCenterDialog:
         self.theme = theme
         self.font = font
         self.mono = mono
+        self._type = resolve(parent, ui_family=font, mono_family=mono)
         self._on_close = on_close
         self._busy = False
         self._last_report: ImportReport | None = None
@@ -101,19 +103,19 @@ class ImportCenterDialog:
         header.pack(fill="x", padx=20, pady=(18, 8))
         tk.Label(
             header, text=TITLE, bg=theme.base, fg=theme.contrast,
-            font=(self.font, 15, "bold"), anchor="w",
+            font=self._type.font("heading1", weight="bold"), anchor="w",
         ).pack(fill="x")
         tk.Label(
             header, text=SUBTITLE, bg=theme.base, fg=theme.text_secondary,
-            font=(self.font, 9), anchor="w", justify="left", wraplength=660,
+            font=self._type.font("xs"), anchor="w", justify="left", wraplength=660,
         ).pack(fill="x", pady=(4, 0))
         tk.Label(
             header, text=FORMATS_LINE, bg=theme.base, fg=theme.text_dim,
-            font=(self.font, 8), anchor="w", justify="left", wraplength=660,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=660,
         ).pack(fill="x", pady=(6, 0))
         tk.Label(
             header, text=UNSUPPORTED_LINE, bg=theme.base, fg=theme.text_dim,
-            font=(self.font, 8), anchor="w", justify="left", wraplength=660,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=660,
         ).pack(fill="x")
 
         self._build_upload_section()
@@ -129,7 +131,7 @@ class ImportCenterDialog:
         frame.pack(fill="x", padx=20, pady=(10, 0))
         tk.Label(
             frame, text=title, bg=theme.surface, fg=theme.contrast,
-            font=(self.font, 10, "bold"), anchor="w",
+            font=self._type.font("sm", weight="bold"), anchor="w",
         ).pack(fill="x", padx=12, pady=(10, 2))
         return frame
 
@@ -139,7 +141,7 @@ class ImportCenterDialog:
             parent, text=text, command=command, bg=theme.surface_raised,
             fg=theme.foreground, activebackground=theme.interactive_active,
             activeforeground=theme.contrast, relief="flat", borderwidth=0,
-            font=(self.font, 9, "bold"), padx=12, pady=4, cursor="hand2",
+            font=self._type.font("xs", weight="bold"), padx=12, pady=4, cursor="hand2",
         )
         return button
 
@@ -152,7 +154,7 @@ class ImportCenterDialog:
         self._upload_button.pack(side="left")
         tk.Label(
             row, text="Select one or many files. Each is imported on its own.",
-            bg=theme.surface, fg=theme.text_secondary, font=(self.font, 9),
+            bg=theme.surface, fg=theme.text_secondary, font=self._type.font("xs"),
         ).pack(side="left", padx=10)
 
     def _build_folder_section(self) -> None:
@@ -164,7 +166,7 @@ class ImportCenterDialog:
         self._folder_button.pack(side="left")
         self._folder_label = tk.Label(
             row, text="No folder chosen", bg=theme.surface, fg=theme.text_dim,
-            font=(self.font, 9), anchor="w",
+            font=self._type.font("xs"), anchor="w",
         )
         self._folder_label.pack(side="left", padx=10, fill="x", expand=True)
         row2 = tk.Frame(frame, bg=theme.surface)
@@ -173,7 +175,7 @@ class ImportCenterDialog:
             row2, text="Include subfolders", variable=self._recursive_var,
             bg=theme.surface, fg=theme.foreground, selectcolor=theme.surface_raised,
             activebackground=theme.surface, activeforeground=theme.contrast,
-            font=(self.font, 9), highlightthickness=0, borderwidth=0, anchor="w",
+            font=self._type.font("xs"), highlightthickness=0, borderwidth=0, anchor="w",
         )
         self._recursive_check.pack(side="left")
         self._folder_import_button = self._button(row2, "Import folder", self._on_import_folder)
@@ -184,29 +186,29 @@ class ImportCenterDialog:
             row3, text="Read scanned PDFs (OCR)", variable=self._ocr_var,
             bg=theme.surface, fg=theme.foreground, selectcolor=theme.surface_raised,
             activebackground=theme.surface, activeforeground=theme.contrast,
-            font=(self.font, 9), highlightthickness=0, borderwidth=0, anchor="w",
+            font=self._type.font("xs"), highlightthickness=0, borderwidth=0, anchor="w",
         )
         self._ocr_check.pack(side="left")
         self._ocr_force_check = tk.Checkbutton(
             row3, text="force low-text pages", variable=self._ocr_force_var,
             bg=theme.surface, fg=theme.text_secondary, selectcolor=theme.surface_raised,
             activebackground=theme.surface, activeforeground=theme.contrast,
-            font=(self.font, 8), highlightthickness=0, borderwidth=0, anchor="w",
+            font=self._type.font("2xs"), highlightthickness=0, borderwidth=0, anchor="w",
         )
         self._ocr_force_check.pack(side="left", padx=(8, 0))
         tk.Label(
             row3, text="languages", bg=theme.surface, fg=theme.text_secondary,
-            font=(self.font, 9),
+            font=self._type.font("xs"),
         ).pack(side="left", padx=(12, 4))
         self._ocr_languages_entry = tk.Entry(
             row3, textvariable=self._ocr_languages_var, width=10,
             bg=theme.surface_deep, fg=theme.foreground, insertbackground=theme.foreground,
-            relief="flat", font=(self.mono, 9),
+            relief="flat", font=self._type.mono("code"),
         )
         self._ocr_languages_entry.pack(side="left")
         tk.Label(
             row3, text="(e.g. ara+eng; needs the [ocr] extra + Tesseract)",
-            bg=theme.surface, fg=theme.text_dim, font=(self.font, 8),
+            bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
         ).pack(side="left", padx=6)
         # Offer the install right where OCR is chosen, but only when it is missing.
         self._ocr_install_button = self._button(
@@ -228,7 +230,7 @@ class ImportCenterDialog:
             row,
             text="Add a SQLite database: read-only connection test, schema and column "
                  "selection, a limited preview, and a resumable import.",
-            bg=theme.surface, fg=theme.text_secondary, font=(self.font, 9),
+            bg=theme.surface, fg=theme.text_secondary, font=self._type.font("xs"),
             justify="left", wraplength=520,
         ).pack(side="left", padx=10)
 
@@ -250,7 +252,7 @@ class ImportCenterDialog:
         self._progress = ttk.Progressbar(top, mode="indeterminate", length=180)
         self._status = tk.Label(
             top, text="Ready.", bg=theme.base, fg=theme.text_secondary,
-            font=(self.font, 9), anchor="w",
+            font=self._type.font("xs"), anchor="w",
         )
         self._status.pack(side="left")
         self._retry_button = self._button(top, "Retry failed", self._on_retry)
@@ -258,7 +260,7 @@ class ImportCenterDialog:
         # The retry button appears only when there is something to retry.
         self._results = tk.Text(
             frame, height=10, bg=theme.surface_deep, fg=theme.foreground,
-            font=(self.mono, 9), relief="flat", wrap="none", padx=10, pady=8,
+            font=self._type.mono("code"), relief="flat", wrap="none", padx=10, pady=8,
             highlightthickness=0, borderwidth=0, state="disabled",
         )
         self._results.pack(fill="both", expand=True, pady=(6, 12))
@@ -479,7 +481,7 @@ class ImportCenterDialog:
         if not jobs:
             tk.Label(
                 self._jobs_frame, text="No import jobs recorded yet.",
-                bg=theme.surface, fg=theme.text_dim, font=(self.font, 9), anchor="w",
+                bg=theme.surface, fg=theme.text_dim, font=self._type.font("xs"), anchor="w",
             ).pack(fill="x")
             return
         for state in jobs:
@@ -488,7 +490,7 @@ class ImportCenterDialog:
             label = f"{state.job_id}  [{state.status}]  pos {state.position}  ·  {state.source}"
             tk.Label(
                 row, text=label, bg=theme.surface, fg=theme.text_secondary,
-                font=(self.font, 8), anchor="w",
+                font=self._type.font("2xs"), anchor="w",
             ).pack(side="left", fill="x", expand=True)
             if state.status == "running":
                 self._button(row, "Resume", lambda jid=state.job_id: self._on_resume_job(jid)).pack(

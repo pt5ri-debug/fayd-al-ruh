@@ -40,6 +40,7 @@ from gui.sql_import import (
     picker_filetypes,
     redact_secrets,
 )
+from gui.typography import resolve
 
 #: The page title and one-line description.
 TITLE = "SQL Database Import"
@@ -76,6 +77,7 @@ class SqlImportDialog:
         self.theme = theme
         self.font = font
         self.mono = mono
+        self._type = resolve(parent, ui_family=font, mono_family=mono)
         self._on_close = on_close
         self._busy = False
         self._cancel = threading.Event()
@@ -106,15 +108,15 @@ class SqlImportDialog:
         header.pack(fill="x", padx=20, pady=(18, 8))
         tk.Label(
             header, text=TITLE, bg=theme.base, fg=theme.contrast,
-            font=(self.font, 15, "bold"), anchor="w",
+            font=self._type.font("heading1", weight="bold"), anchor="w",
         ).pack(fill="x")
         tk.Label(
             header, text=SUBTITLE, bg=theme.base, fg=theme.text_secondary,
-            font=(self.font, 9), anchor="w", justify="left", wraplength=760,
+            font=self._type.font("xs"), anchor="w", justify="left", wraplength=760,
         ).pack(fill="x", pady=(4, 0))
         tk.Label(
             header, text=FORMATS_LINE, bg=theme.base, fg=theme.text_dim,
-            font=(self.font, 8), anchor="w",
+            font=self._type.font("2xs"), anchor="w",
         ).pack(fill="x", pady=(6, 0))
 
         self._build_file_section()
@@ -130,7 +132,7 @@ class SqlImportDialog:
         frame.pack(fill="x", padx=20, pady=(10, 0))
         tk.Label(
             frame, text=title, bg=theme.surface, fg=theme.contrast,
-            font=(self.font, 10, "bold"), anchor="w",
+            font=self._type.font("sm", weight="bold"), anchor="w",
         ).pack(fill="x", padx=12, pady=(10, 2))
         return frame
 
@@ -140,7 +142,7 @@ class SqlImportDialog:
             parent, text=text, command=command, bg=theme.surface_raised,
             fg=theme.foreground, activebackground=theme.interactive_active,
             activeforeground=theme.contrast, relief="flat", borderwidth=0,
-            font=(self.font, 9, "bold"), padx=12, pady=4, cursor="hand2",
+            font=self._type.font("xs", weight="bold"), padx=12, pady=4, cursor="hand2",
         )
 
     def _build_file_section(self) -> None:
@@ -152,7 +154,7 @@ class SqlImportDialog:
         self._choose_button.pack(side="left")
         self._path_label = tk.Label(
             row, text="No database chosen", bg=theme.surface, fg=theme.text_dim,
-            font=(self.font, 9), anchor="w",
+            font=self._type.font("xs"), anchor="w",
         )
         self._path_label.pack(side="left", padx=10, fill="x", expand=True)
         row2 = tk.Frame(frame, bg=theme.surface)
@@ -161,7 +163,7 @@ class SqlImportDialog:
         self._test_button.pack(side="left")
         self._connection_label = tk.Label(
             row2, text="", bg=theme.surface, fg=theme.text_secondary,
-            font=(self.font, 9), anchor="w",
+            font=self._type.font("xs"), anchor="w",
         )
         self._connection_label.pack(side="left", padx=10, fill="x", expand=True)
 
@@ -177,7 +179,7 @@ class SqlImportDialog:
 
         tk.Label(
             left, text="Tables", bg=theme.surface, fg=theme.text_secondary,
-            font=(self.font, 9, "bold"), anchor="w",
+            font=self._type.font("xs", weight="bold"), anchor="w",
         ).pack(fill="x")
         self._table_tree = ttk.Treeview(
             left, columns=("rows", "pk"), show="tree headings", height=6,
@@ -195,19 +197,19 @@ class SqlImportDialog:
             left, text="Import only the selected tables", variable=self._only_selected_var,
             bg=theme.surface, fg=theme.foreground, selectcolor=theme.surface_raised,
             activebackground=theme.surface, activeforeground=theme.contrast,
-            font=(self.font, 9), highlightthickness=0, borderwidth=0, anchor="w",
+            font=self._type.font("xs"), highlightthickness=0, borderwidth=0, anchor="w",
         )
         self._only_selected_check.pack(fill="x")
 
         tk.Label(
             right, text="Columns (uncheck to exclude)", bg=theme.surface,
-            fg=theme.text_secondary, font=(self.font, 9, "bold"), anchor="w",
+            fg=theme.text_secondary, font=self._type.font("xs", weight="bold"), anchor="w",
         ).pack(fill="x")
         self._columns_frame = tk.Frame(right, bg=theme.surface_deep, height=120)
         self._columns_frame.pack(fill="both", expand=True, pady=(4, 4))
         tk.Label(
             right, text=EXCLUSION_NOTE, bg=theme.surface, fg=theme.text_dim,
-            font=(self.font, 8), anchor="w", justify="left", wraplength=360,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=360,
         ).pack(fill="x")
         row = tk.Frame(right, bg=theme.surface)
         row.pack(fill="x", pady=(6, 0))
@@ -221,12 +223,12 @@ class SqlImportDialog:
         row.pack(fill="x", padx=12, pady=(2, 12))
         tk.Label(
             row, text="Batch size (rows per committed batch)", bg=theme.surface,
-            fg=theme.text_secondary, font=(self.font, 9),
+            fg=theme.text_secondary, font=self._type.font("xs"),
         ).pack(side="left")
         self._batch_entry = tk.Entry(
             row, textvariable=self._batch_var, width=10, bg=theme.surface_deep,
             fg=theme.foreground, insertbackground=theme.foreground, relief="flat",
-            font=(self.mono, 9),
+            font=self._type.mono("code"),
         )
         self._batch_entry.pack(side="left", padx=8)
         self._start_button = self._button(row, "Start import", self._on_start)
@@ -252,12 +254,12 @@ class SqlImportDialog:
         self._progress_determinate = ttk.Progressbar(top, mode="determinate", length=180, maximum=100)
         self._status = tk.Label(
             top, text="Ready.", bg=theme.base, fg=theme.text_secondary,
-            font=(self.font, 9), anchor="w",
+            font=self._type.font("xs"), anchor="w",
         )
         self._status.pack(side="left")
         self._results = tk.Text(
             frame, height=8, bg=theme.surface_deep, fg=theme.foreground,
-            font=(self.mono, 9), relief="flat", wrap="none", padx=10, pady=8,
+            font=self._type.mono("code"), relief="flat", wrap="none", padx=10, pady=8,
             highlightthickness=0, borderwidth=0, state="disabled",
         )
         self._results.pack(fill="both", expand=True, pady=(6, 12))
@@ -325,7 +327,7 @@ class SqlImportDialog:
         if table is None or table not in self._tables:
             tk.Label(
                 self._columns_frame, text="Select a table to see its columns.",
-                bg=theme.surface_deep, fg=theme.text_dim, font=(self.font, 9), anchor="w",
+                bg=theme.surface_deep, fg=theme.text_dim, font=self._type.font("xs"), anchor="w",
             ).pack(fill="x", padx=8, pady=8)
             return
         info = self._tables[table]
@@ -340,7 +342,7 @@ class SqlImportDialog:
                 command=partial(self._toggle_column, table, column.name, var),
                 bg=theme.surface_deep, fg=theme.foreground, selectcolor=theme.surface_raised,
                 activebackground=theme.surface_deep, activeforeground=theme.contrast,
-                font=(self.font, 9), highlightthickness=0, borderwidth=0, anchor="w",
+                font=self._type.font("xs"), highlightthickness=0, borderwidth=0, anchor="w",
             )
             check.pack(fill="x", padx=8, pady=1)
 
@@ -520,7 +522,7 @@ class SqlImportDialog:
         if not jobs:
             tk.Label(
                 self._jobs_frame, text="No SQL import jobs recorded yet.",
-                bg=theme.surface, fg=theme.text_dim, font=(self.font, 9), anchor="w",
+                bg=theme.surface, fg=theme.text_dim, font=self._type.font("xs"), anchor="w",
             ).pack(fill="x")
             return
         for job in jobs:
@@ -528,7 +530,7 @@ class SqlImportDialog:
             row.pack(fill="x", pady=1)
             tk.Label(
                 row, text=job.label(), bg=theme.surface, fg=theme.text_secondary,
-                font=(self.font, 8), anchor="w",
+                font=self._type.font("2xs"), anchor="w",
             ).pack(side="left", fill="x", expand=True)
             if job.can_resume:
                 self._button(row, "Resume", lambda jid=job.job_id: self._on_resume_job(jid)).pack(
