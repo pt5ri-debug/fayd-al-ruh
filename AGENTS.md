@@ -851,7 +851,12 @@ Arabic is kept as secondary aliases where useful.
   `bullets_from_text`/`title_from_text`/`outline_from_prose` turn an assistant
   answer into slide content, and `topic_sentence` derives a heading from a
   sentence while dropping the answer's own discourse openers ("First,",
-  "Moreover,") via `_DISCOURSE_OPENER_RE`. `bullets_from_text` treats a line
+  "Moreover,") via `_DISCOURSE_OPENER_RE` — `strip_discourse_opener` is that same
+  pass exposed on its own, so a *bullet* also reads as a fact rather than as the
+  assistant narrating its own list (it returns text with no opener unchanged, so
+  nothing is re-cased). `dedup_key` is a bullet's comparison key (case, whitespace,
+  a trailing stop, and a leading connective ignored) so a repeat is recognised
+  across slides. `bullets_from_text` treats a line
   before the first bullet as the answer's *title* line (which the slide prompt
   asks for), so the same words never appear as both the title and the first
   bullet. `default_presentation_dir()` is `<data>/presentations`, git-ignored;
@@ -873,7 +878,12 @@ Arabic is kept as secondary aliases where useful.
   — so a change after approval is never silent and the export gate re-arms.
   `_is_title_line` distinguishes a model's short title line from the grounded
   assistant's prose first sentence, so a prose answer takes the outline heading as
-  the slide's title instead of repeating its first sentence. `export` requires
+  the slide's title instead of repeating its first sentence. `draft_slides_from_outline`
+  drops a drafted bullet another slide already shows (`dedup_key`), because the
+  retriever can return the same passages for two related headings; when *every*
+  bullet repeats it keeps the section's single strongest line and sets
+  `REPEATED_HEADING_NOTE`, so the slide is flagged for the user rather than left
+  blank or silently duplicated. `export` requires
   `CONTENT_APPROVED`, writes only the approved slides in their approved order,
   records an `ExportRecord` (including a failure), and moves the project to
   `EXPORTED` or `EXPORT_FAILED`.
@@ -906,7 +916,12 @@ Arabic is kept as secondary aliases where useful.
   outline, and slide draft call the project's *existing* assistant through
   `ai.jarvis.build_session(text_only=True)` (`_make_ask`), and with no model
   installed they still work when the text is supplied directly (`--text` /
-  `--text-file` / `--title` / `--bullet`). Exit codes: `0` success, `2` invalid
+  `--text-file` / `--title` / `--bullet`). A project's discussion **resumes
+  across runs**: `_make_ask` loads the conversation id the project last used
+  (`_load_conversation_id`, a `JsonStore` pointer under `<root>/conversations/map`)
+  and calls `resume_session`, saving the session after every turn, so returning to
+  a project in a later process keeps the earlier exchange instead of starting
+  over. Exit codes: `0` success, `2` invalid
   arguments, `3` the assistant is not available, `4` a gate refused the
   operation, `5` an unexpected failure.
 - `core/document_reader.py` — read text out of a Word file with no third-party

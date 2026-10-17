@@ -32,12 +32,14 @@ from core.presentation import (
     PresentationWriter,
     Slide,
     bullets_from_text,
+    dedup_key,
     default_presentation_dir,
     outline_from_prose,
     parse_outline,
     presentation_filename,
     require_transition,
     resolve_content_type,
+    strip_discourse_opener,
     topic_sentence,
 )
 from gui.presentation import PresentationService, SlideSpec
@@ -601,6 +603,19 @@ def test_the_cli_exports_a_real_deck_a_second_time(tmp_path: Path) -> None:
     assert main(["--root", root, "--output-dir", out, "export", "PRS-001", "--output", str(second)]) == 0
     assert second.exists()
 
+
+def test_the_cli_remembers_a_projects_conversation(tmp_path: Path) -> None:
+    """A project's discussion pointer survives the process, so a later run resumes it."""
+    from cli.presentation import _load_conversation_id, _save_conversation_id
+
+    root = tmp_path / "store"
+    assert _load_conversation_id(root, "PRS-001") == ""
+    _save_conversation_id(root, "PRS-001", "CNV-abc123")
+    assert _load_conversation_id(root, "PRS-001") == "CNV-abc123"
+    # A different project keeps its own conversation.
+    assert _load_conversation_id(root, "PRS-002") == ""
+
+
 def test_topic_sentence_drops_the_answers_own_joining_words() -> None:
     assert topic_sentence("First, casing is steel pipe set in the well.") == (
         "Casing is steel pipe set in"
@@ -641,6 +656,90 @@ def test_bullets_from_text_drops_the_answers_title_line() -> None:
         "Two things.",
         "Three things.",
     ]
+
+
+def _heading_of(prompt: str) -> str:
+    """The outline heading a slide prompt is about (its first line)."""
+    return prompt.splitlines()[0].strip()
+
+
+def test_strip_discourse_opener_removes_only_a_leading_connective() -> None:
+    """A joining word is the answer's narration, not the bullet's content."""
+    assert strip_discourse_opener("First, Casing is steel pipe set in the well.") == (
+        "Casing is steel pipe set in the well."
+    )
+    assert strip_discourse_opener("In addition, Primary cementing places a sheath.") == (
+        "Primary cementing places a sheath."
+    )
+    assert strip_discourse_opener("Finally, Field development planning chooses.") == (
+        "Field development planning chooses."
+    )
+    # Text with no opener is returned exactly, so nothing is re-cased.
+    assert strip_discourse_opener("porosity measures void space") == (
+        "porosity measures void space"
+    )
+    # A connective word inside the sentence is content and is left alone.
+    assert strip_discourse_opener("The first step is depth selection") == (
+        "The first step is depth selection"
+    )
+    # A sentence that is only an opener keeps its own words rather than vanishing.
+    assert strip_discourse_opener("First, porosity.") == "Porosity."
+
+
+def test_bullets_from_text_drops_a_leading_discourse_opener() -> None:
+    """A bullet reads as a fact, not as the assistant narrating its own list."""
+    text = "Porosity\n- First, Fraction of void space\n- In addition, Controls storage"
+    assert bullets_from_text(text) == [
+        "Fraction of void space",
+        "Controls storage",
+    ]
+    prose = "First, casing is set in sections. Finally, cementing isolates zones."
+    assert bullets_from_text(prose) == [
+        "Casing is set in sections.",
+        "Cementing isolates zones.",
+    ]
+
+
+def test_dedup_key_recognises_a_repeated_bullet_across_slides() -> None:
+    """The key ignores case, spacing, a trailing stop, and a leading connective."""
+    assert dedup_key("First, Casing is steel pipe.") == dedup_key("casing is steel pipe")
+    assert dedup_key("  Porosity   measures  void space  ") == dedup_key(
+        "Porosity measures void space."
+    )
+    # Two genuinely different bullets must not collide.
+    assert dedup_key("Porosity and permeability") != dedup_key("Permeability and porosity")
+
+
+def test_draft_slides_does_not_repeat_a_bullet_on_a_second_slide() -> None:
+    """A slide never repeats a line an earlier slide already shows."""
+    shared = "Casing is steel pipe set in the well."
+    answers = {
+        "Well design": f"Title A\n- {shared}\n- A unique line for well design",
+        "Cementing": f"Title B\n- {shared}\n- A unique line for cementing",
+    }
+    service = PresentationService(root=None, ask=lambda q: answers[_heading_of(q)])
+    project = service.new_project("Drilling")
+    service.draft_outline(project.project_id, text="Well design\nCementing")
+    service.approve_outline(project.project_id)
+    slides = service.draft_slides_from_outline(project.project_id)
+    first, second = slides
+    assert first.content == [shared, "A unique line for well design"]
+    # The repeat is gone; the second slide keeps only its own new line.
+    assert second.content == ["A unique line for cementing"]
+
+
+def test_draft_slides_flags_a_heading_the_retriever_cannot_distinguish() -> None:
+    """When every bullet repeats, one line is kept and the note says why."""
+    same = "- The only line the retriever returns"
+    service = PresentationService(root=None, ask=lambda q: same)
+    project = service.new_project("Drilling")
+    service.draft_outline(project.project_id, text="Well design\nCementing")
+    service.approve_outline(project.project_id)
+    first, second = service.draft_slides_from_outline(project.project_id)
+    assert first.content == ["The only line the retriever returns"]
+    # A blank slide would be worse than a flagged one, so one line is kept.
+    assert second.content == ["The only line the retriever returns"]
+    assert "no new material" in second.notes
 
 
 def test_drafting_never_repeats_the_title_as_the_first_bullet() -> None:
