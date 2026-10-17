@@ -1107,3 +1107,37 @@ def test_markdown_is_stripped_before_reading() -> None:
     assert "#" not in spoken and "**" not in spoken and "`" not in spoken
     assert "bold" in spoken and "code" in spoken and "item one" in spoken
 
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_opens_the_presentation_studio_from_its_menu() -> None:
+    """The Studio opens from the window and reuses one dialog, not a second AI."""
+    import tkinter as tk
+
+    from gui.actions import ACTIONS
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        service = _service(FakeSession())
+        app = FaydGUI(root, service=service)
+        for _ in range(20):
+            root.update()
+
+        # The sidebar action exists and the Studio shares this window's session.
+        assert any(action.key == "presentation" for action in ACTIONS)
+        assert service.presentation is not None
+
+        app._open_presentation()
+        for _ in range(30):
+            root.update()
+        dialog = app._presentation_dialog
+        assert dialog is not None
+        assert dialog.window.title() == "Presentation Studio"
+        # A second open reuses the window instead of stacking another one.
+        app._open_presentation()
+        assert app._presentation_dialog is dialog
+        dialog._close()
+        assert app._presentation_dialog is None
+    finally:
+        root.destroy()

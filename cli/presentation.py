@@ -1,0 +1,677 @@
+"""Command line for Presentation Studio (the headless twin of its window).
+
+    python -m cli presentation new "Reservoir Porosity"   # a new project
+    python -m cli presentation list                       # the projects so far
+    python -m cli presentation show PRS-001               # state + slides
+    python -m cli presentation discuss PRS-001 "what is porosity?"
+    python -m cli presentation outline PRS-001 --text-file plan.txt
+    python -m cli presentation outline-draft PRS-001      # ask the assistant
+    python -m cli presentation review-outline PRS-001
+    python -m cli presentation approve-outline PRS-001 [--revision 2]
+    python -m cli presentation draft PRS-001 [--heading "Porosity"] [--batch 3]
+    python -m cli presentation add PRS-001 --title "Porosity" --bullet "..."
+    python -m cli presentation edit PRS-001 SLD-001 --title "New title"
+    python -m cli presentation reorder PRS-001 SLD-002 --position 1
+    python -m cli presentation review-slides PRS-001
+    python -m cli presentation approve-slide PRS-001 SLD-001
+    python -m cli presentation unapprove-slide PRS-001 SLD-001
+    python -m cli presentation approve-slides PRS-001
+    python -m cli presentation approve-content PRS-001
+    python -m cli presentation revisions PRS-001 SLD-001
+    python -m cli presentation restore PRS-001 SLD-001 --revision 3
+    python -m cli presentation export PRS-001 [--output deck.pptx]
+    python -m cli presentation history PRS-001
+
+It drives the *same* :class:`gui.presentation.PresentationService` the window
+uses, so the CLI and the window share one set of projects, one revision history,
+and one export gate. No workflow logic is reimplemented here.
+
+The discussion, outline draft, and slide draft call the project's *existing*
+assistant (through ``ai.jarvis.build_session``); with no model installed they
+still work when you supply the text yourself (``--text`` / ``--text-file`` /
+``--title`` / ``--bullet``).
+
+Exit codes: ``0`` success, ``2`` invalid arguments, ``3`` the assistant is not
+available, ``4`` a gate refused the operation, ``5`` an unexpected failure.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+from core.presentation import (
+    CONTENT_BULLETS,
+    CONTENT_TYPES,
+    STATE_LABELS,
+    OutlineRevision,
+    OutlineSection,
+    PresentationError,
+    Slide,
+)
+from gui.presentation import PresentationService, SlideSpec
+
+
+def _read_text(path: str | None) -> str | None:
+    """Read a text file, or return ``None`` when no path was given."""
+    if not path:
+        return None
+    return Path(path).expanduser().read_text(encoding="utf-8")
+
+
+def _make_ask():
+    """Build the assistant callback from the project's own session.
+
+    This is the *existing* assistant -- ``ai.jarvis.build_session`` with the
+    grounded assistant and the knowledge retriever -- so a presentation is
+    discussed with the same mind the chat window uses. Imported lazily, so the
+    CLI never loads the model stack unless it is actually needed.
+    """
+    from ai.jarvis import build_session
+
+    session = build_session(text_only=True)
+
+    def ask(question: str) -> str:
+        turn = session.handle(question)
+        # ``answer_text`` is the assistant's own prose; ``response`` may carry a
+        # spoken wrapper or an agent summary, so the answer text is preferred.
+        return turn.answer_text or turn.response
+
+    return ask
+
+
+def _service(args: argparse.Namespace, *, need_assistant: bool = False) -> PresentationService:
+    root = Path(args.root).expanduser() if getattr(args, "root", None) else None
+    output_dir = Path(args.output_dir).expanduser() if getattr(args, "output_dir", None) else None
+    ask = None
+    if need_assistant or getattr(args, "assistant", False):
+        ask = _make_ask()
+    service = PresentationService(root=root, ask=ask, output_dir=output_dir)
+    if not getattr(args, "quiet", False):
+        service.set_progress(lambda message: print(message, file=sys.stderr))
+    return service
+
+
+def _print_json(payload: object) -> None:
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _print_slide(slide: Slide, *, as_json: bool) -> None:
+    data = {
+        "slide_id": slide.slide_id,
+        "number": slide.number,
+        "title": slide.title,
+        "content_type": slide.content_type,
+        "content": list(slide.content),
+        "table": [list(row) for row in slide.table],
+        "equations": list(slide.equations),
+        "images": list(slide.images),
+        "sources": list(slide.sources),
+        "notes": slide.notes,
+        "approved": slide.approved,
+        "revision": slide.revision,
+    }
+    if as_json:
+        _print_json(data)
+        return
+    mark = "approved" if slide.approved else "not approved"
+    print(f"  [{slide.number}] {slide.slide_id} {slide.title!r} ({slide.content_type}, {mark})")
+    for line in slide.content:
+        print(f"      - {line}")
+    for row in slide.table:
+        print(f"      | {' | '.join(row)}")
+    for line in slide.equations:
+        print(f"      = {line}")
+    for ref in slide.images:
+        print(f"      [image] {ref}")
+    if slide.notes:
+        print(f"      notes: {slide.notes}")
+
+
+def _print_project(
+    service: PresentationService, project_id: str, *, as_json: bool, slides: bool
+) -> None:
+    project = service.get(project_id)
+    status = service.status(project_id)
+    if as_json:
+        payload = status.as_dict()
+        payload["conversation_ids"] = list(project.conversation_ids)
+        if slides:
+            payload["slide_list"] = [
+                {
+                    "slide_id": item.slide_id,
+                    "number": item.number,
+                    "title": item.title,
+                    "approved": item.approved,
+                }
+                for item in project.ordered_slides()
+            ]
+        _print_json(payload)
+        return
+    print(status.summary())
+    print(f"  project: {project.project_id}  state: {STATE_LABELS.get(project.state, project.state)}")
+    if project.conversation_ids:
+        print(f"  conversations: {', '.join(project.conversation_ids)}")
+    outline = project.outline
+    if outline is not None:
+        approved = "approved" if project.approved_outline_revision == outline.revision else "draft"
+        print(
+            f"  outline revision {outline.revision} ({approved}), "
+            f"~{outline.estimated_slides} slide(s):"
+        )
+        for section in outline.sections:
+            print(f"    - {section.heading} ({section.estimated_slides} slides)")
+            for sub in section.subsections:
+                print(f"        {sub}")
+    if slides:
+        if not project.slides:
+            print("  (no slides yet)")
+        for slide in project.ordered_slides():
+            _print_slide(slide, as_json=False)
+
+
+# ----------------------------------------------------------------- handlers
+
+
+def _run_new(service: PresentationService, args: argparse.Namespace) -> int:
+    project = service.new_project(
+        args.title,
+        subtitle=args.subtitle or "",
+        audience=args.audience or "",
+        language=args.language,
+    )
+    if args.as_json:
+        _print_json({"ok": True, "project_id": project.project_id, "title": project.title})
+    else:
+        print(f"Created {project.project_id}: {project.title!r} ({STATE_LABELS[project.state]}).")
+    return 0
+
+
+def _run_list(service: PresentationService, args: argparse.Namespace) -> int:
+    projects = service.list_projects()
+    if args.as_json:
+        _print_json([service.status(item.project_id).as_dict() for item in projects])
+        return 0
+    if not projects:
+        print('No presentation projects yet. Create one with: python -m cli presentation new "Title"')
+        return 0
+    for project in projects:
+        print(f"{project.project_id}  {service.status(project.project_id).summary()}")
+    return 0
+
+
+def _run_show(service: PresentationService, args: argparse.Namespace) -> int:
+    _print_project(service, args.project_id, as_json=args.as_json, slides=True)
+    return 0
+
+
+def _run_status(service: PresentationService, args: argparse.Namespace) -> int:
+    _print_project(service, args.project_id, as_json=args.as_json, slides=False)
+    return 0
+
+
+def _run_discuss(service: PresentationService, args: argparse.Namespace) -> int:
+    result = service.discuss(
+        args.project_id, args.question, conversation_id=args.conversation or ""
+    )
+    if args.as_json:
+        _print_json(
+            {
+                "ok": True,
+                "project_id": result.project_id,
+                "conversation_id": result.conversation_id,
+                "question": result.question,
+                "answer": result.answer,
+            }
+        )
+    else:
+        print(result.answer)
+    return 0
+
+
+def _outline_text(args: argparse.Namespace) -> str | None:
+    """The outline text from ``--text`` or ``--text-file``, if either was given."""
+    return _read_text(args.text_file) if args.text_file else args.text
+
+
+def _print_outline(revision: OutlineRevision) -> None:
+    print(f"Outline revision {revision.revision}: ~{revision.estimated_slides} slide(s)")
+    for section in revision.sections:
+        print(f"  - {section.heading} ({section.estimated_slides} slides)")
+        for sub in section.subsections:
+            print(f"      {sub}")
+
+
+def _run_outline(service: PresentationService, args: argparse.Namespace) -> int:
+    revision = service.draft_outline(args.project_id, text=_outline_text(args), note=args.note or "")
+    if args.as_json:
+        _print_json({"ok": True, **revision.to_primitive()})
+        return 0
+    _print_outline(revision)
+    return 0
+
+
+def _run_outline_draft(service: PresentationService, args: argparse.Namespace) -> int:
+    revision = service.draft_outline(args.project_id, note=args.note or "")
+    if args.as_json:
+        _print_json({"ok": True, **revision.to_primitive()})
+        return 0
+    _print_outline(revision)
+    return 0
+
+
+def _run_outline_edit(service: PresentationService, args: argparse.Namespace) -> int:
+    sections: list[OutlineSection] = []
+    for heading in args.section:
+        parts = heading.split("|", 1)
+        subs = (
+            tuple(item.strip() for item in parts[1].split(",") if item.strip())
+            if len(parts) > 1
+            else ()
+        )
+        sections.append(OutlineSection(heading=parts[0].strip(), subsections=subs))
+    revision = service.edit_outline(args.project_id, sections, note=args.note or "edited by the user")
+    if args.as_json:
+        _print_json({"ok": True, **revision.to_primitive()})
+        return 0
+    print(f"Outline revision {revision.revision} saved with {len(revision.sections)} section(s).")
+    return 0
+
+
+def _run_outline_revise(service: PresentationService, args: argparse.Namespace) -> int:
+    revision = service.request_outline_revision(args.project_id, args.feedback)
+    if args.as_json:
+        _print_json({"ok": True, **revision.to_primitive()})
+        return 0
+    _print_outline(revision)
+    return 0
+
+
+def _run_review_outline(service: PresentationService, args: argparse.Namespace) -> int:
+    project = service.review_outline(args.project_id)
+    print(f"{project.project_id} is now in {STATE_LABELS.get(project.state, project.state)}.")
+    return 0
+
+
+def _run_approve_outline(service: PresentationService, args: argparse.Namespace) -> int:
+    project = service.approve_outline(args.project_id, revision=args.revision)
+    print(
+        f"Approved outline revision {project.approved_outline_revision}; "
+        f"the project is now in {STATE_LABELS.get(project.state, project.state)}."
+    )
+    return 0
+
+
+def _run_draft(service: PresentationService, args: argparse.Namespace) -> int:
+    slides = service.draft_slides_from_outline(
+        args.project_id, heading=args.heading, batch=args.batch
+    )
+    if args.as_json:
+        _print_json({"ok": True, "added": [slide.slide_id for slide in slides]})
+        return 0
+    if not slides:
+        print("Nothing new to draft (every outline section already has a slide).")
+        return 0
+    print(f"Drafted {len(slides)} slide(s):")
+    for slide in slides:
+        _print_slide(slide, as_json=False)
+    return 0
+
+
+def _run_add(service: PresentationService, args: argparse.Namespace) -> int:
+    spec = SlideSpec(
+        title=args.title or "",
+        content=tuple(args.bullet or ()),
+        content_type=args.type,
+        table=tuple(
+            tuple(cell.strip() for cell in row.split("|")) for row in (args.table_row or ())
+        ),
+        equations=tuple(args.equation or ()),
+        images=tuple(args.image or ()),
+        sources=tuple(args.source or ()),
+        notes=args.notes or "",
+    )
+    slide = service.add_slide(args.project_id, spec)
+    if args.as_json:
+        _print_json({"ok": True, "slide_id": slide.slide_id, "number": slide.number})
+        return 0
+    print(f"Added slide {slide.number} ({slide.slide_id}): {slide.title!r}")
+    return 0
+
+
+def _run_edit(service: PresentationService, args: argparse.Namespace) -> int:
+    fields: dict[str, object] = {}
+    if args.title is not None:
+        fields["title"] = args.title
+    if args.bullet is not None:
+        fields["content"] = list(args.bullet)
+    if args.type is not None:
+        fields["content_type"] = args.type
+    if args.notes is not None:
+        fields["notes"] = args.notes
+    if args.table_row is not None:
+        fields["table"] = [row.split("|") for row in args.table_row]
+    if args.equation is not None:
+        fields["equations"] = list(args.equation)
+    if args.source is not None:
+        fields["sources"] = list(args.source)
+    if args.image is not None:
+        fields["images"] = list(args.image)
+    slide = service.edit_slide(args.project_id, args.slide_id, **fields)
+    project = service.get(args.project_id)
+    if args.as_json:
+        _print_json(
+            {"ok": True, "slide_id": slide.slide_id, "state": project.state, "approved": slide.approved}
+        )
+        return 0
+    print(f"Updated {slide.slide_id}; it is now {'approved' if slide.approved else 'not approved'}.")
+    if project.approval_outdated:
+        print("The content approval is now outdated; approve the slides again before exporting.")
+    return 0
+
+
+def _run_reorder(service: PresentationService, args: argparse.Namespace) -> int:
+    service.reorder_slide(args.project_id, args.slide_id, args.position)
+    if args.as_json:
+        _print_json({"ok": True, "slide_id": args.slide_id, "position": args.position})
+        return 0
+    print(f"Moved {args.slide_id} to position {args.position}.")
+    return 0
+
+
+def _run_remove(service: PresentationService, args: argparse.Namespace) -> int:
+    service.remove_slide(args.project_id, args.slide_id)
+    print(f"Removed {args.slide_id}.")
+    return 0
+
+
+def _run_approve_slide(service: PresentationService, args: argparse.Namespace) -> int:
+    slide = service.approve_slide(args.project_id, args.slide_id)
+    print(f"Approved {slide.slide_id} (slide {slide.number}).")
+    return 0
+
+
+def _run_review_slides(service: PresentationService, args: argparse.Namespace) -> int:
+    project = service.review_slides(args.project_id)
+    print(f"{project.project_id} is now in {STATE_LABELS.get(project.state, project.state)}.")
+    return 0
+
+
+def _run_unapprove_slide(service: PresentationService, args: argparse.Namespace) -> int:
+    slide = service.unapprove_slide(args.project_id, args.slide_id)
+    print(f"Withdrew approval from slide {slide.number} ({slide.slide_id}).")
+    return 0
+
+
+def _run_approve_slides(service: PresentationService, args: argparse.Namespace) -> int:
+    project = service.approve_slides(args.project_id)
+    print(f"Approved {len(project.approved_slides)} slide(s).")
+    return 0
+
+
+def _run_approve_content(service: PresentationService, args: argparse.Namespace) -> int:
+    project = service.approve_content(args.project_id)
+    print(f"Content approved; the project is now in {STATE_LABELS.get(project.state, project.state)}.")
+    return 0
+
+
+def _run_reopen(service: PresentationService, args: argparse.Namespace) -> int:
+    project = service.reopen_content(args.project_id)
+    print(
+        f"Reopened for editing; the project is now in "
+        f"{STATE_LABELS.get(project.state, project.state)}."
+    )
+    return 0
+
+
+def _run_revisions(service: PresentationService, args: argparse.Namespace) -> int:
+    items = service.revisions(args.project_id, args.slide_id)
+    if args.as_json:
+        _print_json([item.to_primitive() for item in items])
+        return 0
+    if not items:
+        print(f"No revisions recorded for {args.slide_id}.")
+        return 0
+    for item in items:
+        mark = "approved" if item.approved else "draft"
+        print(f"  r{item.revision} ({mark}, {item.reason}): {item.content.get('title')!r}")
+    return 0
+
+
+def _run_restore(service: PresentationService, args: argparse.Namespace) -> int:
+    slide = service.restore_slide_revision(args.project_id, args.slide_id, args.revision)
+    print(f"Restored {slide.slide_id} to revision {args.revision}; approve it again before exporting.")
+    return 0
+
+
+def _run_restore_approved(service: PresentationService, args: argparse.Namespace) -> int:
+    slide = service.restore_approved(args.project_id, args.slide_id)
+    print(f"Restored the approved content of {slide.slide_id}; approve it again before exporting.")
+    return 0
+
+
+def _run_export(service: PresentationService, args: argparse.Namespace) -> int:
+    report = service.export(args.project_id, path=args.output)
+    if args.as_json:
+        _print_json(report.as_dict())
+        return 0 if report.ok else 4
+    print(report.message)
+    return 0 if report.ok else 4
+
+
+def _run_history(service: PresentationService, args: argparse.Namespace) -> int:
+    records = service.export_history(args.project_id)
+    if args.as_json:
+        _print_json([item.to_primitive() for item in records])
+        return 0
+    if not records:
+        print("No export attempts yet.")
+        return 0
+    for item in records:
+        mark = "ok" if item.ok else "failed"
+        print(f"  {item.export_id} [{mark}] {item.path} ({item.slide_count} slides) - {item.message}")
+    return 0
+
+
+_HANDLERS = {
+    "new": _run_new,
+    "list": _run_list,
+    "show": _run_show,
+    "status": _run_status,
+    "discuss": _run_discuss,
+    "outline": _run_outline,
+    "outline-draft": _run_outline_draft,
+    "outline-edit": _run_outline_edit,
+    "outline-revise": _run_outline_revise,
+    "review-outline": _run_review_outline,
+    "approve-outline": _run_approve_outline,
+    "draft": _run_draft,
+    "add": _run_add,
+    "edit": _run_edit,
+    "reorder": _run_reorder,
+    "remove": _run_remove,
+    "review-slides": _run_review_slides,
+    "approve-slide": _run_approve_slide,
+    "unapprove-slide": _run_unapprove_slide,
+    "approve-slides": _run_approve_slides,
+    "approve-content": _run_approve_content,
+    "reopen": _run_reopen,
+    "revisions": _run_revisions,
+    "restore": _run_restore,
+    "restore-approved": _run_restore_approved,
+    "export": _run_export,
+    "history": _run_history,
+}
+
+#: The commands that need the project's own assistant wired in.
+_NEEDS_ASSISTANT = frozenset({"discuss", "outline-draft", "outline-revise", "draft"})
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="presentation", description=__doc__)
+    parser.add_argument("--root", default=None, help="Where projects are stored (default: the data directory).")
+    parser.add_argument("--output-dir", default=None, help="Where exports are written by default.")
+    parser.add_argument(
+        "--assistant", action="store_true",
+        help="Load the project's assistant for drafting (implied by discuss/outline-draft/draft).",
+    )
+    parser.add_argument("--quiet", action="store_true", help="Suppress progress output on stderr.")
+    parser.add_argument("--json", action="store_true", dest="as_json", help="Machine-readable output.")
+    sub = parser.add_subparsers(dest="command")
+
+    new = sub.add_parser("new", help="Create a new presentation project.")
+    new.add_argument("title")
+    new.add_argument("--subtitle", default="")
+    new.add_argument("--audience", default="")
+    new.add_argument("--language", default="en", help="Content language hint (default: en).")
+
+    sub.add_parser("list", help="List the presentation projects.")
+
+    show = sub.add_parser("show", help="Show a project, its outline, and its slides.")
+    show.add_argument("project_id")
+
+    status = sub.add_parser("status", help="Show a project's state and counts.")
+    status.add_argument("project_id")
+
+    discuss = sub.add_parser("discuss", help="Discuss the subject with the project's assistant.")
+    discuss.add_argument("project_id")
+    discuss.add_argument("question")
+    discuss.add_argument("--conversation", default="", help="Record this conversation id.")
+
+    outline = sub.add_parser("outline", help="Set the outline from text you supply.")
+    outline.add_argument("project_id")
+    outline.add_argument("--text", default=None, help="The outline text.")
+    outline.add_argument("--text-file", default=None, help="Read the outline text from this file.")
+    outline.add_argument("--note", default="")
+
+    outline_draft = sub.add_parser("outline-draft", help="Ask the assistant to propose an outline.")
+    outline_draft.add_argument("project_id")
+    outline_draft.add_argument("--note", default="")
+
+    outline_edit = sub.add_parser("outline-edit", help="Replace the outline with your own sections.")
+    outline_edit.add_argument("project_id")
+    outline_edit.add_argument(
+        "--section", action="append", required=True,
+        help='A section, e.g. --section "Reservoir|Porosity,Permeability".',
+    )
+    outline_edit.add_argument("--note", default="")
+
+    outline_revise = sub.add_parser("outline-revise", help="Ask the assistant to revise the outline.")
+    outline_revise.add_argument("project_id")
+    outline_revise.add_argument("feedback")
+
+    review = sub.add_parser("review-outline", help="Move the project into outline review.")
+    review.add_argument("project_id")
+
+    approve_outline = sub.add_parser("approve-outline", help="Approve an outline revision.")
+    approve_outline.add_argument("project_id")
+    approve_outline.add_argument(
+        "--revision", type=int, default=None,
+        help="Approve this revision instead of the newest (to restore one).",
+    )
+
+    draft = sub.add_parser("draft", help="Ask the assistant for slide content.")
+    draft.add_argument("project_id")
+    draft.add_argument("--heading", default=None, help="Draft only this outline section.")
+    draft.add_argument("--batch", type=int, default=None, help="Add at most this many slides.")
+
+    add = sub.add_parser("add", help="Add one slide.")
+    add.add_argument("project_id")
+    add.add_argument("--title", default="")
+    add.add_argument("--bullet", action="append", help="A content line (repeatable).")
+    add.add_argument("--type", default=CONTENT_BULLETS, choices=list(CONTENT_TYPES))
+    add.add_argument("--table-row", action="append", help='A table row, cells split on "|" (repeatable).')
+    add.add_argument("--equation", action="append", help="An equation line (repeatable).")
+    add.add_argument("--image", action="append", help="An image reference (repeatable).")
+    add.add_argument("--source", action="append", help="A source reference (repeatable).")
+    add.add_argument("--notes", default="")
+
+    edit = sub.add_parser("edit", help="Edit one slide's content.")
+    edit.add_argument("project_id")
+    edit.add_argument("slide_id")
+    edit.add_argument("--title", default=None)
+    edit.add_argument("--bullet", action="append", help="Replace the content lines (repeatable).")
+    edit.add_argument("--type", default=None, choices=list(CONTENT_TYPES))
+    edit.add_argument("--table-row", action="append", help='Replace the table rows (cells split on "|").')
+    edit.add_argument("--equation", action="append")
+    edit.add_argument("--image", action="append")
+    edit.add_argument("--source", action="append")
+    edit.add_argument("--notes", default=None)
+
+    reorder = sub.add_parser("reorder", help="Move a slide to a new position.")
+    reorder.add_argument("project_id")
+    reorder.add_argument("slide_id")
+    reorder.add_argument("--position", type=int, required=True)
+
+    remove = sub.add_parser("remove", help="Remove a slide.")
+    remove.add_argument("project_id")
+    remove.add_argument("slide_id")
+
+    review_slides = sub.add_parser("review-slides", help="Move the project into slide review.")
+    review_slides.add_argument("project_id")
+
+    approve_slide = sub.add_parser("approve-slide", help="Approve one slide.")
+    approve_slide.add_argument("project_id")
+    approve_slide.add_argument("slide_id")
+
+    unapprove_slide = sub.add_parser("unapprove-slide", help="Withdraw a slide's approval.")
+    unapprove_slide.add_argument("project_id")
+    unapprove_slide.add_argument("slide_id")
+
+    approve_slides = sub.add_parser("approve-slides", help="Approve every non-empty slide.")
+    approve_slides.add_argument("project_id")
+
+    approve_content = sub.add_parser("approve-content", help="Approve the complete slide content.")
+    approve_content.add_argument("project_id")
+
+    reopen = sub.add_parser("reopen", help="Reopen approved content for editing.")
+    reopen.add_argument("project_id")
+
+    revisions = sub.add_parser("revisions", help="List a slide's recorded revisions.")
+    revisions.add_argument("project_id")
+    revisions.add_argument("slide_id")
+
+    restore = sub.add_parser("restore", help="Restore a slide to a recorded revision.")
+    restore.add_argument("project_id")
+    restore.add_argument("slide_id")
+    restore.add_argument("--revision", type=int, required=True)
+
+    restore_approved = sub.add_parser("restore-approved", help="Undo an edit: restore the approved content.")
+    restore_approved.add_argument("project_id")
+    restore_approved.add_argument("slide_id")
+
+    export = sub.add_parser("export", help="Write the approved slides to a .pptx.")
+    export.add_argument("project_id")
+    export.add_argument("--output", default=None, help="Write here (default: the data directory).")
+
+    history = sub.add_parser("history", help="Show the export history.")
+    history.add_argument("project_id")
+
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    if not args.command:
+        parser.print_help()
+        return 0
+    try:
+        service = _service(args, need_assistant=args.command in _NEEDS_ASSISTANT)
+        return _HANDLERS[args.command](service, args)
+    except PresentationError as error:
+        print(str(error), file=sys.stderr)
+        return 4
+    except ModuleNotFoundError as error:
+        print(f"The assistant is not available: {error}", file=sys.stderr)
+        return 3
+    except OSError as error:
+        print(f"Could not complete the operation: {error}", file=sys.stderr)
+        return 5
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

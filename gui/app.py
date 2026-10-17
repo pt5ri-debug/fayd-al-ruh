@@ -1882,6 +1882,11 @@ class FaydGUI:
         )
         menu.add_separator()
         menu.add_command(
+            label="Presentation Studio — build a PowerPoint deck…",
+            command=self._open_presentation,
+        )
+        menu.add_separator()
+        menu.add_command(
             label="Code Studio — edit and merge the project's own code…",
             command=self._open_code_studio,
         )
@@ -1953,6 +1958,29 @@ class FaydGUI:
             font=self._font,
             mono=self._mono,
             on_close=lambda: setattr(self, "_image_edit_dialog", None),
+        )
+
+    def _open_presentation(self) -> None:
+        """Open Presentation Studio: build a PowerPoint deck from a discussion.
+
+        The Studio drives the same ``gui.presentation.PresentationService`` the
+        CLI's ``presentation`` command drives, and its discussion asks *this*
+        window's own assistant, so there is no second AI and no second store.
+        """
+        from gui.presentation_dialog import PresentationDialog
+
+        existing = getattr(self, "_presentation_dialog", None)
+        if existing is not None:
+            existing.window.deiconify()
+            existing.window.lift()
+            return
+        self._presentation_dialog = PresentationDialog(
+            self.root,
+            self.service.presentation,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=lambda: setattr(self, "_presentation_dialog", None),
         )
 
     def _open_code_studio(self) -> None:
@@ -2110,6 +2138,10 @@ class FaydGUI:
         # opens it rather than running the headless status command.
         if action.key == "code-studio":
             self._open_code_studio()
+            return
+        # Presentation Studio likewise has its own window and service.
+        if action.key == "presentation":
+            self._open_presentation()
             return
         # Ultron and Vision answer in this same chat (the header's model selector),
         # so the sidebar entry switches the mouth rather than opening a window.

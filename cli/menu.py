@@ -276,6 +276,11 @@ def run_code_studio(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.studio", argv)
 
 
+def run_presentation(argv: Sequence[str] = ()) -> int:
+    """Build a PowerPoint deck from a discussion, slide by slide (Presentation Studio)."""
+    return _run_module("cli.presentation", argv)
+
+
 def run_image(argv: Sequence[str] = ()) -> int:
     """Generate an image from a text prompt (optional, dependency-free backend)."""
     return _run_module("cli.image", argv)
@@ -373,6 +378,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Ingest sources: files, SQL, authorized web", run_ingest, ("list-connectors",)),
     ("Import files and folders (Knowledge Import Center)", run_import_center, ("interactive",)),
     ("Code Studio: edit and merge the project's own code", run_code_studio, ("status",)),
+    ("Presentation Studio: build a PowerPoint deck from a discussion", run_presentation, ("list",)),
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~4 GB)", run_image, ("download", "--approve")),
     ("Install optional PDF/OCR/image support", run_deps, ()),
@@ -509,6 +515,7 @@ __all__ = [
     "run_web",
     "run_update",
     "run_import_center",
+    "run_presentation",
     "run_deps",
     "run_demo",
     "run_ml",
