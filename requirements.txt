@@ -9,6 +9,14 @@ numpy>=2.0
 # OCR path additionally needs the ``[ocr]`` extra plus the Tesseract engine.
 pypdf>=4.0
 
+# The Presentation Studio PowerPoint export engine, installed here so CI can
+# exercise the real render path (slide layouts, tables, embedded images, charts,
+# notes, and RTL) on a base install. Like ``pypdf`` it is *optional* at runtime:
+# ``core.pptx_engine`` imports it lazily and falls back to the dependency-free
+# standard-library writer when it is absent (see requirements-pptx.txt and the
+# ``[pptx]`` extra). ``python-pptx`` pulls ``lxml``, ``Pillow``, and ``XlsxWriter``.
+python-pptx>=1.0
+
 # Test and quality dependencies
 pytest==9.1.1
 ruff==0.16.10

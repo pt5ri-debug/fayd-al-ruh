@@ -48,6 +48,7 @@ FEATURE_IMAGE = "image"
 FEATURE_ULTRON = "ultron"
 FEATURE_CODER = "coder"
 FEATURE_VISION = "vision"
+FEATURE_PPTX = "pptx"
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,16 @@ FEATURES: dict[str, OptionalFeature] = {
             "file into the data/vision folder."
         ),
         system_missing_note="no `.gguf` model file is present yet.",
+    ),
+    FEATURE_PPTX: OptionalFeature(
+        key=FEATURE_PPTX,
+        title="PowerPoint export engine (python-pptx)",
+        summary=(
+            "Export a Presentation Studio deck as a real, editable .pptx with "
+            "tables, embedded images, charts, notes, and right-to-left text."
+        ),
+        requirements_file="requirements-pptx.txt",
+        import_names=("pptx",),
     ),
 }
 

@@ -183,6 +183,257 @@ def resolve_batch_size(value: int | None, *, default: int = DEFAULT_SLIDE_BATCH)
 
 
 # --------------------------------------------------------------------------- #
+# Slide geometry, themes, and presentation settings
+# --------------------------------------------------------------------------- #
+
+#: English Metric Units per inch (the unit DrawingML uses for every length).
+EMU_PER_INCH = 914400
+#: EMU per point (a point is 1/72 inch).
+EMU_PER_POINT = 12700
+
+#: 16:9 widescreen -- the default for a modern deck.
+SLIDE_16_9 = (12192000, 6858000)
+#: 4:3 -- the legacy projector aspect, offered when a venue needs it.
+SLIDE_4_3 = (9144000, 6858000)
+
+ASPECT_16_9 = "16:9"
+ASPECT_4_3 = "4:3"
+ASPECTS: dict[str, tuple[int, int]] = {ASPECT_16_9: SLIDE_16_9, ASPECT_4_3: SLIDE_4_3}
+DEFAULT_ASPECT = ASPECT_16_9
+
+
+def resolve_aspect(value: str | None) -> str:
+    """Normalise an aspect name, defaulting to 16:9 and refusing an unknown one."""
+    key = (value or "").strip().lower().replace(" ", "")
+    if not key:
+        return DEFAULT_ASPECT
+    aliases = {
+        "16:9": ASPECT_16_9,
+        "16x9": ASPECT_16_9,
+        "widescreen": ASPECT_16_9,
+        "wide": ASPECT_16_9,
+        "4:3": ASPECT_4_3,
+        "4x3": ASPECT_4_3,
+        "standard": ASPECT_4_3,
+    }
+    if key not in aliases:
+        raise PresentationError(
+            f"Unknown aspect {value!r}; expected one of {', '.join(sorted(ASPECTS))}."
+        )
+    return aliases[key]
+
+
+def slide_size(aspect: str) -> tuple[int, int]:
+    """The ``(cx, cy)`` EMU geometry for an aspect name."""
+    return ASPECTS[resolve_aspect(aspect)]
+
+
+@dataclass(frozen=True)
+class DeckTheme:
+    """Fonts, sizes, colours, and spacing for a rendered deck.
+
+    Sizes are in points; lengths are in EMU. The values are deliberately
+    conservative so text stays readable on a projector and never crowds the
+    slide edges.
+    """
+
+    name: str = "professional"
+    #: Latin/body and heading typefaces.
+    heading_font: str = "Calibri Light"
+    body_font: str = "Calibri"
+    #: Complex-script (Arabic) typeface; empty means "use the heading/body font".
+    arabic_font: str = "Arial"
+    #: Point sizes.
+    title_size: float = 40.0
+    subtitle_size: float = 22.0
+    section_size: float = 34.0
+    heading_size: float = 30.0
+    body_size: float = 20.0
+    small_size: float = 16.0
+    notes_size: float = 12.0
+    table_size: float = 16.0
+    equation_size: float = 20.0
+    #: Colours as ``RRGGBB``.
+    background: str = "FFFFFF"
+    foreground: str = "1F2933"
+    muted: str = "52606D"
+    accent: str = "C8A24A"
+    accent_dark: str = "2E5A88"
+    section_background: str = "1F2933"
+    section_foreground: str = "FFFFFF"
+    #: Spacing.
+    margin_x: int = 838200
+    margin_y: int = 685800
+    title_gap: int = 274320
+    line_spacing: float = 1.15
+    space_after: float = 0.35
+    #: Slide-number placement.
+    show_slide_numbers: bool = True
+
+    def script_font(self, font: str) -> str:
+        """The complex-script typeface to pair with ``font`` (Arabic text)."""
+        return self.arabic_font or font
+
+    def to_primitive(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "heading_font": self.heading_font,
+            "body_font": self.body_font,
+            "arabic_font": self.arabic_font,
+            "title_size": self.title_size,
+            "subtitle_size": self.subtitle_size,
+            "section_size": self.section_size,
+            "heading_size": self.heading_size,
+            "body_size": self.body_size,
+            "small_size": self.small_size,
+            "notes_size": self.notes_size,
+            "table_size": self.table_size,
+            "equation_size": self.equation_size,
+            "background": self.background,
+            "foreground": self.foreground,
+            "muted": self.muted,
+            "accent": self.accent,
+            "accent_dark": self.accent_dark,
+            "section_background": self.section_background,
+            "section_foreground": self.section_foreground,
+            "margin_x": self.margin_x,
+            "margin_y": self.margin_y,
+            "title_gap": self.title_gap,
+            "line_spacing": self.line_spacing,
+            "space_after": self.space_after,
+            "show_slide_numbers": self.show_slide_numbers,
+        }
+
+
+#: Named themes a user may choose. "professional" is the default.
+THEMES: dict[str, DeckTheme] = {
+    "professional": DeckTheme(),
+    "light": DeckTheme(
+        name="light",
+        background="FFFFFF",
+        foreground="111827",
+        muted="6B7280",
+        accent="2563EB",
+        accent_dark="1E40AF",
+        section_background="1E3A8A",
+        section_foreground="FFFFFF",
+    ),
+    "academic": DeckTheme(
+        name="academic",
+        heading_font="Cambria",
+        body_font="Cambria",
+        accent="7A1F1F",
+        accent_dark="1F3A5F",
+        section_background="1F3A5F",
+        section_foreground="FFFFFF",
+    ),
+    "dark": DeckTheme(
+        name="dark",
+        background="111827",
+        foreground="F9FAFB",
+        muted="9CA3AF",
+        accent="F59E0B",
+        accent_dark="60A5FA",
+        section_background="000000",
+        section_foreground="F9FAFB",
+    ),
+}
+
+DEFAULT_THEME = "professional"
+
+
+def resolve_theme(value: str | None) -> DeckTheme:
+    """Return a :class:`DeckTheme` by name, defaulting to "professional"."""
+    key = (value or "").strip().lower()
+    if not key:
+        return THEMES[DEFAULT_THEME]
+    if key not in THEMES:
+        raise PresentationError(
+            f"Unknown theme {value!r}; expected one of {', '.join(sorted(THEMES))}."
+        )
+    return THEMES[key]
+
+
+def theme_names() -> tuple[str, ...]:
+    """The available theme names, default first."""
+    return (DEFAULT_THEME,) + tuple(sorted(name for name in THEMES if name != DEFAULT_THEME))
+
+
+@dataclass(frozen=True)
+class PresentationSettings:
+    """How a deck should be rendered: geometry, theme, numbering, and metadata."""
+
+    aspect: str = DEFAULT_ASPECT
+    theme: str = DEFAULT_THEME
+    show_slide_numbers: bool = True
+    footer: str = ""
+    author: str = ""
+    company: str = ""
+    subject: str = ""
+    language: str = "en"
+    #: Force right-to-left paragraph direction on every body paragraph.
+    rtl: bool = False
+    #: Refuse to overwrite an existing file unless the caller says otherwise.
+    allow_overwrite: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "aspect", resolve_aspect(self.aspect))
+        object.__setattr__(self, "theme", (self.theme or DEFAULT_THEME).strip().lower())
+        if self.theme not in THEMES:
+            raise PresentationError(
+                f"Unknown theme {self.theme!r}; expected one of {', '.join(sorted(THEMES))}."
+            )
+
+    @property
+    def theme_spec(self) -> DeckTheme:
+        """The resolved :class:`DeckTheme` for this deck."""
+        return THEMES[self.theme]
+
+    @property
+    def size(self) -> tuple[int, int]:
+        """The ``(cx, cy)`` EMU geometry for this deck's aspect."""
+        return ASPECTS[self.aspect]
+
+    def replace(self, **changes: Any) -> "PresentationSettings":
+        """A copy with ``changes`` applied (validated like a fresh instance)."""
+        data = self.to_primitive()
+        data.update(changes)
+        return PresentationSettings.from_primitive(data)
+
+    def to_primitive(self) -> dict[str, Any]:
+        return {
+            "aspect": self.aspect,
+            "theme": self.theme,
+            "show_slide_numbers": self.show_slide_numbers,
+            "footer": self.footer,
+            "author": self.author,
+            "company": self.company,
+            "subject": self.subject,
+            "language": self.language,
+            "rtl": self.rtl,
+            "allow_overwrite": self.allow_overwrite,
+        }
+
+    @classmethod
+    def from_primitive(cls, data: dict[str, Any] | None) -> "PresentationSettings":
+        """Rebuild settings from a stored dict (missing keys take defaults)."""
+        if not data:
+            return cls()
+        return cls(
+            aspect=str(data.get("aspect", DEFAULT_ASPECT)),
+            theme=str(data.get("theme", DEFAULT_THEME)),
+            show_slide_numbers=bool(data.get("show_slide_numbers", True)),
+            footer=str(data.get("footer", "")),
+            author=str(data.get("author", "")),
+            company=str(data.get("company", "")),
+            subject=str(data.get("subject", "")),
+            language=str(data.get("language", "en")),
+            rtl=bool(data.get("rtl", False)),
+            allow_overwrite=bool(data.get("allow_overwrite", False)),
+        )
+
+
+# --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
 
@@ -323,6 +574,7 @@ EDITABLE_FIELDS: tuple[str, ...] = (
     "notes",
     "section",
     "subsection",
+    "layout",
 )
 
 
@@ -351,6 +603,9 @@ class Slide:
     #: travel with the slide, so a reorder never loses where a slide came from.
     section: str = ""
     subsection: str = ""
+    #: An optional explicit layout hint (e.g. "two_column", "chart"); empty lets
+    #: the exporter infer the layout from the content type and the title.
+    layout: str = ""
     approved: bool = False
     revision: int = 0
     #: The last approved content snapshot, kept so an edit can be undone.
@@ -373,6 +628,7 @@ class Slide:
         self.notes = str(self.notes)
         self.section = str(self.section).strip()
         self.subsection = str(self.subsection).strip()
+        self.layout = str(self.layout).strip().lower().replace("-", "_").replace(" ", "_")
 
     @property
     def number(self) -> int:
@@ -402,6 +658,7 @@ class Slide:
             "notes": self.notes,
             "section": self.section,
             "subsection": self.subsection,
+            "layout": self.layout,
         }
 
     def to_primitive(self) -> dict[str, Any]:
@@ -435,6 +692,7 @@ class Slide:
             notes=str(data.get("notes", "")),
             section=str(data.get("section", "")),
             subsection=str(data.get("subsection", "")),
+            layout=str(data.get("layout", "")),
             approved=bool(data.get("approved", False)),
             revision=int(data.get("revision", 0)),
             approved_snapshot=dict(snapshot) if isinstance(snapshot, dict) else None,
@@ -542,6 +800,10 @@ class PresentationProject:
     revisions: list[SlideRevision] = field(default_factory=list)
     exports: list[ExportRecord] = field(default_factory=list)
     content_approved: bool = False
+    #: How the deck should be rendered (geometry, theme, numbering, metadata).
+    #: Kept on the project so a deck's look survives a restart and is shared by
+    #: the window and the CLI.
+    settings: PresentationSettings = field(default_factory=PresentationSettings)
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
     schema_version: int = _SCHEMA_VERSION
@@ -719,6 +981,7 @@ class PresentationProject:
             "revisions": [item.to_primitive() for item in self.revisions],
             "exports": [item.to_primitive() for item in self.exports],
             "content_approved": self.content_approved,
+            "settings": self.settings.to_primitive(),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -752,6 +1015,7 @@ class PresentationProject:
             revisions=[SlideRevision.from_primitive(item) for item in data.get("revisions", ())],
             exports=[ExportRecord.from_primitive(item) for item in data.get("exports", ())],
             content_approved=bool(data.get("content_approved", False)),
+            settings=PresentationSettings.from_primitive(data.get("settings")),
             created_at=str(data.get("created_at") or _now()),
             updated_at=str(data.get("updated_at") or _now()),
             schema_version=version or _SCHEMA_VERSION,

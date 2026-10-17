@@ -62,6 +62,7 @@ from core.presentation import (
     default_presentation_dir,
     parse_slide_range,
 )
+from core.presentation_layout import LAYOUTS
 from gui.presentation import PresentationService, SlideSpec
 
 
@@ -390,6 +391,7 @@ def _run_add(service: PresentationService, args: argparse.Namespace) -> int:
         notes=args.notes or "",
         section=args.section or "",
         subsection=args.subsection or "",
+        layout=args.layout or "",
     )
     if args.position is not None:
         slide = service.insert_slide(args.project_id, spec, position=args.position)
@@ -518,11 +520,182 @@ def _run_restore_approved(service: PresentationService, args: argparse.Namespace
 
 
 def _run_export(service: PresentationService, args: argparse.Namespace) -> int:
-    report = service.export(args.project_id, path=args.output)
+    settings = None
+    if any(
+        value is not None
+        for value in (args.aspect, args.theme, args.author, args.company, args.subject, args.footer)
+    ) or args.rtl or args.no_slide_numbers:
+        current = service.get(args.project_id).settings
+        settings = current.replace(
+            aspect=args.aspect if args.aspect is not None else current.aspect,
+            theme=args.theme if args.theme is not None else current.theme,
+            author=args.author if args.author is not None else current.author,
+            company=args.company if args.company is not None else current.company,
+            subject=args.subject if args.subject is not None else current.subject,
+            footer=args.footer if args.footer is not None else current.footer,
+            rtl=args.rtl or current.rtl,
+            show_slide_numbers=False if args.no_slide_numbers else current.show_slide_numbers,
+        )
+    report = service.export(
+        args.project_id,
+        path=args.output,
+        engine=args.engine,
+        settings=settings,
+        overwrite=True if args.overwrite else None,
+    )
     if args.as_json:
         _print_json(report.as_dict())
         return 0 if report.ok else 4
     print(report.message)
+    for warning in report.warnings:
+        print(f"  note: {warning}", file=sys.stderr)
+    if report.ok:
+        print(f"  engine: {report.engine}")
+        print(f"  file: {report.path}")
+    return 0 if report.ok else 4
+
+
+def _run_warnings(service: PresentationService, args: argparse.Namespace) -> int:
+    """Report the notes an export would raise, without writing a file."""
+    warnings = service.export_warnings(args.project_id)
+    if args.as_json:
+        _print_json({"ok": True, "warnings": list(warnings)})
+        return 0
+    if not warnings:
+        print("No slide needs attention; the deck will export as approved.")
+        return 0
+    for warning in warnings:
+        print(f"  - {warning}")
+    return 0
+
+
+def _run_settings(service: PresentationService, args: argparse.Namespace) -> int:
+    """Show or change a project's presentation settings."""
+    project = service.get(args.project_id)
+    if args.set_aspect is not None or args.set_theme is not None or args.set_footer is not None:
+        project.settings = service.update_settings(
+            args.project_id,
+            **{
+                key: value
+                for key, value in (
+                    ("aspect", args.set_aspect),
+                    ("theme", args.set_theme),
+                    ("footer", args.set_footer),
+                )
+                if value is not None
+            },
+        )
+    settings = service.get(args.project_id).settings
+    if args.as_json:
+        _print_json(settings.to_primitive())
+        return 0
+    print(f"Project {project.project_id}:")
+    print(f"  aspect: {settings.aspect}")
+    print(f"  theme: {settings.theme}")
+    print(f"  slide numbers: {'on' if settings.show_slide_numbers else 'off'}")
+    print(f"  footer: {settings.footer or '(none)'}")
+    print(f"  author: {settings.author or '(none)'}")
+    return 0
+
+#: A complete sample deck that exercises every layout, so a user can see the
+#: whole pipeline end to end without discussing anything with the assistant.
+#: Each tuple is ``(title, content_type, content, extra)``.
+_DEMO_SLIDES: tuple[tuple[str, str, tuple[str, ...], dict], ...] = (
+    (
+        "Reservoir Characterisation",
+        "title",
+        ("A petroleum engineering primer",),
+        {"notes": "Introduce the deck and the audience."},
+    ),
+    (
+        "Learning objectives",
+        "bullets",
+        ("Define porosity and permeability", "Relate pore geometry to flow"),
+        {"notes": "Set expectations for the session."},
+    ),
+    ("Fundamentals", "section", (), {"notes": "Open the first section."}),
+    (
+        "Porosity and permeability",
+        "bullets",
+        ("Porosity is the void fraction | Permeability is the flow capacity",
+         "Primary intergranular | Secondary fracture"),
+        {"section": "Fundamentals", "subsection": "Pore system",
+         "notes": "Contrast storage and flow."},
+    ),
+    (
+        "Typical rock properties",
+        "table",
+        (),
+        {"table": (("Rock", "Porosity", "Permeability (mD)"),
+                    ("Sandstone", "0.20", "100"),
+                    ("Limestone", "0.15", "10"),
+                    ("Shale", "0.05", "0.001")),
+         "section": "Fundamentals", "subsection": "Pore system",
+         "notes": "Values are indicative; cite the source in the review."},
+    ),
+    (
+        "Porosity versus permeability",
+        "table",
+        (),
+        {"table": (("Rock", "Permeability"), ("Sandstone", "100"), ("Limestone", "10")),
+         "layout": "chart", "section": "Fundamentals", "subsection": "Pore system",
+         "notes": "The trend is not always monotonic; discuss."},
+    ),
+    (
+        "Darcy's law",
+        "equation",
+        ("Q = k A (ΔP) / (μ L)", "k is permeability, μ is viscosity"),
+        {"section": "Fundamentals", "subsection": "Flow",
+         "notes": "Walk through each term."},
+    ),
+    ("Summary", "bullets", ("Porosity stores, permeability flows",
+                            "Both depend on the pore network"),
+     {"section": "Fundamentals", "notes": "Recap before questions."}),
+    ("Thank you", "title", ("Questions and discussion",), {"notes": "Invite questions."}),
+)
+
+
+def _run_demo(service: PresentationService, args: argparse.Namespace) -> int:
+    """Build a complete sample deck and export it in one command.
+
+    This walks the *same* state machine a real project walks (draft the outline,
+    approve it, add the numbered slides, approve each, approve the content, then
+    export), so it is a real demonstration of the pipeline rather than a
+    shortcut. Nothing is discussed with the assistant, so it works with no model.
+    """
+    project = service.new_project(args.title or "Reservoir Characterisation Demo")
+    service.draft_outline(project.project_id, text="Fundamentals\n- Pore system\n- Flow")
+    service.review_outline(project.project_id)
+    service.approve_outline(project.project_id)
+    for title, content_type, content, extra in _DEMO_SLIDES:
+        spec = SlideSpec(
+            title=title,
+            content=content,
+            content_type=content_type,
+            table=extra.get("table", ()),
+            notes=extra.get("notes", ""),
+            section=extra.get("section", ""),
+            subsection=extra.get("subsection", ""),
+            layout=extra.get("layout", ""),
+        )
+        service.add_slide(project.project_id, spec)
+    service.review_slides(project.project_id)
+    service.approve_slides(project.project_id)
+    service.approve_content(project.project_id)
+    report = service.export(
+        project.project_id,
+        path=args.output,
+        engine=args.engine,
+        overwrite=True if args.overwrite else None,
+    )
+    if args.as_json:
+        _print_json({"ok": report.ok, "project_id": project.project_id, **report.as_dict()})
+        return 0 if report.ok else 4
+    print(f"Built project {project.project_id} with {report.slide_count} slide(s).")
+    print(report.message)
+    if report.ok:
+        print(f"  engine: {report.engine}")
+        print(f"  file: {report.path}")
     return 0 if report.ok else 4
 
 
@@ -691,6 +864,9 @@ _HANDLERS = {
     "restore": _run_restore,
     "restore-approved": _run_restore_approved,
     "export": _run_export,
+    "warnings": _run_warnings,
+    "settings": _run_settings,
+    "demo": _run_demo,
     "history": _run_history,
 }
 
@@ -783,6 +959,12 @@ def _build_parser() -> argparse.ArgumentParser:
     add.add_argument("--notes", default="")
     add.add_argument("--section", default="", help="The outline section this slide covers.")
     add.add_argument("--subsection", default="", help="The outline subsection it covers.")
+    add.add_argument(
+        "--layout",
+        default="",
+        choices=["", *LAYOUTS],
+        help="An explicit layout (default: inferred from the content and title).",
+    )
     add.add_argument(
         "--position", type=int, default=None,
         help="Insert at this 1-based position instead of appending.",
@@ -881,9 +1063,47 @@ def _build_parser() -> argparse.ArgumentParser:
     export = sub.add_parser("export", help="Write the approved slides to a .pptx.")
     export.add_argument("project_id")
     export.add_argument("--output", default=None, help="Write here (default: the data directory).")
+    export.add_argument(
+        "--engine",
+        choices=["pptx", "stdlib"],
+        default=None,
+        help="Render engine: python-pptx (default when installed) or the stdlib fallback.",
+    )
+    export.add_argument("--aspect", choices=["16:9", "4:3"], default=None)
+    export.add_argument("--theme", default=None, help="Theme name (professional, light, academic, dark).")
+    export.add_argument("--author", default=None)
+    export.add_argument("--company", default=None)
+    export.add_argument("--subject", default=None)
+    export.add_argument("--footer", default=None)
+    export.add_argument("--rtl", action="store_true", help="Force right-to-left paragraphs.")
+    export.add_argument(
+        "--no-slide-numbers", action="store_true", help="Omit the slide number on each slide."
+    )
+    export.add_argument(
+        "--overwrite", action="store_true", help="Replace an existing file of the same name."
+    )
+
+    warnings = sub.add_parser(
+        "warnings", help="Report the notes an export would raise, without writing a file."
+    )
+    warnings.add_argument("project_id")
+
+    settings = sub.add_parser("settings", help="Show or change a project's presentation settings.")
+    settings.add_argument("project_id")
+    settings.add_argument("--set-aspect", choices=["16:9", "4:3"], default=None)
+    settings.add_argument("--set-theme", default=None)
+    settings.add_argument("--set-footer", default=None)
 
     history = sub.add_parser("history", help="Show the export history.")
     history.add_argument("project_id")
+
+    demo = sub.add_parser(
+        "demo", help="Build a complete sample deck and export it in one command."
+    )
+    demo.add_argument("--title", default="", help="The project title (default: a demo title).")
+    demo.add_argument("--output", default=None, help="Write here (default: the data directory).")
+    demo.add_argument("--engine", choices=["pptx", "stdlib"], default=None)
+    demo.add_argument("--overwrite", action="store_true", help="Replace an existing file.")
 
     return parser
 
