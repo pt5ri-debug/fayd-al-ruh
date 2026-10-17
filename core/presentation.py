@@ -1374,9 +1374,9 @@ def bullets_from_text(text: str, *, limit: int = 6) -> list[str]:
             seen_bullet = seen_bullet or marked
             value = (item.group("text") if item else stripped).strip()
             if value and not is_scaffolding(value):
-                lines.append(value)
+                lines.append(strip_discourse_opener(value))
         return lines[:limit]
-    return content_sentences(text)[:limit]
+    return [strip_discourse_opener(s) for s in content_sentences(text)[:limit]]
 
 
 def title_from_text(text: str, *, fallback: str = "Slide") -> str:
@@ -1499,6 +1499,38 @@ _DISCOURSE_OPENER_RE = re.compile(
 )
 
 
+def dedup_key(text: str) -> str:
+    """A comparison key for a bullet, so a repeat is recognised across slides.
+
+    Case, whitespace, and a trailing stop are ignored, and a leading discourse
+    connective is dropped, so "First, Casing is steel pipe." and "casing is steel
+    pipe" count as the same bullet and the second is not added to the deck.
+    """
+    cleaned = strip_discourse_opener(text).casefold().rstrip(" .,;:!?")
+    return " ".join(cleaned.split())
+
+
+def strip_discourse_opener(text: str) -> str:
+    """Drop a leading discourse connective from a sentence or bullet.
+
+    "First,", "In addition,", "Finally," and friends are the *answer's* joining
+    words, not its content, so a bullet that opens with one reads as the
+    assistant's narration rather than as a fact about the topic. Only a known
+    connective at the very start is removed; a word that merely looks like one
+    inside the sentence is left alone, and text with no opener is returned
+    exactly as it was (so a bullet is never re-cased by this pass).
+    """
+    cleaned = " ".join((text or "").split())
+    stripped = _DISCOURSE_OPENER_RE.sub("", cleaned)
+    if stripped == cleaned:
+        return cleaned
+    stripped = stripped.strip()
+    if not stripped:
+        return cleaned
+    # Removing an opener can leave a lower-case start; a bullet reads as a phrase.
+    return stripped[0].upper() + stripped[1:] if stripped[0].islower() else stripped
+
+
 def topic_sentence(sentence: str, *, words: int = 6) -> str:
     """A short heading from a sentence (its first few words, no trailing stop).
 
@@ -1506,8 +1538,7 @@ def topic_sentence(sentence: str, *, words: int = 6) -> str:
     answer's own joining word, not the topic, so it is dropped before the heading
     is taken -- otherwise every derived section reads "In addition, ...".
     """
-    cleaned = " ".join(sentence.split())
-    cleaned = _DISCOURSE_OPENER_RE.sub("", cleaned).strip() or cleaned
+    cleaned = strip_discourse_opener(sentence)
     tokens = cleaned.split(" ")
     heading = " ".join(tokens[:words]).rstrip(".,;:!?")
     if not heading:
@@ -1556,6 +1587,7 @@ __all__ = [
     "default_presentation_dir",
     "content_sentences",
     "is_scaffolding",
+    "dedup_key",
     "looks_like_prose_outline",
     "outline_from_prose",
     "parse_outline",

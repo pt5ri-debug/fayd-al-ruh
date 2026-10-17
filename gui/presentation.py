@@ -56,6 +56,7 @@ from core.presentation import (
     Slide,
     SlideRevision,
     bullets_from_text,
+    dedup_key,
     default_presentation_dir,
     looks_like_prose_outline,
     outline_from_prose,
@@ -92,16 +93,24 @@ def _is_title_line(candidate: str, bullets: list[str]) -> bool:
 #: structure the deterministic parsers understand, so no model-specific
 #: post-processing is needed.
 OUTLINE_PROMPT = (
-    "Propose a slide outline for a presentation titled {title!r}"
-    "{audience}. List the sections as headings, with any subsections indented "
-    "beneath them, and give an estimated slide count for each section."
+    "{title!r}\n"
+    "Propose a slide outline for a presentation titled {title!r}{audience}. "
+    "List the sections as headings, with any subsections indented beneath them, "
+    "and give an estimated slide count for each section."
 )
 SLIDE_PROMPT = (
-    "Write the content for a single slide of the presentation {title!r}.\n"
-    "Section: {heading}\n"
-    "Give a short slide title on the first line and 3 to 5 concise bullets "
-    "after it."
+    "{heading}\n"
+    "Write 3 to 5 concise slide bullets about {heading} for a presentation on "
+    "{title!r}. Give a short slide title on the first line."
 )
+
+#: A drafted slide's note when the retriever returned no new material for its
+#: heading, so the slide is flagged for the user instead of silently repeated.
+REPEATED_HEADING_NOTE = (
+    "The retriever returned no new material for this heading; "
+    "only its strongest line is kept. Replace it during slide review."
+)
+
 REVISION_PROMPT = (
     "Revise this {kind} for the presentation {title!r}.\n"
     "Current content:\n{current}\n\n"
@@ -604,6 +613,14 @@ class PresentationService:
             if not sections:
                 raise PresentationError(f"The outline has no section {heading!r}.")
         drafted = {slide.sources[0] for slide in project.slides if slide.sources}
+        # Bullets already used on another slide, so a new slide does not repeat a
+        # sentence the deck has already shown (the retriever can return the same
+        # passages for two related headings).
+        used: set[str] = {
+            dedup_key(line)
+            for slide in project.slides
+            for line in slide.content
+        }
         specs: list[SlideSpec] = []
         for section in sections:
             if heading is None and section.heading in drafted:
@@ -611,7 +628,18 @@ class PresentationService:
             self._progress(f"Drafting slides for {section.heading!r}...")
             prompt = SLIDE_PROMPT.format(title=project.title, heading=section.heading)
             answer = ask(prompt)
-            bullets = bullets_from_text(answer)
+            drafted_bullets = bullets_from_text(answer)
+            bullets = [line for line in drafted_bullets if dedup_key(line) not in used]
+            repeated = False
+            if not bullets and drafted_bullets:
+                # Every bullet repeated an earlier slide (the retriever can return
+                # the same passages for two related headings). A blank slide is
+                # worse than a flagged one, so the section keeps its single
+                # strongest line and the note says what happened -- slide review is
+                # where the user replaces it.
+                bullets = drafted_bullets[:1]
+                repeated = True
+            used.update(dedup_key(line) for line in bullets)
             # A grounded assistant answers in prose, so its first line is a
             # sentence, not the requested title. The section heading is the title
             # in that case -- taking the first sentence as the title too would
@@ -626,6 +654,7 @@ class PresentationService:
                     title=title,
                     content=bullets,
                     sources=(section.heading,),
+                    notes=REPEATED_HEADING_NOTE if repeated else "",
                 )
             )
             if batch is not None and len(specs) >= batch:
