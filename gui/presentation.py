@@ -28,7 +28,7 @@ by the tests; the window only collects input and shows the result.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -246,6 +246,13 @@ class PresentationStatus:
     last_export: str = ""
     approval_outdated: bool = False
     estimated_slides: int = 0
+    #: When the project was created and last changed (ISO-8601 strings).
+    created_at: str = ""
+    updated_at: str = ""
+    #: The workflow step the user is on (1..8), for a dashboard column.
+    step: int = 1
+    #: The approved deck's download reference, when one is available.
+    download: dict[str, str] = field(default_factory=dict)
 
     def summary(self) -> str:
         """A one-line description, including any outstanding approval."""
@@ -253,6 +260,15 @@ class PresentationStatus:
         return (
             f"{self.title} [{self.state_label}]: {self.slides} slide(s), "
             f"{self.approved_slides} approved{note}"
+        )
+
+    def dashboard_row(self) -> str:
+        """A fixed-width row for the dashboard list: date, counts, and status."""
+        date = (self.updated_at or self.created_at or "")[:10] or "----------"
+        return (
+            f"{self.project_id}  {date}  "
+            f"{self.slides:>3} slide(s)  {self.approved_slides:>3} approved  "
+            f"{self.state_label}"
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -270,6 +286,48 @@ class PresentationStatus:
             "last_export": self.last_export,
             "approval_outdated": self.approval_outdated,
             "estimated_slides": self.estimated_slides,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "step": self.step,
+            "download": self.download,
+        }
+
+
+@dataclass
+class ProjectValidation:
+    """The result of checking a project's structure before an export.
+
+    The check is read-only and never mutates the project: it reports what a user
+    must fix (a numbering gap, an empty slide, an unapproved slide, an outdated
+    approval) so the CLI can *validate* a deck without exporting it.
+    """
+
+    ok: bool
+    project_id: str
+    state: str
+    issues: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    slides: int = 0
+    approved_slides: int = 0
+
+    def summary(self) -> str:
+        """A one-line description of the verdict."""
+        if self.ok:
+            return (
+                f"{self.project_id} is valid: {self.slides} slide(s), "
+                f"{self.approved_slides} approved, ready to export."
+            )
+        return f"{self.project_id} is not ready: " + "; ".join(self.issues)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "project_id": self.project_id,
+            "state": self.state,
+            "slides": self.slides,
+            "approved_slides": self.approved_slides,
+            "issues": list(self.issues),
+            "warnings": list(self.warnings),
         }
 
 
@@ -295,6 +353,25 @@ class SlideCommandResult:
             "state": self.state,
             "slide_id": self.slide_id,
         }
+
+
+#: The workflow step each state corresponds to (for a dashboard's "step" column).
+_WORKFLOW_STEPS: dict[str, int] = {
+    STATE_DISCUSSION: 1,
+    STATE_OUTLINE_DRAFT: 2,
+    STATE_OUTLINE_REVIEW: 3,
+    STATE_SLIDE_DRAFTING: 5,
+    STATE_SLIDE_REVIEW: 6,
+    STATE_CONTENT_APPROVED: 7,
+    STATE_EXPORTING: 8,
+    STATE_EXPORTED: 8,
+    STATE_EXPORT_FAILED: 8,
+}
+
+
+def _workflow_step(state: str) -> int:
+    """The 1..8 workflow step a project's state corresponds to."""
+    return _WORKFLOW_STEPS.get(state, 1)
 
 
 def render_slide_text(slide: Slide) -> str:
@@ -428,6 +505,15 @@ class PresentationService:
         """A renderable snapshot of one project."""
         project = self.get(project_id)
         last = next((item for item in reversed(project.exports) if item.ok), None)
+        download: dict[str, str] = {}
+        if last is not None and last.path and Path(last.path).exists():
+            path = Path(last.path)
+            download = {
+                "path": str(path),
+                "filename": path.name,
+                "directory": str(path.parent),
+                "size_bytes": str(last.size_bytes),
+            }
         return PresentationStatus(
             project_id=project.project_id,
             title=project.title,
@@ -442,6 +528,95 @@ class PresentationService:
             last_export=last.path if last is not None else "",
             approval_outdated=project.approval_outdated,
             estimated_slides=project.total_estimated_slides,
+            created_at=project.created_at,
+            updated_at=project.updated_at,
+            step=_workflow_step(project.state),
+            download=download,
+        )
+
+    def rename_project(self, project_id: str, title: str) -> PresentationProject:
+        """Rename a project (its id, slides, and exports are untouched)."""
+        project = self.get(project_id)
+        new_title = title.strip()
+        if not new_title:
+            raise PresentationError("A project needs a non-empty title.")
+        project.title = new_title
+        return self._save(project)
+
+    def duplicate_project(self, project_id: str, *, title: str = "") -> PresentationProject:
+        """Copy a project under a fresh id, preserving its slides and settings.
+
+        The copy starts in the state the original is in, so a duplicated deck can
+        be edited and re-exported without touching the original's exports. The
+        new project never carries the original's export records (each deck owns
+        its own history) and its slides are re-keyed so the two never collide.
+        """
+        source = self.get(project_id)
+        clone = PresentationProject.from_primitive(source.to_primitive())
+        clone.project_id = self._next_project_id()
+        clone.title = (title.strip() or f"{source.title} (copy)")
+        clone.exports = []
+        clone.conversation_ids = []
+        clone.slides = [replace(slide) for slide in source.slides]
+        return self._save(clone)
+
+    def validate_project(
+        self, project_id: str, *, settings: PresentationSettings | None = None
+    ) -> ProjectValidation:
+        """Check a project's structure and numbering without exporting it.
+
+        Reports the *blocking* issues (an empty slide, an unapproved slide, a
+        numbering gap, an outdated approval) and the *advisory* warnings (an
+        over-full slide, a missing image) an export would produce. Never mutates
+        the project, so the CLI can validate a deck in any state.
+        """
+        project = self.get(project_id)
+        issues: list[str] = []
+        warnings: list[str] = []
+
+        if not project.slides:
+            issues.append("the project has no slides")
+        numbers = [slide.number for slide in project.ordered_slides()]
+        expected = list(range(1, len(numbers) + 1))
+        if numbers != expected:
+            issues.append(
+                f"the slide numbers are not dense 1..n (found {numbers or 'none'})"
+            )
+        empty = [slide.number for slide in project.ordered_slides() if slide.is_empty]
+        if empty:
+            issues.append(
+                "slide(s) " + ", ".join(str(number) for number in empty) + " are empty"
+            )
+        unapproved = [
+            slide.number for slide in project.ordered_slides() if not slide.approved
+        ]
+        if unapproved and project.state in (STATE_CONTENT_APPROVED, STATE_EXPORTED):
+            issues.append(
+                "slide(s) "
+                + ", ".join(str(number) for number in unapproved)
+                + " are not approved"
+            )
+        if project.approval_outdated:
+            issues.append("the content approval is outdated (a slide changed)")
+
+        allowed, reason = self.can_export(project_id)
+        if not allowed:
+            issues.append(reason)
+
+        if project.slides:
+            try:
+                warnings.extend(self.export_warnings(project_id, settings=settings))
+            except PresentationError:
+                pass
+
+        return ProjectValidation(
+            ok=not issues,
+            project_id=project.project_id,
+            state=project.state,
+            issues=tuple(issues),
+            warnings=tuple(warnings),
+            slides=len(project.slides),
+            approved_slides=len(project.approved_slides),
         )
 
     def _next_project_id(self) -> str:
@@ -1632,6 +1807,7 @@ __all__ = [
     "PresentationService",
     "PresentationStatus",
     "ProgressCallback",
+    "ProjectValidation",
     "REVISION_PROMPT",
     "SHORTEN_PROMPT",
     "SLIDE_PROMPT",

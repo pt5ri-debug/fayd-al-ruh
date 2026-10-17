@@ -458,3 +458,144 @@ def test_the_deck_look_controls_persist_the_project_settings(tmp_path: Path) -> 
         dialog._close()
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_management_buttons_track_the_selection(tmp_path: Path) -> None:
+    """Rename/Duplicate/Delete are live only while a project is selected."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.presentation_dialog import PresentationDialog
+
+    service = _service(tmp_path)
+    root = tk.Tk()
+    try:
+        dialog = PresentationDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        root.update()
+        # No project yet: every management button is disabled.
+        assert dialog._rename_button.cget("state") == "disabled"
+        assert dialog._duplicate_button.cget("state") == "disabled"
+        assert dialog._delete_button.cget("state") == "disabled"
+
+        project = service.new_project("Manage")
+        dialog._refresh_projects()
+        dialog._select_project(project.project_id)
+        root.update()
+        assert dialog._rename_button.cget("state") == "normal"
+        assert dialog._duplicate_button.cget("state") == "normal"
+        assert dialog._delete_button.cget("state") == "normal"
+
+        # The dashboard row carries the id, a date, a slide count, and the state.
+        row = dialog._project_list.get(0)
+        assert project.project_id in row
+        assert "slide(s)" in row
+        assert "Discussion" in row
+        dialog._close()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_check_and_preview_actions_report_the_deck(tmp_path: Path) -> None:
+    """Check the deck and Preview show the honest, in-order content."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.presentation_dialog import PresentationDialog
+
+    service = _service(tmp_path)
+    project = service.new_project("Deck")
+    service.draft_outline(project.project_id, text=OUTLINE)
+    service.approve_outline(project.project_id)
+    service.draft_slides_from_outline(project.project_id)
+    service.review_slides(project.project_id)
+
+    root = tk.Tk()
+    try:
+        dialog = PresentationDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        dialog._refresh_projects()
+        dialog._select_project(project.project_id)
+        root.update()
+
+        # The check runs with no file written and reports the deck's state
+        # (here it is not yet ready, because the content is not approved).
+        dialog._on_validate()
+        root.update()
+        transcript = _transcript_text(dialog)
+        assert "is not ready" in transcript
+        assert project.project_id in transcript
+        assert "issue:" in transcript
+
+        # Approve every slide, then check and preview the ready deck.
+        for slide_id in list(dialog._slide_ids):
+            service.approve_slide(project.project_id, slide_id)
+        service.approve_content(project.project_id)
+        dialog.refresh()
+        root.update()
+
+        dialog._on_validate()
+        root.update()
+        assert "is valid" in _transcript_text(dialog)
+
+        # The preview names every approved slide, in order, before any export.
+        dialog._on_preview()
+        root.update()
+        preview = _transcript_text(dialog)
+        assert "slide(s) will be written" in preview
+        for slide in service.get(project.project_id).ordered_slides():
+            assert f"{slide.number}. {slide.title}" in preview
+        dialog._close()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_export_button_validates_before_it_writes(tmp_path: Path) -> None:
+    """The export path refuses an invalid deck and only opens after approval."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.presentation_dialog import PresentationDialog
+
+    service = _service(tmp_path)
+    project = service.new_project("Gate")
+    service.draft_outline(project.project_id, text=OUTLINE)
+    service.approve_outline(project.project_id)
+    service.draft_slides_from_outline(project.project_id)
+    service.review_slides(project.project_id)
+
+    root = tk.Tk()
+    try:
+        dialog = PresentationDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        dialog._refresh_projects()
+        dialog._select_project(project.project_id)
+        root.update()
+
+        # Content is not approved yet, so the export button stays disabled.
+        assert dialog._export_button.cget("state") == "disabled"
+        # The download folder button is off until a real export exists.
+        assert dialog._download_button.cget("state") == "disabled"
+
+        for slide_id in list(dialog._slide_ids):
+            service.approve_slide(project.project_id, slide_id)
+        dialog.refresh()
+        root.update()
+        dialog._on_approve_content()
+        root.update()
+        assert dialog._export_button.cget("state") == "normal"
+
+        dialog._on_export()
+        assert _wait_until(root, lambda: not dialog._busy)
+        # After a successful export the folder button becomes available.
+        assert dialog._download_button.cget("state") == "normal"
+        dialog._close()
+    finally:
+        root.destroy()
+

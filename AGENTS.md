@@ -968,14 +968,25 @@ Arabic is kept as secondary aliases where useful.
 - `gui/presentation_dialog.py` — the Presentation Studio **window** (Tk, imported
   lazily), built the way the chat and Code Studio windows are built (the same
   theme tokens, `RoundedBox`, and a centred column capped at `_COLUMN_MAX`). A
-  left sidebar lists the projects and the eight workflow steps with their state; a
+  left sidebar lists the projects (each row carries its id, last-updated date,
+  slide count, and state) and the eight workflow steps with their state, beside
+  **New presentation** / **Rename** / **Duplicate** / **Delete** management
+  buttons (a management button is live only while a project is selected, and
+  **Delete** asks for confirmation); a
   centred conversation column holds the transcript, the question box, and the
   slide editor. The slide list shows each slide's number, title, and outline topic
   and a **Draft N slides per batch** spinbox sets the service's batch size. The
   editor edits the title, type, section/subsection, body, and notes, with
   Save / Approve / Withdraw approval / Move up / Move down / Regenerate /
   Revisions… / Remove, and a **Command** box that runs a plain instruction
-  ("shorten slides 11-15") through the shared `apply_slide_command`. Message rows
+  ("shorten slides 11-15") through the shared `apply_slide_command`. The Export
+  section holds the export gate plus **Check the deck** (runs
+  `validate_project`, reporting issues/warnings with no file written),
+  **Preview…** (renders the exact approved slides, in order, as text), and
+  **Open the folder** (reveals the last validated export in the OS file manager;
+  enabled only once a real export exists). **Export the .pptx** validates the deck
+  *before* it writes, so a numbering gap or an unapproved slide is reported rather
+  than producing a bad download. Message rows
   are measured the way the chat window measures its
   bubbles: `_bubble_fonts`/`_bubble_text_width` convert the column's *pixels* into
   the *characters* a `tk.Text` `width` is counted in (rounding **down**, so a row
@@ -988,12 +999,19 @@ Arabic is kept as secondary aliases where useful.
   a PowerPoint deck…**) and the sidebar action; the headless twin is
   `python -m cli presentation`.
 - `cli/presentation.py` — the Presentation Studio CLI, the headless twin of the
-  window: `new`/`list`/`show`/`status`/`discuss`/`outline`/`outline-draft`/
+  window: `new`/`list`/`rename`/`duplicate`/`delete`/`validate`/`test`/`show`/
+  `status`/`discuss`/`outline`/`outline-draft`/
   `outline-edit`/`outline-revise`/`review-outline`/`approve-outline`/`draft`/
   `add`/`edit`/`reorder`/`remove`/`review-slides`/`approve-slide`/
   `unapprove-slide`/`approve-slides`/`approve-content`/`reopen`/`revisions`/
   `restore`/`restore-approved`/`export`/`warnings`/`settings`/`demo`/`history`
   (`python -m cli presentation …`, wired in `cli/menu.py` as `run_presentation`).
+  `list` prints a dashboard table (id, updated date, slide count, approved count,
+  status); `rename`/`duplicate`/`delete` manage projects; `validate` runs the same
+  structural check the window's **Check the deck** runs and exits `4` when the
+  deck is not ready; `test` runs the presentation test files through pytest
+  (`--json` for a machine-readable report) so a user can verify the feature
+  in-place.
   It drives the *same* `gui.presentation.PresentationService` the window drives,
   so the CLI and the window share one set of projects, one revision history, and
   one export gate — no workflow logic is reimplemented here. Its discussion,
