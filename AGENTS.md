@@ -634,6 +634,36 @@ Arabic is kept as secondary aliases where useful.
   highlighter), tables, horizontal rules, and inline bold/code, returned as
   `StyledLine`/`Segment`s the window paints with Tk text tags. No Markdown library
   is added.
+- `gui/typography.py` — the one **type scale**, the sibling of `Theme`'s colour
+  tokens. Tk has no stylesheet, so every `font=(family, size)` and every
+  `spacing1`/`spacing3` used to be a literal copied into `gui/app.py` and each
+  dialog — which is how two windows drift apart. This module is the single
+  source of truth: `UI_FONT_STACK`/`MONO_FONT_STACK` (OpenHands' own stacks, and
+  `pick_family` takes the first the platform actually has, else Tk's
+  `TkDefaultFont`/`TkFixedFont`); `SCALE`, keyed by *role* (`body` = `text-sm`
+  `leading-6` like `chat-message.tsx`, `heading1`..`heading4` from
+  `markdown/headings.tsx`, `chatInput`, `code`, `table`, `hero`…), each a
+  `TypeStep(size_px, leading_px)`; `to_points` converts a web pixel size to the
+  integer points Tk demands using the root's own `tk scaling` (so a high-DPI
+  display is not shrunk to a hair); `Typography.font`/`mono` return the Tk font
+  tuple (weight by role, `slant="italic"` supported) and `block_metrics`
+  computes the `spacing1`/`spacing2`/`spacing3` that emulate the web
+  line-height and a block's `mt-*`/`mb-*`/`py-*` gap, because a Text *tag* has no
+  `-linespacing`. `resolve`/`for_root` build one for a display and fall back to
+  the 96-dpi reference with no display, so it is testable headless. Tk's weight
+  is only normal/bold, so OpenHands' `font-medium` headings are drawn bold; size
+  and line-height match the web exactly.
+- `gui/rich_text.py` — the shared Markdown **painter**. `insert_markdown(widget,
+  text, theme=, typography=)` creates the tags (`configure_markdown_tags`:
+  paragraph/heading1/heading2/heading3/bullet/quote/code/table/rule/bold/
+  inline_code, each with the `gui.typography` size and the line/paragraph
+  spacing) and paints every `StyledLine`, including the inline bold/inline-code
+  spans and the code token colours. `body_spacing`/`apply_body_spacing` give the
+  widget itself the body rhythm, so the *blank* line between two Markdown
+  paragraphs has height (it belongs to no block tag). `gui/app.py` and
+  `gui/code_studio_dialog.py` both call it, so every window draws Markdown with
+  the one scale and the one palette; the painting logic used to be duplicated in
+  both.
 - `gui/app.py` — a professional desktop front end styled after the **OpenHands
   chat UI**: the same cool-grey token scale (base `cool-grey-950`, surface
   `cool-grey-925`, raised `cool-grey-900`), the gold primary accent, and

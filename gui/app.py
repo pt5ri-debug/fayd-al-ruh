@@ -44,6 +44,7 @@ from core.ultron import UltronUnavailable
 from core.vision_model import VisionUnavailable
 from core.version import __version__
 from gui import markdown as md
+from gui import rich_text
 from gui.actions import ACTIONS, GuiAction
 from gui.attachments import Attachment, AttachmentNotice
 from gui.modes import (
@@ -56,6 +57,7 @@ from gui.modes import (
 )
 from gui.options import build_parser
 from gui.service import ChatReply, ChatService
+from gui.typography import Typography, for_root
 
 #: The answering mouths the header's model selector offers, in order. The label
 #: is what the user reads; the key is the value :class:`ChatService` expects.
@@ -193,19 +195,17 @@ _COLUMN_MAX = 820
 
 
 def _pick_font() -> str:
-    """A clean UI font, falling back to whatever Tk offers."""
-    for name in ("Segoe UI", "Helvetica Neue", "DejaVu Sans", "Helvetica", "Arial"):
-        if name in tkfont.families():
-            return name
-    return "TkDefaultFont"
+    """The proportional family the window draws with (OpenHands' UI stack).
+
+    Kept as a module-level function because the dialogs and the tests call it;
+    the choice itself now lives in :mod:`gui.typography`.
+    """
+    return for_root(None).ui_family
 
 
 def _pick_mono() -> str:
-    """A monospace font for code, falling back to whatever Tk offers."""
-    for name in ("Consolas", "Menlo", "DejaVu Sans Mono", "Courier New", "Courier"):
-        if name in tkfont.families():
-            return name
-    return "TkFixedFont"
+    """The monospace family the window draws code with (OpenHands' code stack)."""
+    return for_root(None).mono_family
 
 
 def load_theme_name() -> str:
@@ -386,6 +386,7 @@ class CircleButton(tk.Canvas):
         ink: str,
         text: str,
         command: Callable[[], Any],
+        typography: Typography | None = None,
     ) -> None:
         super().__init__(
             parent, width=size, height=size, bg=bg, highlightthickness=0,
@@ -397,9 +398,10 @@ class CircleButton(tk.Canvas):
         self._command = command
         self._enabled = True
         self._shape = self.create_oval(1, 1, size - 1, size - 1, fill=fill, outline="")
+        scale = typography or for_root(None)
         self._glyph = self.create_text(
             size // 2, size // 2, text=text, fill=ink,
-            font=("TkDefaultFont", max(11, size // 3), "bold"),
+            font=scale.font("lg", weight="bold"),
         )
         self.bind("<Button-1>", self._on_click)
 
@@ -420,11 +422,11 @@ class CircleButton(tk.Canvas):
 class _Tooltip:
     """A small hover hint for a control, shown after a short delay."""
 
-    def __init__(self, widget: tk.Widget, text: str, theme: Theme, font: str) -> None:
+    def __init__(self, widget: tk.Widget, text: str, theme: Theme, typography: Typography) -> None:
         self._widget = widget
         self._text = text
         self._theme = theme
-        self._font = font
+        self._type = typography
         self._window: tk.Toplevel | None = None
         self._after: str | None = None
         widget.bind("<Enter>", self._schedule, add="+")
@@ -442,7 +444,7 @@ class _Tooltip:
         window.configure(bg=self._theme.border)
         tk.Label(
             window, text=self._text, bg=self._theme.surface, fg=self._theme.foreground,
-            font=(self._font, 9), padx=8, pady=4, relief="flat",
+            font=self._type.font("xs"), padx=8, pady=4, relief="flat",
         ).pack()
         x = self._widget.winfo_rootx() + 4
         y = self._widget.winfo_rooty() - 32
@@ -534,8 +536,10 @@ class FaydGUI:
         self._pending: list[str] = []
         self._last_render = 0.0
         self._rows: list[_Row] = []
-        self._font = _pick_font()
-        self._mono = _pick_mono()
+        # One type scale for the whole window (OpenHands' sizes, DPI-corrected).
+        self._type: Typography = for_root(root)
+        self._font = self._type.ui_family
+        self._mono = self._type.mono_family
         self._thinking: tk.Label | None = None
         self._thinking_row: tk.Widget | None = None
         self._thinking_phase = 0
@@ -658,7 +662,7 @@ class FaydGUI:
             bg=self._theme.surface_raised, fg=self._theme.contrast,
             activebackground=self._theme.interactive_active,
             activeforeground=self._theme.contrast,
-            font=(self._font, 10, "bold"), relief="flat", borderwidth=0,
+            font=self._type.font("sm", weight="bold"), relief="flat", borderwidth=0,
             anchor="w", padx=14, pady=8, cursor="hand2",
         )
         new_chat.bind("<Enter>", lambda _e: new_chat.configure(bg=self._theme.interactive_active))
@@ -668,7 +672,7 @@ class FaydGUI:
         self._search_entry = tk.Entry(
             sidebar, textvariable=self._history_query, bg=self._theme.surface_raised,
             fg=self._theme.foreground, insertbackground=self._theme.primary,
-            relief="flat", font=(self._font, 10), highlightthickness=0,
+            relief="flat", font=self._type.font("sm"), highlightthickness=0,
         )
         self._search_entry.pack(fill="x", padx=12, pady=(0, 8), ipady=6)
         self._search_entry.insert(0, "")
@@ -722,12 +726,12 @@ class FaydGUI:
         )
         tk.Label(
             row, text="Theme and mode are saved for next launch.", bg=self._theme.surface,
-            fg=self._theme.text_dim, font=(self._font, 8), anchor="w", padx=12,
+            fg=self._theme.text_dim, font=self._type.font("2xs"), anchor="w", padx=12,
         ).pack(fill="x")
 
         self._status = tk.Label(
             sidebar, text=self._status_text(), bg=self._theme.surface, fg=self._theme.text_dim,
-            font=(self._font, 8), anchor="w", justify="left", padx=18, pady=10,
+            font=self._type.font("2xs"), anchor="w", justify="left", padx=18, pady=10,
         )
         self._status.pack(side="bottom", fill="x")
 
@@ -800,23 +804,23 @@ class FaydGUI:
         header.pack(fill="x", padx=18, pady=(18, 10))
         dot = tk.Canvas(header, width=30, height=30, bg=self._theme.surface, highlightthickness=0)
         dot.create_oval(1, 1, 29, 29, fill=self._theme.primary, outline="")
-        dot.create_text(15, 16, text="ف", fill=self._theme.primary_foreground, font=(self._font, 13, "bold"))
+        dot.create_text(15, 16, text="ف", fill=self._theme.primary_foreground, font=self._type.font("sm", weight="bold"))
         dot.pack(side="left")
         titles = tk.Frame(header, bg=self._theme.surface)
         titles.pack(side="left", padx=(10, 0))
         tk.Label(
             titles, text="Fayd Al-Ruh", bg=self._theme.surface, fg=self._theme.contrast,
-            font=(self._font, 14, "bold"), anchor="w",
+            font=self._type.font("heading3", weight="bold"), anchor="w",
         ).pack(anchor="w")
         tk.Label(
             titles, text=f"v{__version__}  ·  petroleum mind", bg=self._theme.surface,
-            fg=self._theme.text_dim, font=(self._font, 8), anchor="w",
+            fg=self._theme.text_dim, font=self._type.font("2xs"), anchor="w",
         ).pack(anchor="w")
 
     def _section_label(self, parent: tk.Misc, text: str, *, top: int = 6) -> tk.Label:
         label = tk.Label(
             parent, text=text.upper(), bg=self._theme.surface, fg=self._theme.text_dim,
-            font=(self._font, 8, "bold"), anchor="w", padx=18,
+            font=self._type.font("2xs", weight="bold"), anchor="w", padx=18,
         )
         label.pack(fill="x", pady=(top, 4))
         return label
@@ -831,11 +835,10 @@ class FaydGUI:
         active: bool = False,
     ) -> tk.Label:
         """A flat, hoverable label that behaves like a button."""
-        size = 9 if small else 11
         base = self._theme.surface_raised if active else self._theme.surface
         button = tk.Label(
             parent, text=text, bg=base, fg=self._theme.foreground,
-            font=(self._font, size), anchor="w", padx=12,
+            font=self._type.font("xs" if small else "body"), anchor="w", padx=12,
             pady=(4 if small else 9),
             justify="left", wraplength=232 if small else 0, cursor="hand2",
         )
@@ -866,7 +869,7 @@ class FaydGUI:
             hint = tk.Label(
                 self._history_panel,
                 text="No matching chats." if query else "No saved chats yet.",
-                bg=self._theme.surface, fg=self._theme.text_dim, font=(self._font, 9),
+                bg=self._theme.surface, fg=self._theme.text_dim, font=self._type.font("xs"),
                 anchor="w", padx=18, pady=2,
             )
             hint.pack(fill="x")
@@ -875,7 +878,7 @@ class FaydGUI:
         for bucket, group in group_by_date(items):
             header = tk.Label(
                 self._history_panel, text=bucket, bg=self._theme.surface,
-                fg=self._theme.text_dim, font=(self._font, 8, "bold"), anchor="w", padx=18,
+                fg=self._theme.text_dim, font=self._type.font("2xs", weight="bold"), anchor="w", padx=18,
             )
             header.pack(fill="x", pady=(6, 1))
             self._history_buttons.append(header)
@@ -897,7 +900,7 @@ class FaydGUI:
         if not self.service.tool_names:
             tk.Label(
                 self._tools_panel, text="No tools available.", bg=self._theme.surface,
-                fg=self._theme.text_dim, font=(self._font, 9), anchor="w", padx=18, pady=2,
+                fg=self._theme.text_dim, font=self._type.font("xs"), anchor="w", padx=18, pady=2,
             ).pack(fill="x")
             return
         enabled = self.service.tools_enabled
@@ -905,7 +908,7 @@ class FaydGUI:
         for name in self.service.tool_names:
             tk.Label(
                 self._tools_panel, text=f"• {name}", bg=self._theme.surface, fg=colour,
-                font=(self._font, 9), anchor="w", padx=20, pady=1,
+                font=self._type.font("xs"), anchor="w", padx=20, pady=1,
             ).pack(fill="x")
         note = (
             "Available in Jarvics Mode."
@@ -914,7 +917,7 @@ class FaydGUI:
         )
         tk.Label(
             self._tools_panel, text=note, bg=self._theme.surface, fg=self._theme.text_dim,
-            font=(self._font, 8), anchor="w", padx=20, pady=2, wraplength=232, justify="left",
+            font=self._type.font("2xs"), anchor="w", padx=20, pady=2, wraplength=232, justify="left",
         ).pack(fill="x")
 
     def _toggle_settings(self) -> None:
@@ -928,7 +931,7 @@ class FaydGUI:
         panel = self._settings_panel
         tk.Label(
             panel, text="Answering mouth", bg=self._theme.surface, fg=self._theme.text_secondary,
-            font=(self._font, 8, "bold"), anchor="w", padx=18,
+            font=self._type.font("2xs", weight="bold"), anchor="w", padx=18,
         ).pack(fill="x", pady=(6, 2))
         self._source_var.set(self.service.source)
         for key, label in MOUTH_CHOICES:
@@ -956,7 +959,7 @@ class FaydGUI:
             parent, text=label, value=value, variable=self._source_var,
             command=self._on_source_change, bg=self._theme.surface, fg=self._theme.foreground,
             selectcolor=self._theme.surface, activebackground=self._theme.surface,
-            activeforeground=self._theme.foreground, font=(self._font, 10),
+            activeforeground=self._theme.foreground, font=self._type.font("sm"),
             anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
         )
 
@@ -967,13 +970,13 @@ class FaydGUI:
         note = self.service.reading_status()
         tk.Label(
             panel, text=note, bg=self._theme.surface, fg=self._theme.text_dim,
-            font=(self._font, 8), anchor="w", padx=20, pady=2, wraplength=232, justify="left",
+            font=self._type.font("2xs"), anchor="w", padx=20, pady=2, wraplength=232, justify="left",
         ).pack(fill="x")
 
         for category, label_en, _label_ar in voice_categories():
             tk.Label(
                 panel, text=label_en, bg=self._theme.surface, fg=self._theme.text_secondary,
-                font=(self._font, 8), anchor="w", padx=22,
+                font=self._type.font("2xs"), anchor="w", padx=22,
             ).pack(fill="x", pady=(4, 0))
             for voice in voices_for(category):
                 tk.Radiobutton(
@@ -982,7 +985,7 @@ class FaydGUI:
                     command=partial(self._on_voice_change, voice.key),
                     bg=self._theme.surface, fg=self._theme.foreground,
                     selectcolor=self._theme.surface, activebackground=self._theme.surface,
-                    activeforeground=self._theme.foreground, font=(self._font, 9),
+                    activeforeground=self._theme.foreground, font=self._type.font("xs"),
                     anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
                 ).pack(fill="x", padx=22, pady=0)
 
@@ -990,7 +993,7 @@ class FaydGUI:
             panel, text="Read new answers aloud automatically", variable=self._auto_speak,
             command=self._on_auto_speak_toggle, bg=self._theme.surface, fg=self._theme.foreground,
             selectcolor=self._theme.surface, activebackground=self._theme.surface,
-            activeforeground=self._theme.foreground, font=(self._font, 9),
+            activeforeground=self._theme.foreground, font=self._type.font("xs"),
             anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
         ).pack(fill="x", padx=16, pady=(6, 0))
         self._sidebar_button(
@@ -1074,14 +1077,14 @@ class FaydGUI:
         self._mode_menu.configure(
             bg=self._theme.surface_raised, fg=self._theme.contrast, activebackground=self._theme.interactive_active,
             activeforeground=self._theme.contrast, relief="flat", highlightthickness=0,
-            font=(self._font, 10, "bold"), padx=10, pady=4, bd=0, cursor="hand2",
+            font=self._type.font("sm", weight="bold"), padx=10, pady=4, bd=0, cursor="hand2",
             indicatoron=True,
         )
         self._mode_menu["menu"].configure(bg=self._theme.surface, fg=self._theme.foreground)
         self._mode_menu.pack(side="left", padx=(8, 0))
         self._mode_label = tk.Label(
             inner, text="", bg=self._theme.base, fg=self._theme.text_secondary,
-            font=(self._font, 9), anchor="w",
+            font=self._type.font("xs"), anchor="w",
         )
         self._mode_label.pack(side="left", padx=(10, 0))
 
@@ -1094,7 +1097,7 @@ class FaydGUI:
         self._source_menu.configure(
             bg=self._theme.base, fg=self._theme.foreground, activebackground=self._theme.surface_raised,
             activeforeground=self._theme.contrast, relief="flat", highlightthickness=0,
-            font=(self._font, 9), padx=6, pady=3, bd=0, cursor="hand2",
+            font=self._type.font("xs"), padx=6, pady=3, bd=0, cursor="hand2",
         )
         self._source_menu["menu"].configure(bg=self._theme.surface, fg=self._theme.foreground)
         self._source_menu.pack(side="right")
@@ -1108,10 +1111,10 @@ class FaydGUI:
         button = tk.Button(
             parent, text=glyph, command=command, bg=self._theme.base, fg=self._theme.foreground,
             activebackground=self._theme.surface_raised, activeforeground=self._theme.contrast,
-            font=(self._font, 13), relief="flat", borderwidth=0, padx=8, pady=2, cursor="hand2",
+            font=self._type.font("sm"), relief="flat", borderwidth=0, padx=8, pady=2, cursor="hand2",
         )
         if tip:
-            _Tooltip(button, tip, self._theme, self._font)
+            _Tooltip(button, tip, self._theme, self._type)
         return button
 
     def _column_pad(self) -> int:
@@ -1123,10 +1126,14 @@ class FaydGUI:
         return max(16, (width - _COLUMN_MAX) // 2)
 
     def _bubble_fonts(self) -> tuple[tkfont.Font, tkfont.Font]:
-        """The proportional and mono fonts a bubble measures its text with."""
+        """The proportional and mono fonts a bubble measures its text with.
+
+        Measured at the same sizes the body and code tags draw with, so the
+        width a bubble reserves matches the text it will hold.
+        """
         return (
-            tkfont.Font(family=self._font, size=11),
-            tkfont.Font(family=self._mono, size=10),
+            tkfont.Font(font=self._type.font("body")),
+            tkfont.Font(font=self._type.mono("code")),
         )
 
     def _available_column(self) -> int:
@@ -1176,19 +1183,19 @@ class FaydGUI:
             self._empty, width=64, height=64, bg=self._theme.base, highlightthickness=0
         )
         badge.create_oval(1, 1, 63, 63, fill=self._theme.primary, outline="")
-        badge.create_text(32, 34, text="ف", fill=self._theme.primary_foreground, font=(self._font, 26, "bold"))
+        badge.create_text(32, 34, text="ف", fill=self._theme.primary_foreground, font=self._type.font("hero", weight="bold"))
         badge.pack()
         tk.Label(
             self._empty, text="Fayd Al-Ruh",
-            bg=self._theme.base, fg=self._theme.contrast, font=(self._font, 24, "bold"),
+            bg=self._theme.base, fg=self._theme.contrast, font=self._type.font("hero", weight="bold"),
         ).pack(pady=(14, 0))
         tk.Label(
             self._empty, text="Ask anything about petroleum engineering",
-            bg=self._theme.base, fg=self._theme.foreground, font=(self._font, 14),
+            bg=self._theme.base, fg=self._theme.foreground, font=self._type.font("sm"),
         ).pack(pady=(6, 0))
         tk.Label(
             self._empty, text=self._hero_subtitle(),
-            bg=self._theme.base, fg=self._theme.text_secondary, font=(self._font, 11),
+            bg=self._theme.base, fg=self._theme.text_secondary, font=self._type.font("body"),
             justify="center", wraplength=560,
         ).pack(pady=(10, 0))
         tk.Label(
@@ -1198,7 +1205,7 @@ class FaydGUI:
                 "shows what it learned · “Ultron” answers anything, locally · “Vision” "
                 "is the petroleum local model (no citations)"
             ),
-            bg=self._theme.base, fg=self._theme.text_dim, font=(self._font, 9), justify="center",
+            bg=self._theme.base, fg=self._theme.text_dim, font=self._type.font("xs"), justify="center",
             wraplength=560,
         ).pack(pady=(16, 0))
 
@@ -1230,7 +1237,7 @@ class FaydGUI:
             widget = tk.Text(
                 card.inner, height=1, wrap="word", relief="flat", borderwidth=0,
                 highlightthickness=0, bg=self._theme.user_bubble, fg=self._theme.user_bubble_fg,
-                font=(self._font, 11), padx=14, pady=8, cursor="xterm", takefocus=1, width=0,
+                font=self._type.font("body"), padx=14, pady=8, cursor="xterm", takefocus=1, width=0,
             )
             widget.insert("1.0", text)
             self._make_read_only(widget)
@@ -1249,15 +1256,15 @@ class FaydGUI:
                 accent, fg = self._theme.text_dim, self._theme.foreground
             tk.Label(
                 head, text=self._role_label(role), bg=bg, fg=accent,
-                font=(self._font, 9, "bold"), anchor="w",
+                font=self._type.font("xs", weight="bold"), anchor="w",
             ).pack(side="left", padx=(6 if role != "note" else 0, 0))
 
             widget = tk.Text(
                 row, height=1, wrap="word", relief="flat", borderwidth=0,
-                highlightthickness=0, bg=bg, fg=fg, font=(self._font, 11),
+                highlightthickness=0, bg=bg, fg=fg, font=self._type.font("body"),
                 padx=(6 if role != "note" else 0), pady=0, cursor="xterm", takefocus=1,
-                spacing1=1, spacing3=1,
             )
+            rich_text.apply_body_spacing(widget, self._type)
             body = f"{text}\n\n{extra}" if extra else text
             self._insert_rich(widget, body)
             self._make_read_only(widget)
@@ -1274,7 +1281,7 @@ class FaydGUI:
             self._copy_label(footer, "⧉ Copy", widget)
             retry = tk.Label(
                 footer, text="↻ Retry", bg=self._theme.base, fg=self._theme.text_dim,
-                font=(self._font, 8), cursor="hand2",
+                font=self._type.font("2xs"), cursor="hand2",
             )
             retry.pack(side="left", padx=(10, 0))
             retry.bind("<Button-1>", lambda _e: self._on_retry())
@@ -1291,7 +1298,7 @@ class FaydGUI:
     def _copy_label(self, footer: tk.Frame, text: str, widget: tk.Text) -> None:
         copy = tk.Label(
             footer, text=text, bg=self._theme.base, fg=self._theme.text_dim,
-            font=(self._font, 8), cursor="hand2",
+            font=self._type.font("2xs"), cursor="hand2",
         )
         copy.pack(side="right" if widget.cget("bg") == self._theme.user_bubble else "left")
         copy.bind("<Button-1>", lambda _e: self._copy_widget(widget))
@@ -1308,7 +1315,7 @@ class FaydGUI:
             return
         label = tk.Label(
             footer, text="🔊 Read aloud", bg=self._theme.base, fg=self._theme.text_dim,
-            font=(self._font, 8), cursor="hand2",
+            font=self._type.font("2xs"), cursor="hand2",
         )
         label.pack(side=side, padx=(10, 0))
         label.bind("<Button-1>", lambda _e: self._speak_text(text))
@@ -1377,108 +1384,14 @@ class FaydGUI:
         )
 
     def _insert_rich(self, widget: tk.Text, text: str) -> None:
-        """Insert Markdown-styled text into a Text widget, tags included.
-
-        Newlines are inserted *between* lines only, so the widget's content is the
-        message exactly -- no trailing newline -- which keeps a copied message
-        byte-for-byte identical to what was shown.
-        """
-        self._configure_tags(widget)
-        for index, styled in enumerate(md.iter_styled_lines(text)):
-            if index:
-                widget.insert("end", "\n")
-            self._insert_styled_line(widget, styled)
-
-    def _configure_tags(self, widget: tk.Text) -> None:
-        """Create the tags a rendered message uses, on this widget."""
-        theme = self._theme
-        widget.tag_configure("heading", font=(self._font, 15, "bold"), foreground=theme.contrast,
-                             spacing1=6, spacing3=4)
-        widget.tag_configure("heading3", font=(self._font, 12, "bold"), foreground=theme.contrast,
-                             spacing1=4, spacing3=3)
-        widget.tag_configure("bullet", lmargin1=16, lmargin2=30)
-        widget.tag_configure("quote", lmargin1=16, lmargin2=16, foreground=theme.text_secondary,
-                             background=theme.surface_raised)
-        widget.tag_configure("code", font=(self._mono, 10), background=theme.code_bg,
-                             foreground=theme.code_fg, lmargin1=10, lmargin2=10, spacing1=2, spacing3=2)
-        widget.tag_configure("table", font=(self._mono, 10), foreground=theme.foreground, lmargin1=8)
-        widget.tag_configure("rule", foreground=theme.border)
-        widget.tag_configure("bold", font=(self._font, 11, "bold"), foreground=theme.contrast)
-        widget.tag_configure("inline_code", font=(self._mono, 10), background=theme.code_bg,
-                             foreground=theme.code_fg)
-        widget.tag_configure("kw", foreground=theme.primary)
-        widget.tag_configure("str", foreground=theme.success)
-        widget.tag_configure("cmt", foreground=theme.text_dim)
-
-    def _insert_styled_line(self, widget: tk.Text, styled: md.StyledLine) -> None:
-        start = widget.index("end-1c")
-        widget.insert("end", styled.text)
-        end = widget.index("end-1c")
-        tag = None
-        if styled.in_code:
-            tag = "code"
-        elif styled.kind == md.HEADING:
-            tag = "heading" if styled.level <= 2 else "heading3"
-        elif styled.kind in (md.BULLET, md.NUMBER):
-            tag = "bullet"
-        elif styled.kind == md.QUOTE:
-            tag = "quote"
-        elif styled.kind == md.TABLE:
-            tag = "table"
-        elif styled.kind == md.RULE:
-            tag = "rule"
-        if tag:
-            widget.tag_add(tag, start, end)
-        if styled.in_code:
-            self._highlight_code_line(widget, styled.text, start, end)
-        elif styled.kind not in (md.CODE, md.RULE):
-            self._inline_tags(widget, styled.text, start)
-
-    def _inline_tags(self, widget: tk.Text, line: str, line_start: str) -> None:
-        """Add bold / inline-code tags to the recognised spans of one line."""
-        row = line_start.split(".")[0]
-        for segment in md.parse_inline(line):
-            if segment.kind == "text":
-                continue
-            # parse_inline returns whole-line offsets; map them onto the widget.
-            offset = line.index(segment.text) if segment.kind == "bold" else None
-            if segment.kind == "bold":
-                token = f"**{segment.text}**"
-                idx = line.find(token)
-                if idx >= 0:
-                    widget.tag_add("bold", f"{row}.{idx}", f"{row}.{idx + len(token)}")
-            elif offset is not None:
-                widget.tag_add("inline_code", f"{row}.{offset}", f"{row}.{offset + len(segment.text)}")
-        # Inline code is handled explicitly: mark `x` spans.
-        position = 0
-        while True:
-            opening = line.find("`", position)
-            if opening < 0:
-                break
-            closing = line.find("`", opening + 1)
-            if closing < 0:
-                break
-            widget.tag_add("inline_code", f"{row}.{opening}", f"{row}.{closing + 1}")
-            position = closing + 1
-
-    def _highlight_code_line(self, widget: tk.Text, line: str, start: str, end: str) -> None:
-        """Colour keywords/strings/comments inside a fenced code line."""
-        row = start.split(".")[0]
-        for segment in md.highlight_code(line):
-            if segment.kind == "plain" or segment.text == "\n":
-                continue
-            tag = {"keyword": "kw", "string": "str", "comment": "cmt"}.get(segment.kind)
-            if tag is None:
-                continue
-            idx = line.find(segment.text)
-            if idx >= 0:
-                widget.tag_add(tag, f"{row}.{idx}", f"{row}.{idx + len(segment.text)}")
+        """Render Markdown into a message's Text widget (shared renderer)."""
+        rich_text.insert_markdown(widget, text, theme=self._theme, typography=self._type)
 
     def _avatar(self, parent: tk.Misc) -> None:
         """A small gold disc with the brand letter, beside an assistant message."""
         badge = tk.Canvas(parent, width=24, height=24, bg=self._theme.base, highlightthickness=0)
         badge.create_oval(1, 1, 23, 23, fill=self._theme.primary, outline="")
-        badge.create_text(12, 13, text="ف", fill=self._theme.primary_foreground, font=(self._font, 10, "bold"))
+        badge.create_text(12, 13, text="ف", fill=self._theme.primary_foreground, font=self._type.font("sm", weight="bold"))
         badge.pack(side="left")
 
     def _reflow(self) -> None:
@@ -1660,7 +1573,7 @@ class FaydGUI:
         self._confirm_bar = tk.Frame(composer, bg=self._theme.surface_raised)
         self._confirm_label = tk.Label(
             self._confirm_bar, text="", bg=self._theme.surface_raised, fg=self._theme.foreground,
-            font=(self._font, 9), anchor="w", justify="left", wraplength=_COLUMN_MAX - 200,
+            font=self._type.font("xs"), anchor="w", justify="left", wraplength=_COLUMN_MAX - 200,
         )
         self._confirm_label.pack(side="left", padx=10, pady=6)
         for label, approve in (("Run", True), ("Cancel", False)):
@@ -1669,7 +1582,7 @@ class FaydGUI:
                 command=partial(self._resolve_confirmation, approve),
                 bg=self._theme.primary if approve else self._theme.surface,
                 fg=self._theme.primary_foreground if approve else self._theme.foreground,
-                relief="flat", borderwidth=0, font=(self._font, 9, "bold"), padx=10, pady=2,
+                relief="flat", borderwidth=0, font=self._type.font("xs", weight="bold"), padx=10, pady=2,
                 cursor="hand2",
             )
             button.pack(side="right", padx=(0, 6), pady=4)
@@ -1689,15 +1602,15 @@ class FaydGUI:
             field, text="＋", command=self._on_attach_clicked,
             bg=self._theme.surface, fg=self._theme.text_dim,
             activebackground=self._theme.surface, activeforeground=self._theme.contrast,
-            font=(self._font, 16, "bold"), relief="flat", borderwidth=0,
+            font=self._type.font("xl", weight="bold"), relief="flat", borderwidth=0,
             padx=12, pady=0, cursor="hand2",
         )
         self._attach_button.pack(side="left", fill="y")
-        _Tooltip(self._attach_button, "Attach a Word (.docx) or text file", self._theme, self._font)
+        _Tooltip(self._attach_button, "Attach a Word (.docx) or text file", self._theme, self._type)
 
         self._entry = tk.Text(
             field, height=2, width=1, bg=self._theme.surface, fg=self._theme.contrast,
-            insertbackground=self._theme.primary, font=(self._font, 11),
+            insertbackground=self._theme.primary, font=self._type.font("chatInput"),
             relief="flat", wrap="word", padx=6, pady=12,
             highlightthickness=0, borderwidth=0,
         )
@@ -1708,7 +1621,7 @@ class FaydGUI:
         self._send = CircleButton(
             field, size=SEND_BUTTON_SIZE, bg=self._theme.surface,
             fill=self._theme.primary, ink=self._theme.primary_foreground,
-            text="↑", command=self._on_send,
+            text="↑", command=self._on_send, typography=self._type,
         )
         self._send.pack(side="right", padx=(6, 6), pady=6)
         self._render_attachment_chips()
@@ -1941,7 +1854,7 @@ class FaydGUI:
         menu = tk.Menu(
             self.root, tearoff=0, bg=theme.surface, fg=theme.foreground,
             activebackground=theme.interactive_active, activeforeground=theme.contrast,
-            font=(self._font, 10), borderwidth=0,
+            font=self._type.font("sm"), borderwidth=0,
         )
         menu.add_command(label="Attach a file to this chat…", command=self._attach_one_file)
         menu.add_command(
@@ -2150,11 +2063,11 @@ class FaydGUI:
         chip.pack(side="left", padx=(0, 6), pady=2)
         tk.Label(
             chip, text=f"📄 {attachment.filename}", bg=self._theme.surface_raised,
-            fg=self._theme.foreground, font=(self._font, 9), padx=8, pady=3,
+            fg=self._theme.foreground, font=self._type.font("xs"), padx=8, pady=3,
         ).pack(side="left")
         close = tk.Label(
             chip, text="✕", bg=self._theme.surface_raised, fg=self._theme.text_dim,
-            font=(self._font, 9, "bold"), padx=8, pady=3, cursor="hand2",
+            font=self._type.font("xs", weight="bold"), padx=8, pady=3, cursor="hand2",
         )
         close.pack(side="left")
         close.bind("<Enter>", lambda _e: close.configure(fg=self._theme.primary))
@@ -2252,7 +2165,7 @@ class FaydGUI:
         self._thinking_row = row
         self._thinking = tk.Label(
             row, text="Thinking·", bg=self._theme.base, fg=self._theme.text_secondary,
-            font=(self._font, 10, "italic"),
+            font=self._type.font("sm", slant="italic"),
         )
         self._thinking.pack(side="left")
         self._thinking_base = "Thinking"

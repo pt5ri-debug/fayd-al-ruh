@@ -44,6 +44,7 @@ from gui.image_edit import (
     ImageEditService,
 )
 from gui.image_preview import load_scaled
+from gui.typography import resolve
 
 TITLE = "Edit an image from text"
 SUBTITLE = (
@@ -94,6 +95,7 @@ class ImageEditDialog:
         self.theme = theme
         self.font = font
         self.mono = mono
+        self._type = resolve(parent, ui_family=font, mono_family=mono)
         self._on_close = on_close
         self._busy = False
         self._session: Any = None
@@ -126,15 +128,15 @@ class ImageEditDialog:
         header.pack(fill="x", padx=20, pady=(18, 8))
         tk.Label(
             header, text=TITLE, bg=theme.base, fg=theme.contrast,
-            font=(self.font, 15, "bold"), anchor="w",
+            font=self._type.font("heading1", weight="bold"), anchor="w",
         ).pack(fill="x")
         tk.Label(
             header, text=SUBTITLE, bg=theme.base, fg=theme.text_secondary,
-            font=(self.font, 9), anchor="w", justify="left", wraplength=980,
+            font=self._type.font("xs"), anchor="w", justify="left", wraplength=980,
         ).pack(fill="x", pady=(4, 0))
         tk.Label(
             header, text=HONESTY_LINE, bg=theme.base, fg=theme.text_dim,
-            font=(self.font, 8), anchor="w", justify="left", wraplength=980,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=980,
         ).pack(fill="x", pady=(6, 0))
 
         # Two columns: the controls on the left, the preview on the right. The
@@ -162,12 +164,12 @@ class ImageEditDialog:
         self._choose_button.pack(side="left")
         self._source_label = tk.Label(
             source_row, text="No image chosen.", bg=theme.surface, fg=theme.text_dim,
-            font=(self.font, 9), anchor="w",
+            font=self._type.font("xs"), anchor="w",
         )
         self._source_label.pack(side="left", padx=(10, 0))
         tk.Label(
             source_frame, text=f"Supported now: {', '.join(READABLE_SUFFIXES)}.",
-            bg=theme.surface, fg=theme.text_dim, font=(self.font, 8), anchor="w",
+            bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"), anchor="w",
         ).pack(fill="x", padx=12, pady=(0, 8))
 
         options = self._section("2.  Editor", parent=controls)
@@ -175,7 +177,7 @@ class ImageEditDialog:
         backend_row.pack(fill="x", padx=12, pady=(2, 4))
         tk.Label(
             backend_row, text="Backend", bg=theme.surface, fg=theme.text_secondary,
-            font=(self.font, 9),
+            font=self._type.font("xs"),
         ).pack(side="left", padx=(0, 6))
         for name, label in (
             (BACKEND_DETERMINISTIC, "Deterministic (default)"),
@@ -184,14 +186,14 @@ class ImageEditDialog:
             tk.Radiobutton(
                 backend_row, text=label, value=name, variable=self._backend_var,
                 command=self._on_backend_change, bg=theme.surface, fg=theme.foreground,
-                selectcolor=theme.base, activebackground=theme.surface, font=(self.font, 9),
+                selectcolor=theme.base, activebackground=theme.surface, font=self._type.font("xs"),
                 highlightthickness=0, borderwidth=0,
             ).pack(side="left", padx=(0, 12))
         self._download_button = self._button(
             backend_row, "Download model…", self._on_download_model
         )
         self._backend_note = tk.Label(
-            options, text="", bg=theme.surface, fg=theme.text_dim, font=(self.font, 8),
+            options, text="", bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
             anchor="w", justify="left", wraplength=560,
         )
         self._backend_note.pack(fill="x", padx=12, pady=(0, 4))
@@ -200,13 +202,13 @@ class ImageEditDialog:
         preset_row.pack(fill="x", padx=12, pady=(2, 8))
         tk.Label(
             preset_row, text="Change size", bg=theme.surface, fg=theme.text_secondary,
-            font=(self.font, 9),
+            font=self._type.font("xs"),
         ).pack(side="left", padx=(0, 6))
         for name, title in ((p.name, p.title) for p in EDIT_PRESETS.values()):
             tk.Radiobutton(
                 preset_row, text=title, value=name, variable=self._preset_var,
                 command=self._on_preset_change, bg=theme.surface, fg=theme.foreground,
-                selectcolor=theme.base, activebackground=theme.surface, font=(self.font, 9),
+                selectcolor=theme.base, activebackground=theme.surface, font=self._type.font("xs"),
                 highlightthickness=0, borderwidth=0,
             ).pack(side="left", padx=(0, 12))
 
@@ -215,12 +217,12 @@ class ImageEditDialog:
             instruction_frame, height=3, wrap="word", relief="flat", borderwidth=0,
             highlightthickness=1, highlightbackground=theme.border,
             highlightcolor=theme.primary, bg=theme.surface, fg=theme.foreground,
-            insertbackground=theme.primary, font=(self.font, 11), padx=8, pady=8,
+            insertbackground=theme.primary, font=self._type.font("body"), padx=8, pady=8,
         )
         self._instruction.pack(fill="x", padx=12, pady=(2, 4))
         tk.Label(
             instruction_frame, text=INSTRUCTION_HINT, bg=theme.surface,
-            fg=theme.text_dim, font=(self.font, 8), anchor="w", justify="left",
+            fg=theme.text_dim, font=self._type.font("2xs"), anchor="w", justify="left",
             wraplength=560,
         ).pack(fill="x", padx=12, pady=(0, 8))
 
@@ -237,14 +239,14 @@ class ImageEditDialog:
         self._save_button.configure(state="disabled")
         self._status = tk.Label(
             actions, text="", bg=theme.base, fg=theme.text_secondary,
-            font=(self.font, 9), anchor="w", justify="left", wraplength=520,
+            font=self._type.font("xs"), anchor="w", justify="left", wraplength=520,
         )
         self._status.pack(side="left", padx=12)
 
         preview = self._section("4.  Preview", parent=side)
         preview.pack_configure(fill="both", expand=True)
         self._preview = tk.Label(
-            preview, bg=theme.surface, fg=theme.text_dim, font=(self.font, 9),
+            preview, bg=theme.surface, fg=theme.text_dim, font=self._type.font("xs"),
             width=1, height=1, anchor="center", justify="center",
         )
         self._preview.pack(fill="both", expand=True, padx=12, pady=(2, 10))
@@ -293,7 +295,7 @@ class ImageEditDialog:
         frame.pack(fill="x", padx=20, pady=(10, 0))
         tk.Label(
             frame, text=title, bg=theme.surface, fg=theme.contrast,
-            font=(self.font, 10, "bold"), anchor="w",
+            font=self._type.font("sm", weight="bold"), anchor="w",
         ).pack(fill="x", padx=12, pady=(10, 4))
         return frame
 
@@ -303,7 +305,7 @@ class ImageEditDialog:
             parent, text=text, command=command, bg=theme.surface_raised,
             fg=theme.foreground, activebackground=theme.interactive_active,
             activeforeground=theme.contrast, relief="flat", borderwidth=0,
-            font=(self.font, 9, "bold"), padx=12, pady=4, cursor="hand2",
+            font=self._type.font("xs", weight="bold"), padx=12, pady=4, cursor="hand2",
         )
 
     # -- backend selection ------------------------------------------------
