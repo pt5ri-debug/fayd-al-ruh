@@ -141,6 +141,21 @@ def _save_conversation_id(root: Path | None, project_id: str, conversation_id: s
         pass
 
 
+def _maybe_author(root: Path | None):
+    """The Studio's own authoring model, or ``None`` when it is not installed.
+
+    Never raises: a missing optional extra or a missing model file simply means
+    the Studio drafts with the project's assistant, which is the documented
+    fallback. Imported lazily so the CLI loads no model stack unless it can help.
+    """
+    try:
+        from ai.presentation_author import load_presentation_author
+
+        return load_presentation_author(root=root)
+    except Exception:  # noqa: BLE001 - absent extra/weights is a normal state
+        return None
+
+
 def _service(args: argparse.Namespace, *, need_assistant: bool = False) -> PresentationService:
     root = Path(args.root).expanduser() if getattr(args, "root", None) else None
     output_dir = Path(args.output_dir).expanduser() if getattr(args, "output_dir", None) else None
@@ -148,6 +163,14 @@ def _service(args: argparse.Namespace, *, need_assistant: bool = False) -> Prese
     if need_assistant or getattr(args, "assistant", False):
         ask = _make_ask(root, getattr(args, "project_id", None))
     service = PresentationService(root=root, ask=ask, output_dir=output_dir)
+    # Drafting prefers the Studio's own Qwen3 model when it is installed, so the
+    # outline and slide bullets are generated prose rather than cited extracts.
+    # Only the drafting commands look for it, so a `list` or `status` never probes
+    # a runtime it will not use.
+    if need_assistant:
+        author = _maybe_author(root)
+        if author is not None:
+            service.set_author(author)
     if not getattr(args, "quiet", False):
         service.set_progress(lambda message: print(message, file=sys.stderr))
     return service
@@ -326,6 +349,11 @@ PRESENTATION_TEST_FILES: tuple[str, ...] = (
     "tests/test_presentation_window.py",
     "tests/test_presentation_e2e.py",
     "tests/test_presentation_e2e_window.py",
+    "tests/test_presentation_finalize.py",
+    "tests/test_presentation_finalize_window.py",
+    "tests/test_presentation_model.py",
+    "tests/test_presentation_courses.py",
+    "tests/test_presentation_course_window.py",
 )
 
 
@@ -929,6 +957,119 @@ def _run_command(service: PresentationService, args: argparse.Namespace) -> int:
     return 0 if result.ok else 4
 
 
+def _run_model_status(service: PresentationService, args: argparse.Namespace) -> int:
+    """Report whether the Studio's own authoring model can draft, and the next step."""
+    from core.presentation_model import presentation_model_status
+
+    root = Path(args.root).expanduser() if getattr(args, "root", None) else None
+    status = presentation_model_status(root=root)
+    if getattr(args, "as_json", False):
+        _print_json(
+            {
+                "available": status.available,
+                "model": status.model,
+                "backend": getattr(status, "backend", ""),
+                "installed": status.installed,
+                "detail": status.detail,
+                "hint": status.hint,
+            }
+        )
+        return 0 if status.available else 4
+    print(status.summary())
+    if not status.available and status.hint:
+        print(f"Next step: {status.hint}")
+    return 0 if status.available else 4
+
+
+def _run_model_download(service: PresentationService, args: argparse.Namespace) -> int:
+    """Download the Studio's authoring model (a human-approved external action)."""
+    from core.presentation_model import download_model, spec_summaries
+
+    if getattr(args, "list_models", False):
+        for key, title, size, summary in spec_summaries():
+            print(f"{key}\t{title}\t~{size:.1f} GB\t{summary}")
+        return 0
+    root = Path(args.root).expanduser() if getattr(args, "root", None) else None
+    try:
+        path = download_model(
+            getattr(args, "model", None) or "qwen3-8b",
+            root=root,
+            approved=bool(getattr(args, "approve", False)),
+            progress=None if getattr(args, "quiet", False) else lambda m: print(m, file=sys.stderr),
+        )
+    except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+        print(str(error), file=sys.stderr)
+        return 4
+    if getattr(args, "as_json", False):
+        _print_json({"path": str(path)})
+    else:
+        print(f"Saved the presentation model to {path}")
+    return 0
+
+
+def _run_courses(service: PresentationService, args: argparse.Namespace) -> int:
+    """Show which of the project's own courses the deck covers.
+
+    The headless twin of the Course window: it reports the curriculum courses the
+    deck's own content matches, and -- with ``--course`` -- one course's concepts
+    marked covered or missing, so a script can drive the same "reach suitable
+    course content" step the window offers.
+    """
+    if args.course:
+        try:
+            detail = service.course_detail(args.project_id, args.course)
+        except KeyError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        if args.as_json:
+            _print_json(
+                {
+                    "key": detail.key,
+                    "label": detail.label,
+                    "branch": detail.branch,
+                    "covered": [c.name for c in detail.covered],
+                    "missing": [c.name for c in detail.missing],
+                    "relations": [r.describe() for r in detail.relations],
+                }
+            )
+            return 0
+        print(f"{detail.label} — {detail.branch}")
+        print(f"  covered ({len(detail.covered)}): " + ", ".join(c.name for c in detail.covered))
+        print(f"  missing ({len(detail.missing)}): " + ", ".join(c.name for c in detail.missing))
+        for relation in detail.relations[: args.limit or 10]:
+            print(f"    {relation.describe()}")
+        return 0
+
+    matches = service.course_matches(args.project_id, limit=args.limit)
+    if args.as_json:
+        _print_json(
+            [
+                {
+                    "key": match.key,
+                    "label": match.label,
+                    "branch": match.branch,
+                    "matched": list(match.matched),
+                    "match_count": match.match_count,
+                    "total": match.total,
+                    "coverage": round(match.coverage, 4),
+                    "strong": match.strong,
+                }
+                for match in matches
+            ]
+        )
+        return 0
+    if not matches:
+        print("No curriculum course matches this deck's content yet.")
+        return 0
+    for match in matches:
+        flag = "strong" if match.strong else "related"
+        print(f"  [{flag}] {match.describe()} ({match.match_count}/{match.total})")
+    best = service.best_course(args.project_id)
+    if best is not None:
+        print(f"\nThe deck is about: {best.label} ({best.branch})")
+    return 0
+
+
 _HANDLERS = {
     "new": _run_new,
     "list": _run_list,
@@ -972,6 +1113,9 @@ _HANDLERS = {
     "settings": _run_settings,
     "demo": _run_demo,
     "history": _run_history,
+    "model-status": _run_model_status,
+    "model-download": _run_model_download,
+    "courses": _run_courses,
 }
 
 #: The commands that need the project's own assistant wired in.
@@ -1230,6 +1374,37 @@ def _build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--output", default=None, help="Write here (default: the data directory).")
     demo.add_argument("--engine", choices=["pptx", "stdlib"], default=None)
     demo.add_argument("--overwrite", action="store_true", help="Replace an existing file.")
+
+    sub.add_parser(
+        "model-status", help="Show whether the Studio's own authoring model can draft."
+    )
+    model_download = sub.add_parser(
+        "model-download",
+        help="Download the Studio's own authoring model (Qwen3 8B by default).",
+    )
+    model_download.add_argument(
+        "--model", default=None, help="Which model to fetch (see --list-models)."
+    )
+    model_download.add_argument(
+        "--list-models", action="store_true", help="List the fetchable models and exit."
+    )
+    model_download.add_argument(
+        "--approve", action="store_true",
+        help="Record the human approval the download gate requires.",
+    )
+
+    courses = sub.add_parser(
+        "courses",
+        help="Show the project's own curriculum courses the deck covers.",
+    )
+    courses.add_argument("project_id")
+    courses.add_argument(
+        "--course", default=None,
+        help="Show one course's concepts (covered/missing) and relations.",
+    )
+    courses.add_argument(
+        "--limit", type=int, default=None, help="Cap how many courses (or relations) to show."
+    )
 
     return parser
 

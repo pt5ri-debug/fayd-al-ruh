@@ -49,6 +49,7 @@ FEATURE_ULTRON = "ultron"
 FEATURE_CODER = "coder"
 FEATURE_VISION = "vision"
 FEATURE_PPTX = "pptx"
+FEATURE_PRESENTATION = "presentation"
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,22 @@ FEATURES: dict[str, OptionalFeature] = {
         ),
         requirements_file="requirements-pptx.txt",
         import_names=("pptx",),
+    ),
+    FEATURE_PRESENTATION: OptionalFeature(
+        key=FEATURE_PRESENTATION,
+        title="Presentation Studio authoring model (in-process)",
+        summary=(
+            "Draft a presentation's outline and slide content with a local Qwen3 "
+            "model, with no Ollama server running."
+        ),
+        requirements_file="requirements-presentation.txt",
+        import_names=("llama_cpp", "huggingface_hub"),
+        system_note=(
+            "The model weights are a separate one-time, human-approved download: "
+            "run `python -m cli presentation model-download --approve` (~5 GB), or "
+            "drop a `.gguf` file into the data/presentation folder."
+        ),
+        system_missing_note="no `.gguf` presentation model file is present yet.",
     ),
 }
 

@@ -70,6 +70,11 @@ from core.presentation import (
     title_from_text,
     validate_pptx,
 )
+from core.presentation_courses import (
+    DEFAULT_MIN_MATCHES,
+    CourseDetail,
+    CourseMatch,
+)
 from core.presentation_layout import (
     PresentationSettings,
     prepare_deck,
@@ -417,6 +422,7 @@ class PresentationService:
     ) -> None:
         self._store = store if store is not None else PresentationStore(root)
         self._ask = ask
+        self._author: AskCallback | None = None
         self._writer = writer if writer is not None else PresentationWriter()
         self._output_dir = Path(output_dir) if output_dir is not None else None
         self._on_progress = on_progress
@@ -454,6 +460,26 @@ class PresentationService:
     def set_ask(self, ask: AskCallback | None) -> None:
         """Wire (or clear) the assistant callback the discussion uses."""
         self._ask = ask
+
+    def set_author(self, author: AskCallback | None) -> None:
+        """Wire (or clear) the Studio's own authoring model.
+
+        When set, drafting an *outline* or *slide content* uses this model instead
+        of the grounded assistant: those two jobs want generated, structured prose,
+        not a cited extract. The discussion itself still uses the assistant, so the
+        user keeps talking to the same grounded brain it always did.
+        """
+        self._author = author
+
+    @property
+    def author(self) -> AskCallback | None:
+        """The authoring model's ``ask`` callback, or ``None`` when none is wired."""
+        return self._author
+
+    @property
+    def has_author(self) -> bool:
+        """Whether a dedicated authoring model is wired in."""
+        return self._author is not None
 
     def set_progress(self, on_progress: ProgressCallback | None) -> None:
         """Wire (or clear) the progress callback long operations report to."""
@@ -651,6 +677,21 @@ class PresentationService:
         if self._on_progress is not None:
             self._on_progress(message)
 
+    def _drafting_callback(self, what: str) -> AskCallback:
+        """The callback that drafts ``what``: the authoring model, else the assistant.
+
+        Outline and slide-content drafting prefer the Studio's own authoring model
+        (:mod:`core.presentation_model`): those jobs want generated, structured
+        prose, and a model built for instruction following does that better than
+        the grounded assistant, which answers with cited extracts. The discussion
+        and the review-time instructions keep using the assistant. When no
+        authoring model is wired the assistant answers, so the feature works with
+        no optional extra installed.
+        """
+        if self._author is not None:
+            return self._author
+        return self._require_assistant(what)
+
     def _require_assistant(self, what: str) -> AskCallback:
         if self._ask is None:
             raise PresentationError(
@@ -723,7 +764,7 @@ class PresentationService:
             audience = f" for {project.audience}" if project.audience else ""
             prompt = OUTLINE_PROMPT.format(title=project.title, audience=audience)
             self._progress("Asking the assistant for an outline...")
-            source = self._require_assistant("outline")(prompt)
+            source = self._drafting_callback("outline")(prompt)
         sections = parse_outline(source)
         derived = False
         if looks_like_prose_outline(sections):
@@ -927,7 +968,7 @@ class PresentationService:
         drafted slide keeps the outline heading it came from (its
         ``section``/``subsection``), so the topic sequence is preserved.
         """
-        ask = self._require_assistant("slide content")
+        ask = self._drafting_callback("slide content")
         project = self.get(project_id)
         if project.state not in (STATE_SLIDE_DRAFTING, STATE_SLIDE_REVIEW):
             raise PresentationError("Slides can only be drafted after the outline is approved.")
@@ -1160,13 +1201,26 @@ class PresentationService:
         return slide
 
     def approve_slides(self, project_id: str) -> PresentationProject:
-        """Approve every non-empty slide at once (batch approval)."""
+        """Approve every slide at once (batch approval).
+
+        An empty slide is refused *by number* rather than skipped: silently
+        leaving one unapproved made the content gate fail later with a message
+        that did not say which slide was at fault, which is exactly how the
+        workflow appeared to break between reviewing the slides and exporting.
+        """
         project = self.get(project_id)
+        self._require_editable(project)
+        self._reopen_for_edit(project)
+        empty = [slide.number for slide in project.ordered_slides() if slide.is_empty]
+        if empty:
+            raise PresentationError(
+                f"Slide(s) {', '.join(str(number) for number in empty)} are empty; "
+                "fill or remove them before approving."
+            )
         for slide in project.ordered_slides():
-            if not slide.is_empty:
-                slide.approved = True
-                slide.approved_snapshot = slide.content_snapshot()
-                project.record_revision(slide, reason="approved (batch)")
+            slide.approved = True
+            slide.approved_snapshot = slide.content_snapshot()
+            project.record_revision(slide, reason="approved (batch)")
         self._save(project)
         return project
 
@@ -1300,7 +1354,7 @@ class PresentationService:
         change. Regenerating is an edit, so the affected approvals are cleared
         and the export gate re-arms.
         """
-        ask = self._require_assistant("slide content")
+        ask = self._drafting_callback("slide content")
         project = self.get(project_id)
         self._require_editable(project)
         targets = self._slides_for_numbers(project, numbers)
@@ -1337,7 +1391,7 @@ class PresentationService:
         which re-ask for the topic in fewer or more bullets. Either way the slide
         keeps its number and heading and its approval is cleared.
         """
-        ask = self._require_assistant("slide content")
+        ask = self._drafting_callback("slide content")
         project = self.get(project_id)
         self._require_editable(project)
         targets = self._slides_for_numbers(project, numbers)
@@ -1363,7 +1417,7 @@ class PresentationService:
         self, project_id: str, number: int, *, instruction: str | None = None
     ) -> Slide:
         """Draft a worked-example slide and insert it after the named slide."""
-        ask = self._require_assistant("slide content")
+        ask = self._drafting_callback("slide content")
         project = self.get(project_id)
         self._require_editable(project)
         anchor = project.slide_by_number(int(number))
@@ -1536,6 +1590,67 @@ class PresentationService:
     def export_history(self, project_id: str) -> list[ExportRecord]:
         """Every export attempt recorded for a project, oldest first."""
         return list(self.get(project_id).exports)
+
+    # ----------------------------------------------------------- curriculum
+
+    def course_matches(
+        self, project_id: str, *, min_matches: int = DEFAULT_MIN_MATCHES, limit: int | None = None
+    ) -> tuple[CourseMatch, ...]:
+        """The project's own curriculum courses, strongest first.
+
+        The deck's *content* -- its title, outline, and slides -- decides which of
+        the project's courses it covers. The discussion is deliberately excluded:
+        it may wander, and what matters is what the deck actually says. This is a
+        read-only report, so it never changes the project or its state.
+        """
+        from core.presentation_courses import match_project
+
+        return match_project(self.get(project_id), min_matches=min_matches, limit=limit)
+
+    def best_course(self, project_id: str) -> CourseMatch | None:
+        """The one course the deck is *about*, or ``None`` when none clears the bar."""
+        from core.presentation_courses import best_course
+
+        return best_course(self.course_matches(project_id))
+
+    def course_detail(self, project_id: str, course_key: str) -> CourseDetail:
+        """A course's concepts and relations, marking what this deck already covers."""
+        from core.presentation_courses import course_detail, project_text
+
+        project = self.get(project_id)
+        return course_detail(course_key, text=project_text(project))
+
+    def course_concepts_text(self, project_id: str, course_key: str) -> str:
+        """A course's *missing* concepts, one per line, for pasting into a draft.
+
+        The Course window offers this so the user can put the ideas the deck has
+        not covered yet into the Studio's own question box -- the material comes
+        from the curriculum, and the user stays in control of what is added.
+        """
+        detail = self.course_detail(project_id, course_key)
+        return "\n".join(f"- {concept.name}" for concept in detail.missing)
+
+    def slides_for_concept(self, project_id: str, concept: str) -> list[int]:
+        """The numbers of the slides whose own text mentions a concept.
+
+        Used to jump the user to the slides that already cover a concept, so the
+        Course window's coverage marks are actionable rather than decorative.
+        """
+        from core.rag import _query_terms
+
+        wanted = _query_terms(concept)
+        if not wanted:
+            return []
+        numbers: list[int] = []
+        for slide in self.get(project_id).ordered_slides():
+            parts = [slide.title, slide.section, slide.subsection, *slide.content, *slide.equations]
+            for row in slide.table or ():
+                if isinstance(row, (list, tuple)):
+                    parts.extend(str(cell) for cell in row)
+            text = " ".join(part for part in parts if part)
+            if wanted <= _query_terms(text):
+                numbers.append(slide.number)
+        return numbers
 
     # ------------------------------------------------------------- approvals
 

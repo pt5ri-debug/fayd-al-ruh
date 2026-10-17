@@ -97,6 +97,10 @@ class PresentationDialog:
         font: str,
         mono: str,
         on_close: Callable[[], None] | None = None,
+        on_open_final_editor: Callable[[], None] | None = None,
+        model_status: Any = None,
+        ensure_author: Callable[[], Any] | None = None,
+        on_open_course: Callable[[str], None] | None = None,
     ) -> None:
         self.service = service
         self.theme = theme
@@ -104,6 +108,21 @@ class PresentationDialog:
         self.mono = mono
         self._type = resolve(parent, ui_family=font, mono_family=mono)
         self._on_close = on_close
+        # Called when "Approve the content" opens the final-editing window. The
+        # chat window owns that window's lifetime, so this dialog only asks for it.
+        self._on_open_final_editor = on_open_final_editor
+        # An optional callable returning the authoring model's honest status, shown
+        # so the user knows whether a dedicated model is drafting or the assistant.
+        self._model_status = model_status
+        # Called on the *worker* thread before a draft, so the Studio's own model is
+        # loaded there (once) rather than at construction -- loading a multi-gigabyte
+        # GGUF must never block the window opening, and the load cost is paid only
+        # when a draft is actually asked for.
+        self._ensure_author = ensure_author
+        # Called with a course key when the deck reaches suitable course content, so
+        # the chat window can open the Course window. The Studio only *asks*; it
+        # never owns that window.
+        self._on_open_course = on_open_course
         self._busy = False
         self._closed = False
         self._project_id = ""
@@ -332,11 +351,35 @@ class PresentationDialog:
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
         )
         self._engine_note.pack(fill="x", padx=14, pady=(4, 0))
+        # Which model drafts the outline and slides: the Studio's own Qwen3 GGUF
+        # when installed, else the project's assistant. Said plainly, so the user
+        # knows what is writing the content and what to install for the better one.
+        self._model_note = tk.Label(
+            sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._model_note.pack(fill="x", padx=14, pady=(4, 0))
         self._export_note = tk.Label(
             sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
         )
-        self._export_note.pack(fill="x", padx=14, pady=(4, 14))
+        self._export_note.pack(fill="x", padx=14, pady=(4, 0))
+
+        self._section_label(sidebar, "Course content")
+        course_row = tk.Frame(sidebar, bg=theme.surface)
+        course_row.pack(fill="x", padx=14, pady=(0, 4))
+        # Enabled only once the deck's own slides match one of the project's
+        # courses; the window opens when suitable content is reached, never before.
+        self._course_button = self._button(
+            course_row, "Open the course…", self._on_course_button
+        )
+        self._course_button.pack(side="left")
+        self._course_button.configure(state="disabled")
+        self._course_note = tk.Label(
+            sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._course_note.pack(fill="x", padx=14, pady=(4, 14))
 
     # -- conversation -----------------------------------------------------
 
@@ -471,6 +514,7 @@ class PresentationDialog:
         actions.pack(fill="x", padx=12, pady=(0, 10))
         self._button(actions, "Save slide", self._on_save_slide).pack(side="left")
         self._button(actions, "Approve slide", self._on_approve_slide).pack(side="left", padx=(6, 0))
+        self._button(actions, "Approve all slides", self._on_approve_all_slides).pack(side="left", padx=(6, 0))
         self._button(actions, "Withdraw approval", self._on_unapprove_slide).pack(side="left", padx=(6, 0))
         self._button(actions, "Move up", lambda: self._on_move(-1)).pack(side="left", padx=(6, 0))
         self._button(actions, "Move down", lambda: self._on_move(1)).pack(side="left", padx=(6, 0))
@@ -767,6 +811,7 @@ class PresentationDialog:
             self._check_button.configure(state="disabled")
             self._preview_button.configure(state="disabled")
             self._download_button.configure(state="disabled")
+            self._course_button.configure(state="disabled")
         else:
             self._sync_project_buttons()
 
@@ -856,7 +901,14 @@ class PresentationDialog:
         self._sync_project_buttons()
 
     def _refresh_steps(self, state: str) -> None:
-        """Enable only the workflow steps that make sense in this state."""
+        """Enable only the workflow steps that make sense in this state.
+
+        Step 7 (*Approve the content*) is enabled only once the deck is under
+        review, because that is the first state the state machine accepts an
+        approval from -- offering it while the slides are still being drafted made
+        it look available and then fail. Step 6 (*Review the slides*) stays
+        available through drafting so the user can start reviewing early.
+        """
         allowed = {
             "discuss": True,
             "outline": state in ("DISCUSSION", "OUTLINE_DRAFT", "OUTLINE_REVIEW"),
@@ -864,7 +916,7 @@ class PresentationDialog:
             "approve-outline": state in ("OUTLINE_DRAFT", "OUTLINE_REVIEW"),
             "slides": state in ("SLIDE_DRAFTING", "SLIDE_REVIEW"),
             "review-slides": state in ("SLIDE_DRAFTING", "SLIDE_REVIEW"),
-            "approve-content": state in ("SLIDE_DRAFTING", "SLIDE_REVIEW"),
+            "approve-content": state in ("SLIDE_REVIEW",),
             "export": state in (STATE_CONTENT_APPROVED, STATE_EXPORTED, "EXPORT_FAILED"),
         }
         for key, button in self._step_buttons.items():
@@ -891,7 +943,9 @@ class PresentationDialog:
         self._preview_button.configure(state="normal" if not self._busy else "disabled")
         self._sync_download_button(project)
         self._sync_settings(project)
+        self._sync_course(project)
         self._engine_note.configure(text=self._engine_line())
+        self._model_note.configure(text=self._model_line())
         if keep_note:
             return
         if allowed:
@@ -916,6 +970,59 @@ class PresentationDialog:
         self._theme_choice.set(settings.theme)
         self._aspect_choice.set(settings.aspect)
         self._numbers_var.set(bool(settings.show_slide_numbers))
+
+    def _sync_course(self, project: Any) -> None:
+        """Offer the Course window only once the deck reaches suitable content.
+
+        The deck's *own* slides decide this: a course the deck is substantially
+        about (the service's ``best_course``) enables the button and names itself,
+        so the window opens at a meaningful moment rather than at random. Before
+        that the button is disabled and the note says what would enable it.
+        """
+        best = None
+        try:
+            best = self.service.best_course(project.project_id)
+        except Exception:  # noqa: BLE001 - a status line must never crash the window
+            best = None
+        if best is not None:
+            self._course_button.configure(state="normal" if not self._busy else "disabled")
+            self._course_note.configure(
+                text=(
+                    f"This deck is about **{best.label}** ({best.branch}) — "
+                    f"{best.match_count} of its concepts are covered. Open the course "
+                    "to see what is still missing."
+                )
+            )
+        else:
+            self._course_button.configure(state="disabled")
+            self._course_note.configure(
+                text=(
+                    "Draft the slides first — the course window opens when the deck's "
+                    "content matches one of the project's own courses."
+                )
+            )
+
+    def _model_line(self) -> str:
+        """Say which model drafts the outline and slides, and how to get the better one."""
+        status = None
+        if callable(self._model_status):
+            try:
+                status = self._model_status()
+            except Exception:  # noqa: BLE001 - a status line must never crash the window
+                status = None
+        if status is not None and getattr(status, "available", False):
+            backend = getattr(status, "backend", "")
+            where = "in-process" if backend == "in-process" else "Ollama"
+            return (
+                f"Drafting model: {getattr(status, 'model', 'qwen3:8b')} ({where}) — "
+                "outlines and slides are written by it."
+            )
+        return (
+            "Drafting model: the project's own assistant. Install the Studio's Qwen3 "
+            "model for purpose-built slides: `python -m pip install -r "
+            "requirements-presentation.txt` then `python -m cli presentation "
+            "model-download --approve`."
+        )
 
     def _engine_line(self) -> str:
         """Say which render engine an export would actually use, and why."""
@@ -1089,10 +1196,26 @@ class PresentationDialog:
         )
         self.draft_outline(note if note and note.strip() else None)
 
+    def _prepare_draft(self) -> None:
+        """Wire the Studio's own authoring model, if one is installed.
+
+        Called on the worker thread just before a draft. It is best-effort: with no
+        model installed, or on a load failure, the Studio simply drafts with the
+        project's assistant, which is the documented fallback.
+        """
+        ensure = self._ensure_author
+        if not callable(ensure):
+            return
+        try:
+            ensure()
+        except Exception:  # noqa: BLE001 - a missing model is a normal state
+            pass
+
     def draft_outline(self, text: str | None = None) -> None:
         """Draft an outline (from ``text``, or by asking the assistant)."""
 
         def job() -> Any:
+            self._prepare_draft()
             return self.service.draft_outline(self._project_id, text=text)
 
         def finish(result: Any, error: Exception | None) -> None:
@@ -1156,6 +1279,7 @@ class PresentationDialog:
             heading = heading.strip()
 
         def job() -> Any:
+            self._prepare_draft()
             return self.service.draft_slides_from_outline(self._project_id, heading=heading)
 
         def finish(result: Any, error: Exception | None) -> None:
@@ -1191,18 +1315,110 @@ class PresentationDialog:
         self.refresh()
 
     def _on_approve_content(self) -> None:
+        """Approve the whole deck, then open the final editor.
+
+        Approving the content is the workflow's *gate*: the state machine requires
+        every slide to be approved first (``gui.presentation.approve_content``),
+        because the export must contain exactly the approved slides. Rather than
+        make the user approve each slide by hand and then press this again, this
+        step approves every non-empty slide that is not approved yet, then moves
+        the project to *Content approved* and opens the **final editor**, where the
+        deck is polished and the .pptx is written.
+
+        A slide that is empty is never approved silently: the service refuses, and
+        the reason is shown in the transcript and the status line so the user knows
+        exactly which slide to fill or remove.
+        """
         try:
+            # Approve every slide in one save; the service refuses an empty slide
+            # *by number*, so the message names the slide that needs attention.
+            self.service.approve_slides(self._project_id)
             project = self.service.approve_content(self._project_id)
         except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
             self._set_status(str(error), error=True)
+            self._report_error(error)
             return
         self._add_message(
             "note",
             f"Content approved ({STATE_LABELS.get(project.state, project.state)}). "
-            f"{len(project.approved_slides)} slide(s) are ready to export.",
+            f"{len(project.approved_slides)} slide(s) are ready to export. "
+            "The final editor is open — polish any slide there and press "
+            "**Export the .pptx**.",
             title="Content approved",
         )
         self.refresh()
+        self._open_final_editor()
+
+    def _open_final_editor(self) -> None:
+        """Open the final-editing window for the approved deck.
+
+        The window is a *sibling* of this one and drives the same service, so the
+        two views can never disagree: an edit made there is visible here on the
+        next refresh. When a final editor is already open for this project it is
+        brought to the front instead of a second one being created.
+        """
+        opener = getattr(self, "_on_open_final_editor", None)
+        if callable(opener):
+            opener()
+
+    # -- course window -----------------------------------------------------
+
+    def _on_course_button(self) -> None:
+        """Open the Course window for the course this deck is about.
+
+        Only enabled once the deck's own content matches a course strongly enough
+        (``_sync_course``), so the window never opens on a deck with no curriculum
+        behind it. The *best* match is the one the button names, so the button and
+        the window can never disagree.
+        """
+        if not self._project_id:
+            return
+        try:
+            best = self.service.best_course(self._project_id)
+        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            self._report_error(error)
+            return
+        if best is None:
+            self._set_status(
+                "The deck does not match a course yet — draft more content first."
+            )
+            return
+        self.open_course(best.key)
+
+    def open_course(self, course_key: str) -> None:
+        """Ask the window's owner to open the Course window for ``course_key``."""
+        opener = getattr(self, "_on_open_course", None)
+        if callable(opener):
+            opener(course_key)
+
+    def use_course_concepts(self, text: str) -> None:
+        """Put curriculum concepts into the Studio's own question box.
+
+        The Course window hands the deck's *missing* concepts here; the user then
+        decides whether to ask the assistant about them. The Studio never drafts
+        on its own, so the user keeps control of what enters the deck.
+        """
+        current = self._question.get("1.0", "end").strip()
+        merged = f"{current}\n{text}".strip() if current else text
+        self._question.delete("1.0", "end")
+        self._question.insert("1.0", merged)
+        self._set_status("Concepts copied into the question box — press Discuss to use them.")
+
+    def reveal_slide_number(self, number: int) -> None:
+        """Select and show the slide with this 1-based number, if it exists."""
+        for index, slide_id in enumerate(self._slide_ids):
+            try:
+                slide = self.service.get(self._project_id).slide(slide_id)
+            except Exception:  # noqa: BLE001 - a stale list must not crash Tk
+                return
+            if slide.number == number:
+                self._slide_list.selection_clear(0, "end")
+                self._slide_list.selection_set(index)
+                self._slide_list.see(index)
+                self._selected_slide = slide_id
+                self._load_slide(slide_id)
+                self._show_slide_editor()
+                return
 
     # -- slide handlers ----------------------------------------------------
 
@@ -1297,6 +1513,26 @@ class PresentationDialog:
             self._set_status(str(error), error=True)
             return
         self._set_status(f"Approved slide {slide.number}.")
+        self.refresh(keep_note=True)
+
+    def _on_approve_all_slides(self) -> None:
+        """Approve every non-empty slide in one action.
+
+        The export contains exactly the approved slides, so the content gate needs
+        every slide approved. Approving them one at a time is what made the
+        workflow stall at step 7; this is the one-click equivalent, and an empty
+        slide is reported rather than silently approved.
+        """
+        try:
+            project = self.service.approve_slides(self._project_id)
+        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            self._set_status(str(error), error=True)
+            self._report_error(error)
+            return
+        self._set_status(
+            f"Approved {len(project.approved_slides)} slide(s). "
+            "Press “Approve the content” when the deck is ready."
+        )
         self.refresh(keep_note=True)
 
     def _on_unapprove_slide(self) -> None:
