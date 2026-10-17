@@ -324,6 +324,8 @@ PRESENTATION_TEST_FILES: tuple[str, ...] = (
     "tests/test_presentation_engine.py",
     "tests/test_presentation_integration.py",
     "tests/test_presentation_window.py",
+    "tests/test_presentation_e2e.py",
+    "tests/test_presentation_e2e_window.py",
 )
 
 

@@ -481,10 +481,22 @@ class PresentationService:
         return project
 
     def get(self, project_id: str) -> PresentationProject:
-        """Load a project; raises when it does not exist."""
+        """Load a project; raises when it does not exist.
+
+        A project found mid-export (state ``EXPORTING``) was interrupted between
+        the state being written and the deck being finished -- a crash or a kill
+        during the write. ``EXPORTING`` has no outgoing edge except to
+        ``EXPORTED``/``EXPORT_FAILED``, so without recovery the project would be
+        stranded: no export, edit, or reopen would ever be accepted again. The
+        approved content is still intact, so it is returned to
+        ``CONTENT_APPROVED`` and the export may simply be run again.
+        """
         project = self._store.load(project_id)
         if project is None:
             raise PresentationError(f"No presentation project {project_id!r}.")
+        if project.state == STATE_EXPORTING:
+            project.state = STATE_CONTENT_APPROVED
+            self._save(project)
         return project
 
     def list_projects(self) -> list[PresentationProject]:

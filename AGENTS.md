@@ -943,6 +943,12 @@ Arabic is kept as secondary aliases where useful.
   revision and snapshots the approved content, and `_reopen_for_edit` returns an
   approved or exported project to `SLIDE_REVIEW` and clears the content approval
   — so a change after approval is never silent and the export gate re-arms.
+  `get` also recovers a project found in `EXPORTING`: an export interrupted
+  between the state write and the finished file (a crash or a kill) would
+  otherwise be stranded forever, because `EXPORTING` has no outgoing edge except
+  to `EXPORTED`/`EXPORT_FAILED`. The approved content is intact, so it is
+  returned to `CONTENT_APPROVED` and the export may simply be run again; a
+  regression test covers the recovery and the edit-after-interruption path.
   `_is_title_line` distinguishes a model's short title line from the grounded
   assistant's prose first sentence, so a prose answer takes the outline heading as
   the slide's title instead of repeating its first sentence. `draft_slides_from_outline`
