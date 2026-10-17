@@ -6,6 +6,7 @@
     python -m cli chat --mind                   # answer from the trained model, not the sources
     python -m cli chat --ultron                 # answer from the general local model (any subject)
     python -m cli chat --vision                 # answer from the petroleum local model (reservoir, drilling, PVT)
+    python -m cli chat --banner                 # answer from the presentation local model (outlines, slide content)
     python -m cli chat --session demo           # resume/autosave a named session
     python -m cli chat --list-sessions          # show saved conversations
 
@@ -29,10 +30,13 @@ is unaffected:
 * ``--ultron`` -- the real, general local model (``llama-cpp-python``), which
   talks about every field of life, no citations;
 * ``--vision`` -- the real, petroleum-engineering local model
-  (``llama-cpp-python``, built on OGAI Reasoner), no citations.
+  (``llama-cpp-python``, built on OGAI Reasoner), no citations;
+* ``--banner`` -- the real, presentation local model (``llama-cpp-python``, the
+  Presentation Studio's own Qwen3 weights), which drafts outlines and slide
+  content, no citations.
 
-Type "from the model", "from ultron", "from vision", or "from the sources" to
-switch mouths mid-conversation.
+Type "from the model", "from ultron", "from vision", "from banner", or "from the
+sources" to switch mouths mid-conversation.
 """
 
 from __future__ import annotations
@@ -44,9 +48,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ai import mind as mind_module
+from ai import banner_mouth
 from ai import ultron_mouth
 from ai import vision_mouth
 from ai.jarvis import build_session
+from core.banner import BannerUnavailable
 from core.composition import sources_block
 from core.jarvis import JarvisMode, JarvisTurn
 from core.ultron import UltronUnavailable
@@ -56,7 +62,8 @@ INTRO = "Chat with the project's AI. Ask a question, or type 'help' for controls
 MIND_HINT = (
     "AI: (the sources could not answer; type 'from the model' to answer from the "
     "trained model, 'from ultron' for the general local model, 'from vision' for the "
-    "petroleum local model, or 'from the sources' to go back)"
+    "petroleum local model, 'from banner' for the presentation local model, or "
+    "'from the sources' to go back)"
 )
 
 # The composer's wording when retrieval found nothing to stand on.
@@ -65,13 +72,15 @@ _NO_SOURCE_MARKER = "not enough evidence"
 # Strips punctuation so "From the model." and "model on" match the same phrase.
 _NON_WORD = re.compile(r"[^\w\s]", flags=re.UNICODE)
 
-#: The four answering mouths. The sources are the grounded default; ``model`` is
+#: The five answering mouths. The sources are the grounded default; ``model`` is
 #: the small in-project checkpoint; ``ultron`` is the general local model;
-#: ``vision`` is the petroleum-engineering local model.
+#: ``vision`` is the petroleum-engineering local model; ``banner`` is the
+#: Presentation Studio's own local model.
 MOUTH_SOURCES = "sources"
 MOUTH_MODEL = "model"
 MOUTH_ULTRON = "ultron"
 MOUTH_VISION = "vision"
+MOUTH_BANNER = "banner"
 
 
 def _normalize(text: str) -> str:
@@ -83,9 +92,9 @@ def _match_switch(text: str) -> str | None:
     """Return the mouth a switch line selects, else ``None``.
 
     Recognised only for the whole line, so an ordinary question is never captured.
-    The phrases live in :mod:`ai.mind`, :mod:`ai.ultron_mouth`, and
-    :mod:`ai.vision_mouth`, not in the shared Jarvis controls, so the Jarvis
-    command's wording never changes.
+    The phrases live in :mod:`ai.mind`, :mod:`ai.ultron_mouth`,
+    :mod:`ai.vision_mouth`, and :mod:`ai.banner_mouth`, not in the shared Jarvis
+    controls, so the Jarvis command's wording never changes.
     """
     normalized = _normalize(text)
     if not normalized:
@@ -96,6 +105,8 @@ def _match_switch(text: str) -> str | None:
         return MOUTH_ULTRON
     if normalized in _normalize_set(vision_mouth.SWITCH_TO_VISION):
         return MOUTH_VISION
+    if normalized in _normalize_set(banner_mouth.SWITCH_TO_BANNER):
+        return MOUTH_BANNER
     if normalized in _normalize_set(mind_module.SWITCH_TO_SOURCES):
         return MOUTH_SOURCES
     return None
@@ -108,9 +119,10 @@ def _normalize_set(phrases: tuple[str, ...]) -> set[str]:
 class ModelSwitcher:
     """Swaps the session's answering mouth between the sources and a model.
 
-    Four mouths are offered: the grounded sources (default), the small
-    in-project trained model, **Ultron**, the general local model, and **Vision**,
-    the petroleum-engineering local model. The
+    Five mouths are offered: the grounded sources (default), the small in-project
+    trained model, **Ultron**, the general local model, **Vision**, the
+    petroleum-engineering local model, and **Banner**, the Presentation Studio's
+    own local model. The
     grounded assistant and its help text are kept so switching back is exact.
     Only ``mode.assistant``/``mode.voice.assistant``/``mode.help_text`` change;
     nothing in the Jarvis loop, the controls, or the session builder is touched,
@@ -130,6 +142,7 @@ class ModelSwitcher:
         max_new_tokens: int = 96,
         ultron_loader: Callable[[], "ultron_mouth.UltronAssistant"] | None = None,
         vision_loader: Callable[[], "vision_mouth.VisionAssistant"] | None = None,
+        banner_loader: Callable[[], "banner_mouth.BannerAssistant"] | None = None,
     ) -> None:
         self.mode = mode
         self.grounded = mode.assistant
@@ -137,15 +150,17 @@ class ModelSwitcher:
         self._loader = loader
         self._ultron_loader = ultron_loader or ultron_mouth.load_ultron_assistant
         self._vision_loader = vision_loader or vision_mouth.load_vision_assistant
+        self._banner_loader = banner_loader or banner_mouth.load_banner_assistant
         self._max_new_tokens = max_new_tokens
         self._mind: mind_module.MindAssistant | None = None
         self._ultron: ultron_mouth.UltronAssistant | None = None
         self._vision: vision_mouth.VisionAssistant | None = None
+        self._banner: banner_mouth.BannerAssistant | None = None
         self._mouth = MOUTH_SOURCES
 
     @property
     def mouth(self) -> str:
-        """Which mouth currently answers: ``"sources"``, ``"model"``, ``"ultron"``, ``"vision"``."""
+        """Which mouth currently answers: ``"sources"``, ``"model"``, ``"ultron"``, ``"vision"``, or ``"banner"``."""
         return self._mouth
 
     @property
@@ -171,6 +186,12 @@ class ModelSwitcher:
             self._vision = self._vision_loader()
         return self._vision
 
+    @property
+    def banner(self) -> banner_mouth.BannerAssistant:
+        if self._banner is None:
+            self._banner = self._banner_loader()
+        return self._banner
+
     def _swap(self, assistant, mouth: str, help_suffix: str) -> None:
         """Point the session at ``assistant`` and record which mouth is active."""
         self.mode.assistant = assistant
@@ -192,6 +213,11 @@ class ModelSwitcher:
         """Activate the Vision mouth. Raises when the runtime or model is missing."""
         assistant = self.vision  # load/check now, before the swap
         self._swap(assistant, MOUTH_VISION, vision_mouth.VISION_HELP)
+
+    def use_banner(self) -> None:
+        """Activate the Banner mouth. Raises when the runtime or model is missing."""
+        assistant = self.banner  # load/check now, before the swap
+        self._swap(assistant, MOUTH_BANNER, banner_mouth.BANNER_HELP)
 
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations again."""
@@ -266,14 +292,16 @@ def _print_switch(kind: str, *, as_json: bool) -> None:
         print("AI: [ultron] Now answering from the general local model (any subject, no sources).")
     elif kind == MOUTH_VISION:
         print("AI: [vision] Now answering from the petroleum local model (reservoir, drilling, PVT; no sources).")
+    elif kind == MOUTH_BANNER:
+        print("AI: [banner] Now answering from the presentation local model (outlines and slide content; no sources).")
     else:
         print("AI: [sources] Now answering from retrieved passages with citations.")
     print()
 
 
-#: What to say when a mouth could not be loaded, and how to fix it. Ultron's and
-#: Vision's messages name their own real next step (install the extra, or fetch a
-#: model), so a failed switch is never a dead end.
+#: What to say when a mouth could not be loaded, and how to fix it. Ultron's,
+#: Vision's, and Banner's messages name their own real next step (install the
+#: extra, or fetch a model), so a failed switch is never a dead end.
 _MOUTH_FAILURE = {
     MOUTH_MODEL: (
         "Could not load the trained model: {error}",
@@ -289,6 +317,11 @@ _MOUTH_FAILURE = {
         "Install the optional runtime with `python -m pip install -r requirements-vision.txt`, "
         "then fetch a model with `python -m cli vision download --approve`.",
     ),
+    MOUTH_BANNER: (
+        "Could not load Banner: {error}",
+        "Install the optional runtime with `python -m pip install -r requirements-banner.txt`, "
+        "then fetch a model with `python -m cli banner download --approve`.",
+    ),
 }
 
 #: The confirmation shown once a mouth is active. Shared by the text loop and the
@@ -297,6 +330,7 @@ _MOUTH_SWITCHED = {
     MOUTH_MODEL: "Now answering from the trained model (no sources).",
     MOUTH_ULTRON: "Now answering from Ultron, the general local model (any subject, no citations).",
     MOUTH_VISION: "Now answering from Vision, the petroleum local model (reservoir, drilling, PVT; no citations).",
+    MOUTH_BANNER: "Now answering from Banner, the presentation local model (outlines and slide content; no citations).",
     MOUTH_SOURCES: "Now answering from sources, with citations.",
 }
 
@@ -323,9 +357,11 @@ def _apply_switch(switcher, kind: str) -> str:
             switcher.use_ultron()
         elif kind == MOUTH_VISION:
             switcher.use_vision()
+        elif kind == MOUTH_BANNER:
+            switcher.use_banner()
         else:
             switcher.use_sources()
-    except (FileNotFoundError, OSError, ValueError, UltronUnavailable, VisionUnavailable) as error:
+    except (FileNotFoundError, OSError, ValueError, UltronUnavailable, VisionUnavailable, BannerUnavailable) as error:
         return switch_failure_message(kind, error)
     return ""
 
@@ -413,6 +449,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--vision-model", default=None, help="a specific .gguf file for Vision to load")
     parser.add_argument("--vision-tokens", type=int, default=None, help="maximum tokens per Vision answer")
     parser.add_argument("--vision-temperature", type=float, default=None, help="sampling temperature for Vision answers")
+    parser.add_argument(
+        "--banner",
+        action="store_true",
+        help="answer from Banner, the presentation local model (outlines and slide content; no citations), not from the sources",
+    )
+    parser.add_argument("--banner-model", default=None, help="a specific .gguf file for Banner to load")
+    parser.add_argument("--banner-tokens", type=int, default=None, help="maximum tokens per Banner answer")
+    parser.add_argument("--banner-temperature", type=float, default=None, help="sampling temperature for Banner answers")
     args = parser.parse_args(argv)
 
     if args.list_sessions:
@@ -453,6 +497,11 @@ def main(argv: list[str] | None = None) -> int:
             max_tokens=args.vision_tokens,
             temperature=args.vision_temperature,
         ),
+        banner_loader=lambda: banner_mouth.load_banner_assistant(
+            args.banner_model,
+            max_tokens=args.banner_tokens,
+            temperature=args.banner_temperature,
+        ),
     )
     if args.mind:
         failure = _apply_switch(switcher, MOUTH_MODEL)
@@ -475,6 +524,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if not args.json:
             print(switcher.vision.describe())
+    if args.banner:
+        failure = _apply_switch(switcher, MOUTH_BANNER)
+        if failure:
+            print(failure)
+            return 1
+        if not args.json:
+            print(switcher.banner.describe())
 
     if args.session:
         if not mode.resume_session(args.session):
@@ -495,6 +551,7 @@ def main(argv: list[str] | None = None) -> int:
 
 __all__ = [
     "INTRO",
+    "MOUTH_BANNER",
     "MOUTH_MODEL",
     "MOUTH_SOURCES",
     "MOUTH_ULTRON",

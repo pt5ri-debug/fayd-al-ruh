@@ -41,6 +41,7 @@ from gui.sql_import import (
     redact_secrets,
 )
 from gui.typography import resolve
+from gui.window_controls import install_window_controls
 
 #: The page title and one-line description.
 TITLE = "SQL Database Import"
@@ -106,10 +107,15 @@ class SqlImportDialog:
         theme = self.theme
         header = tk.Frame(self.window, bg=theme.base)
         header.pack(fill="x", padx=20, pady=(18, 8))
+        title_row = tk.Frame(header, bg=theme.base)
+        title_row.pack(fill="x")
         tk.Label(
-            header, text=TITLE, bg=theme.base, fg=theme.contrast,
+            title_row, text=TITLE, bg=theme.base, fg=theme.contrast,
             font=self._type.font("heading1", weight="bold"), anchor="w",
-        ).pack(fill="x")
+        ).pack(side="left")
+        self._window_controls = install_window_controls(
+            self.window, title_row, theme=theme, typography=self._type, on_close=self._close
+        )
         tk.Label(
             header, text=SUBTITLE, bg=theme.base, fg=theme.text_secondary,
             font=self._type.font("xs"), anchor="w", justify="left", wraplength=760,

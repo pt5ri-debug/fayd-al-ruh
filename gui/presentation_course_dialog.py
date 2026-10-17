@@ -34,6 +34,7 @@ from typing import Any
 
 from core.presentation_courses import CourseDetail, CourseMatch
 from gui.typography import resolve
+from gui.window_controls import install_window_controls
 
 TITLE = "Course content"
 SUBTITLE = (
@@ -115,6 +116,9 @@ class PresentationCourseDialog:
             font=self._type.font("2xs", weight="bold"), padx=10, pady=4, cursor="hand2",
         )
         self._close_button.pack(side="right")
+        self._window_controls = install_window_controls(
+            self.window, inner, theme=theme, typography=self._type, on_close=self._close
+        )
         tk.Frame(self.window, bg=theme.border_subtle, height=1).pack(fill="x")
 
         body = tk.Frame(self.window, bg=theme.base)

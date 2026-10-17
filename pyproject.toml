@@ -74,6 +74,15 @@ presentation = [
     "llama-cpp-python>=0.3",
     "huggingface_hub>=0.23",
 ]
+# Banner, the Presentation Studio's local model, is the same Qwen3 GGUF promoted
+# to a first-class mouth (see `core/banner.py`). It shares the `[presentation]`
+# runtime and its `data/presentation` model folder, so a machine that already has
+# `[presentation]` needs nothing new; the extra is named for symmetry with
+# `[ultron]`/`[vision]` and because a user may install Banner alone.
+banner = [
+    "llama-cpp-python>=0.3",
+    "huggingface_hub>=0.23",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

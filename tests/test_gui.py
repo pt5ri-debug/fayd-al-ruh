@@ -312,8 +312,9 @@ def test_actions_cover_the_mirrored_menu_items() -> None:
 
 
 #: The visible CLI menu entries the window provides through its own controls
-#: (the window itself, the reading-voice picker, Jarvis, Ultron, Vision, and the
-#: two text-chat mouths). The sidebar mirrors a later block instead of repeating them.
+#: (the window itself, the reading-voice picker, Jarvis, Ultron, Vision, Banner,
+#: and the two text-chat mouths). The sidebar mirrors a later block instead of
+#: repeating them.
 _WINDOW_OWNED_MENU_LABELS = frozenset(
     {
         "Open the graphical interface (ChatGPT-style)",
@@ -321,6 +322,7 @@ _WINDOW_OWNED_MENU_LABELS = frozenset(
         "Jarvis mode (listen, act, speak)",
         "Ultron (general local model, any subject)",
         "Vision (petroleum local model: reservoir, drilling, PVT)",
+        "Banner (presentation local model: outlines and slide content)",
         "Chat with the AI (text, like Jarvis without voice)",
         "Chat with the AI (trained model, no sources)",
     }
@@ -328,8 +330,8 @@ _WINDOW_OWNED_MENU_LABELS = frozenset(
 
 #: The visible CLI entries the sidebar mirrors, in order (the first one after the
 #: window-owned controls through the Code Studio screen).
-_MIRRORED_MENU_START = 7
-_MIRRORED_MENU_STOP = 14
+_MIRRORED_MENU_START = 8
+_MIRRORED_MENU_STOP = 15
 
 
 def test_action_labels_match_the_mirrored_cli_menu_block() -> None:
@@ -674,7 +676,7 @@ def test_window_sidebar_has_a_scrollbar_shown_only_on_overflow() -> None:
         app._toggle_sidebar_scrollbar()
         root.update()
         assert app._side_scrollbar.winfo_ismapped()
-        root.geometry("1160x2000")  # tall enough to fit everything
+        root.geometry("1160x2400")  # tall enough to fit everything
         for _ in range(10):
             root.update()
         app._toggle_sidebar_scrollbar()

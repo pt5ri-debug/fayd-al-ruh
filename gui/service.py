@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from ai import chat as chat_module
+from ai import banner_mouth
 from ai import mind as mind_module
 from ai import ultron_mouth
 from ai import vision_mouth
@@ -102,6 +103,7 @@ class ChatService:
     - ``"model"`` -- answers from the trained language model, no citations.
     - ``"ultron"`` -- answers from the general local model, no citations.
     - ``"vision"`` -- answers from the petroleum local model, no citations.
+    - ``"banner"`` -- answers from the presentation local model, no citations.
 
     ``mode`` selects the *operating mode* (see :mod:`gui.modes`). In **AI Mode**
     the message is answered conversationally and no tool can run. In **Jarvics
@@ -125,6 +127,9 @@ class ChatService:
         vision_model: str | None = None,
         vision_tokens: int | None = None,
         vision_temperature: float | None = None,
+        banner_model: str | None = None,
+        banner_tokens: int | None = None,
+        banner_temperature: float | None = None,
         session: str | None = None,
         operating_mode: str | None = None,
         data_root: Path | None = None,
@@ -156,6 +161,11 @@ class ChatService:
                 vision_model,
                 max_tokens=vision_tokens,
                 temperature=vision_temperature,
+            ),
+            banner_loader=lambda: banner_mouth.load_banner_assistant(
+                banner_model,
+                max_tokens=banner_tokens,
+                temperature=banner_temperature,
             ),
         )
         self.session = session
@@ -284,7 +294,7 @@ class ChatService:
 
     @property
     def source(self) -> str:
-        """Which mouth currently answers: ``"model"``, ``"ultron"``, ``"vision"``, or ``"sources"``."""
+        """Which mouth currently answers: ``"model"``, ``"ultron"``, ``"vision"``, ``"banner"``, or ``"sources"``."""
         return self.switcher.mouth
 
     def use_model(self) -> None:
@@ -307,6 +317,14 @@ class ChatService:
         step.
         """
         self.switcher.use_vision()
+
+    def use_banner(self) -> None:
+        """Answer from Banner, the presentation local model.
+
+        Raises :class:`~core.banner.BannerUnavailable` when the optional runtime or
+        a model file is missing, so the caller can report the real next step.
+        """
+        self.switcher.use_banner()
 
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations."""
