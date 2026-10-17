@@ -3,6 +3,11 @@
     python -m cli presentation new "Reservoir Porosity"   # a new project
     python -m cli presentation list                       # the projects so far
     python -m cli presentation show PRS-001               # state + slides
+    python -m cli presentation rename PRS-001 "New title"
+    python -m cli presentation duplicate PRS-001 [--title "A copy"]
+    python -m cli presentation delete PRS-001
+    python -m cli presentation validate PRS-001           # structure + numbering
+    python -m cli presentation test                       # run the suite
     python -m cli presentation discuss PRS-001 "what is porosity?"
     python -m cli presentation outline PRS-001 --text-file plan.txt
     python -m cli presentation outline-draft PRS-001      # ask the assistant
@@ -46,10 +51,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from core.paths import bundle_root
 from core.presentation import (
     CONTENT_BULLETS,
     CONTENT_TYPES,
@@ -252,9 +259,99 @@ def _run_list(service: PresentationService, args: argparse.Namespace) -> int:
     if not projects:
         print('No presentation projects yet. Create one with: python -m cli presentation new "Title"')
         return 0
+    print(f"{'ID':<9} {'UPDATED':<11} {'SLIDES':>6} {'APPROVED':>8}  STATUS")
     for project in projects:
-        print(f"{project.project_id}  {service.status(project.project_id).summary()}")
+        status = service.status(project.project_id)
+        date = (status.updated_at or status.created_at or "")[:10] or "----------"
+        print(
+            f"{status.project_id:<9} {date:<11} {status.slides:>6} "
+            f"{status.approved_slides:>8}  {status.state_label}  {status.title}"
+        )
     return 0
+
+
+def _run_rename(service: PresentationService, args: argparse.Namespace) -> int:
+    project = service.rename_project(args.project_id, args.title)
+    if args.as_json:
+        _print_json(service.status(project.project_id).as_dict())
+        return 0
+    print(f"Renamed {project.project_id} to {project.title!r}.")
+    return 0
+
+
+def _run_duplicate(service: PresentationService, args: argparse.Namespace) -> int:
+    clone = service.duplicate_project(args.project_id, title=getattr(args, "title", "") or "")
+    if args.as_json:
+        _print_json(service.status(clone.project_id).as_dict())
+        return 0
+    print(
+        f"Duplicated {args.project_id} as {clone.project_id} ({clone.title!r}) "
+        f"with {len(clone.slides)} slide(s)."
+    )
+    return 0
+
+
+def _run_delete(service: PresentationService, args: argparse.Namespace) -> int:
+    removed = service.delete(args.project_id)
+    if args.as_json:
+        _print_json({"project_id": args.project_id, "removed": removed})
+        return 0
+    if removed:
+        print(f"Removed {args.project_id}.")
+    else:
+        print(f"No stored project {args.project_id}.")
+    return 0
+
+
+def _run_validate(service: PresentationService, args: argparse.Namespace) -> int:
+    """Check a project's structure and numbering without exporting it."""
+    result = service.validate_project(args.project_id)
+    if args.as_json:
+        _print_json(result.as_dict())
+        return 0 if result.ok else 4
+    print(result.summary())
+    for issue in result.issues:
+        print(f"  issue: {issue}")
+    for warning in result.warnings:
+        print(f"  warning: {warning}")
+    return 0 if result.ok else 4
+
+
+#: The test files that cover Presentation Studio (the ``test`` command's default).
+PRESENTATION_TEST_FILES: tuple[str, ...] = (
+    "tests/test_presentation.py",
+    "tests/test_presentation_authoring.py",
+    "tests/test_presentation_engine.py",
+    "tests/test_presentation_integration.py",
+    "tests/test_presentation_window.py",
+)
+
+
+def _run_test(service: PresentationService, args: argparse.Namespace) -> int:
+    """Run the presentation test suite through the project's own test runner.
+
+    This is the same ``python -m pytest`` the repository uses (never a second
+    test framework); it exists so a user can verify the feature from the CLI.
+    """
+    argv = [sys.executable, "-m", "pytest", "-q"]
+    argv.extend(args.files or PRESENTATION_TEST_FILES)
+    if args.keyword:
+        argv.extend(["-k", args.keyword])
+    # Run from the repository root so the default test paths resolve, wherever
+    # the CLI was launched from (``core.paths`` owns the same resolution).
+    completed = subprocess.run(
+        argv, capture_output=args.as_json, text=True, cwd=str(bundle_root())
+    )
+    if args.as_json:
+        _print_json(
+            {
+                "ok": completed.returncode == 0,
+                "command": argv,
+                "returncode": completed.returncode,
+                "output": completed.stdout,
+            }
+        )
+    return 0 if completed.returncode == 0 else 4
 
 
 def _run_show(service: PresentationService, args: argparse.Namespace) -> int:
@@ -835,6 +932,11 @@ _HANDLERS = {
     "list": _run_list,
     "show": _run_show,
     "status": _run_status,
+    "rename": _run_rename,
+    "duplicate": _run_duplicate,
+    "delete": _run_delete,
+    "validate": _run_validate,
+    "test": _run_test,
     "discuss": _run_discuss,
     "outline": _run_outline,
     "outline-draft": _run_outline_draft,
@@ -895,6 +997,28 @@ def _build_parser() -> argparse.ArgumentParser:
     new.add_argument("--language", default="en", help="Content language hint (default: en).")
 
     sub.add_parser("list", help="List the presentation projects.")
+
+    rename = sub.add_parser("rename", help="Rename a presentation project.")
+    rename.add_argument("project_id")
+    rename.add_argument("title")
+
+    duplicate = sub.add_parser("duplicate", help="Copy a project under a new id.")
+    duplicate.add_argument("project_id")
+    duplicate.add_argument("--title", default="", help="The copy's title (default: '<title> (copy)').")
+
+    delete = sub.add_parser("delete", help="Remove a project and its stored file.")
+    delete.add_argument("project_id")
+
+    validate = sub.add_parser(
+        "validate", help="Check a project's structure and slide numbering (no export)."
+    )
+    validate.add_argument("project_id")
+
+    test = sub.add_parser("test", help="Run the Presentation Studio test suite.")
+    test.add_argument("files", nargs="*", help="Test paths (default: the presentation tests).")
+    test.add_argument(
+        "-k", "--keyword", default="", help="Only run tests matching this pytest keyword."
+    )
 
     show = sub.add_parser("show", help="Show a project, its outline, and its slides.")
     show.add_argument("project_id")

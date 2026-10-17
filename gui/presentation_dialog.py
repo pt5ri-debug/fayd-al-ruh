@@ -28,12 +28,15 @@ rest of the window, so the CLI never touches it.
 from __future__ import annotations
 
 import queue
+import subprocess
+import sys
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Literal
 
 import tkinter as tk
-from tkinter import filedialog, font as tkfont, simpledialog, ttk
+from tkinter import filedialog, font as tkfont, messagebox, simpledialog, ttk
 
 from core.presentation import (
     CONTENT_TYPES,
@@ -41,6 +44,7 @@ from core.presentation import (
     STATE_CONTENT_APPROVED,
     STATE_EXPORTED,
     STATE_LABELS,
+    PresentationError,
     theme_names,
 )
 from gui import markdown as md
@@ -217,6 +221,14 @@ class PresentationDialog:
         row = tk.Frame(sidebar, bg=theme.surface)
         row.pack(fill="x", padx=14, pady=(0, 4))
         self._button(row, "New presentation", self._on_new_project).pack(side="left")
+        manage = tk.Frame(sidebar, bg=theme.surface)
+        manage.pack(fill="x", padx=14, pady=(0, 4))
+        self._rename_button = self._button(manage, "Rename", self._on_rename_project)
+        self._rename_button.pack(side="left")
+        self._duplicate_button = self._button(manage, "Duplicate", self._on_duplicate_project)
+        self._duplicate_button.pack(side="left", padx=(6, 0))
+        self._delete_button = self._button(manage, "Delete", self._on_delete_project)
+        self._delete_button.pack(side="left", padx=(6, 0))
 
         self._project_label = tk.Label(
             sidebar, text="No project selected.", bg=theme.surface, fg=theme.text_secondary,
@@ -304,6 +316,17 @@ class PresentationDialog:
         self._export_button.pack(side="left")
         self._export_button.configure(state="disabled")
         self._button(gate, "Save as…", self._on_export_as).pack(side="left", padx=(6, 0))
+        check_row = tk.Frame(sidebar, bg=theme.surface)
+        check_row.pack(fill="x", padx=14, pady=(0, 4))
+        self._check_button = self._button(check_row, "Check the deck", self._on_validate)
+        self._check_button.pack(side="left")
+        self._preview_button = self._button(check_row, "Preview…", self._on_preview)
+        self._preview_button.pack(side="left", padx=(6, 0))
+        self._download_button = self._button(
+            check_row, "Open the folder", self._on_open_folder
+        )
+        self._download_button.pack(side="left", padx=(6, 0))
+        self._download_button.configure(state="disabled")
         self._engine_note = tk.Label(
             sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
@@ -737,8 +760,15 @@ class PresentationDialog:
         self._ask_button.configure(state=state)
         for button in self._step_buttons.values():
             button.configure(state=state)
+        for button in (self._rename_button, self._duplicate_button, self._delete_button):
+            button.configure(state="disabled")
         if not enabled:
             self._export_button.configure(state="disabled")
+            self._check_button.configure(state="disabled")
+            self._preview_button.configure(state="disabled")
+            self._download_button.configure(state="disabled")
+        else:
+            self._sync_project_buttons()
 
     def _set_status(self, message: str, *, error: bool = False) -> None:
         self._export_note.configure(
@@ -751,6 +781,8 @@ class PresentationDialog:
     # -- project state -----------------------------------------------------
 
     def _open_first_project(self) -> None:
+        # Build the list first so selecting the first project can also mark its row.
+        self._refresh_projects()
         projects = self.service.list_projects()
         if projects:
             self._select_project(projects[0].project_id)
@@ -761,14 +793,21 @@ class PresentationDialog:
                 "assistant in the box below.",
                 title="Getting started",
             )
-        self._refresh_projects()
 
     def _refresh_projects(self) -> None:
         self._project_list.delete(0, "end")
         self._project_ids = []
         for project in self.service.list_projects():
             self._project_ids.append(project.project_id)
-            self._project_list.insert("end", f"{project.project_id}  {project.title}")
+            # One shared row format for the window and the CLI's `list`.
+            self._project_list.insert("end", self.service.status(project.project_id).dashboard_row())
+        self._sync_project_buttons()
+
+    def _sync_project_buttons(self) -> None:
+        """A management button is live only when a project is selected."""
+        state: Literal["normal", "disabled"] = "normal" if self._project_id else "disabled"
+        for button in (self._rename_button, self._duplicate_button, self._delete_button):
+            button.configure(state=state)
 
     def _on_project_select(self, _event: tk.Event | None = None) -> None:
         selection = self._project_list.curselection()
@@ -782,10 +821,21 @@ class PresentationDialog:
         self._project_id = project_id
         self._selected_slide = ""
         self._hide_slide_editor()
+        if project_id in self._project_ids:
+            index = self._project_ids.index(project_id)
+            self._project_list.selection_clear(0, "end")
+            self._project_list.selection_set(index)
+            self._project_list.see(index)
+        self._sync_project_buttons()
         self.refresh()
 
-    def refresh(self) -> None:
-        """Reload the project's state, slide list, and export gate."""
+    def refresh(self, *, keep_note: bool = False) -> None:
+        """Reload the project's state, slide list, and export gate.
+
+        ``keep_note`` leaves the status line alone, so a caller that has just
+        reported something (a save, an approval, a command's result) does not
+        have its confirmation replaced by the export-gate hint.
+        """
         if not self._project_id:
             return
         try:
@@ -801,8 +851,9 @@ class PresentationDialog:
             f"{len(project.approved_slides)} approved"
         )
         self._refresh_slides(project)
-        self._refresh_gate(project)
+        self._refresh_gate(project, keep_note=keep_note)
         self._refresh_steps(project.state)
+        self._sync_project_buttons()
 
     def _refresh_steps(self, state: str) -> None:
         """Enable only the workflow steps that make sense in this state."""
@@ -833,17 +884,29 @@ class PresentationDialog:
                 "end", f"{slide.number}. {mark} {slide.title or '(untitled)'}{place}"
             )
 
-    def _refresh_gate(self, project: Any) -> None:
+    def _refresh_gate(self, project: Any, *, keep_note: bool = False) -> None:
         allowed, reason = self.service.can_export(project.project_id)
         self._export_button.configure(state="normal" if allowed and not self._busy else "disabled")
+        self._check_button.configure(state="normal" if not self._busy else "disabled")
+        self._preview_button.configure(state="normal" if not self._busy else "disabled")
+        self._sync_download_button(project)
         self._sync_settings(project)
         self._engine_note.configure(text=self._engine_line())
+        if keep_note:
+            return
         if allowed:
             self._set_status(
                 f"Ready to export {len(project.approved_slides)} approved slide(s) to a .pptx."
             )
         else:
             self._set_status(reason)
+
+    def _sync_download_button(self, project: Any) -> None:
+        """Enable "Open the folder" only when a validated export exists on disk."""
+        last = next((item for item in reversed(project.exports) if item.ok), None)
+        has_file = last is not None and bool(last.path) and Path(last.path).exists()
+        enabled = has_file and not self._busy
+        self._download_button.configure(state="normal" if enabled else "disabled")
 
     def _sync_settings(self, project: Any) -> None:
         """Mirror the project's stored settings into the widgets (no callbacks)."""
@@ -923,6 +986,75 @@ class PresentationDialog:
             "drawn from.",
             title="New presentation",
         )
+
+    def _on_rename_project(self) -> None:
+        if not self._project_id:
+            self._set_status("Select a presentation first.", error=True)
+            return
+        try:
+            current = self.service.get(self._project_id)
+        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            self._report_error(error)
+            return
+        title = simpledialog.askstring(
+            TITLE, "New title:", initialvalue=current.title, parent=self.window
+        )
+        if not title or not title.strip():
+            return
+        try:
+            project = self.service.rename_project(self._project_id, title)
+        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            self._report_error(error)
+            return
+        self._refresh_projects()
+        self._select_project(project.project_id)
+        self._add_message("note", f"Renamed to **{project.title}**.", title="Renamed")
+
+    def _on_duplicate_project(self) -> None:
+        if not self._project_id:
+            self._set_status("Select a presentation first.", error=True)
+            return
+        try:
+            clone = self.service.duplicate_project(self._project_id)
+        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            self._report_error(error)
+            return
+        self._refresh_projects()
+        self._select_project(clone.project_id)
+        self._add_message(
+            "note",
+            f"Duplicated as **{clone.title}** ({clone.project_id}) with "
+            f"{len(clone.slides)} slide(s). The original is unchanged.",
+            title="Duplicated",
+        )
+
+    def _on_delete_project(self) -> None:
+        if not self._project_id:
+            self._set_status("Select a presentation first.", error=True)
+            return
+        try:
+            current = self.service.get(self._project_id)
+        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            self._report_error(error)
+            return
+        confirmed = messagebox.askyesno(
+            TITLE,
+            f"Delete {current.project_id} — {current.title!r}?\n\n"
+            "The stored project is removed. Any .pptx already exported stays on disk.",
+            parent=self.window,
+        )
+        if not confirmed:
+            return
+        try:
+            self.service.delete(self._project_id)
+        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            self._report_error(error)
+            return
+        self._project_id = ""
+        self._selected_slide = ""
+        self._hide_slide_editor()
+        self._refresh_projects()
+        self._open_first_project()
 
     def _on_discuss(self) -> None:
         if not self._project_id:
@@ -1089,6 +1221,10 @@ class PresentationDialog:
         except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
             self._report_error(error)
             return
+        # Loading a slide makes it the editor's target, so a save/revision acts on
+        # the slide the user is looking at even when the editor was opened
+        # programmatically (not through a list selection).
+        self._selected_slide = slide_id
         self._slide_label.configure(
             text=f"Slide {slide.number} ({slide.slide_id})"
             + (f"  ·  {slide.topic}" if slide.topic else "")
@@ -1148,7 +1284,7 @@ class PresentationDialog:
             if project.approval_outdated:
                 note += " The content approval is now outdated; approve the slides again."
             self._set_status(note)
-            self.refresh()
+            self.refresh(keep_note=True)
 
         self._run_background("Saving the slide…", job, finish)
 
@@ -1161,7 +1297,7 @@ class PresentationDialog:
             self._set_status(str(error), error=True)
             return
         self._set_status(f"Approved slide {slide.number}.")
-        self.refresh()
+        self.refresh(keep_note=True)
 
     def _on_unapprove_slide(self) -> None:
         if not self._selected_slide:
@@ -1172,7 +1308,7 @@ class PresentationDialog:
             self._set_status(str(error), error=True)
             return
         self._set_status(f"Withdrew the approval of slide {slide.number}.")
-        self.refresh()
+        self.refresh(keep_note=True)
 
     def _on_move(self, delta: int) -> None:
         if not self._selected_slide:
@@ -1185,7 +1321,7 @@ class PresentationDialog:
             self._set_status(str(error), error=True)
             return
         self._set_status("Reordered the slide.")
-        self.refresh()
+        self.refresh(keep_note=True)
 
     def _on_batch_size(self) -> None:
         """Apply the chosen drafting batch size (validated by the service)."""
@@ -1218,7 +1354,7 @@ class PresentationDialog:
                 return
             self._load_slide(self._selected_slide)
             self._set_status(f"Regenerated slide {number}; approve it again before exporting.")
-            self.refresh()
+            self.refresh(keep_note=True)
 
         self._run_background(f"Regenerating slide {number}…", job, finish)
 
@@ -1240,7 +1376,7 @@ class PresentationDialog:
                 self._set_status(str(error), error=True)
                 return
             self._set_status(result.message, error=not result.ok)
-            self.refresh()
+            self.refresh(keep_note=True)
 
         self._run_background("Running the slide command…", job, finish)
 
@@ -1255,7 +1391,7 @@ class PresentationDialog:
         self._selected_slide = ""
         self._hide_slide_editor()
         self._set_status("Removed the slide.")
-        self.refresh()
+        self.refresh(keep_note=True)
 
     def _on_revisions(self) -> None:
         if not self._selected_slide:
@@ -1290,7 +1426,7 @@ class PresentationDialog:
             return
         self._set_status(f"Restored revision {choice.strip()}; approve it again before exporting.")
         self._load_slide(self._selected_slide)
-        self.refresh()
+        self.refresh(keep_note=True)
 
     # -- export ------------------------------------------------------------
 
@@ -1311,12 +1447,94 @@ class PresentationDialog:
             return
         self._export_to(path)
 
+    # -- export validation and preview -------------------------------------
+
+    def _on_validate(self) -> None:
+        """Check the deck's structure and numbering without writing a file."""
+        if not self._project_id:
+            self._set_status("Select a presentation first.", error=True)
+            return
+        try:
+            result = self.service.validate_project(self._project_id)
+        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            self._set_status(str(error), error=True)
+            return
+        lines = [result.summary()]
+        for issue in result.issues:
+            lines.append(f"- issue: {issue}")
+        for warning in result.warnings:
+            lines.append(f"- warning: {warning}")
+        self._add_message(
+            "note",
+            "\n".join(lines),
+            title="Deck check" if result.ok else "Deck check — not ready",
+        )
+        self._set_status(result.summary(), error=not result.ok)
+
+    def _on_preview(self) -> None:
+        """Show the exact slides an export would write, in order, as text."""
+        if not self._project_id:
+            self._set_status("Select a presentation first.", error=True)
+            return
+        try:
+            deck = self.service.preview(self._project_id)
+        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            self._set_status(str(error), error=True)
+            return
+        lines = [f"**{deck.title}** — {len(deck.slides)} slide(s) will be written.", ""]
+        for slide in deck.slides:
+            lines.append(f"**{slide.number}. {slide.title or '(untitled)'}**")
+            for item in slide.content:
+                lines.append(f"- {item}")
+            for row in slide.table:
+                lines.append("| " + " | ".join(row) + " |")
+            for equation in slide.equations:
+                lines.append(f"= {equation}")
+            lines.append("")
+        self._add_message("note", "\n".join(lines), title="Preview")
+
+    def _on_open_folder(self) -> None:
+        """Open the folder that holds the last validated export (a local action)."""
+        if not self._project_id:
+            self._set_status("Select a presentation first.", error=True)
+            return
+        try:
+            project = self.service.get(self._project_id)
+        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            self._report_error(error)
+            return
+        last = next((item for item in reversed(project.exports) if item.ok), None)
+        if last is None or not last.path:
+            self._set_status("Export a deck first.", error=True)
+            return
+        directory = Path(last.path).parent
+        self._reveal_directory(directory)
+
+    def _reveal_directory(self, directory: Path) -> None:
+        """Ask the OS to open a folder, tolerating a headless or locked desktop."""
+        try:
+            if sys.platform.startswith("darwin"):
+                subprocess.Popen(["open", str(directory)])
+            elif sys.platform.startswith("win"):
+                subprocess.Popen(["explorer", str(directory)])
+            else:
+                subprocess.Popen(["xdg-open", str(directory)])
+        except Exception as error:  # noqa: BLE001 - the path is still shown, so never crash
+            self._set_status(f"Could not open the folder ({error}). It is at {directory}.")
+            return
+        self._set_status(f"Opened {directory}.")
+
     def _export_to(self, path: str | None) -> None:
         if not self._project_id:
             self._set_status("Create a presentation first.", error=True)
             return
 
         def job() -> Any:
+            # Validate the deck's structure *before* writing, so a numbering gap or
+            # an unapproved slide is reported instead of producing a bad download.
+            check = self.service.validate_project(self._project_id)
+            if not check.ok:
+                raise PresentationError(check.summary())
             return self.service.export(self._project_id, path=path)
 
         def finish(result: Any, error: Exception | None) -> None:
@@ -1337,7 +1555,7 @@ class PresentationDialog:
             for warning in getattr(result, "warnings", ()):
                 self._add_message("note", f"⚠ {warning}", title="Check")
             self._set_status(result.message)
-            self.refresh()
+            self.refresh(keep_note=True)
 
         self._run_background("Writing the .pptx…", job, finish)
 
