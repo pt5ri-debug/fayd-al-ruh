@@ -51,6 +51,7 @@ from core.presentation import (
     OutlineSection,
     PresentationError,
     Slide,
+    default_presentation_dir,
 )
 from gui.presentation import PresentationService, SlideSpec
 
@@ -62,20 +63,35 @@ def _read_text(path: str | None) -> str | None:
     return Path(path).expanduser().read_text(encoding="utf-8")
 
 
-def _make_ask():
+def _make_ask(root: Path | None = None, project_id: str | None = None):
     """Build the assistant callback from the project's own session.
 
     This is the *existing* assistant -- ``ai.jarvis.build_session`` with the
     grounded assistant and the knowledge retriever -- so a presentation is
     discussed with the same mind the chat window uses. Imported lazily, so the
     CLI never loads the model stack unless it is actually needed.
+
+    A project that names a conversation resumes it, so a follow-up question in a
+    later run keeps the earlier exchange (and a new project starts a fresh one).
+    The session is saved after every turn, so the discussion survives the
+    process: returning to a project never means re-arguing from the start.
     """
     from ai.jarvis import build_session
 
     session = build_session(text_only=True)
+    if project_id:
+        saved = _load_conversation_id(root, project_id)
+        # Resume the project's own conversation when it exists; otherwise this
+        # fresh session becomes the project's conversation from here on.
+        if not (saved and session.resume_session(saved)):
+            _save_conversation_id(root, project_id, session.conversation.id)
 
     def ask(question: str) -> str:
         turn = session.handle(question)
+        if project_id:
+            # ``save_session`` reports a write failure instead of raising, so a
+            # read-only store never breaks the turn.
+            session.save_session()
         # ``answer_text`` is the assistant's own prose; ``response`` may carry a
         # spoken wrapper or an agent summary, so the answer text is preferred.
         return turn.answer_text or turn.response
@@ -83,12 +99,37 @@ def _make_ask():
     return ask
 
 
+def _conversation_root(root: Path | None) -> Path:
+    """Where a project's conversation pointer lives (beside its own projects)."""
+    if root is not None:
+        return root / "conversations"
+    return default_presentation_dir().parent / "conversations"
+
+
+def _load_conversation_id(root: Path | None, project_id: str) -> str:
+    """The saved conversation id for a project, or "" when none is stored."""
+    from storage.json_store import JsonStore
+
+    value = JsonStore(_conversation_root(root)).load("map", project_id)
+    return value if isinstance(value, str) else ""
+
+
+def _save_conversation_id(root: Path | None, project_id: str, conversation_id: str) -> None:
+    """Remember which conversation a project is discussed in (best effort)."""
+    from storage.json_store import JsonStore
+
+    try:
+        JsonStore(_conversation_root(root)).save("map", project_id, conversation_id)
+    except (OSError, ValueError):
+        pass
+
+
 def _service(args: argparse.Namespace, *, need_assistant: bool = False) -> PresentationService:
     root = Path(args.root).expanduser() if getattr(args, "root", None) else None
     output_dir = Path(args.output_dir).expanduser() if getattr(args, "output_dir", None) else None
     ask = None
     if need_assistant or getattr(args, "assistant", False):
-        ask = _make_ask()
+        ask = _make_ask(root, getattr(args, "project_id", None))
     service = PresentationService(root=root, ask=ask, output_dir=output_dir)
     if not getattr(args, "quiet", False):
         service.set_progress(lambda message: print(message, file=sys.stderr))
@@ -214,9 +255,11 @@ def _run_status(service: PresentationService, args: argparse.Namespace) -> int:
 
 
 def _run_discuss(service: PresentationService, args: argparse.Namespace) -> int:
-    result = service.discuss(
-        args.project_id, args.question, conversation_id=args.conversation or ""
+    conversation = getattr(args, "conversation", "") or _load_conversation_id(
+        Path(args.root).expanduser() if getattr(args, "root", None) else None,
+        args.project_id,
     )
+    result = service.discuss(args.project_id, args.question, conversation_id=conversation)
     if args.as_json:
         _print_json(
             {
