@@ -63,6 +63,17 @@ vision = [
 # standard-library writer as a fallback, and `core.pptx_engine` imports this
 # package lazily. It is never required by the base install.
 pptx = ["python-pptx>=1.0"]
+# The Presentation Studio's own authoring model is a separate optional extra: a
+# local Qwen3 GGUF (8B by default) loaded in-process through llama-cpp-python, so
+# the Studio drafts structured outlines and slide bullets with no Ollama server
+# left running. Same runtime as Ultron/the Code Studio; the weights are a separate
+# one-time, human-approved download (`python -m cli presentation model-download
+# --approve`). Never required by the base install -- the Studio falls back to the
+# project's own assistant for drafting -- and the imports are lazy.
+presentation = [
+    "llama-cpp-python>=0.3",
+    "huggingface_hub>=0.23",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,18 @@
+# Optional: the Presentation Studio's in-process authoring model (the
+# [presentation] extra).
+#
+# Install with:  python -m pip install -r requirements-presentation.txt
+#
+# This pulls ``llama-cpp-python``, which runs a GGUF authoring model locally
+# inside this process -- no ``ollama serve`` daemon has to sit in the background
+# holding RAM -- and ``huggingface_hub``, used only to fetch the weights. On a
+# machine with no prebuilt wheel, ``llama-cpp-python`` compiles from source and
+# needs a C/C++ compiler.
+#
+# The model weights are a *separate* one-time, human-approved download:
+#     python -m cli presentation model-download --approve
+# or drop any authoring `.gguf` file into the data/presentation folder. The base
+# install needs none of this; the import is lazy and the app reports clearly when
+# absent. The Studio falls back to the project's own assistant for drafting.
+llama-cpp-python>=0.3
+huggingface_hub>=0.23

@@ -203,6 +203,14 @@ class ChatService:
         self._presentation = PresentationService(
             ask=self._presentation_ask, on_progress=self._on_presentation_progress
         )
+        # The Studio's own authoring model (an optional Qwen3 GGUF) is built lazily
+        # on first use, so constructing the window never loads a multi-gigabyte
+        # model. ``None`` means "not looked for yet"; a failed load sets the
+        # ``_presentation_author_loaded`` flag and leaves it ``None``, so the
+        # fallback to the assistant is not retried (and re-attempted) on every draft.
+        self._presentation_author: Any = None
+        self._presentation_author_loaded = False
+        self._presentation_model_root: Path | None = None
         # The text-to-speech reader: it reads the chat's own text aloud with a
         # chosen catalog voice (core/voices.py). It is always available; when no
         # speech engine is installed it reports honestly instead of pretending.
@@ -551,6 +559,34 @@ class ChatService:
         """
         turn = self.mode.handle(question, require_wake=False, speak=False)
         return turn.answer_text or turn.response
+
+    def presentation_author(self) -> Any:
+        """The Studio's own authoring model (Qwen3 GGUF), or ``None``.
+
+        Drafting an outline or slide bullets is structured prose generation, which
+        the grounded assistant -- built to answer with cited extracts -- does not
+        do well. When the user has installed the optional authoring model the
+        Studio drafts with it; otherwise it falls back to the assistant, so the
+        feature works with no extra at all. Construction is lazy and never raises:
+        a missing extra or missing weights simply yields ``None``.
+        """
+        if self._presentation_author_loaded:
+            return self._presentation_author
+        self._presentation_author_loaded = True
+        try:
+            from ai.presentation_author import load_presentation_author
+
+            self._presentation_author = load_presentation_author(root=self._presentation_model_root)
+        except Exception:  # noqa: BLE001 - absent extra/weights is a normal state
+            return None
+        self._presentation.set_author(self._presentation_author)
+        return self._presentation_author
+
+    def presentation_model_status(self) -> Any:
+        """An honest status of the Studio's authoring model, for the window."""
+        from core.presentation_model import presentation_model_status
+
+        return presentation_model_status(root=self._presentation_model_root)
 
     def _on_presentation_progress(self, message: str) -> None:
         """Record a Studio progress line for the window (it polls this list)."""

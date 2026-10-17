@@ -11,11 +11,11 @@ Arabic is kept as secondary aliases where useful.
   `python -m evaluation` (must print PASS, no regression).
 - CI (`.github/workflows/ci.yml`) installs **only `requirements.txt`** — no
   optional extras. So that file must carry every dependency the tests need
-  (it already bundles `pytest`/`ruff`/`mypy`, and now `pypdf`); tests over an
-  optional extra must skip when it is absent (`pdf_available()`,
+  (it already bundles `pytest`/`ruff`/`mypy`, `pypdf`, and `python-pptx`); tests
+  over an optional extra must skip when it is absent (`pdf_available()`,
   `ocr_available()`, `pytest.importorskip`), and `pyproject.toml`'s mypy
   overrides must ignore every optional import name (`pypdf`, `pypdfium2`,
-  `pytesseract`, `PIL`, `diffusers`).
+  `pytesseract`, `PIL`, `diffusers`, `llama_cpp`, `huggingface_hub`, `pptx`).
 - Push branches and open PRs with the `create_pr` tool. Merge only on the user's
   explicit approval ("نعم قم بالدمج").
 
@@ -924,7 +924,9 @@ Arabic is kept as secondary aliases where useful.
   `apply_slide_command`,
   `approve_slide`/`unapprove_slide`/`approve_slides`/`approve_slides_in_range`/
   `approve_content`, `revisions`/`restore_slide_revision`/`restore_approved`,
-  `export`, `export_history`, `status`) persists projects through `JsonStore`
+  `export`, `export_history`, `course_matches`/`best_course`/`course_detail`/
+  `course_concepts_text`/`slides_for_concept`, `status`) persists projects through
+  `JsonStore`
   under `PRESENTATIONS_NAMESPACE`. It takes an injected `ask` callback and never
   builds a model itself: the CLI passes `ai.jarvis.build_session` and the window
   passes *its own* session (`ChatService._presentation_ask`), so there is **no
@@ -934,6 +936,11 @@ Arabic is kept as secondary aliases where useful.
   draft expands each outline subsection into its own numbered slide and records
   the `section`/`subsection` on it, so the topic sequence is preserved.
   `approve_slides_in_range` approves a numbered span (clamped to the deck);
+  `approve_slides` approves the whole deck and, like `approve_slides_in_range`,
+  refuses an **empty slide by number** rather than skipping it — silently leaving
+  one unapproved made the content gate fail later with a message that did not say
+  which slide was at fault, which is how the step 6 → step 8 workflow appeared
+  broken;
   `insert_slide`/`move_slide` renumber densely while `slide_id`s stay stable;
   `renumber_slides` closes any gap; `regenerate_slides`/`revise_slides`/
   `add_example_after` re-draft through the assistant keeping the slide's id,
@@ -985,8 +992,24 @@ Arabic is kept as secondary aliases where useful.
   editor edits the title, type, section/subsection, body, and notes, with
   Save / Approve / Withdraw approval / Move up / Move down / Regenerate /
   Revisions… / Remove, and a **Command** box that runs a plain instruction
-  ("shorten slides 11-15") through the shared `apply_slide_command`. The Export
-  section holds the export gate plus **Check the deck** (runs
+  ("shorten slides 11-15") through the shared `apply_slide_command`. An
+  **Approve all slides** button approves the whole deck in one save (an empty
+  slide is reported by number, never silently approved), so step 7 does not
+  require a click per slide. **Approve the content** is enabled only from
+  `SLIDE_REVIEW` (the first state the state machine accepts an approval from —
+  offering it while the slides were still being drafted is what made the workflow
+  look broken), approves every slide, moves the project to *Content approved*, and
+  then opens the **final presentation editor** window
+  (`gui/presentation_finalize_dialog.py`) through `on_open_final_editor`; a failure
+  there is shown in the transcript *and* the status line, so an empty slide names
+  itself. The sidebar's `_model_note`/`_model_line()` say which model drafts the
+  outline and slides (the Studio's own Qwen3 GGUF, else the project's assistant)
+  and how to install the better one. A **Course content** section below the model
+  note holds **Open the course…**, enabled only once the deck's own content matches
+  one of the project's courses (`_sync_course` names the course and how many of its
+  concepts are covered, or says to draft the slides first) — so the Course window
+  (`gui/presentation_course_dialog.py`) opens at a meaningful moment, never at
+  random. The Export section holds the export gate plus **Check the deck** (runs
   `validate_project`, reporting issues/warnings with no file written),
   **Preview…** (renders the exact approved slides, in order, as text), and
   **Open the folder** (reveals the last validated export in the OS file manager;
@@ -1031,7 +1054,106 @@ Arabic is kept as secondary aliases where useful.
   a project in a later process keeps the earlier exchange instead of starting
   over. Exit codes: `0` success, `2` invalid
   arguments, `3` the assistant is not available, `4` a gate refused the
-  operation, `5` an unexpected failure.
+  operation, `5` an unexpected failure. It also carries **`model-status`** and
+  **`model-download`** (`--list-models`, `--approve`), the headless twins of the
+  Studio's own authoring model: `model-status` reports honestly (exit `4` when
+  neither the in-process model nor a reachable Ollama can answer, printing the
+  real next step), and `model-download` fetches a catalog model only through the
+  permission + human-approval gates. `_maybe_author(root)` builds the Studio's
+  authoring model when one is installed and passes it to
+  `PresentationService.set_author`, so drafting prefers the Studio's own Qwen3
+  model and falls back to the project's assistant when it is absent.
+- `core/presentation_model.py` — the Presentation Studio's **own authoring model**,
+  added the way Ultron's and the Code Studio's are: a real **GGUF file loaded into
+  this process** with `llama-cpp-python` (no server, nothing sent off the
+  machine), the runtime being the optional `[presentation]` extra
+  (`core.optional_deps.FEATURE_PRESENTATION`, `requirements-presentation.txt`,
+  `presentation = [...]` in `pyproject.toml`), imported lazily so a base install
+  needs neither the extra nor a model file. The model is a GGUF under
+  `data/presentation` (`core.paths.presentation_models_dir`, git-ignored):
+  `find_model_file` prefers the file named in the registry (`model.json`, written
+  on download), else the largest `*.gguf`. `DEFAULT_PRESENTATION_MODEL` is
+  **`qwen3:8b`** and `CATALOG` names the fetchable choices (`qwen3-8b` default,
+  `qwen3-4b` the lighter option), exposed through `spec_names`/`spec_summaries`/
+  `resolve_spec`. `LlamaCppPresentationClient` satisfies the same
+  `core.coder_model.CoderClient` protocol as `OllamaCoderClient` (so the Studio
+  cannot tell the two runtimes apart) and carries `backend = "in-process"`, which
+  is why `coder_status` never tells an in-process user to start a server;
+  `PresentationRunner` is the seam a test injects, so the client is exercised with
+  no extra and no weights. `download_model` runs only through the permission +
+  human-approval gates (`approved=True`), like the other model downloads.
+  `presentation_backend_status`/`presentation_model_status` report *exactly* what
+  is installed -- in-process, Ollama, or nothing, with the real next step and no
+  mention of the Code Studio's coding model. Nothing here executes model output;
+  the Studio parses the text with the same deterministic parsers it uses for any
+  other answer.
+- `ai/presentation_author.py` — adapts the Studio's authoring model to the
+  service's `Callable[[str], str]` `ask` shape: a question in, plain text out. It
+  exists as its own layer because the client speaks in messages while the service
+  wants one string, so this is where the system prompt is added *once* (asking for
+  exactly the shape the Studio's parsers read) and where a reasoning model's
+  ` thinking…` blocks are stripped (`strip_thinking`, which also drops an
+  unterminated block to the end so a reply cut off mid-thought never leaks
+  reasoning into a slide; when nothing is left the original text is returned, so
+  the answer is never silently empty). `PresentationAuthor.__call__` is
+  deliberately **stateless** -- one self-contained question per call, so a retry
+  or a re-draft cannot be skewed by an earlier exchange -- and `describe()` names
+  the model and runtime honestly. `load_presentation_author` prefers the
+  in-process GGUF, honours a reachable Ollama serving the same model otherwise
+  (so a user who already pulled it there is not asked for a second copy), and
+  raises `PresentationModelUnavailable` with the real next step when neither can
+  answer.
+- `core/presentation_courses.py` — the **curriculum bridge**: which of the
+  project's *own* courses a deck covers, so the Studio can open the Course window
+  at a meaningful moment. `match_courses(text, min_matches, limit)` matches a
+  deck's own words against every `CourseKnowledge` concept in
+  `core.curriculum_knowledge` (the same seed the Continuous Internet Learner
+  navigates), keeping only **whole-concept** matches — a concept counts only when
+  *all* of its words appear (Arabic-normalised through `core.rag._query_terms`,
+  never a substring), so "porosity" alone never counts as "effective porosity" —
+  and returns `CourseMatch(key, label, branch, matched, total)` ordered strongest
+  first, with `match_count`/`coverage`/`strong` (`coverage >= STRONG_COVERAGE`)
+  and an honest `describe()`. `match_project(project)` builds the deck's text from
+  its title, outline, and slides (never the discussion, which may wander) and
+  matches it; `best_course(matches)` is the one *strong* match, or `None`, so a
+  weak incidental overlap never nominates a course. `course_detail(key, text=...)`
+  returns the course's `ConceptInfo`s (each marked `present`) and readable
+  `RelationInfo`s (`describe()` renders "source —relation→ target"), and raises
+  `KeyError` on an unknown key rather than showing a blank course. Dependency-free
+  and read-only: it invents nothing and never touches a project.
+- `gui/presentation_course_dialog.py` — the **Course window** (Tk, imported
+  lazily), a *sibling* of the Studio that drives the *same*
+  `gui.presentation.PresentationService`. Opened by the Studio through
+  `on_open_course` once the deck's own content matches a course strongly enough
+  (`best_course`), it lists the courses the deck covers (strong ones marked) and
+  the chosen course's concepts with the covered ones ticked, beside the course's
+  own relations, in the chat window's theme and centred column. Two honesty rules:
+  it **never edits the deck** — *Use the missing concepts* hands the uncovered
+  concepts to the Studio's question box (the user then decides whether to ask) and
+  *Go to its slides* selects the slide that covers a concept — and it re-reads
+  everything from the one service on every refresh, so it can never disagree with
+  the Studio. The listbox selection uses the *most recent* index (Tk's
+  `selection_set` adds to the selection). Reachable headless as
+  `python -m cli presentation courses <project_id> [--course <key>] [--limit N]`
+  (`cli/presentation.py`), which prints the same matches, or one course's
+  covered/missing concepts and relations.
+- `gui/presentation_finalize_dialog.py` — the **final presentation editor** window
+  (Tk, imported lazily), a *sibling* of the Studio that drives the *same*
+  `gui.presentation.PresentationService`, so the two views can never disagree.
+  Opened by the Studio's **Approve the content** step (through
+  `on_open_final_editor`), it lists the approved deck's slides on the left and
+  holds the slide editor, the deck-wide look controls, and the export gate on the
+  right: edit a slide's title/body/notes, reorder it (Move up/down), re-approve
+  the deck, then **Export the .pptx** or **Save as…**. An edit re-arms the export
+  gate (the service's `_reopen_for_edit`), so the export button disables itself
+  and says why until the slides are approved again; `on_edit` tells the Studio
+  behind to refresh, so both views stay in step. **Check the deck** and
+  **Preview…** report into the same transcript rather than a dialog. The export
+  handler deliberately shows no modal confirmation -- a blocking prompt is wrong
+  for a long worker-thread action and would hang a headless run -- and reports the
+  written path, size, and engine in the transcript, with **Open the folder** to
+  reveal it. Reachable from the Studio's approve step; there is no separate CLI
+  command, because `python -m cli presentation export` is the same gate.
 - `core/document_reader.py` — read text out of a Word file with no third-party
   dependency: a `.docx`/`.docm` is an Office Open XML package (a ZIP holding
   `word/document.xml`), read through **`core/docx_extract.py`** (Stage 2B), which

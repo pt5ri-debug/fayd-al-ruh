@@ -121,6 +121,20 @@ def coder_models_dir() -> Path:
     return data_dir() / "coder"
 
 
+def presentation_models_dir() -> Path:
+    """Where the Presentation Studio's in-process authoring models live.
+
+    The Studio drafts outlines and slide content with a GGUF file the user drops
+    into ``data/presentation`` (or downloads there with
+    ``python -m cli presentation model-download --approve``). Like Ultron's and
+    the Code Studio's models these are *not* in-project checkpoints, so the
+    folder is git-ignored and a multi-gigabyte model never dirties the working
+    tree or bloats a program update. ``FAYD_DATA_DIR`` moves it with the rest of
+    the data.
+    """
+    return data_dir() / "presentation"
+
+
 def studio_dir() -> Path:
     """Where the Code Studio keeps its own state (git worktrees, run logs).
 
@@ -204,6 +218,7 @@ __all__ = [
     "models_dir",
     "ultron_models_dir",
     "coder_models_dir",
+    "presentation_models_dir",
     "studio_dir",
     "studio_workspaces_dir",
     "bundled_artifacts_dir",

@@ -1981,7 +1981,94 @@ class FaydGUI:
             font=self._font,
             mono=self._mono,
             on_close=lambda: setattr(self, "_presentation_dialog", None),
+            on_open_final_editor=self._open_presentation_finalize,
+            model_status=self.service.presentation_model_status,
+            ensure_author=self.service.presentation_author,
+            on_open_course=self._open_presentation_course,
         )
+
+    def _open_presentation_course(self, course_key: str) -> None:
+        """Open the Course window for the deck's curriculum course.
+
+        Reached from the Studio once the deck's own content matches a course
+        strongly enough. It is a sibling window that drives the *same*
+        ``PresentationService``, so the coverage it shows is the deck's real one.
+        The window can hand concepts back to the Studio and jump to a slide; it
+        never edits the deck itself. When a Course window is already open it is
+        rebuilt for the new course rather than duplicated.
+        """
+        from gui.presentation_course_dialog import PresentationCourseDialog
+
+        dialog = getattr(self, "_presentation_course_dialog", None)
+        if dialog is not None:
+            dialog.window.destroy()
+        self._presentation_course_dialog = PresentationCourseDialog(
+            self.root,
+            self.service.presentation,
+            project_id=self._presentation_project_id(),
+            course_key=course_key,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=lambda: setattr(self, "_presentation_course_dialog", None),
+            on_use_concepts=self._use_presentation_course_concepts,
+            on_open_slide=self._reveal_presentation_slide,
+        )
+
+    def _use_presentation_course_concepts(self, text: str) -> None:
+        """Copy curriculum concepts into the Studio's own question box."""
+        dialog = getattr(self, "_presentation_dialog", None)
+        use = getattr(dialog, "use_course_concepts", None)
+        if callable(use):
+            use(text)
+
+    def _reveal_presentation_slide(self, number: int) -> None:
+        """Show the slide that covers a concept, in the Studio behind."""
+        dialog = getattr(self, "_presentation_dialog", None)
+        reveal = getattr(dialog, "reveal_slide_number", None)
+        if callable(reveal):
+            reveal(number)
+
+    def _open_presentation_finalize(self) -> None:
+        """Open the final-editing window for the Studio's approved deck.
+
+        Reached from the Studio's **Approve the content** step. It is a sibling
+        window that drives the *same* ``PresentationService``, so the two views
+        never disagree. When a final editor is already open for the same project
+        it is raised rather than duplicated.
+        """
+        from gui.presentation_finalize_dialog import PresentationFinalizeDialog
+
+        dialog = getattr(self, "_presentation_finalize_dialog", None)
+        project_id = self._presentation_project_id()
+        if dialog is not None and getattr(dialog, "_project_id", "") == project_id:
+            dialog.window.deiconify()
+            dialog.window.lift()
+            return
+        if dialog is not None:
+            dialog.window.destroy()
+        self._presentation_finalize_dialog = PresentationFinalizeDialog(
+            self.root,
+            self.service.presentation,
+            project_id=project_id,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=lambda: setattr(self, "_presentation_finalize_dialog", None),
+            on_edit=self._refresh_presentation_dialog,
+        )
+
+    def _presentation_project_id(self) -> str:
+        """The project the Studio currently has open (the final editor's target)."""
+        dialog = getattr(self, "_presentation_dialog", None)
+        return str(getattr(dialog, "_project_id", "") or "")
+
+    def _refresh_presentation_dialog(self) -> None:
+        """Refresh the Studio behind the final editor after an edit there."""
+        dialog = getattr(self, "_presentation_dialog", None)
+        refresh = getattr(dialog, "refresh", None)
+        if callable(refresh):
+            refresh(keep_note=True)
 
     def _open_code_studio(self) -> None:
         """Open the Code Studio: edit, test, and merge the project's own code.
