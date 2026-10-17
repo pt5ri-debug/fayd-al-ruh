@@ -10,10 +10,17 @@
     python -m cli presentation approve-outline PRS-001 [--revision 2]
     python -m cli presentation draft PRS-001 [--heading "Porosity"] [--batch 3]
     python -m cli presentation add PRS-001 --title "Porosity" --bullet "..."
+    python -m cli presentation slides PRS-001               # the numbered slides
     python -m cli presentation edit PRS-001 SLD-001 --title "New title"
+    python -m cli presentation move PRS-001 18 --before 17
     python -m cli presentation reorder PRS-001 SLD-002 --position 1
+    python -m cli presentation renumber PRS-001
+    python -m cli presentation regenerate PRS-001 21-25
+    python -m cli presentation revise PRS-001 11-15 --instruction "add units"
+    python -m cli presentation command PRS-001 "shorten slides 11-15"
     python -m cli presentation review-slides PRS-001
     python -m cli presentation approve-slide PRS-001 SLD-001
+    python -m cli presentation approve-range PRS-001 5-8
     python -m cli presentation unapprove-slide PRS-001 SLD-001
     python -m cli presentation approve-slides PRS-001
     python -m cli presentation approve-content PRS-001
@@ -46,12 +53,14 @@ from pathlib import Path
 from core.presentation import (
     CONTENT_BULLETS,
     CONTENT_TYPES,
+    DEFAULT_SLIDE_BATCH,
     STATE_LABELS,
     OutlineRevision,
     OutlineSection,
     PresentationError,
     Slide,
     default_presentation_dir,
+    parse_slide_range,
 )
 from gui.presentation import PresentationService, SlideSpec
 
@@ -152,6 +161,8 @@ def _print_slide(slide: Slide, *, as_json: bool) -> None:
         "images": list(slide.images),
         "sources": list(slide.sources),
         "notes": slide.notes,
+        "section": slide.section,
+        "subsection": slide.subsection,
         "approved": slide.approved,
         "revision": slide.revision,
     }
@@ -159,7 +170,8 @@ def _print_slide(slide: Slide, *, as_json: bool) -> None:
         _print_json(data)
         return
     mark = "approved" if slide.approved else "not approved"
-    print(f"  [{slide.number}] {slide.slide_id} {slide.title!r} ({slide.content_type}, {mark})")
+    place = f" [{slide.topic}]" if slide.topic else ""
+    print(f"  [{slide.number}] {slide.slide_id} {slide.title!r} ({slide.content_type}, {mark}){place}")
     for line in slide.content:
         print(f"      - {line}")
     for row in slide.table:
@@ -376,8 +388,13 @@ def _run_add(service: PresentationService, args: argparse.Namespace) -> int:
         images=tuple(args.image or ()),
         sources=tuple(args.source or ()),
         notes=args.notes or "",
+        section=args.section or "",
+        subsection=args.subsection or "",
     )
-    slide = service.add_slide(args.project_id, spec)
+    if args.position is not None:
+        slide = service.insert_slide(args.project_id, spec, position=args.position)
+    else:
+        slide = service.add_slide(args.project_id, spec)
     if args.as_json:
         _print_json({"ok": True, "slide_id": slide.slide_id, "number": slide.number})
         return 0
@@ -403,6 +420,10 @@ def _run_edit(service: PresentationService, args: argparse.Namespace) -> int:
         fields["sources"] = list(args.source)
     if args.image is not None:
         fields["images"] = list(args.image)
+    if args.section is not None:
+        fields["section"] = args.section
+    if args.subsection is not None:
+        fields["subsection"] = args.subsection
     slide = service.edit_slide(args.project_id, args.slide_id, **fields)
     project = service.get(args.project_id)
     if args.as_json:
@@ -519,6 +540,123 @@ def _run_history(service: PresentationService, args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_slides(service: PresentationService, args: argparse.Namespace) -> int:
+    """List the numbered slides (the review view)."""
+    project = service.get(args.project_id)
+    slides = project.ordered_slides()
+    if args.as_json:
+        _print_json(
+            {
+                "ok": True,
+                "project_id": project.project_id,
+                "count": len(slides),
+                "slides": [
+                    {
+                        "slide_id": slide.slide_id,
+                        "number": slide.number,
+                        "section": slide.section,
+                        "subsection": slide.subsection,
+                        "title": slide.title,
+                        "approved": slide.approved,
+                    }
+                    for slide in slides
+                ],
+            }
+        )
+        return 0
+    if not slides:
+        print("No slides yet.")
+        return 0
+    for slide in slides:
+        mark = "approved" if slide.approved else "not approved"
+        place = f" [{slide.topic}]" if slide.topic else ""
+        print(f"  {slide.number:>3}. {slide.slide_id} {slide.title or '(untitled)'} ({mark}){place}")
+    print(f"{len(slides)} slide(s), {len(project.approved_slides)} approved.")
+    return 0
+
+
+def _parse_slide_numbers(value: str) -> tuple[int, int]:
+    """Parse a CLI slide range ("7", "11-15", "11 to 15") into ``(first, last)``."""
+    span = parse_slide_range(value)
+    if span is not None:
+        return span
+    raise PresentationError(
+        f"{value!r} is not a slide number or range; write e.g. 7 or 11-15."
+    )
+
+
+def _run_approve_range(service: PresentationService, args: argparse.Namespace) -> int:
+    first, last = _parse_slide_numbers(args.range)
+    approved = service.approve_slides_in_range(args.project_id, first, last)
+    if args.as_json:
+        _print_json({"ok": True, "approved": [slide.number for slide in approved]})
+        return 0
+    numbers = ", ".join(str(slide.number) for slide in approved)
+    print(f"Approved slide(s) {numbers}.")
+    return 0
+
+
+def _run_regenerate(service: PresentationService, args: argparse.Namespace) -> int:
+    first, last = _parse_slide_numbers(args.range)
+    numbers = list(range(first, last + 1))
+    changed = service.regenerate_slides(
+        args.project_id, numbers, instruction=args.instruction
+    )
+    if args.as_json:
+        _print_json({"ok": True, "regenerated": [slide.number for slide in changed]})
+        return 0
+    print(f"Regenerated {len(changed)} slide(s): {', '.join(str(s.number) for s in changed)}.")
+    return 0
+
+
+def _run_revise_range(service: PresentationService, args: argparse.Namespace) -> int:
+    first, last = _parse_slide_numbers(args.range)
+    numbers = list(range(first, last + 1))
+    changed = service.revise_slides(
+        args.project_id, numbers, instruction=args.instruction
+    )
+    if args.as_json:
+        _print_json({"ok": True, "revised": [slide.number for slide in changed]})
+        return 0
+    print(f"Revised {len(changed)} slide(s): {', '.join(str(s.number) for s in changed)}.")
+    return 0
+
+
+def _run_move(service: PresentationService, args: argparse.Namespace) -> int:
+    project = service.get(args.project_id)
+    slide = project.slide_by_number(args.number)
+    if (args.before is None) == (args.after is None):
+        raise PresentationError("Give exactly one of --before/--after.")
+    service.move_slide(
+        args.project_id, slide.slide_id, before=args.before, after=args.after
+    )
+    where = "before" if args.before is not None else "after"
+    target = args.before if args.before is not None else args.after
+    if args.as_json:
+        _print_json({"ok": True, "slide_id": slide.slide_id, "where": where, "anchor": target})
+        return 0
+    print(f"Moved slide {args.number} {where} slide {target}.")
+    return 0
+
+
+def _run_renumber(service: PresentationService, args: argparse.Namespace) -> int:
+    project = service.renumber_slides(args.project_id)
+    if args.as_json:
+        _print_json({"ok": True, "count": len(project.slides)})
+        return 0
+    print(f"Renumbered {len(project.slides)} slide(s) 1..{len(project.slides)}.")
+    return 0
+
+
+def _run_command(service: PresentationService, args: argparse.Namespace) -> int:
+    result = service.apply_slide_command(args.project_id, args.text)
+    if args.as_json:
+        _print_json(result.as_dict())
+        return 0 if result.ok else 4
+    print(result.message)
+    return 0 if result.ok else 4
+
+
 _HANDLERS = {
     "new": _run_new,
     "list": _run_list,
@@ -535,11 +673,18 @@ _HANDLERS = {
     "add": _run_add,
     "edit": _run_edit,
     "reorder": _run_reorder,
+    "move": _run_move,
+    "slides": _run_slides,
+    "renumber": _run_renumber,
+    "regenerate": _run_regenerate,
+    "revise": _run_revise_range,
+    "command": _run_command,
     "remove": _run_remove,
     "review-slides": _run_review_slides,
     "approve-slide": _run_approve_slide,
     "unapprove-slide": _run_unapprove_slide,
     "approve-slides": _run_approve_slides,
+    "approve-range": _run_approve_range,
     "approve-content": _run_approve_content,
     "reopen": _run_reopen,
     "revisions": _run_revisions,
@@ -550,7 +695,9 @@ _HANDLERS = {
 }
 
 #: The commands that need the project's own assistant wired in.
-_NEEDS_ASSISTANT = frozenset({"discuss", "outline-draft", "outline-revise", "draft"})
+_NEEDS_ASSISTANT = frozenset(
+    {"discuss", "outline-draft", "outline-revise", "draft", "regenerate", "revise", "command"}
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -619,7 +766,10 @@ def _build_parser() -> argparse.ArgumentParser:
     draft = sub.add_parser("draft", help="Ask the assistant for slide content.")
     draft.add_argument("project_id")
     draft.add_argument("--heading", default=None, help="Draft only this outline section.")
-    draft.add_argument("--batch", type=int, default=None, help="Add at most this many slides.")
+    draft.add_argument(
+        "--batch", type=int, default=None,
+        help=f"Add at most this many slides (default: {DEFAULT_SLIDE_BATCH}).",
+    )
 
     add = sub.add_parser("add", help="Add one slide.")
     add.add_argument("project_id")
@@ -631,6 +781,12 @@ def _build_parser() -> argparse.ArgumentParser:
     add.add_argument("--image", action="append", help="An image reference (repeatable).")
     add.add_argument("--source", action="append", help="A source reference (repeatable).")
     add.add_argument("--notes", default="")
+    add.add_argument("--section", default="", help="The outline section this slide covers.")
+    add.add_argument("--subsection", default="", help="The outline subsection it covers.")
+    add.add_argument(
+        "--position", type=int, default=None,
+        help="Insert at this 1-based position instead of appending.",
+    )
 
     edit = sub.add_parser("edit", help="Edit one slide's content.")
     edit.add_argument("project_id")
@@ -643,11 +799,41 @@ def _build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--image", action="append")
     edit.add_argument("--source", action="append")
     edit.add_argument("--notes", default=None)
+    edit.add_argument("--section", default=None, help="Re-home the slide under this section.")
+    edit.add_argument("--subsection", default=None, help="Re-home it under this subsection.")
 
     reorder = sub.add_parser("reorder", help="Move a slide to a new position.")
     reorder.add_argument("project_id")
     reorder.add_argument("slide_id")
     reorder.add_argument("--position", type=int, required=True)
+
+    move = sub.add_parser("move", help="Move a slide before or after another slide.")
+    move.add_argument("project_id")
+    move.add_argument("number", type=int, help="The slide number to move.")
+    move.add_argument("--before", type=int, default=None, help="Put it before this slide number.")
+    move.add_argument("--after", type=int, default=None, help="Put it after this slide number.")
+
+    slides = sub.add_parser("slides", help="List the numbered slides.")
+    slides.add_argument("project_id")
+
+    renumber = sub.add_parser("renumber", help="Renumber every slide 1..n in display order.")
+    renumber.add_argument("project_id")
+
+    regenerate = sub.add_parser("regenerate", help="Re-draft slides, keeping their numbers.")
+    regenerate.add_argument("project_id")
+    regenerate.add_argument("range", help="A slide number or range, e.g. 7 or 11-15.")
+    regenerate.add_argument("--instruction", default=None, help="What to change (optional).")
+
+    revise = sub.add_parser("revise", help="Revise slides with an instruction.")
+    revise.add_argument("project_id")
+    revise.add_argument("range", help="A slide number or range, e.g. 7 or 11-15.")
+    revise.add_argument("--instruction", default=None, help="What to change.")
+
+    command = sub.add_parser(
+        "command", help="Run one slide instruction, e.g. 'shorten slides 11-15'."
+    )
+    command.add_argument("project_id")
+    command.add_argument("text", help="The instruction to parse and run.")
 
     remove = sub.add_parser("remove", help="Remove a slide.")
     remove.add_argument("project_id")
@@ -666,6 +852,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     approve_slides = sub.add_parser("approve-slides", help="Approve every non-empty slide.")
     approve_slides.add_argument("project_id")
+
+    approve_range = sub.add_parser(
+        "approve-range", help="Approve the slides in a number range, e.g. 5-8."
+    )
+    approve_range.add_argument("project_id")
+    approve_range.add_argument("range", help="A slide number or range, e.g. 7 or 5-8.")
 
     approve_content = sub.add_parser("approve-content", help="Approve the complete slide content.")
     approve_content.add_argument("project_id")

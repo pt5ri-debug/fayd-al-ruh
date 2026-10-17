@@ -11,9 +11,12 @@ actually made:
 * **Draft the slides.** The assistant writes each section's slide content, one
   reviewable batch at a time.
 * **Review every slide.** Each slide is individually numbered; you can edit its
-  title, body, table, equations, notes, reorder it, remove it, and approve it.
-  An edit after approval is never silent -- it reopens the content and the export
-  gate re-arms -- and every change is recorded as a revision you can restore.
+  title, body, table, equations, notes, its section/subsection, reorder it,
+  remove it, regenerate it, and approve it. A command box accepts a plain
+  instruction ("shorten slides 11-15", "move slide 18 before slide 17") that the
+  shared parser turns into the same operation. An edit after approval is never
+  silent -- it reopens the content and the export gate re-arms -- and every change
+  is recorded as a revision you can restore.
 * **Approve the content**, then **export** a complete ``.pptx`` containing the
   approved slides in exactly the approved order.
 
@@ -34,6 +37,7 @@ from tkinter import filedialog, font as tkfont, simpledialog, ttk
 
 from core.presentation import (
     CONTENT_TYPES,
+    DEFAULT_SLIDE_BATCH,
     STATE_CONTENT_APPROVED,
     STATE_EXPORTED,
     STATE_LABELS,
@@ -120,6 +124,8 @@ class PresentationDialog:
         self._title_var = tk.StringVar(value="")
         self._slide_title_var = tk.StringVar(value="")
         self._slide_type_var = tk.StringVar(value="bullets")
+        self._slide_section_var = tk.StringVar(value="")
+        self._slide_subsection_var = tk.StringVar(value="")
 
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
@@ -229,6 +235,23 @@ class PresentationDialog:
             self._step_buttons[key] = button
 
         self._section_label(sidebar, "Slides")
+        batch_row = tk.Frame(sidebar, bg=theme.surface)
+        batch_row.pack(fill="x", padx=14, pady=(0, 4))
+        tk.Label(
+            batch_row, text="Draft", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs", weight="bold"),
+        ).pack(side="left")
+        self._batch_var = tk.StringVar(value=str(self.service.batch_size))
+        tk.Spinbox(
+            batch_row, from_=1, to=50, width=3, textvariable=self._batch_var,
+            command=self._on_batch_size, relief="flat", highlightthickness=0,
+            bg=theme.base, fg=theme.foreground, font=self._type.font("2xs"),
+            buttonbackground=theme.surface_raised,
+        ).pack(side="left", padx=(6, 0))
+        tk.Label(
+            batch_row, text="slides per batch", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"),
+        ).pack(side="left", padx=(6, 0))
         self._slide_list = tk.Listbox(
             sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
@@ -337,6 +360,26 @@ class PresentationDialog:
         tk.OptionMenu(
             type_row, self._slide_type_var, *CONTENT_TYPES,
         ).pack(side="left", padx=(6, 0))
+        place_row = tk.Frame(form, bg=theme.surface)
+        place_row.pack(fill="x", pady=(0, 4))
+        tk.Label(
+            place_row, text="Section", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs", weight="bold"),
+        ).pack(side="left")
+        tk.Entry(
+            place_row, textvariable=self._slide_section_var, bg=theme.base, fg=theme.foreground,
+            insertbackground=theme.primary, relief="flat", highlightthickness=0,
+            font=self._type.font("xs"), width=18,
+        ).pack(side="left", padx=(6, 8))
+        tk.Label(
+            place_row, text="Subsection", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs", weight="bold"),
+        ).pack(side="left")
+        tk.Entry(
+            place_row, textvariable=self._slide_subsection_var, bg=theme.base,
+            fg=theme.foreground, insertbackground=theme.primary, relief="flat",
+            highlightthickness=0, font=self._type.font("xs"), width=18,
+        ).pack(side="left", padx=(6, 0))
         tk.Label(
             form, text="Content (one line per bullet / table row / equation)", bg=theme.surface,
             fg=theme.text_dim, font=self._type.font("2xs", weight="bold"), anchor="w",
@@ -366,8 +409,23 @@ class PresentationDialog:
         self._button(actions, "Withdraw approval", self._on_unapprove_slide).pack(side="left", padx=(6, 0))
         self._button(actions, "Move up", lambda: self._on_move(-1)).pack(side="left", padx=(6, 0))
         self._button(actions, "Move down", lambda: self._on_move(1)).pack(side="left", padx=(6, 0))
+        self._button(actions, "Regenerate", self._on_regenerate_slide).pack(side="left", padx=(6, 0))
         self._button(actions, "Revisions…", self._on_revisions).pack(side="left", padx=(6, 0))
         self._button(actions, "Remove", self._on_remove_slide).pack(side="left", padx=(6, 0))
+
+        command_row = tk.Frame(panel, bg=theme.surface)
+        command_row.pack(fill="x", padx=12, pady=(0, 10))
+        tk.Label(
+            command_row, text="Command", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs", weight="bold"),
+        ).pack(side="left")
+        self._command_var = tk.StringVar(value="")
+        tk.Entry(
+            command_row, textvariable=self._command_var, bg=theme.base, fg=theme.foreground,
+            insertbackground=theme.primary, relief="flat", highlightthickness=0,
+            font=self._type.font("xs"),
+        ).pack(side="left", fill="x", expand=True, padx=(6, 6))
+        self._button(command_row, "Run", self._on_run_command).pack(side="left")
         self._slide_panel = panel
 
     def _show_slide_editor(self) -> None:
@@ -728,7 +786,10 @@ class PresentationDialog:
         for slide in project.ordered_slides():
             self._slide_ids.append(slide.slide_id)
             mark = "✓" if slide.approved else "·"
-            self._slide_list.insert("end", f"{slide.number}. {mark} {slide.title or '(untitled)'}")
+            place = f"  [{slide.topic}]" if slide.topic else ""
+            self._slide_list.insert(
+                "end", f"{slide.number}. {mark} {slide.title or '(untitled)'}{place}"
+            )
 
     def _refresh_gate(self, project: Any) -> None:
         allowed, reason = self.service.can_export(project.project_id)
@@ -889,7 +950,9 @@ class PresentationDialog:
                 return
             self._add_message(
                 "note",
-                f"Drafted {len(result)} slide(s). Review each one in the list on the left.",
+                f"Drafted {len(result)} slide(s). Review each one in the list on the left — "
+                "select a slide to edit, regenerate, or approve it, or type a command "
+                "such as “shorten slides 3-5”.",
                 title="Slides drafted",
             )
             self.refresh()
@@ -943,10 +1006,13 @@ class PresentationDialog:
             return
         self._slide_label.configure(
             text=f"Slide {slide.number} ({slide.slide_id})"
+            + (f"  ·  {slide.topic}" if slide.topic else "")
             + ("  ·  approved" if slide.approved else "")
         )
         self._slide_title_var.set(slide.title)
         self._slide_type_var.set(slide.content_type)
+        self._slide_section_var.set(slide.section)
+        self._slide_subsection_var.set(slide.subsection)
         body = "\n".join(
             "|".join(row) for row in slide.table
         ) if slide.content_type == "table" else "\n".join(slide.content)
@@ -963,6 +1029,8 @@ class PresentationDialog:
             "title": self._slide_title_var.get().strip(),
             "content_type": content_type,
             "notes": self._slide_notes.get().strip(),
+            "section": self._slide_section_var.get().strip(),
+            "subsection": self._slide_subsection_var.get().strip(),
         }
         if content_type == "table":
             fields["table"] = [line.split("|") for line in lines]
@@ -1033,6 +1101,63 @@ class PresentationDialog:
             return
         self._set_status("Reordered the slide.")
         self.refresh()
+
+    def _on_batch_size(self) -> None:
+        """Apply the chosen drafting batch size (validated by the service)."""
+        try:
+            size = self.service.set_batch_size(int(self._batch_var.get()))
+        except Exception as error:  # noqa: BLE001 - a bad value is shown, not raised
+            self._batch_var.set(str(DEFAULT_SLIDE_BATCH))
+            self._set_status(str(error), error=True)
+            return
+        self._batch_var.set(str(size))
+        self._set_status(f"Drafting will add up to {size} slide(s) per batch.")
+
+    def _on_regenerate_slide(self) -> None:
+        """Re-draft the selected slide, keeping its number and heading."""
+        if not self._selected_slide:
+            return
+        try:
+            slide = self.service.get(self._project_id).slide(self._selected_slide)
+        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            self._report_error(error)
+            return
+        number = slide.number
+
+        def job() -> Any:
+            return self.service.regenerate_slides(self._project_id, [number])
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._set_status(str(error), error=True)
+                return
+            self._load_slide(self._selected_slide)
+            self._set_status(f"Regenerated slide {number}; approve it again before exporting.")
+            self.refresh()
+
+        self._run_background(f"Regenerating slide {number}…", job, finish)
+
+    def _on_run_command(self) -> None:
+        """Run the typed slide instruction (the shared command parser)."""
+        text = self._command_var.get().strip()
+        if not text:
+            return
+        if not self._project_id:
+            self._set_status("Create a presentation first.", error=True)
+            return
+        self._command_var.set("")
+
+        def job() -> Any:
+            return self.service.apply_slide_command(self._project_id, text)
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._set_status(str(error), error=True)
+                return
+            self._set_status(result.message, error=not result.ok)
+            self.refresh()
+
+        self._run_background("Running the slide command…", job, finish)
 
     def _on_remove_slide(self) -> None:
         if not self._selected_slide:
