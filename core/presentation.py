@@ -164,6 +164,24 @@ def resolve_content_type(value: str) -> str:
     return key
 
 
+#: How many slides one drafting batch produces unless the user says otherwise.
+#: Five keeps the *first* review pass small, which is the whole point of batching;
+#: the caller may raise it (ten is a common choice) with no other change.
+DEFAULT_SLIDE_BATCH = 5
+#: An upper bound on one batch, so a typo cannot ask for an unbounded run.
+MAX_SLIDE_BATCH = 50
+
+
+def resolve_batch_size(value: int | None, *, default: int = DEFAULT_SLIDE_BATCH) -> int:
+    """Validate a batch size, defaulting and clamping to the allowed range."""
+    if value is None:
+        return default
+    size = int(value)
+    if size < 1:
+        raise PresentationError("A batch size must be 1 or greater.")
+    return min(size, MAX_SLIDE_BATCH)
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -203,6 +221,20 @@ def _clean_lines(values: Iterable[str]) -> list[str]:
         if text:
             out.append(text)
     return out
+
+
+def slide_topic_key(section: str, subsection: str = "") -> str:
+    """The key naming the outline heading a slide covers.
+
+    A subsection is qualified by its section, because the same subsection name
+    can occur under two sections; the key therefore stays unique across the
+    outline. An empty key means the slide is not tied to an outline heading.
+    """
+    head = (section or "").strip()
+    sub = (subsection or "").strip()
+    if sub:
+        return f"{head} / {sub}" if head else sub
+    return head
 
 
 # --------------------------------------------------------------------------- #
@@ -278,6 +310,8 @@ class OutlineRevision:
 
 #: The slide fields a content edit may change. ``approved`` and ``order`` are
 #: deliberately absent: approval has its own transition and order is separate.
+#: ``section``/``subsection`` are editable too, so a slide can be re-homed under
+#: a different outline heading without losing its stable id.
 EDITABLE_FIELDS: tuple[str, ...] = (
     "title",
     "content",
@@ -287,6 +321,8 @@ EDITABLE_FIELDS: tuple[str, ...] = (
     "images",
     "sources",
     "notes",
+    "section",
+    "subsection",
 )
 
 
@@ -311,6 +347,10 @@ class Slide:
     images: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
     notes: str = ""
+    #: The outline section (and optional subsection) this slide belongs to. They
+    #: travel with the slide, so a reorder never loses where a slide came from.
+    section: str = ""
+    subsection: str = ""
     approved: bool = False
     revision: int = 0
     #: The last approved content snapshot, kept so an edit can be undone.
@@ -331,6 +371,8 @@ class Slide:
         self.sources = _clean_lines(self.sources)
         self.table = [[str(cell) for cell in row] for row in self.table if row]
         self.notes = str(self.notes)
+        self.section = str(self.section).strip()
+        self.subsection = str(self.subsection).strip()
 
     @property
     def number(self) -> int:
@@ -341,6 +383,11 @@ class Slide:
     def is_empty(self) -> bool:
         """True when the slide carries no body content of any kind."""
         return not (self.title.strip() or self.content or self.table or self.equations)
+
+    @property
+    def topic(self) -> str:
+        """The outline heading this slide covers (see :func:`slide_topic_key`)."""
+        return slide_topic_key(self.section, self.subsection)
 
     def content_snapshot(self) -> dict[str, Any]:
         """The editable content of this slide, as a plain dict."""
@@ -353,6 +400,8 @@ class Slide:
             "images": list(self.images),
             "sources": list(self.sources),
             "notes": self.notes,
+            "section": self.section,
+            "subsection": self.subsection,
         }
 
     def to_primitive(self) -> dict[str, Any]:
@@ -384,6 +433,8 @@ class Slide:
             images=list(data.get("images", ())),
             sources=list(data.get("sources", ())),
             notes=str(data.get("notes", "")),
+            section=str(data.get("section", "")),
+            subsection=str(data.get("subsection", "")),
             approved=bool(data.get("approved", False)),
             revision=int(data.get("revision", 0)),
             approved_snapshot=dict(snapshot) if isinstance(snapshot, dict) else None,
@@ -606,6 +657,34 @@ class PresentationProject:
         """Renumber every slide 1..n in its current display order."""
         for index, slide in enumerate(self.ordered_slides(), start=1):
             slide.order = index
+
+    def slide_numbers(self) -> list[int]:
+        """The displayed numbers, 1..n, in current order (the numbering is dense)."""
+        return list(range(1, len(self.slides) + 1))
+
+    def slides_in_range(self, first: int, last: int | None = None) -> list[Slide]:
+        """The slides numbered ``first``..``last`` (inclusive), in display order.
+
+        A range is clamped to the slides that exist rather than raising, so
+        "shorten slides 11-15" still does the sensible thing on a shorter deck;
+        the caller decides whether an empty result is an error.
+        """
+        if last is None:
+            last = first
+        low, high = (first, last) if first <= last else (last, first)
+        ordered = self.ordered_slides()
+        low = max(1, low)
+        high = min(len(ordered), high)
+        return ordered[low - 1 : high] if low <= high else []
+
+    def insert_slide(self, slide: Slide, position: int | None = None) -> None:
+        """Insert ``slide`` at ``position`` (1-based; appended when omitted)."""
+        ordered = self.ordered_slides()
+        target = len(ordered) + 1 if position is None else max(1, min(position, len(ordered) + 1))
+        ordered.insert(target - 1, slide)
+        for index, item in enumerate(ordered, start=1):
+            item.order = index
+        self.slides = ordered
 
     def record_revision(self, slide: Slide, reason: str) -> SlideRevision:
         """Append a revision snapshot of ``slide`` and return it."""
@@ -1548,6 +1627,165 @@ def topic_sentence(sentence: str, *, words: int = 6) -> str:
     return heading[0].upper() + heading[1:]
 
 
+# --------------------------------------------------------------------------- #
+# Slide commands
+# --------------------------------------------------------------------------- #
+
+#: The slide commands a user may type or say, each of which maps to exactly one
+#: deterministic service operation. Parsing them here (rather than asking a model
+#: to interpret "shorten slides 11-15") keeps the edit predictable and testable.
+SLIDE_COMMANDS: tuple[str, ...] = (
+    "revise",
+    "shorten",
+    "expand",
+    "add-example",
+    "add-slide",
+    "move",
+    "renumber",
+    "regenerate",
+    "approve",
+    "approve-batch",
+)
+
+#: "11-15", "11–15", "11 to 15", "11..15", optionally prefixed with "slides".
+_RANGE_RE = re.compile(
+    r"(?:slides?\s+)?(?P<first>\d+)\s*(?:-{1,2}|\u2013|\u2014|\bto\b|\bthrough\b)\s*(?P<last>\d+)",
+    re.IGNORECASE,
+)
+_NUMBER_RE = re.compile(r"(?:slides?\s+)?(?P<number>\d+)", re.IGNORECASE)
+_MOVE_RE = re.compile(
+    r"move\s+slides?\s+(?P<a>\d+)\s+(?P<where>before|after|above|below|ahead of|in front of)\s+"
+    r"slides?\s+(?P<b>\d+)",
+    re.IGNORECASE,
+)
+_ADD_RE = re.compile(
+    r"add\s+(?:a\s+|an\s+)?(?P<what>.+?)\s+(?P<where>after|before|following|preceding)\s+"
+    r"slides?\s+(?P<n>\d+)",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class SlideCommand:
+    """One parsed slide instruction: the action and the slides it targets."""
+
+    action: str
+    slides: tuple[int, ...] = ()
+    anchor: int | None = None
+    before: bool = False
+    text: str = ""
+
+    def __post_init__(self) -> None:
+        if self.action not in SLIDE_COMMANDS:
+            raise PresentationError(
+                f"Unknown slide command {self.action!r}; expected one of "
+                f"{', '.join(SLIDE_COMMANDS)}."
+            )
+
+    def to_primitive(self) -> dict[str, Any]:
+        return {
+            "action": self.action,
+            "slides": list(self.slides),
+            "anchor": self.anchor,
+            "before": self.before,
+            "text": self.text,
+        }
+
+
+def parse_slide_range(text: str) -> tuple[int, int] | None:
+    """Read a slide range ("7", "slides 11-15", "11 to 15") as ``(first, last)``.
+
+    A single number is the one-slide range ``(n, n)``. Returns ``None`` when the
+    text holds no number, so a caller can tell "no range here" from "the range
+    1-1".
+    """
+    match = _RANGE_RE.search(text or "")
+    if match:
+        first = int(match.group("first"))
+        last = int(match.group("last"))
+        if first < 1 or last < 1:
+            return None
+        return (first, last) if first <= last else (last, first)
+    single = _NUMBER_RE.search(text or "")
+    if not single:
+        return None
+    number = int(single.group("number"))
+    return (number, number) if number >= 1 else None
+
+
+def _slide_numbers(text: str) -> tuple[int, ...]:
+    """Every slide number the text names (a range expands to each number)."""
+    span = parse_slide_range(text)
+    if span is not None:
+        return tuple(range(span[0], span[1] + 1))
+    match = _NUMBER_RE.search(text or "")
+    if not match:
+        return ()
+    return (int(match.group("number")),)
+
+
+def parse_slide_command(text: str) -> SlideCommand | None:
+    """Parse one slide instruction, or return ``None`` when it is not a command.
+
+    Recognised (case-insensitive, English)::
+
+        Revise slide 7.
+        Shorten slides 11-15.            Expand slides 3-4.
+        Add a worked example after slide 12.
+        Move slide 18 before slide 17.   Move slide 3 after slide 9.
+        Renumber all slides after reordering.
+        Regenerate slides 21-25.
+        Approve slide 2.                 Approve slides 5-8.
+
+    The order of the checks matters: "renumber ... after reordering" contains the
+    word "after" but is a renumber, not a move, so it is tested first.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    low = raw.lower()
+
+    if "renumber" in low:
+        return SlideCommand(action="renumber", text=raw)
+
+    move = _MOVE_RE.search(raw)
+    if move:
+        before = move.group("where").lower() in ("before", "above", "ahead of", "in front of")
+        return SlideCommand(
+            action="move",
+            slides=(int(move.group("a")),),
+            anchor=int(move.group("b")),
+            before=before,
+            text=raw,
+        )
+
+    if low.startswith("add") or low.startswith("insert"):
+        add = _ADD_RE.search(raw)
+        if add:
+            what = add.group("what").strip().lower()
+            action = "add-example" if "example" in what else "add-slide"
+            return SlideCommand(
+                action=action,
+                slides=(int(add.group("n")),),
+                before=add.group("where").lower() in ("before", "preceding"),
+                text=raw,
+            )
+
+    if "regenerate" in low or "redo" in low:
+        return SlideCommand(action="regenerate", slides=_slide_numbers(raw), text=raw)
+    if "shorten" in low or "condense" in low or "trim" in low:
+        return SlideCommand(action="shorten", slides=_slide_numbers(raw), text=raw)
+    if "expand" in low or "lengthen" in low or "elaborate" in low:
+        return SlideCommand(action="expand", slides=_slide_numbers(raw), text=raw)
+    if low.startswith("approve"):
+        numbers = _slide_numbers(raw)
+        action = "approve-batch" if "batch" in low or len(numbers) > 1 else "approve"
+        return SlideCommand(action=action, slides=numbers, text=raw)
+    if "revise" in low or "rewrite" in low or "rework" in low:
+        return SlideCommand(action="revise", slides=_slide_numbers(raw), text=raw)
+    return None
+
+
 __all__ = [
     "CONTENT_BULLETS",
     "CONTENT_EQUATION",
@@ -1558,9 +1796,11 @@ __all__ = [
     "CONTENT_TITLE",
     "CONTENT_TYPE_LABELS",
     "CONTENT_TYPES",
+    "DEFAULT_SLIDE_BATCH",
     "Deck",
     "EDITABLE_FIELDS",
     "ExportRecord",
+    "MAX_SLIDE_BATCH",
     "OutlineRevision",
     "OutlineSection",
     "PRESENTATIONS_NAMESPACE",
@@ -1579,7 +1819,9 @@ __all__ = [
     "STATE_OUTLINE_REVIEW",
     "STATE_SLIDE_DRAFTING",
     "STATE_SLIDE_REVIEW",
+    "SLIDE_COMMANDS",
     "Slide",
+    "SlideCommand",
     "SlideRevision",
     "ValidationResult",
     "can_transition",
@@ -1591,7 +1833,11 @@ __all__ = [
     "looks_like_prose_outline",
     "outline_from_prose",
     "parse_outline",
+    "parse_slide_command",
+    "parse_slide_range",
     "presentation_filename",
+    "resolve_batch_size",
+    "slide_topic_key",
     "strip_scaffolding_lines",
     "require_transition",
     "resolve_content_type",

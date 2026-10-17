@@ -859,20 +859,45 @@ Arabic is kept as secondary aliases where useful.
   across slides. `bullets_from_text` treats a line
   before the first bullet as the answer's *title* line (which the slide prompt
   asks for), so the same words never appear as both the title and the first
-  bullet. `default_presentation_dir()` is `<data>/presentations`, git-ignored;
+  bullet. A `Slide` carries its place in the deck — `section`/`subsection` (the
+  outline topic it was developed from, `Slide.topic` is the readable
+  `"Section / Subsection"` key and `slide_topic_key()` builds it) alongside its
+  stable `slide_id` and its current `order`/`number`, so a slide's identity, its
+  number, and the outline place it belongs to are all explicit and survive a
+  reorder. `parse_slide_range` reads a plain range ("7", "11-15", "11 to 15"),
+  and `parse_slide_command` turns one plain-language instruction into a
+  `SlideCommand(action, slides, anchor, before, text)` — the shared parser behind
+  the window's command box and the CLI's `command` subcommand, so a typed
+  "shorten slides 11-15" and a spoken one do the same thing.
+  `default_presentation_dir()` is `<data>/presentations`, git-ignored;
   `presentation_filename` slugifies the title.
+
 - `gui/presentation.py` — the Presentation Studio **service** (Tk-free), the one
   engine the window and the CLI share, so both see one set of projects, one
   revision history, and one export gate. `PresentationService` (`new_project`,
   `discuss`, `draft_outline`/`review_outline`/`approve_outline`,
-  `draft_slides_from_outline`, `review_slides`, `edit_slide`/`add_slides`/
-  `reorder_slide`/`remove_slide`, `approve_slide`/`unapprove_slide`/
+  `draft_slides_from_outline`, `review_slides`, `edit_slide`/`add_slide`/
+  `add_slides`/`insert_slide`/`reorder_slide`/`move_slide`/`remove_slide`/
+  `renumber_slides`, `regenerate_slides`/`revise_slides`/`add_example_after`/
+  `apply_slide_command`,
+  `approve_slide`/`unapprove_slide`/`approve_slides`/`approve_slides_in_range`/
   `approve_content`, `revisions`/`restore_slide_revision`/`restore_approved`,
   `export`, `export_history`, `status`) persists projects through `JsonStore`
   under `PRESENTATIONS_NAMESPACE`. It takes an injected `ask` callback and never
   builds a model itself: the CLI passes `ai.jarvis.build_session` and the window
   passes *its own* session (`ChatService._presentation_ask`), so there is **no
-  second AI** and no second knowledge base. Every edit records a numbered
+  second AI** and no second knowledge base. `set_batch_size`/`batch_size` cap how
+  many slides one `draft_slides_from_outline` call adds (default 5,
+  `DEFAULT_SLIDE_BATCH`), so a long deck is developed in reviewable pieces; the
+  draft expands each outline subsection into its own numbered slide and records
+  the `section`/`subsection` on it, so the topic sequence is preserved.
+  `approve_slides_in_range` approves a numbered span (clamped to the deck);
+  `insert_slide`/`move_slide` renumber densely while `slide_id`s stay stable;
+  `renumber_slides` closes any gap; `regenerate_slides`/`revise_slides`/
+  `add_example_after` re-draft through the assistant keeping the slide's id,
+  number, and heading, and `apply_slide_command` runs a parsed
+  `parse_slide_command` instruction through those same methods (returning a
+  `SlideCommandResult`). Every edit records a numbered
   revision and snapshots the approved content, and `_reopen_for_edit` returns an
   approved or exported project to `SLIDE_REVIEW` and clears the content approval
   — so a change after approval is never silent and the export gate re-arms.
@@ -892,7 +917,13 @@ Arabic is kept as secondary aliases where useful.
   theme tokens, `RoundedBox`, and a centred column capped at `_COLUMN_MAX`). A
   left sidebar lists the projects and the eight workflow steps with their state; a
   centred conversation column holds the transcript, the question box, and the
-  slide editor. Message rows are measured the way the chat window measures its
+  slide editor. The slide list shows each slide's number, title, and outline topic
+  and a **Draft N slides per batch** spinbox sets the service's batch size. The
+  editor edits the title, type, section/subsection, body, and notes, with
+  Save / Approve / Withdraw approval / Move up / Move down / Regenerate /
+  Revisions… / Remove, and a **Command** box that runs a plain instruction
+  ("shorten slides 11-15") through the shared `apply_slide_command`. Message rows
+  are measured the way the chat window measures its
   bubbles: `_bubble_fonts`/`_bubble_text_width` convert the column's *pixels* into
   the *characters* a `tk.Text` `width` is counted in (rounding **down**, so a row
   can never request more pixels than the column has), `_bubble_card_width` sizes a

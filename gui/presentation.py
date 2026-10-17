@@ -61,9 +61,12 @@ from core.presentation import (
     looks_like_prose_outline,
     outline_from_prose,
     parse_outline,
+    parse_slide_command,
     presentation_filename,
     require_transition,
+    resolve_batch_size,
     resolve_content_type,
+    slide_topic_key,
     title_from_text,
     validate_pptx,
 )
@@ -102,6 +105,27 @@ SLIDE_PROMPT = (
     "{heading}\n"
     "Write 3 to 5 concise slide bullets about {heading} for a presentation on "
     "{title!r}. Give a short slide title on the first line."
+)
+
+#: Prompts for the review-time edits. Each asks for the *same* shape as
+#: :data:`SLIDE_PROMPT`, so the deterministic parsers read the answer unchanged.
+SHORTEN_PROMPT = (
+    "{heading}\n"
+    "Shorten the slide {heading!r} of the presentation {title!r} to its key points. "
+    "Keep the same technical meaning and every number. Give a short slide title on "
+    "the first line, then 2 to 3 concise bullets."
+)
+EXPAND_PROMPT = (
+    "{heading}\n"
+    "Expand the slide {heading!r} of the presentation {title!r} with the missing "
+    "scientific or engineering detail. Give a short slide title on the first line, "
+    "then 4 to 6 concise bullets."
+)
+EXAMPLE_PROMPT = (
+    "{heading}\n"
+    "Give one short worked example about {heading} for the presentation {title!r}. "
+    "Give a short slide title on the first line, then the example as 2 to 4 concise "
+    "bullets, naming every quantity and its units."
 )
 
 #: A drafted slide's note when the retriever returned no new material for its
@@ -208,6 +232,38 @@ class PresentationStatus:
         }
 
 
+@dataclass
+class SlideCommandResult:
+    """The outcome of one parsed slide command (what the review box reports)."""
+
+    ok: bool
+    action: str
+    message: str
+    state: str = ""
+    slide_id: str = ""
+
+    def summary(self) -> str:
+        """A one-line description of the outcome."""
+        return self.message
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "action": self.action,
+            "message": self.message,
+            "state": self.state,
+            "slide_id": self.slide_id,
+        }
+
+
+def render_slide_text(slide: Slide) -> str:
+    """A slide's content as plain text (used to prompt a revision)."""
+    lines = [slide.title]
+    lines.extend(slide.content)
+    lines.extend(slide.equations)
+    return "\n".join(line for line in lines if line)
+
+
 @dataclass(frozen=True)
 class SlideSpec:
     """The content for one new slide (used for single and batch drafting)."""
@@ -220,6 +276,8 @@ class SlideSpec:
     images: Sequence[str] = ()
     sources: Sequence[str] = ()
     notes: str = ""
+    section: str = ""
+    subsection: str = ""
     approved: bool = False
 
 
@@ -235,12 +293,16 @@ class PresentationService:
         output_dir: str | Path | None = None,
         writer: PresentationWriter | None = None,
         on_progress: ProgressCallback | None = None,
+        batch_size: int | None = None,
     ) -> None:
         self._store = store if store is not None else PresentationStore(root)
         self._ask = ask
         self._writer = writer if writer is not None else PresentationWriter()
         self._output_dir = Path(output_dir) if output_dir is not None else None
         self._on_progress = on_progress
+        # How many slides one drafting batch adds. Five by default, so the first
+        # review pass is small; the user may raise it (ten is common).
+        self._batch_size = resolve_batch_size(batch_size)
 
     # ------------------------------------------------------------ properties
 
@@ -258,6 +320,16 @@ class PresentationService:
     def output_dir(self) -> Path:
         """Where exports are written when no explicit path is given."""
         return self._output_dir if self._output_dir is not None else default_presentation_dir()
+
+    @property
+    def batch_size(self) -> int:
+        """How many slides one drafting batch adds unless a call overrides it."""
+        return self._batch_size
+
+    def set_batch_size(self, size: int | None) -> int:
+        """Change the drafting batch size (returns the validated value)."""
+        self._batch_size = resolve_batch_size(size)
+        return self._batch_size
 
     def set_ask(self, ask: AskCallback | None) -> None:
         """Wire (or clear) the assistant callback the discussion uses."""
@@ -554,6 +626,8 @@ class PresentationService:
             images=list(spec.images),
             sources=list(spec.sources),
             notes=spec.notes,
+            section=spec.section,
+            subsection=spec.subsection,
             approved=spec.approved,
         )
         if slide.approved:
@@ -589,6 +663,23 @@ class PresentationService:
         self._save(project)
         return added
 
+    def _outline_topics(self, project: PresentationProject) -> list[tuple[str, str]]:
+        """The ``(section, subsection)`` topics the approved outline implies.
+
+        A section with subsections yields one topic per subsection (so a long
+        section is developed piece by piece); a section without any yields one
+        topic for the section itself. The outline's order is preserved exactly,
+        so no topic is added, dropped, or merged.
+        """
+        outline = project.outline
+        topics: list[tuple[str, str]] = []
+        for section in outline.sections if outline is not None else ():
+            if section.subsections:
+                topics.extend((section.heading, sub) for sub in section.subsections)
+            else:
+                topics.append((section.heading, ""))
+        return topics
+
     def draft_slides_from_outline(
         self,
         project_id: str,
@@ -598,21 +689,24 @@ class PresentationService:
     ) -> list[Slide]:
         """Ask the assistant for slide content, one manageable batch at a time.
 
-        With no ``heading`` every not-yet-drafted outline section is drafted;
-        with a ``heading`` only that section is. ``batch`` caps how many slides
-        one call may add, so a long deck is developed in reviewable pieces.
+        With no ``heading`` every not-yet-drafted outline topic is drafted; with
+        a ``heading`` only that section is. ``batch`` caps how many slides one
+        call may add -- it defaults to :attr:`batch_size` (5), so a long deck is
+        developed in reviewable pieces rather than in one long response. Every
+        drafted slide keeps the outline heading it came from (its
+        ``section``/``subsection``), so the topic sequence is preserved.
         """
         ask = self._require_assistant("slide content")
         project = self.get(project_id)
         if project.state not in (STATE_SLIDE_DRAFTING, STATE_SLIDE_REVIEW):
             raise PresentationError("Slides can only be drafted after the outline is approved.")
-        outline = project.outline
-        sections = list(outline.sections) if outline is not None else []
+        topics = self._outline_topics(project)
         if heading is not None:
-            sections = [item for item in sections if item.heading == heading]
-            if not sections:
+            topics = [topic for topic in topics if topic[0] == heading]
+            if not topics:
                 raise PresentationError(f"The outline has no section {heading!r}.")
-        drafted = {slide.sources[0] for slide in project.slides if slide.sources}
+        limit = resolve_batch_size(batch, default=self._batch_size)
+        drafted = {slide.topic for slide in project.slides if slide.topic}
         # Bullets already used on another slide, so a new slide does not repeat a
         # sentence the deck has already shown (the retriever can return the same
         # passages for two related headings).
@@ -622,11 +716,13 @@ class PresentationService:
             for line in slide.content
         }
         specs: list[SlideSpec] = []
-        for section in sections:
-            if heading is None and section.heading in drafted:
+        for section, subsection in topics:
+            topic = slide_topic_key(section, subsection)
+            if heading is None and topic in drafted:
                 continue
-            self._progress(f"Drafting slides for {section.heading!r}...")
-            prompt = SLIDE_PROMPT.format(title=project.title, heading=section.heading)
+            label = subsection or section
+            self._progress(f"Drafting slides for {label!r}...")
+            prompt = SLIDE_PROMPT.format(title=project.title, heading=label)
             answer = ask(prompt)
             drafted_bullets = bullets_from_text(answer)
             bullets = [line for line in drafted_bullets if dedup_key(line) not in used]
@@ -634,30 +730,32 @@ class PresentationService:
             if not bullets and drafted_bullets:
                 # Every bullet repeated an earlier slide (the retriever can return
                 # the same passages for two related headings). A blank slide is
-                # worse than a flagged one, so the section keeps its single
+                # worse than a flagged one, so the topic keeps its single
                 # strongest line and the note says what happened -- slide review is
                 # where the user replaces it.
                 bullets = drafted_bullets[:1]
                 repeated = True
             used.update(dedup_key(line) for line in bullets)
             # A grounded assistant answers in prose, so its first line is a
-            # sentence, not the requested title. The section heading is the title
+            # sentence, not the requested title. The outline heading is the title
             # in that case -- taking the first sentence as the title too would
             # repeat it verbatim as the slide's first bullet.
             explicit = title_from_text(answer, fallback="")
             if explicit and _is_title_line(explicit, bullets):
                 title = explicit
             else:
-                title = section.heading
+                title = label
             specs.append(
                 SlideSpec(
                     title=title,
                     content=bullets,
-                    sources=(section.heading,),
+                    sources=(label,),
                     notes=REPEATED_HEADING_NOTE if repeated else "",
+                    section=section,
+                    subsection=subsection,
                 )
             )
-            if batch is not None and len(specs) >= batch:
+            if len(specs) >= limit:
                 break
         if not specs:
             return []
@@ -767,6 +865,8 @@ class PresentationService:
             images=slide.images,
             sources=slide.sources,
             notes=slide.notes,
+            section=slide.section,
+            subsection=slide.subsection,
         )
         for name in EDITABLE_FIELDS:
             setattr(slide, name, getattr(normalized, name))
@@ -838,6 +938,338 @@ class PresentationService:
                 project.record_revision(slide, reason="approved (batch)")
         self._save(project)
         return project
+
+    def approve_slides_in_range(
+        self, project_id: str, first: int, last: int | None = None
+    ) -> list[Slide]:
+        """Approve the slides numbered ``first``..``last`` (batch, one save).
+
+        A range is clamped to the slides that exist, so approving 5-12 on a
+        ten-slide deck approves 5-10 rather than failing.
+        """
+        project = self.get(project_id)
+        self._require_editable(project)
+        targets = project.slides_in_range(first, last)
+        if not targets:
+            raise PresentationError(f"There are no slides in the range {first}-{last or first}.")
+        empty = [slide.number for slide in targets if slide.is_empty]
+        if empty:
+            raise PresentationError(
+                f"Slide(s) {', '.join(str(number) for number in empty)} are empty; "
+                "fill or remove them before approving."
+            )
+        for slide in targets:
+            slide.approved = True
+            slide.approved_snapshot = slide.content_snapshot()
+            project.record_revision(slide, reason="approved (range)")
+        self._save(project)
+        return targets
+
+    def insert_slide(
+        self, project_id: str, spec: SlideSpec, *, position: int | None = None
+    ) -> Slide:
+        """Insert one slide at ``position`` (1-based; appended when omitted).
+
+        Inserting renumbers the slides after it, which is what "add a slide after
+        slide 12" means; the new slide gets a fresh stable id, never a reused one.
+        """
+        project = self.get(project_id)
+        self._require_editable(project)
+        self._reopen_for_edit(project)
+        slide = self._new_slide(project, spec)
+        project.insert_slide(slide, position)
+        self._save(project)
+        return slide
+
+    def move_slide(
+        self,
+        project_id: str,
+        slide_id: str,
+        *,
+        before: int | None = None,
+        after: int | None = None,
+    ) -> PresentationProject:
+        """Move a slide to sit before or after another slide (by number).
+
+        The move is expressed against another slide's number rather than a raw
+        position, so "move slide 18 before slide 17" stays meaningful while the
+        slides are being renumbered. Reordering approved content reopens it, so
+        the order the user finally approves is the order that is exported.
+        """
+        project = self.get(project_id)
+        self._require_editable(project)
+        if (before is None) == (after is None):
+            raise PresentationError("A move needs exactly one of before/after.")
+        anchor = project.slide_by_number(before if before is not None else after or 0)
+        moving = project.slide(slide_id)
+        self._reopen_for_edit(project)
+        ordered = project.ordered_slides()
+        ordered.remove(moving)
+        anchor_index = ordered.index(anchor)
+        target = anchor_index if before is not None else anchor_index + 1
+        ordered.insert(target, moving)
+        for index, item in enumerate(ordered, start=1):
+            item.order = index
+        self._save(project)
+        return project
+
+    def renumber_slides(self, project_id: str) -> PresentationProject:
+        """Renumber every slide 1..n in display order (the numbering is dense)."""
+        project = self.get(project_id)
+        self._require_editable(project)
+        self._reopen_for_edit(project)
+        project.renumber()
+        self._save(project)
+        return project
+
+    def _slides_for_numbers(
+        self, project: PresentationProject, numbers: Iterable[int]
+    ) -> list[Slide]:
+        """Resolve slide numbers to slides, raising for an unknown one."""
+        wanted = list(numbers)
+        if not wanted:
+            raise PresentationError("Name at least one slide by its number.")
+        slides = [project.slide_by_number(number) for number in wanted]
+        return slides
+
+    def _redraft_slide(
+        self,
+        project: PresentationProject,
+        slide: Slide,
+        answer: str,
+        *,
+        fallback_title: str,
+    ) -> None:
+        """Apply an assistant answer to an existing slide (no save).
+
+        The slide keeps its stable id, number, and outline heading; only its
+        title and bullets change, and its approval is cleared like any edit.
+        """
+        bullets = bullets_from_text(answer)
+        explicit = title_from_text(answer, fallback="")
+        title = explicit if explicit and _is_title_line(explicit, bullets) else fallback_title
+        self._apply_edit(
+            project,
+            slide,
+            {"title": title, "content": bullets},
+            save=False,
+        )
+
+    def regenerate_slides(
+        self,
+        project_id: str,
+        numbers: Iterable[int],
+        *,
+        instruction: str | None = None,
+    ) -> list[Slide]:
+        """Re-draft the named slides, keeping their number, id, and heading.
+
+        With no ``instruction`` the assistant is asked for the topic again (the
+        same prompt the first draft used); with one, it is asked to apply that
+        change. Regenerating is an edit, so the affected approvals are cleared
+        and the export gate re-arms.
+        """
+        ask = self._require_assistant("slide content")
+        project = self.get(project_id)
+        self._require_editable(project)
+        targets = self._slides_for_numbers(project, numbers)
+        self._reopen_for_edit(project)
+        for slide in targets:
+            label = slide.subsection or slide.section or slide.title
+            self._progress(f"Regenerating slide {slide.number} ({label!r})...")
+            if instruction:
+                prompt = REVISION_PROMPT.format(
+                    kind="slide",
+                    title=project.title,
+                    current=render_slide_text(slide),
+                    feedback=instruction,
+                )
+            else:
+                prompt = SLIDE_PROMPT.format(title=project.title, heading=label)
+            answer = ask(prompt)
+            self._redraft_slide(project, slide, answer, fallback_title=label)
+        self._save(project)
+        return targets
+
+    def revise_slides(
+        self,
+        project_id: str,
+        numbers: Iterable[int],
+        *,
+        instruction: str | None = None,
+        template: str = REVISION_PROMPT,
+    ) -> list[Slide]:
+        """Revise the named slides with an instruction (shorten, expand, ...).
+
+        The default template asks for the current content to be revised; the
+        shortcut commands pass :data:`SHORTEN_PROMPT`/:data:`EXPAND_PROMPT`,
+        which re-ask for the topic in fewer or more bullets. Either way the slide
+        keeps its number and heading and its approval is cleared.
+        """
+        ask = self._require_assistant("slide content")
+        project = self.get(project_id)
+        self._require_editable(project)
+        targets = self._slides_for_numbers(project, numbers)
+        self._reopen_for_edit(project)
+        for slide in targets:
+            label = slide.subsection or slide.section or slide.title
+            self._progress(f"Revising slide {slide.number} ({label!r})...")
+            if template is REVISION_PROMPT:
+                prompt = template.format(
+                    kind="slide",
+                    title=project.title,
+                    current=render_slide_text(slide),
+                    feedback=instruction or "Improve the scientific accuracy and clarity.",
+                )
+            else:
+                prompt = template.format(title=project.title, heading=label)
+            answer = ask(prompt)
+            self._redraft_slide(project, slide, answer, fallback_title=label)
+        self._save(project)
+        return targets
+
+    def add_example_after(
+        self, project_id: str, number: int, *, instruction: str | None = None
+    ) -> Slide:
+        """Draft a worked-example slide and insert it after the named slide."""
+        ask = self._require_assistant("slide content")
+        project = self.get(project_id)
+        self._require_editable(project)
+        anchor = project.slide_by_number(int(number))
+        label = anchor.subsection or anchor.section or anchor.title
+        self._progress(f"Drafting a worked example after slide {anchor.number}...")
+        prompt = EXAMPLE_PROMPT.format(title=project.title, heading=label)
+        answer = ask(prompt)
+        bullets = bullets_from_text(answer)
+        explicit = title_from_text(answer, fallback="")
+        title = (
+            explicit
+            if explicit and _is_title_line(explicit, bullets)
+            else f"Worked example: {label}"
+        )
+        spec = SlideSpec(
+            title=title,
+            content=bullets,
+            section=anchor.section,
+            subsection=anchor.subsection,
+            notes=instruction or "",
+        )
+        self._reopen_for_edit(project)
+        slide = self._new_slide(project, spec)
+        project.insert_slide(slide, anchor.number + 1)
+        self._save(project)
+        return slide
+
+    def apply_slide_command(self, project_id: str, text: str) -> SlideCommandResult:
+        """Parse and run one slide instruction (the review-time command).
+
+        This is the one entry point the window's command box and the CLI's
+        ``command`` subcommand share, so a typed "shorten slides 11-15" and a
+        spoken one do exactly the same thing. A text that is not a command
+        returns ``ok=False`` rather than raising, so a caller can tell the user
+        what it understood.
+        """
+        command = parse_slide_command(text)
+        if command is None:
+            return SlideCommandResult(
+                ok=False,
+                action="",
+                message=f"I did not recognise a slide instruction in {text!r}.",
+            )
+        project = self.get(project_id)
+        action = command.action
+
+        if action == "renumber":
+            self.renumber_slides(project_id)
+            return self._command_result(
+                project_id, action, f"Renumbered {len(project.slides)} slide(s)."
+            )
+
+        if action == "move":
+            if not command.slides or command.anchor is None:
+                raise PresentationError("A move needs a slide number and an anchor.")
+            source = project.slide_by_number(command.slides[0])
+            self.move_slide(
+                project_id,
+                source.slide_id,
+                before=command.anchor if command.before else None,
+                after=None if command.before else command.anchor,
+            )
+            where = "before" if command.before else "after"
+            return self._command_result(
+                project_id,
+                action,
+                f"Moved slide {command.slides[0]} {where} slide {command.anchor}.",
+            )
+
+        if action in ("add-example", "add-slide"):
+            if not command.slides:
+                raise PresentationError("An add command needs the slide to follow.")
+            anchor = command.slides[0]
+            slide = self.add_example_after(project_id, anchor)
+            return self._command_result(
+                project_id,
+                action,
+                f"Added slide {slide.number} ({slide.slide_id}) after slide {anchor}.",
+                slide_id=slide.slide_id,
+            )
+
+        if action in ("revise", "shorten", "expand", "regenerate"):
+            if action == "regenerate":
+                changed = self.regenerate_slides(
+                    project_id, command.slides, instruction=command.text
+                )
+            else:
+                template = {
+                    "shorten": SHORTEN_PROMPT,
+                    "expand": EXPAND_PROMPT,
+                }.get(action, REVISION_PROMPT)
+                changed = self.revise_slides(
+                    project_id,
+                    command.slides,
+                    instruction=command.text,
+                    template=template,
+                )
+            numbers = ", ".join(str(slide.number) for slide in changed)
+            verb = {
+                "shorten": "Shortened",
+                "expand": "Expanded",
+                "regenerate": "Regenerated",
+            }.get(action, "Revised")
+            return self._command_result(project_id, action, f"{verb} slide(s) {numbers}.")
+
+        if action in ("approve", "approve-batch"):
+            if not command.slides:
+                raise PresentationError("Name the slide(s) to approve by number.")
+            if len(command.slides) > 1:
+                approved = self.approve_slides_in_range(
+                    project_id, command.slides[0], command.slides[-1]
+                )
+            else:
+                target = project.slide_by_number(command.slides[0])
+                approved = [self.approve_slide(project_id, target.slide_id)]
+            numbers = ", ".join(str(slide.number) for slide in approved)
+            return self._command_result(project_id, action, f"Approved slide(s) {numbers}.")
+
+        raise PresentationError(f"Unhandled slide command {action!r}.")
+
+    def _command_result(
+        self,
+        project_id: str,
+        action: str,
+        message: str,
+        *,
+        slide_id: str = "",
+    ) -> SlideCommandResult:
+        """Build the report for one executed slide command."""
+        project = self.get(project_id)
+        return SlideCommandResult(
+            ok=True,
+            action=action,
+            message=message,
+            state=project.state,
+            slide_id=slide_id,
+        )
 
     # ----------------------------------------------------------- the history
 
@@ -1042,12 +1474,17 @@ class PresentationService:
 __all__ = [
     "AskCallback",
     "DiscussResult",
+    "EXAMPLE_PROMPT",
+    "EXPAND_PROMPT",
     "OUTLINE_PROMPT",
     "PresentationReport",
     "PresentationService",
     "PresentationStatus",
     "ProgressCallback",
     "REVISION_PROMPT",
+    "SHORTEN_PROMPT",
     "SLIDE_PROMPT",
+    "SlideCommandResult",
     "SlideSpec",
+    "render_slide_text",
 ]

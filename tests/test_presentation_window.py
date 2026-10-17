@@ -316,3 +316,103 @@ def test_messages_are_re_measured_when_the_column_changes(tmp_path: Path) -> Non
         dialog._close()
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_batch_control_drafts_a_bounded_number_of_slides(tmp_path: Path) -> None:
+    """The window's batch spinbox sets the service's batch size."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.presentation_dialog import PresentationDialog
+
+    service = _service(tmp_path)
+    root = tk.Tk()
+    try:
+        dialog = PresentationDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        project = service.new_project("Batch")
+        dialog._refresh_projects()
+        dialog._select_project(project.project_id)
+        root.update()
+
+        assert dialog._batch_var.get() == str(service.batch_size)
+        dialog._batch_var.set("2")
+        dialog._on_batch_size()
+        assert service.batch_size == 2
+        assert "2 slide(s) per batch" in dialog._export_note.cget("text")
+        dialog._close()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_editor_edits_a_slide_section_and_subsection(tmp_path: Path) -> None:
+    """The section/subsection fields are loaded and saved by the editor."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.presentation_dialog import PresentationDialog
+
+    service = _service(tmp_path)
+    root = tk.Tk()
+    try:
+        dialog = PresentationDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        project = service.new_project("Editor")
+        service.draft_outline(project.project_id, text="Reservoir\n  - Porosity")
+        service.approve_outline(project.project_id)
+        service.draft_slides_from_outline(project.project_id, batch=1)
+        service.review_slides(project.project_id)
+        dialog._refresh_projects()
+        dialog._select_project(project.project_id)
+        root.update()
+
+        (slide,) = service.get(project.project_id).ordered_slides()
+        dialog._load_slide(slide.slide_id)
+        assert dialog._slide_section_var.get() == "Reservoir"
+        assert dialog._slide_subsection_var.get() == "Porosity"
+        dialog._slide_subsection_var.set("Storage")
+        dialog._on_save_slide()
+        assert _wait_until(root, lambda: not dialog._busy)
+        reloaded = service.get(project.project_id).slide(slide.slide_id)
+        assert reloaded.section == "Reservoir"
+        assert reloaded.subsection == "Storage"
+        dialog._close()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_command_box_runs_a_slide_instruction(tmp_path: Path) -> None:
+    """The command box drives the shared command parser."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.presentation_dialog import PresentationDialog
+
+    service = _service(tmp_path)
+    root = tk.Tk()
+    try:
+        dialog = PresentationDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        project = service.new_project("Command")
+        service.draft_outline(project.project_id, text=OUTLINE)
+        service.approve_outline(project.project_id)
+        service.draft_slides_from_outline(project.project_id, batch=2)
+        service.review_slides(project.project_id)
+        dialog._refresh_projects()
+        dialog._select_project(project.project_id)
+        root.update()
+
+        dialog._command_var.set("Approve slides 1-2")
+        dialog._on_run_command()
+        assert _wait_until(root, lambda: not dialog._busy)
+        assert "Approved slide(s) 1, 2" in dialog._export_note.cget("text")
+        assert len(service.get(project.project_id).approved_slides) == 2
+        dialog._close()
+    finally:
+        root.destroy()
