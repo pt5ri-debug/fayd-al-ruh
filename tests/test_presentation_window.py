@@ -416,3 +416,45 @@ def test_the_command_box_runs_a_slide_instruction(tmp_path: Path) -> None:
         dialog._close()
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_deck_look_controls_persist_the_project_settings(tmp_path: Path) -> None:
+    """The theme/size/numbers controls write through to the stored settings."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.presentation_dialog import PresentationDialog
+
+    service = _service(tmp_path)
+    root = tk.Tk()
+    try:
+        dialog = PresentationDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        project = service.new_project("Look")
+        dialog._refresh_projects()
+        dialog._select_project(project.project_id)
+        root.update()
+
+        # The widgets mirror the stored defaults on open.
+        assert dialog._theme_choice.get() == "professional"
+        assert dialog._aspect_choice.get() == "16:9"
+
+        dialog._theme_choice.set("dark")
+        dialog._on_theme_change()
+        dialog._aspect_choice.set("4:3")
+        dialog._on_aspect_change()
+        dialog._numbers_var.set(False)
+        dialog._on_numbers_change()
+
+        saved = service.get(project.project_id).settings
+        assert saved.theme == "dark"
+        assert saved.aspect == "4:3"
+        assert saved.show_slide_numbers is False
+
+        # The engine note names the engine an export would really use.
+        assert "Engine:" in dialog._engine_note.cget("text")
+        dialog._close()
+    finally:
+        root.destroy()

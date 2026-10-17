@@ -41,6 +41,7 @@ from core.presentation import (
     STATE_CONTENT_APPROVED,
     STATE_EXPORTED,
     STATE_LABELS,
+    theme_names,
 )
 from gui import markdown as md
 from gui import rich_text
@@ -62,8 +63,9 @@ SUBTITLE = (
 HONESTY_LINE = (
     "Discussion, outline, and slide text come from the project's own assistant — the same "
     "grounded assistant and knowledge base the chat window uses, with its citations. "
-    "Nothing is exported until you approve the content, and the .pptx is written locally "
-    "with no extra package."
+    "Nothing is exported until you approve the content. The .pptx is written locally, in "
+    "editable PowerPoint shapes, with the optional python-pptx engine (the built-in "
+    "writer is used when it is not installed)."
 )
 
 #: The workflow, in order, with the sidebar button that advances it.
@@ -260,6 +262,41 @@ class PresentationDialog:
         self._slide_list.pack(fill="both", expand=True, padx=14, pady=(0, 6))
         self._slide_list.bind("<<ListboxSelect>>", self._on_slide_select)
 
+        self._section_label(sidebar, "Deck look")
+        look = tk.Frame(sidebar, bg=theme.surface)
+        look.pack(fill="x", padx=14, pady=(0, 6))
+        tk.Label(
+            look, text="Theme", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"),
+        ).pack(anchor="w")
+        self._theme_choice = tk.StringVar(value="professional")
+        theme_picker = ttk.Combobox(
+            look, textvariable=self._theme_choice, state="readonly",
+            values=list(theme_names()), font=self._type.font("2xs"),
+        )
+        theme_picker.pack(fill="x")
+        theme_picker.bind("<<ComboboxSelected>>", self._on_theme_change)
+
+        shape = tk.Frame(look, bg=theme.surface)
+        shape.pack(fill="x", pady=(4, 0))
+        tk.Label(
+            shape, text="Size", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"),
+        ).pack(side="left")
+        self._aspect_choice = tk.StringVar(value="16:9")
+        aspect_picker = ttk.Combobox(
+            shape, textvariable=self._aspect_choice, state="readonly", width=6,
+            values=["16:9", "4:3"], font=self._type.font("2xs"),
+        )
+        aspect_picker.pack(side="left", padx=(6, 0))
+        aspect_picker.bind("<<ComboboxSelected>>", self._on_aspect_change)
+        self._numbers_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            shape, text="Numbers", variable=self._numbers_var, command=self._on_numbers_change,
+            bg=theme.surface, fg=theme.foreground, selectcolor=theme.base,
+            activebackground=theme.surface, font=self._type.font("2xs"),
+        ).pack(side="left", padx=(6, 0))
+
         self._section_label(sidebar, "Export")
         gate = tk.Frame(sidebar, bg=theme.surface)
         gate.pack(fill="x", padx=14, pady=(0, 4))
@@ -267,6 +304,11 @@ class PresentationDialog:
         self._export_button.pack(side="left")
         self._export_button.configure(state="disabled")
         self._button(gate, "Save as…", self._on_export_as).pack(side="left", padx=(6, 0))
+        self._engine_note = tk.Label(
+            sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._engine_note.pack(fill="x", padx=14, pady=(4, 0))
         self._export_note = tk.Label(
             sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
@@ -794,12 +836,55 @@ class PresentationDialog:
     def _refresh_gate(self, project: Any) -> None:
         allowed, reason = self.service.can_export(project.project_id)
         self._export_button.configure(state="normal" if allowed and not self._busy else "disabled")
+        self._sync_settings(project)
+        self._engine_note.configure(text=self._engine_line())
         if allowed:
             self._set_status(
                 f"Ready to export {len(project.approved_slides)} approved slide(s) to a .pptx."
             )
         else:
             self._set_status(reason)
+
+    def _sync_settings(self, project: Any) -> None:
+        """Mirror the project's stored settings into the widgets (no callbacks)."""
+        settings = getattr(project, "settings", None)
+        if settings is None:
+            return
+        self._theme_choice.set(settings.theme)
+        self._aspect_choice.set(settings.aspect)
+        self._numbers_var.set(bool(settings.show_slide_numbers))
+
+    def _engine_line(self) -> str:
+        """Say which render engine an export would actually use, and why."""
+        try:
+            engine = self.service.resolve_engine(None)
+        except Exception as error:  # noqa: BLE001 - never let a status line crash the window
+            return str(error)
+        if engine == "pptx":
+            return "Engine: python-pptx — real, editable shapes."
+        return (
+            "Engine: built-in writer (python-pptx is not installed; "
+            "run `python -m cli deps --install pptx` for editable shapes)."
+        )
+
+    def _on_theme_change(self, _event: Any = None) -> None:
+        self._save_settings(theme=self._theme_choice.get())
+
+    def _on_aspect_change(self, _event: Any = None) -> None:
+        self._save_settings(aspect=self._aspect_choice.get())
+
+    def _on_numbers_change(self) -> None:
+        self._save_settings(show_slide_numbers=bool(self._numbers_var.get()))
+
+    def _save_settings(self, **changes: Any) -> None:
+        if not self._project_id:
+            return
+        try:
+            self.service.update_settings(self._project_id, **changes)
+        except Exception as error:  # noqa: BLE001 - report, do not crash the window
+            self._set_status(str(error), error=True)
+            return
+        self._set_status("Deck settings saved.")
 
     # -- workflow steps ----------------------------------------------------
 
@@ -1244,10 +1329,13 @@ class PresentationDialog:
             self._add_message(
                 "note",
                 f"**Exported {result.slide_count} slide(s)** to:\n\n`{result.path}`\n\n"
-                f"{result.size_bytes:,} bytes. The deck contains exactly the slides you "
-                "approved, in the order you approved them.",
+                f"{result.size_bytes:,} bytes, written by the **{result.engine}** engine. "
+                "The deck contains exactly the slides you approved, in the order you "
+                "approved them.",
                 title="Exported",
             )
+            for warning in getattr(result, "warnings", ()):
+                self._add_message("note", f"⚠ {warning}", title="Check")
             self._set_status(result.message)
             self.refresh()
 

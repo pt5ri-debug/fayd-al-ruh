@@ -871,6 +871,48 @@ Arabic is kept as secondary aliases where useful.
   "shorten slides 11-15" and a spoken one do the same thing.
   `default_presentation_dir()` is `<data>/presentations`, git-ignored;
   `presentation_filename` slugifies the title.
+- `core/presentation_layout.py` — the **first half** of the export engine, with
+  no rendering dependency. It turns an approved `Deck` into a `DeckPlan`:
+  `classify_layout` picks one of twelve named layouts (`title`, `section`,
+  `objectives`, `bullets`, `paragraph`, `two_column`, `table`, `equation`,
+  `chart`, `image`, `summary`, `conclusion`) from an explicit `Slide.layout`
+  hint, a title cue ("Objectives"/"Summary"/"Conclusion", and the Arabic
+  equivalents), a `|` separator in a bullet (two columns), or the content type --
+  deterministically, nothing guessed. `estimate_fit` measures the prepared text
+  against the slide geometry (an average-glyph-width estimate, documented as
+  conservative) and returns a `FitEstimate`, so an over-full slide is **flagged**
+  with a warning, never clipped or shortened; `prepare_deck`/`prepare_slide`
+  build the `SlidePlan`/`DeckPlan` (blocks: title, bullets, paragraph, table,
+  columns, image, chart, equation) with `warnings` and `overflows`. `validate_image`
+  checks an image reference against an extension allow-list and a size cap and
+  returns an `ImageCheck`, so a missing or unusable file is *skipped* with a
+  readable reason rather than crashing the export (it reads only the name and
+  size -- an image is never decoded or executed). `safe_filename`/`safe_output_path`/
+  `unique_export_path` make a path-traversal-proof, never-overwriting output name.
+  `PresentationSettings` (aspect, theme, slide numbers, footer/author/company/
+  subject, `rtl`, `allow_overwrite`) and the four `THEMES` (`professional` default,
+  `light`, `academic`, `dark`) live in `core/presentation.py` and round-trip
+  through `to_primitive`/`from_primitive`; `DeckTheme` carries the fonts, sizes,
+  colours, and spacing. `looks_rtl` detects right-to-left script so a mixed deck
+  is drawn correctly.
+- `core/pptx_engine.py` — the **second half**: the optional, real PowerPoint
+  renderer. `PptxEngine.write`/`render` consume a `DeckPlan` and draw a genuine,
+  editable Office Open XML deck with **python-pptx** (the `[pptx]` extra, installed
+  from `requirements-pptx.txt`, also bundled in `requirements.txt` so CI exercises
+  the real path, like `pypdf`): a 16:9 or 4:3 canvas, twelve drawn layouts, real
+  shapes, native tables, `COLUMN_CLUSTERED` charts (a non-numeric "chart" slide
+  degrades to its table rather than going blank), embedded images scaled to fit,
+  speaker notes, slide numbers, a footer, and document metadata. `rtl` is honoured
+  by setting `a:pPr/@rtl` and the `a:cs` complex-script typeface, so Arabic is not
+  substituted. The package is assembled in memory and written atomically (a
+  temporary file replaced into place), so a failure never leaves a half-written
+  deck. **python-pptx is imported lazily**: `pptx_available` reports whether it is
+  present and `_require_pptx` raises `PptxUnavailable` with the exact install
+  command when it is not, so a base install and CI still work and the
+  dependency-free `core.presentation.PresentationWriter` remains the fallback.
+  `validate_deck` re-opens the written file and compares the slide count, order,
+  titles, and notes against the plan, so "it exported" is proven rather than
+  assumed. Nothing in the deck is ever executed.
 
 - `gui/presentation.py` — the Presentation Studio **service** (Tk-free), the one
   engine the window and the CLI share, so both see one set of projects, one
@@ -911,7 +953,18 @@ Arabic is kept as secondary aliases where useful.
   blank or silently duplicated. `export` requires
   `CONTENT_APPROVED`, writes only the approved slides in their approved order,
   records an `ExportRecord` (including a failure), and moves the project to
-  `EXPORTED` or `EXPORT_FAILED`.
+  `EXPORTED` or `EXPORT_FAILED`. It selects a render engine through
+  `resolve_engine`: `"pptx"` (the optional python-pptx engine, preferred when
+  installed) or `"stdlib"` (the always-available fallback); an explicit request
+  for an absent engine is refused honestly, while the automatic choice falls back
+  so a base install never breaks. `settings` overrides the stored look for one
+  export, and the output is **never overwritten** unless `overwrite=True` (or
+  `settings.allow_overwrite`): with no explicit path a unique, safe name is
+  chosen. `PresentationReport` carries the engine, the filename, the slide
+  `warnings`, and a `download` reference (path, filename, directory, size) -- the
+  desktop app's real "download", since it has no web server. `export_warnings`
+  previews the notes an export *would* raise without writing a file, and
+  `update_settings` persists a project's look.
 - `gui/presentation_dialog.py` — the Presentation Studio **window** (Tk, imported
   lazily), built the way the chat and Code Studio windows are built (the same
   theme tokens, `RoundedBox`, and a centred column capped at `_COLUMN_MAX`). A
@@ -939,7 +992,7 @@ Arabic is kept as secondary aliases where useful.
   `outline-edit`/`outline-revise`/`review-outline`/`approve-outline`/`draft`/
   `add`/`edit`/`reorder`/`remove`/`review-slides`/`approve-slide`/
   `unapprove-slide`/`approve-slides`/`approve-content`/`reopen`/`revisions`/
-  `restore`/`restore-approved`/`export`/`history`
+  `restore`/`restore-approved`/`export`/`warnings`/`settings`/`demo`/`history`
   (`python -m cli presentation …`, wired in `cli/menu.py` as `run_presentation`).
   It drives the *same* `gui.presentation.PresentationService` the window drives,
   so the CLI and the window share one set of projects, one revision history, and

@@ -55,6 +55,7 @@ from core.presentation import (
     PresentationWriter,
     Slide,
     SlideRevision,
+    ValidationResult,
     bullets_from_text,
     dedup_key,
     default_presentation_dir,
@@ -62,7 +63,6 @@ from core.presentation import (
     outline_from_prose,
     parse_outline,
     parse_slide_command,
-    presentation_filename,
     require_transition,
     resolve_batch_size,
     resolve_content_type,
@@ -70,10 +70,23 @@ from core.presentation import (
     title_from_text,
     validate_pptx,
 )
+from core.presentation_layout import (
+    PresentationSettings,
+    prepare_deck,
+    safe_filename,
+    unique_export_path,
+)
 
 #: An ``ask`` callable: a question in, the assistant's answer out.
 AskCallback = Callable[[str], str]
 ProgressCallback = Callable[[str], None]
+
+#: Export engines the service can use, in preference order. ``pptx`` needs the
+#: optional python-pptx extra; ``stdlib`` always works.
+ENGINE_PPTX = "pptx"
+ENGINE_STDLIB = "stdlib"
+ENGINES: tuple[str, ...] = (ENGINE_PPTX, ENGINE_STDLIB)
+DEFAULT_ENGINE = ENGINE_PPTX
 
 
 def _is_title_line(candidate: str, bullets: list[str]) -> bool:
@@ -168,10 +181,34 @@ class PresentationReport:
     approved_slides: int = 0
     #: Slides whose approval is outdated (edited after approval).
     outdated_slides: int = 0
+    #: The engine that produced the file ("pptx" or "stdlib").
+    engine: str = ""
+    #: The generated file's basename (the reference a download action uses).
+    filename: str = ""
+    #: Slide warnings (an overflowing slide, a missing image) the user must see.
+    warnings: tuple[str, ...] = ()
 
     def summary(self) -> str:
         """A one-line, human-readable description of the outcome."""
         return self.message
+
+    @property
+    def download(self) -> dict[str, str]:
+        """The reference and action a front end needs to serve the file.
+
+        There is no web server in this desktop app, so "download" is a real,
+        local action: the exact path on disk, its basename, and the folder that
+        holds it (what an "open the folder" or "save a copy" action uses).
+        """
+        if not self.path:
+            return {}
+        path = Path(self.path)
+        return {
+            "path": str(path),
+            "filename": self.filename or path.name,
+            "directory": str(path.parent),
+            "size_bytes": str(self.size_bytes),
+        }
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -185,6 +222,10 @@ class PresentationReport:
             "state": self.state,
             "approved_slides": self.approved_slides,
             "outdated_slides": self.outdated_slides,
+            "engine": self.engine,
+            "filename": self.filename,
+            "warnings": list(self.warnings),
+            "download": self.download,
         }
 
 
@@ -278,6 +319,8 @@ class SlideSpec:
     notes: str = ""
     section: str = ""
     subsection: str = ""
+    #: An optional layout hint (e.g. "chart", "two_column"); empty infers it.
+    layout: str = ""
     approved: bool = False
 
 
@@ -628,6 +671,7 @@ class PresentationService:
             notes=spec.notes,
             section=spec.section,
             subsection=spec.subsection,
+            layout=spec.layout,
             approved=spec.approved,
         )
         if slide.approved:
@@ -1376,6 +1420,9 @@ class PresentationService:
         *,
         path: str | Path | None = None,
         approved_only: bool = True,
+        engine: str | None = None,
+        settings: PresentationSettings | None = None,
+        overwrite: bool | None = None,
     ) -> PresentationReport:
         """Write the approved slides to a ``.pptx`` and validate the result.
 
@@ -1383,28 +1430,83 @@ class PresentationService:
         EXPORT_FAILED) -> EXPORTING -> EXPORTED or EXPORT_FAILED. A failure is
         recorded in the export history and leaves the project in EXPORT_FAILED,
         from which ``export`` may safely be called again.
+
+        ``engine`` selects the renderer: ``"pptx"`` (the optional python-pptx
+        engine, the default when it is installed) draws real, editable shapes,
+        tables, charts, embedded images, notes, and RTL text; ``"stdlib"`` is the
+        dependency-free fallback that always works. When ``engine`` is not given
+        the python-pptx engine is preferred and the fallback is used only when it
+        is absent -- so a base install and CI never break.
+
+        ``settings`` overrides the project's stored look for this one export.
+        The output is never allowed to overwrite an existing file unless
+        ``overwrite`` is true (or ``settings.allow_overwrite`` is set): when no
+        explicit ``path`` is given a unique, safe name is chosen instead.
         """
         project = self.get(project_id)
         allowed, reason = self.can_export(project_id)
         if not allowed:
             raise PresentationError(reason)
 
+        spec = settings or project.settings
+        chosen = self.resolve_engine(engine)
+
         require_transition(project.state, STATE_EXPORTING)
         project.state = STATE_EXPORTING
         self._save(project)
 
-        target = (
-            Path(path).expanduser()
-            if path is not None
-            else self.output_dir / presentation_filename(project.title)
-        )
         export_id = project.next_export_id()
+        allow_overwrite = spec.allow_overwrite if overwrite is None else overwrite
+        if path is not None:
+            target = Path(path).expanduser()
+            if target.suffix.lower() != ".pptx":
+                target = target.with_suffix(".pptx")
+            if target.exists() and not allow_overwrite:
+                return self._fail_export(
+                    project,
+                    export_id,
+                    target,
+                    f"{target.name} already exists; choose another name or allow an overwrite.",
+                )
+        else:
+            directory = self.output_dir
+            filename = safe_filename(project.title, export_id=export_id)
+            if allow_overwrite:
+                target = directory / filename
+            else:
+                target = unique_export_path(directory, project.title, export_id=export_id)
+
         self._progress(f"Writing {target}...")
         try:
             deck = Deck.from_project(project, approved_only=approved_only)
-            written = self._writer.write(deck, target)
-            result = validate_pptx(written)
-        except (PresentationError, OSError, ValueError) as error:
+            plan = prepare_deck(deck, settings=spec, project=project)
+            warnings = plan.warnings
+            if chosen == ENGINE_PPTX:
+                from core.pptx_engine import PptxEngine, validate_deck
+
+                written = PptxEngine().write(plan, target)
+                validation = validate_deck(written, plan)
+                result = ValidationResult(
+                    ok=validation.ok,
+                    slide_count=validation.slide_count,
+                    parts=len(validation.layouts),
+                    message=(
+                        f"Valid deck with {validation.slide_count} slide(s)."
+                        if validation.ok
+                        else "; ".join(validation.issues) or "The deck did not validate."
+                    ),
+                    size_bytes=validation.size_bytes,
+                )
+                if validation.issues:
+                    warnings = warnings + validation.issues
+            else:
+                written = self._writer.write(deck, target)
+                result = validate_pptx(written)
+        except PresentationError as error:
+            return self._fail_export(project, export_id, target, str(error))
+        except OSError as error:
+            return self._fail_export(project, export_id, target, str(error))
+        except Exception as error:  # noqa: BLE001 - reported, project preserved
             return self._fail_export(project, export_id, target, str(error))
 
         if not result.ok:
@@ -1422,10 +1524,13 @@ class PresentationService:
         require_transition(project.state, STATE_EXPORTED)
         project.state = STATE_EXPORTED
         self._save(project)
+        message = f"Exported {result.slide_count} slide(s) to {written}."
+        if warnings:
+            message += f" {len(warnings)} note(s) to review."
         return PresentationReport(
             ok=True,
             project_id=project.project_id,
-            message=f"Exported {result.slide_count} slide(s) to {written}.",
+            message=message,
             path=str(written),
             slide_count=result.slide_count,
             size_bytes=result.size_bytes,
@@ -1433,7 +1538,53 @@ class PresentationService:
             state=project.state,
             approved_slides=len(project.approved_slides),
             outdated_slides=len(project.outdated_slides),
+            engine=chosen,
+            filename=Path(written).name,
+            warnings=warnings,
         )
+
+    def resolve_engine(self, engine: str | None) -> str:
+        """Pick a render engine, falling back honestly when the extra is absent.
+
+        An explicit request for an engine that is unavailable raises; the
+        *automatic* choice (``engine is None``) falls back to the standard-library
+        writer so a base install still exports.
+        """
+        from core.pptx_engine import pptx_available
+
+        if engine is None:
+            return ENGINE_PPTX if pptx_available() else ENGINE_STDLIB
+        key = str(engine).strip().lower()
+        if key not in ENGINES:
+            raise PresentationError(
+                f"Unknown export engine {engine!r}; expected one of {', '.join(ENGINES)}."
+            )
+        if key == ENGINE_PPTX and not pptx_available():
+            raise PresentationError(
+                "The python-pptx engine is not installed; install it with "
+                "`python -m cli deps --install pptx`, or export with engine='stdlib'."
+            )
+        return key
+
+    def export_warnings(self, project_id: str, *, settings: PresentationSettings | None = None) -> tuple[str, ...]:
+        """The slide warnings an export *would* produce (without writing a file).
+
+        Used by the review screen to flag an over-full slide or a missing image
+        *before* the user commits to an export, so nothing is silently clipped.
+        """
+        project = self.get(project_id)
+        spec = settings or project.settings
+        deck = Deck.from_project(project, approved_only=True)
+        plan = prepare_deck(deck, settings=spec, project=project)
+        return plan.warnings
+
+    def update_settings(self, project_id: str, **changes: Any) -> PresentationSettings:
+        """Change a project's presentation settings (theme, aspect, metadata)."""
+        project = self.get(project_id)
+        project.settings = project.settings.replace(**changes)
+        project.touch()
+        self._save(project)
+        return project.settings
 
     def _fail_export(
         self,

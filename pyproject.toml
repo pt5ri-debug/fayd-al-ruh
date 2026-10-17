@@ -57,6 +57,12 @@ vision = [
     "llama-cpp-python>=0.3",
     "huggingface_hub>=0.23",
 ]
+# The Presentation Studio PowerPoint export engine is a separate optional extra.
+# `python-pptx` draws a real, editable deck (shapes, tables, embedded images,
+# charts, speaker notes, RTL); the base install keeps the dependency-free
+# standard-library writer as a fallback, and `core.pptx_engine` imports this
+# package lazily. It is never required by the base install.
+pptx = ["python-pptx>=1.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -114,4 +120,11 @@ ignore_missing_imports = true
 # type-check.
 [[tool.mypy.overrides]]
 module = ["llama_cpp", "huggingface_hub"]
+ignore_missing_imports = true
+
+# The Presentation Studio PowerPoint engine is an optional extra
+# (``pip install .[pptx]``); ``core.pptx_engine`` imports ``pptx`` lazily and a
+# base install must still type-check. python-pptx ships no type stubs.
+[[tool.mypy.overrides]]
+module = ["pptx", "pptx.*"]
 ignore_missing_imports = true

@@ -1,0 +1,11 @@
+# The Presentation Studio PowerPoint export engine.
+#
+# `python-pptx` draws a real, editable Office Open XML deck: shapes, tables,
+# embedded images, charts, speaker notes, and right-to-left text. It is an
+# *optional* extra -- the base install keeps the dependency-free standard-library
+# writer as a fallback, and `core.pptx_engine` imports this package lazily and
+# reports clearly when it is absent. Install it with:
+#
+#     python -m pip install -r requirements-pptx.txt
+#     python -m cli deps --install pptx
+python-pptx>=1.0
