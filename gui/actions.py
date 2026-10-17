@@ -32,6 +32,7 @@ from cli.menu import (
     run_learn,
     run_llm,
     run_ml,
+    run_presentation,
     run_release,
     run_selfcheck,
     run_ultron_chat,
@@ -117,6 +118,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         "Code Studio: edit and merge the project's own code",
         run_code_studio,
         ("status",),
+    ),
+    GuiAction(
+        "presentation",
+        "Presentation Studio: build a PowerPoint deck",
+        run_presentation,
+        ("list",),
     ),
     GuiAction("image", "Generate an image from text", run_image, ("backends",)),
     GuiAction(

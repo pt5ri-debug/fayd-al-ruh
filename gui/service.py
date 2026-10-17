@@ -29,6 +29,7 @@ from gui.attachments import Attachment, AttachmentNotice, attach_document, remov
 from gui.import_center import ImportReport, KnowledgeImporter
 from gui.image_edit import ImageEditService
 from gui.image_gen import ImageGenerationService
+from gui.presentation import PresentationService
 from gui.sql_import import SqlImportService
 from gui.modes import (
     AnswerOnlyRouter,
@@ -196,10 +197,18 @@ class ChatService:
         # storage folder and needs no model: the default editor is a deterministic
         # keyword interpreter (see core/imageedit.py).
         self._image_edit = ImageEditService(root=image_store_dir)
+        # Presentation Studio: build a .pptx from a discussion, slide by slide. It
+        # drives the *same* service the CLI uses and asks the *existing* assistant
+        # (this session's own loop), so no second AI is introduced.
+        self._presentation = PresentationService(
+            ask=self._presentation_ask, on_progress=self._on_presentation_progress
+        )
         # The text-to-speech reader: it reads the chat's own text aloud with a
         # chosen catalog voice (core/voices.py). It is always available; when no
         # speech engine is installed it reports honestly instead of pretending.
         self._reader = TextReader(engine=tts_engine, voice=voice)
+        # Progress lines the Studio service emits; the window drains them.
+        self.presentation_progress: list[str] = []
 
     # ------------------------------------------------------------ operating mode
 
@@ -526,6 +535,27 @@ class ChatService:
     def image_edit(self) -> ImageEditService:
         """The optional image-editing engine (default: the keyword interpreter)."""
         return self._image_edit
+
+    @property
+    def presentation(self) -> PresentationService:
+        """The Presentation Studio engine (the same service the CLI drives)."""
+        return self._presentation
+
+    def _presentation_ask(self, question: str) -> str:
+        """Answer one Presentation Studio question with *this* session's assistant.
+
+        The Studio must never stand up a second AI: it borrows the conversation's
+        own loop (``self.mode``), so a presentation is discussed with the same
+        grounded assistant, the same knowledge base, and the same citations the
+        chat window uses. Speech is suppressed -- the Studio reads text.
+        """
+        turn = self.mode.handle(question, require_wake=False, speak=False)
+        return turn.answer_text or turn.response
+
+    def _on_presentation_progress(self, message: str) -> None:
+        """Record a Studio progress line for the window (it polls this list)."""
+        self.presentation_progress.append(message)
+        del self.presentation_progress[:-32]
 
     # --------------------------------------------------------------- reading
 

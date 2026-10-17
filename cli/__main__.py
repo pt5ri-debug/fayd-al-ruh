@@ -45,6 +45,12 @@ Usage:
     python -m cli studio diff <slug>    # review the change as a unified diff
     python -m cli studio check <slug>   # run the project's tests inside the workspace
     python -m cli studio merge <slug>   # merge it into the project (gated by checks)
+    python -m cli presentation new "T"  # Presentation Studio: a new deck project
+    python -m cli presentation outline P --text-file plan.txt   # set the outline
+    python -m cli presentation approve-outline P   # approve it, then draft slides
+    python -m cli presentation draft P  # ask the assistant for slide content
+    python -m cli presentation approve-content P   # approve the content
+    python -m cli presentation export P --output deck.pptx      # write the .pptx
     python -m cli deps                  # show which optional features are installed
     python -m cli deps --install ocr    # install the OCR packages (scanned PDFs)
     python -m cli paths               # show asset/data locations
@@ -90,6 +96,7 @@ from cli.menu import (
     run_mind_chat,
     run_ml,
     run_petroleum,
+    run_presentation,
     run_release,
     run_selfcheck,
     run_speak,
@@ -123,6 +130,7 @@ _COMMANDS = {
     "ingest": run_ingest,
     "import-center": run_import_center,
     "studio": run_code_studio,
+    "presentation": run_presentation,
     "image": run_image,
     "deps": run_deps,
     "demo": run_demo,

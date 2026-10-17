@@ -831,6 +831,84 @@ Arabic is kept as secondary aliases where useful.
   Reachable from the composer's **＋** menu (**Code Studio — edit and merge the
   project's own code…**) and the sidebar action; the headless twin is
   `python -m cli studio`.
+- `core/presentation.py` — the **Presentation Studio** content model and the
+  dependency-free `.pptx` writer. A project walks a strict state machine
+  (`DISCUSSION` → `OUTLINE_DRAFT` → `OUTLINE_REVIEW` → `SLIDE_DRAFTING` →
+  `SLIDE_REVIEW` → `CONTENT_APPROVED` → `EXPORTING` → `EXPORTED`, plus
+  `EXPORT_FAILED`), enforced by `require_transition`, so a deck can only reach
+  `EXPORTED` through the user's own approvals. Content types are
+  `CONTENT_TITLE`/`SECTION`/`PARAGRAPH`/`BULLETS`/`EQUATION`/`IMAGE`/`TABLE`
+  (`resolve_content_type` infers one from what a slide actually holds). A `Deck`
+  is the export view of the approved slides. `PresentationWriter` renders a real
+  Office Open XML package with **only the standard library** (`zipfile` +
+  `xml.etree`): the content types, both relationship files, the presentation, one
+  slide master, one layout, a theme, the numbered slides, and a `notesSlide` per
+  slide that has speaker notes. The package is assembled in memory and written
+  atomically (a temporary file replaced into place), so a failure never leaves a
+  half-written deck; `render`/`validate_pptx` re-open the bytes and prove the
+  package is well-formed. All text is XML-escaped, so Arabic, mixed
+  Arabic/English, equations (`μ`, `Σ`), and `&`/`<`/`"` round-trip intact.
+  `bullets_from_text`/`title_from_text`/`outline_from_prose` turn an assistant
+  answer into slide content, and `topic_sentence` derives a heading from a
+  sentence while dropping the answer's own discourse openers ("First,",
+  "Moreover,") via `_DISCOURSE_OPENER_RE`. `bullets_from_text` treats a line
+  before the first bullet as the answer's *title* line (which the slide prompt
+  asks for), so the same words never appear as both the title and the first
+  bullet. `default_presentation_dir()` is `<data>/presentations`, git-ignored;
+  `presentation_filename` slugifies the title.
+- `gui/presentation.py` — the Presentation Studio **service** (Tk-free), the one
+  engine the window and the CLI share, so both see one set of projects, one
+  revision history, and one export gate. `PresentationService` (`new_project`,
+  `discuss`, `draft_outline`/`review_outline`/`approve_outline`,
+  `draft_slides_from_outline`, `review_slides`, `edit_slide`/`add_slides`/
+  `reorder_slide`/`remove_slide`, `approve_slide`/`unapprove_slide`/
+  `approve_content`, `revisions`/`restore_slide_revision`/`restore_approved`,
+  `export`, `export_history`, `status`) persists projects through `JsonStore`
+  under `PRESENTATIONS_NAMESPACE`. It takes an injected `ask` callback and never
+  builds a model itself: the CLI passes `ai.jarvis.build_session` and the window
+  passes *its own* session (`ChatService._presentation_ask`), so there is **no
+  second AI** and no second knowledge base. Every edit records a numbered
+  revision and snapshots the approved content, and `_reopen_for_edit` returns an
+  approved or exported project to `SLIDE_REVIEW` and clears the content approval
+  — so a change after approval is never silent and the export gate re-arms.
+  `_is_title_line` distinguishes a model's short title line from the grounded
+  assistant's prose first sentence, so a prose answer takes the outline heading as
+  the slide's title instead of repeating its first sentence. `export` requires
+  `CONTENT_APPROVED`, writes only the approved slides in their approved order,
+  records an `ExportRecord` (including a failure), and moves the project to
+  `EXPORTED` or `EXPORT_FAILED`.
+- `gui/presentation_dialog.py` — the Presentation Studio **window** (Tk, imported
+  lazily), built the way the chat and Code Studio windows are built (the same
+  theme tokens, `RoundedBox`, and a centred column capped at `_COLUMN_MAX`). A
+  left sidebar lists the projects and the eight workflow steps with their state; a
+  centred conversation column holds the transcript, the question box, and the
+  slide editor. Message rows are measured the way the chat window measures its
+  bubbles: `_bubble_fonts`/`_bubble_text_width` convert the column's *pixels* into
+  the *characters* a `tk.Text` `width` is counted in (rounding **down**, so a row
+  can never request more pixels than the column has), `_bubble_card_width` sizes a
+  user bubble's rounded card, and `_fit_height` caps a tall message to its own
+  scroll region. A resize re-measures every row (`_reflow` → `_remetric_rows`),
+  because a `tk.Text` keeps the character width it was built with. Long work runs
+  on a worker thread whose result is handed back through a queue the UI thread
+  drains. Reachable from the composer's **＋** menu (**Presentation Studio — build
+  a PowerPoint deck…**) and the sidebar action; the headless twin is
+  `python -m cli presentation`.
+- `cli/presentation.py` — the Presentation Studio CLI, the headless twin of the
+  window: `new`/`list`/`show`/`status`/`discuss`/`outline`/`outline-draft`/
+  `outline-edit`/`outline-revise`/`review-outline`/`approve-outline`/`draft`/
+  `add`/`edit`/`reorder`/`remove`/`review-slides`/`approve-slide`/
+  `unapprove-slide`/`approve-slides`/`approve-content`/`reopen`/`revisions`/
+  `restore`/`restore-approved`/`export`/`history`
+  (`python -m cli presentation …`, wired in `cli/menu.py` as `run_presentation`).
+  It drives the *same* `gui.presentation.PresentationService` the window drives,
+  so the CLI and the window share one set of projects, one revision history, and
+  one export gate — no workflow logic is reimplemented here. Its discussion,
+  outline, and slide draft call the project's *existing* assistant through
+  `ai.jarvis.build_session(text_only=True)` (`_make_ask`), and with no model
+  installed they still work when the text is supplied directly (`--text` /
+  `--text-file` / `--title` / `--bullet`). Exit codes: `0` success, `2` invalid
+  arguments, `3` the assistant is not available, `4` a gate refused the
+  operation, `5` an unexpected failure.
 - `core/document_reader.py` — read text out of a Word file with no third-party
   dependency: a `.docx`/`.docm` is an Office Open XML package (a ZIP holding
   `word/document.xml`), read through **`core/docx_extract.py`** (Stage 2B), which
