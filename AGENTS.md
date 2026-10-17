@@ -246,6 +246,43 @@ Arabic is kept as secondary aliases where useful.
   (`chat` default, `download`, `models`, `status`, `--session` persistence).
   The modules are named `vision_model`/`vision_mouth` on purpose, because
   `core/vision.py` is already the unrelated optional multimodal perception.
+- `core/banner.py` — **Banner**, the project's *presentation* mouth: Ultron and
+  Vision's third sibling, added the same way and living in the same places. It is
+  the Presentation Studio's own authoring model (**Qwen3 8B Instruct**,
+  `qwen3:8b`), promoted to a first-class mouth dedicated to turning a discussion
+  into an outline and an outline into slide content. It is deliberately a *thin*
+  layer, not a second implementation: the catalog, the model folder, the download
+  gate, and the in-process GGUF runner all live in `core.presentation_model`, and
+  `core/banner.py` reuses them, so one catalog and one model file mean the Studio
+  and Banner can never disagree about what is installed (a user who fetched the
+  weights for the Studio downloads nothing extra). The model is a **GGUF file
+  under `data/presentation`** (`core.paths.presentation_models_dir`, git-ignored,
+  the same folder the Studio uses); the runtime and `huggingface_hub` are the
+  optional `[presentation]` extra (`core.optional_deps.FEATURE_BANNER`,
+  `requirements-banner.txt`, which only pins the Studio's runtime), imported
+  lazily. `download_model` runs only through the permission + human approval
+  gates (`--approve`), like a web search or the image model. `BannerUnavailable`
+  subclasses the Studio's own `PresentationModelUnavailable`, so a caller can
+  catch either. Wired **directly below Vision** in the menu (`cli.menu.run_banner`),
+  CLI (`python -m cli banner`), and — as a **mouth inside the project's own
+  chat** (`ai/banner_mouth.py`, the headless twin `python -m cli banner-chat`) —
+  the window's header model selector (`MOUTH_CHOICES` in `gui/app.py`) and
+  settings *Answering mouth* radio, beside *From sources (cited)*, *From trained
+  model*, Ultron, and Vision, plus the sidebar **Answer from Banner** action; the
+  conversation stays in the same transcript and session, never a separate window.
+  Every answer is labelled as the local presentation model's own, not grounded in
+  cited sources. `ai/banner.py` is the CLI entry point (`chat` default,
+  `download`, `models`, `status`, `--session` persistence).
+- `gui/window_controls.py` — the shared **minimize / maximize** controls every
+  dialog window installs. `install_window_controls(window, header, theme=,
+  typography=, on_close=)` builds one frame of two buttons into the window's
+  header and returns a `WindowControls`; `WindowControls` grows the window with
+  `state("zoomed")` where the window manager supports it and falls back to a real
+  full-screen window where it does not (many X11 desktops), restoring exactly
+  what it did. Rolled into the eight dialog windows (Code Studio, Presentation
+  Studio and its finalize/course windows, the Import Center, the SQL import
+  screen, and the two image windows) so a secondary window behaves like the main
+  one without each dialog re-implementing the logic.
 - `core/composition.py` — the deterministic composer: dependency-free rules that
   render evidence (retrieved passages, web sources, causal/reasoning/decision
   traces) into clean attributed prose. Shared by the assistant's extractive

@@ -665,6 +665,7 @@ python -m cli chat --no-web                 # answer only from what it knows
 python -m cli chat --mind                   # answer from the trained model, not the sources
 python -m cli chat --ultron                 # answer from Ultron, the general local model
 python -m cli chat --vision                 # answer from Vision, the petroleum local model
+python -m cli chat --banner                 # answer from Banner, the presentation local model
 python -m cli chat --session demo           # resume/autosave a named session
 python -m cli chat --list-sessions          # show saved conversations
 python -m cli chat --json "what is porosity?"   # machine-readable turn
@@ -702,7 +703,8 @@ model. A missing checkpoint is reported plainly, with the command to train one
 
 Inside an interactive session you can switch mouths without restarting: type
 `from the model` to answer from the model, `from ultron` for the general local
-model, `from vision` for the petroleum local model (both below), or `from the
+model, `from vision` for the petroleum local model, `from banner` for the
+presentation local model (all three below), or `from the
 sources` for cited, retrieved answers again. When
 the sources cannot answer a question, the chat prints a short hint pointing at
 the other mouths. Those phrases are recognised by `chat` alone — they are
@@ -710,9 +712,9 @@ the other mouths. Those phrases are recognised by `chat` alone — they are
 
 The model mouth is wired only in `ai/chat.py` (`ai/mind.py` holds the logic) and
 never touches `ai/jarvis.py`, `core/jarvis.py`, or the session builder, so Jarvis
-mode is unaffected. The Ultron (`ai/ultron_mouth.py`) and Vision
-(`ai/vision_mouth.py`) mouths follow the same rule, so all four mouths answer in
-one session.
+mode is unaffected. The Ultron (`ai/ultron_mouth.py`), Vision
+(`ai/vision_mouth.py`), and Banner (`ai/banner_mouth.py`) mouths follow the same
+rule, so all five mouths answer in one session.
 
 ### Ultron: a general, advanced local model (optional)
 
@@ -846,6 +848,53 @@ That is what makes "attach a document, then ask Vision about it" work inside the
 same chat. The grounded mouth is unaffected — it already retrieves the file's
 chunks and cites them.
 
+### Banner: a presentation local model (optional)
+
+**Banner** is the Presentation Studio's own model, promoted to a first-class
+mouth so the same model that drafts a deck can also be talked to directly. It is
+a real, advanced model that runs **locally** — the Studio's authoring model,
+**Qwen3 8B Instruct** (`qwen3:8b`) — dedicated to turning a discussion into an
+outline and an outline into slide content.
+
+```bash
+python -m cli chat --banner                       # chat answering from Banner (same window, same session)
+python -m cli banner                              # Banner on its own (type 'quit' to exit)
+python -m cli banner "outline a talk on hydraulic fracturing"   # one prompt, answered locally
+python -m cli banner --session demo "expand slide 3"   # keep context across runs
+python -m cli banner models                       # list the models it can fetch
+python -m cli banner status                       # what is installed and present
+python -m cli banner download --approve           # one-time: fetch the model
+```
+
+Like Ultron and Vision, it is a **mouth inside the project's own chat**: the
+window's model selector and the settings panel's *Answering mouth* both list
+**Banner (presentation local model)**, and the sidebar's **Answer from Banner**
+entry selects it. Whichever way you pick it, the conversation continues in the
+**same transcript, the same session, and with the same conversation controls** —
+there is no separate window. In the text chat, type `from banner` (or `from the
+sources` to switch back). It is wired **directly below Vision** in the numbered
+menu as its own program (`python -m cli banner`).
+
+Banner is deliberately a *thin* layer, not a second implementation: the catalog,
+the model folder, the download gate, and the in-process GGUF runner all live in
+`core/presentation_model.py`, and `core/banner.py` reuses them. One catalog and
+one model file mean the Studio and Banner can never disagree about what is
+installed, and a user who already fetched the weights for the Studio downloads
+nothing extra for Banner. The model is a **GGUF file under `data/presentation`**
+(the same folder the Studio uses, git-ignored), it shares the **`[presentation]`
+runtime extra** (`llama-cpp-python` + `huggingface_hub`, imported lazily), and
+downloading the weights runs only through the permission and human-approval gates
+(`--approve`), denied by default.
+
+Every Banner answer is labelled `[banner] answered by the local presentation
+model; not grounded in cited sources.` It is the model's own prose, not a cited
+extract, and it is never checked against the corpus — the same honesty rule the
+other mouths follow. `core/banner.py` holds the engine (an injectable runner, the
+catalog, and the gates); `ai/banner.py` is the CLI entry point; and
+`ai/banner_mouth.py` is the chat mouth that lets Banner answer inside the
+project's own conversation (`from banner` in text, the model selector in the
+window).
+
 ## Graphical interface (ChatGPT-style)
 
 A desktop window that looks and reads like ChatGPT ships **next to** the command
@@ -858,6 +907,7 @@ python -m gui                           # the same window, directly
 python -m cli gui --mind                # start answering from the trained model
 python -m cli gui --ultron              # start answering from Ultron (general local model)
 python -m cli gui --vision              # start answering from Vision (petroleum local model)
+python -m cli gui --banner              # start answering from Banner (presentation local model)
 python -m cli gui --session demo        # resume a saved conversation
 python -m cli gui --no-web              # answer only from internal knowledge
 python -m cli gui --mode jarvics        # start with sandboxed tools enabled
@@ -880,7 +930,8 @@ The window is a thin shell over the same code the CLI already runs:
   in the sandbox under every existing guarantee. The header shows the active mode
   by name and switches with one control, and beside it sits the **model
   selector** — *From sources (cited)*, *From trained model*, *Ultron (general
-  local model)*, and *Vision (petroleum local model)* — so the answering mouth
+  local model)*, *Vision (petroleum local model)*, and *Banner (presentation
+  local model)* — so the answering mouth
   changes inside the *same* chat. The
   sidebar lists the sandbox tools and dims them in AI Mode. The chosen mode
   persists (see `gui/modes.py`), and switching never clears the transcript.

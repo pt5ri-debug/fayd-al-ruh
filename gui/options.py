@@ -32,6 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="start answering from Vision, the petroleum local model (reservoir, drilling, PVT)",
     )
     parser.add_argument("--vision-model", default=None, help="a specific .gguf file for Vision to load")
+    parser.add_argument(
+        "--banner",
+        action="store_true",
+        help="start answering from Banner, the presentation local model (outlines and slide content)",
+    )
+    parser.add_argument("--banner-model", default=None, help="a specific .gguf file for Banner to load")
     parser.add_argument("--session", default=None, help="resume a saved session by id")
     parser.add_argument(
         "--mode",

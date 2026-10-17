@@ -32,6 +32,7 @@ from core.imagegen_diffusion import DEFAULT_PRESET, PRESETS
 from core.optional_deps import FEATURE_IMAGE, pip_install_command
 from gui.image_preview import load_scaled
 from gui.typography import resolve
+from gui.window_controls import install_window_controls
 
 TITLE = "Generate an image from text"
 SUBTITLE = (
@@ -106,10 +107,15 @@ class ImageGenDialog:
         theme = self.theme
         header = tk.Frame(self.window, bg=theme.base)
         header.pack(fill="x", padx=20, pady=(18, 8))
+        title_row = tk.Frame(header, bg=theme.base)
+        title_row.pack(fill="x")
         tk.Label(
-            header, text=TITLE, bg=theme.base, fg=theme.contrast,
+            title_row, text=TITLE, bg=theme.base, fg=theme.contrast,
             font=self._type.font("heading1", weight="bold"), anchor="w",
-        ).pack(fill="x")
+        ).pack(side="left")
+        self._window_controls = install_window_controls(
+            self.window, title_row, theme=theme, typography=self._type, on_close=self._close
+        )
         tk.Label(
             header, text=SUBTITLE, bg=theme.base, fg=theme.text_secondary,
             font=self._type.font("xs"), anchor="w", justify="left", wraplength=980,

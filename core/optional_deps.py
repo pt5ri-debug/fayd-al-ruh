@@ -50,6 +50,7 @@ FEATURE_CODER = "coder"
 FEATURE_VISION = "vision"
 FEATURE_PPTX = "pptx"
 FEATURE_PRESENTATION = "presentation"
+FEATURE_BANNER = "banner"
 
 
 @dataclass(frozen=True)
@@ -165,6 +166,23 @@ FEATURES: dict[str, OptionalFeature] = {
         ),
         system_missing_note="no `.gguf` presentation model file is present yet.",
     ),
+    FEATURE_BANNER: OptionalFeature(
+        key=FEATURE_BANNER,
+        title="Banner, the presentation local model (in-process)",
+        summary=(
+            "Answer from Banner, the Presentation Studio's own local Qwen3 model, "
+            "with no Ollama server running. It shares the data/presentation folder "
+            "and the [presentation] runtime with the Studio's authoring model."
+        ),
+        requirements_file="requirements-banner.txt",
+        import_names=("llama_cpp", "huggingface_hub"),
+        system_note=(
+            "The model weights are a separate one-time, human-approved download: "
+            "run `python -m cli banner download --approve` (~5 GB), or drop a "
+            "`.gguf` file into the data/presentation folder."
+        ),
+        system_missing_note="no `.gguf` presentation model file is present yet.",
+    ),
 }
 
 
@@ -267,6 +285,18 @@ def _vision_model_cached() -> bool:
     return model_is_cached()
 
 
+def _banner_model_cached() -> bool:
+    """Whether at least one Banner model file (a ``.gguf``) is already on disk.
+
+    Banner shares the Presentation Studio's ``data/presentation`` folder, so a
+    model the Studio already fetched counts here too; the extra installs the
+    runtime and the file is the second half of "usable right now".
+    """
+    from core.banner import model_is_cached
+
+    return model_is_cached()
+
+
 def status(key: str) -> FeatureStatus:
     """Check one optional feature without importing its heavy packages eagerly."""
     missing = missing_imports(key)
@@ -281,6 +311,8 @@ def status(key: str) -> FeatureStatus:
         system_ok = _coder_model_cached() if python_ok else False
     elif key == FEATURE_VISION:
         system_ok = _vision_model_cached() if python_ok else False
+    elif key == FEATURE_BANNER:
+        system_ok = _banner_model_cached() if python_ok else False
     else:
         system_ok = True
     return FeatureStatus(key=key, python_ok=python_ok, system_ok=system_ok, missing_python=missing)
@@ -432,6 +464,7 @@ def install(
 
 
 __all__ = [
+    "FEATURE_BANNER",
     "FEATURE_IMAGE",
     "FEATURE_OCR",
     "FEATURE_PDF",

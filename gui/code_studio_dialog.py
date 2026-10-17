@@ -46,6 +46,7 @@ from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.typography import resolve
+from gui.window_controls import install_window_controls
 
 #: The Studio reads as a centred conversation, capped like the chat window's
 #: transcript so long lines stay readable on a wide screen.
@@ -184,6 +185,9 @@ class CodeStudioDialog:
         ).pack(anchor="w", pady=(2, 0))
 
         self._spinner = ttk.Progressbar(inner, mode="indeterminate", length=120)
+        self._window_controls = install_window_controls(
+            self.window, inner, theme=theme, typography=self._type, on_close=self._close
+        )
         tk.Frame(self.window, bg=theme.border_subtle, height=1).pack(fill="x")
 
     # -- sidebar ----------------------------------------------------------

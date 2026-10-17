@@ -18,6 +18,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from cli.menu import (
+    run_banner_chat,
     run_code_studio,
     run_curriculum,
     run_demo,
@@ -78,6 +79,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         "vision",
         "Answer from Vision (petroleum local model)",
         run_vision_chat,
+        (),
+    ),
+    GuiAction(
+        "banner",
+        "Answer from Banner (presentation local model)",
+        run_banner_chat,
         (),
     ),
     GuiAction("learn", "Continuous learning and regression gate", run_learn, ()),

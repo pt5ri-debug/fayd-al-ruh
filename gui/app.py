@@ -41,6 +41,7 @@ from core import optional_deps
 from core import speech
 from core.paths import data_dir
 from core.ultron import UltronUnavailable
+from core.banner import BannerUnavailable
 from core.vision_model import VisionUnavailable
 from core.version import __version__
 from gui import markdown as md
@@ -61,13 +62,15 @@ from gui.typography import Typography, for_root
 
 #: The answering mouths the header's model selector offers, in order. The label
 #: is what the user reads; the key is the value :class:`ChatService` expects.
-#: Ultron and Vision are mouths *inside* this chat, exactly like the other two, so
-#: a conversation with either happens in the project's own window, not a separate one.
+#: Ultron, Vision, and Banner are mouths *inside* this chat, exactly like the other
+#: two, so a conversation with any of them happens in the project's own window, not
+#: a separate one.
 MOUTH_CHOICES: tuple[tuple[str, str], ...] = (
     (chat_module.MOUTH_SOURCES, "From sources (cited)"),
     (chat_module.MOUTH_MODEL, "From trained model"),
     (chat_module.MOUTH_ULTRON, "Ultron (general local model)"),
     (chat_module.MOUTH_VISION, "Vision (petroleum local model)"),
+    (chat_module.MOUTH_BANNER, "Banner (presentation local model)"),
 )
 MOUTH_LABELS: dict[str, str] = {key: label for key, label in MOUTH_CHOICES}
 
@@ -1203,7 +1206,8 @@ class FaydGUI:
             text=(
                 "Answering mouth: “From sources” cites passages · “From trained model” "
                 "shows what it learned · “Ultron” answers anything, locally · “Vision” "
-                "is the petroleum local model (no citations)"
+                "is the petroleum local model (no citations) · “Banner” drafts "
+                "presentation outlines and slide content"
             ),
             bg=self._theme.base, fg=self._theme.text_dim, font=self._type.font("xs"), justify="center",
             wraplength=560,
@@ -1685,10 +1689,10 @@ class FaydGUI:
     def _switch_mouth(self, want: str) -> None:
         """Swap the mouth the *same* chat answers from, reporting a failure plainly.
 
-        All four mouths -- sources, the trained model, Ultron, and Vision -- answer
-        in this conversation; only ``mode.assistant`` changes, so the transcript, the
-        session, and the controls are untouched. A mouth that cannot load leaves
-        the current one in place and shows the real next step instead.
+        All five mouths -- sources, the trained model, Ultron, Vision, and Banner --
+        answer in this conversation; only ``mode.assistant`` changes, so the
+        transcript, the session, and the controls are untouched. A mouth that cannot
+        load leaves the current one in place and shows the real next step instead.
         """
         if want == self.service.source:
             return
@@ -1699,9 +1703,18 @@ class FaydGUI:
                 self.service.use_ultron()
             elif want == chat_module.MOUTH_VISION:
                 self.service.use_vision()
+            elif want == chat_module.MOUTH_BANNER:
+                self.service.use_banner()
             else:
                 self.service.use_sources()
-        except (FileNotFoundError, OSError, ValueError, UltronUnavailable, VisionUnavailable) as error:
+        except (
+            FileNotFoundError,
+            OSError,
+            ValueError,
+            UltronUnavailable,
+            VisionUnavailable,
+            BannerUnavailable,
+        ) as error:
             self._source_var.set(self.service.source)
             self._source_menu_var_reset()
             self._add_bubble("note", chat_module.switch_failure_message(want, error))
@@ -2116,6 +2129,16 @@ class FaydGUI:
         """
         self._switch_mouth(chat_module.MOUTH_VISION)
 
+    def _select_banner_mouth(self) -> None:
+        """Switch this chat to the Banner mouth from the sidebar action.
+
+        Banner answers in the *same* conversation -- no separate window -- so this
+        just drives the header's model selector. When the optional runtime or a
+        model file is missing, the honest next step is shown in the transcript
+        instead of opening a mouth that could not answer.
+        """
+        self._switch_mouth(chat_module.MOUTH_BANNER)
+
     def _on_install_ocr(self) -> None:
         """Install the optional OCR packages from within the window.
 
@@ -2237,6 +2260,9 @@ class FaydGUI:
             return
         if action.key == "vision":
             self._select_vision_mouth()
+            return
+        if action.key == "banner":
+            self._select_banner_mouth()
             return
         argv = action.argv
         if action.needs_input:
@@ -2418,6 +2444,7 @@ def main(argv: list[str] | None = None) -> int:
         model_checkpoint=args.model_checkpoint,
         ultron_model=args.ultron_model,
         vision_model=args.vision_model,
+        banner_model=args.banner_model,
         session=args.session,
         operating_mode=args.mode,
     )
@@ -2438,6 +2465,12 @@ def main(argv: list[str] | None = None) -> int:
             service.use_vision()
         except (VisionUnavailable, OSError, ValueError) as error:
             print(f"Could not load Vision: {error}")
+            return 1
+    if args.banner:
+        try:
+            service.use_banner()
+        except (BannerUnavailable, OSError, ValueError) as error:
+            print(f"Could not load Banner: {error}")
             return 1
 
     FaydGUI(root, service=service)
