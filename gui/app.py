@@ -1012,6 +1012,45 @@ class FaydGUI:
         )
         self._cloud_provider_note.pack(fill="x")
 
+        model_row = tk.Frame(panel, bg=self._theme.surface)
+        model_row.pack(fill="x", padx=14, pady=(4, 0))
+        tk.Label(
+            model_row, text="Model", bg=self._theme.surface,
+            fg=self._theme.text_secondary, font=self._type.font("2xs"),
+            anchor="w", padx=4,
+        ).pack(side="left")
+        self._cloud_model_var = tk.StringVar(value=self.service.cloud_model())
+        entry = tk.Entry(
+            model_row, textvariable=self._cloud_model_var, bg=self._theme.surface_raised,
+            fg=self._theme.foreground, insertbackground=self._theme.foreground,
+            font=self._type.font("xs"), relief="flat", highlightthickness=0,
+        )
+        entry.pack(side="left", fill="x", expand=True, padx=(2, 4))
+        entry.bind("<Return>", lambda _event: self._on_cloud_model_change())
+        tk.Button(
+            model_row, text="Set", command=self._on_cloud_model_change,
+            bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("2xs"),
+            activebackground=self._theme.interactive_hover,
+            activeforeground=self._theme.foreground, relief="flat",
+            highlightthickness=0, bd=0, cursor="hand2",
+        ).pack(side="left")
+
+    def _on_cloud_model_change(self) -> None:
+        """Store the typed Cloud model, so a retired default is fixed once.
+
+        A provider renames and shuts models down; when the built-in default stops
+        working, typing a working name here (e.g. ``gemini-3.8-flash``) makes every
+        later answer use it, and the window and the CLI agree.
+        """
+        typed = self._cloud_model_var.get().strip()
+        try:
+            stored = self.service.set_cloud_model(typed)
+        except ValueError as error:
+            self._add_bubble("note", f"Could not set the Cloud model: {error}")
+            return
+        self._cloud_model_var.set(stored)
+        self._add_bubble("note", f"Cloud will ask for model {stored!r}.")
+
     def _cloud_provider_line(self, key: str) -> str:
         """An honest one-line note about a provider: key needed, free tier, or local."""
         import os
@@ -1037,6 +1076,8 @@ class FaydGUI:
             return
         if hasattr(self, "_cloud_provider_note"):
             self._cloud_provider_note.configure(text=self._cloud_provider_line(stored))
+        if hasattr(self, "_cloud_model_var"):
+            self._cloud_model_var.set(self.service.cloud_model())
         self._source_menu_var_reset()
         self._add_bubble("note", f"Cloud will answer from {self._cloud_provider_line(stored)}")
 

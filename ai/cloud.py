@@ -4,6 +4,8 @@
     python -m cli cloud "explain how a jet engine works"   # one question
     python -m cli cloud --provider groq "..."   # choose the provider for one turn
     python -m cli cloud use gemini               # remember a provider for later runs
+    python -m cli cloud use gemini --model gemini-3.8-flash   # also remember its model
+    python -m cli cloud models                   # the models the provider serves *now*
     python -m cli cloud --session demo "and who invented it?"  # keep context across runs
     python -m cli cloud providers                # list the providers it can reach
     python -m cli cloud status                   # is a key set and the endpoint reachable
@@ -46,10 +48,13 @@ from core.cloud_model import (
     CloudEngine,
     CloudUnavailable,
     cloud_status,
+    load_model_key,
     load_provider_key,
     provider_summaries,
     resolve_provider,
+    save_model_key,
     save_provider_key,
+    selected_model,
     selected_provider,
 )
 from core.conversation import Conversation, ConversationMemory, Role
@@ -81,11 +86,15 @@ def _settings_root() -> Path:
 def _engine(args: argparse.Namespace) -> CloudEngine:
     # An explicit --provider wins; otherwise the provider the user last chose is
     # used, so "python -m cli cloud use gemini" makes every later run Gemini with
-    # no flag. A local server needs no key.
+    # no flag. A local server needs no key. The model follows the same rule: an
+    # explicit --model wins, else the model saved for this provider, else the
+    # provider's own default -- so a provider whose default was retired can be
+    # pointed at a working model once with "cloud use <provider> --model <name>".
     provider = selected_provider(_settings_root(), getattr(args, "provider", None))
+    model = selected_model(_settings_root(), provider, getattr(args, "model", None))
     return CloudEngine(
         provider=provider,
-        model=args.model,
+        model=model,
         base_url=args.base_url,
         api_key_env=args.api_key_env,
         temperature=getattr(args, "temperature", None),
@@ -235,7 +244,7 @@ def _provider_table(current: str) -> None:
 
 
 def run_use(args: argparse.Namespace) -> int:
-    """Remember a provider as the default, so later runs need no ``--provider``."""
+    """Remember a provider (and optionally a model) as the default for later runs."""
     key = getattr(args, "provider_key", None)
     if not key:
         # No name given: show the catalog and ask, so choosing is one keystroke.
@@ -257,15 +266,78 @@ def run_use(args: argparse.Namespace) -> int:
         print(f"Cloud: {error}")
         return 2
     spec = resolve_provider(chosen)
-    print(f"Cloud will now use {spec.title} ({spec.key}) by default.")
+    model = getattr(args, "model", None)
+    if model:
+        try:
+            save_model_key(_settings_root(), chosen, model)
+        except ValueError as error:
+            print(f"Cloud: {error}")
+            return 2
+        print(f"Cloud will now use {spec.title} ({spec.key}) model {model!r} by default.")
+    else:
+        saved_model = load_model_key(_settings_root(), chosen)
+        print(f"Cloud will now use {spec.title} ({spec.key}) by default.")
+        if saved_model:
+            print(f"Its saved model is {saved_model!r}; a retired default is avoided.")
+        else:
+            print(f"Its default model is {spec.default_model!r}.")
     print("Ask it with: python -m cli cloud \"your question\"")
     if spec.needs_key:
         print(f"Set its key first: export {spec.api_key_env}=\"your key\"")
         if spec.free:
             print("This provider has a free tier, so no card is needed.")
         print("Then check it: python -m cli cloud status")
+        print("If a model is refused as unavailable, list what it serves:")
+        print(f"  python -m cli cloud models --provider {spec.key}")
     else:
         print(f"No key is needed; it talks to {spec.base_url} on this machine.")
+    return 0
+
+
+def run_models(args: argparse.Namespace) -> int:
+    """List the models the provider actually serves right now (a real request).
+
+    A provider renames and shuts models down, so the catalog's own list can go
+    stale; this asks the endpoint itself, which is the only honest answer to
+    "which model should I use?".
+    """
+    engine = _engine(args)
+    spec = engine.provider
+    if not engine.is_available():
+        status = cloud_status(engine.client)
+        print(status.summary() + (" " + status.hint if status.hint else ""))
+        return 1
+    try:
+        names = engine.client.list_models()
+    except CloudUnavailable as error:
+        print(str(error))
+        print(
+            f"{spec.title} does not advertise a model list here. The catalog default "
+            f"is {spec.default_model!r}; pick another with "
+            f"python -m cli cloud --provider {spec.key} --model <name> \"...\"."
+        )
+        return 1
+    saved = load_model_key(_settings_root(), spec.key)
+    current = engine.client.model
+    if args.as_json:
+        print(json.dumps(
+            {"provider": spec.key, "model": current, "saved_model": saved, "models": list(names)},
+            ensure_ascii=False,
+        ))
+        return 0
+    print(f"{spec.title} serves {len(names)} models (in use now: {current}):")
+    for name in names:
+        marks = []
+        if name == current:
+            marks.append("in use")
+        if name == saved:
+            marks.append("saved")
+        if name == spec.default_model:
+            marks.append("catalog default")
+        suffix = f"   [{', '.join(marks)}]" if marks else ""
+        print(f"  {name}{suffix}")
+    print("\nPick one for one turn: python -m cli cloud --model <name> \"your question\"")
+    print(f"Or make it the default:  python -m cli cloud use {spec.key} --model <name>")
     return 0
 
 
@@ -296,7 +368,7 @@ def run_status(args: argparse.Namespace) -> int:
 
 
 #: The subcommands Cloud understands. Anything else is read as a chat message.
-_COMMANDS = ("chat", "providers", "status", "use")
+_COMMANDS = ("chat", "providers", "models", "status", "use")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -317,6 +389,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "provider_key", nargs="?", default=None,
         help="which provider to use by default (e.g. gemini, groq); omit to pick from a list",
     )
+    use.add_argument(
+        "--model", default=None,
+        help="also remember this model for that provider (e.g. gemini-3.8-flash)",
+    )
+
+    models = sub.add_parser("models", help="List the models the provider serves now.")
+    _add_connection_arguments(models)
+    models.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
 
     status = sub.add_parser("status", help="Show whether a key is set and the endpoint answers.")
     _add_connection_arguments(status)
@@ -388,6 +468,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_providers(args)
     if args.command == "use":
         return run_use(args)
+    if args.command == "models":
+        return run_models(args)
     if args.command == "status":
         return run_status(args)
 

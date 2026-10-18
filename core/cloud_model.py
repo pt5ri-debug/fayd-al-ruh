@@ -156,10 +156,16 @@ CATALOG: dict[str, CloudProvider] = {
         key="gemini",
         title="Google Gemini",
         base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-        default_model="gemini-2.0-flash",
+        default_model="gemini-2.5-flash",
         api_key_env="GEMINI_API_KEY",
         summary="Google's Gemini models; there is a free tier for light use.",
-        models=("gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"),
+        models=(
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3.8-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash-lite",
+        ),
         free=True,
     ),
     "groq": CloudProvider(
@@ -276,6 +282,12 @@ def free_provider_names() -> tuple[str, ...]:
 PROVIDER_NAMESPACE = "cloud"
 PROVIDER_KEY = "provider"
 
+#: Where the user's *chosen model* per provider is remembered, so a provider whose
+#: default was retired (a provider renames and shuts models down) can be pointed at
+#: a working one once -- ``cloud use gemini --model gemini-3.8-flash`` -- instead of
+#: repeating ``--model`` on every call. Only a model *name*, never a key.
+MODEL_KEY = "models"
+
 
 def load_provider_key(root: str | Path) -> str:
     """The provider the user last chose, or the default; never raises.
@@ -317,6 +329,68 @@ def selected_provider(root: str | Path, explicit: str | None = None) -> CloudPro
     if explicit:
         return resolve_provider(explicit)
     return resolve_provider(load_provider_key(root))
+
+
+def load_model_key(root: str | Path, provider_key: str) -> str | None:
+    """The model the user last chose for ``provider_key``, or ``None``.
+
+    Lets a provider whose built-in default was retired be pointed at a working
+    model once, instead of repeating ``--model`` on every call. Never raises: a
+    broken store simply means "no saved model", so the provider default applies.
+    """
+    try:
+        resolved = resolve_provider(provider_key).key
+    except ValueError:
+        return None
+    from storage.json_store import JsonStore
+
+    try:
+        saved = JsonStore(root).load(PROVIDER_NAMESPACE, MODEL_KEY)
+    except Exception:
+        return None
+    if not isinstance(saved, dict):
+        return None
+    name = saved.get(resolved)
+    return str(name).strip() or None if name else None
+
+
+def save_model_key(root: str | Path, provider_key: str, model: str) -> str:
+    """Remember ``model`` as the model to use for ``provider_key``.
+
+    Raises :class:`ValueError` for an unknown provider or an empty model name, so
+    a typo is reported rather than stored. A store error is swallowed, so choosing
+    a model cannot fail just because the data folder is read-only.
+    """
+    resolved = resolve_provider(provider_key).key
+    name = (model or "").strip()
+    if not name:
+        raise ValueError("A model name is required.")
+    from storage.json_store import JsonStore
+
+    try:
+        store = JsonStore(root)
+        current = store.load(PROVIDER_NAMESPACE, MODEL_KEY)
+        mapping = dict(current) if isinstance(current, dict) else {}
+        mapping[resolved] = name
+        store.save(PROVIDER_NAMESPACE, MODEL_KEY, mapping)
+    except Exception:
+        pass
+    return name
+
+
+def selected_model(
+    root: str | Path, provider: CloudProvider | str | None, explicit: str | None = None
+) -> str:
+    """The model to ask for: an explicit name, else the saved one, else the default.
+
+    The order matters: a user who typed ``--model`` this once gets it, a user who
+    saved a model for this provider gets that, and otherwise the provider's own
+    default applies.
+    """
+    if explicit and explicit.strip():
+        return explicit.strip()
+    spec = resolve_provider(provider)
+    return load_model_key(root, spec.key) or spec.default_model
 
 
 def redact_secret(text: str, secret: str | None) -> str:
@@ -479,9 +553,7 @@ class OpenAICompatibleClient:
     def _parse(self, status: int, body: str) -> dict[str, Any]:
         safe = redact_secret(body, self.api_key)
         if status >= 400:
-            raise CloudUnavailable(
-                f"{self.provider.title} returned HTTP {status}: {safe[:300]}"
-            )
+            raise CloudUnavailable(self._error_message(status, safe))
         try:
             parsed = json.loads(body)
         except json.JSONDecodeError as error:
@@ -491,6 +563,34 @@ class OpenAICompatibleClient:
         if not isinstance(parsed, dict):
             raise CloudUnavailable(f"{self.provider.title} returned an unexpected reply shape.")
         return parsed
+
+    def _error_message(self, status: int, safe: str) -> str:
+        """An honest error that names the *next step*, not just the HTTP code.
+
+        A retired or misspelled model is the most common failure (providers
+        rename and shut models down), and a bare ``HTTP 404`` leaves the user
+        stuck. So a 404/400 that mentions the model points at the two fixes:
+        list what the endpoint really serves, and pick a different one.
+        """
+        head = f"{self.provider.title} returned HTTP {status}: {safe[:300]}"
+        low = safe.lower()
+        model_gone = status in (400, 404) and (
+            "model" in low and ("not found" in low or "no longer available" in low
+                                or "not available" in low or "does not exist" in low
+                                or "unsupported" in low or "shut down" in low
+                                or "deprecated" in low)
+        )
+        if not model_gone:
+            return head
+        return (
+            f"{head}\n"
+            f"The model {self.model!r} is not available at {self.provider.title}. "
+            f"See what it serves with: python -m cli cloud models --provider "
+            f"{self.provider.key}\n"
+            f"Then ask with another one, e.g.: python -m cli cloud --provider "
+            f"{self.provider.key} --model <name> \"your question\" "
+            f"(or set it as the default for this provider)."
+        )
 
     def _payload(
         self,
@@ -858,6 +958,7 @@ __all__ = [
     "HEADER",
     "MAX_TOKENS_CEILING",
     "MAX_TEMPERATURE",
+    "MODEL_KEY",
     "NAME",
     "OpenAICompatibleClient",
     "PROVIDER_KEY",
@@ -867,11 +968,14 @@ __all__ = [
     "cloud_status",
     "free_provider_names",
     "granted_permissions",
+    "load_model_key",
     "load_provider_key",
     "provider_names",
     "provider_summaries",
     "redact_secret",
     "resolve_provider",
+    "save_model_key",
     "save_provider_key",
+    "selected_model",
     "selected_provider",
 ]
