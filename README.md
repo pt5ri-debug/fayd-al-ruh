@@ -911,7 +911,9 @@ its own; the mouth stays closed until you set a key *and* select it.
 ```bash
 python -m cli cloud status                        # is a key present, and is it reachable?
 python -m cli cloud providers                     # the catalog: OpenAI, Anthropic, Gemini, ...
+python -m cli cloud models                        # the models the provider serves *now*
 python -m cli cloud use gemini                    # remember a provider (Gemini *or* Groq, ...)
+python -m cli cloud use gemini --model gemini-3.8-flash   # also remember its model
 python -m cli cloud "who wrote Hamlet?"           # one question, answered remotely
 python -m cli cloud --provider anthropic "explain PVT"
 python -m cli cloud --provider ollama --model llama3.2 "hi"   # a local server, no key
@@ -929,6 +931,20 @@ catalog and asks. A one-off `--provider <key>` still wins for a single turn. In
 the window, open **Settings → Cloud provider** and pick from the menu; the choice
 is stored at once and shown under the menu (including whether that provider's key
 is already set). Only the provider's *name* is saved, never a key.
+
+The **model** is remembered the same way, per provider. If a provider retires the
+model the project defaults to (Google shut `gemini-2.0-flash` down), you get a
+clear error and two ways out:
+
+```bash
+python -m cli cloud models                        # what the endpoint really serves
+python -m cli cloud use gemini --model gemini-3.8-flash   # fix it once, remembered
+python -m cli cloud --model gemini-3.8-flash "hi"         # or just for one turn
+```
+
+The window's **Settings → Cloud provider → Model** field does the same thing: type
+a working name and press **Set**, and every later answer — in the window and the
+CLI — uses it. With nothing saved, the provider's own default applies.
 
 Two of the catalog entries need **no card** — both have a free tier:
 

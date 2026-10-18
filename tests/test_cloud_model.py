@@ -47,12 +47,15 @@ from core.cloud_model import (
     approved_gate,
     cloud_status,
     granted_permissions,
+    load_model_key,
     load_provider_key,
     provider_names,
     provider_summaries,
     redact_secret,
     resolve_provider,
+    save_model_key,
     save_provider_key,
+    selected_model,
     selected_provider,
 )
 from core.conversation import Conversation
@@ -581,6 +584,7 @@ def test_cli_bare_question_is_normalized_to_chat() -> None:
     assert cloud_cli._normalize_argv(["who wrote Hamlet?"])[0] == "chat"
     assert cloud_cli._normalize_argv(["status"]) == ["status"]
     assert cloud_cli._normalize_argv(["providers"]) == ["providers"]
+    assert cloud_cli._normalize_argv(["models"]) == ["models"]
     assert cloud_cli._normalize_argv(["use", "gemini"]) == ["use", "gemini"]
     assert cloud_cli._normalize_argv(["--help"]) == ["--help"]
 
@@ -616,12 +620,192 @@ def test_selected_provider_prefers_an_explicit_choice(tmp_path) -> None:
     assert selected_provider(tmp_path, "groq").key == "groq"
 
 
+def test_gemini_default_model_is_a_current_one() -> None:
+    """A retired model must not be the shipped default.
+
+    Google shuts models down (`gemini-2.0-flash` is gone), so the catalog's
+    default has to be a model the endpoint still serves, or every Gemini call
+    fails with a 404 out of the box.
+    """
+    assert CATALOG["gemini"].default_model != "gemini-2.0-flash"
+    assert CATALOG["gemini"].default_model.startswith("gemini-")
+
+
+def test_selected_model_prefers_explicit_then_saved_then_default(tmp_path) -> None:
+    spec = CATALOG["gemini"]
+    # Nothing saved: the provider's own default.
+    assert selected_model(tmp_path, "gemini") == spec.default_model
+    # A saved model wins over the default.
+    save_model_key(tmp_path, "gemini", "gemini-3.8-flash")
+    assert selected_model(tmp_path, "gemini") == "gemini-3.8-flash"
+    # An explicit --model wins over the saved one, for one turn.
+    assert selected_model(tmp_path, "gemini", "gemini-2.5-flash") == "gemini-2.5-flash"
+
+
+def test_saved_model_is_per_provider(tmp_path) -> None:
+    save_model_key(tmp_path, "gemini", "gemini-3.8-flash")
+    assert load_model_key(tmp_path, "gemini") == "gemini-3.8-flash"
+    # Another provider is unaffected and keeps its own default.
+    assert load_model_key(tmp_path, "groq") is None
+    assert selected_model(tmp_path, "groq") == CATALOG["groq"].default_model
+
+
+def test_saved_model_rejects_an_unknown_provider_and_empty_name(tmp_path) -> None:
+    with pytest.raises(ValueError):
+        save_model_key(tmp_path, "not-a-provider", "some-model")
+    with pytest.raises(ValueError):
+        save_model_key(tmp_path, "gemini", "   ")
+
+
+def test_load_model_key_never_raises_on_a_broken_store(tmp_path) -> None:
+    """A bad stored model, or an unknown provider, is simply "no saved model"."""
+    from storage.json_store import JsonStore
+
+    JsonStore(tmp_path).save("cloud", "models", {"gemini": "gemini-3.8-flash"})
+    assert load_model_key(tmp_path, "not-a-provider") is None
+
+
 def test_cli_use_remembers_the_provider(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
-    args = cast(argparse.Namespace, SimpleNamespace(provider_key="gemini"))
+    args = cast(argparse.Namespace, SimpleNamespace(provider_key="gemini", model=None))
     assert cloud_cli.run_use(args) == 0
     assert "Gemini" in capsys.readouterr().out
     assert load_provider_key(tmp_path) == "gemini"
+
+
+def test_cli_use_can_remember_a_model_too(tmp_path, monkeypatch, capsys) -> None:
+    """`cloud use gemini --model X` remembers the model, so a retired default is fixed once."""
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
+    args = cast(argparse.Namespace, SimpleNamespace(provider_key="gemini", model="gemini-3.8-flash"))
+    assert cloud_cli.run_use(args) == 0
+    out = capsys.readouterr().out
+    assert "gemini-3.8-flash" in out
+    assert load_model_key(tmp_path, "gemini") == "gemini-3.8-flash"
+
+
+def test_cli_engine_honours_the_saved_model(tmp_path, monkeypatch) -> None:
+    """With no --model, the engine uses the model saved for the chosen provider."""
+    save_provider_key(tmp_path, "gemini")
+    save_model_key(tmp_path, "gemini", "gemini-3.8-flash")
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
+    args = cast(
+        argparse.Namespace,
+        SimpleNamespace(
+            provider=None, model=None, base_url=None, api_key_env=None,
+            temperature=None, max_tokens=None,
+        ),
+    )
+    engine = cloud_cli._engine(args)
+    assert engine.provider.key == "gemini"
+    assert engine.client.model == "gemini-3.8-flash"
+
+
+def test_cli_models_lists_what_the_provider_serves(tmp_path, monkeypatch, capsys) -> None:
+    """`cloud models` prints the endpoint's real list and marks the one in use."""
+    save_provider_key(tmp_path, "gemini")
+    save_model_key(tmp_path, "gemini", "gemini-3.8-flash")
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
+    client = FakeClient("x", provider="gemini")
+    client.model = "gemini-3.8-flash"
+    client.list_models = lambda: ("gemini-2.0-flash", "gemini-3.8-flash")  # type: ignore[method-assign]
+    monkeypatch.setattr(cloud_cli, "_engine", lambda _args: CloudEngine(client, approved=True))
+    args = cast(argparse.Namespace, SimpleNamespace(as_json=False))
+    assert cloud_cli.run_models(args) == 0
+    out = capsys.readouterr().out
+    assert "gemini-3.8-flash" in out
+    assert "in use" in out
+
+
+def test_cli_models_json(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
+    client = FakeClient("x", provider="gemini")
+    client.model = "gemini-3.8-flash"
+    client.list_models = lambda: ("gemini-3.8-flash",)  # type: ignore[method-assign]
+    monkeypatch.setattr(cloud_cli, "_engine", lambda _args: CloudEngine(client, approved=True))
+    args = cast(argparse.Namespace, SimpleNamespace(as_json=True))
+    assert cloud_cli.run_models(args) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["provider"] == "gemini"
+    assert data["models"] == ["gemini-3.8-flash"]
+
+
+def test_cli_models_needs_a_key(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        cloud_cli, "_engine", lambda _args: CloudEngine(KeylessClient(provider="openai"), approved=True)
+    )
+    args = cast(argparse.Namespace, SimpleNamespace(as_json=False))
+    assert cloud_cli.run_models(args) == 1
+    assert "OPENAI_API_KEY" in capsys.readouterr().out
+
+
+def test_retired_model_error_names_the_next_step() -> None:
+    """A 404 for a retired model must say how to recover, not just show JSON.
+
+    This is the exact failure a user hits when a provider shuts a model down
+    (Google retired ``gemini-2.0-flash``): the bare HTTP code leaves them stuck,
+    so the message points at `cloud models` and at `--model`.
+    """
+    body = json.dumps({
+        "error": {
+            "code": 404,
+            "message": "This model models/gemini-2.0-flash is no longer available. "
+                       "Please update your code to use models/gemini-3.8-flash.",
+        }
+    })
+
+    def transport(url: str, headers: dict[str, str], data: bytes | None, timeout: float):
+        return 404, body
+
+    client = OpenAICompatibleClient(
+        "gemini-2.0-flash", provider="gemini", api_key="k", transport=transport
+    )
+    with pytest.raises(CloudUnavailable) as info:
+        client.chat([CloudMessage("user", "hi")])
+    message = str(info.value)
+    assert "gemini-2.0-flash" in message
+    assert "cloud models" in message
+    assert "--model" in message
+
+
+def test_an_unrelated_http_error_keeps_the_plain_message() -> None:
+    """Only a *model* problem gets the model advice; a 500 stays a 500."""
+
+    def transport(url: str, headers: dict[str, str], data: bytes | None, timeout: float):
+        return 500, "internal server error"
+
+    client = OpenAICompatibleClient(
+        "gpt-4o-mini", provider="openai", api_key="k", transport=transport
+    )
+    with pytest.raises(CloudUnavailable) as info:
+        client.chat([CloudMessage("user", "hi")])
+    message = str(info.value)
+    assert "HTTP 500" in message
+    assert "cloud models" not in message
+
+
+def test_cloud_mouth_honours_the_saved_model(tmp_path, monkeypatch) -> None:
+    """The chat mouth answers from the saved model, not the retired default.
+
+    The window and the CLI must agree, so a model saved once (fixing a provider
+    that retired its default) is used by the mouth too, not just by `cli cloud`.
+    """
+    save_provider_key(tmp_path, "gemini")
+    save_model_key(tmp_path, "gemini", "gemini-3.8-flash")
+    monkeypatch.setattr("core.paths.data_dir", lambda: tmp_path)
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    assistant = cloud_mouth.load_cloud_assistant()
+    assert assistant.engine.provider.key == "gemini"
+    assert assistant.engine.client.model == "gemini-3.8-flash"
+
+
+def test_cloud_mouth_explicit_model_still_wins(tmp_path, monkeypatch) -> None:
+    """An explicit model passed to the loader is not overridden by the saved one."""
+    save_model_key(tmp_path, "gemini", "gemini-3.8-flash")
+    monkeypatch.setattr("core.paths.data_dir", lambda: tmp_path)
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    assistant = cloud_mouth.load_cloud_assistant(provider="gemini", model="gemini-2.5-flash")
+    assert assistant.engine.client.model == "gemini-2.5-flash"
 
 
 def test_cli_use_rejects_an_unknown_provider(tmp_path, monkeypatch, capsys) -> None:
@@ -748,12 +932,26 @@ def test_service_remembers_the_cloud_provider(tmp_path) -> None:
     assert ChatService(data_root=tmp_path).cloud_provider() == "groq"
 
 
-def test_service_rejects_an_unknown_cloud_provider(tmp_path) -> None:
+def test_service_remembers_the_cloud_model(tmp_path) -> None:
+    """The window's model choice is persisted too, so a retired default is fixed once."""
+    from gui.service import ChatService
+
+    service = ChatService(data_root=tmp_path)
+    service.set_cloud_provider("gemini")
+    # With nothing saved, the provider's own default is reported.
+    assert service.cloud_model() == CATALOG["gemini"].default_model
+    assert service.set_cloud_model("gemini-3.8-flash") == "gemini-3.8-flash"
+    assert service.cloud_model() == "gemini-3.8-flash"
+    # A fresh service (a new launch) reads the saved model.
+    assert ChatService(data_root=tmp_path).cloud_model() == "gemini-3.8-flash"
+
+
+def test_service_rejects_an_empty_cloud_model(tmp_path) -> None:
     from gui.service import ChatService
 
     service = ChatService(data_root=tmp_path)
     with pytest.raises(ValueError):
-        service.set_cloud_provider("not-a-provider")
+        service.set_cloud_model("   ")
 
 
 def test_gui_provider_picker_changes_the_provider(tmp_path) -> None:
@@ -774,6 +972,37 @@ def test_gui_provider_picker_changes_the_provider(tmp_path) -> None:
         assert service.cloud_provider() == "gemini"
     finally:
         root.destroy()
+
+
+def test_gui_model_field_sets_the_cloud_model(tmp_path) -> None:
+    """Typing a model in the settings field stores it, so the window can fix a 404."""
+    if not _display_available():
+        pytest.skip("no display available")
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+    from gui.service import ChatService
+
+    root = tk.Tk()
+    service = ChatService(data_root=tmp_path)
+    service.set_cloud_provider("gemini")
+    window = FaydGUI(root, service=service)
+    try:
+        window._toggle_settings()
+        assert window._cloud_model_var.get() == CATALOG["gemini"].default_model
+        window._cloud_model_var.set("gemini-3.8-flash")
+        window._on_cloud_model_change()
+        assert service.cloud_model() == "gemini-3.8-flash"
+    finally:
+        root.destroy()
+
+
+def test_service_rejects_an_unknown_cloud_provider(tmp_path) -> None:
+    from gui.service import ChatService
+
+    service = ChatService(data_root=tmp_path)
+    with pytest.raises(ValueError):
+        service.set_cloud_provider("not-a-provider")
 
 
 def test_chat_parser_accepts_cloud_flags(monkeypatch, capsys) -> None:

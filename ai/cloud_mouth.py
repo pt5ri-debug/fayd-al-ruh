@@ -42,6 +42,7 @@ from core.cloud_model import (
     NAME as CLOUD_NAME,
     CloudEngine,
     CloudUnavailable,
+    selected_model,
     selected_provider,
 )
 from core.conversation import Conversation, Role
@@ -252,12 +253,19 @@ def load_cloud_assistant(
     When ``provider`` is ``None`` the provider the user last chose (through
     ``python -m cli cloud use <key>`` or the window's provider picker) is used, so
     the mouth answers from the same provider the rest of the program does; only an
-    explicit name overrides the saved choice.
+    explicit name overrides the saved choice. The *model* follows the same rule: an
+    explicit ``model`` wins, else the model saved for that provider, else the
+    provider's own default -- so a provider whose default was retired can be
+    pointed at a working model once and every later answer uses it.
     """
     if provider is None and client is None:
         from core.paths import data_dir
 
         provider = selected_provider(data_dir()).key
+    if model is None and client is None:
+        from core.paths import data_dir
+
+        model = selected_model(data_dir(), provider)
     engine = CloudEngine(
         client,
         provider=provider,

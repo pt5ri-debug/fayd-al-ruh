@@ -290,7 +290,17 @@ Arabic is kept as secondary aliases where useful.
   `cloud` namespace (only the provider's *name*, never a key), so
   `python -m cli cloud use gemini` (or the window's provider picker) makes every
   later run Gemini with no flag — an explicit `--provider` still wins for one turn,
-  and a stored name that left the catalog falls back to the default. Each catalog
+  and a stored name that left the catalog falls back to the default. The **model is
+  remembered too, per provider**: `load_model_key`/`save_model_key`/`selected_model`
+  persist it under the same namespace (`MODEL_KEY`), so
+  `python -m cli cloud use gemini --model gemini-3.8-flash` (or the window's
+  **Model** field) points a provider whose built-in default was *retired* at a
+  working model once — an explicit `--model` still wins for one turn, and with
+  nothing saved the provider's own default applies. `cli cloud models` asks the
+  endpoint what it *actually* serves (a real request, `--json` for machines), which
+  is the honest answer when a provider renames or shuts a model down; a 404/400 that
+  names the model gets an actionable error (run `cloud models`, then `--model`)
+  instead of a bare HTTP code. Each catalog
   entry also carries `free` (`free_provider_names`), so the app can point a user who
   does not want to pay at a no-card provider (Gemini, Groq, OpenRouter, Mistral).
   It is governed like every other external action: a cloud call

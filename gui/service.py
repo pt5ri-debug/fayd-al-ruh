@@ -368,6 +368,32 @@ class ChatService:
             self.switcher.use_cloud()
         return stored
 
+    def cloud_model(self) -> str:
+        """The model the Cloud mouth will ask for (the saved one, else the default).
+
+        Shown beside the provider picker so a provider whose built-in default was
+        retired can be pointed at a working model from the window, not only the CLI.
+        """
+        from core.cloud_model import load_provider_key, selected_model
+
+        provider = load_provider_key(self._data_root)
+        return selected_model(self._data_root, provider)
+
+    def set_cloud_model(self, model: str) -> str:
+        """Remember ``model`` for the current Cloud provider, and rebuild the mouth.
+
+        Returns the stored name. Raises :class:`ValueError` for an empty name, so
+        the window reports a bad entry rather than storing it. This is the window's
+        fix for a provider that retired its default model: type a working one once.
+        """
+        from core.cloud_model import load_provider_key, save_model_key
+
+        stored = save_model_key(self._data_root, load_provider_key(self._data_root), model)
+        self.switcher.invalidate_cloud()
+        if self.switcher.mouth == chat_module.MOUTH_CLOUD:
+            self.switcher.use_cloud()
+        return stored
+
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations."""
         self.switcher.use_sources()
