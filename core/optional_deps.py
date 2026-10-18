@@ -51,6 +51,8 @@ FEATURE_VISION = "vision"
 FEATURE_PPTX = "pptx"
 FEATURE_PRESENTATION = "presentation"
 FEATURE_BANNER = "banner"
+FEATURE_QWEN_ASR = "qwen-asr"
+FEATURE_QWEN_TTS = "qwen-tts"
 
 
 @dataclass(frozen=True)
@@ -183,6 +185,39 @@ FEATURES: dict[str, OptionalFeature] = {
         ),
         system_missing_note="no `.gguf` presentation model file is present yet.",
     ),
+    FEATURE_QWEN_ASR: OptionalFeature(
+        key=FEATURE_QWEN_ASR,
+        title="Qwen3-ASR speech recognition",
+        summary=(
+            "Transcribe speech with the local Qwen3-ASR model (52 languages, "
+            "including Arabic) instead of the system `whisper` engine."
+        ),
+        requirements_file="requirements-qwen-speech.txt",
+        import_names=("torch", "qwen_asr"),
+        system_note=(
+            "The model weights are a separate one-time, human-approved download: "
+            "run `python -m cli qwen-asr download --approve` (~3.4 GB), or drop a "
+            "model folder into the data/qwen-speech folder."
+        ),
+        system_missing_note="no Qwen3-ASR model folder is present yet.",
+    ),
+    FEATURE_QWEN_TTS: OptionalFeature(
+        key=FEATURE_QWEN_TTS,
+        title="Qwen3-TTS speech synthesis",
+        summary=(
+            "Read chat text aloud with the local Qwen3-TTS model (expressive, ten "
+            "languages; it does not speak Arabic)."
+        ),
+        requirements_file="requirements-qwen-speech.txt",
+        import_names=("torch", "qwen_tts"),
+        system_note=(
+            "The model weights are a separate one-time, human-approved download: "
+            "run `python -m cli qwen-tts download --approve` (~3.4 GB), or drop a "
+            "model folder into the data/qwen-speech folder. Qwen3-TTS does not "
+            "speak Arabic; the system engine still reads Arabic aloud."
+        ),
+        system_missing_note="no Qwen3-TTS model folder is present yet.",
+    ),
 }
 
 
@@ -297,6 +332,18 @@ def _banner_model_cached() -> bool:
     return model_is_cached()
 
 
+def _qwen_speech_model_cached(kind: str) -> bool:
+    """Whether a Qwen3 speech model (``"asr"`` or ``"tts"``) is already on disk.
+
+    Both families live under ``data/qwen-speech`` and are keyed by a registry; the
+    extra installs the runtime and the model folder is the second half of "usable
+    right now".
+    """
+    from core.qwen_speech import model_is_cached
+
+    return model_is_cached(kind)
+
+
 def status(key: str) -> FeatureStatus:
     """Check one optional feature without importing its heavy packages eagerly."""
     missing = missing_imports(key)
@@ -313,6 +360,10 @@ def status(key: str) -> FeatureStatus:
         system_ok = _vision_model_cached() if python_ok else False
     elif key == FEATURE_BANNER:
         system_ok = _banner_model_cached() if python_ok else False
+    elif key == FEATURE_QWEN_ASR:
+        system_ok = _qwen_speech_model_cached("asr") if python_ok else False
+    elif key == FEATURE_QWEN_TTS:
+        system_ok = _qwen_speech_model_cached("tts") if python_ok else False
     else:
         system_ok = True
     return FeatureStatus(key=key, python_ok=python_ok, system_ok=system_ok, missing_python=missing)

@@ -403,6 +403,41 @@ Arabic is kept as secondary aliases where useful.
   voice and says when no engine exists rather than pretending. CLI:
   `python -m ai.speak [list] "<text>" --voice <key> [--write-wav f] [--no-play]`
   / `python -m cli speak` and `python -m cli voices`.
+- `core/qwen_speech.py` — the **Qwen3 speech models** (ASR + TTS) as a real, local
+  alternative to the system engines, added the way Ultron/Vision add a real local
+  *language* model. `QwenAsrRecognizer` runs **Qwen3-ASR** (1.7B default / 0.6B)
+  through `qwen-asr`; `QwenTtsSynthesizer` runs **Qwen3-TTS** (12 Hz, 1.7B / 0.6B)
+  through `qwen-tts`; both load a model folder into this process (no server,
+  nothing sent off the machine) and both delegate to an injectable runner
+  (`AsrRunner`/`TtsRunner`), so the engines are exercised with no `torch` and no
+  weights. `ASR_CATALOG`/`TTS_CATALOG` + `resolve_asr_spec`/`resolve_tts_spec`/
+  `asr_spec_names`/`tts_spec_names` name the fetchable models; the weights live
+  under `data/qwen-speech` (`core.paths.qwen_speech_models_dir`, git-ignored) with
+  a `model.json` registry, and `find_model_dir`/`model_is_cached` read them.
+  `qwen_asr_status`/`qwen_tts_status` report *exactly* what is installed (extra +
+  weights) and the real next step; `download_model` runs only through the
+  permission + human-approval gates (`--approve`), like every other model
+  download. The runtime is the optional `[qwen-speech]` extra
+  (`requirements-qwen-speech.txt`), imported lazily. **Honest by construction:**
+  Qwen3-ASR covers **Arabic** (52 languages), but **Qwen3-TTS does not speak
+  Arabic** (ten languages: Chinese, English, Japanese, Korean, German, French,
+  Russian, Portuguese, Spanish, Italian) — `QWEN_TTS_LANGUAGES` states this, the
+  synthesizer refuses Arabic with a clear message, and a `fallback` synthesizer
+  (the system engine) can be supplied so Arabic is still read aloud.
+- `core/speech.py`'s two factories are the **one** place every chat interface gets
+  its speech, so Qwen3 is wired there and nowhere else: `discover_recognizer_name`
+  prefers `qwen3-asr` when the extra and weights are present (else `whisper`, else
+  `transcript`), `load_recognizer("qwen3-asr")` builds the recognizer, and
+  `load_synthesizer("qwen3-tts")` builds the synthesizer with the system engine as
+  its automatic Arabic fallback (`_system_synthesizer`). `discover_synthesizer_name`
+  keeps the tiny system engines first (they are installed and speak Arabic) and
+  only falls to `qwen3-tts` when no system engine exists. So the GUI, Jarvis,
+  `ai.voice`, `ai.speak`, and **every future mouth** get Qwen3 by construction,
+  with no per-window work. CLI: `python -m cli qwen-asr status|models|download
+  --approve|transcribe <file>` and `python -m cli qwen-tts status|models|download
+  --approve|say "<text>" --write-wav f` (`cli/qwen_speech.py`, the headless twin of
+  the window's controls), mirrored as the GUI sidebar's three *Qwen3 speech*
+  actions and the reading-voice picker's status note.
 - `core/jarvis.py` — the unified Jarvis loop over the assistant, the tool router,
   and speech; it keeps one `Conversation` per run (persisted through the memory's
   `JsonStore` when one is configured) and a mute state.
@@ -1472,6 +1507,17 @@ clone, each optional so the base system still runs without it:
   package, so when it is absent the window's sidebar and the CLI offer to install
   it (`install_speech_engine`, `python -m cli speak --install-engine`) instead of
   only naming it, and `python -m cli deps` reports it beside the other features.
+- Phase 11 — the Qwen3 speech models (ASR + TTS) for every chat interface:
+  `core/qwen_speech.py` adds **Qwen3-ASR** (52 languages, **including Arabic**) and
+  **Qwen3-TTS** (expressive, ten languages, **no Arabic**) as real local engines,
+  wired into `core/speech.py`'s `load_recognizer`/`load_synthesizer` so the GUI,
+  Jarvis, `ai.voice`, `ai.speak`, and every future mouth get them by construction.
+  Both run locally through the optional `[qwen-speech]` extra, the weights are a
+  one-time human-approved download under `data/qwen-speech`, and each engine is a
+  seam a test injects. Arabic is handled honestly: ASR transcribes it, and TTS
+  reads it through the system engine rather than the model. Surfaced as
+  `python -m cli qwen-asr|qwen-tts`, the GUI sidebar's three *Qwen3 speech*
+  actions, and a status note in the reading-voice picker.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

@@ -214,8 +214,16 @@ def run_loop(mode: JarvisMode, *, as_json: bool, require_wake: bool, speak: bool
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Jarvis mode: listen, understand, act, speak.")
     parser.add_argument("utterance", nargs="*", help="one request; omit to enter the interactive loop")
-    parser.add_argument("--asr", default="auto", help="ASR engine: auto, transcript, whisper")
-    parser.add_argument("--tts", default="auto", help="TTS engine: auto, silent, espeak, say, flite")
+    parser.add_argument(
+        "--asr",
+        default="auto",
+        help="ASR engine: auto, transcript, whisper, qwen3-asr (local Qwen3-ASR model)",
+    )
+    parser.add_argument(
+        "--tts",
+        default="auto",
+        help="TTS engine: auto, silent, espeak, say, flite, qwen3-tts (local Qwen3-TTS model)",
+    )
     parser.add_argument("--root", default=None, help="sandbox root directory for tools")
     parser.add_argument("--read-write", action="store_true", help="allow writing tools in the sandbox")
     parser.add_argument("--wake", action="store_true", help="require the wake word before responding")

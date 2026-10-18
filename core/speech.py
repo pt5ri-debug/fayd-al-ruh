@@ -13,6 +13,16 @@ Engines are discovered lazily by name (``piper``, ``whisper``, ...). When none i
 installed the project still exposes a working *text* voice loop -- the recognizer
 returns a supplied transcript and the synthesizer produces a silent clip -- so the
 conversation flow is exercised end to end on a fresh clone.
+
+This module is the **one** place every chat interface gets its speech from: the
+GUI, Jarvis, ``ai.voice``, ``ai.speak``, and every future mouth call
+:func:`load_recognizer` / :func:`load_synthesizer` (or ``'auto'``). The two
+**Qwen3** models -- :mod:`core.qwen_speech`'s Qwen3-ASR and Qwen3-TTS -- are wired
+in here as named engines (``'qwen3-asr'`` / ``'qwen3-tts'``), so adding them once
+makes them available to every interface, present and future, with no per-window
+work. ``auto`` prefers the Qwen3 model for ASR (it covers Arabic) and a system
+engine for TTS (tiny, installed, and Arabic-capable); choosing ``qwen3-tts``
+explicitly still reads Arabic through the system engine rather than failing.
 """
 
 from __future__ import annotations
@@ -405,16 +415,22 @@ SpeechCommandRunner = Callable[[Sequence[str]], tuple[int, str]]
 
 
 def discover_synthesizer_name() -> str:
-    """Return the first system TTS engine available, or ``'silent'``.
+    """Return the best installed TTS engine, or ``'silent'``.
 
-    Windows' own engine (SAPI through PowerShell) is checked too, so a Windows
-    machine with no command-line engine still reads aloud instead of going silent.
+    The system engines (``espeak``, ``say``, Windows SAPI) come first because they
+    are tiny, already installed, and speak Arabic. When none exists but the local
+    Qwen3-TTS model is fully present, that model is used instead, so a machine
+    with the Qwen3 extra still gets a natural voice rather than silence.
     """
     for name, executable, _builder, _voice_options in TTS_ENGINES:
         if shutil.which(executable):
             return name
     if windows_speech_available():
         return _WINDOWS_SAPI
+    from core.qwen_speech import available_synthesizer
+
+    if available_synthesizer():
+        return "qwen3-tts"
     return "silent"
 
 
@@ -582,7 +598,17 @@ class WhisperRecognizer:
 
 
 def discover_recognizer_name() -> str:
-    """Return ``'whisper'`` when the program is installed, else ``'transcript'``."""
+    """Return the best installed ASR engine: ``'qwen3-asr'``, ``'whisper'``, else ``'transcript'``.
+
+    The local Qwen3-ASR model is preferred when its extra and weights are present
+    (it covers Arabic, where ``whisper`` is English-first), then the ``whisper``
+    program, then the transcript stand-in -- so ``auto`` never fails and always
+    picks the strongest engine that is actually installed.
+    """
+    from core.qwen_speech import available_recognizer
+
+    if available_recognizer():
+        return "qwen3-asr"
     return "whisper" if shutil.which("whisper") else "transcript"
 
 
@@ -622,10 +648,53 @@ def load_recognizer(name: str = "transcript", **options) -> SpeechRecognizer:
         raise ValueError(
             "ASR engine 'whisper' is not installed. Use --asr auto or --asr transcript."
         )
+    if name in ("qwen3-asr", "qwen"):
+        from core.qwen_speech import QwenAsrRecognizer, QwenSpeechUnavailable, available_recognizer
+
+        if not available_recognizer() and not options.get("runner"):
+            from core.qwen_speech import qwen_asr_status
+
+            raise ValueError(
+                "ASR engine 'qwen3-asr' is not ready. " + qwen_asr_status().hint
+            )
+        try:
+            return QwenAsrRecognizer(
+                model_dir=options.get("model_dir"),
+                runner=options.get("runner"),
+                language=options.get("language"),
+                device=options.get("device", "cpu"),
+                root=options.get("root"),
+            )
+        except QwenSpeechUnavailable as error:
+            raise ValueError(str(error)) from error
     raise ValueError(
         f"ASR engine {name!r} is not available in this build. "
         "Install a speech backend or use the transcript recognizer."
     )
+
+
+def _system_synthesizer(
+    *, voice: Voice | None = None, language: str | None = None
+) -> SpeechSynthesizer | None:
+    """The installed system TTS engine, or ``None`` when there is none.
+
+    Used as the Arabic fallback for Qwen3-TTS (which has no Arabic). ``None`` --
+    not a silent stand-in -- so the caller can decide, rather than being handed an
+    engine that would produce nothing.
+    """
+    for engine_name, executable, builder, voice_options in TTS_ENGINES:
+        if shutil.which(executable):
+            return CommandSynthesizer(
+                engine_name,
+                executable,
+                builder,
+                voice=voice,
+                language=language,
+                voice_options=voice_options,
+            )
+    if windows_speech_available():
+        return WindowsSapiSynthesizer(voice=voice, language=language)
+    return None
 
 
 def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
@@ -647,6 +716,34 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
         return SilentSynthesizer()
     voice = _resolve_voice(options.get("voice"))
     language = options.get("language")
+    if name in ("qwen3-tts", "qwen"):
+        from core.qwen_speech import QwenSpeechUnavailable, QwenTtsSynthesizer, available_synthesizer
+
+        if not available_synthesizer() and not options.get("runner"):
+            from core.qwen_speech import qwen_tts_status
+
+            raise ValueError("TTS engine 'qwen3-tts' is not ready. " + qwen_tts_status().hint)
+        fallback = options.get("fallback")
+        if fallback is None:
+            # Qwen3-TTS does not speak Arabic, so a system engine reads it instead
+            # of the model silently mispronouncing it. Chosen once here, so every
+            # caller (window, CLI, voice loop) gets the same honest behaviour.
+            system = _system_synthesizer(voice=voice, language=language)
+            if system is not None:
+                fallback = system
+        try:
+            return QwenTtsSynthesizer(
+                model_dir=options.get("model_dir"),
+                runner=options.get("runner"),
+                speaker=options.get("speaker"),
+                language=language,
+                instruct=options.get("instruct"),
+                fallback=fallback,
+                device=options.get("device", "cpu"),
+                root=options.get("root"),
+            )
+        except QwenSpeechUnavailable as error:
+            raise ValueError(str(error)) from error
     if name == _WINDOWS_SAPI:
         if windows_speech_available():
             return WindowsSapiSynthesizer(voice=voice, language=language)
