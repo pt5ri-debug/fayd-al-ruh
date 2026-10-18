@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import platform
 import shutil
+import signal
 import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
@@ -785,12 +786,91 @@ def _resolve_voice(value) -> Voice | None:
     return find_voice(str(value))
 
 
+class MicRecording:
+    """A microphone recording in progress, stoppable before the time limit.
+
+    :meth:`MicrophoneRecorder.start` returns one of these instead of blocking for
+    a fixed number of seconds: the caller :meth:`stop` s it when the user is done
+    talking (a second click on the microphone icon) and :meth:`result` returns the
+    clip. ``arecord`` stops cleanly on ``SIGINT`` (it finalises the WAV header);
+    ``sox`` is asked for a long capture and terminated the same way. The handle
+    also works with an injected process, so the flow is testable with no audio
+    hardware.
+    """
+
+    def __init__(
+        self,
+        process: subprocess.Popen[bytes],
+        *,
+        path: Path,
+        recorder: str,
+        folder: Path,
+    ) -> None:
+        self._process = process
+        self._path = path
+        self._recorder = recorder
+        self._folder = folder
+
+    @property
+    def recorder(self) -> str:
+        return self._recorder
+
+    @property
+    def recording(self) -> bool:
+        """True while the recorder is still capturing."""
+        return self._process.poll() is None
+
+    def stop(self) -> None:
+        """Ask the recorder to stop and finalise the WAV (idempotent).
+
+        ``SIGINT`` is used rather than ``terminate()`` because ``arecord`` flushes
+        its WAV header on interrupt; a recorder that ignores it is killed after a
+        short grace period, so ``stop`` never hangs.
+        """
+        if self._process.poll() is None:
+            try:
+                self._process.send_signal(signal.SIGINT)
+            except (OSError, ValueError):
+                self._process.terminate()
+            try:
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait(timeout=5)
+
+    def result(self, *, timeout: float | None = 30.0) -> AudioClip:
+        """Stop if needed and return the recorded clip.
+
+        Raises :class:`ValueError` when no audio was captured (an unavailable
+        microphone, or a clip too short to hold a word) rather than returning a
+        silent clip the recognizer would reject anyway.
+        """
+        if self._process.poll() is None:
+            self.stop()
+        try:
+            self._process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self._process.kill()
+            self._process.wait(timeout=5)
+        try:
+            if not self._path.exists() or self._path.stat().st_size <= 44:
+                raise ValueError(
+                    f"Microphone recorder {self._recorder!r} captured no audio."
+                )
+            return AudioClip.read_wav(self._path)
+        finally:
+            shutil.rmtree(self._folder, ignore_errors=True)
+
+
 class MicrophoneRecorder:
-    """Records a short clip from the system microphone, when a recorder exists.
+    """Records a clip from the system microphone, when a recorder exists.
 
     Uses ``arecord`` (Linux/ALSA) or ``sox`` (cross-platform) if installed; when
     neither exists, :meth:`available` is False and the caller should fall back to
     the text loop. No pip package and no network access is involved.
+    :meth:`record` blocks for a fixed number of seconds (the CLI's behaviour);
+    :meth:`start` returns a :class:`MicRecording` the caller stops when the user
+    is done -- which is how the window's microphone icon toggles.
     """
 
     def __init__(self, *, seconds: float = 4.0, sample_rate: int = SAMPLE_RATE) -> None:
@@ -808,25 +888,111 @@ class MicrophoneRecorder:
     def available(self) -> bool:
         return self.recorder is not None
 
-    def record(self) -> AudioClip:
+    @staticmethod
+    def _argv(recorder: str, target: Path, sample_rate: int, seconds: float) -> list[str]:
+        """The command that captures ``seconds`` of mono 16-bit audio to ``target``."""
+        if recorder == "arecord":
+            return [
+                "arecord", "-q", "-f", "S16_LE", "-r", str(sample_rate),
+                "-d", str(int(seconds)), str(target),
+            ]
+        return [
+            "sox", "-d", "-r", str(sample_rate), "-c", "1", "-b", "16",
+            str(target), "trim", "0", str(seconds),
+        ]
+
+    def start(self) -> MicRecording:
+        """Begin recording in the background; return a stoppable MicRecording.
+
+        ``seconds`` bounds the capture (a safety limit); the caller normally stops
+        it sooner. A recorder that cannot start raises, so the caller can report
+        it instead of hanging.
+        """
         recorder = self.recorder
         if recorder is None:
             raise ValueError("No microphone recorder is available (install arecord or sox).")
-        with tempfile.TemporaryDirectory(prefix="fayd-mic-") as folder:
-            target = Path(folder) / "input.wav"
-            if recorder == "arecord":
-                argv = ["arecord", "-q", "-f", "S16_LE", "-r", str(self.sample_rate), "-d", str(int(self.seconds)), str(target)]
-            else:  # sox
-                argv = ["sox", "-d", "-r", str(self.sample_rate), "-c", "1", "-b", "16", str(target), "trim", "0", str(self.seconds)]
+        folder = Path(tempfile.mkdtemp(prefix="fayd-mic-"))
+        target = folder / "input.wav"
+        argv = self._argv(recorder, target, self.sample_rate, self.seconds)
+        try:
+            process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+                argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except OSError as error:
+            shutil.rmtree(folder, ignore_errors=True)
+            raise ValueError(f"Microphone recorder {recorder!r} failed: {error}") from error
+        return MicRecording(
+            process, path=target, recorder=recorder, folder=folder
+        )
+
+    def record(self) -> AudioClip:
+        """Record for a fixed ``seconds`` and return the clip (blocking)."""
+        return self.start().result()
+
+
+class Playback:
+    """A clip playing in the background, stoppable before it ends.
+
+    :meth:`Speaker.start` returns one of these instead of blocking: the audio runs
+    in a child process the caller can :meth:`stop` (so a second click on "Read
+    aloud" stops the reading) while :meth:`wait` blocks until it finishes. It is
+    honest about what happened -- :attr:`stopped` says whether it was cut short,
+    and a real player failure is raised from :meth:`wait` rather than swallowed.
+    """
+
+    def __init__(self, process: subprocess.Popen[bytes], *, player: str, folder: Path) -> None:
+        self._process = process
+        self._player = player
+        self._folder: Path | None = folder
+        self.stopped = False
+
+    @property
+    def player(self) -> str:
+        return self._player
+
+    @property
+    def playing(self) -> bool:
+        """True while the audio is still being played."""
+        return self._process.poll() is None
+
+    def stop(self) -> None:
+        """Stop the audio now, if it is still playing (idempotent).
+
+        Also removes the temporary WAV, so a stopped reading leaves nothing
+        behind -- the caller does not have to remember to clean up.
+        """
+        if self._process.poll() is None:
+            self.stopped = True
+            self._process.terminate()
             try:
-                completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
-                    argv, capture_output=True, timeout=int(self.seconds) + 10, check=False
-                )
-            except (OSError, subprocess.SubprocessError) as error:
-                raise ValueError(f"Microphone recorder {recorder!r} failed: {error}") from error
-            if completed.returncode != 0 or not target.exists():
-                raise ValueError(f"Microphone recorder {recorder!r} produced no audio.")
-            return AudioClip.read_wav(target)
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait(timeout=5)
+        self._cleanup()
+
+    def wait(self, *, timeout: float | None = 120.0) -> None:
+        """Block until the audio ends; raise if the player failed.
+
+        A clip the caller stopped is *not* a failure: it returns quietly, so the
+        GUI's ``stop()`` then ``wait()`` flow never reports a spurious error.
+        """
+        try:
+            self._process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            self.stop()
+            raise ValueError(f"Audio player {self._player!r} timed out.") from error
+        finally:
+            self._cleanup()
+        if self.stopped:
+            return
+        if self._process.returncode != 0:
+            raise ValueError(f"Audio player {self._player!r} failed to play the clip.")
+
+    def _cleanup(self) -> None:
+        if self._folder is not None:
+            shutil.rmtree(self._folder, ignore_errors=True)
+            self._folder = None
 
 
 class Speaker:
@@ -837,6 +1003,10 @@ class Speaker:
     built-in ``SoundPlayer`` through PowerShell so read-aloud is actually audible.
     :meth:`available` reports honestly, and :meth:`play` raises when no player
     exists so the caller can fall back to text. No pip package needed.
+
+    :meth:`play` blocks until the clip ends (the CLI's behaviour); :meth:`start`
+    returns a :class:`Playback` the caller can stop -- which is how a chat window
+    lets a second click end the reading.
     """
 
     def __init__(self, *, sample_rate: int = SAMPLE_RATE) -> None:
@@ -854,35 +1024,49 @@ class Speaker:
     def available(self) -> bool:
         return self.player is not None
 
-    def play(self, clip: AudioClip) -> None:
+    @staticmethod
+    def _argv(player: str, target: Path) -> list[str]:
+        """The command that plays the WAV ``target`` through ``player``."""
+        if player == "aplay":
+            return ["aplay", "-q", str(target)]
+        if player == "afplay":
+            return ["afplay", str(target)]
+        if player == "play":
+            return ["play", "-q", str(target)]
+        if player == _WINDOWS_SHELL:
+            # Windows: play the WAV through the built-in SoundPlayer.
+            script = (
+                f"(New-Object System.Media.SoundPlayer '{_ps_quote(str(target))}').PlaySync()"
+            )
+            return [player, "-NoProfile", "-NonInteractive", "-Command", script]
+        return ["sox", str(target), "-d"]  # sox
+
+    def start(self, clip: AudioClip) -> Playback:
+        """Begin playing ``clip`` in the background; return a stoppable Playback.
+
+        The WAV is written under a temporary folder that outlives this call -- a
+        background player reads the file after we return -- and :class:`Playback`
+        removes it when the clip finishes or is stopped.
+        """
         player = self.player
         if player is None:
             raise ValueError("No audio player is available (install aplay, afplay, or sox).")
-        with tempfile.TemporaryDirectory(prefix="fayd-play-") as folder:
-            target = Path(folder) / "speech.wav"
-            clip.write_wav(target)
-            if player == "aplay":
-                argv = ["aplay", "-q", str(target)]
-            elif player == "afplay":
-                argv = ["afplay", str(target)]
-            elif player == "play":
-                argv = ["play", "-q", str(target)]
-            elif player == _WINDOWS_SHELL:
-                # Windows: play the WAV through the built-in SoundPlayer.
-                script = (
-                    f"(New-Object System.Media.SoundPlayer '{_ps_quote(str(target))}').PlaySync()"
-                )
-                argv = [player, "-NoProfile", "-NonInteractive", "-Command", script]
-            else:  # sox
-                argv = ["sox", str(target), "-d"]
-            try:
-                completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
-                    argv, capture_output=True, timeout=120, check=False
-                )
-            except (OSError, subprocess.SubprocessError) as error:
-                raise ValueError(f"Audio player {player!r} failed: {error}") from error
-            if completed.returncode != 0:
-                raise ValueError(f"Audio player {player!r} failed to play the clip.")
+        folder = Path(tempfile.mkdtemp(prefix="fayd-play-"))
+        target = folder / "speech.wav"
+        clip.write_wav(target)
+        argv = self._argv(player, target)
+        try:
+            process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+                argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except OSError as error:
+            shutil.rmtree(folder, ignore_errors=True)
+            raise ValueError(f"Audio player {player!r} failed: {error}") from error
+        return Playback(process, player=player, folder=folder)
+
+    def play(self, clip: AudioClip) -> None:
+        """Play ``clip`` and block until it ends; raise if no player or it fails."""
+        self.start(clip).wait()
 
 
 @dataclass
@@ -956,6 +1140,8 @@ __all__ = [
     "AudioModel",
     "CommandSynthesizer",
     "MicrophoneRecorder",
+    "MicRecording",
+    "Playback",
     "SilentSynthesizer",
     "Speaker",
     "SpeechCommandRunner",

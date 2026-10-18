@@ -1023,10 +1023,55 @@ class _FakeVoiceEngine:
         return AudioClip(tuple([1000, -1000] * 400), sample_rate=16_000)
 
 
+class _FakePlayback:
+    """A stoppable playback that reports itself as still playing."""
+
+    def __init__(self) -> None:
+        self.stopped = False
+
+    @property
+    def playing(self) -> bool:
+        return not self.stopped
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def wait(self, *, timeout: float | None = None) -> None:
+        return None
+
+
+class _FakeSpeaker:
+    """A player that records the clips it was asked to start."""
+
+    def __init__(self) -> None:
+        self.started: list = []
+
+    def available(self) -> bool:
+        return True
+
+    def play(self, clip) -> None:
+        self.started.append(clip)
+
+    def start(self, clip) -> _FakePlayback:
+        self.started.append(clip)
+        return _FakePlayback()
+
+
+def _wait(app, root, predicate, tries: int = 120) -> bool:
+    """Pump the Tk event loop until ``predicate`` holds (or give up)."""
+    import time
+
+    for _ in range(tries):
+        root.update()
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return predicate()
+
+
 @pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_reads_a_message_aloud_and_picks_a_voice() -> None:
     """The reading controls: a per-message button, a voice picker, honest notes."""
-    import time
     import tkinter as tk
 
     from core.voices import VOICE_CATALOG
@@ -1035,8 +1080,6 @@ def test_window_reads_a_message_aloud_and_picks_a_voice() -> None:
     root = tk.Tk()
     try:
         app = FaydGUI(root, service=_service(FakeSession()))
-        # A fake real engine, so the test never depends on a system voice.
-        app.service.reader._synthesizer = _FakeVoiceEngine()
         root.update()
 
         # The settings panel exposes one radio per catalog voice, grouped.
@@ -1067,16 +1110,113 @@ def test_window_reads_a_message_aloud_and_picks_a_voice() -> None:
         app._on_auto_speak_toggle()
         assert app._auto_speak.get() is True
 
-        # Reading a message speaks it and reports the duration honestly.
+        # A fake real engine + player, installed *after* the voice change (which
+        # rebuilds the engine), so the test never depends on a system voice.
+        app.service.reader._synthesizer = _FakeVoiceEngine()
+        speaker = _FakeSpeaker()
+        app.service.reader._speaker = speaker  # type: ignore[assignment]
+
+        # Reading a message plays it and reports the duration honestly.
         app._speak_text("porosity is the fraction of pore space")
-        for _ in range(80):
-            root.update()
-            if not app._busy:
-                break
-            time.sleep(0.02)
+        assert _wait(app, root, lambda: app._playback is not None)
+        notes = [entry.text for entry in app._rows if entry.role == "note"]
+        assert any("reading aloud" in note.lower() for note in notes)
+        assert speaker.started, "the clip was rendered and played"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_speaker_icon_toggles_reading_on_and_off() -> None:
+    """A second click on the speaker control stops the reading it started."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        app.service.reader._synthesizer = _FakeVoiceEngine()
+        app.service.reader._speaker = _FakeSpeaker()  # type: ignore[assignment]
+        root.update()
+
+        widget = app._add_bubble("assistant", "porosity is the fraction of pore space")
+        root.update()
+        # The message footer carries the read-aloud control.
+        footer = widget.master.winfo_children()[-1]
+        label = next(
+            w for w in footer.winfo_children()
+            if isinstance(w, tk.Label) and "Read aloud" in str(w.cget("text"))
+        )
+
+        # First click: the label flips to "Stop" and playback starts.
+        app._toggle_speak(label, "porosity is the fraction of pore space")
+        assert _wait(app, root, lambda: app._playback is not None)
+        assert "Stop" in str(label.cget("text"))
+
+        # Second click on the same control: the reading stops, label restored.
+        app._toggle_speak(label, "porosity is the fraction of pore space")
+        assert app._playback is None
+        assert "Read aloud" in str(label.cget("text"))
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_microphone_reports_honestly_when_no_recorder_is_installed() -> None:
+    """With no recorder installed, the microphone says so and names the next step."""
+    import tkinter as tk
+
+    from core.speech import MicrophoneRecorder
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.update()
+        if MicrophoneRecorder().available():
+            return  # a real recorder exists here; the honest-note path needs none
+        app._toggle_mic()
         root.update()
         notes = [entry.text for entry in app._rows if entry.role == "note"]
-        assert any("spoke" in note.lower() for note in notes)
+        assert any("no microphone recorder is installed" in note.lower() for note in notes)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_microphone_transcribes_into_the_composer() -> None:
+    """The microphone flow places the transcript in the input box, ready to edit."""
+    import tkinter as tk
+
+    from core.speech import AudioClip
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+
+        class _Recording:
+            recording = True
+
+            def result(self, *, timeout=None):
+                return AudioClip(tuple([500, -500] * 100))
+
+        app.service.microphone_available = lambda: True  # type: ignore[method-assign]
+        app.service.recognizer_name = lambda: "qwen3-asr"  # type: ignore[method-assign]
+        app.service.start_recording = lambda: _Recording()  # type: ignore[assignment,method-assign,return-value]
+        app.service.stop_recording = lambda: _Recording()  # type: ignore[assignment,method-assign,return-value]
+        app.service.transcribe = lambda clip: "ما هي المسامية؟"  # type: ignore[method-assign]
+        root.update()
+
+        app._toggle_mic()
+        root.update()
+        assert app._recording is not None
+        app._toggle_mic()  # stop and transcribe
+        assert _wait(app, root, lambda: "المسامية" in app._entry.get("1.0", "end"))
+        assert "المسامية" in app._entry.get("1.0", "end")
+        notes = [entry.text for entry in app._rows if entry.role == "note"]
+        assert any("Heard" in note for note in notes)
     finally:
         root.destroy()
 

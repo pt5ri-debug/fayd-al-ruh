@@ -55,6 +55,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--asr",
+        default="auto",
+        help=(
+            "speech-to-text engine for the microphone button: auto, qwen3-asr "
+            "(the local Qwen3-ASR model), or whisper"
+        ),
+    )
+    parser.add_argument(
         "--mode",
         default=None,
         choices=("ai", "jarvics"),

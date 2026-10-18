@@ -15,6 +15,8 @@ from core.speech import (
     AudioModel,
     CommandSynthesizer,
     MicrophoneRecorder,
+    MicRecording,
+    Playback,
     SilentSynthesizer,
     Speaker,
     TranscriptRecognizer,
@@ -188,3 +190,66 @@ def test_speaker_raises_when_no_player_is_available(monkeypatch):
     monkeypatch.setattr(speech.shutil, "which", lambda name: None)
     with pytest.raises(ValueError):
         Speaker().play(AudioClip.silence(0.1))
+
+
+class _FakeProcess:
+    """A stand-in for the player/recorder child process (no real audio)."""
+
+    def __init__(self) -> None:
+        self.returncode: int | None = None  # None while running, like Popen
+        self.signals: list[int] = []
+        self.killed = False
+
+    def poll(self):
+        return self.returncode
+
+    def send_signal(self, sig) -> None:
+        self.signals.append(int(sig))
+        self.returncode = 0
+
+    def terminate(self) -> None:
+        self.returncode = 0
+
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = 0
+
+    def wait(self, timeout=None) -> int:
+        assert self.returncode is not None
+        return self.returncode
+
+
+def test_playback_stops_a_running_clip():
+    """A Playback can stop the child process and reports it was stopped."""
+    from pathlib import Path
+
+    process = _FakeProcess()
+    playback = Playback(process, player="aplay", folder=Path("/tmp/does-not-exist"))
+    assert playback.playing is True
+    playback.stop()
+    assert playback.stopped is True
+    assert process.returncode == 0  # terminated, not left running
+
+
+def test_playback_wait_is_quiet_after_a_stop():
+    """Stopping then waiting never reports a spurious failure."""
+    from pathlib import Path
+
+    process = _FakeProcess()
+    playback = Playback(process, player="aplay", folder=Path("/tmp/does-not-exist"))
+    playback.stop()
+    playback.wait()  # must not raise
+
+
+def test_microphone_recording_stops_and_finalises():
+    """A MicRecording sends SIGINT so the recorder flushes its WAV header."""
+    from pathlib import Path
+
+    process = _FakeProcess()
+    recording = MicRecording(
+        process, path=Path("/tmp/nope.wav"), recorder="arecord", folder=Path("/tmp/nope")
+    )
+    assert recording.recording is True
+    recording.stop()
+    assert recording.recording is False
+    assert process.signals  # SIGINT was delivered

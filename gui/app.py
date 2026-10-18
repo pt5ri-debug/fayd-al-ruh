@@ -504,8 +504,21 @@ class _Row:
 
 
 @dataclass(frozen=True)
-class _SpokenNote:
-    """The transcript line a finished reading produces (rendered as a note)."""
+class _SpokenClip:
+    """A rendered clip awaiting playback, tagged with the click that asked for it.
+
+    The token lets the window drop a render that a newer click (or a stop) has
+    superseded, so a second click never starts the previous message talking.
+    """
+
+    text: str
+    clip: Any
+    token: int
+
+
+@dataclass(frozen=True)
+class _Transcript:
+    """The text the microphone produced, ready to place in the composer."""
 
     text: str
 
@@ -535,6 +548,9 @@ class FaydGUI:
         self._lines: queue.Queue[str] = queue.Queue()
         self._busy = False
         self._streaming_label: tk.Text | None = None
+        # Speech jobs (render / transcribe) run off the busy path, so the composer
+        # stays usable while a clip renders or a recording is transcribed.
+        self._speech_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
         # Live output is coalesced and rendered at a bounded rate: a fast training
         # loop can emit thousands of lines, and reconfiguring on every one would
         # freeze the window.
@@ -579,6 +595,21 @@ class FaydGUI:
         self._auto_speak = tk.BooleanVar(value=load_auto_speak())
         self._speak_var = tk.StringVar(value=self._voice_key)
         self._speaking = False
+        # The playback in progress (a stoppable clip) and the message it belongs
+        # to, so a second click on that message's speaker stops the reading and a
+        # new click elsewhere stops the old reading before starting the new one.
+        self._playback: Any = None
+        # The per-message speaker control currently showing "Stop", so its label
+        # can be restored when the reading ends or is superseded.
+        self._speak_control: tk.Label | None = None
+        # A counter that tags each "read aloud" request; a render whose token is
+        # stale (superseded by a newer click or a stop) is discarded on arrival.
+        self._speak_token = 0
+        # Microphone state: the recording in progress, its button, and the
+        # transcript note shown while recording.
+        self._recording: Any = None
+        self._mic_button: tk.Button | None = None
+        self._listening = False
 
         # The transcript is selectable and copyable; Delete clears it, Ctrl+C
         # copies the selection, Ctrl+A selects the whole transcript, and a
@@ -603,9 +634,16 @@ class FaydGUI:
         root.title("Fayd Al-Ruh")
         root.geometry("1180x780")
         root.minsize(420, 520)
+        root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_ui()
         root.bind("<Configure>", self._on_root_configure)
+
+    def _on_close(self) -> None:
+        """Stop any reading or recording before the window is destroyed."""
+        self._stop_speaking()
+        self._cancel_recording()
+        self.root.destroy()
 
     # ------------------------------------------------------------------ layout
 
@@ -1487,7 +1525,12 @@ class FaydGUI:
     def _speak_label(
         self, footer: tk.Frame, text: str, *, side: Literal["left", "right", "top", "bottom"] = "left"
     ) -> None:
-        """Add a "Read aloud" control that speaks this message with the chosen voice."""
+        """Add the per-message read-aloud toggle (🔊 Read aloud / ⏹ Stop).
+
+        Clicking it once starts reading the message with the chosen voice; a
+        second click stops the reading. Only one message is read at a time, so a
+        click on another message's control stops the first before starting.
+        """
         if not text.strip():
             return
         label = tk.Label(
@@ -1495,15 +1538,31 @@ class FaydGUI:
             font=self._type.font("2xs"), cursor="hand2",
         )
         label.pack(side=side, padx=(10, 0))
-        label.bind("<Button-1>", lambda _e: self._speak_text(text))
+        label.bind("<Button-1>", lambda _e: self._toggle_speak(label, text))
         label.bind("<Enter>", lambda _e: label.configure(fg=self._theme.foreground))
         label.bind("<Leave>", lambda _e: label.configure(fg=self._theme.text_dim))
 
-    def _speak_text(self, text: str) -> None:
-        """Read ``text`` aloud in the background, reporting honestly if it cannot."""
+    def _toggle_speak(self, label: tk.Label, text: str) -> None:
+        """Start reading ``text``, or stop the reading if this message is playing.
+
+        The active control is remembered as soon as the reading starts, so a
+        second click stops it even while the clip is still being rendered.
+        """
+        if self._speak_control is label:
+            self._stop_speaking()
+            return
+        self._speak_text(text, label=label)
+
+    def _speak_text(self, text: str, *, label: tk.Label | None = None) -> None:
+        """Read ``text`` aloud in the background, reporting honestly if it cannot.
+
+        A reading already in progress is stopped first, so starting a new one (or
+        auto-speak after a fresh answer) never leaves two voices talking at once.
+        """
         clean = _strip_markdown(text).strip()
         if not clean:
             return
+        self._stop_speaking()
         if not self.service.reading_available():
             from core.speech import speech_install_plan
 
@@ -1514,20 +1573,164 @@ class FaydGUI:
                 + " Or run `python -m cli speak --install-engine`.",
             )
             return
-        if self._speaking:
-            return
+        self._speak_token += 1
+        token = self._speak_token
         self._speaking = True
+        if label is not None:
+            label.configure(text="⏹ Stop")
+            self._speak_control = label
         self._status.configure(text="Speaking…")
-        self._start_work(lambda: self._speak_worker(clean))
+        self._start_speech_job(
+            lambda: _SpokenClip(clean, self.service.render_aloud(clean), token)
+        )
 
-    def _speak_worker(self, text: str):
-        """Render and play the clip, returning an honest note for the transcript."""
-        clip = self.service.read_aloud(text)
-        if clip.is_silent:
-            note = "The speech engine produced no audio (it may be missing the voice or language data)."
-        else:
-            note = f"🔊 Spoke {clip.duration_seconds:.1f} s with the {self._voice_label()} voice."
-        return _SpokenNote(note)
+    def _start_speech_job(self, job) -> None:
+        """Run a short speech job (render/transcribe) off the busy path.
+
+        The composer and the transcript stay responsive, and the result is handed
+        back through the pump on the Tk thread; a render carries its own token in
+        the returned :class:`_SpokenClip`, so a newer click can discard a
+        superseded clip when it arrives.
+        """
+
+        def run() -> None:
+            try:
+                self._speech_queue.put(("ok", job()))
+            except Exception as error:  # surfaced in the transcript, never crashes Tk
+                self._speech_queue.put(("error", error))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _play_rendered(self, payload: _SpokenClip) -> None:
+        """Play a rendered clip, unless a newer click has superseded it."""
+        if payload.token != self._speak_token:
+            # A stop or a newer click happened while this clip was rendering.
+            return
+        playback = self.service.play_clip(payload.clip)
+        if playback is None:
+            self._add_bubble(
+                "note",
+                "No audio player is installed (install aplay, afplay, or sox), "
+                "so the reading could not be played.",
+            )
+            self._speaking = False
+            self._reset_speak_control()
+            return
+        self._playback = playback
+        duration = payload.clip.duration_seconds
+        self._add_bubble(
+            "note",
+            f"🔊 Reading aloud with the {self._voice_label()} voice "
+            f"({duration:.1f} s) — click Stop to end it.",
+        )
+        self._watch_playback(playback)
+
+    def _watch_playback(self, playback: Any) -> None:
+        """Poll a playback on the Tk thread; clear the state when it ends."""
+
+        def poll() -> None:
+            if self._playback is not playback:
+                return
+            if playback.playing:
+                self.root.after(200, poll)
+                return
+            self._finish_playback()
+
+        self.root.after(200, poll)
+
+    def _finish_playback(self) -> None:
+        """The clip ended on its own: clear the playing state and restore the label."""
+        playback = self._playback
+        self._playback = None
+        self._speaking = False
+        self._reset_speak_control()
+        self._update_status()
+        if playback is not None:
+            with contextlib.suppress(Exception):
+                playback.wait()
+
+    def _stop_speaking(self) -> None:
+        """Stop the reading in progress, if any, and restore its control.
+
+        The token is bumped so a clip still rendering on the worker thread is
+        discarded when it arrives, rather than starting to talk after the stop.
+        """
+        self._speak_token += 1
+        playback = self._playback
+        self._playback = None
+        self._speaking = False
+        self._reset_speak_control()
+        if playback is not None:
+            with contextlib.suppress(Exception):
+                playback.stop()
+
+    def _reset_speak_control(self) -> None:
+        """Restore the speaker control that was showing "Stop" to "Read aloud"."""
+        if self._speak_control is not None:
+            with contextlib.suppress(tk.TclError):
+                self._speak_control.configure(text="🔊 Read aloud")
+            self._speak_control = None
+
+    # -------------------------------------------------------------- listening
+
+    def _toggle_mic(self) -> None:
+        """Start a recording, or stop it and transcribe with the local Qwen3-ASR."""
+        if self._recording is not None:
+            self._finish_recording()
+            return
+        if not self.service.microphone_available():
+            from core.speech import speech_install_plan
+
+            self._add_bubble(
+                "note",
+                "No microphone recorder is installed (install arecord or sox), "
+                "so I cannot listen. " + speech_install_plan().hint,
+            )
+            return
+        if self.service.recognizer_name() == "transcript":
+            self._add_bubble("note", self.service.asr_status())
+            return
+        try:
+            self._recording = self.service.start_recording()
+        except ValueError as error:
+            self._add_bubble("note", f"Could not start recording: {error}")
+            self._recording = None
+            return
+        self._set_mic_recording(True)
+        self._status.configure(text="Listening… click the microphone again to stop.")
+        self._add_bubble("note", "🎤 Listening… click the microphone again to stop and transcribe.")
+
+    def _finish_recording(self) -> None:
+        """Stop the recording and transcribe it in the background."""
+        recording = self.service.stop_recording()
+        self._recording = None
+        self._set_mic_recording(False)
+        if recording is None:
+            return
+        self._status.configure(text="Transcribing…")
+        self._start_speech_job(lambda: _Transcript(self._transcribe(recording)))
+
+    def _transcribe(self, recording: Any) -> str:
+        """Finish the recording and transcribe its clip (runs on the worker thread)."""
+        clip = recording.result()
+        return self.service.transcribe(clip)
+
+    def _cancel_recording(self) -> None:
+        """Abandon a recording in progress (a new chat, or a resume)."""
+        self.service.stop_recording()
+        self._recording = None
+        self._set_mic_recording(False)
+
+    def _set_mic_recording(self, recording: bool) -> None:
+        """Reflect the recording state on the microphone button."""
+        self._listening = recording
+        if self._mic_button is None:
+            return
+        with contextlib.suppress(tk.TclError):
+            self._mic_button.configure(
+                fg=self._theme.primary if recording else self._theme.text_dim,
+                text="⏺" if recording else "🎤",
+            )
 
     def _voice_label(self) -> str:
         from core.voices import find_voice
@@ -1801,6 +2004,21 @@ class FaydGUI:
             text="↑", command=self._on_send, typography=self._type,
         )
         self._send.pack(side="right", padx=(6, 6), pady=6)
+
+        # The microphone: one click starts recording (through the local Qwen3-ASR
+        # model when installed), a second click stops and transcribes into the
+        # composer. Kept beside Send, in the composer, so voice is a first-class
+        # input rather than a separate window.
+        self._mic_button = tk.Button(
+            field, text="🎤", command=self._toggle_mic,
+            bg=self._theme.surface, fg=self._theme.text_dim,
+            activebackground=self._theme.surface, activeforeground=self._theme.primary,
+            font=self._type.font("lg"), relief="flat", borderwidth=0,
+            padx=8, pady=0, cursor="hand2",
+        )
+        self._mic_button.pack(side="right", fill="y")
+        _Tooltip(self._mic_button, "Dictate with the microphone (Qwen3-ASR)", self._theme, self._type)
+
         self._render_attachment_chips()
         self._entry.focus_set()
 
@@ -1905,6 +2123,8 @@ class FaydGUI:
         message = self._entry.get("1.0", "end").strip()
         if not message:
             return
+        self._stop_speaking()
+        self._cancel_recording()
         self._entry.delete("1.0", "end")
         self._add_bubble("user", message)
 
@@ -1953,6 +2173,8 @@ class FaydGUI:
     def _on_new_chat(self, _event: tk.Event | None = None) -> str:
         if self._busy:
             return "break"
+        self._stop_speaking()
+        self._cancel_recording()
         conversation_id = self.service.new_conversation()
         self._hide_thinking()
         self._reset_attachments()
@@ -1974,6 +2196,8 @@ class FaydGUI:
         if self._busy or item.is_current:
             return
         if self.service.resume(item.session_id):
+            self._stop_speaking()
+            self._cancel_recording()
             self._reset_attachments()
             self._add_bubble("note", f"Resumed conversation {item.session_id}.")
             self._update_status()
@@ -2553,6 +2777,7 @@ class FaydGUI:
     def _pump(self) -> None:
         self._drain_lines(cap=500)
         self._flush_progress()
+        self._drain_speech()
         try:
             kind, payload = self._results.get_nowait()
         except queue.Empty:
@@ -2561,7 +2786,6 @@ class FaydGUI:
             self._drain_lines(cap=None)
             self._flush_progress(force=True)
             self._hide_thinking()
-            self._speaking = False
             if kind == "ok":
                 self._render_result(payload)
             else:
@@ -2572,6 +2796,35 @@ class FaydGUI:
             self._update_status()
             self.refresh_history()
         self.root.after(100, self._pump)
+
+    def _drain_speech(self) -> None:
+        """Hand a finished speech job (render/transcribe) back on the Tk thread."""
+        try:
+            kind, payload = self._speech_queue.get_nowait()
+        except queue.Empty:
+            return
+        if kind != "ok":
+            self._speaking = False
+            self._reset_speak_control()
+            self._add_bubble("assistant", f"Speech failed: {payload}")
+            self._update_status()
+            return
+        if isinstance(payload, _SpokenClip):
+            self._play_rendered(payload)
+        elif isinstance(payload, _Transcript):
+            self._show_transcript(payload.text)
+
+    def _show_transcript(self, text: str) -> None:
+        """Place a microphone transcript in the composer, ready to send or edit."""
+        if not text:
+            self._add_bubble("note", "I could not make out any words — please try again.")
+            self._update_status()
+            return
+        self._entry.delete("1.0", "end")
+        self._entry.insert("1.0", text)
+        self._entry.focus_set()
+        self._status.configure(text="Transcribed with " + self.service.recognizer_name() + ".")
+        self._add_bubble("note", f"🎤 Heard: {text}")
 
     def _drain_lines(self, *, cap: int | None) -> None:
         drained = 0
@@ -2587,8 +2840,6 @@ class FaydGUI:
             self._render_install_result(payload)
         elif isinstance(payload, speech.SpeechInstallResult):
             self._render_speech_install(payload)
-        elif isinstance(payload, _SpokenNote):
-            self._add_bubble("note", payload.text)
         elif isinstance(payload, ChatReply):
             if payload.steps:
                 self._add_bubble("assistant", self._render_steps(payload))
@@ -2636,6 +2887,7 @@ def main(argv: list[str] | None = None) -> int:
         session=args.session,
         operating_mode=args.mode,
         tts_engine=args.tts,
+        asr_engine=args.asr,
     )
     if args.mind:
         try:
