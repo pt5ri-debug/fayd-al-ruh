@@ -379,6 +379,19 @@ class ChatService:
         provider = load_provider_key(self._data_root)
         return selected_model(self._data_root, provider)
 
+    def free_cloud_providers(self) -> tuple[tuple[str, str, str, str], ...]:
+        """The no-card providers as ``(key, title, api_key_env, signup_url)`` rows.
+
+        The window's "which ones are free, and where do I sign up" answer, read
+        from the same catalog the CLI prints, so the two never disagree.
+        """
+        from core.cloud_model import free_provider_summaries
+
+        return tuple(
+            (key, title, env, signup)
+            for key, title, env, signup, _summary in free_provider_summaries()
+        )
+
     def cloud_model_choices(self) -> tuple[str, ...]:
         """The models the window offers for the current provider, default first.
 

@@ -948,6 +948,75 @@ def test_free_providers_are_named() -> None:
     assert "openai" not in free
 
 
+def test_free_provider_summaries_carry_a_signup_url() -> None:
+    """Each free provider names its key variable and a real signup link.
+
+    This is the data behind the CLI's ``cloud free`` and the window's hint, so a
+    user always gets a place to create the key, not just a variable name.
+    """
+    from core.cloud_model import free_provider_summaries
+
+    rows = free_provider_summaries()
+    keys = [key for key, *_rest in rows]
+    assert keys == ["gemini", "groq", "openrouter", "mistral"]
+    for key, title, env, signup, summary in rows:
+        assert key and title and summary
+        assert env.endswith("_API_KEY"), (key, env)
+        assert signup.startswith("https://"), (key, signup)
+
+
+def test_every_keyed_provider_has_a_signup_url() -> None:
+    """A provider that needs a key says where to create one; a local one does not."""
+    from core.cloud_model import CATALOG
+
+    for spec in CATALOG.values():
+        if spec.needs_key:
+            assert spec.signup_url.startswith("https://"), spec.key
+        else:
+            assert spec.signup_url == "", spec.key
+
+
+def test_cli_free_lists_no_card_providers(capsys) -> None:
+    """``cloud free`` prints the free providers with their signup links."""
+    args = cast(argparse.Namespace, SimpleNamespace(as_json=False))
+    assert cloud_cli.run_free(args) == 0
+    out = capsys.readouterr().out
+    assert "gemini" in out and "GEMINI_API_KEY" in out
+    assert "https://aistudio.google.com/apikey" in out
+    # A paid-only provider is not in the free list.
+    assert "openai" not in out.lower()
+
+
+def test_cli_free_json(capsys) -> None:
+    """``cloud free --json`` is machine-readable and marks the local servers."""
+    args = cast(argparse.Namespace, SimpleNamespace(as_json=True))
+    assert cloud_cli.run_free(args) == 0
+    data = json.loads(capsys.readouterr().out)
+    keys = [entry["key"] for entry in data["free_providers"]]
+    assert keys == ["gemini", "groq", "openrouter", "mistral"]
+    assert all(entry["signup_url"] for entry in data["free_providers"])
+    assert data["local_no_key"] == ["ollama", "lmstudio"]
+
+
+def test_cli_providers_mentions_the_free_ones(capsys, tmp_path, monkeypatch) -> None:
+    """The providers list also points a user at the no-card services."""
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
+    assert cloud_cli.run_providers(cast(argparse.Namespace, SimpleNamespace(as_json=False))) == 0
+    out = capsys.readouterr().out
+    assert "Free to use (no card needed)" in out
+    assert "GEMINI_API_KEY" in out
+
+
+def test_service_offers_free_providers(tmp_path) -> None:
+    """The window's service exposes the same free-provider rows the CLI prints."""
+    from gui.service import ChatService
+
+    rows = ChatService(data_root=tmp_path).free_cloud_providers()
+    keys = [key for key, _title, _env, _signup in rows]
+    assert keys == ["gemini", "groq", "openrouter", "mistral"]
+    assert all(signup.startswith("https://") for *_rest, signup in rows)
+
+
 def test_service_remembers_the_cloud_provider(tmp_path) -> None:
     """The window's provider choice is persisted through the one service."""
     from gui.service import ChatService
