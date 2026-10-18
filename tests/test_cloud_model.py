@@ -918,6 +918,16 @@ def test_gui_sidebar_has_a_cloud_action() -> None:
     assert "Cloud" in action.label
 
 
+def test_gui_cloud_action_is_hidden_from_the_sidebar() -> None:
+    """Cloud is offered by the header's model selector, so its sidebar row is hidden."""
+    action = gui_actions.action_by_key("cloud")
+    assert action.hidden is True
+    assert action not in gui_actions.visible_actions()
+    assert "Answer from Cloud (remote model: ChatGPT, Claude, Gemini)" not in [
+        a.label for a in gui_actions.visible_actions()
+    ]
+
+
 def test_gui_mouth_choices_include_cloud() -> None:
     if not _display_available():
         pytest.skip("no display available")

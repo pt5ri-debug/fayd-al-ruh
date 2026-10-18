@@ -742,8 +742,9 @@ python -m cli ultron download --approve           # one-time: fetch a model (~5 
 
 It is a **mouth inside the project's own chat**: the window's model selector
 (the one above the transcript, beside the mode switch) lists **Ultron (general
-local model)** beside *From sources (cited)* and *From trained model*, and the
-sidebar's **Answer from Ultron** entry selects it. Whichever way you pick it, the conversation continues in the
+local model)** beside *From sources (cited)* and *From trained model*, and it is
+the header selector that switches the mouth (the sidebar's *Answer from ...*
+rows are hidden, so the selector is the one visible way). Whichever way you pick it, the conversation continues in the
 **same transcript, the same session, and with the same conversation controls** as
 the other two mouths — there is no separate window. In the text chat, type
 `from ultron` (or `from the sources` to switch back). It is still wired
@@ -870,8 +871,9 @@ python -m cli banner download --approve           # one-time: fetch the model
 ```
 
 Like Ultron and Vision, it is a **mouth inside the project's own chat**: the
-window's model selector lists **Banner (presentation local model)**, and the
-sidebar's **Answer from Banner** entry selects it. Whichever way you pick it, the conversation continues in the
+window's model selector lists **Banner (presentation local model)**, and it is
+the header selector that switches the mouth (the sidebar's *Answer from ...*
+rows are hidden). Whichever way you pick it, the conversation continues in the
 **same transcript, the same session, and with the same conversation controls** —
 there is no separate window. In the text chat, type `from banner` (or `from the
 sources` to switch back). It is wired **directly below Vision** in the numbered
@@ -995,8 +997,9 @@ log. There is **no third-party dependency**: the client is a thin `urllib`
 wrapper, so a base install reaches a cloud model.
 
 Like the other mouths, Cloud is a **mouth inside the project's own chat**: the
-window's model selector lists **Cloud (remote model)**, and the sidebar's
-**Answer from Cloud** entry selects it; the conversation stays in the **same transcript and the same session**. The
+window's model selector lists **Cloud (remote model)**, and it is the header
+selector that switches the mouth (the sidebar's *Answer from ...* rows are
+hidden); the conversation stays in the **same transcript and the same session**. The
 settings panel also carries the **Cloud provider** menu, so you pick Gemini *or*
 Groq (or any provider) right in the window, and the choice is remembered. In
 the text chat, type `from cloud` (or `from the sources` to switch back).

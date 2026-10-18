@@ -286,10 +286,14 @@ def test_gui_sidebar_has_a_vision_action() -> None:
     assert action.command is cli_menu.run_vision_chat
 
 
-def test_gui_vision_action_selects_the_mouth_in_the_same_chat() -> None:
-    """Vision answers in the project's own chat, so the sidebar entry switches the mouth."""
-    labels = [action.label for action in gui_actions.ACTIONS]
-    assert "Answer from Vision (petroleum local model)" in labels
+def test_gui_vision_action_is_hidden_from_the_sidebar() -> None:
+    """Vision is offered by the header's model selector, so its sidebar row is hidden."""
+    action = gui_actions.action_by_key("vision")
+    assert action.hidden is True
+    assert action not in gui_actions.visible_actions()
+    assert "Answer from Vision (petroleum local model)" not in [
+        a.label for a in gui_actions.visible_actions()
+    ]
 
 
 def test_menu_offers_the_vision_chat_mouth() -> None:

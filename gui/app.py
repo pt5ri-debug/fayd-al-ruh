@@ -47,7 +47,7 @@ from core.vision_model import VisionUnavailable
 from core.version import __version__
 from gui import markdown as md
 from gui import rich_text
-from gui.actions import ACTIONS, GuiAction
+from gui.actions import GuiAction, visible_actions
 from gui.attachments import Attachment, AttachmentNotice
 from gui.modes import (
     MODES,
@@ -955,7 +955,10 @@ class FaydGUI:
             panel, "⌫   Clear transcript", self._clear_transcript, small=True
         ).pack(fill="x", padx=12, pady=(2, 0))
         self._section_label(panel, "Actions", top=8)
-        for action in ACTIONS:
+        # Only the visible actions are drawn: the four "Answer from ..." mouth
+        # switches stay in ACTIONS for the CLI/action_by_key but are hidden here,
+        # because the header's model selector already offers them.
+        for action in visible_actions():
             button = self._sidebar_button(
                 panel, action.label, partial(self._on_action, action), small=True
             )

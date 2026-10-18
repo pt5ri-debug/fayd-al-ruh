@@ -201,8 +201,9 @@ Arabic is kept as secondary aliases where useful.
   (`python -m cli ultron`), and — as a **mouth inside the project's own chat**
   (`ai/ultron_mouth.py`, the headless twin `python -m cli ultron-chat`) — the
   window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
-  *From sources (cited)* and *From trained model*, plus the sidebar **Answer from
-  Ultron** action; the conversation stays
+  *From sources (cited)* and *From trained model*; the sidebar **Answer from
+  Ultron** action exists but is hidden (`hidden=True` in `gui/actions.py`), so
+  the header selector is the one visible switch. The conversation stays
   in the same transcript and session, never a separate window. Every answer is
   labelled as the local general model's own, not grounded in cited sources.
   `UltronAssistant.ask` reads an attached file from the conversation's `CONTEXT`
@@ -236,8 +237,9 @@ Arabic is kept as secondary aliases where useful.
   (`python -m cli vision`), and — as a **mouth inside the project's own chat**
   (`ai/vision_mouth.py`, the headless twin `python -m cli vision-chat`) — the
   window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
-  *From sources (cited)*, *From trained model*, and Ultron, plus the sidebar
-  **Answer from Vision** action; the conversation
+  *From sources (cited)*, *From trained model*, and Ultron; the sidebar
+  **Answer from Vision** action exists but is hidden, so the header selector is
+  the one visible switch. The conversation
   stays in the same transcript and session, never a separate window. Every answer
   is labelled as the local petroleum model's own, not grounded in cited sources.
   `VisionAssistant.ask` reads an attached file from the conversation's `CONTEXT`
@@ -267,9 +269,8 @@ Arabic is kept as secondary aliases where useful.
   CLI (`python -m cli banner`), and — as a **mouth inside the project's own
   chat** (`ai/banner_mouth.py`, the headless twin `python -m cli banner-chat`) —
   the window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
-  *From sources (cited)*, *From trained model*, Ultron, and Vision, plus the
-  sidebar **Answer from Banner** action; the
-  conversation stays in the same transcript and session, never a separate window.
+  *From sources (cited)*, *From trained model*, Ultron, and Vision; the
+  sidebar **Answer from Banner** action exists but is hidden. The conversation stays in the same transcript and session, never a separate window.
   Every answer is labelled as the local presentation model's own, not grounded in
   cited sources. `ai/banner.py` is the CLI entry point (`chat` default,
   `download`, `models`, `status`, `--session` persistence).
@@ -323,8 +324,8 @@ Arabic is kept as secondary aliases where useful.
   as a **mouth inside the project's own chat** (`ai/cloud_mouth.py`, the headless
   twin `python -m cli cloud-chat`) — the window's header model selector
   (`MOUTH_CHOICES` in `gui/app.py`), beside *From sources (cited)*, *From trained
-  model*, Ultron, Vision, and Banner, plus the sidebar **Answer from Cloud**
-  action; the conversation stays in the same
+  model*, Ultron, Vision, and Banner; the sidebar **Answer from Cloud** action
+  exists but is hidden. The conversation stays in the same
   transcript and session, never a separate window. `CloudAssistant.ask` reads an
   attached file from the conversation's `CONTEXT` turns exactly as Ultron and
   Vision do (`_context_prompt`), capped at `DEFAULT_REFERENCE_CHARS` (8000), so
@@ -713,8 +714,13 @@ Arabic is kept as secondary aliases where useful.
   gate for a mutating tool); `actions.py` maps the sidebar to `cli.menu.run_*` —
   the **Actions** list mirrors numbered CLI items 6..12 (never repeating the
   window's own controls, which cover items 1..5 — the window, Jarvis, **Ultron**,
-  and the two chat modes); `options.py` has the argument parser (`--mode ai|jarvics`,
-  and the three mouth starts `--mind` / `--ultron` / default);
+  and the two chat modes). A `GuiAction` carries a `hidden` flag: the four
+  *Answer from ...* mouth switches stay in `ACTIONS` (so `action_by_key` and the
+  CLI still resolve them) but are `hidden=True`, and `visible_actions()` — what
+  the sidebar actually draws — leaves them out, because the header's model
+  selector already offers them; `options.py` has the argument parser
+  (`--mode ai|jarvics`, and the three mouth starts `--mind` / `--ultron` /
+  default);
   `app.py` is the Tkinter window (imported lazily, so `cli/` never imports Tk).
   Reachable as `python -m cli gui` and `python -m gui`.
 - `gui/modes.py` — the two operating modes. **AI Mode** (`allows_tools=False`)
