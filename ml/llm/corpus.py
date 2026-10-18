@@ -11,6 +11,7 @@ about, rather than pretending to be general.
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Iterable
 
 
 def _sentences() -> list[str]:
@@ -125,6 +126,95 @@ def knowledge_base_sentences(*, kb_max_chunks: int) -> list[str]:
     return sentences_from_documents(documents)
 
 
+#: The local mouths, mapped to the data sub-path each one persists its
+#: conversations under. Jarvis keeps its sessions directly in its own folder;
+#: the other three nest a ``sessions`` folder. A caller names a mouth by its
+#: short label.
+MOUTH_SESSION_SOURCES: dict[str, tuple[str, ...]] = {
+    "jarvis": ("jarvis",),
+    "ultron": ("ultron", "sessions"),
+    "vision": ("vision", "sessions"),
+    "banner": ("banner", "sessions"),
+}
+
+#: Upper bound on the raw conversation text read, so a long-running install
+#: cannot make corpus building unbounded.
+DEFAULT_MAX_SESSION_CHARS = 2_000_000
+
+
+def session_sentences(
+    *,
+    sources: "Iterable[str] | None" = None,
+    include_user: bool = True,
+    include_assistant: bool = True,
+    max_chars: int = DEFAULT_MAX_SESSION_CHARS,
+) -> list[str]:
+    """Training prose from the local mouths' own saved conversations.
+
+    Jarvis, Ultron, Vision, and Banner each persist what was asked and answered
+    under the data directory; those transcripts are the only record of the
+    voices the user actually talks to, so training on them lets the small
+    in-project model learn those voices. A turn is read as one sentence per
+    sentence of its text; ``SYSTEM`` and ``CONTEXT`` turns are skipped, because a
+    context turn is a whole attached file rather than something a mouth said.
+
+    This is **off by default** (``build_corpus(include_sessions=...)``) on
+    purpose: the transcripts are personal, so they are folded into training only
+    when a caller asks for them by name. Reading is bounded by ``max_chars`` and
+    de-duplicated, and a mouth with no saved session simply contributes nothing.
+    """
+    from collections import OrderedDict
+
+    from core.composition import clean, sentences
+    from core.conversation import ConversationMemory, Role
+    from core.paths import data_dir
+    from storage.json_store import JsonStore
+
+    chosen = tuple(MOUTH_SESSION_SOURCES) if sources is None else tuple(sources)
+    unknown = [name for name in chosen if name not in MOUTH_SESSION_SOURCES]
+    if unknown:
+        raise ValueError(
+            f"unknown session source(s) {unknown}; "
+            f"choose from {sorted(MOUTH_SESSION_SOURCES)}."
+        )
+    allowed = set()
+    if include_user:
+        allowed.add(Role.USER)
+    if include_assistant:
+        allowed.add(Role.ASSISTANT)
+    if not allowed:
+        return []
+
+    root = data_dir()
+    spoken: list[str] = []
+    budget = max_chars
+    exhausted = False
+    for name in chosen:
+        memory = ConversationMemory(JsonStore(root.joinpath(*MOUTH_SESSION_SOURCES[name])))
+        for conversation_id in memory.list_saved():
+            conversation = memory.load(conversation_id)
+            if conversation is None:
+                continue
+            for message in conversation.messages:
+                if message.role not in allowed:
+                    continue
+                text = message.text.strip()
+                if not text:
+                    continue
+                # Stop at the budget boundary rather than cutting a message
+                # mid-word, so training never sees a torn fragment.
+                if len(text) > budget:
+                    exhausted = True
+                    break
+                budget -= len(text)
+                spoken.extend(sentences(clean(text)))
+            if exhausted:
+                break
+        if exhausted:
+            break
+    return list(OrderedDict.fromkeys(sentence for sentence in spoken if sentence.strip()))
+
+
 def build_corpus(
     *,
     repeats: int = 40,
@@ -132,6 +222,9 @@ def build_corpus(
     kb_max_chunks: int = 0,
     kb_repeats: int = 1,
     include_runtime: bool = True,
+    include_sessions: bool = False,
+    session_sources: "Iterable[str] | None" = None,
+    session_repeats: int = 1,
     exclude: "set[str] | frozenset[str] | None" = None,
     include: "set[str] | frozenset[str] | None" = None,
 ) -> str:
@@ -142,11 +235,14 @@ def build_corpus(
     from the whole seeded curriculum (every discipline and course), prose and
     formulas from the seeded petroleum corpus (the knowledge content behind the
     curriculum), numbered procedural text, prose from the other repositories
-    (promoted learned statements and runtime documents), a relevance-filtered
-    sample of the bulk knowledge base when ``kb_max_chunks`` is positive
-    (repeated ``kb_repeats`` times, since it is large and broad), and JSON
-    objects in the shape ``MODEL_OUTPUT_SCHEMA`` expects. The JSON block teaches
-    the model the field names and English values used by schema-guided decoding.
+    (promoted learned statements and runtime documents), the local mouths' own
+    saved conversations when ``include_sessions`` is set (Jarvis, Ultron,
+    Vision, and Banner -- off by default, because a transcript is personal), a
+    relevance-filtered sample of the bulk knowledge base when ``kb_max_chunks``
+    is positive (repeated ``kb_repeats`` times, since it is large and broad),
+    and JSON objects in the shape ``MODEL_OUTPUT_SCHEMA`` expects. The JSON
+    block teaches the model the field names and English values used by
+    schema-guided decoding.
 
     ``exclude`` drops sentences held out for validation or test, so a held-out
     perplexity is genuinely out-of-sample. ``include`` keeps only the sentences
@@ -159,6 +255,8 @@ def build_corpus(
         raise ValueError("structured_repeats must be at least 1.")
     if kb_repeats < 1:
         kb_repeats = 1
+    if session_repeats < 1:
+        session_repeats = 1
     held = exclude or frozenset()
     chosen = include
 
@@ -173,6 +271,7 @@ def build_corpus(
     corpus = keep(corpus_sentences())
     procedures = keep(procedural_sentences())
     repositories = keep(repository_sentences(include_runtime=include_runtime))
+    sessions = keep(session_sentences(sources=session_sources)) if include_sessions else ""
     bulk = keep(knowledge_base_sentences(kb_max_chunks=kb_max_chunks))
     structured = " ".join(structured_examples())
     return (
@@ -182,6 +281,7 @@ def build_corpus(
         + (corpus + " ") * (repeats if corpus else 0)
         + (procedures + " ") * (repeats if procedures else 0)
         + (repositories + " ") * (repeats if repositories else 0)
+        + (sessions + " ") * (session_repeats if sessions else 0)
         + (bulk + " ") * (kb_repeats if bulk else 0)
         + (structured + " ") * structured_repeats
     )
@@ -215,13 +315,15 @@ def procedural_sentences() -> list[str]:
     return sentences
 
 
-def corpus_units() -> list[str]:
+def corpus_units(*, include_sessions: bool = False) -> list[str]:
     """Unique documents for splitting and tokenizer training.
 
     Concatenating the repeated training text would let the same sentence appear
     in both training and test; these are the distinct units before repetition,
     so a document-level split stays honest. The small structured-JSON block is
     left out on purpose -- it teaches output shape and is always trained on.
+    The mouths' saved conversations are included only when ``include_sessions``
+    is set, matching :func:`build_corpus`.
     """
     from collections import OrderedDict
 
@@ -233,6 +335,8 @@ def corpus_units() -> list[str]:
         + procedural_sentences()
         + repository_sentences(include_runtime=False)
     )
+    if include_sessions:
+        units = units + session_sentences()
     return list(OrderedDict.fromkeys(unit for unit in units if unit.strip()))
 
 
@@ -297,10 +401,13 @@ def normalise(text: str) -> str:
 
 
 __all__ = [
+    "DEFAULT_MAX_SESSION_CHARS",
+    "MOUTH_SESSION_SOURCES",
     "build_corpus",
     "corpus_sentences",
     "curriculum_sentences",
     "knowledge_base_sentences",
     "normalise",
     "repository_sentences",
+    "session_sentences",
 ]

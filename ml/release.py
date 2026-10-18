@@ -51,6 +51,7 @@ from ml.llm.corpus import (
     curriculum_sentences,
     knowledge_base_sentences,
     repository_sentences,
+    session_sentences,
     structured_examples,
 )
 from ml.llm.__main__ import train_and_save
@@ -87,6 +88,7 @@ class TrainingConfig:
     kb_max_chunks: int = DEFAULT_KB_CHUNKS
     kb_repeats: int = 1
     include_runtime: bool = True
+    include_sessions: bool = False
     include_procedural: bool = True
     max_procedural: int | None = None
     measure_perplexity: bool = False
@@ -148,6 +150,7 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
         kb_max_chunks=config.kb_max_chunks,
         kb_repeats=config.kb_repeats,
         include_runtime=config.include_runtime,
+        include_sessions=config.include_sessions,
     )
     sample = knowledge_sample(
         kb_max_chunks=config.kb_max_chunks, include_runtime=config.include_runtime
@@ -156,6 +159,7 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
         "curriculum_sentences": len(curriculum_sentences()),
         "corpus_sentences": len(corpus_sentences()),
         "repository_sentences": len(repository_sentences(include_runtime=config.include_runtime)),
+        "session_sentences": len(session_sentences()) if config.include_sessions else 0,
         "knowledge_base_sentences": len(knowledge_base_sentences(kb_max_chunks=config.kb_max_chunks)),
         "structured_examples": len(structured_examples()),
         "characters": len(text),
@@ -163,6 +167,7 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
         "kb_max_chunks": config.kb_max_chunks,
         "kb_repeats": config.kb_repeats,
         "include_runtime": config.include_runtime,
+        "include_sessions": config.include_sessions,
         "structured_repeats": config.llm_structured_repeats,
         "tokenizer_kind": config.tokenizer_kind,
         "tokenizer_vocab_size": config.tokenizer_vocab_size,
@@ -233,6 +238,7 @@ def describe_checkpoint(
     measure_perplexity: bool = False,
     seed: int = 0,
     model: TransformerLM | None = None,
+    include_sessions: bool = False,
 ) -> Manifest:
     """Describe a saved language-model checkpoint for the manifest.
 
@@ -271,7 +277,12 @@ def describe_checkpoint(
             "tie_weights": config.tie_weights,
         }
     if measure_perplexity and model is not None:
-        split = document_split(corpus_units(), val_fraction=0.1, test_fraction=0.1, seed=seed)
+        split = document_split(
+            corpus_units(include_sessions=include_sessions),
+            val_fraction=0.1,
+            test_fraction=0.1,
+            seed=seed,
+        )
         tokenizer = load_tokenizer(checkpoint.with_suffix(".tokenizer.json"))
         model.eval()
         report = evaluate_model(model, tokenizer, split, seed=seed)
@@ -321,6 +332,7 @@ def train_release(
             "kb_max_chunks": config.kb_max_chunks,
             "kb_repeats": config.kb_repeats,
             "include_runtime": config.include_runtime,
+            "include_sessions": config.include_sessions,
             "include_procedural": config.include_procedural,
             "max_procedural": config.max_procedural,
             "resume": config.resume,
@@ -364,6 +376,7 @@ def train_release(
         kb_max_chunks=config.kb_max_chunks,
         kb_repeats=config.kb_repeats,
         include_runtime=config.include_runtime,
+        include_sessions=config.include_sessions,
         preset=config.llm_preset,
         resume=config.resume,
         shard_count=config.shard_count,
@@ -378,6 +391,7 @@ def train_release(
         measure_perplexity=config.measure_perplexity,
         seed=config.seed,
         model=model,
+        include_sessions=config.include_sessions,
         resumed=continued,
     )
     if config.shard_count > 0:
@@ -483,6 +497,13 @@ def main(argv: list[str] | None = None) -> int:
         help="skip documents written at runtime when training the language model",
     )
     parser.add_argument(
+        "--llm-sessions",
+        action="store_true",
+        help="also train the language model on the local mouths' own saved "
+        "conversations (Jarvis, Ultron, Vision, Banner -- the user's turns and the "
+        "answers); off by default, because a transcript is personal",
+    )
+    parser.add_argument(
         "--no-procedural",
         action="store_true",
         help="skip the procedural tasks derived from the corpus",
@@ -527,6 +548,7 @@ def main(argv: list[str] | None = None) -> int:
         kb_max_chunks=args.kb_max_chunks,
         kb_repeats=args.kb_repeats,
         include_runtime=not args.no_runtime_docs,
+        include_sessions=args.llm_sessions,
         include_procedural=not args.no_procedural,
         measure_perplexity=args.measure_perplexity,
         resume=args.resume,

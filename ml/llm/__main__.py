@@ -92,6 +92,7 @@ def train_and_save(
     kb_max_chunks: int = 0,
     kb_repeats: int = 1,
     include_runtime: bool = True,
+    include_sessions: bool = False,
     learning_rate: float = 3e-3,
     warmup: int | None = None,
     max_grad_norm: float = 1.0,
@@ -103,7 +104,7 @@ def train_and_save(
     shard_count: int = 0,
     schedule_path_arg: Path | None = None,
 ) -> TransformerLM:
-    units = corpus_units()
+    units = corpus_units(include_sessions=include_sessions)
     split = document_split(units, val_fraction=0.1, test_fraction=0.1, seed=seed)
     held_out = set(split.validation) | set(split.test)
     plan = ShardPlan(shard_count) if shard_count > 0 else None
@@ -143,6 +144,7 @@ def train_and_save(
         kb_max_chunks=kb_max_chunks,
         kb_repeats=kb_repeats,
         include_runtime=include_runtime,
+        include_sessions=include_sessions,
         exclude=held_out,
         include=set(shard) if shard is not None else None,
     )
@@ -258,6 +260,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip documents written at runtime (internet learning, Jarvis feedback).",
     )
     parser.add_argument(
+        "--llm-sessions",
+        action="store_true",
+        help="Also train on the local mouths' own saved conversations (Jarvis, "
+        "Ultron, Vision, Banner -- both the user's turns and the answers). Off by "
+        "default, because a transcript is personal.",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Continue training from the checkpoint at --checkpoint (and its "
@@ -304,6 +313,7 @@ def main(argv: list[str] | None = None) -> int:
         val_every=args.val_every,
         kb_max_chunks=args.kb_max_chunks,
         include_runtime=not args.no_runtime_docs,
+        include_sessions=args.llm_sessions,
         resume=args.resume,
         shard_count=args.llm_shards,
         progress_every=args.progress_every,
