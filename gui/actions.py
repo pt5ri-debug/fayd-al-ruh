@@ -56,6 +56,10 @@ class GuiAction:
     argv: tuple[str, ...] = ()
     #: When true, the composer's text is appended to ``argv`` (e.g. a web question).
     needs_input: bool = False
+    #: When true, the action is kept in ``ACTIONS`` (so ``action_by_key`` and the
+    #: CLI still resolve it) but is not drawn as a sidebar button. The mouth
+    #: switches use this: the header's model selector already offers them.
+    hidden: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,30 +73,37 @@ class SessionItem:
 
 
 # Numbered CLI menu items 5..11, plus the training entries the sidebar already had.
+# The first four entries are the "Answer from ..." mouth switches: they stay in the
+# tuple (so ``action_by_key`` and the CLI keep resolving them) but are ``hidden``,
+# because the header's model selector is the one visible way to switch mouths.
 ACTIONS: tuple[GuiAction, ...] = (
     GuiAction(
         "ultron",
         "Answer from Ultron (general local model)",
         run_ultron_chat,
         (),
+        hidden=True,
     ),
     GuiAction(
         "vision",
         "Answer from Vision (petroleum local model)",
         run_vision_chat,
         (),
+        hidden=True,
     ),
     GuiAction(
         "banner",
         "Answer from Banner (presentation local model)",
         run_banner_chat,
         (),
+        hidden=True,
     ),
     GuiAction(
         "cloud",
         "Answer from Cloud (remote model: ChatGPT, Claude, Gemini)",
         run_cloud_chat,
         (),
+        hidden=True,
     ),
     GuiAction("learn", "Continuous learning and regression gate", run_learn, ()),
     GuiAction(
@@ -192,6 +203,11 @@ def action_by_key(key: str) -> GuiAction:
     raise KeyError(key)
 
 
+def visible_actions() -> tuple[GuiAction, ...]:
+    """The actions the sidebar actually draws (``hidden`` ones left out)."""
+    return tuple(action for action in ACTIONS if not action.hidden)
+
+
 def saved_session_items(
     session_ids: Sequence[str], current: str | None = None
 ) -> tuple[SessionItem, ...]:
@@ -211,4 +227,12 @@ def saved_session_items(
     return tuple(items)
 
 
-__all__ = ["ACTIONS", "Command", "GuiAction", "SessionItem", "action_by_key", "saved_session_items"]
+__all__ = [
+    "ACTIONS",
+    "Command",
+    "GuiAction",
+    "SessionItem",
+    "action_by_key",
+    "saved_session_items",
+    "visible_actions",
+]

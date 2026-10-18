@@ -313,9 +313,14 @@ def test_gui_sidebar_has_a_banner_action() -> None:
     assert action.command is cli_menu.run_banner_chat
 
 
-def test_gui_banner_action_selects_the_mouth_in_the_same_chat() -> None:
-    labels = [action.label for action in gui_actions.ACTIONS]
-    assert "Answer from Banner (presentation local model)" in labels
+def test_gui_banner_action_is_hidden_from_the_sidebar() -> None:
+    """Banner is offered by the header's model selector, so its sidebar row is hidden."""
+    action = gui_actions.action_by_key("banner")
+    assert action.hidden is True
+    assert action not in gui_actions.visible_actions()
+    assert "Answer from Banner (presentation local model)" not in [
+        a.label for a in gui_actions.visible_actions()
+    ]
 
 
 def test_run_banner_chat_adds_the_flag_once(monkeypatch) -> None:

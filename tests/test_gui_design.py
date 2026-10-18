@@ -362,6 +362,30 @@ def test_window_sidebar_collapses_and_reopens(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_sidebar_hides_the_mouth_actions(tmp_path) -> None:
+    """The four "Answer from ..." rows are hidden; the header selector still switches."""
+    import tkinter as tk
+
+    from gui.actions import visible_actions
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        app._toggle_settings()
+        root.update()
+
+        labels = [button.cget("text") for button in app._action_buttons]
+        for mouth in ("Ultron", "Vision", "Banner", "Cloud"):
+            assert not any(f"Answer from {mouth}" in text for text in labels)
+        assert len(app._action_buttons) == len(visible_actions())
+        # The header selector remains the live mouth switch.
+        assert app._source_var.get() == app.service.source
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_settings_hides_the_answering_mouth_radios(tmp_path) -> None:
     """The sidebar settings no longer list the answering mouths; the header does."""
     import tkinter as tk

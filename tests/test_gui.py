@@ -748,7 +748,7 @@ def test_window_shows_actions_and_saved_chats() -> None:
     import tkinter as tk
 
     from gui.app import FaydGUI
-    from gui.actions import ACTIONS
+    from gui.actions import visible_actions
 
     session = FakeSession()
     session.saved_ids = ("CNV-alpha", "CNV-beta")
@@ -757,10 +757,15 @@ def test_window_shows_actions_and_saved_chats() -> None:
         app = FaydGUI(root, service=_service(session))
         root.update()
         # The Actions list is behind Settings; opening it builds one button per
-        # action, none of them repeated.
+        # *visible* action (the hidden mouth switches are not drawn), none repeated.
         app._toggle_settings()
         root.update()
-        assert len(app._action_buttons) == len(ACTIONS)
+        assert len(app._action_buttons) == len(visible_actions())
+        drawn = [button.cget("text") for button in app._action_buttons]
+        assert not any("Answer from Ultron" in text for text in drawn)
+        assert not any("Answer from Vision" in text for text in drawn)
+        assert not any("Answer from Banner" in text for text in drawn)
+        assert not any("Answer from Cloud" in text for text in drawn)
         labels = [button.cget("text") for button in app._session_buttons]
         assert any("CNV-alpha" in text for text in labels)
         assert any("CNV-beta" in text for text in labels)
