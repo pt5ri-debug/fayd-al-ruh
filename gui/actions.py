@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from cli.menu import (
     run_banner_chat,
+    run_cloud_chat,
     run_code_studio,
     run_curriculum,
     run_demo,
@@ -85,6 +86,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         "banner",
         "Answer from Banner (presentation local model)",
         run_banner_chat,
+        (),
+    ),
+    GuiAction(
+        "cloud",
+        "Answer from Cloud (remote model: ChatGPT, Claude, Gemini)",
+        run_cloud_chat,
         (),
     ),
     GuiAction("learn", "Continuous learning and regression gate", run_learn, ()),

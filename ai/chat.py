@@ -7,6 +7,7 @@
     python -m cli chat --ultron                 # answer from the general local model (any subject)
     python -m cli chat --vision                 # answer from the petroleum local model (reservoir, drilling, PVT)
     python -m cli chat --banner                 # answer from the presentation local model (outlines, slide content)
+    python -m cli chat --cloud                  # answer from a remote cloud model (ChatGPT/Claude/Gemini/...)
     python -m cli chat --session demo           # resume/autosave a named session
     python -m cli chat --list-sessions          # show saved conversations
 
@@ -21,7 +22,7 @@ over, "save" persists the session, "sessions" lists saved ones, "web on"/"web
 off" toggle internet lookups, "that's right" and "that's wrong, it's ..." teach it
 from explicit feedback, and "help" lists them. Type "quit" to leave.
 
-Three mouths answer in the *same* conversation, swapped in **here**, in this
+Six mouths answer in the *same* conversation, swapped in **here**, in this
 module, without touching the Jarvis loop or the session builder, so Jarvis mode
 is unaffected:
 
@@ -33,10 +34,12 @@ is unaffected:
   (``llama-cpp-python``, built on OGAI Reasoner), no citations;
 * ``--banner`` -- the real, presentation local model (``llama-cpp-python``, the
   Presentation Studio's own Qwen3 weights), which drafts outlines and slide
-  content, no citations.
+  content, no citations;
+* ``--cloud`` -- a **remote** OpenAI-compatible model (ChatGPT, Claude, Gemini,
+  Groq, ...), opt-in and off by default, no citations.
 
-Type "from the model", "from ultron", "from vision", "from banner", or "from the
-sources" to switch mouths mid-conversation.
+Type "from the model", "from ultron", "from vision", "from banner", "from cloud",
+or "from the sources" to switch mouths mid-conversation.
 """
 
 from __future__ import annotations
@@ -49,10 +52,12 @@ from pathlib import Path
 
 from ai import mind as mind_module
 from ai import banner_mouth
+from ai import cloud_mouth
 from ai import ultron_mouth
 from ai import vision_mouth
 from ai.jarvis import build_session
 from core.banner import BannerUnavailable
+from core.cloud_model import CloudUnavailable
 from core.composition import sources_block
 from core.jarvis import JarvisMode, JarvisTurn
 from core.ultron import UltronUnavailable
@@ -81,6 +86,7 @@ MOUTH_MODEL = "model"
 MOUTH_ULTRON = "ultron"
 MOUTH_VISION = "vision"
 MOUTH_BANNER = "banner"
+MOUTH_CLOUD = "cloud"
 
 
 def _normalize(text: str) -> str:
@@ -107,6 +113,8 @@ def _match_switch(text: str) -> str | None:
         return MOUTH_VISION
     if normalized in _normalize_set(banner_mouth.SWITCH_TO_BANNER):
         return MOUTH_BANNER
+    if normalized in _normalize_set(cloud_mouth.SWITCH_TO_CLOUD):
+        return MOUTH_CLOUD
     if normalized in _normalize_set(mind_module.SWITCH_TO_SOURCES):
         return MOUTH_SOURCES
     return None
@@ -119,10 +127,10 @@ def _normalize_set(phrases: tuple[str, ...]) -> set[str]:
 class ModelSwitcher:
     """Swaps the session's answering mouth between the sources and a model.
 
-    Five mouths are offered: the grounded sources (default), the small in-project
+    Six mouths are offered: the grounded sources (default), the small in-project
     trained model, **Ultron**, the general local model, **Vision**, the
-    petroleum-engineering local model, and **Banner**, the Presentation Studio's
-    own local model. The
+    petroleum-engineering local model, **Banner**, the Presentation Studio's own
+    local model, and **Cloud**, a remote OpenAI-compatible model. The
     grounded assistant and its help text are kept so switching back is exact.
     Only ``mode.assistant``/``mode.voice.assistant``/``mode.help_text`` change;
     nothing in the Jarvis loop, the controls, or the session builder is touched,
@@ -143,6 +151,7 @@ class ModelSwitcher:
         ultron_loader: Callable[[], "ultron_mouth.UltronAssistant"] | None = None,
         vision_loader: Callable[[], "vision_mouth.VisionAssistant"] | None = None,
         banner_loader: Callable[[], "banner_mouth.BannerAssistant"] | None = None,
+        cloud_loader: Callable[[], "cloud_mouth.CloudAssistant"] | None = None,
     ) -> None:
         self.mode = mode
         self.grounded = mode.assistant
@@ -151,16 +160,18 @@ class ModelSwitcher:
         self._ultron_loader = ultron_loader or ultron_mouth.load_ultron_assistant
         self._vision_loader = vision_loader or vision_mouth.load_vision_assistant
         self._banner_loader = banner_loader or banner_mouth.load_banner_assistant
+        self._cloud_loader = cloud_loader or cloud_mouth.load_cloud_assistant
         self._max_new_tokens = max_new_tokens
         self._mind: mind_module.MindAssistant | None = None
         self._ultron: ultron_mouth.UltronAssistant | None = None
         self._vision: vision_mouth.VisionAssistant | None = None
         self._banner: banner_mouth.BannerAssistant | None = None
+        self._cloud: cloud_mouth.CloudAssistant | None = None
         self._mouth = MOUTH_SOURCES
 
     @property
     def mouth(self) -> str:
-        """Which mouth currently answers: ``"sources"``, ``"model"``, ``"ultron"``, ``"vision"``, or ``"banner"``."""
+        """Which mouth currently answers: ``"sources"``, ``"model"``, ``"ultron"``, ``"vision"``, ``"banner"``, or ``"cloud"``."""
         return self._mouth
 
     @property
@@ -192,6 +203,12 @@ class ModelSwitcher:
             self._banner = self._banner_loader()
         return self._banner
 
+    @property
+    def cloud(self) -> cloud_mouth.CloudAssistant:
+        if self._cloud is None:
+            self._cloud = self._cloud_loader()
+        return self._cloud
+
     def _swap(self, assistant, mouth: str, help_suffix: str) -> None:
         """Point the session at ``assistant`` and record which mouth is active."""
         self.mode.assistant = assistant
@@ -218,6 +235,11 @@ class ModelSwitcher:
         """Activate the Banner mouth. Raises when the runtime or model is missing."""
         assistant = self.banner  # load/check now, before the swap
         self._swap(assistant, MOUTH_BANNER, banner_mouth.BANNER_HELP)
+
+    def use_cloud(self) -> None:
+        """Activate the Cloud mouth. Raises when no key is set or the endpoint refuses."""
+        assistant = self.cloud  # load/check now, before the swap
+        self._swap(assistant, MOUTH_CLOUD, cloud_mouth.CLOUD_HELP)
 
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations again."""
@@ -294,6 +316,8 @@ def _print_switch(kind: str, *, as_json: bool) -> None:
         print("AI: [vision] Now answering from the petroleum local model (reservoir, drilling, PVT; no sources).")
     elif kind == MOUTH_BANNER:
         print("AI: [banner] Now answering from the presentation local model (outlines and slide content; no sources).")
+    elif kind == MOUTH_CLOUD:
+        print("AI: [cloud] Now answering from a remote cloud model over the network (no sources).")
     else:
         print("AI: [sources] Now answering from retrieved passages with citations.")
     print()
@@ -322,6 +346,12 @@ _MOUTH_FAILURE = {
         "Install the optional runtime with `python -m pip install -r requirements-banner.txt`, "
         "then fetch a model with `python -m cli banner download --approve`.",
     ),
+    MOUTH_CLOUD: (
+        "Could not reach the cloud model: {error}",
+        "Set the provider's API key in an environment variable (e.g. OPENAI_API_KEY, "
+        "ANTHROPIC_API_KEY, GEMINI_API_KEY), then run `python -m cli cloud status` "
+        "to check the endpoint.",
+    ),
 }
 
 #: The confirmation shown once a mouth is active. Shared by the text loop and the
@@ -331,6 +361,7 @@ _MOUTH_SWITCHED = {
     MOUTH_ULTRON: "Now answering from Ultron, the general local model (any subject, no citations).",
     MOUTH_VISION: "Now answering from Vision, the petroleum local model (reservoir, drilling, PVT; no citations).",
     MOUTH_BANNER: "Now answering from Banner, the presentation local model (outlines and slide content; no citations).",
+    MOUTH_CLOUD: "Now answering from a remote cloud model over the network (no citations).",
     MOUTH_SOURCES: "Now answering from sources, with citations.",
 }
 
@@ -359,9 +390,11 @@ def _apply_switch(switcher, kind: str) -> str:
             switcher.use_vision()
         elif kind == MOUTH_BANNER:
             switcher.use_banner()
+        elif kind == MOUTH_CLOUD:
+            switcher.use_cloud()
         else:
             switcher.use_sources()
-    except (FileNotFoundError, OSError, ValueError, UltronUnavailable, VisionUnavailable, BannerUnavailable) as error:
+    except (FileNotFoundError, OSError, ValueError, UltronUnavailable, VisionUnavailable, BannerUnavailable, CloudUnavailable) as error:
         return switch_failure_message(kind, error)
     return ""
 
@@ -457,6 +490,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--banner-model", default=None, help="a specific .gguf file for Banner to load")
     parser.add_argument("--banner-tokens", type=int, default=None, help="maximum tokens per Banner answer")
     parser.add_argument("--banner-temperature", type=float, default=None, help="sampling temperature for Banner answers")
+    parser.add_argument(
+        "--cloud",
+        action="store_true",
+        help="answer from a remote cloud model (ChatGPT/Claude/Gemini/... over the network; no citations), not from the sources",
+    )
+    parser.add_argument("--cloud-provider", default=None, help="which cloud provider to use (e.g. openai, anthropic, gemini, groq)")
+    parser.add_argument("--cloud-model", default=None, help="the cloud model to ask for (overrides the provider default)")
+    parser.add_argument("--cloud-base-url", default=None, help="an OpenAI-compatible base URL to use instead")
+    parser.add_argument("--cloud-api-key-env", default=None, help="the environment variable holding the cloud API key")
+    parser.add_argument("--cloud-tokens", type=int, default=None, help="maximum tokens per cloud answer")
+    parser.add_argument("--cloud-temperature", type=float, default=None, help="sampling temperature for cloud answers")
     args = parser.parse_args(argv)
 
     if args.list_sessions:
@@ -502,6 +546,14 @@ def main(argv: list[str] | None = None) -> int:
             max_tokens=args.banner_tokens,
             temperature=args.banner_temperature,
         ),
+        cloud_loader=lambda: cloud_mouth.load_cloud_assistant(
+            args.cloud_model,
+            provider=args.cloud_provider,
+            base_url=args.cloud_base_url,
+            api_key_env=args.cloud_api_key_env,
+            max_tokens=args.cloud_tokens,
+            temperature=args.cloud_temperature,
+        ),
     )
     if args.mind:
         failure = _apply_switch(switcher, MOUTH_MODEL)
@@ -531,6 +583,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if not args.json:
             print(switcher.banner.describe())
+    if args.cloud:
+        failure = _apply_switch(switcher, MOUTH_CLOUD)
+        if failure:
+            print(failure)
+            return 1
+        if not args.json:
+            print(switcher.cloud.describe())
 
     if args.session:
         if not mode.resume_session(args.session):
@@ -552,6 +611,7 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = [
     "INTRO",
     "MOUTH_BANNER",
+    "MOUTH_CLOUD",
     "MOUTH_MODEL",
     "MOUTH_SOURCES",
     "MOUTH_ULTRON",

@@ -273,6 +273,44 @@ Arabic is kept as secondary aliases where useful.
   Every answer is labelled as the local presentation model's own, not grounded in
   cited sources. `ai/banner.py` is the CLI entry point (`chat` default,
   `download`, `models`, `status`, `--session` persistence).
+- `core/cloud_model.py` — **Cloud**, the project's *remote* mouth: the one mouth
+  that deliberately does **not** run on this machine. It reaches an
+  **OpenAI-compatible** chat endpoint over the network, so a user who has an
+  account with a cloud provider (or a free tier, or their own local server) can
+  talk to it from the same chat. `CATALOG` names the fetchable providers
+  (`openai` *(default)*, `anthropic`, `gemini`, `groq`, `openrouter`, `mistral`,
+  `deepseek`, and the local `ollama`/`lmstudio`), each a base URL, a default
+  model, and the environment variable its key lives in (`OPENAI_API_KEY`,
+  `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, …; `FAYD_CLOUD_API_KEY` for a custom
+  endpoint); `CloudProvider`, `CloudMessage`, `CloudStatus`, `CloudUnavailable`,
+  `resolve_provider`/`provider_names`/`provider_summaries`, and
+  `redact_secret`. It is governed like every other external action: a cloud call
+  is the `cloud_chat` tool (`CHAT_TOOL`), and it passes **two** gates before a
+  byte leaves the machine — the permission policy
+  (`Capability.EXTERNAL_TOOL`) *and* the human-approval gate — both **denied by
+  default**, so a bare `CloudEngine` reaches nothing; selecting the mouth (or
+  `--cloud`) is the explicit approval, and every attempt is written to the
+  `AuditLog`. **No third-party dependency**: `OpenAICompatibleClient` is a thin
+  `urllib`+`json` client, so a base install reaches a cloud model and the whole
+  module imports with no network or account (which is why there is no
+  `requirements-cloud.txt`). The transport is the seam a test injects.
+  `cloud_status` distinguishes "no key set" from "the endpoint refused us" and
+  makes **no** request unless `probe=True`; the API key is read from the
+  environment at call time and is never written to the repository, a config file,
+  or a log (`redact_secret` scrubs it from every message). Wired **directly below
+  Banner** in the menu (`cli.menu.run_cloud`), CLI (`python -m cli cloud`), and —
+  as a **mouth inside the project's own chat** (`ai/cloud_mouth.py`, the headless
+  twin `python -m cli cloud-chat`) — the window's header model selector
+  (`MOUTH_CHOICES` in `gui/app.py`) and settings *Answering mouth* radio, beside
+  *From sources (cited)*, *From trained model*, Ultron, Vision, and Banner, plus
+  the sidebar **Answer from Cloud** action; the conversation stays in the same
+  transcript and session, never a separate window. `CloudAssistant.ask` reads an
+  attached file from the conversation's `CONTEXT` turns exactly as Ultron and
+  Vision do (`_context_prompt`), capped at `DEFAULT_REFERENCE_CHARS` (8000), so
+  the model can answer about a document the user attached. Every answer is
+  labelled as the remote model's own, not grounded in cited sources.
+  `ai/cloud.py` is the CLI entry point (`chat` default, `providers`, `status`,
+  `--session` persistence).
 - `gui/window_controls.py` — the shared **minimize / maximize** controls every
   dialog window installs. `install_window_controls(window, header, theme=,
   typography=, on_close=)` builds one frame of two buttons into the window's
