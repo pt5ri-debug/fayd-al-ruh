@@ -42,6 +42,7 @@ from core import speech
 from core.paths import data_dir
 from core.ultron import UltronUnavailable
 from core.banner import BannerUnavailable
+from core.cloud_model import CloudUnavailable
 from core.vision_model import VisionUnavailable
 from core.version import __version__
 from gui import markdown as md
@@ -71,6 +72,7 @@ MOUTH_CHOICES: tuple[tuple[str, str], ...] = (
     (chat_module.MOUTH_ULTRON, "Ultron (general local model)"),
     (chat_module.MOUTH_VISION, "Vision (petroleum local model)"),
     (chat_module.MOUTH_BANNER, "Banner (presentation local model)"),
+    (chat_module.MOUTH_CLOUD, "Cloud (remote model: ChatGPT, Claude, Gemini)"),
 )
 MOUTH_LABELS: dict[str, str] = {key: label for key, label in MOUTH_CHOICES}
 
@@ -1689,10 +1691,10 @@ class FaydGUI:
     def _switch_mouth(self, want: str) -> None:
         """Swap the mouth the *same* chat answers from, reporting a failure plainly.
 
-        All five mouths -- sources, the trained model, Ultron, Vision, and Banner --
-        answer in this conversation; only ``mode.assistant`` changes, so the
-        transcript, the session, and the controls are untouched. A mouth that cannot
-        load leaves the current one in place and shows the real next step instead.
+        All six mouths -- sources, the trained model, Ultron, Vision, Banner, and
+        Cloud -- answer in this conversation; only ``mode.assistant`` changes, so
+        the transcript, the session, and the controls are untouched. A mouth that
+        cannot load leaves the current one in place and shows the real next step.
         """
         if want == self.service.source:
             return
@@ -1705,6 +1707,8 @@ class FaydGUI:
                 self.service.use_vision()
             elif want == chat_module.MOUTH_BANNER:
                 self.service.use_banner()
+            elif want == chat_module.MOUTH_CLOUD:
+                self.service.use_cloud()
             else:
                 self.service.use_sources()
         except (
@@ -1714,6 +1718,7 @@ class FaydGUI:
             UltronUnavailable,
             VisionUnavailable,
             BannerUnavailable,
+            CloudUnavailable,
         ) as error:
             self._source_var.set(self.service.source)
             self._source_menu_var_reset()
@@ -2139,6 +2144,17 @@ class FaydGUI:
         """
         self._switch_mouth(chat_module.MOUTH_BANNER)
 
+    def _select_cloud_mouth(self) -> None:
+        """Switch this chat to the Cloud mouth from the sidebar action.
+
+        Cloud answers in the *same* conversation -- no separate window -- so this
+        just drives the header's model selector. When no API key is set or the
+        endpoint refuses, the honest next step is shown in the transcript instead
+        of opening a mouth that could not answer. Selecting this mouth is the
+        user's explicit approval to send their words to the remote model.
+        """
+        self._switch_mouth(chat_module.MOUTH_CLOUD)
+
     def _on_install_ocr(self) -> None:
         """Install the optional OCR packages from within the window.
 
@@ -2263,6 +2279,9 @@ class FaydGUI:
             return
         if action.key == "banner":
             self._select_banner_mouth()
+            return
+        if action.key == "cloud":
+            self._select_cloud_mouth()
             return
         argv = action.argv
         if action.needs_input:
@@ -2445,6 +2464,8 @@ def main(argv: list[str] | None = None) -> int:
         ultron_model=args.ultron_model,
         vision_model=args.vision_model,
         banner_model=args.banner_model,
+        cloud_provider=args.cloud_provider,
+        cloud_model=args.cloud_model,
         session=args.session,
         operating_mode=args.mode,
     )
@@ -2471,6 +2492,12 @@ def main(argv: list[str] | None = None) -> int:
             service.use_banner()
         except (BannerUnavailable, OSError, ValueError) as error:
             print(f"Could not load Banner: {error}")
+            return 1
+    if args.cloud:
+        try:
+            service.use_cloud()
+        except (CloudUnavailable, OSError, ValueError) as error:
+            print(f"Could not reach the cloud model: {error}")
             return 1
 
     FaydGUI(root, service=service)

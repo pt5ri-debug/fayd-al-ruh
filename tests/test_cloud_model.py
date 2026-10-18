@@ -1,0 +1,718 @@
+"""Cloud: the remote, OpenAI-compatible mouth -- engine, gates, CLI, chat, and GUI.
+
+Everything remote is injected: the engine takes a ``transport`` callable, so the
+whole client is exercised with **no network and no account**, and the mouth is
+built with an explicit key. These tests also pin the two honesty rules that make
+the layer safe to ship: a bare engine is *denied by default* (the permission and
+human-approval gates must both say yes), and the API key is never written to a
+message, a log, or the repository.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
+
+import pytest
+
+from ai import chat as chat_module
+from ai import cloud as cloud_cli
+from ai import cloud_mouth
+from ai.chat import (
+    MOUTH_BANNER,
+    MOUTH_CLOUD,
+    MOUTH_MODEL,
+    MOUTH_SOURCES,
+    MOUTH_ULTRON,
+    MOUTH_VISION,
+)
+from cli import menu as cli_menu
+from core.cloud_model import (
+    BLURB,
+    CATALOG,
+    CHAT_TOOL,
+    DEFAULT_PROVIDER_KEY,
+    HEADER,
+    MAX_TEMPERATURE,
+    MAX_TOKENS_CEILING,
+    NAME,
+    CloudEngine,
+    CloudMessage,
+    CloudUnavailable,
+    OpenAICompatibleClient,
+    approved_gate,
+    cloud_status,
+    granted_permissions,
+    provider_names,
+    provider_summaries,
+    redact_secret,
+    resolve_provider,
+)
+from core.conversation import Conversation
+from core.permissions import Capability
+from gui import actions as gui_actions
+
+#: A minimal, well-formed OpenAI-compatible chat completion.
+_REPLY = json.dumps({"choices": [{"message": {"content": "Hello from the cloud."}}]})
+_MODELS = json.dumps({"data": [{"id": "gpt-4o-mini"}, {"id": "gpt-4o"}]})
+
+
+def _display_available() -> bool:
+    """True when a Tk display can be opened (the GUI tests skip without one)."""
+    try:
+        import tkinter as tk
+
+        root = tk.Tk()
+    except Exception:
+        return False
+    root.destroy()
+    return True
+
+
+class FakeTransport:
+    """A stand-in for the HTTP transport: records calls, returns canned replies."""
+
+    def __init__(self, *, status: int = 200, body: str = _REPLY) -> None:
+        self.status = status
+        self.body = body
+        self.calls: list[tuple[str, dict[str, str], bytes | None, float]] = []
+
+    def __call__(self, url, headers, data, timeout):
+        self.calls.append((url, headers, data, timeout))
+        return self.status, self.body
+
+
+class FakeClient:
+    """A stand-in for a cloud client: satisfies the engine's protocol."""
+
+    def __init__(self, reply: str = "Hi there.", *, provider: str = "openai") -> None:
+        self.model = "fake-model"
+        self.provider = resolve_provider(provider)
+        self.reply_text = reply
+        self.calls: list[tuple[list[CloudMessage], dict]] = []
+
+    def chat(self, messages, *, temperature=None, max_tokens=None) -> str:
+        self.calls.append((list(messages), {"temperature": temperature, "max_tokens": max_tokens}))
+        return self.reply_text
+
+    def list_models(self) -> tuple[str, ...]:
+        return ("fake-model",)
+
+
+class KeylessClient(FakeClient):
+    """A client that reports it has no key, like a provider with an empty env var."""
+
+    def key_available(self) -> bool:
+        return False
+
+    def missing_key_hint(self) -> str:
+        return "Set OPENAI_API_KEY to your OpenAI (ChatGPT) API key, then try again."
+
+
+# --- the catalog -----------------------------------------------------------
+
+
+def test_catalog_has_a_default_and_named_providers() -> None:
+    assert DEFAULT_PROVIDER_KEY in CATALOG
+    assert resolve_provider(None) is CATALOG[DEFAULT_PROVIDER_KEY]
+    assert "openai" in provider_names()
+    assert "anthropic" in provider_names()
+    assert "gemini" in provider_names()
+    for _key, title, model, summary, _local in provider_summaries():
+        assert title and model and summary
+
+
+def test_every_remote_provider_names_its_key_variable() -> None:
+    """A remote provider must say which environment variable holds its key."""
+    for spec in CATALOG.values():
+        if spec.local:
+            assert spec.api_key_env == ""
+        else:
+            assert spec.api_key_env.endswith("_API_KEY")
+
+
+def test_local_providers_need_no_key() -> None:
+    assert resolve_provider("ollama").needs_key is False
+    assert resolve_provider("lmstudio").needs_key is False
+    assert resolve_provider("ollama").local is True
+
+
+def test_resolve_provider_is_case_insensitive_and_rejects_unknown() -> None:
+    assert resolve_provider("OPENAI").key == "openai"
+    with pytest.raises(ValueError):
+        resolve_provider("nope")
+
+
+def test_resolve_provider_passes_a_provider_back_unchanged() -> None:
+    spec = resolve_provider("groq")
+    assert resolve_provider(spec) is spec
+
+
+def test_blurb_is_short_and_honest() -> None:
+    assert "remote" in BLURB.lower()
+
+
+# --- the client ------------------------------------------------------------
+
+
+def test_client_posts_the_openai_chat_shape() -> None:
+    transport = FakeTransport()
+    client = OpenAICompatibleClient("gpt-4o-mini", provider="openai", api_key="k", transport=transport)
+    reply = client.chat([CloudMessage("user", "hi")])
+    assert reply == "Hello from the cloud."
+    url, headers, data, _timeout = transport.calls[0]
+    assert url.endswith("/chat/completions")
+    assert headers["Authorization"] == "Bearer k"
+    assert json.loads(cast(bytes, data))["model"] == "gpt-4o-mini"
+
+
+def test_client_sends_no_authorization_without_a_key() -> None:
+    transport = FakeTransport()
+    client = OpenAICompatibleClient(provider="ollama", transport=transport)
+    client.chat([CloudMessage("user", "hi")])
+    _url, headers, _data, _timeout = transport.calls[0]
+    assert "Authorization" not in headers
+
+
+def test_client_refuses_without_a_key_and_names_the_variable() -> None:
+    client = OpenAICompatibleClient(provider="openai", api_key="")
+    with pytest.raises(CloudUnavailable) as error:
+        client.chat([CloudMessage("user", "hi")])
+    assert "OPENAI_API_KEY" in str(error.value)
+
+
+def test_client_reads_the_key_from_the_environment(monkeypatch) -> None:
+    monkeypatch.setenv("FAYD_TEST_KEY", "env-key")
+    transport = FakeTransport()
+    client = OpenAICompatibleClient(
+        provider="openai", api_key_env="FAYD_TEST_KEY", transport=transport
+    )
+    client.chat([CloudMessage("user", "hi")])
+    assert transport.calls[0][1]["Authorization"] == "Bearer env-key"
+
+
+def test_client_reports_an_http_error_without_leaking_the_key() -> None:
+    secret = "sk-super-secret"
+    transport = FakeTransport(status=401, body=f"invalid key {secret}")
+    client = OpenAICompatibleClient(
+        "gpt-4o-mini", provider="openai", api_key=secret, transport=transport
+    )
+    with pytest.raises(CloudUnavailable) as error:
+        client.chat([CloudMessage("user", "hi")])
+    assert secret not in str(error.value)
+    assert "***" in str(error.value)
+    assert "401" in str(error.value)
+
+
+def test_client_reports_a_non_json_reply_honestly() -> None:
+    transport = FakeTransport(body="<html>not json</html>")
+    client = OpenAICompatibleClient(provider="ollama", transport=transport)
+    with pytest.raises(CloudUnavailable):
+        client.chat([CloudMessage("user", "hi")])
+
+
+def test_client_rejects_an_empty_reply() -> None:
+    transport = FakeTransport(body=json.dumps({"choices": [{"message": {"content": ""}}]}))
+    client = OpenAICompatibleClient(provider="ollama", transport=transport)
+    with pytest.raises(CloudUnavailable):
+        client.chat([CloudMessage("user", "hi")])
+
+
+def test_client_validates_temperature_and_max_tokens() -> None:
+    client = OpenAICompatibleClient(provider="ollama", transport=FakeTransport())
+    with pytest.raises(ValueError):
+        client.chat([CloudMessage("user", "hi")], temperature=MAX_TEMPERATURE + 1)
+    with pytest.raises(ValueError):
+        client.chat([CloudMessage("user", "hi")], max_tokens=MAX_TOKENS_CEILING + 1)
+
+
+def test_client_lists_models() -> None:
+    client = OpenAICompatibleClient(provider="openai", api_key="k", transport=FakeTransport(body=_MODELS))
+    assert client.list_models() == ("gpt-4o", "gpt-4o-mini")
+
+
+def test_message_rejects_a_bad_role_and_empty_content() -> None:
+    with pytest.raises(ValueError):
+        CloudMessage("system2", "x")
+    with pytest.raises(ValueError):
+        CloudMessage("user", "   ")
+
+
+def test_redact_secret_is_safe_with_no_secret() -> None:
+    assert redact_secret("plain text", None) == "plain text"
+    assert redact_secret("key abc here", "abc") == "key *** here"
+
+
+# --- status ----------------------------------------------------------------
+
+
+def test_status_reports_a_missing_key_without_a_network_call() -> None:
+    transport = FakeTransport()
+    client = OpenAICompatibleClient(provider="openai", api_key="", transport=transport)
+    status = cloud_status(client)
+    assert status.available is False
+    assert status.key_present is False
+    assert "OPENAI_API_KEY" in status.hint
+    assert transport.calls == []  # no probe, no request
+
+
+def test_status_probe_reports_reachable_and_lists_models() -> None:
+    client = OpenAICompatibleClient(
+        provider="openai", api_key="k", transport=FakeTransport(body=_MODELS)
+    )
+    status = cloud_status(client, probe=True)
+    assert status.reachable is True
+    assert status.available is True
+    assert "gpt-4o" in status.models
+
+
+def test_status_probe_reports_an_unreachable_endpoint() -> None:
+    client = OpenAICompatibleClient(
+        provider="openai", api_key="k", transport=FakeTransport(status=500, body="boom")
+    )
+    status = cloud_status(client, probe=True)
+    assert status.reachable is False
+    assert status.available is False
+    assert "500" in status.detail
+
+
+def test_status_summary_is_honest() -> None:
+    client = OpenAICompatibleClient(provider="ollama", transport=FakeTransport())
+    assert "ready" in cloud_status(client).summary()
+    missing = OpenAICompatibleClient(provider="openai", api_key="")
+    assert "not ready" in cloud_status(missing).summary() or "no API key" in cloud_status(missing).summary()
+
+
+# --- the engine and its gates ----------------------------------------------
+
+
+def test_engine_is_denied_by_default() -> None:
+    """A bare engine must reach nothing: the permission gate is closed."""
+    client = FakeClient()
+    engine = CloudEngine(client)
+    assert engine.is_available() is False
+    with pytest.raises(CloudUnavailable) as error:
+        engine.reply("hello")
+    assert "denied" in str(error.value).lower()
+    assert client.calls == []  # the client was never called
+
+
+def test_engine_requires_approval_even_with_permission() -> None:
+    client = FakeClient()
+    engine = CloudEngine(client, permissions=granted_permissions())
+    assert engine.is_available() is False
+    with pytest.raises(CloudUnavailable):
+        engine.reply("hello")
+    assert client.calls == []
+
+
+def test_engine_requires_a_key_even_when_approved() -> None:
+    engine = CloudEngine(KeylessClient(), approved=True)
+    assert engine.is_available() is False
+    with pytest.raises(CloudUnavailable) as error:
+        engine.reply("hello")
+    assert "OPENAI_API_KEY" in str(error.value)
+
+
+def test_engine_answers_once_approved_and_keyed() -> None:
+    client = FakeClient("Cloud reply.")
+    engine = CloudEngine(client, approved=True)
+    assert engine.is_available() is True
+    assert engine.reply("hello") == "Cloud reply."
+    messages, kwargs = client.calls[0]
+    assert messages[0].role == "system"
+    assert messages[-1] == CloudMessage("user", "hello")
+
+
+def test_engine_builds_system_then_history_then_prompt() -> None:
+    engine = CloudEngine(FakeClient(), approved=True)
+    messages = engine.build_messages([("user", "hi"), ("assistant", "hello")], "and?")
+    assert [m.role for m in messages] == ["system", "user", "assistant", "user"]
+    assert messages[0].content == engine.system_prompt
+
+
+def test_engine_skips_an_empty_history_turn() -> None:
+    engine = CloudEngine(FakeClient(), approved=True)
+    messages = engine.build_messages([("user", "hi"), ("assistant", "   ")], "and?")
+    assert [m.role for m in messages] == ["system", "user", "user"]
+
+
+def test_engine_rejects_an_empty_prompt() -> None:
+    engine = CloudEngine(FakeClient(), approved=True)
+    with pytest.raises(ValueError):
+        engine.reply("   ")
+
+
+def test_engine_streams_when_the_client_can() -> None:
+    class StreamingClient(FakeClient):
+        def stream_chat(self, messages, *, temperature=None, max_tokens=None):
+            yield "a"
+            yield "b"
+
+    engine = CloudEngine(StreamingClient(), approved=True)
+    assert list(engine.stream_reply("hi")) == ["a", "b"]
+
+
+def test_engine_describe_names_the_provider_and_where_it_runs() -> None:
+    remote = CloudEngine(FakeClient(provider="openai"), approved=True)
+    assert "remote" in remote.describe()
+    local = CloudEngine(FakeClient(provider="ollama"), approved=True)
+    assert "on this machine" in local.describe()
+
+
+def test_engine_audits_its_decision() -> None:
+    """Every cloud attempt is recorded, allowed or not."""
+    from core.audit_log import AuditLog
+
+    audit = AuditLog()
+    engine = CloudEngine(FakeClient(), approved=True, audit=audit)
+    engine.reply("hi")
+    records = audit.for_capability(Capability.EXTERNAL_TOOL)
+    assert any(record.target == CHAT_TOOL for record in records)
+
+
+def test_granted_permissions_and_gate_are_scoped_to_the_chat_tool() -> None:
+    policy = granted_permissions()
+    assert policy.decide(Capability.EXTERNAL_TOOL, CHAT_TOOL).allowed
+    gate = approved_gate()
+    assert gate.decide(CHAT_TOOL).approved
+
+
+# --- the chat mouth --------------------------------------------------------
+
+
+def _cloud_assistant(reply: str = "Cloud reply.") -> cloud_mouth.CloudAssistant:
+    return cloud_mouth.load_cloud_assistant(client=FakeClient(reply), api_key="k")
+
+
+def test_load_cloud_assistant_needs_a_usable_endpoint() -> None:
+    with pytest.raises(CloudUnavailable):
+        cloud_mouth.load_cloud_assistant(client=KeylessClient())
+
+
+def test_cloud_assistant_ask_records_the_turn_with_no_citations() -> None:
+    assistant = _cloud_assistant("A remote answer.")
+    conversation = Conversation()
+    answer = assistant.ask("what is porosity?", conversation=conversation)
+    assert "A remote answer." in answer.text
+    assert HEADER in answer.text
+    assert answer.citations == ()
+    assert answer.passages == ()
+    assert answer.used_model is True
+    assert conversation.messages[-1].role.value == "assistant"
+
+
+def test_cloud_assistant_passes_prior_turns_as_history() -> None:
+    client = FakeClient()
+    assistant = cloud_mouth.load_cloud_assistant(client=client, api_key="k")
+    conversation = Conversation()
+    conversation.add_user("first")
+    conversation.add_assistant("first answer")
+    assistant.ask("second", conversation=conversation)
+    messages, _kwargs = client.calls[0]
+    assert ("user", "first") in [(m.role, m.content) for m in messages]
+    assert ("assistant", "first answer") in [(m.role, m.content) for m in messages]
+
+
+def test_cloud_assistant_strips_a_prior_honesty_header_from_history() -> None:
+    client = FakeClient()
+    assistant = cloud_mouth.load_cloud_assistant(client=client, api_key="k")
+    conversation = Conversation()
+    conversation.add_assistant(f"{HEADER}\n\nearlier answer")
+    assistant.ask("next", conversation=conversation)
+    messages, _kwargs = client.calls[0]
+    assert all(HEADER not in m.content for m in messages)
+
+
+def test_cloud_assistant_includes_attached_reference_material() -> None:
+    client = FakeClient()
+    assistant = cloud_mouth.load_cloud_assistant(client=client, api_key="k")
+    conversation = Conversation()
+    conversation.add_context("The casing is 9-5/8 inch.")
+    assistant.ask("what size is the casing?", conversation=conversation)
+    messages, _kwargs = client.calls[0]
+    prompt = messages[-1].content
+    assert "9-5/8 inch" in prompt
+    assert cloud_mouth.REFERENCE_LABEL in prompt
+
+
+def test_cloud_assistant_substitutes_a_body_when_the_model_is_silent() -> None:
+    assistant = _cloud_assistant("   ")
+    answer = assistant.ask("anything")
+    assert cloud_mouth.CLOUD_EMPTY in answer.text
+
+
+def test_cloud_assistant_rejects_an_empty_question() -> None:
+    assistant = _cloud_assistant()
+    with pytest.raises(ValueError):
+        assistant.ask("   ")
+
+
+def test_unavailable_message_names_the_next_step() -> None:
+    engine = CloudEngine(OpenAICompatibleClient(provider="openai", api_key=""))
+    message = cloud_mouth.unavailable_message(engine)
+    assert "OPENAI_API_KEY" in message
+
+
+# --- the switcher ----------------------------------------------------------
+
+
+class FakeSession:
+    def __init__(self) -> None:
+        self.assistant: Any = SimpleNamespace(name="grounded")
+        self.help_text = "help"
+        self.voice = SimpleNamespace(assistant=self.assistant)
+
+
+def _switcher(reply: str = "Cloud reply."):
+    session = FakeSession()
+    switcher = chat_module.ModelSwitcher(
+        cast(Any, session),
+        loader=lambda: (_ for _ in ()).throw(AssertionError("the trained model must not load")),
+        cloud_loader=lambda: cloud_mouth.load_cloud_assistant(client=FakeClient(reply), api_key="k"),
+    )
+    return session, switcher
+
+
+def test_switcher_cloud_swaps_the_mouth_and_keeps_the_grounded_one() -> None:
+    session, switcher = _switcher()
+    grounded = switcher.grounded
+    grounded_help = switcher.grounded_help
+
+    switcher.use_cloud()
+
+    assert switcher.mouth == MOUTH_CLOUD
+    assert switcher.active is True
+    assert session.assistant is switcher.cloud
+    assert session.voice.assistant is switcher.cloud
+    assert cloud_mouth.CLOUD_HELP in session.help_text
+
+    switcher.use_sources()
+    assert switcher.mouth == MOUTH_SOURCES
+    assert session.assistant is grounded
+    assert session.help_text == grounded_help
+
+
+def test_switcher_loads_cloud_lazily_and_reuses_it() -> None:
+    session = FakeSession()
+    calls: list[int] = []
+
+    def _loader():
+        calls.append(1)
+        return cloud_mouth.load_cloud_assistant(client=FakeClient(), api_key="k")
+
+    switcher = chat_module.ModelSwitcher(cast(Any, session), loader=lambda: None, cloud_loader=_loader)
+    assert calls == []
+    switcher.use_cloud()
+    switcher.use_cloud()
+    assert calls == [1]
+
+
+def test_switcher_reports_a_cloud_failure_with_the_real_next_step() -> None:
+    session = FakeSession()
+    switcher = chat_module.ModelSwitcher(
+        cast(Any, session),
+        loader=lambda: None,
+        cloud_loader=lambda: cloud_mouth.load_cloud_assistant(client=KeylessClient()),
+    )
+    message = chat_module._apply_switch(switcher, MOUTH_CLOUD)
+    assert "OPENAI_API_KEY" in message
+    assert switcher.mouth == MOUTH_SOURCES  # the working mouth stays
+
+
+def test_switch_recognises_the_cloud_phrases() -> None:
+    assert chat_module._match_switch("from cloud") == MOUTH_CLOUD
+    assert chat_module._match_switch("Cloud on.") == MOUTH_CLOUD
+    assert chat_module._match_switch("من السحابة") == MOUTH_CLOUD
+    assert chat_module._match_switch("from banner") == MOUTH_BANNER
+    assert chat_module._match_switch("from vision") == MOUTH_VISION
+    assert chat_module._match_switch("from ultron") == MOUTH_ULTRON
+    assert chat_module._match_switch("from the model") == MOUTH_MODEL
+    assert chat_module._match_switch("from the sources") == MOUTH_SOURCES
+    # A real question is never captured as a switch.
+    assert chat_module._match_switch("what is cloud computing?") is None
+
+
+def test_mouth_switched_message_describes_the_cloud() -> None:
+    assert "cloud" in chat_module.mouth_switched_message(MOUTH_CLOUD).lower()
+
+
+# --- the CLI ---------------------------------------------------------------
+
+
+def test_cli_providers_lists_the_catalog(capsys) -> None:
+    assert cloud_cli.run_providers(cast(argparse.Namespace, SimpleNamespace(as_json=False))) == 0
+    assert "openai" in capsys.readouterr().out
+
+
+def test_cli_providers_json(capsys) -> None:
+    assert cloud_cli.run_providers(cast(argparse.Namespace, SimpleNamespace(as_json=True))) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert any(entry["key"] == "openai" for entry in data)
+
+
+def test_cli_status_is_nonzero_without_a_key(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    args = cast(argparse.Namespace, SimpleNamespace(provider=None, model=None, base_url=None, api_key_env=None, probe=False, as_json=False))
+    assert cloud_cli.run_status(args) == 1
+    assert "OPENAI_API_KEY" in capsys.readouterr().out
+
+
+def test_cli_status_is_zero_with_a_key(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    args = cast(argparse.Namespace, SimpleNamespace(provider=None, model=None, base_url=None, api_key_env=None, probe=False, as_json=False))
+    assert cloud_cli.run_status(args) == 0
+    assert NAME in capsys.readouterr().out
+
+
+def test_cli_bare_question_is_normalized_to_chat() -> None:
+    assert cloud_cli._normalize_argv(["who wrote Hamlet?"])[0] == "chat"
+    assert cloud_cli._normalize_argv(["status"]) == ["status"]
+    assert cloud_cli._normalize_argv(["providers"]) == ["providers"]
+    assert cloud_cli._normalize_argv(["--help"]) == ["--help"]
+
+
+def test_cli_one_shot_uses_an_injected_client(monkeypatch, tmp_path, capsys) -> None:
+    client = FakeClient("The cloud says hello.")
+    monkeypatch.setattr(cloud_cli, "_engine", lambda _args: CloudEngine(client, approved=True))
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cloud_cli.main(["who wrote Hamlet?"]) == 0
+    out = capsys.readouterr().out
+    assert "The cloud says hello." in out
+    assert HEADER in out
+
+
+def test_cli_interactive_quits_immediately(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setattr(cloud_cli, "_engine", lambda _args: CloudEngine(FakeClient(), approved=True))
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("builtins.input", lambda _prompt: "quit")
+    assert cloud_cli.main([]) == 0
+
+
+# --- menu and CLI dispatch -------------------------------------------------
+
+
+def test_menu_shows_cloud_directly_below_banner() -> None:
+    labels = [title for title, _action, _argv in cli_menu.visible_menu()]
+    banner = next(i for i, label in enumerate(labels) if label.startswith("Banner"))
+    assert labels[banner + 1].startswith("Cloud (remote model")
+
+
+def test_menu_action_runs_the_cloud_module(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_module(name: str, argv) -> int:
+        captured["name"] = name
+        captured["argv"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(cli_menu, "_run_module", fake_run_module)
+    assert cli_menu.run_cloud(["--session", "s"]) == 0
+    assert captured["name"] == "ai.cloud"
+    assert captured["argv"] == ["--session", "s"]
+
+
+def test_run_cloud_chat_adds_the_flag_once(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_module(name: str, argv) -> int:
+        captured["name"] = name
+        captured["argv"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(cli_menu, "_run_module", fake_run_module)
+    assert cli_menu.run_cloud_chat([]) == 0
+    assert captured["name"] == "ai.chat"
+    assert captured["argv"] == ["--cloud"]
+    cli_menu.run_cloud_chat(["--cloud", "--json"])
+    assert captured["argv"] == ["--cloud", "--json"]
+
+
+def test_cli_dispatches_cloud() -> None:
+    from cli import __main__ as cli_entry
+
+    assert cli_entry._COMMANDS["cloud"] is cli_menu.run_cloud
+    assert cli_entry._COMMANDS["cloud-chat"] is cli_menu.run_cloud_chat
+
+
+def test_gui_sidebar_has_a_cloud_action() -> None:
+    keys = {action.key for action in gui_actions.ACTIONS}
+    assert "cloud" in keys
+    action = gui_actions.action_by_key("cloud")
+    assert action.command is cli_menu.run_cloud_chat
+    assert "Cloud" in action.label
+
+
+def test_gui_mouth_choices_include_cloud() -> None:
+    if not _display_available():
+        pytest.skip("no display available")
+    from gui import app as gui_app
+
+    keys = [key for key, _label in gui_app.MOUTH_CHOICES]
+    assert MOUTH_CLOUD in keys
+
+
+def test_chat_parser_accepts_cloud_flags(monkeypatch, capsys) -> None:
+    """The chat's own argument parser accepts the cloud flags."""
+    from ai import chat
+
+    class FakeMode:
+        def list_sessions(self) -> list[str]:
+            return []
+
+    monkeypatch.setattr(chat, "build_session", lambda **_kw: FakeMode())
+    assert chat.main(["--cloud", "--cloud-provider", "groq", "--list-sessions"]) == 0
+    assert "No saved sessions yet." in capsys.readouterr().out
+
+
+def test_gui_parser_accepts_cloud_flags() -> None:
+    from gui.options import build_parser
+
+    args = build_parser().parse_args(["--cloud", "--cloud-model", "gpt-4o"])
+    assert args.cloud is True
+    assert args.cloud_model == "gpt-4o"
+
+
+# --- no dependency, no committed key ---------------------------------------
+
+
+def test_the_layer_adds_no_third_party_dependency() -> None:
+    """The client is stdlib only, so a base install reaches a cloud model."""
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "core" / "cloud_model.py").read_text(encoding="utf-8")
+    assert "import requests" not in text
+    assert "import urllib.request" in text
+
+
+def test_no_api_key_is_committed_anywhere_in_the_source() -> None:
+    """The key is read from the environment; it must never be written to a file."""
+    root = Path(__file__).resolve().parents[1]
+    for name in ("core/cloud_model.py", "ai/cloud.py", "ai/cloud_mouth.py"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "api_key_env" in text
+        # No hard-coded credential of any common shape.
+        for marker in ("sk-proj-", "sk-ant-", "AIzaSy"):
+            assert marker not in text
+
+
+def test_engine_reads_the_key_from_the_environment_only(monkeypatch) -> None:
+    monkeypatch.setenv("FAYD_TEST_KEY", "env-key")
+    client = OpenAICompatibleClient(provider="openai", api_key_env="FAYD_TEST_KEY")
+    assert client.api_key == "env-key"
+    monkeypatch.delenv("FAYD_TEST_KEY")
+    assert client.api_key is None
+
+
+def test_default_api_key_env_is_named() -> None:
+    from core.cloud_model import DEFAULT_API_KEY_ENV
+
+    assert DEFAULT_API_KEY_ENV == "FAYD_CLOUD_API_KEY"
+
+
+def test_no_env_key_is_present_by_default() -> None:
+    """The test environment itself holds no key, so the default path is denied."""
+    assert os.environ.get("OPENAI_API_KEY") in (None, "")

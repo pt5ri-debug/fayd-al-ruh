@@ -17,6 +17,7 @@ from typing import Any, TYPE_CHECKING
 
 from ai import chat as chat_module
 from ai import banner_mouth
+from ai import cloud_mouth
 from ai import mind as mind_module
 from ai import ultron_mouth
 from ai import vision_mouth
@@ -104,6 +105,7 @@ class ChatService:
     - ``"ultron"`` -- answers from the general local model, no citations.
     - ``"vision"`` -- answers from the petroleum local model, no citations.
     - ``"banner"`` -- answers from the presentation local model, no citations.
+    - ``"cloud"`` -- answers from a remote cloud model over the network, no citations.
 
     ``mode`` selects the *operating mode* (see :mod:`gui.modes`). In **AI Mode**
     the message is answered conversationally and no tool can run. In **Jarvics
@@ -130,6 +132,10 @@ class ChatService:
         banner_model: str | None = None,
         banner_tokens: int | None = None,
         banner_temperature: float | None = None,
+        cloud_provider: str | None = None,
+        cloud_model: str | None = None,
+        cloud_tokens: int | None = None,
+        cloud_temperature: float | None = None,
         session: str | None = None,
         operating_mode: str | None = None,
         data_root: Path | None = None,
@@ -166,6 +172,12 @@ class ChatService:
                 banner_model,
                 max_tokens=banner_tokens,
                 temperature=banner_temperature,
+            ),
+            cloud_loader=lambda: cloud_mouth.load_cloud_assistant(
+                cloud_model,
+                provider=cloud_provider,
+                max_tokens=cloud_tokens,
+                temperature=cloud_temperature,
             ),
         )
         self.session = session
@@ -294,7 +306,7 @@ class ChatService:
 
     @property
     def source(self) -> str:
-        """Which mouth currently answers: ``"model"``, ``"ultron"``, ``"vision"``, ``"banner"``, or ``"sources"``."""
+        """Which mouth currently answers: ``"model"``, ``"ultron"``, ``"vision"``, ``"banner"``, ``"cloud"``, or ``"sources"``."""
         return self.switcher.mouth
 
     def use_model(self) -> None:
@@ -325,6 +337,14 @@ class ChatService:
         a model file is missing, so the caller can report the real next step.
         """
         self.switcher.use_banner()
+
+    def use_cloud(self) -> None:
+        """Answer from a remote cloud model over the network.
+
+        Raises :class:`~core.cloud_model.CloudUnavailable` when no API key is set
+        or the endpoint refuses, so the caller can report the real next step.
+        """
+        self.switcher.use_cloud()
 
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations."""

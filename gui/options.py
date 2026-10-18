@@ -38,6 +38,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="start answering from Banner, the presentation local model (outlines and slide content)",
     )
     parser.add_argument("--banner-model", default=None, help="a specific .gguf file for Banner to load")
+    parser.add_argument(
+        "--cloud",
+        action="store_true",
+        help="start answering from a remote cloud model (ChatGPT/Claude/Gemini/... over the network)",
+    )
+    parser.add_argument("--cloud-provider", default=None, help="which cloud provider to use")
+    parser.add_argument("--cloud-model", default=None, help="the cloud model to ask for")
     parser.add_argument("--session", default=None, help="resume a saved session by id")
     parser.add_argument(
         "--mode",

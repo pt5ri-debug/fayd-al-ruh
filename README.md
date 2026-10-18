@@ -666,6 +666,8 @@ python -m cli chat --mind                   # answer from the trained model, not
 python -m cli chat --ultron                 # answer from Ultron, the general local model
 python -m cli chat --vision                 # answer from Vision, the petroleum local model
 python -m cli chat --banner                 # answer from Banner, the presentation local model
+python -m cli chat --cloud                  # answer from a remote model (needs an API key)
+python -m cli chat --cloud --cloud-provider groq --cloud-model llama-3.3-70b-versatile
 python -m cli chat --session demo           # resume/autosave a named session
 python -m cli chat --list-sessions          # show saved conversations
 python -m cli chat --json "what is porosity?"   # machine-readable turn
@@ -704,7 +706,8 @@ model. A missing checkpoint is reported plainly, with the command to train one
 Inside an interactive session you can switch mouths without restarting: type
 `from the model` to answer from the model, `from ultron` for the general local
 model, `from vision` for the petroleum local model, `from banner` for the
-presentation local model (all three below), or `from the
+presentation local model (all three below), `from cloud` for a remote model (see
+below), or `from the
 sources` for cited, retrieved answers again. When
 the sources cannot answer a question, the chat prints a short hint pointing at
 the other mouths. Those phrases are recognised by `chat` alone — they are
@@ -713,8 +716,9 @@ the other mouths. Those phrases are recognised by `chat` alone — they are
 The model mouth is wired only in `ai/chat.py` (`ai/mind.py` holds the logic) and
 never touches `ai/jarvis.py`, `core/jarvis.py`, or the session builder, so Jarvis
 mode is unaffected. The Ultron (`ai/ultron_mouth.py`), Vision
-(`ai/vision_mouth.py`), and Banner (`ai/banner_mouth.py`) mouths follow the same
-rule, so all five mouths answer in one session.
+(`ai/vision_mouth.py`), Banner (`ai/banner_mouth.py`), and Cloud
+(`ai/cloud_mouth.py`) mouths follow the same
+rule, so all six mouths answer in one session.
 
 ### Ultron: a general, advanced local model (optional)
 
@@ -895,6 +899,52 @@ catalog, and the gates); `ai/banner.py` is the CLI entry point; and
 project's own conversation (`from banner` in text, the model selector in the
 window).
 
+### Cloud: a remote model you choose (optional)
+
+Every mouth above runs **on this machine**. **Cloud** is the one deliberate
+exception: an *opt-in* mouth that reaches a remote, OpenAI-compatible service —
+**ChatGPT (OpenAI)**, **Claude (Anthropic)**, **Gemini (Google)**, Groq,
+OpenRouter, Mistral, DeepSeek, or a local server (Ollama, LM Studio) — using
+**your own API key**. The project ships **no** key and talks to no AI service on
+its own; the mouth stays closed until you set a key *and* select it.
+
+```bash
+python -m cli cloud status                        # is a key present, and is it reachable?
+python -m cli cloud providers                     # the catalog: OpenAI, Anthropic, Gemini, ...
+python -m cli cloud "who wrote Hamlet?"           # one question, answered remotely
+python -m cli cloud --provider anthropic "explain PVT"
+python -m cli cloud --provider ollama --model llama3.2 "hi"   # a local server, no key
+python -m cli cloud-chat                          # the cloud mouth inside `python -m cli chat`
+python -m cli chat --cloud "what is porosity?"    # the same thing
+```
+
+The key is read from the environment — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GEMINI_API_KEY`, and so on (or `FAYD_CLOUD_API_KEY` for any provider) — and is
+**never** written to a file, a message, or a log: an error string is redacted
+before it is shown. A local server (Ollama, LM Studio) needs no key at all.
+
+The layer is governed like every other external action. Reaching a remote model
+is the `cloud_chat` tool, and it passes **two** gates before a byte leaves the
+machine: the permission policy (`Capability.EXTERNAL_TOOL`) and the
+human-approval gate. Both are **denied by default**, so a bare engine answers
+nothing; choosing the Cloud mouth in the chat, or passing `--cloud`, is the
+explicit approval. Every attempt — allowed or refused — is written to the audit
+log. There is **no third-party dependency**: the client is a thin `urllib`
+wrapper, so a base install reaches a cloud model.
+
+Like the other mouths, Cloud is a **mouth inside the project's own chat**: the
+window's model selector and the settings panel's *Answering mouth* both list
+**Cloud (remote model)**, and the sidebar's **Answer from Cloud** entry selects
+it; the conversation stays in the **same transcript and the same session**. In
+the text chat, type `from cloud` (or `from the sources` to switch back).
+`core/cloud_model.py` holds the engine, the catalog, and the gates;
+`ai/cloud.py` is the CLI entry point; and `ai/cloud_mouth.py` is the chat mouth.
+
+Every Cloud answer is labelled `[cloud] answered by a remote model over the
+network; not grounded in cited sources.` — it is a remote model's own prose, sent
+over the network, and it is never checked against the corpus. That is the honest
+trade you accept by selecting the mouth.
+
 ## Graphical interface (ChatGPT-style)
 
 A desktop window that looks and reads like ChatGPT ships **next to** the command
@@ -908,6 +958,7 @@ python -m cli gui --mind                # start answering from the trained model
 python -m cli gui --ultron              # start answering from Ultron (general local model)
 python -m cli gui --vision              # start answering from Vision (petroleum local model)
 python -m cli gui --banner              # start answering from Banner (presentation local model)
+python -m cli gui --cloud               # start answering from a remote model (needs an API key)
 python -m cli gui --session demo        # resume a saved conversation
 python -m cli gui --no-web              # answer only from internal knowledge
 python -m cli gui --mode jarvics        # start with sandboxed tools enabled
@@ -930,8 +981,9 @@ The window is a thin shell over the same code the CLI already runs:
   in the sandbox under every existing guarantee. The header shows the active mode
   by name and switches with one control, and beside it sits the **model
   selector** — *From sources (cited)*, *From trained model*, *Ultron (general
-  local model)*, *Vision (petroleum local model)*, and *Banner (presentation
-  local model)* — so the answering mouth
+  local model)*, *Vision (petroleum local model)*, *Banner (presentation
+  local model)*, and *Cloud (remote model: ChatGPT, Claude, Gemini)* — so the
+  answering mouth
   changes inside the *same* chat. The
   sidebar lists the sandbox tools and dims them in AI Mode. The chosen mode
   persists (see `gui/modes.py`), and switching never clears the transcript.

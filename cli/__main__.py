@@ -17,13 +17,19 @@ Usage:
     python -m cli banner              # Banner: the Presentation Studio's local model
     python -m cli banner "an outline for a deck on well testing"   # one question
     python -m cli banner download --approve    # one-time: fetch Banner's model (~5 GB)
+    python -m cli cloud               # Cloud: a remote model (ChatGPT, Claude, Gemini, ...)
+    python -m cli cloud "who wrote Hamlet?"    # one question, answered by the remote model
+    python -m cli cloud --provider groq "..."  # choose the provider
+    python -m cli cloud status        # is a key set and the endpoint reachable
     python -m cli chat                # chat with the AI in text (Jarvis, no voice)
     python -m cli chat --ultron       # chat answering from Ultron (general local model)
     python -m cli chat --vision       # chat answering from Vision (petroleum local model)
     python -m cli chat --banner       # chat answering from Banner (presentation local model)
+    python -m cli chat --cloud        # chat answering from a remote cloud model
     python -m cli ultron-chat         # the same, from the menu/CLI command
     python -m cli vision-chat         # chat answering from Vision (petroleum local model)
     python -m cli banner-chat         # chat answering from Banner (presentation local model)
+    python -m cli cloud-chat          # chat answering from a remote cloud model
     python -m cli mind-chat           # chat answering from the trained model (no sources)
     python -m cli learn               # continuous learning + regression gate
     python -m cli insight             # what the AI can do and what it has learned
@@ -112,6 +118,8 @@ from cli.menu import (
     run_vision_chat,
     run_banner,
     run_banner_chat,
+    run_cloud,
+    run_cloud_chat,
     run_voice,
     run_web,
 )
@@ -125,12 +133,14 @@ _COMMANDS = {
     "ultron": run_ultron,
     "vision": run_vision,
     "banner": run_banner,
+    "cloud": run_cloud,
     "chat": run_chat,
     "gui": run_gui,
     "mind-chat": run_mind_chat,
     "ultron-chat": run_ultron_chat,
     "vision-chat": run_vision_chat,
     "banner-chat": run_banner_chat,
+    "cloud-chat": run_cloud_chat,
     "learn": run_learn,
     "insight": run_insight,
     "internet-learner": run_internet_learner,

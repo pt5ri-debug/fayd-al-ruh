@@ -132,6 +132,11 @@ def run_banner(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.banner", argv)
 
 
+def run_cloud(argv: Sequence[str] = ()) -> int:
+    """Run Cloud: a remote, OpenAI-compatible model (ChatGPT, Claude, Gemini, ...)."""
+    return _run_module("ai.cloud", argv)
+
+
 def run_chat(argv: Sequence[str] = ()) -> int:
     """Talk with the AI in text, like Jarvis without the voice."""
     return _run_module("ai.chat", argv)
@@ -166,6 +171,14 @@ def run_banner_chat(argv: Sequence[str] = ()) -> int:
     args = list(argv)
     if "--banner" not in args:
         args.insert(0, "--banner")
+    return _run_module("ai.chat", args)
+
+
+def run_cloud_chat(argv: Sequence[str] = ()) -> int:
+    """Talk with the AI in text, answering from a remote cloud model."""
+    args = list(argv)
+    if "--cloud" not in args:
+        args.insert(0, "--cloud")
     return _run_module("ai.chat", args)
 
 
@@ -377,6 +390,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Ultron (general local model, any subject)", run_ultron, ()),
     ("Vision (petroleum local model: reservoir, drilling, PVT)", run_vision, ()),
     ("Banner (presentation local model: outlines and slide content)", run_banner, ()),
+    ("Cloud (remote model: ChatGPT, Claude, Gemini; needs an API key)", run_cloud, ("status",)),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
@@ -520,11 +534,13 @@ __all__ = [
     "run_ultron",
     "run_vision",
     "run_banner",
+    "run_cloud",
     "run_chat",
     "run_mind_chat",
     "run_ultron_chat",
     "run_vision_chat",
     "run_banner_chat",
+    "run_cloud_chat",
     "run_learn",
     "run_insight",
     "run_internet_learner",

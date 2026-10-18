@@ -313,8 +313,8 @@ def test_actions_cover_the_mirrored_menu_items() -> None:
 
 #: The visible CLI menu entries the window provides through its own controls
 #: (the window itself, the reading-voice picker, Jarvis, Ultron, Vision, Banner,
-#: and the two text-chat mouths). The sidebar mirrors a later block instead of
-#: repeating them.
+#: Cloud, and the two text-chat mouths). The sidebar mirrors a later block
+#: instead of repeating them.
 _WINDOW_OWNED_MENU_LABELS = frozenset(
     {
         "Open the graphical interface (ChatGPT-style)",
@@ -323,6 +323,7 @@ _WINDOW_OWNED_MENU_LABELS = frozenset(
         "Ultron (general local model, any subject)",
         "Vision (petroleum local model: reservoir, drilling, PVT)",
         "Banner (presentation local model: outlines and slide content)",
+        "Cloud (remote model: ChatGPT, Claude, Gemini; needs an API key)",
         "Chat with the AI (text, like Jarvis without voice)",
         "Chat with the AI (trained model, no sources)",
     }
@@ -330,8 +331,8 @@ _WINDOW_OWNED_MENU_LABELS = frozenset(
 
 #: The visible CLI entries the sidebar mirrors, in order (the first one after the
 #: window-owned controls through the Code Studio screen).
-_MIRRORED_MENU_START = 8
-_MIRRORED_MENU_STOP = 15
+_MIRRORED_MENU_START = 9
+_MIRRORED_MENU_STOP = 16
 
 
 def test_action_labels_match_the_mirrored_cli_menu_block() -> None:
