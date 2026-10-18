@@ -283,8 +283,17 @@ Arabic is kept as secondary aliases where useful.
   model, and the environment variable its key lives in (`OPENAI_API_KEY`,
   `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, …; `FAYD_CLOUD_API_KEY` for a custom
   endpoint); `CloudProvider`, `CloudMessage`, `CloudStatus`, `CloudUnavailable`,
-  `resolve_provider`/`provider_names`/`provider_summaries`, and
-  `redact_secret`. It is governed like every other external action: a cloud call
+  `resolve_provider`/`provider_names`/`provider_summaries`/`free_provider_names`,
+  and
+  `redact_secret`. The user's **chosen provider is remembered**: `load_provider_key`/
+  `save_provider_key`/`selected_provider` persist it through `JsonStore` under the
+  `cloud` namespace (only the provider's *name*, never a key), so
+  `python -m cli cloud use gemini` (or the window's provider picker) makes every
+  later run Gemini with no flag — an explicit `--provider` still wins for one turn,
+  and a stored name that left the catalog falls back to the default. Each catalog
+  entry also carries `free` (`free_provider_names`), so the app can point a user who
+  does not want to pay at a no-card provider (Gemini, Groq, OpenRouter, Mistral).
+  It is governed like every other external action: a cloud call
   is the `cloud_chat` tool (`CHAT_TOOL`), and it passes **two** gates before a
   byte leaves the machine — the permission policy
   (`Capability.EXTERNAL_TOOL`) *and* the human-approval gate — both **denied by
@@ -310,7 +319,7 @@ Arabic is kept as secondary aliases where useful.
   the model can answer about a document the user attached. Every answer is
   labelled as the remote model's own, not grounded in cited sources.
   `ai/cloud.py` is the CLI entry point (`chat` default, `providers`, `status`,
-  `--session` persistence).
+  `use <key>` to remember a provider, `--session` persistence).
 - `gui/window_controls.py` — the shared **minimize / maximize** controls every
   dialog window installs. `install_window_controls(window, header, theme=,
   typography=, on_close=)` builds one frame of two buttons into the window's

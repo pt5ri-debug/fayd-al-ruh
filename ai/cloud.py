@@ -2,7 +2,8 @@
 
     python -m cli cloud                          # interactive chat (type 'quit' to exit)
     python -m cli cloud "explain how a jet engine works"   # one question
-    python -m cli cloud --provider groq "..."   # choose the provider
+    python -m cli cloud --provider groq "..."   # choose the provider for one turn
+    python -m cli cloud use gemini               # remember a provider for later runs
     python -m cli cloud --session demo "and who invented it?"  # keep context across runs
     python -m cli cloud providers                # list the providers it can reach
     python -m cli cloud status                   # is a key set and the endpoint reachable
@@ -45,7 +46,11 @@ from core.cloud_model import (
     CloudEngine,
     CloudUnavailable,
     cloud_status,
+    load_provider_key,
     provider_summaries,
+    resolve_provider,
+    save_provider_key,
+    selected_provider,
 )
 from core.conversation import Conversation, ConversationMemory, Role
 from core.paths import data_dir
@@ -68,9 +73,18 @@ def _memory() -> ConversationMemory:
         return ConversationMemory()
 
 
+def _settings_root() -> Path:
+    """Where the chosen provider is remembered (the project's data folder)."""
+    return data_dir()
+
+
 def _engine(args: argparse.Namespace) -> CloudEngine:
+    # An explicit --provider wins; otherwise the provider the user last chose is
+    # used, so "python -m cli cloud use gemini" makes every later run Gemini with
+    # no flag. A local server needs no key.
+    provider = selected_provider(_settings_root(), getattr(args, "provider", None))
     return CloudEngine(
-        provider=args.provider,
+        provider=provider,
         model=args.model,
         base_url=args.base_url,
         api_key_env=args.api_key_env,
@@ -84,7 +98,7 @@ def _engine(args: argparse.Namespace) -> CloudEngine:
 
 def status_line(engine: CloudEngine | None = None, *, probe: bool = False) -> str:
     """A one-line, honest status: is a key set, and (optionally) is the endpoint up."""
-    engine = engine or CloudEngine(approved=True)
+    engine = engine or CloudEngine(provider=selected_provider(_settings_root()), approved=True)
     status = cloud_status(engine.client, probe=probe)
     if status.available:
         return f"{NAME} ready. {engine.describe()}"
@@ -174,31 +188,84 @@ def _interactive(
 
 
 def run_providers(args: argparse.Namespace) -> int:
+    current = load_provider_key(_settings_root())
     if args.as_json:
         print(
             json.dumps(
-                [
-                    {
-                        "key": key,
-                        "title": title,
-                        "default_model": model,
-                        "summary": summary,
-                        "local": local,
-                    }
-                    for key, title, model, summary, local in provider_summaries()
-                ],
+                {
+                    "chosen": current,
+                    "providers": [
+                        {
+                            "key": key,
+                            "title": title,
+                            "default_model": model,
+                            "summary": summary,
+                            "local": local,
+                            "free": free,
+                            "chosen": key == current,
+                        }
+                        for key, title, model, summary, local, free in provider_summaries()
+                    ],
+                },
                 ensure_ascii=False,
                 indent=2,
             )
         )
         return 0
-    print(f"Cloud providers Cloud can reach (default: {DEFAULT_PROVIDER_KEY}):")
-    for key, title, model, summary, local in provider_summaries():
-        where = "this machine" if local else "remote"
-        print(f"  {key:12s} {title:34s} [{where}] default: {model}")
-        print(f"  {'':12s} {summary}")
-    print("\nChoose one with: python -m cli cloud --provider <key> \"your question\"")
-    print("The API key is read from the provider's environment variable (e.g. OPENAI_API_KEY).")
+    print(f"Cloud providers Cloud can reach (currently chosen: {current}):")
+    _provider_table(current)
+    print("  * = the provider currently chosen")
+    print("\nChoose one with: python -m cli cloud use <key>   (remembered for later runs)")
+    print("Or for one turn: python -m cli cloud --provider <key> \"your question\"")
+    print("The API key is read from the provider's environment variable (e.g. GEMINI_API_KEY).")
+    return 0
+
+
+def _provider_table(current: str) -> None:
+    """Print the catalog with the free-tier and local providers marked."""
+    for key, title, model, summary, local, free in provider_summaries():
+        if local:
+            where = "this machine"
+        elif free:
+            where = "remote, free tier"
+        else:
+            where = "remote, paid"
+        mark = " *" if key == current else "  "
+        print(f" {mark}{key:12s} {title:34s} [{where}] default: {model}")
+
+
+def run_use(args: argparse.Namespace) -> int:
+    """Remember a provider as the default, so later runs need no ``--provider``."""
+    key = getattr(args, "provider_key", None)
+    if not key:
+        # No name given: show the catalog and ask, so choosing is one keystroke.
+        current = load_provider_key(_settings_root())
+        print(f"Choose the Cloud provider (currently chosen: {current}):")
+        _provider_table(current)
+        print("  * = the provider currently chosen")
+        try:
+            key = input("Provider key (or blank to keep the current one): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if not key:
+            print(f"Keeping {current}.")
+            return 0
+    try:
+        chosen = save_provider_key(_settings_root(), key)
+    except ValueError as error:
+        print(f"Cloud: {error}")
+        return 2
+    spec = resolve_provider(chosen)
+    print(f"Cloud will now use {spec.title} ({spec.key}) by default.")
+    print("Ask it with: python -m cli cloud \"your question\"")
+    if spec.needs_key:
+        print(f"Set its key first: export {spec.api_key_env}=\"your key\"")
+        if spec.free:
+            print("This provider has a free tier, so no card is needed.")
+        print("Then check it: python -m cli cloud status")
+    else:
+        print(f"No key is needed; it talks to {spec.base_url} on this machine.")
     return 0
 
 
@@ -229,7 +296,7 @@ def run_status(args: argparse.Namespace) -> int:
 
 
 #: The subcommands Cloud understands. Anything else is read as a chat message.
-_COMMANDS = ("chat", "providers", "status")
+_COMMANDS = ("chat", "providers", "status", "use")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -244,6 +311,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     providers = sub.add_parser("providers", help="List the providers Cloud can reach.")
     providers.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
+
+    use = sub.add_parser("use", help="Remember a provider as the default for later runs.")
+    use.add_argument(
+        "provider_key", nargs="?", default=None,
+        help="which provider to use by default (e.g. gemini, groq); omit to pick from a list",
+    )
 
     status = sub.add_parser("status", help="Show whether a key is set and the endpoint answers.")
     _add_connection_arguments(status)
@@ -313,6 +386,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "providers":
         return run_providers(args)
+    if args.command == "use":
+        return run_use(args)
     if args.command == "status":
         return run_status(args)
 

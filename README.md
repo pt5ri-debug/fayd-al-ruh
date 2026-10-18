@@ -911,12 +911,56 @@ its own; the mouth stays closed until you set a key *and* select it.
 ```bash
 python -m cli cloud status                        # is a key present, and is it reachable?
 python -m cli cloud providers                     # the catalog: OpenAI, Anthropic, Gemini, ...
+python -m cli cloud use gemini                    # remember a provider (Gemini *or* Groq, ...)
 python -m cli cloud "who wrote Hamlet?"           # one question, answered remotely
 python -m cli cloud --provider anthropic "explain PVT"
 python -m cli cloud --provider ollama --model llama3.2 "hi"   # a local server, no key
 python -m cli cloud-chat                          # the cloud mouth inside `python -m cli chat`
 python -m cli chat --cloud "what is porosity?"    # the same thing
 ```
+
+### Choose one provider or the other (remembered)
+
+The provider is a plain either/or choice, and it is **remembered**: run
+`python -m cli cloud use gemini` once and every later `cloud` command, the window,
+and the next launch use Gemini — no flag needed. Run `python -m cli cloud use groq`
+to switch to Groq instead; `python -m cli cloud use` with no name lists the
+catalog and asks. A one-off `--provider <key>` still wins for a single turn. In
+the window, open **Settings → Cloud provider** and pick from the menu; the choice
+is stored at once and shown under the menu (including whether that provider's key
+is already set). Only the provider's *name* is saved, never a key.
+
+Two of the catalog entries need **no card** — both have a free tier:
+
+| Provider | Key variable | Where to get a free key |
+|---|---|---|
+| **Gemini** (Google) | `GEMINI_API_KEY` | <https://aistudio.google.com/apikey> → *Create API key* |
+| **Groq** | `GROQ_API_KEY` | <https://console.groq.com/keys> → *Create API Key* |
+
+OpenRouter and Mistral also have free tiers, and `ollama`/`lmstudio` run on your
+own machine with no key at all.
+
+**Gemini, step by step**
+
+1. Sign in at <https://aistudio.google.com/apikey> with a Google account.
+2. Click **Create API key** and copy it.
+3. Set it in your shell: `export GEMINI_API_KEY="your key"` (Windows PowerShell:
+   `setx GEMINI_API_KEY "your key"`, then open a new terminal).
+4. `python -m cli cloud use gemini` — remembers Gemini.
+5. `python -m cli cloud status` — should print **Cloud ready**.
+6. Ask: `python -m cli cloud "اشرح المسامية في المكامن"`.
+
+**Groq, step by step**
+
+1. Sign in at <https://console.groq.com/keys> (email or Google; no card).
+2. Click **Create API Key** and copy it.
+3. `export GROQ_API_KEY="your key"` (Windows: `setx GROQ_API_KEY "your key"`).
+4. `python -m cli cloud use groq` — remembers Groq.
+5. `python -m cli cloud status` — should print **Cloud ready**.
+6. Ask: `python -m cli cloud "what is a kick-off meeting in drilling?"`.
+
+To go back to Gemini, run `python -m cli cloud use gemini` again; to use the paid
+OpenAI models, `python -m cli cloud use openai` after setting `OPENAI_API_KEY`.
 
 The key is read from the environment — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `GEMINI_API_KEY`, and so on (or `FAYD_CLOUD_API_KEY` for any provider) — and is
@@ -935,7 +979,9 @@ wrapper, so a base install reaches a cloud model.
 Like the other mouths, Cloud is a **mouth inside the project's own chat**: the
 window's model selector and the settings panel's *Answering mouth* both list
 **Cloud (remote model)**, and the sidebar's **Answer from Cloud** entry selects
-it; the conversation stays in the **same transcript and the same session**. In
+it; the conversation stays in the **same transcript and the same session**. The
+settings panel also carries the **Cloud provider** menu, so you pick Gemini *or*
+Groq (or any provider) right in the window, and the choice is remembered. In
 the text chat, type `from cloud` (or `from the sources` to switch back).
 `core/cloud_model.py` holds the engine, the catalog, and the gates;
 `ai/cloud.py` is the CLI entry point; and `ai/cloud_mouth.py` is the chat mouth.

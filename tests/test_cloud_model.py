@@ -47,10 +47,13 @@ from core.cloud_model import (
     approved_gate,
     cloud_status,
     granted_permissions,
+    load_provider_key,
     provider_names,
     provider_summaries,
     redact_secret,
     resolve_provider,
+    save_provider_key,
+    selected_provider,
 )
 from core.conversation import Conversation
 from core.permissions import Capability
@@ -122,7 +125,7 @@ def test_catalog_has_a_default_and_named_providers() -> None:
     assert "openai" in provider_names()
     assert "anthropic" in provider_names()
     assert "gemini" in provider_names()
-    for _key, title, model, summary, _local in provider_summaries():
+    for _key, title, model, summary, _local, _free in provider_summaries():
         assert title and model and summary
 
 
@@ -544,26 +547,31 @@ def test_mouth_switched_message_describes_the_cloud() -> None:
 # --- the CLI ---------------------------------------------------------------
 
 
-def test_cli_providers_lists_the_catalog(capsys) -> None:
+def test_cli_providers_lists_the_catalog(capsys, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
     assert cloud_cli.run_providers(cast(argparse.Namespace, SimpleNamespace(as_json=False))) == 0
     assert "openai" in capsys.readouterr().out
 
 
-def test_cli_providers_json(capsys) -> None:
+def test_cli_providers_json(capsys, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
     assert cloud_cli.run_providers(cast(argparse.Namespace, SimpleNamespace(as_json=True))) == 0
     data = json.loads(capsys.readouterr().out)
-    assert any(entry["key"] == "openai" for entry in data)
+    assert data["chosen"] in CATALOG
+    assert any(entry["key"] == "openai" for entry in data["providers"])
 
 
-def test_cli_status_is_nonzero_without_a_key(monkeypatch, capsys) -> None:
+def test_cli_status_is_nonzero_without_a_key(monkeypatch, capsys, tmp_path) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
     args = cast(argparse.Namespace, SimpleNamespace(provider=None, model=None, base_url=None, api_key_env=None, probe=False, as_json=False))
     assert cloud_cli.run_status(args) == 1
     assert "OPENAI_API_KEY" in capsys.readouterr().out
 
 
-def test_cli_status_is_zero_with_a_key(monkeypatch, capsys) -> None:
+def test_cli_status_is_zero_with_a_key(monkeypatch, capsys, tmp_path) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
     args = cast(argparse.Namespace, SimpleNamespace(provider=None, model=None, base_url=None, api_key_env=None, probe=False, as_json=False))
     assert cloud_cli.run_status(args) == 0
     assert NAME in capsys.readouterr().out
@@ -573,7 +581,68 @@ def test_cli_bare_question_is_normalized_to_chat() -> None:
     assert cloud_cli._normalize_argv(["who wrote Hamlet?"])[0] == "chat"
     assert cloud_cli._normalize_argv(["status"]) == ["status"]
     assert cloud_cli._normalize_argv(["providers"]) == ["providers"]
+    assert cloud_cli._normalize_argv(["use", "gemini"]) == ["use", "gemini"]
     assert cloud_cli._normalize_argv(["--help"]) == ["--help"]
+
+
+def test_saved_provider_defaults_to_openai(tmp_path) -> None:
+    assert load_provider_key(tmp_path) == DEFAULT_PROVIDER_KEY
+
+
+def test_saved_provider_round_trips(tmp_path) -> None:
+    assert save_provider_key(tmp_path, "gemini") == "gemini"
+    assert load_provider_key(tmp_path) == "gemini"
+    # And a second choice replaces the first.
+    save_provider_key(tmp_path, "groq")
+    assert load_provider_key(tmp_path) == "groq"
+
+
+def test_saved_provider_rejects_an_unknown_name(tmp_path) -> None:
+    with pytest.raises(ValueError):
+        save_provider_key(tmp_path, "not-a-provider")
+
+
+def test_saved_provider_ignores_a_stale_name(tmp_path) -> None:
+    """A stored provider that left the catalog falls back, never breaks."""
+    from storage.json_store import JsonStore
+
+    JsonStore(tmp_path).save("cloud", "provider", {"provider": "removed-provider"})
+    assert load_provider_key(tmp_path) == DEFAULT_PROVIDER_KEY
+
+
+def test_selected_provider_prefers_an_explicit_choice(tmp_path) -> None:
+    save_provider_key(tmp_path, "gemini")
+    assert selected_provider(tmp_path).key == "gemini"
+    assert selected_provider(tmp_path, "groq").key == "groq"
+
+
+def test_cli_use_remembers_the_provider(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
+    args = cast(argparse.Namespace, SimpleNamespace(provider_key="gemini"))
+    assert cloud_cli.run_use(args) == 0
+    assert "Gemini" in capsys.readouterr().out
+    assert load_provider_key(tmp_path) == "gemini"
+
+
+def test_cli_use_rejects_an_unknown_provider(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
+    args = cast(argparse.Namespace, SimpleNamespace(provider_key="nope"))
+    assert cloud_cli.run_use(args) == 2
+    assert "Unknown cloud provider" in capsys.readouterr().out
+
+
+def test_cli_engine_honours_the_saved_provider(tmp_path, monkeypatch) -> None:
+    """With no --provider, the engine uses what the user chose and saved."""
+    save_provider_key(tmp_path, "groq")
+    monkeypatch.setattr(cloud_cli, "_settings_root", lambda: tmp_path)
+    args = cast(
+        argparse.Namespace,
+        SimpleNamespace(
+            provider=None, model=None, base_url=None, api_key_env=None,
+            temperature=None, max_tokens=None,
+        ),
+    )
+    assert cloud_cli._engine(args).provider.key == "groq"
 
 
 def test_cli_one_shot_uses_an_injected_client(monkeypatch, tmp_path, capsys) -> None:
@@ -654,6 +723,57 @@ def test_gui_mouth_choices_include_cloud() -> None:
 
     keys = [key for key, _label in gui_app.MOUTH_CHOICES]
     assert MOUTH_CLOUD in keys
+
+
+def test_free_providers_are_named() -> None:
+    """Gemini and Groq are offered as no-card choices, so a user need not pay."""
+    from core.cloud_model import free_provider_names
+
+    free = free_provider_names()
+    assert "gemini" in free
+    assert "groq" in free
+    # A paid-only provider is not mislabelled as free.
+    assert "openai" not in free
+
+
+def test_service_remembers_the_cloud_provider(tmp_path) -> None:
+    """The window's provider choice is persisted through the one service."""
+    from gui.service import ChatService
+
+    service = ChatService(data_root=tmp_path)
+    assert service.cloud_provider() == DEFAULT_PROVIDER_KEY
+    assert service.set_cloud_provider("groq") == "groq"
+    assert service.cloud_provider() == "groq"
+    # A fresh service (a new launch) reads the saved choice.
+    assert ChatService(data_root=tmp_path).cloud_provider() == "groq"
+
+
+def test_service_rejects_an_unknown_cloud_provider(tmp_path) -> None:
+    from gui.service import ChatService
+
+    service = ChatService(data_root=tmp_path)
+    with pytest.raises(ValueError):
+        service.set_cloud_provider("not-a-provider")
+
+
+def test_gui_provider_picker_changes_the_provider(tmp_path) -> None:
+    """The settings picker stores the choice through the service (no network)."""
+    if not _display_available():
+        pytest.skip("no display available")
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+    from gui.service import ChatService
+
+    root = tk.Tk()
+    service = ChatService(data_root=tmp_path)
+    window = FaydGUI(root, service=service)
+    try:
+        window._toggle_settings()  # build the settings panel (and the picker)
+        window._on_cloud_provider_change("gemini")
+        assert service.cloud_provider() == "gemini"
+    finally:
+        root.destroy()
 
 
 def test_chat_parser_accepts_cloud_flags(monkeypatch, capsys) -> None:
