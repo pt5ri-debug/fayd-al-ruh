@@ -1018,7 +1018,18 @@ def test_gui_provider_picker_changes_the_provider(tmp_path) -> None:
         root.destroy()
 
 
-def test_gui_model_field_sets_the_cloud_model(tmp_path) -> None:
+def _menu_labels(picker) -> tuple[str, ...]:
+    """The labelled entries an OptionMenu offers (separators are skipped)."""
+    menu = picker["menu"]
+    labels = []
+    for i in range(menu.index("end") + 1):
+        if menu.type(i) == "separator":
+            continue
+        labels.append(menu.entrycget(i, "label"))
+    return tuple(labels)
+
+
+def test_gui_model_dropdown_sets_the_cloud_model(tmp_path) -> None:
     """The settings dropdown sets the model, so the window can fix a 404."""
     if not _display_available():
         pytest.skip("no display available")
@@ -1034,14 +1045,12 @@ def test_gui_model_field_sets_the_cloud_model(tmp_path) -> None:
     try:
         window._toggle_settings()
         picker = window._cloud_model_picker
-        # A real dropdown: the current provider's models are its values.
-        assert str(picker.cget("state")) == "normal"
-        values = tuple(picker.cget("values"))
+        # A real dropdown: the current provider's models are its menu entries.
+        values = _menu_labels(picker)
         assert values[0] == CATALOG["gemini"].default_model
         assert "gemini-3.8-flash" in values
         # Picking one from the menu stores it.
-        window._cloud_model_var.set("gemini-3.8-flash")
-        window._on_cloud_model_change()
+        window._set_cloud_model("gemini-3.8-flash")
         assert service.cloud_model() == "gemini-3.8-flash"
     finally:
         root.destroy()
@@ -1062,10 +1071,10 @@ def test_gui_model_dropdown_follows_the_provider(tmp_path) -> None:
     try:
         window._toggle_settings()
         window._on_cloud_provider_change("gemini")
-        gemini_values = tuple(window._cloud_model_picker.cget("values"))
+        gemini_values = _menu_labels(window._cloud_model_picker)
         assert "gemini-3.8-flash" in gemini_values
         window._on_cloud_provider_change("groq")
-        groq_values = tuple(window._cloud_model_picker.cget("values"))
+        groq_values = _menu_labels(window._cloud_model_picker)
         assert "gemini-3.8-flash" not in groq_values
         assert groq_values[0] == CATALOG["groq"].default_model
     finally:
