@@ -155,3 +155,29 @@ def test_release_config_carries_the_flag(mouths):
     off = corpus_summary(TrainingConfig(include_sessions=False, kb_max_chunks=0))
     assert off["include_sessions"] is False
     assert off["session_sentences"] == 0
+
+
+def test_cli_menu_offers_both_session_training_entries():
+    from cli.menu import run_llm, run_release, visible_menu
+
+    entries = [(title, action, tuple(argv)) for title, action, argv in visible_menu()]
+    assert (
+        "Train the language model on the local mouths' own chats",
+        run_llm,
+        ("--llm-sessions", "--steps", "4000"),
+    ) in entries
+    assert (
+        "Train everything for a release (including the local mouths' chats)",
+        run_release,
+        ("--llm-sessions",),
+    ) in entries
+
+
+def test_gui_sidebar_offers_both_session_training_actions():
+    from gui.actions import run_llm, run_release, visible_actions
+
+    by_key = {action.key: action for action in visible_actions()}
+    assert by_key["llm-sessions"].command is run_llm
+    assert by_key["llm-sessions"].argv == ("--llm-sessions", "--steps", "4000")
+    assert by_key["release-sessions"].command is run_release
+    assert by_key["release-sessions"].argv == ("--llm-sessions",)
