@@ -125,6 +125,10 @@ class CloudProvider:
     #: True when the provider offers a free tier (a real, no-cost quota), so the
     #: window and the CLI can point a user at a provider that needs no payment.
     free: bool = False
+    #: Where a user creates a free (or paid) API key for this provider. Empty when
+    #: the endpoint needs no key (a local server), so a hint never sends a user to
+    #: a signup page they do not need.
+    signup_url: str = ""
 
     @property
     def needs_key(self) -> bool:
@@ -142,6 +146,7 @@ CATALOG: dict[str, CloudProvider] = {
         api_key_env="OPENAI_API_KEY",
         summary="OpenAI's own API (the ChatGPT models). Needs a paid API key.",
         models=("gpt-4o-mini", "gpt-4o", "gpt-4.1", "o4-mini"),
+        signup_url="https://platform.openai.com/api-keys",
     ),
     "anthropic": CloudProvider(
         key="anthropic",
@@ -151,6 +156,7 @@ CATALOG: dict[str, CloudProvider] = {
         api_key_env="ANTHROPIC_API_KEY",
         summary="Anthropic's Claude models through their OpenAI-compatible endpoint.",
         models=("claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"),
+        signup_url="https://console.anthropic.com/settings/keys",
     ),
     "gemini": CloudProvider(
         key="gemini",
@@ -167,6 +173,7 @@ CATALOG: dict[str, CloudProvider] = {
             "gemini-3.5-flash-lite",
         ),
         free=True,
+        signup_url="https://aistudio.google.com/apikey",
     ),
     "groq": CloudProvider(
         key="groq",
@@ -177,6 +184,7 @@ CATALOG: dict[str, CloudProvider] = {
         summary="Very fast open-model hosting with a free tier.",
         models=("llama-3.3-70b-versatile", "llama-3.1-8b-instant"),
         free=True,
+        signup_url="https://console.groq.com/keys",
     ),
     "openrouter": CloudProvider(
         key="openrouter",
@@ -191,6 +199,7 @@ CATALOG: dict[str, CloudProvider] = {
             "mistralai/mistral-7b-instruct:free",
         ),
         free=True,
+        signup_url="https://openrouter.ai/keys",
     ),
     "mistral": CloudProvider(
         key="mistral",
@@ -201,6 +210,7 @@ CATALOG: dict[str, CloudProvider] = {
         summary="Mistral's own models; there is a free tier for light use.",
         models=("mistral-small-latest", "mistral-large-latest", "open-mistral-nemo"),
         free=True,
+        signup_url="https://console.mistral.ai/api-keys",
     ),
     "deepseek": CloudProvider(
         key="deepseek",
@@ -210,6 +220,7 @@ CATALOG: dict[str, CloudProvider] = {
         api_key_env="DEEPSEEK_API_KEY",
         summary="DeepSeek's chat and reasoning models.",
         models=("deepseek-chat", "deepseek-reasoner"),
+        signup_url="https://platform.deepseek.com/api_keys",
     ),
     "ollama": CloudProvider(
         key="ollama",
@@ -270,6 +281,21 @@ def free_provider_names() -> tuple[str, ...]:
     without a card (Gemini, Groq, OpenRouter, Mistral), or at a local server.
     """
     return tuple(key for key, spec in CATALOG.items() if spec.free)
+
+
+def free_provider_summaries() -> tuple[tuple[str, str, str, str, str], ...]:
+    """``(key, title, api_key_env, signup_url, summary)`` for the free-tier providers.
+
+    One row per provider that needs **no card**: the key variable to set, where to
+    create the key, and what the provider is for. This is the single source the
+    CLI's ``providers`` list and the window's "free providers" hint both read, so
+    the two can never disagree about which services are free or where to sign up.
+    """
+    return tuple(
+        (spec.key, spec.title, spec.api_key_env, spec.signup_url, spec.summary)
+        for spec in CATALOG.values()
+        if spec.free
+    )
 
 
 def provider_models(name: str | CloudProvider | None) -> tuple[str, ...]:
@@ -986,6 +1012,7 @@ __all__ = [
     "approved_gate",
     "cloud_status",
     "free_provider_names",
+    "free_provider_summaries",
     "granted_permissions",
     "load_model_key",
     "load_provider_key",

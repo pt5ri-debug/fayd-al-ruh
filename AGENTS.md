@@ -316,8 +316,15 @@ Arabic is kept as secondary aliases where useful.
   is the honest answer when a provider renames or shuts a model down; a 404/400 that
   names the model gets an actionable error (run `cloud models`, then `--model`)
   instead of a bare HTTP code. Each catalog
-  entry also carries `free` (`free_provider_names`), so the app can point a user who
-  does not want to pay at a no-card provider (Gemini, Groq, OpenRouter, Mistral).
+  entry also carries `free` (`free_provider_names`) and `signup_url`, so the app
+  can point a user who does not want to pay at a no-card provider (Gemini, Groq,
+  OpenRouter, Mistral). `free_provider_summaries` is that one list as
+  `(key, title, api_key_env, signup_url, summary)` rows, so the CLI's
+  `python -m cli cloud free` (and the same block appended to `cloud providers`)
+  and the window's **Free providers and how to start…** button
+  (`gui.service.ChatService.free_cloud_providers` → `_show_free_cloud_providers`)
+  can never disagree about which services are free or where to sign up; the CLI
+  menu carries the twin entry *Cloud: free providers (no card) and how to start*.
   It is governed like every other external action: a cloud call
   is the `cloud_chat` tool (`CHAT_TOOL`), and it passes **two** gates before a
   byte leaves the machine — the permission policy

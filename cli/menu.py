@@ -407,6 +407,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Vision (petroleum local model: reservoir, drilling, PVT)", run_vision, ()),
     ("Banner (presentation local model: outlines and slide content)", run_banner, ()),
     ("Cloud (remote model: ChatGPT, Claude, Gemini; needs an API key)", run_cloud, ("status",)),
+    ("Cloud: free providers (no card) and how to start", run_cloud, ("free",)),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
