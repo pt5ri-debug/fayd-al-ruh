@@ -1073,6 +1073,55 @@ class FaydGUI:
         self._cloud_model_picker.pack(side="left", fill="x", expand=True, padx=(2, 4))
         self._add_cloud_model_other_entry()
 
+        # A one-line, always-visible answer to "which of these are free?": the
+        # free-tier providers need no card, so a user who does not want to pay
+        # should not have to hunt for them in the dropdown.
+        free_note = tk.Label(
+            panel,
+            text="Free (no card): " + ", ".join(
+                title for _key, title, _env, _signup in self.service.free_cloud_providers()
+            ),
+            bg=self._theme.surface, fg=self._theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", padx=20, pady=2,
+            wraplength=232, justify="left",
+        )
+        free_note.pack(fill="x")
+        free_button = tk.Button(
+            panel, text="Free providers and how to start…", command=self._show_free_cloud_providers,
+            bg=self._theme.surface, fg=self._theme.primary,
+            activebackground=self._theme.interactive_hover, activeforeground=self._theme.primary,
+            font=self._type.font("2xs"), relief="flat", borderwidth=0,
+            anchor="w", padx=18, pady=2, cursor="hand2",
+        )
+        free_button.pack(fill="x")
+
+    def _show_free_cloud_providers(self) -> None:
+        """Post the free-tier providers and their signup links into the transcript.
+
+        The window's shortcut for a user who does not want to pay: the no-card
+        providers, the environment variable to set, where to create the key, and
+        the exact commands to start talking to one -- the same list the CLI's
+        ``cloud free`` prints.
+        """
+        rows = self.service.free_cloud_providers()
+        lines = ["**Free cloud providers (no card needed)**", ""]
+        for key, title, env, signup in rows:
+            lines.append(f"- **{title}** (`{key}`) — set `{env}` · key: {signup}")
+        lines.append("- **Ollama** / **LM Studio** — run on this machine, no key, no internet")
+        lines.append("")
+        example_key, example_title, example_env, example_signup = rows[0]
+        lines.append("Two steps (example: " + example_title + "):")
+        lines.append(f"1. Create a key: {example_signup}")
+        lines.append(
+            f"2. Set `{example_env}`, then choose **{example_key}** above, then ask."
+        )
+        lines.append("")
+        lines.append(
+            "Nothing is sent anywhere until you choose the Cloud mouth, and the key "
+            "is read from the environment — never written to the repository."
+        )
+        self._add_bubble("assistant", "\n".join(lines))
+
     def _add_cloud_model_other_entry(self) -> None:
         """Offer an "Other…" row, so a model the catalog does not list can be set.
 

@@ -8,6 +8,7 @@
     python -m cli cloud models                   # the models the provider serves *now*
     python -m cli cloud --session demo "and who invented it?"  # keep context across runs
     python -m cli cloud providers                # list the providers it can reach
+    python -m cli cloud free                     # only the free-tier ones (no card) and how to start
     python -m cli cloud status                   # is a key set and the endpoint reachable
     python -m cli cloud status --probe           # also ask the endpoint (a real request)
 
@@ -48,6 +49,7 @@ from core.cloud_model import (
     CloudEngine,
     CloudUnavailable,
     cloud_status,
+    free_provider_summaries,
     load_model_key,
     load_provider_key,
     provider_summaries,
@@ -227,6 +229,60 @@ def run_providers(args: argparse.Namespace) -> int:
     print("\nChoose one with: python -m cli cloud use <key>   (remembered for later runs)")
     print("Or for one turn: python -m cli cloud --provider <key> \"your question\"")
     print("The API key is read from the provider's environment variable (e.g. GEMINI_API_KEY).")
+    print()
+    _free_provider_block()
+    return 0
+
+
+def _free_provider_block() -> None:
+    """Print the no-card providers: what to set, where to get a key, and the step.
+
+    This is the shortcut a user who does not want to pay needs: it names the
+    free-tier services (and the local servers that need no key at all) and the
+    exact commands to be talking to one in two steps. Read from
+    :func:`core.cloud_model.free_provider_summaries`, so it never disagrees with
+    the window's own hint.
+    """
+    rows = free_provider_summaries()
+    print("Free to use (no card needed):")
+    for key, title, env, signup, _summary in rows:
+        print(f"  {key:12s} {title:22s} set {env:20s} key: {signup}")
+    print("  ollama       Ollama (this machine) no key, no internet")
+    print("  lmstudio     LM Studio / vLLM      no key, no internet")
+    print()
+    print("Two steps to talk to a free provider (example: Gemini):")
+    print(f"  1. Create a key: {rows[0][3]}")
+    print(f"  2. export {rows[0][2]}=\"your key\"   then: python -m cli cloud use {rows[0][0]}")
+    print("  Then ask: python -m cli cloud \"اشرح المسامية في المكامن\"")
+    print("Nothing is sent anywhere until you choose the Cloud mouth, and the key is")
+    print("never written to the repository.")
+
+
+def run_free(args: argparse.Namespace) -> int:
+    """Print only the free-tier providers and how to start using one."""
+    rows = free_provider_summaries()
+    if getattr(args, "as_json", False):
+        print(
+            json.dumps(
+                {
+                    "free_providers": [
+                        {
+                            "key": key,
+                            "title": title,
+                            "api_key_env": env,
+                            "signup_url": signup,
+                            "summary": summary,
+                        }
+                        for key, title, env, signup, summary in rows
+                    ],
+                    "local_no_key": ["ollama", "lmstudio"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    _free_provider_block()
     return 0
 
 
@@ -368,7 +424,7 @@ def run_status(args: argparse.Namespace) -> int:
 
 
 #: The subcommands Cloud understands. Anything else is read as a chat message.
-_COMMANDS = ("chat", "providers", "models", "status", "use")
+_COMMANDS = ("chat", "providers", "free", "models", "status", "use")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -383,6 +439,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     providers = sub.add_parser("providers", help="List the providers Cloud can reach.")
     providers.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
+
+    free = sub.add_parser(
+        "free", help="Show the free-tier providers (no card) and how to start using one."
+    )
+    free.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
 
     use = sub.add_parser("use", help="Remember a provider as the default for later runs.")
     use.add_argument(
@@ -466,6 +527,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "providers":
         return run_providers(args)
+    if args.command == "free":
+        return run_free(args)
     if args.command == "use":
         return run_use(args)
     if args.command == "models":

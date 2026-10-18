@@ -329,8 +329,8 @@ def test_screen_actions_are_hidden_from_the_sidebar() -> None:
 
 #: The visible CLI menu entries the window provides through its own controls
 #: (the window itself, the reading-voice picker, Jarvis, Ultron, Vision, Banner,
-#: Cloud, and the two text-chat mouths). The sidebar mirrors a later block
-#: instead of repeating them.
+#: Cloud and its free-provider hint, and the two text-chat mouths). The sidebar
+#: mirrors a later block instead of repeating them.
 _WINDOW_OWNED_MENU_LABELS = frozenset(
     {
         "Open the graphical interface (ChatGPT-style)",
@@ -340,6 +340,7 @@ _WINDOW_OWNED_MENU_LABELS = frozenset(
         "Vision (petroleum local model: reservoir, drilling, PVT)",
         "Banner (presentation local model: outlines and slide content)",
         "Cloud (remote model: ChatGPT, Claude, Gemini; needs an API key)",
+        "Cloud: free providers (no card) and how to start",
         "Chat with the AI (text, like Jarvis without voice)",
         "Chat with the AI (trained model, no sources)",
     }
@@ -347,8 +348,8 @@ _WINDOW_OWNED_MENU_LABELS = frozenset(
 
 #: The visible CLI entries the sidebar mirrors, in order (the first one after the
 #: window-owned controls through the Code Studio screen).
-_MIRRORED_MENU_START = 12
-_MIRRORED_MENU_STOP = 19
+_MIRRORED_MENU_START = 13
+_MIRRORED_MENU_STOP = 20
 
 #: The Qwen3 speech entries sit before the window-owned controls (the window shows
 #: their status in the reading-voice picker), so they are mirrored as their own
@@ -1316,5 +1317,44 @@ def test_window_opens_the_presentation_studio_from_its_menu() -> None:
         assert app._presentation_dialog is dialog
         dialog._close()
         assert app._presentation_dialog is None
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_shows_the_free_cloud_providers() -> None:
+    """The window points a user who does not want to pay at the no-card providers.
+
+    The Settings panel carries a one-line "Free (no card)" note, and the button
+    posts the providers with their key variable and signup link -- the same list
+    the CLI's ``cloud free`` prints, so the two never disagree.
+    """
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        root.update()
+        app._toggle_settings()
+        root.update()
+
+        def walk(widget, out):
+            for child in widget.winfo_children():
+                out.append(child)
+                walk(child, out)
+
+        widgets: list = []
+        walk(app._settings_panel, widgets)
+        labels = [w.cget("text") for w in widgets if isinstance(w, tk.Label)]
+        assert any("Free (no card)" in text for text in labels)
+        assert any("Gemini" in text for text in labels)
+
+        app._show_free_cloud_providers()
+        root.update()
+        posted = app._bubbles[-1].get("1.0", "end-1c")
+        assert "GEMINI_API_KEY" in posted
+        assert "https://aistudio.google.com/apikey" in posted
     finally:
         root.destroy()
