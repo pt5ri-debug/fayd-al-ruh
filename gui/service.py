@@ -26,6 +26,14 @@ from core.command_router import RouteKind, RoutedCommand
 from core.jarvis import JarvisMode, JarvisTurn
 from core.paths import data_dir
 from core.reading import TextReader
+from core.speech import (
+    AudioClip,
+    MicRecording,
+    MicrophoneRecorder,
+    Playback,
+    discover_recognizer_name,
+    load_recognizer,
+)
 from core.voices import Voice, voice_keys
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
 from gui.import_center import ImportReport, KnowledgeImporter
@@ -143,6 +151,8 @@ class ChatService:
         image_store_dir: str | Path | None = None,
         voice: str | None = None,
         tts_engine: str = "auto",
+        asr_engine: str = "auto",
+        record_seconds: float = 120.0,
     ) -> None:
         self.mode = mode or build_session(
             root=root,
@@ -237,6 +247,14 @@ class ChatService:
         # chosen catalog voice (core/voices.py). It is always available; when no
         # speech engine is installed it reports honestly instead of pretending.
         self._reader = TextReader(engine=tts_engine, voice=voice)
+        # Speech-to-text: the microphone icon records a clip and the *same*
+        # recognizer the voice loop uses turns it into text. ``auto`` prefers the
+        # local Qwen3-ASR model (it covers Arabic), so the icon drives Qwen3-ASR
+        # when it is installed and degrades honestly when it is not.
+        self._asr_engine = asr_engine
+        self._recognizer: Any = None
+        self._recording: MicRecording | None = None
+        self._record_seconds = record_seconds
         # Progress lines the Studio service emits; the window drains them.
         self.presentation_progress: list[str] = []
 
@@ -768,6 +786,120 @@ class ChatService:
     def refresh_reading(self) -> None:
         """Re-discover the speech engine (after one is installed mid-session)."""
         self._reader.refresh()
+
+    # --------------------------------------------------------------- listening
+
+    def render_aloud(self, text: str) -> AudioClip:
+        """Render ``text`` to audio with the chosen voice, without playing it.
+
+        The window renders on the worker thread, then plays (and can stop) the
+        clip on the main thread, so a long answer never freezes the window and a
+        second click on the speaker can end the reading.
+        """
+        return self._reader.render(text)
+
+    def play_clip(self, clip: AudioClip) -> Playback | None:
+        """Play an already-rendered clip in the background; ``None`` if no player."""
+        return self._reader.play(clip)
+
+    def listening_available(self) -> bool:
+        """True when the microphone icon can work (a recorder *and* an engine).
+
+        Two things are needed: a program that captures audio (``arecord``/``sox``)
+        and a speech recognizer. Reported separately so the window can name the
+        real missing piece instead of a vague "cannot listen".
+        """
+        return MicrophoneRecorder().available() and self._resolve_recognizer() is not None
+
+    def microphone_available(self) -> bool:
+        """True when a microphone recorder program is installed."""
+        return MicrophoneRecorder().available()
+
+    def recognizer_name(self) -> str:
+        """The ASR engine that will be used (``'qwen3-asr'``, ``'whisper'``, ...)."""
+        return self._resolve_recognizer_name()
+
+    def asr_status(self) -> str:
+        """An honest, human-readable status of the microphone path."""
+        if not self.microphone_available():
+            return (
+                "No microphone recorder is installed (install arecord or sox), "
+                "so the microphone button cannot record."
+            )
+        name = self._resolve_recognizer_name()
+        if name == "transcript":
+            from core.qwen_speech import qwen_asr_status
+
+            return (
+                "No speech-to-text engine is installed. "
+                + qwen_asr_status().hint
+            )
+        if name == "qwen3-asr":
+            return "Listening through the local Qwen3-ASR model."
+        return f"Listening through the {name} engine."
+
+    def start_recording(self) -> MicRecording:
+        """Begin a microphone recording; raises when no recorder is installed.
+
+        The capture window is generous (two minutes) because the user stops it
+        with a second click on the microphone; the limit is only a safety bound,
+        so a forgotten recording cannot grow without end.
+        """
+        if self._recording is not None and self._recording.recording:
+            return self._recording
+        recording = MicrophoneRecorder(seconds=self._record_seconds).start()
+        self._recording = recording
+        return recording
+
+    def stop_recording(self) -> MicRecording | None:
+        """Stop the current recording (if any) and return it, or ``None``."""
+        recording = self._recording
+        self._recording = None
+        if recording is not None:
+            recording.stop()
+        return recording
+
+    def recording(self) -> MicRecording | None:
+        """The recording in progress, or ``None``."""
+        return self._recording
+
+    def transcribe(self, clip: AudioClip) -> str:
+        """Turn a recorded clip into text with the resolved recognizer.
+
+        Raises :class:`ValueError` when no recognizer is available, so the window
+        reports the real next step instead of returning an empty transcript.
+        """
+        recognizer = self._resolve_recognizer()
+        if recognizer is None:
+            raise ValueError(self.asr_status())
+        return recognizer.transcribe(clip).strip()
+
+    def refresh_listening(self) -> None:
+        """Drop the cached recognizer, so a newly installed engine is found."""
+        self._recognizer = None
+
+    def _resolve_recognizer_name(self) -> str:
+        if self._asr_engine == "auto":
+            return discover_recognizer_name()
+        return self._asr_engine
+
+    def _resolve_recognizer(self):
+        """The cached ASR engine, or ``None`` when none can be built here.
+
+        Building an engine is deferred until the microphone is actually used, so
+        constructing the window never imports torch. A requested engine that is
+        unavailable leaves ``None`` (reported honestly) rather than raising.
+        """
+        if self._recognizer is not None:
+            return self._recognizer
+        name = self._resolve_recognizer_name()
+        if name == "transcript":
+            return None
+        try:
+            self._recognizer = load_recognizer(name)
+        except (ValueError, OSError, ImportError):
+            return None
+        return self._recognizer
 
     def _retriever(self):
         """The grounded assistant's retriever, when one is wired in.

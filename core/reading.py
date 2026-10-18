@@ -18,6 +18,7 @@ from pathlib import Path
 
 from core.speech import (
     AudioClip,
+    Playback,
     SilentSynthesizer,
     Speaker,
     SpeechSynthesizer,
@@ -123,6 +124,18 @@ class TextReader:
         if self.speaker.available():
             self.speaker.play(clip)
         return clip
+
+    def play(self, clip: AudioClip) -> Playback | None:
+        """Play an already-rendered ``clip`` in the background.
+
+        Returns a stoppable :class:`~core.speech.Playback` so a caller can end the
+        reading (a second click on "Read aloud"), or ``None`` when the machine has
+        no audio player -- the clip is then simply not played, matching
+        :meth:`speak`'s best-effort rule rather than raising.
+        """
+        if not self.speaker.available():
+            return None
+        return self.speaker.start(clip)
 
     def save(self, text: str, path: str | Path) -> Path:
         """Render ``text`` and write it to a WAV file, returning the path."""

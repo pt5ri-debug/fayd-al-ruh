@@ -416,14 +416,23 @@ def test_windows_speaker_plays_through_powershell(monkeypatch):
     monkeypatch.setattr(speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None)
     seen: list[list[str]] = []
 
-    def fake_run(argv, **kwargs):
-        seen.append(list(argv))
-        return speech.subprocess.CompletedProcess(argv, 0, b"", b"")
+    class FakeProcess:
+        returncode = 0
 
-    monkeypatch.setattr(speech.subprocess, "run", fake_run)
-    Speech = speech.Speaker()
-    assert Speech.available() is True
-    Speech.play(speech.AudioClip.silence(0.1))
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(argv, **kwargs):
+        seen.append(list(argv))
+        return FakeProcess()
+
+    monkeypatch.setattr(speech.subprocess, "Popen", fake_popen)
+    speaker = speech.Speaker()
+    assert speaker.available() is True
+    speaker.play(speech.AudioClip.silence(0.1))
     assert seen and seen[0][0] == "powershell"
     assert "System.Media.SoundPlayer" in seen[0][-1]
 
