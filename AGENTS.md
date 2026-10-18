@@ -75,6 +75,18 @@ Arabic is kept as secondary aliases where useful.
   corpus (`corpus_sentences`), and numbered procedures (`procedural_sentences`);
   `corpus_units()` returns the distinct documents for an honest document-level
   split, and `build_corpus(..., exclude=...)` drops held-out units from training.
+  `session_sentences()` reads the four local mouths' **own saved conversations**
+  — Jarvis, Ultron, Vision, and Banner, mapped by `MOUTH_SESSION_SOURCES` to the
+  folder each persists under (`data/jarvis`, `data/ultron/sessions`,
+  `data/vision/sessions`, `data/banner/sessions`) — as one sentence per sentence
+  of each turn; only `USER` and `ASSISTANT` turns are read (`SYSTEM`/`CONTEXT`
+  are skipped: a context turn is a whole attached file, not something a mouth
+  said), the read is bounded by `DEFAULT_MAX_SESSION_CHARS` and de-duplicated,
+  and an unknown source name is rejected. It is **off by default** — a transcript
+  is personal — and turns on only through `build_corpus(include_sessions=True)` /
+  `corpus_units(include_sessions=True)`, i.e. the `--llm-sessions` flag in
+  `ml.llm` and `ml.release` (whose `TrainingConfig.include_sessions` and
+  `corpus_summary` record it).
 - `ml/llm/transformer.py` — decoder-only transformer with manual backprop.
   `TransformerConfig.preset(name)` selects a capacity tier (`small` default,
   `release-1`, `capable`) with optional weight tying and dropout. Training uses a

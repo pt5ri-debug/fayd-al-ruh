@@ -294,6 +294,7 @@ a multi-megabyte corpus, so it is opt-in via `--tokenizer-kind bpe`.
 python -m ml.release --kb-max-chunks 2000          # smaller knowledge-base sample
 python -m ml.release --no-procedural               # skip corpus-derived procedures
 python -m ml.release --no-runtime-docs             # authored documents only
+python -m ml.release --llm-sessions                # also learn the local mouths' own chats
 ```
 
 It then writes a **manifest** at `ml/artifacts/release_manifest.json` recording:
@@ -1810,8 +1811,27 @@ python -m ml.llm --preset release-1    # the larger, released capacity tier
 python -m ml.llm --generate "water"    # train, then sample a continuation
 python -m ml.llm --kb-max-chunks 2000  # also train on the bulk knowledge base
 python -m ml.llm --tokenizer-kind bpe  # smaller corpus: use the subword tokenizer
+python -m ml.llm --llm-sessions        # also learn the local mouths' own saved chats
 python -m ml.llm.evaluate --checkpoint ml/llm/checkpoints/fayd-llm.npz  # held-out perplexity
 ```
+
+### Learning from the local mouths' own conversations
+
+Jarvis, Ultron, Vision, and Banner each persist what was asked and answered under
+the data directory. `--llm-sessions` folds those transcripts into the training
+text — **both** the user's turns and the answers — so the small in-project model
+learns the voices the user actually talks to, not only the seeds:
+
+```bash
+python -m ml.llm --llm-sessions --steps 4000      # train with the saved chats
+python -m ml.release --llm-sessions               # same, as part of a release run
+```
+
+It is **off by default**, because a transcript is personal: nothing is read
+unless you ask for it. Only `user` and `assistant` turns are read — `system` and
+`context` turns (a whole attached file) are never folded in — the reading is
+bounded by a character budget, and a mouth with no saved session contributes
+nothing.
 
 ### Resuming training instead of restarting
 
