@@ -1079,13 +1079,19 @@ The window is a thin shell over the same code the CLI already runs:
   restored when the window widens.
 - The sidebar's **Actions** buttons and the **Saved chats** list call the
   `cli.menu` `run_*` functions the numbered menu calls. The **Actions** section
-  adds numbered CLI items **6 through 12** — learn, insight, Internet learner,
+  mirrors numbered CLI items **6 through 12** — learn, insight, Internet learner,
   web verify, the two knowledge-base entries, and the Import Center — with the
   same labels and default arguments, so nothing is offered twice: the window's
   own controls cover the first five menu items (the window, Jarvis, **Ultron**,
   **Vision**, and the two chat modes).
   The training and evaluation entries that already lived in the sidebar are kept
   here too, even though they are hidden from the numbered CLI menu.
+  Eight rows are **hidden from the sidebar** (`hidden=True` in `gui/actions.py`,
+  drawn through `visible_actions()`): the four *Answer from ...* mouth switches
+  (the header's model selector offers them) and the four screens the composer's
+  ＋ menu already opens (the Import Center, Code Studio, Presentation Studio, and
+  image generation). They remain in `ACTIONS`, so the CLI and `action_by_key`
+  still resolve them.
 - Answers run on a **worker thread** and are posted back through a queue, so the
   window never freezes while the model thinks; output from a sidebar action is
   streamed into the transcript.
@@ -1525,8 +1531,8 @@ python -m cli import-center formats                    # supported / unsupported
 
 The portable menu's **10) Import files and folders (Knowledge Import Center)**
 entry runs the same interactive prompt, so it imports a path you type instead of
-only listing the formats; the GUI sidebar's **Import files and folders** action
-opens the window page instead.
+only listing the formats; the GUI opens the window page from the composer's ＋
+menu (**Open Knowledge Import Center…**) instead.
 
 The window page (**Upload files** / **Import from a local folder** / **Import
 jobs**) and the CLI drive the *same* engine, `gui/import_center.py`

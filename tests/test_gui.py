@@ -311,6 +311,22 @@ def test_actions_cover_the_mirrored_menu_items() -> None:
         assert key in keys, f"missing action {key!r}"
 
 
+def test_screen_actions_are_hidden_from_the_sidebar() -> None:
+    """The screens the ＋ menu already opens leave the sidebar.
+
+    Entries 11..14 -- the Import Center, Code Studio, Presentation Studio, and
+    image generation -- are reachable from the composer's ＋ menu, so their
+    sidebar rows are hidden. They stay in ``ACTIONS`` (the CLI still resolves
+    them) and are absent from ``visible_actions()``.
+    """
+    hidden = {action.key for action in gui_actions.ACTIONS if action.hidden}
+    assert {"import-center", "code-studio", "presentation", "image"} <= hidden
+    visible = {action.key for action in gui_actions.visible_actions()}
+    assert not ({"import-center", "code-studio", "presentation", "image"} & visible)
+    for key in ("import-center", "code-studio", "presentation", "image"):
+        assert gui_actions.action_by_key(key).key == key
+
+
 #: The visible CLI menu entries the window provides through its own controls
 #: (the window itself, the reading-voice picker, Jarvis, Ultron, Vision, Banner,
 #: Cloud, and the two text-chat mouths). The sidebar mirrors a later block

@@ -452,8 +452,8 @@ Arabic is kept as secondary aliases where useful.
   `gui/image_gen.py` adds the Tk-free `ImageGenerationService`
   (`parse_size` reads a trailing `WxH`; `ImageReport`; `for_backend`,
   `backend_status`, `download_model`) and `gui/image_gen_dialog.py` is the
-  window's page (＋ menu → "Generate an image from text…", a sidebar action, a
-  backend selector, and `python -m cli image`).
+  window's page (＋ menu → "Generate an image from text…", a backend selector,
+  and `python -m cli image`).
 - `core/imagegen_diffusion.py` — the optional **learned** text-to-image backend:
   a real Diffusers diffusion model, tuned for photorealistic, clean pictures.
   `ImageModelPreset` + `PRESETS` (`fast` sd-turbo / `realistic` *(default)*
@@ -611,7 +611,8 @@ Arabic is kept as secondary aliases where useful.
   refuse it, and `--ocr-languages` / `--ocr-dpi` / `--ocr-max-pages` tune it; any
   run that skipped a scanned PDF offers to retry it with OCR on a
   terminal. Mirrored as GUI action `import-center` — which the
-  window routes to the dialog below — and opened from the composer's ＋ menu.
+  window routes to the dialog below — and opened from the composer's ＋ menu (the
+  action's sidebar row is hidden).
 - `gui/import_dialog.py` — the Import Center **dialog** (Tk, imported lazily so
   `cli/` never imports Tk): Upload files / Import from a local folder / Import
   jobs, with a background worker thread, per-file results, retry, and a progress
@@ -657,8 +658,8 @@ Arabic is kept as secondary aliases where useful.
   width/height/seed fields, **Generate** (worker thread, then a `tk.PhotoImage`
   preview), and **Save a copy…**. It says plainly that this build has no learned
   text-to-image model and the picture is a geometric composition. Reachable from
-  the composer's ＋ menu (**Generate an image from text…**) and the sidebar
-  (**Generate an image from text**).
+  the composer's ＋ menu (**Generate an image from text…**), whose sidebar action
+  is hidden.
 - `gui/image_edit_dialog.py` — the **Edit an image from text** screen (Tk,
   imported lazily): **Choose an image…** (PNG or PPM) loads it, an instruction
   box describes the change, and **Apply** edits the current picture (worker
@@ -714,11 +715,13 @@ Arabic is kept as secondary aliases where useful.
   gate for a mutating tool); `actions.py` maps the sidebar to `cli.menu.run_*` —
   the **Actions** list mirrors numbered CLI items 6..12 (never repeating the
   window's own controls, which cover items 1..5 — the window, Jarvis, **Ultron**,
-  and the two chat modes). A `GuiAction` carries a `hidden` flag: the four
-  *Answer from ...* mouth switches stay in `ACTIONS` (so `action_by_key` and the
-  CLI still resolve them) but are `hidden=True`, and `visible_actions()` — what
-  the sidebar actually draws — leaves them out, because the header's model
-  selector already offers them; `options.py` has the argument parser
+  and the two chat modes). A `GuiAction` carries a `hidden` flag: eight entries
+  stay in `ACTIONS` (so `action_by_key` and the CLI still resolve them) but are
+  `hidden=True`, and `visible_actions()` — what the sidebar actually draws —
+  leaves them out. The four *Answer from ...* mouth switches are hidden because
+  the header's model selector offers them, and the Import Center, Code Studio,
+  Presentation Studio, and image generation are hidden because the composer's ＋
+  menu already opens them; `options.py` has the argument parser
   (`--mode ai|jarvics`, and the three mouth starts `--mind` / `--ultron` /
   default);
   `app.py` is the Tkinter window (imported lazily, so `cli/` never imports Tk).
@@ -934,7 +937,7 @@ Arabic is kept as secondary aliases where useful.
   automatic workspace open) is kept rather than overwritten by the gate hint
   (`_refresh_merge_state(keep_note=True)`; `_run_background(note=False)`).
   Reachable from the composer's **＋** menu (**Code Studio — edit and merge the
-  project's own code…**) and the sidebar action; the headless twin is
+  project's own code…**), whose sidebar action is hidden; the headless twin is
   `python -m cli studio`.
 - `core/presentation.py` — the **Presentation Studio** content model and the
   dependency-free `.pptx` writer. A project walks a strict state machine
@@ -1130,7 +1133,7 @@ Arabic is kept as secondary aliases where useful.
   because a `tk.Text` keeps the character width it was built with. Long work runs
   on a worker thread whose result is handed back through a queue the UI thread
   drains. Reachable from the composer's **＋** menu (**Presentation Studio — build
-  a PowerPoint deck…**) and the sidebar action; the headless twin is
+  a PowerPoint deck…**), whose sidebar action is hidden; the headless twin is
   `python -m cli presentation`.
 - `cli/presentation.py` — the Presentation Studio CLI, the headless twin of the
   window: `new`/`list`/`rename`/`duplicate`/`delete`/`validate`/`test`/`show`/
