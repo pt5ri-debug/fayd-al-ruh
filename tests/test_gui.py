@@ -311,6 +311,27 @@ def test_actions_cover_the_mirrored_menu_items() -> None:
         assert key in keys, f"missing action {key!r}"
 
 
+def test_hidden_actions_are_kept_but_not_drawn() -> None:
+    """The hidden rows stay in ACTIONS (CLI/action_by_key) but leave the sidebar."""
+    hidden = {action.key for action in gui_actions.ACTIONS if action.hidden}
+    # The first eight: the four mouth switches, then learn/insight/internet/web.
+    assert hidden == {
+        "ultron",
+        "vision",
+        "banner",
+        "cloud",
+        "learn",
+        "insight",
+        "internet-learner",
+        "web",
+    }
+    visible = {action.key for action in gui_actions.visible_actions()}
+    assert hidden.isdisjoint(visible)
+    # Every hidden key still resolves through action_by_key.
+    for key in hidden:
+        assert gui_actions.action_by_key(key).key == key
+
+
 #: The visible CLI menu entries the window provides through its own controls
 #: (the window itself, the reading-voice picker, Jarvis, Ultron, Vision, Banner,
 #: Cloud, and the two text-chat mouths). The sidebar mirrors a later block

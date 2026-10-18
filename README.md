@@ -1079,13 +1079,18 @@ The window is a thin shell over the same code the CLI already runs:
   restored when the window widens.
 - The sidebar's **Actions** buttons and the **Saved chats** list call the
   `cli.menu` `run_*` functions the numbered menu calls. The **Actions** section
-  adds numbered CLI items **6 through 12** — learn, insight, Internet learner,
+  mirrors numbered CLI items **6 through 12** — learn, insight, Internet learner,
   web verify, the two knowledge-base entries, and the Import Center — with the
   same labels and default arguments, so nothing is offered twice: the window's
   own controls cover the first five menu items (the window, Jarvis, **Ultron**,
   **Vision**, and the two chat modes).
   The training and evaluation entries that already lived in the sidebar are kept
   here too, even though they are hidden from the numbered CLI menu.
+  The first eight rows — the four *Answer from ...* mouth switches, then learn,
+  insight, the Internet learner, and the web verifier — are **hidden from the
+  sidebar** (`hidden=True` in `gui/actions.py`, drawn through
+  `visible_actions()`); they remain in `ACTIONS`, so the CLI and
+  `action_by_key` still resolve them.
 - Answers run on a **worker thread** and are posted back through a queue, so the
   window never freezes while the model thinks; output from a sidebar action is
   streamed into the transcript.

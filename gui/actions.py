@@ -73,9 +73,11 @@ class SessionItem:
 
 
 # Numbered CLI menu items 5..11, plus the training entries the sidebar already had.
-# The first four entries are the "Answer from ..." mouth switches: they stay in the
-# tuple (so ``action_by_key`` and the CLI keep resolving them) but are ``hidden``,
-# because the header's model selector is the one visible way to switch mouths.
+# The first eight entries are hidden from the sidebar: the first four are the
+# "Answer from ..." mouth switches (the header's model selector already offers
+# them), and the next four (learn, insight, the Internet learner, and the web
+# verifier) were hidden on request. They all stay in the tuple, so
+# ``action_by_key`` and the CLI keep resolving them.
 ACTIONS: tuple[GuiAction, ...] = (
     GuiAction(
         "ultron",
@@ -105,18 +107,20 @@ ACTIONS: tuple[GuiAction, ...] = (
         (),
         hidden=True,
     ),
-    GuiAction("learn", "Continuous learning and regression gate", run_learn, ()),
+    GuiAction("learn", "Continuous learning and regression gate", run_learn, (), hidden=True),
     GuiAction(
         "insight",
         "Ask the AI: what can it do and what has it learned",
         run_insight,
         ("--report",),
+        hidden=True,
     ),
     GuiAction(
         "internet-learner",
         "Continuous Internet Learner",
         run_internet_learner,
         ("--approve", "--write", "--max-topics", "5", "--per-topic", "3"),
+        hidden=True,
     ),
     GuiAction(
         "web",
@@ -124,6 +128,7 @@ ACTIONS: tuple[GuiAction, ...] = (
         run_web,
         ("--approve",),
         needs_input=True,
+        hidden=True,
     ),
     GuiAction(
         "knowledge-build",

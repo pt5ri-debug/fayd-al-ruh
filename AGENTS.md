@@ -714,11 +714,13 @@ Arabic is kept as secondary aliases where useful.
   gate for a mutating tool); `actions.py` maps the sidebar to `cli.menu.run_*` —
   the **Actions** list mirrors numbered CLI items 6..12 (never repeating the
   window's own controls, which cover items 1..5 — the window, Jarvis, **Ultron**,
-  and the two chat modes). A `GuiAction` carries a `hidden` flag: the four
-  *Answer from ...* mouth switches stay in `ACTIONS` (so `action_by_key` and the
+  and the two chat modes). A `GuiAction` carries a `hidden` flag: the first eight
+  entries — the four *Answer from ...* mouth switches, then `learn`, `insight`,
+  `internet-learner`, and `web` — stay in `ACTIONS` (so `action_by_key` and the
   CLI still resolve them) but are `hidden=True`, and `visible_actions()` — what
-  the sidebar actually draws — leaves them out, because the header's model
-  selector already offers them; `options.py` has the argument parser
+  the sidebar actually draws — leaves them out (the four mouths are offered by
+  the header's model selector; the next four were hidden on request);
+  `options.py` has the argument parser
   (`--mode ai|jarvics`, and the three mouth starts `--mind` / `--ultron` /
   default);
   `app.py` is the Tkinter window (imported lazily, so `cli/` never imports Tk).
