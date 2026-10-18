@@ -241,6 +241,14 @@ class ModelSwitcher:
         assistant = self.cloud  # load/check now, before the swap
         self._swap(assistant, MOUTH_CLOUD, cloud_mouth.CLOUD_HELP)
 
+    def invalidate_cloud(self) -> None:
+        """Forget the cached Cloud mouth, so the next load picks up a new provider.
+
+        Called when the user changes the cloud provider: without this the mouth
+        would keep answering from the provider it was first built with.
+        """
+        self._cloud = None
+
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations again."""
         self.mode.assistant = self.grounded

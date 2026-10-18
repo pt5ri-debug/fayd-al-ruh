@@ -53,6 +53,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from core.audit_log import AuditLog
@@ -121,6 +122,9 @@ class CloudProvider:
     #: True when the endpoint is expected to run on this machine, so the wording
     #: never claims data left the machine for a local server.
     local: bool = False
+    #: True when the provider offers a free tier (a real, no-cost quota), so the
+    #: window and the CLI can point a user at a provider that needs no payment.
+    free: bool = False
 
     @property
     def needs_key(self) -> bool:
@@ -156,6 +160,7 @@ CATALOG: dict[str, CloudProvider] = {
         api_key_env="GEMINI_API_KEY",
         summary="Google's Gemini models; there is a free tier for light use.",
         models=("gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"),
+        free=True,
     ),
     "groq": CloudProvider(
         key="groq",
@@ -165,6 +170,7 @@ CATALOG: dict[str, CloudProvider] = {
         api_key_env="GROQ_API_KEY",
         summary="Very fast open-model hosting with a free tier.",
         models=("llama-3.3-70b-versatile", "llama-3.1-8b-instant"),
+        free=True,
     ),
     "openrouter": CloudProvider(
         key="openrouter",
@@ -178,6 +184,7 @@ CATALOG: dict[str, CloudProvider] = {
             "google/gemma-2-9b-it:free",
             "mistralai/mistral-7b-instruct:free",
         ),
+        free=True,
     ),
     "mistral": CloudProvider(
         key="mistral",
@@ -187,6 +194,7 @@ CATALOG: dict[str, CloudProvider] = {
         api_key_env="MISTRAL_API_KEY",
         summary="Mistral's own models; there is a free tier for light use.",
         models=("mistral-small-latest", "mistral-large-latest", "open-mistral-nemo"),
+        free=True,
     ),
     "deepseek": CloudProvider(
         key="deepseek",
@@ -241,12 +249,74 @@ def provider_names() -> tuple[str, ...]:
     return tuple(CATALOG)
 
 
-def provider_summaries() -> tuple[tuple[str, str, str, str, bool], ...]:
-    """``(key, title, default_model, summary, local)`` for every catalog entry."""
+def provider_summaries() -> tuple[tuple[str, str, str, str, bool, bool], ...]:
+    """``(key, title, default_model, summary, local, free)`` for every catalog entry."""
     return tuple(
-        (spec.key, spec.title, spec.default_model, spec.summary, spec.local)
+        (spec.key, spec.title, spec.default_model, spec.summary, spec.local, spec.free)
         for spec in CATALOG.values()
     )
+
+
+def free_provider_names() -> tuple[str, ...]:
+    """The providers that offer a no-cost tier, in catalog order.
+
+    Used to point a user who does not want to pay at a provider that works
+    without a card (Gemini, Groq, OpenRouter, Mistral), or at a local server.
+    """
+    return tuple(key for key, spec in CATALOG.items() if spec.free)
+
+
+# ------------------------------------------------------- the saved choice
+
+
+#: Where the user's *chosen* provider is remembered, so "use Gemini" or "use
+#: Groq" survives a restart and the next chat needs no flag. Persisted through
+#: the project's own :class:`storage.json_store.JsonStore`, like every other
+#: preference -- never a key, only the provider's name.
+PROVIDER_NAMESPACE = "cloud"
+PROVIDER_KEY = "provider"
+
+
+def load_provider_key(root: str | Path) -> str:
+    """The provider the user last chose, or the default; never raises.
+
+    A stored value that is no longer in the catalog (a removed provider) falls
+    back to the default rather than failing, so a stale file can never make the
+    cloud mouth unusable.
+    """
+    from storage.json_store import JsonStore
+
+    try:
+        saved = JsonStore(root).load(PROVIDER_NAMESPACE, PROVIDER_KEY)
+    except Exception:  # a broken store must not stop the cloud mouth loading
+        return DEFAULT_PROVIDER_KEY
+    name = saved.get("provider") if isinstance(saved, dict) else None
+    key = str(name).strip().lower() if name else ""
+    return key if key in CATALOG else DEFAULT_PROVIDER_KEY
+
+
+def save_provider_key(root: str | Path, key: str) -> str:
+    """Remember ``key`` as the chosen provider. Returns the key that was stored.
+
+    Raises :class:`ValueError` for an unknown provider, so a typo is reported
+    rather than silently stored. A store error is swallowed: choosing a provider
+    must not fail just because the data folder is read-only.
+    """
+    resolved = resolve_provider(key).key
+    from storage.json_store import JsonStore
+
+    try:
+        JsonStore(root).save(PROVIDER_NAMESPACE, PROVIDER_KEY, {"provider": resolved})
+    except Exception:
+        pass
+    return resolved
+
+
+def selected_provider(root: str | Path, explicit: str | None = None) -> CloudProvider:
+    """The provider to use: an explicit choice, else the saved one, else the default."""
+    if explicit:
+        return resolve_provider(explicit)
+    return resolve_provider(load_provider_key(root))
 
 
 def redact_secret(text: str, secret: str | None) -> str:
@@ -790,12 +860,18 @@ __all__ = [
     "MAX_TEMPERATURE",
     "NAME",
     "OpenAICompatibleClient",
+    "PROVIDER_KEY",
+    "PROVIDER_NAMESPACE",
     "SYSTEM_PROMPT",
     "approved_gate",
     "cloud_status",
+    "free_provider_names",
     "granted_permissions",
+    "load_provider_key",
     "provider_names",
     "provider_summaries",
     "redact_secret",
     "resolve_provider",
+    "save_provider_key",
+    "selected_provider",
 ]

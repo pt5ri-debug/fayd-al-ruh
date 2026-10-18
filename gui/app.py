@@ -942,6 +942,8 @@ class FaydGUI:
         for key, label in MOUTH_CHOICES:
             self._radio(panel, label, key).pack(fill="x", padx=14, pady=1)
 
+        self._build_cloud_provider_picker(panel)
+
         self._section_label(panel, "Reading voice (text to speech)", top=8)
         self._build_voice_picker(panel)
 
@@ -967,6 +969,76 @@ class FaydGUI:
             activeforeground=self._theme.foreground, font=self._type.font("sm"),
             anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
         )
+
+    def _build_cloud_provider_picker(self, panel: tk.Misc) -> None:
+        """The Cloud provider picker: choose Gemini *or* Groq (or any provider).
+
+        Shown under the mouth list so a user who picks the Cloud mouth can also
+        choose *which* remote service answers -- Gemini or Groq for the free tier,
+        or any other provider. The choice is remembered, so the next answer and the
+        next launch use it without a flag. It is a plain either/or menu: the current
+        provider is the one shown, and picking another one stores it at once.
+        """
+        from core.cloud_model import provider_summaries
+
+        provider = self.service.cloud_provider()
+        self._cloud_provider_var = tk.StringVar(value=provider)
+        row = tk.Frame(panel, bg=self._theme.surface)
+        row.pack(fill="x", padx=14, pady=(6, 0))
+        tk.Label(
+            row, text="Cloud provider", bg=self._theme.surface,
+            fg=self._theme.text_secondary, font=self._type.font("2xs"),
+            anchor="w", padx=4,
+        ).pack(side="left")
+        menu = tk.OptionMenu(
+            row, self._cloud_provider_var,
+            *[key for key, *_rest in provider_summaries()],
+            command=self._on_cloud_provider_change,
+        )
+        menu.configure(
+            bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("xs"),
+            activebackground=self._theme.interactive_hover, activeforeground=self._theme.foreground,
+            highlightthickness=0, bd=0, relief="flat", cursor="hand2", anchor="w",
+        )
+        menu["menu"].configure(
+            bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("xs"),
+        )
+        menu.pack(side="right", padx=4)
+        self._cloud_provider_note = tk.Label(
+            panel, text=self._cloud_provider_line(provider),
+            bg=self._theme.surface, fg=self._theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", padx=20, pady=2,
+            wraplength=232, justify="left",
+        )
+        self._cloud_provider_note.pack(fill="x")
+
+    def _cloud_provider_line(self, key: str) -> str:
+        """An honest one-line note about a provider: key needed, free tier, or local."""
+        import os
+
+        from core.cloud_model import resolve_provider
+
+        spec = resolve_provider(key)
+        if not spec.needs_key:
+            return f"{spec.title}: on this machine, no key needed."
+        has_key = bool(os.environ.get(spec.api_key_env))
+        tier = "free tier" if spec.free else "paid"
+        if has_key:
+            return f"{spec.title}: key found ({spec.api_key_env}), {tier}."
+        return f"{spec.title}: {tier}. Set {spec.api_key_env} to use it."
+
+    def _on_cloud_provider_change(self, key: str) -> None:
+        """Store the chosen Cloud provider and refresh the note and the header."""
+        try:
+            stored = self.service.set_cloud_provider(key)
+        except ValueError as error:
+            self._add_bubble("note", f"Could not change the Cloud provider: {error}")
+            self._cloud_provider_var.set(self.service.cloud_provider())
+            return
+        if hasattr(self, "_cloud_provider_note"):
+            self._cloud_provider_note.configure(text=self._cloud_provider_line(stored))
+        self._source_menu_var_reset()
+        self._add_bubble("note", f"Cloud will answer from {self._cloud_provider_line(stored)}")
 
     def _build_voice_picker(self, panel: tk.Misc) -> None:
         """The reading-voice menu (grouped by category) plus the auto-speak toggle."""

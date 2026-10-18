@@ -346,6 +346,28 @@ class ChatService:
         """
         self.switcher.use_cloud()
 
+    def cloud_provider(self) -> str:
+        """The provider key the Cloud mouth will use (the saved choice, else the default)."""
+        from core.cloud_model import load_provider_key
+
+        return load_provider_key(self._data_root)
+
+    def set_cloud_provider(self, key: str) -> str:
+        """Remember ``key`` as the Cloud provider, so the next answer uses it.
+
+        Returns the stored key. Raises :class:`ValueError` for an unknown provider,
+        so the window can report a bad choice instead of silently ignoring it. If
+        the Cloud mouth is already answering, it is rebuilt against the new
+        provider at once, so the very next question uses the chosen one.
+        """
+        from core.cloud_model import save_provider_key
+
+        stored = save_provider_key(self._data_root, key)
+        self.switcher.invalidate_cloud()
+        if self.switcher.mouth == chat_module.MOUTH_CLOUD:
+            self.switcher.use_cloud()
+        return stored
+
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations."""
         self.switcher.use_sources()

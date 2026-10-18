@@ -42,6 +42,7 @@ from core.cloud_model import (
     NAME as CLOUD_NAME,
     CloudEngine,
     CloudUnavailable,
+    selected_provider,
 )
 from core.conversation import Conversation, Role
 
@@ -247,7 +248,16 @@ def load_cloud_assistant(
     approval: selecting this mouth is the user's explicit approval to send their
     words to the remote model. ``client`` is the seam a test injects, so the whole
     mouth is exercised with no network and no account.
+
+    When ``provider`` is ``None`` the provider the user last chose (through
+    ``python -m cli cloud use <key>`` or the window's provider picker) is used, so
+    the mouth answers from the same provider the rest of the program does; only an
+    explicit name overrides the saved choice.
     """
+    if provider is None and client is None:
+        from core.paths import data_dir
+
+        provider = selected_provider(data_dir()).key
     engine = CloudEngine(
         client,
         provider=provider,
