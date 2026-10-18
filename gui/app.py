@@ -35,6 +35,7 @@ import tkinter as tk
 from tkinter import filedialog
 from tkinter import font as tkfont
 from tkinter import simpledialog
+from tkinter import ttk
 
 from ai import chat as chat_module
 from core import optional_deps
@@ -1020,13 +1021,16 @@ class FaydGUI:
             anchor="w", padx=4,
         ).pack(side="left")
         self._cloud_model_var = tk.StringVar(value=self.service.cloud_model())
-        entry = tk.Entry(
-            model_row, textvariable=self._cloud_model_var, bg=self._theme.surface_raised,
-            fg=self._theme.foreground, insertbackground=self._theme.foreground,
-            font=self._type.font("xs"), relief="flat", highlightthickness=0,
+        self._cloud_model_picker = ttk.Combobox(
+            model_row, textvariable=self._cloud_model_var,
+            values=list(self.service.cloud_model_choices()),
+            state="normal", font=self._type.font("xs"),
         )
-        entry.pack(side="left", fill="x", expand=True, padx=(2, 4))
-        entry.bind("<Return>", lambda _event: self._on_cloud_model_change())
+        self._cloud_model_picker.pack(side="left", fill="x", expand=True, padx=(2, 4))
+        # A dropdown pick and a typed name both commit the same way, so a model the
+        # catalog does not list yet can still be used.
+        self._cloud_model_picker.bind("<<ComboboxSelected>>", lambda _e: self._on_cloud_model_change())
+        self._cloud_model_picker.bind("<Return>", lambda _e: self._on_cloud_model_change())
         tk.Button(
             model_row, text="Set", command=self._on_cloud_model_change,
             bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("2xs"),
@@ -1035,11 +1039,24 @@ class FaydGUI:
             highlightthickness=0, bd=0, cursor="hand2",
         ).pack(side="left")
 
+    def _refresh_cloud_model_choices(self) -> None:
+        """Re-point the model dropdown at the current provider's lineup.
+
+        Called when the provider changes, so the menu always lists *that*
+        provider's models (Gemini's for Gemini, Groq's for Groq) instead of the
+        previous provider's.
+        """
+        if not hasattr(self, "_cloud_model_picker"):
+            return
+        choices = list(self.service.cloud_model_choices())
+        self._cloud_model_picker.configure(values=choices)
+        self._cloud_model_var.set(self.service.cloud_model())
+
     def _on_cloud_model_change(self) -> None:
-        """Store the typed Cloud model, so a retired default is fixed once.
+        """Store the picked Cloud model, so a retired default is fixed once.
 
         A provider renames and shuts models down; when the built-in default stops
-        working, typing a working name here (e.g. ``gemini-3.8-flash``) makes every
+        working, choosing a working name here (e.g. ``gemini-3.8-flash``) makes every
         later answer use it, and the window and the CLI agree.
         """
         typed = self._cloud_model_var.get().strip()
@@ -1076,8 +1093,7 @@ class FaydGUI:
             return
         if hasattr(self, "_cloud_provider_note"):
             self._cloud_provider_note.configure(text=self._cloud_provider_line(stored))
-        if hasattr(self, "_cloud_model_var"):
-            self._cloud_model_var.set(self.service.cloud_model())
+        self._refresh_cloud_model_choices()
         self._source_menu_var_reset()
         self._add_bubble("note", f"Cloud will answer from {self._cloud_provider_line(stored)}")
 

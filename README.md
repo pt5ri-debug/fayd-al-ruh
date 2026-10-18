@@ -942,9 +942,13 @@ python -m cli cloud use gemini --model gemini-3.8-flash   # fix it once, remembe
 python -m cli cloud --model gemini-3.8-flash "hi"         # or just for one turn
 ```
 
-The window's **Settings → Cloud provider → Model** field does the same thing: type
-a working name and press **Set**, and every later answer — in the window and the
-CLI — uses it. With nothing saved, the provider's own default applies.
+The window's **Settings → Cloud provider → Model** dropdown does the same thing:
+pick a model from the list — the current provider's known lineup, with the
+project's default first (for Gemini: `gemini-2.5-flash`, `gemini-2.5-flash-lite`,
+`gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite`) — and every later
+answer, in the window and the CLI, uses it. You can still type a name the catalog
+does not list yet, and it stays in the menu. With nothing saved, the provider's own
+default applies.
 
 Two of the catalog entries need **no card** — both have a free tier:
 
