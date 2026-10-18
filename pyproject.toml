@@ -83,6 +83,18 @@ banner = [
     "llama-cpp-python>=0.3",
     "huggingface_hub>=0.23",
 ]
+# The Qwen3 speech models (ASR and TTS) are a separate optional extra. They run
+# locally through torch + Qwen's own `qwen-asr`/`qwen-tts` packages, so a chat can
+# transcribe with Qwen3-ASR (52 languages, including Arabic) and read aloud with
+# Qwen3-TTS (ten languages, no Arabic). Same runtime for both; the weights are a
+# separate one-time, human-approved download. Never required by the base install,
+# and imported lazily.
+qwen-speech = [
+    "torch>=2.2",
+    "transformers>=4.40",
+    "qwen-asr",
+    "qwen-tts",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -147,4 +159,11 @@ ignore_missing_imports = true
 # base install must still type-check. python-pptx ships no type stubs.
 [[tool.mypy.overrides]]
 module = ["pptx", "pptx.*"]
+ignore_missing_imports = true
+
+# The Qwen3 speech models are an optional extra (``pip install .[qwen-speech]``);
+# ``core.qwen_speech`` imports torch/qwen-asr/qwen-tts lazily, so a base install
+# must still type-check. The Qwen packages ship no type stubs.
+[[tool.mypy.overrides]]
+module = ["torch", "qwen_asr", "qwen_tts"]
 ignore_missing_imports = true

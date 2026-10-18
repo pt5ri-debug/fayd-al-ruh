@@ -35,6 +35,7 @@ from cli.menu import (
     run_llm,
     run_ml,
     run_presentation,
+    run_qwen_speech,
     run_release,
     run_selfcheck,
     run_ultron_chat,
@@ -156,6 +157,24 @@ ACTIONS: tuple[GuiAction, ...] = (
         hidden=True,
     ),
     GuiAction("image", "Generate an image from text", run_image, ("backends",), hidden=True),
+    GuiAction(
+        "qwen-speech",
+        "Qwen3 speech: status of the local ASR + TTS models",
+        run_qwen_speech,
+        ("qwen-asr", "status"),
+    ),
+    GuiAction(
+        "qwen-speech-asr",
+        "Qwen3 speech: download the local ASR model (~3.4 GB)",
+        run_qwen_speech,
+        ("qwen-asr", "download", "--approve"),
+    ),
+    GuiAction(
+        "qwen-speech-tts",
+        "Qwen3 speech: download the local TTS model (~3.4 GB)",
+        run_qwen_speech,
+        ("qwen-tts", "download", "--approve"),
+    ),
     GuiAction(
         "deps",
         "Install optional PDF/OCR/image support",

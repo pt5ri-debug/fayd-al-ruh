@@ -135,6 +135,20 @@ def presentation_models_dir() -> Path:
     return data_dir() / "presentation"
 
 
+def qwen_speech_models_dir() -> Path:
+    """Where the Qwen3 speech models (ASR and TTS) live.
+
+    Qwen3-ASR and Qwen3-TTS are *not* in-project checkpoints: they are
+    ``transformers`` model folders the user drops into ``data/qwen-speech`` (or
+    downloads there with ``python -m cli qwen-asr download --approve`` and
+    ``python -m cli qwen-tts download --approve``). One folder holds both
+    families, keyed by a registry, so a machine that installs one can install the
+    other beside it. The folder is git-ignored, so a multi-gigabyte model never
+    dirties the working tree or bloats a program update.
+    """
+    return data_dir() / "qwen-speech"
+
+
 def studio_dir() -> Path:
     """Where the Code Studio keeps its own state (git worktrees, run logs).
 

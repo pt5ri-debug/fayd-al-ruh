@@ -730,6 +730,24 @@ class ChatService:
         """An honest, human-readable status of the reader."""
         return self._reader.describe()
 
+    def qwen_speech_status(self) -> str:
+        """An honest note about the local Qwen3 speech models, for the window.
+
+        Reports each family separately (ASR and TTS can be installed
+        independently) and states the Arabic asymmetry plainly: Qwen3-ASR covers
+        Arabic, Qwen3-TTS does not.
+        """
+        from core.qwen_speech import qwen_asr_status, qwen_tts_status
+
+        asr = qwen_asr_status()
+        tts = qwen_tts_status()
+        asr_line = "ready" if asr.available else f"not ready — {asr.hint}"
+        tts_line = "ready" if tts.available else f"not ready — {tts.hint}"
+        return (
+            f"Qwen3-ASR (speech to text): {asr_line}\n"
+            f"Qwen3-TTS (text to speech): {tts_line}"
+        )
+
     def reading_available(self) -> bool:
         """True when a real speech engine is installed."""
         return self._reader.available()

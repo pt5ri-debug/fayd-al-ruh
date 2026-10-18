@@ -47,6 +47,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cloud-model", default=None, help="the cloud model to ask for")
     parser.add_argument("--session", default=None, help="resume a saved session by id")
     parser.add_argument(
+        "--tts",
+        default="auto",
+        help=(
+            "text-to-speech engine: auto, espeak-ng, say, ..., or qwen3-tts "
+            "(the local Qwen3-TTS model)"
+        ),
+    )
+    parser.add_argument(
         "--mode",
         default=None,
         choices=("ai", "jarvics"),

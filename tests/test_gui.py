@@ -347,8 +347,19 @@ _WINDOW_OWNED_MENU_LABELS = frozenset(
 
 #: The visible CLI entries the sidebar mirrors, in order (the first one after the
 #: window-owned controls through the Code Studio screen).
-_MIRRORED_MENU_START = 9
-_MIRRORED_MENU_STOP = 16
+_MIRRORED_MENU_START = 12
+_MIRRORED_MENU_STOP = 19
+
+#: The Qwen3 speech entries sit before the window-owned controls (the window shows
+#: their status in the reading-voice picker), so they are mirrored as their own
+#: block rather than inside the range above.
+_QWEN_MENU_LABELS = frozenset(
+    {
+        "Qwen3 speech: status of the local ASR + TTS models",
+        "Qwen3 speech: download the local ASR model (~3.4 GB)",
+        "Qwen3 speech: download the local TTS model (~3.4 GB)",
+    }
+)
 
 
 def test_action_labels_match_the_mirrored_cli_menu_block() -> None:
@@ -367,6 +378,8 @@ def test_action_labels_match_the_mirrored_cli_menu_block() -> None:
         assert gui_labels.count(title) == 1, f"{title!r} must appear exactly once"
     for title in _WINDOW_OWNED_MENU_LABELS:
         assert title not in gui_labels, f"{title!r} is a window control, not a sidebar action"
+    for title in _QWEN_MENU_LABELS:
+        assert gui_labels.count(title) == 1, f"{title!r} must appear exactly once"
 
 
 def test_actions_never_duplicate_a_gui_control() -> None:
