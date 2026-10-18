@@ -180,6 +180,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         run_release,
         ("--resume", "--episodes", "120", "--llm-steps", "4000", "--llm-shards", "4"),
     ),
+    GuiAction(
+        "release-sessions",
+        "Train everything for a release (including the local mouths' chats)",
+        run_release,
+        ("--llm-sessions",),
+    ),
     GuiAction("evaluation", "Run the evaluation suite", run_evaluation, ()),
     GuiAction("selfcheck", "Self-check the install", run_selfcheck, ()),
     GuiAction(
@@ -193,6 +199,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         "Train the language model",
         run_llm,
         ("--resume", "--steps", "200", "--kb-max-chunks", "2000", "--llm-shards", "4"),
+    ),
+    GuiAction(
+        "llm-sessions",
+        "Train the language model on the local mouths' own chats",
+        run_llm,
+        ("--llm-sessions", "--steps", "4000"),
     ),
     GuiAction("ml", "Train the ML pipeline", run_ml, ("--resume", "--episodes", "60")),
     GuiAction("curriculum", "Show the petroleum-engineering curriculum", run_curriculum, ()),

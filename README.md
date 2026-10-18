@@ -1850,6 +1850,18 @@ release** buttons, and the CLI's `release` menu entry, all pass `--resume` by
 default, so pressing them accumulates training instead of rebuilding from
 scratch. Add `--resume` explicitly for the same behaviour on the command line.
 
+Both menus also carry a session-aware twin of each entry, so the trained model
+can learn the local mouths' own saved conversations in one click:
+
+- **Train the language model on the local mouths' own chats** —
+  `python -m ml.llm --llm-sessions --steps 4000`
+- **Train everything for a release (including the local mouths' chats)** —
+  `python -m ml.release --llm-sessions`
+
+The first is CLI menu item 21 and GUI sidebar action `llm-sessions`; the second
+is CLI item 23 and GUI action `release-sessions`. Like `--llm-sessions` itself,
+neither is run automatically: both are opt-in, because a transcript is personal.
+
 The Adam optimiser's moment estimates and step count live in a small sidecar
 next to the checkpoint (`fayd-llm.state.npz`). It is *run state*, not release
 content, so it is never committed; a fresh run rebuilds it. When the sidecar is
