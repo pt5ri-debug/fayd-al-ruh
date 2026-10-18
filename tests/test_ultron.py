@@ -756,7 +756,8 @@ def test_window_switches_mouth_before_the_settings_panel_is_opened(tmp_path) -> 
         root.update()
         assert service.source == MOUTH_ULTRON
 
-        # Opening Settings afterwards shows the radio on the same mouth.
+        # Opening Settings afterwards keeps the header's choice; the panel no longer
+        # shows a mouth radio, so the variable is what stays in step.
         app._toggle_settings()
         root.update()
         assert app._source_var.get() == MOUTH_ULTRON

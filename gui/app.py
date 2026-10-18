@@ -35,7 +35,6 @@ import tkinter as tk
 from tkinter import filedialog
 from tkinter import font as tkfont
 from tkinter import simpledialog
-from tkinter import ttk
 
 from ai import chat as chat_module
 from core import optional_deps
@@ -708,11 +707,6 @@ class FaydGUI:
         self._history_buttons: list[tk.Widget] = []
         self.refresh_history()
 
-        self._section_label(panel, "Tools", top=14)
-        self._tools_panel = tk.Frame(panel, bg=self._theme.surface)
-        self._tools_panel.pack(fill="x")
-        self._render_tools()
-
         self._section_label(panel, "Settings", top=14)
         settings = tk.Frame(panel, bg=self._theme.surface)
         settings.pack(fill="x")
@@ -900,12 +894,21 @@ class FaydGUI:
         )
 
     def _render_tools(self) -> None:
-        """List the sandbox tools in the sidebar; dim them when tools are off."""
-        for child in self._tools_panel.winfo_children():
+        """Refresh the sidebar's tool list -- which the sidebar no longer shows.
+
+        The sidebar used to carry a **Tools** section listing the sandbox tools.
+        It is gone, so there is nothing to paint; the guard keeps the call sites
+        (``_set_mode``) working without a panel to draw into. The tools themselves
+        are unchanged and still run in Jarvics Mode.
+        """
+        panel = getattr(self, "_tools_panel", None)
+        if panel is None or not panel.winfo_exists():
+            return
+        for child in panel.winfo_children():
             child.destroy()
         if not self.service.tool_names:
             tk.Label(
-                self._tools_panel, text="No tools available.", bg=self._theme.surface,
+                panel, text="No tools available.", bg=self._theme.surface,
                 fg=self._theme.text_dim, font=self._type.font("xs"), anchor="w", padx=18, pady=2,
             ).pack(fill="x")
             return
@@ -913,7 +916,7 @@ class FaydGUI:
         colour = self._theme.foreground if enabled else self._theme.text_dim
         for name in self.service.tool_names:
             tk.Label(
-                self._tools_panel, text=f"• {name}", bg=self._theme.surface, fg=colour,
+                panel, text=f"• {name}", bg=self._theme.surface, fg=colour,
                 font=self._type.font("xs"), anchor="w", padx=20, pady=1,
             ).pack(fill="x")
         note = (
@@ -922,7 +925,7 @@ class FaydGUI:
             else "Switch to Jarvics Mode to use them."
         )
         tk.Label(
-            self._tools_panel, text=note, bg=self._theme.surface, fg=self._theme.text_dim,
+            panel, text=note, bg=self._theme.surface, fg=self._theme.text_dim,
             font=self._type.font("2xs"), anchor="w", padx=20, pady=2, wraplength=232, justify="left",
         ).pack(fill="x")
 
@@ -935,13 +938,10 @@ class FaydGUI:
             return
         self._settings_open = True
         panel = self._settings_panel
-        tk.Label(
-            panel, text="Answering mouth", bg=self._theme.surface, fg=self._theme.text_secondary,
-            font=self._type.font("2xs", weight="bold"), anchor="w", padx=18,
-        ).pack(fill="x", pady=(6, 2))
+        # The "Answering mouth" radio list is hidden on purpose: the header's model
+        # selector is the one visible mouth switch. The variable still tracks the
+        # live mouth (the header sets it), so nothing else has to change.
         self._source_var.set(self.service.source)
-        for key, label in MOUTH_CHOICES:
-            self._radio(panel, label, key).pack(fill="x", padx=14, pady=1)
 
         self._build_cloud_provider_picker(panel)
 
@@ -962,23 +962,14 @@ class FaydGUI:
             button.pack(fill="x", padx=12, pady=1)
             self._action_buttons.append(button)
 
-    def _radio(self, parent: tk.Misc, label: str, value: str) -> tk.Radiobutton:
-        return tk.Radiobutton(
-            parent, text=label, value=value, variable=self._source_var,
-            command=self._on_source_change, bg=self._theme.surface, fg=self._theme.foreground,
-            selectcolor=self._theme.surface, activebackground=self._theme.surface,
-            activeforeground=self._theme.foreground, font=self._type.font("sm"),
-            anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
-        )
-
     def _build_cloud_provider_picker(self, panel: tk.Misc) -> None:
         """The Cloud provider picker: choose Gemini *or* Groq (or any provider).
 
-        Shown under the mouth list so a user who picks the Cloud mouth can also
-        choose *which* remote service answers -- Gemini or Groq for the free tier,
-        or any other provider. The choice is remembered, so the next answer and the
-        next launch use it without a flag. It is a plain either/or menu: the current
-        provider is the one shown, and picking another one stores it at once.
+        Shown at the top of the settings panel so a user who picks the Cloud mouth
+        can also choose *which* remote service answers -- Gemini or Groq for the free
+        tier, or any other provider. The choice is remembered, so the next answer and
+        the next launch use it without a flag. It is a plain either/or menu: the
+        current provider is the one shown, and picking another one stores it at once.
         """
         from core.cloud_model import provider_summaries
 
@@ -1021,23 +1012,57 @@ class FaydGUI:
             anchor="w", padx=4,
         ).pack(side="left")
         self._cloud_model_var = tk.StringVar(value=self.service.cloud_model())
-        self._cloud_model_picker = ttk.Combobox(
-            model_row, textvariable=self._cloud_model_var,
-            values=list(self.service.cloud_model_choices()),
-            state="normal", font=self._type.font("xs"),
+        # A real dropdown, styled like the provider menu above it: ttk's default
+        # Combobox draws an unthemed white box that reads as a text field, not a
+        # menu, in this dark palette. An OptionMenu carries the theme's own colours,
+        # so the model list is visibly a list.
+        self._cloud_model_picker = tk.OptionMenu(
+            model_row, self._cloud_model_var,
+            *self.service.cloud_model_choices(),
+            command=self._set_cloud_model,
+        )
+        self._cloud_model_picker.configure(
+            bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("xs"),
+            activebackground=self._theme.interactive_hover, activeforeground=self._theme.foreground,
+            highlightthickness=0, bd=0, relief="flat", cursor="hand2", anchor="w",
+        )
+        self._cloud_model_picker["menu"].configure(
+            bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("xs"),
         )
         self._cloud_model_picker.pack(side="left", fill="x", expand=True, padx=(2, 4))
-        # A dropdown pick and a typed name both commit the same way, so a model the
-        # catalog does not list yet can still be used.
-        self._cloud_model_picker.bind("<<ComboboxSelected>>", lambda _e: self._on_cloud_model_change())
-        self._cloud_model_picker.bind("<Return>", lambda _e: self._on_cloud_model_change())
-        tk.Button(
-            model_row, text="Set", command=self._on_cloud_model_change,
-            bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("2xs"),
-            activebackground=self._theme.interactive_hover,
-            activeforeground=self._theme.foreground, relief="flat",
-            highlightthickness=0, bd=0, cursor="hand2",
-        ).pack(side="left")
+        self._add_cloud_model_other_entry()
+
+    def _add_cloud_model_other_entry(self) -> None:
+        """Offer an "Other…" row, so a model the catalog does not list can be set.
+
+        The dropdown is the common case; a provider that renames a model faster
+        than this catalog is updated still needs a way in, so the last entry asks
+        for a name and stores it (the same path the CLI's ``--model`` uses).
+        """
+        menu = self._cloud_model_picker["menu"]
+        menu.add_separator()
+        menu.add_command(label="Other…", command=self._prompt_cloud_model)
+
+    def _prompt_cloud_model(self) -> None:
+        """Ask for a model name and store it (the dropdown's "Other…" row)."""
+        current = self.service.cloud_model()
+        typed = simpledialog.askstring(
+            "Cloud model", "Model name to ask the provider for:", initialvalue=current, parent=self.root
+        )
+        if not typed:
+            return
+        try:
+            stored = self.service.set_cloud_model(typed.strip())
+        except ValueError as error:
+            self._add_bubble("note", f"Could not set the Cloud model: {error}")
+            return
+        # Keep the custom name in the menu so it stays selectable.
+        menu = self._cloud_model_picker["menu"]
+        labels = [menu.entrycget(i, "label") for i in range(menu.index("end") + 1)]
+        if stored not in labels:
+            menu.insert_command(0, label=stored, command=partial(self._set_cloud_model, stored))
+        self._cloud_model_var.set(stored)
+        self._add_bubble("note", f"Cloud will ask for model {stored!r}.")
 
     def _refresh_cloud_model_choices(self) -> None:
         """Re-point the model dropdown at the current provider's lineup.
@@ -1048,9 +1073,17 @@ class FaydGUI:
         """
         if not hasattr(self, "_cloud_model_picker"):
             return
-        choices = list(self.service.cloud_model_choices())
-        self._cloud_model_picker.configure(values=choices)
+        menu = self._cloud_model_picker["menu"]
+        menu.delete(0, "end")
+        for model in self.service.cloud_model_choices():
+            menu.add_command(label=model, command=partial(self._set_cloud_model, model))
+        self._add_cloud_model_other_entry()
         self._cloud_model_var.set(self.service.cloud_model())
+
+    def _set_cloud_model(self, model: str) -> None:
+        """Set the shown model and store it (the dropdown's per-entry callback)."""
+        self._cloud_model_var.set(model)
+        self._on_cloud_model_change()
 
     def _on_cloud_model_change(self) -> None:
         """Store the picked Cloud model, so a retired default is fixed once.
@@ -1812,10 +1845,6 @@ class FaydGUI:
     def _source_menu_var_reset(self) -> None:
         """Keep the model selector's shown value in step with the real mouth."""
         self._source_var_menu.set(self._source_choice_label())
-
-    def _on_source_change(self) -> None:
-        """The settings-panel radio, mirroring the header's model selector."""
-        self._switch_mouth(self._source_var.get())
 
     def _switch_mouth(self, want: str) -> None:
         """Swap the mouth the *same* chat answers from, reporting a failure plainly.

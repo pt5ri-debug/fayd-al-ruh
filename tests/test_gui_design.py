@@ -362,7 +362,38 @@ def test_window_sidebar_collapses_and_reopens(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
-def test_window_tools_section_reflects_the_mode(tmp_path) -> None:
+def test_window_settings_hides_the_answering_mouth_radios(tmp_path) -> None:
+    """The sidebar settings no longer list the answering mouths; the header does."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        app._toggle_settings()
+        root.update()
+
+        def walk(widget, out):
+            for child in widget.winfo_children():
+                out.append(child)
+                walk(child, out)
+
+        widgets: list = []
+        walk(app._settings_panel, widgets)
+        # No radio for any mouth remains in the panel, and the header's variable
+        # still tracks the live mouth (the header selector is the one switch).
+        mouth_keys = {"sources", "model", "ultron", "vision", "banner", "cloud"}
+        radios = [w for w in widgets if isinstance(w, tk.Radiobutton)]
+        assert not any(w.cget("value") in mouth_keys for w in radios)
+        assert app._source_var.get() == app.service.source
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_has_no_tools_section_in_the_sidebar(tmp_path) -> None:
+    """The sidebar's **Tools** list is gone; the tools themselves are unchanged."""
     import tkinter as tk
 
     from gui.app import FaydGUI
@@ -371,14 +402,14 @@ def test_window_tools_section_reflects_the_mode(tmp_path) -> None:
     try:
         app = FaydGUI(root, service=_service(tmp_path))
         root.update()
-        labels = [w.cget("text") for w in app._tools_panel.winfo_children()]
-        assert any("calculator" in text for text in labels)
-        # AI Mode dims them and says so; Jarvics Mode enables them.
-        assert any("Jarvics Mode" in text for text in labels)
+        # The panel is not built any more, and the service still knows the tools.
+        assert not hasattr(app, "_tools_panel")
+        assert app.service.tool_names
+        # Switching mode no longer needs a panel to paint into (it used to call
+        # _render_tools); it must not raise.
         app._set_mode(modes.resolve_mode("jarvics"))
         root.update()
-        labels = [w.cget("text") for w in app._tools_panel.winfo_children()]
-        assert any("Available in Jarvics Mode" in text for text in labels)
+        assert app.service.tools_enabled is True
     finally:
         root.destroy()
 

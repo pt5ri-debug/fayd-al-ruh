@@ -741,10 +741,9 @@ python -m cli ultron download --approve           # one-time: fetch a model (~5 
 ```
 
 It is a **mouth inside the project's own chat**: the window's model selector
-(the one above the transcript, beside the mode switch) and the settings panel's
-*Answering mouth* both list **Ultron (general local model)** beside *From sources
-(cited)* and *From trained model*, and the sidebar's **Answer from Ultron**
-entry selects it. Whichever way you pick it, the conversation continues in the
+(the one above the transcript, beside the mode switch) lists **Ultron (general
+local model)** beside *From sources (cited)* and *From trained model*, and the
+sidebar's **Answer from Ultron** entry selects it. Whichever way you pick it, the conversation continues in the
 **same transcript, the same session, and with the same conversation controls** as
 the other two mouths — there is no separate window. In the text chat, type
 `from ultron` (or `from the sources` to switch back). It is still wired
@@ -808,10 +807,10 @@ python -m cli vision download --approve           # one-time: fetch a model (~5 
 ```
 
 Like Ultron, it is a **mouth inside the project's own chat**: the window's model
-selector (the one above the transcript, beside the mode switch) and the settings
-panel's *Answering mouth* both list **Vision (petroleum local model)** beside
-*From sources (cited)*, *From trained model*, and *Ultron (general local model)*,
-and the sidebar's **Answer from Vision** entry selects it. Whichever way you pick
+selector (the one above the transcript, beside the mode switch) lists
+**Vision (petroleum local model)** beside *From sources (cited)*, *From trained
+model*, and *Ultron (general local model)*, and the sidebar's **Answer from
+Vision** entry selects it. Whichever way you pick
 it, the conversation continues in the **same transcript, the same session, and
 with the same conversation controls** — there is no separate window. In the text
 chat, type `from vision` (or `from the sources` to switch back). It is wired
@@ -871,9 +870,8 @@ python -m cli banner download --approve           # one-time: fetch the model
 ```
 
 Like Ultron and Vision, it is a **mouth inside the project's own chat**: the
-window's model selector and the settings panel's *Answering mouth* both list
-**Banner (presentation local model)**, and the sidebar's **Answer from Banner**
-entry selects it. Whichever way you pick it, the conversation continues in the
+window's model selector lists **Banner (presentation local model)**, and the
+sidebar's **Answer from Banner** entry selects it. Whichever way you pick it, the conversation continues in the
 **same transcript, the same session, and with the same conversation controls** —
 there is no separate window. In the text chat, type `from banner` (or `from the
 sources` to switch back). It is wired **directly below Vision** in the numbered
@@ -997,9 +995,8 @@ log. There is **no third-party dependency**: the client is a thin `urllib`
 wrapper, so a base install reaches a cloud model.
 
 Like the other mouths, Cloud is a **mouth inside the project's own chat**: the
-window's model selector and the settings panel's *Answering mouth* both list
-**Cloud (remote model)**, and the sidebar's **Answer from Cloud** entry selects
-it; the conversation stays in the **same transcript and the same session**. The
+window's model selector lists **Cloud (remote model)**, and the sidebar's
+**Answer from Cloud** entry selects it; the conversation stays in the **same transcript and the same session**. The
 settings panel also carries the **Cloud provider** menu, so you pick Gemini *or*
 Groq (or any provider) right in the window, and the choice is remembered. In
 the text chat, type `from cloud` (or `from the sources` to switch back).
@@ -1050,8 +1047,8 @@ The window is a thin shell over the same code the CLI already runs:
   local model)*, *Vision (petroleum local model)*, *Banner (presentation
   local model)*, and *Cloud (remote model: ChatGPT, Claude, Gemini)* — so the
   answering mouth
-  changes inside the *same* chat. The
-  sidebar lists the sandbox tools and dims them in AI Mode. The chosen mode
+  changes inside the *same* chat. The sandbox tools still run in Jarvics Mode;
+  they are no longer listed in the sidebar. The chosen mode
   persists (see `gui/modes.py`), and switching never clears the transcript.
 - The **composer** is a rounded, ChatGPT-like card: a multiline field (Enter
   sends, Shift+Enter inserts a newline), a send button, and a **＋** control that
@@ -1073,8 +1070,8 @@ The window is a thin shell over the same code the CLI already runs:
   the dependency-free renderer in `gui/markdown.py`.
 - The **sidebar** carries the logo, **New chat**, a **search** box, the saved
   conversations grouped by date (*Today* / *Yesterday* / *Previous 7 days* /
-  *Previous 30 days* / *Older*), the sandbox tools, and a **Settings** panel with
-  the answering-mouth switch, **Save conversation**, and the **Actions** list.
+  *Previous 30 days* / *Older*) and a **Settings** panel with the **Cloud
+  provider**/**Model** dropdowns, **Save conversation**, and the **Actions** list.
   The sidebar collapses to a drawer on a narrow (mobile-sized) window and is
   restored when the window widens.
 - The sidebar's **Actions** buttons and the **Saved chats** list call the

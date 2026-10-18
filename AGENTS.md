@@ -200,9 +200,9 @@ Arabic is kept as secondary aliases where useful.
   below Jarvis** in the menu (`cli.menu.run_ultron`), CLI
   (`python -m cli ultron`), and — as a **mouth inside the project's own chat**
   (`ai/ultron_mouth.py`, the headless twin `python -m cli ultron-chat`) — the
-  window's header model selector (`MOUTH_CHOICES` in `gui/app.py`) and settings
-  *Answering mouth* radio, beside *From sources (cited)* and *From trained
-  model*, plus the sidebar **Answer from Ultron** action; the conversation stays
+  window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
+  *From sources (cited)* and *From trained model*, plus the sidebar **Answer from
+  Ultron** action; the conversation stays
   in the same transcript and session, never a separate window. Every answer is
   labelled as the local general model's own, not grounded in cited sources.
   `UltronAssistant.ask` reads an attached file from the conversation's `CONTEXT`
@@ -235,9 +235,9 @@ Arabic is kept as secondary aliases where useful.
   below Ultron** in the menu (`cli.menu.run_vision`), CLI
   (`python -m cli vision`), and — as a **mouth inside the project's own chat**
   (`ai/vision_mouth.py`, the headless twin `python -m cli vision-chat`) — the
-  window's header model selector (`MOUTH_CHOICES` in `gui/app.py`) and settings
-  *Answering mouth* radio, beside *From sources (cited)*, *From trained model*,
-  and Ultron, plus the sidebar **Answer from Vision** action; the conversation
+  window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
+  *From sources (cited)*, *From trained model*, and Ultron, plus the sidebar
+  **Answer from Vision** action; the conversation
   stays in the same transcript and session, never a separate window. Every answer
   is labelled as the local petroleum model's own, not grounded in cited sources.
   `VisionAssistant.ask` reads an attached file from the conversation's `CONTEXT`
@@ -266,9 +266,9 @@ Arabic is kept as secondary aliases where useful.
   catch either. Wired **directly below Vision** in the menu (`cli.menu.run_banner`),
   CLI (`python -m cli banner`), and — as a **mouth inside the project's own
   chat** (`ai/banner_mouth.py`, the headless twin `python -m cli banner-chat`) —
-  the window's header model selector (`MOUTH_CHOICES` in `gui/app.py`) and
-  settings *Answering mouth* radio, beside *From sources (cited)*, *From trained
-  model*, Ultron, and Vision, plus the sidebar **Answer from Banner** action; the
+  the window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
+  *From sources (cited)*, *From trained model*, Ultron, and Vision, plus the
+  sidebar **Answer from Banner** action; the
   conversation stays in the same transcript and session, never a separate window.
   Every answer is labelled as the local presentation model's own, not grounded in
   cited sources. `ai/banner.py` is the CLI entry point (`chat` default,
@@ -322,9 +322,9 @@ Arabic is kept as secondary aliases where useful.
   Banner** in the menu (`cli.menu.run_cloud`), CLI (`python -m cli cloud`), and —
   as a **mouth inside the project's own chat** (`ai/cloud_mouth.py`, the headless
   twin `python -m cli cloud-chat`) — the window's header model selector
-  (`MOUTH_CHOICES` in `gui/app.py`) and settings *Answering mouth* radio, beside
-  *From sources (cited)*, *From trained model*, Ultron, Vision, and Banner, plus
-  the sidebar **Answer from Cloud** action; the conversation stays in the same
+  (`MOUTH_CHOICES` in `gui/app.py`), beside *From sources (cited)*, *From trained
+  model*, Ultron, Vision, and Banner, plus the sidebar **Answer from Cloud**
+  action; the conversation stays in the same
   transcript and session, never a separate window. `CloudAssistant.ask` reads an
   attached file from the conversation's `CONTEXT` turns exactly as Ultron and
   Vision do (`_context_prompt`), capped at `DEFAULT_REFERENCE_CHARS` (8000), so
@@ -776,8 +776,11 @@ Arabic is kept as secondary aliases where useful.
   is saved through `JsonStore` and reloaded on the next launch, and the whole
   window is rebuilt for the new palette with the transcript preserved), a
   collapsible sidebar (brand + version, a filled **New chat** button, a search
-  box, **Conversations** grouped by date, the sandbox tools, **Settings** with
-  the answering-mouth switch and the **Actions** list) behind a scrollbar that
+  box, **Conversations** grouped by date, **Settings** with the **Cloud
+  provider**/**Model** dropdowns and the **Actions** list; the sandbox-tools
+  list and the answering-mouth radios are deliberately *not* in the sidebar --
+  the header's model selector is the one visible mouth switch) behind a
+  scrollbar that
   appears only when the content overflows, a header showing the active mode by
   name (one switch) plus the **model selector** (`MOUTH_CHOICES`: *From sources
   (cited)* / *From trained model* / *Ultron (general local model)*, matched to the
