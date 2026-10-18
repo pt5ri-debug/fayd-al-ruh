@@ -76,6 +76,8 @@ class SessionItem:
 # The first four entries are the "Answer from ..." mouth switches: they stay in the
 # tuple (so ``action_by_key`` and the CLI keep resolving them) but are ``hidden``,
 # because the header's model selector is the one visible way to switch mouths.
+# Entries 11..14 (the Import Center, Code Studio, Presentation Studio, and image
+# generation) are hidden too, because the composer's ＋ menu already opens them.
 ACTIONS: tuple[GuiAction, ...] = (
     GuiAction(
         "ultron",
@@ -137,20 +139,23 @@ ACTIONS: tuple[GuiAction, ...] = (
         "Import files and folders (Knowledge Import Center)",
         run_import_center,
         ("interactive",),
+        hidden=True,
     ),
     GuiAction(
         "code-studio",
         "Code Studio: edit and merge the project's own code",
         run_code_studio,
         ("status",),
+        hidden=True,
     ),
     GuiAction(
         "presentation",
         "Presentation Studio: build a PowerPoint deck",
         run_presentation,
         ("list",),
+        hidden=True,
     ),
-    GuiAction("image", "Generate an image from text", run_image, ("backends",)),
+    GuiAction("image", "Generate an image from text", run_image, ("backends",), hidden=True),
     GuiAction(
         "deps",
         "Install optional PDF/OCR/image support",
