@@ -272,6 +272,25 @@ def free_provider_names() -> tuple[str, ...]:
     return tuple(key for key, spec in CATALOG.items() if spec.free)
 
 
+def provider_models(name: str | CloudProvider | None) -> tuple[str, ...]:
+    """The models the catalog knows a provider serves, default first.
+
+    The provider's ``default_model`` is put first (so a menu opens on the model
+    the project ships with) followed by the rest of its known lineup, with no
+    repeats. A provider with no listed lineup still yields its default, so the
+    picker is never empty. This is the *catalog's* knowledge, not a live query:
+    ``cloud models`` asks the endpoint for the real, current list.
+    """
+    spec = resolve_provider(name)
+    ordered = [spec.default_model, *spec.models]
+    seen: list[str] = []
+    for model in ordered:
+        name_ = model.strip()
+        if name_ and name_ not in seen:
+            seen.append(name_)
+    return tuple(seen)
+
+
 # ------------------------------------------------------- the saved choice
 
 
@@ -970,6 +989,7 @@ __all__ = [
     "granted_permissions",
     "load_model_key",
     "load_provider_key",
+    "provider_models",
     "provider_names",
     "provider_summaries",
     "redact_secret",

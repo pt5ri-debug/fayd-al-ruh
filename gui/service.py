@@ -379,6 +379,22 @@ class ChatService:
         provider = load_provider_key(self._data_root)
         return selected_model(self._data_root, provider)
 
+    def cloud_model_choices(self) -> tuple[str, ...]:
+        """The models the window offers for the current provider, default first.
+
+        The catalog's own knowledge of the provider's lineup, so the picker is a
+        real menu rather than a blank box. The saved model is always included, so a
+        model the user typed (one the catalog does not list yet) stays selectable.
+        """
+        from core.cloud_model import load_provider_key, provider_models
+
+        provider = load_provider_key(self._data_root)
+        choices = list(provider_models(provider))
+        current = self.cloud_model()
+        if current and current not in choices:
+            choices.insert(0, current)
+        return tuple(choices)
+
     def set_cloud_model(self, model: str) -> str:
         """Remember ``model`` for the current Cloud provider, and rebuild the mouth.
 

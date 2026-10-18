@@ -294,8 +294,10 @@ Arabic is kept as secondary aliases where useful.
   remembered too, per provider**: `load_model_key`/`save_model_key`/`selected_model`
   persist it under the same namespace (`MODEL_KEY`), so
   `python -m cli cloud use gemini --model gemini-3.8-flash` (or the window's
-  **Model** field) points a provider whose built-in default was *retired* at a
-  working model once — an explicit `--model` still wins for one turn, and with
+  **Model** dropdown, fed by `provider_models` -- the catalog's known lineup for a
+  provider, default first -- through `gui.service.ChatService.cloud_model_choices`)
+  points a provider whose built-in default was *retired* at a working model once --
+  an explicit `--model` still wins for one turn, and with
   nothing saved the provider's own default applies. `cli cloud models` asks the
   endpoint what it *actually* serves (a real request, `--json` for machines), which
   is the honest answer when a provider renames or shuts a model down; a 404/400 that

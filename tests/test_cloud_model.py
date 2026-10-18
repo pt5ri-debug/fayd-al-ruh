@@ -49,6 +49,7 @@ from core.cloud_model import (
     granted_permissions,
     load_model_key,
     load_provider_key,
+    provider_models,
     provider_names,
     provider_summaries,
     redact_secret,
@@ -631,6 +632,23 @@ def test_gemini_default_model_is_a_current_one() -> None:
     assert CATALOG["gemini"].default_model.startswith("gemini-")
 
 
+def test_provider_models_lists_the_default_first() -> None:
+    """The catalog's lineup for a provider, with the shipped default first."""
+    models = provider_models("gemini")
+    assert models[0] == CATALOG["gemini"].default_model
+    assert "gemini-3.8-flash" in models
+    # No repeats, even though the default also appears in the lineup.
+    assert len(models) == len(set(models))
+
+
+def test_provider_models_never_empty_and_accepts_a_spec() -> None:
+    """Even a provider with no listed lineup yields its default, and a spec works."""
+    from core.cloud_model import resolve_provider
+
+    assert provider_models(resolve_provider("lmstudio")) == ("local-model",)
+    assert provider_models("groq")[0] == CATALOG["groq"].default_model
+
+
 def test_selected_model_prefers_explicit_then_saved_then_default(tmp_path) -> None:
     spec = CATALOG["gemini"]
     # Nothing saved: the provider's own default.
@@ -946,6 +964,32 @@ def test_service_remembers_the_cloud_model(tmp_path) -> None:
     assert ChatService(data_root=tmp_path).cloud_model() == "gemini-3.8-flash"
 
 
+def test_service_offers_the_providers_models(tmp_path) -> None:
+    """The dropdown's choices are the current provider's lineup, default first."""
+    from gui.service import ChatService
+
+    service = ChatService(data_root=tmp_path)
+    service.set_cloud_provider("gemini")
+    choices = service.cloud_model_choices()
+    assert choices[0] == CATALOG["gemini"].default_model
+    assert "gemini-3.8-flash" in choices
+    # Switching provider re-points the menu at *that* provider's models.
+    service.set_cloud_provider("groq")
+    groq_choices = service.cloud_model_choices()
+    assert groq_choices[0] == CATALOG["groq"].default_model
+    assert "gemini-3.8-flash" not in groq_choices
+
+
+def test_service_keeps_a_typed_model_in_the_choices(tmp_path) -> None:
+    """A model the catalog does not list yet (typed once) stays in the menu."""
+    from gui.service import ChatService
+
+    service = ChatService(data_root=tmp_path)
+    service.set_cloud_provider("gemini")
+    service.set_cloud_model("gemini-9.9-experimental")
+    assert "gemini-9.9-experimental" in service.cloud_model_choices()
+
+
 def test_service_rejects_an_empty_cloud_model(tmp_path) -> None:
     from gui.service import ChatService
 
@@ -975,7 +1019,7 @@ def test_gui_provider_picker_changes_the_provider(tmp_path) -> None:
 
 
 def test_gui_model_field_sets_the_cloud_model(tmp_path) -> None:
-    """Typing a model in the settings field stores it, so the window can fix a 404."""
+    """The settings dropdown sets the model, so the window can fix a 404."""
     if not _display_available():
         pytest.skip("no display available")
     import tkinter as tk
@@ -989,10 +1033,41 @@ def test_gui_model_field_sets_the_cloud_model(tmp_path) -> None:
     window = FaydGUI(root, service=service)
     try:
         window._toggle_settings()
-        assert window._cloud_model_var.get() == CATALOG["gemini"].default_model
+        picker = window._cloud_model_picker
+        # A real dropdown: the current provider's models are its values.
+        assert str(picker.cget("state")) == "normal"
+        values = tuple(picker.cget("values"))
+        assert values[0] == CATALOG["gemini"].default_model
+        assert "gemini-3.8-flash" in values
+        # Picking one from the menu stores it.
         window._cloud_model_var.set("gemini-3.8-flash")
         window._on_cloud_model_change()
         assert service.cloud_model() == "gemini-3.8-flash"
+    finally:
+        root.destroy()
+
+
+def test_gui_model_dropdown_follows_the_provider(tmp_path) -> None:
+    """Changing the provider re-points the dropdown at *that* provider's models."""
+    if not _display_available():
+        pytest.skip("no display available")
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+    from gui.service import ChatService
+
+    root = tk.Tk()
+    service = ChatService(data_root=tmp_path)
+    window = FaydGUI(root, service=service)
+    try:
+        window._toggle_settings()
+        window._on_cloud_provider_change("gemini")
+        gemini_values = tuple(window._cloud_model_picker.cget("values"))
+        assert "gemini-3.8-flash" in gemini_values
+        window._on_cloud_provider_change("groq")
+        groq_values = tuple(window._cloud_model_picker.cget("values"))
+        assert "gemini-3.8-flash" not in groq_values
+        assert groq_values[0] == CATALOG["groq"].default_model
     finally:
         root.destroy()
 
