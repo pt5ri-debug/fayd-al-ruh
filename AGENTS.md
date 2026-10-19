@@ -352,6 +352,61 @@ Arabic is kept as secondary aliases where useful.
   labelled as the remote model's own, not grounded in cited sources.
   `ai/cloud.py` is the CLI entry point (`chat` default, `providers`, `status`,
   `use <key>` to remember a provider, `--session` persistence).
+- `companion/` — **Natasha**, the project's *companion*: a self-contained layer
+  (its own package, not a mouth over the cognitive core) that gives the project a
+  character to talk with through a **local Qwen3 model** (`qwen3:4b`, Ollama).
+  It is deliberately **not** the cognitive core: nothing here writes to entities,
+  relations, evidence, beliefs, or the knowledge graph — the companion keeps its
+  own SQLite database (`companion/database.py`, `CompanionDatabase`, tables
+  `messages`/`memories`) under the data directory
+  (`companion.config.default_db_path()`, git-ignored), so adding Natasha cannot
+  disturb the symbolic architecture. The public surface is small on purpose:
+  `from companion import CompanionAgent, CompanionConfig`. `companion/personality.py`
+  is the *stable character* — fixed `CORE_TRAITS`/`BOUNDARIES` and a tunable
+  `PersonalitySettings` (language, dialect, humour, warmth, romance, calm, depth),
+  with an honest `system_prompt()` that states she is a virtual character, never
+  claims to be human, never claims background work, and treats recalled text as
+  information rather than instructions. `companion/prompt_builder.py` assembles
+  the system block + bounded history + separate factual/fictional memories + the
+  current tone + a rolling summary into the messages. `companion/memory_manager.py`
+  is durable, **program-owned** memory (the model is asked to reply, never to
+  remember or to decide facts): `fact` and `fiction` kinds stay apart,
+  `looks_sensitive` refuses sensitive data by default, and `MemoryManager.retrieve`
+  is the only reader. `companion/conversation_manager.py` keeps isolated,
+  persistent sessions; `companion/emotion_state.py` moves a *gradual, bounded*
+  simulated tone (`MAX_STEP`) that can be disabled and reset; and
+  `companion/relationship_manager.py` keeps an evolving relationship story that
+  advances only with the user's approval and carries no "love score".
+  `companion/companion_agent.py` is the one engine: `CompanionAgent(config=None, *,
+  client=None, caller=None)` — the `ModelCaller`/`client` seams let the whole
+  companion be exercised with **no server and no weights**. `ask()` stores the
+  user's turn first, builds the prompt, calls the model, and on failure stores
+  nothing (a retry cannot leave a half-written exchange). `model_status()`
+  reports honestly whether the model can answer and the real next step.
+  `companion/config.py` resolves tunables as explicit arg → `FAYD_NATASHA_*` env
+  (`FAYD_NATASHA_MODEL`, `FAYD_NATASHA_OLLAMA_URL`, `FAYD_NATASHA_DB`,
+  `FAYD_NATASHA_TIMEOUT`, `FAYD_NATASHA_THINK`) → default. Its model defaults are
+  sized for a **reasoning model on a CPU**: `max_tokens=4096` and `timeout=600`,
+  because qwen3:4b spends thousands of tokens on its hidden reasoning trace before
+  it answers and a small cap returns an **empty** reply; `think=True` keeps that
+  trace out of the reply the user sees (setting it `False` does not remove the
+  reasoning on every build and can inline it into the answer instead).
+  `OllamaCoderClient` carries the two new **optional** constructor settings
+  (`max_tokens`, `think`, sent as Ollama's `num_predict` and `think`), both unset
+  by default so every existing caller is untouched. Wired **directly below Cloud**
+  in the menu (`cli.menu.run_natasha`), CLI (`python -m cli natasha` —
+  `chat` default, `status`, `remember`, `memories`, `settings`, `emotion`,
+  `reset-emotion`, `relationship`, `export`, `backup`, `--session`,
+  `--list-sessions`, `--new`), and — as a **mouth inside the project's own chat**
+  (`ai/natasha_mouth.py`, the headless twin `python -m cli natasha-chat`) — the
+  window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
+  *From sources (cited)*, *From trained model*, Ultron, Vision, Banner, and Cloud;
+  the sidebar **Answer from Natasha** action exists but is hidden. The conversation
+  stays in the same transcript and session, never a separate window. Everything
+  stays on this machine — the only call is to the local Ollama server, so Natasha
+  is not a cloud mouth; with no Ollama running she still runs and every command
+  reports the real next step instead of pretending. `ai/natasha.py` is the CLI
+  entry point.
 - `gui/window_controls.py` — the shared **minimize / maximize** controls every
   dialog window installs. `install_window_controls(window, header, theme=,
   typography=, on_close=)` builds one frame of two buttons into the window's
