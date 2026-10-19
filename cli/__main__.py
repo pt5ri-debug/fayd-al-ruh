@@ -21,6 +21,9 @@ Usage:
     python -m cli cloud "who wrote Hamlet?"    # one question, answered by the remote model
     python -m cli cloud --provider groq "..."  # choose the provider
     python -m cli cloud status        # is a key set and the endpoint reachable
+    python -m cli natasha             # chat with Natasha, the companion (local Qwen3)
+    python -m cli natasha "مرحبا"      # one message; --session <id> keeps one session
+    python -m cli natasha status      # is the local companion model reachable
     python -m cli chat                # chat with the AI in text (Jarvis, no voice)
     python -m cli chat --ultron       # chat answering from Ultron (general local model)
     python -m cli chat --vision       # chat answering from Vision (petroleum local model)
@@ -106,6 +109,7 @@ from cli.menu import (
     run_llm,
     run_mind_chat,
     run_ml,
+    run_natasha,
     run_petroleum,
     run_presentation,
     run_qwen_speech,
@@ -138,6 +142,7 @@ _COMMANDS = {
     "vision": run_vision,
     "banner": run_banner,
     "cloud": run_cloud,
+    "natasha": run_natasha,
     "chat": run_chat,
     "gui": run_gui,
     "mind-chat": run_mind_chat,

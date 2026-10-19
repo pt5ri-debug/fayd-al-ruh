@@ -364,6 +364,14 @@ class ChatService:
         """
         self.switcher.use_cloud()
 
+    def use_natasha(self) -> None:
+        """Talk with Natasha, the companion.
+
+        Raises :class:`~companion.companion_agent.CompanionError` when the local
+        model cannot answer, so the caller can report the real next step.
+        """
+        self.switcher.use_natasha()
+
     def cloud_provider(self) -> str:
         """The provider key the Cloud mouth will use (the saved choice, else the default)."""
         from core.cloud_model import load_provider_key
