@@ -6,6 +6,8 @@
     python -m cli natasha --list-sessions          # the sessions saved so far
     python -m cli natasha --new                    # start a fresh session
     python -m cli natasha status                   # is the local model reachable
+    python -m cli natasha models                   # list the models she can pull
+    python -m cli natasha download --approve        # one-time: pull a model (~2.6 GB)
     python -m cli natasha remember "أحب القهوة" --kind preference
     python -m cli natasha memories                 # what she remembers
     python -m cli natasha memories --correct MEM-... "نص مصحّح"
@@ -33,6 +35,12 @@ from collections.abc import Sequence
 
 from companion.companion_agent import CompanionAgent, CompanionError
 from companion.config import CompanionConfig
+from companion.model import (
+    DEFAULT_SPEC_KEY,
+    CompanionModelUnavailable,
+    download_model,
+    spec_summaries,
+)
 from companion.personality import NAME
 from companion.memory_manager import KINDS
 
@@ -43,8 +51,8 @@ INTRO = (
 
 #: Recognised subcommands. Anything else is read as a chat message.
 _COMMANDS = (
-    "chat", "status", "sessions", "remember", "memories", "settings",
-    "emotion", "reset-emotion", "relationship", "export", "backup",
+    "chat", "status", "models", "download", "sessions", "remember", "memories",
+    "settings", "emotion", "reset-emotion", "relationship", "export", "backup",
 )
 
 
@@ -90,10 +98,56 @@ def run_status(args: argparse.Namespace) -> int:
     print(f"  server: {agent.config.base_url}")
     print(f"  storage: {agent.config.describe().split('; storage: ')[-1]}")
     if not status.available and status.server_reachable:
-        print(f"  next step: ollama pull {agent.config.model}")
+        print("  next step: python -m cli natasha download --approve")
     elif not status.server_reachable:
         print("  next step: start Ollama with `ollama serve`")
     return 0 if status.available else 1
+
+
+def run_models(args: argparse.Namespace) -> int:
+    """List the models Natasha can pull, the same menu the other mouths offer."""
+    if getattr(args, "as_json", False):
+        print(
+            json.dumps(
+                [
+                    {"key": key, "title": title, "size_gb": size, "summary": summary}
+                    for key, title, size, summary in spec_summaries()
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    print(f"Models Natasha can pull with Ollama (default: {DEFAULT_SPEC_KEY}):")
+    for key, title, size, summary in spec_summaries():
+        print(f"  {key:14s} {title:34s} ~{size:.1f} GB")
+        print(f"  {'':14s} {summary}")
+    print("\nPull one with: python -m cli natasha download --approve --model <key>")
+    return 0
+
+
+def run_download(args: argparse.Namespace) -> int:
+    """Pull a companion model through the permission + human-approval gates."""
+    if not args.approve:
+        print(
+            "error: pulling a model is an external action and needs --approve "
+            "(it fetches several GB from the internet)."
+        )
+        return 2
+    try:
+        tag = download_model(
+            args.model or DEFAULT_SPEC_KEY,
+            approved=True,
+            progress=lambda message: print(message, file=sys.stderr),
+        )
+    except (CompanionModelUnavailable, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 5
+    if getattr(args, "as_json", False):
+        print(json.dumps({"model": tag}, ensure_ascii=False))
+        return 0
+    print(f"Natasha's model ready: {tag}.")
+    return 0
 
 
 def run_sessions(args: argparse.Namespace) -> int:
@@ -360,6 +414,16 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_connection_arguments(status)
     status.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
 
+    models = sub.add_parser("models", help="List the models Natasha can pull with Ollama.")
+    models.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
+
+    download = sub.add_parser("download", help="Pull a model with Ollama (one-time, several GB).")
+    download.add_argument("--approve", action="store_true", help="grant the external pull.")
+    download.add_argument(
+        "--model", default=None, help=f"which model to pull (default {DEFAULT_SPEC_KEY})."
+    )
+    download.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
+
     sessions = sub.add_parser("sessions", help="List saved sessions.")
     _add_connection_arguments(sessions)
     sessions.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
@@ -437,6 +501,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     handlers = {
         "status": run_status,
+        "models": run_models,
+        "download": run_download,
         "sessions": run_sessions,
         "remember": run_remember,
         "memories": run_memories,

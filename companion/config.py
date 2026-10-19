@@ -18,16 +18,8 @@ import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from companion.model import DEFAULT_MODEL, DEFAULT_OLLAMA_URL
 from core.paths import data_dir
-
-#: The model Natasha speaks through. A small local Qwen3 model that runs on a
-#: laptop CPU with a few gigabytes of RAM, and the one the project already
-#: targets for local chat (``ai/ollama_client.py``).
-DEFAULT_MODEL = "qwen3:4b"
-
-#: The local Ollama server address. The same default the rest of the project
-#: uses (``core.coder_model.DEFAULT_OLLAMA_URL``); overridable per config.
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
 #: Environment overrides, following the project's ``FAYD_*`` convention, so a
 #: user can point Natasha elsewhere without editing code.

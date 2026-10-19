@@ -41,6 +41,7 @@ from companion.personality import (
 )
 from companion.prompt_builder import PromptBuilder
 from companion.relationship_manager import KIND_FICTION, KIND_FACT as REL_FACT
+from core.coder_model import CoderUnavailable
 
 
 # -- fixtures -------------------------------------------------------------
@@ -246,6 +247,120 @@ def test_ollama_payload_omits_unset_settings() -> None:
     payload = captured["payload"]
     assert "num_predict" not in payload["options"]  # type: ignore[index]
     assert "think" not in payload  # type: ignore[operator]
+
+
+# -- the model layer ------------------------------------------------------
+def test_the_client_is_natashas_own_ollama_client() -> None:
+    """Natasha speaks through her own client, not the coding model's directly."""
+    from companion.model import NatashaModelClient, OllamaNatashaClient
+
+    agent = CompanionAgent(CompanionConfig(db_path=None, persistent=False))
+    client = agent._active_client()
+    assert isinstance(client, OllamaNatashaClient)
+    assert isinstance(client, NatashaModelClient)  # runtime_checkable shape
+
+
+def test_the_catalog_names_a_default_and_its_specs() -> None:
+    from companion.model import CATALOG, DEFAULT_SPEC_KEY, resolve_spec, spec_names
+
+    assert DEFAULT_SPEC_KEY in CATALOG
+    assert resolve_spec(None).key == DEFAULT_SPEC_KEY
+    assert resolve_spec("qwen3-8b").tag == "qwen3:8b"
+    assert set(spec_names()) == set(CATALOG)
+
+
+def test_an_unknown_model_name_is_refused() -> None:
+    from companion.model import CompanionModelUnavailable, resolve_spec
+
+    with pytest.raises(CompanionModelUnavailable):
+        resolve_spec("not-a-model")
+
+
+def test_status_reports_a_missing_server_honestly() -> None:
+    from companion.model import natasha_model_status
+
+    class DownClient:
+        model = "qwen3:4b"
+
+        def list_models(self) -> tuple[str, ...]:
+            raise CoderUnavailable("connection refused")
+
+        def chat(self, messages, *, temperature: float = 0.2) -> str:  # pragma: no cover
+            raise CoderUnavailable("connection refused")
+
+    status = natasha_model_status(client=DownClient())
+    assert status.available is False
+    assert status.server_reachable is False
+    assert "ollama serve" in status.summary()
+
+
+def test_status_reports_a_missing_model_honestly() -> None:
+    from companion.model import natasha_model_status
+
+    class EmptyClient:
+        model = "qwen3:4b"
+
+        def list_models(self) -> tuple[str, ...]:
+            return ("llama3:8b",)
+
+        def chat(self, messages, *, temperature: float = 0.2) -> str:  # pragma: no cover
+            return ""
+
+    status = natasha_model_status(client=EmptyClient())
+    assert status.available is False
+    assert status.server_reachable is True
+    assert status.installed is False
+    assert "ollama pull qwen3:4b" in status.summary()
+
+
+def test_status_accepts_an_implicit_latest_tag() -> None:
+    from companion.model import model_present, natasha_model_status
+
+    assert model_present("qwen3:4b", ("qwen3:4b",))
+    assert model_present("qwen3", ("qwen3:latest",))
+    assert not model_present("qwen3:8b", ("qwen3:4b",))
+
+    class ReadyClient:
+        model = "qwen3"
+
+        def list_models(self) -> tuple[str, ...]:
+            return ("qwen3:latest",)
+
+        def chat(self, messages, *, temperature: float = 0.2) -> str:  # pragma: no cover
+            return ""
+
+    assert natasha_model_status(client=ReadyClient()).available is True
+
+
+def test_a_model_pull_is_denied_by_default() -> None:
+    from companion.model import CompanionModelUnavailable, download_model
+
+    with pytest.raises(CompanionModelUnavailable):
+        download_model("qwen3-4b")
+
+
+def test_an_approved_pull_runs_ollama_and_reports_the_tag() -> None:
+    from companion.model import download_model
+
+    calls: list[list[str]] = []
+
+    def runner(argv) -> tuple[int, str]:
+        calls.append(list(argv))
+        return 0, "success"
+
+    tag = download_model("qwen3-4b", approved=True, runner=runner)
+    assert tag == "qwen3:4b"
+    assert calls == [["ollama", "pull", "qwen3:4b"]]
+
+
+def test_a_failed_pull_is_an_honest_error() -> None:
+    from companion.model import CompanionModelUnavailable, download_model
+
+    def runner(argv) -> tuple[int, str]:
+        return 1, "Error: pull access denied"
+
+    with pytest.raises(CompanionModelUnavailable, match="pull access denied"):
+        download_model("qwen3-8b", approved=True, runner=runner)
 
 
 def test_deleting_a_session_removes_its_messages(agent: CompanionAgent) -> None:
@@ -579,3 +694,36 @@ def test_natasha_mouth_unavailable_reports_the_next_step() -> None:
     with pytest.raises(CompanionError):
         assistant.ensure_available()
     assert "ollama serve" in agent.model_status().summary().lower()
+
+
+# -- the CLI surface (models / download) ----------------------------------
+def test_cli_models_lists_the_catalog(capsys) -> None:
+    from ai import natasha
+
+    assert natasha.main(["models"]) == 0
+    out = capsys.readouterr().out
+    assert "qwen3-4b" in out
+    assert "qwen3:4b" not in out  # the keys are shown, not the raw tags
+
+
+def test_cli_download_refuses_without_approval(capsys) -> None:
+    from ai import natasha
+
+    assert natasha.main(["download"]) == 2
+    assert "approve" in capsys.readouterr().out.lower()
+
+
+def test_cli_download_runs_the_gate_when_approved(monkeypatch, capsys) -> None:
+    from ai import natasha
+
+    calls: list[str] = []
+
+    def fake_download(spec_key, *, approved=False, progress=None):
+        calls.append(spec_key)
+        assert approved is True
+        return "qwen3:4b"
+
+    monkeypatch.setattr(natasha, "download_model", fake_download)
+    assert natasha.main(["download", "--approve"]) == 0
+    assert calls == ["qwen3-4b"]
+    assert "qwen3:4b" in capsys.readouterr().out

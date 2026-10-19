@@ -355,6 +355,20 @@ Arabic is kept as secondary aliases where useful.
 - `companion/` — **Natasha**, the project's *companion*: a self-contained layer
   (its own package, not a mouth over the cognitive core) that gives the project a
   character to talk with through a **local Qwen3 model** (`qwen3:4b`, Ollama).
+  `companion/model.py` is her **model layer**, the counterpart of `core.ultron`/
+  `core.vision_model`/`core.banner`: it owns `NAME`, `DEFAULT_MODEL`/`DEFAULT_OLLAMA_URL`,
+  a `CATALOG` of pullable Ollama models (`qwen3-4b` default, `qwen3-8b`,
+  `qwen2.5-7b`) with `resolve_spec`/`spec_names`/`spec_summaries`, the
+  `NatashaModelClient` protocol, the default `OllamaNatashaClient` (a thin
+  subclass of `core.coder_model.OllamaCoderClient`, so the project's own Ollama
+  transport is *reused*, no second client written), an honest
+  `NatashaModelStatus`/`natasha_model_status` (a missing server and a missing
+  model are reported separately, each with its own next step), `CompanionModelUnavailable`,
+  and a governed `download_model` that runs `ollama pull` only through the
+  permission + human-approval gates (`--approve`), like every other model
+  download. `companion.config` re-exports the model defaults from it, and
+  `CompanionAgent` builds its client through it, so the catalog, the client, and
+  the status live in one place.
   It is deliberately **not** the cognitive core: nothing here writes to entities,
   relations, evidence, beliefs, or the knowledge graph — the companion keeps its
   own SQLite database (`companion/database.py`, `CompanionDatabase`, tables
@@ -395,7 +409,8 @@ Arabic is kept as secondary aliases where useful.
   (`max_tokens`, `think`, sent as Ollama's `num_predict` and `think`), both unset
   by default so every existing caller is untouched. Wired **directly below Cloud**
   in the menu (`cli.menu.run_natasha`), CLI (`python -m cli natasha` —
-  `chat` default, `status`, `remember`, `memories`, `settings`, `emotion`,
+  `chat` default, `status`, `models`, `download --approve`, `remember`,
+  `memories`, `settings`, `emotion`,
   `reset-emotion`, `relationship`, `export`, `backup`, `--session`,
   `--list-sessions`, `--new`), and — as a **mouth inside the project's own chat**
   (`ai/natasha_mouth.py`, the headless twin `python -m cli natasha-chat`) — the
