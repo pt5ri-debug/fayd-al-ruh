@@ -118,12 +118,20 @@ class OllamaCoderClient:
         *,
         base_url: str = DEFAULT_OLLAMA_URL,
         timeout: float = 120.0,
+        max_tokens: int | None = None,
+        think: bool | None = None,
     ) -> None:
         if not model.strip():
             raise ValueError("A coding model name is required.")
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        #: Cap on generated tokens (Ollama's ``num_predict``); ``None`` leaves the
+        #: server's own default.
+        self.max_tokens = max_tokens
+        #: Toggle for a reasoning model's hidden reasoning trace (Ollama's
+        #: ``think``); ``None`` leaves the server's own default.
+        self.think = think
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = json.dumps(payload).encode("utf-8")
@@ -174,12 +182,17 @@ class OllamaCoderClient:
         """One non-streamed reply from the coding model."""
         if not messages:
             raise ValueError("At least one message is required.")
-        payload = {
+        options: dict[str, Any] = {"temperature": temperature}
+        if self.max_tokens is not None:
+            options["num_predict"] = self.max_tokens
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": [message.as_dict() for message in messages],
             "stream": False,
-            "options": {"temperature": temperature},
+            "options": options,
         }
+        if self.think is not None:
+            payload["think"] = self.think
         reply = self._post("/api/chat", payload)
         message = reply.get("message") or {}
         content = str(message.get("content", "")).strip()

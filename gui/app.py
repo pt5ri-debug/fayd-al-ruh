@@ -43,6 +43,7 @@ from core.paths import data_dir
 from core.ultron import UltronUnavailable
 from core.banner import BannerUnavailable
 from core.cloud_model import CloudUnavailable
+from companion.companion_agent import CompanionError
 from core.vision_model import VisionUnavailable
 from core.version import __version__
 from gui import markdown as md
@@ -73,6 +74,7 @@ MOUTH_CHOICES: tuple[tuple[str, str], ...] = (
     (chat_module.MOUTH_VISION, "Vision (petroleum local model)"),
     (chat_module.MOUTH_BANNER, "Banner (presentation local model)"),
     (chat_module.MOUTH_CLOUD, "Cloud (remote model: ChatGPT, Claude, Gemini)"),
+    (chat_module.MOUTH_NATASHA, "Natasha (companion: memory, tone)"),
 )
 MOUTH_LABELS: dict[str, str] = {key: label for key, label in MOUTH_CHOICES}
 
@@ -2125,10 +2127,11 @@ class FaydGUI:
     def _switch_mouth(self, want: str) -> None:
         """Swap the mouth the *same* chat answers from, reporting a failure plainly.
 
-        All six mouths -- sources, the trained model, Ultron, Vision, Banner, and
-        Cloud -- answer in this conversation; only ``mode.assistant`` changes, so
-        the transcript, the session, and the controls are untouched. A mouth that
-        cannot load leaves the current one in place and shows the real next step.
+        All seven mouths -- sources, the trained model, Ultron, Vision, Banner,
+        Cloud, and Natasha -- answer in this conversation; only ``mode.assistant``
+        changes, so the transcript, the session, and the controls are untouched. A
+        mouth that cannot load leaves the current one in place and shows the real
+        next step.
         """
         if want == self.service.source:
             return
@@ -2143,6 +2146,8 @@ class FaydGUI:
                 self.service.use_banner()
             elif want == chat_module.MOUTH_CLOUD:
                 self.service.use_cloud()
+            elif want == chat_module.MOUTH_NATASHA:
+                self.service.use_natasha()
             else:
                 self.service.use_sources()
         except (
@@ -2153,6 +2158,7 @@ class FaydGUI:
             VisionUnavailable,
             BannerUnavailable,
             CloudUnavailable,
+            CompanionError,
         ) as error:
             self._source_var.set(self.service.source)
             self._source_menu_var_reset()

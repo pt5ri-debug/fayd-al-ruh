@@ -8,6 +8,7 @@
     python -m cli chat --vision                 # answer from the petroleum local model (reservoir, drilling, PVT)
     python -m cli chat --banner                 # answer from the presentation local model (outlines, slide content)
     python -m cli chat --cloud                  # answer from a remote cloud model (ChatGPT/Claude/Gemini/...)
+    python -m cli chat --natasha                # talk with Natasha, the companion (memory + tone)
     python -m cli chat --session demo           # resume/autosave a named session
     python -m cli chat --list-sessions          # show saved conversations
 
@@ -22,7 +23,7 @@ over, "save" persists the session, "sessions" lists saved ones, "web on"/"web
 off" toggle internet lookups, "that's right" and "that's wrong, it's ..." teach it
 from explicit feedback, and "help" lists them. Type "quit" to leave.
 
-Six mouths answer in the *same* conversation, swapped in **here**, in this
+Seven mouths answer in the *same* conversation, swapped in **here**, in this
 module, without touching the Jarvis loop or the session builder, so Jarvis mode
 is unaffected:
 
@@ -36,10 +37,12 @@ is unaffected:
   Presentation Studio's own Qwen3 weights), which drafts outlines and slide
   content, no citations;
 * ``--cloud`` -- a **remote** OpenAI-compatible model (ChatGPT, Claude, Gemini,
-  Groq, ...), opt-in and off by default, no citations.
+  Groq, ...), opt-in and off by default, no citations;
+* ``--natasha`` -- the project's **companion**: a stable personality, a durable
+  memory, and a changing tone, through the local model, no citations.
 
 Type "from the model", "from ultron", "from vision", "from banner", "from cloud",
-or "from the sources" to switch mouths mid-conversation.
+"from natasha", or "from the sources" to switch mouths mid-conversation.
 """
 
 from __future__ import annotations
@@ -53,11 +56,13 @@ from pathlib import Path
 from ai import mind as mind_module
 from ai import banner_mouth
 from ai import cloud_mouth
+from ai import natasha_mouth
 from ai import ultron_mouth
 from ai import vision_mouth
 from ai.jarvis import build_session
 from core.banner import BannerUnavailable
 from core.cloud_model import CloudUnavailable
+from companion.companion_agent import CompanionError
 from core.composition import sources_block
 from core.jarvis import JarvisMode, JarvisTurn
 from core.ultron import UltronUnavailable
@@ -67,8 +72,8 @@ INTRO = "Chat with the project's AI. Ask a question, or type 'help' for controls
 MIND_HINT = (
     "AI: (the sources could not answer; type 'from the model' to answer from the "
     "trained model, 'from ultron' for the general local model, 'from vision' for the "
-    "petroleum local model, 'from banner' for the presentation local model, or "
-    "'from the sources' to go back)"
+    "petroleum local model, 'from banner' for the presentation local model, "
+    "'from natasha' for the companion, or 'from the sources' to go back)"
 )
 
 # The composer's wording when retrieval found nothing to stand on.
@@ -87,6 +92,7 @@ MOUTH_ULTRON = "ultron"
 MOUTH_VISION = "vision"
 MOUTH_BANNER = "banner"
 MOUTH_CLOUD = "cloud"
+MOUTH_NATASHA = "natasha"
 
 
 def _normalize(text: str) -> str:
@@ -115,6 +121,8 @@ def _match_switch(text: str) -> str | None:
         return MOUTH_BANNER
     if normalized in _normalize_set(cloud_mouth.SWITCH_TO_CLOUD):
         return MOUTH_CLOUD
+    if normalized in _normalize_set(natasha_mouth.SWITCH_TO_NATASHA):
+        return MOUTH_NATASHA
     if normalized in _normalize_set(mind_module.SWITCH_TO_SOURCES):
         return MOUTH_SOURCES
     return None
@@ -127,10 +135,11 @@ def _normalize_set(phrases: tuple[str, ...]) -> set[str]:
 class ModelSwitcher:
     """Swaps the session's answering mouth between the sources and a model.
 
-    Six mouths are offered: the grounded sources (default), the small in-project
-    trained model, **Ultron**, the general local model, **Vision**, the
+    Seven mouths are offered: the grounded sources (default), the small
+    in-project trained model, **Ultron**, the general local model, **Vision**, the
     petroleum-engineering local model, **Banner**, the Presentation Studio's own
-    local model, and **Cloud**, a remote OpenAI-compatible model. The
+    local model, **Cloud**, a remote OpenAI-compatible model, and **Natasha**, the
+    companion. The
     grounded assistant and its help text are kept so switching back is exact.
     Only ``mode.assistant``/``mode.voice.assistant``/``mode.help_text`` change;
     nothing in the Jarvis loop, the controls, or the session builder is touched,
@@ -152,6 +161,7 @@ class ModelSwitcher:
         vision_loader: Callable[[], "vision_mouth.VisionAssistant"] | None = None,
         banner_loader: Callable[[], "banner_mouth.BannerAssistant"] | None = None,
         cloud_loader: Callable[[], "cloud_mouth.CloudAssistant"] | None = None,
+        natasha_loader: Callable[[], "natasha_mouth.NatashaAssistant"] | None = None,
     ) -> None:
         self.mode = mode
         self.grounded = mode.assistant
@@ -161,12 +171,14 @@ class ModelSwitcher:
         self._vision_loader = vision_loader or vision_mouth.load_vision_assistant
         self._banner_loader = banner_loader or banner_mouth.load_banner_assistant
         self._cloud_loader = cloud_loader or cloud_mouth.load_cloud_assistant
+        self._natasha_loader = natasha_loader or natasha_mouth.load_natasha_assistant
         self._max_new_tokens = max_new_tokens
         self._mind: mind_module.MindAssistant | None = None
         self._ultron: ultron_mouth.UltronAssistant | None = None
         self._vision: vision_mouth.VisionAssistant | None = None
         self._banner: banner_mouth.BannerAssistant | None = None
         self._cloud: cloud_mouth.CloudAssistant | None = None
+        self._natasha: natasha_mouth.NatashaAssistant | None = None
         self._mouth = MOUTH_SOURCES
 
     @property
@@ -209,6 +221,12 @@ class ModelSwitcher:
             self._cloud = self._cloud_loader()
         return self._cloud
 
+    @property
+    def natasha(self) -> natasha_mouth.NatashaAssistant:
+        if self._natasha is None:
+            self._natasha = self._natasha_loader()
+        return self._natasha
+
     def _swap(self, assistant, mouth: str, help_suffix: str) -> None:
         """Point the session at ``assistant`` and record which mouth is active."""
         self.mode.assistant = assistant
@@ -240,6 +258,11 @@ class ModelSwitcher:
         """Activate the Cloud mouth. Raises when no key is set or the endpoint refuses."""
         assistant = self.cloud  # load/check now, before the swap
         self._swap(assistant, MOUTH_CLOUD, cloud_mouth.CLOUD_HELP)
+
+    def use_natasha(self) -> None:
+        """Activate the Natasha mouth. Raises when the local model cannot answer."""
+        assistant = self.natasha  # load/check now, before the swap
+        self._swap(assistant, MOUTH_NATASHA, natasha_mouth.NATASHA_HELP)
 
     def invalidate_cloud(self) -> None:
         """Forget the cached Cloud mouth, so the next load picks up a new provider.
@@ -326,6 +349,8 @@ def _print_switch(kind: str, *, as_json: bool) -> None:
         print("AI: [banner] Now answering from the presentation local model (outlines and slide content; no sources).")
     elif kind == MOUTH_CLOUD:
         print("AI: [cloud] Now answering from a remote cloud model over the network (no sources).")
+    elif kind == MOUTH_NATASHA:
+        print("AI: [natasha] Now talking with Natasha, the companion (stable personality, lasting memory, changing tone).")
     else:
         print("AI: [sources] Now answering from retrieved passages with citations.")
     print()
@@ -360,6 +385,11 @@ _MOUTH_FAILURE = {
         "ANTHROPIC_API_KEY, GEMINI_API_KEY), then run `python -m cli cloud status` "
         "to check the endpoint.",
     ),
+    MOUTH_NATASHA: (
+        "Could not reach Natasha's local model: {error}",
+        "Start Ollama with `ollama serve`, then fetch the model with "
+        "`ollama pull qwen3:4b` (or run `python -m cli natasha status` to check).",
+    ),
 }
 
 #: The confirmation shown once a mouth is active. Shared by the text loop and the
@@ -370,6 +400,7 @@ _MOUTH_SWITCHED = {
     MOUTH_VISION: "Now answering from Vision, the petroleum local model (reservoir, drilling, PVT; no citations).",
     MOUTH_BANNER: "Now answering from Banner, the presentation local model (outlines and slide content; no citations).",
     MOUTH_CLOUD: "Now answering from a remote cloud model over the network (no citations).",
+    MOUTH_NATASHA: "Now talking with Natasha, the companion (stable personality, lasting memory, changing tone; no citations).",
     MOUTH_SOURCES: "Now answering from sources, with citations.",
 }
 
@@ -400,9 +431,11 @@ def _apply_switch(switcher, kind: str) -> str:
             switcher.use_banner()
         elif kind == MOUTH_CLOUD:
             switcher.use_cloud()
+        elif kind == MOUTH_NATASHA:
+            switcher.use_natasha()
         else:
             switcher.use_sources()
-    except (FileNotFoundError, OSError, ValueError, UltronUnavailable, VisionUnavailable, BannerUnavailable, CloudUnavailable) as error:
+    except (FileNotFoundError, OSError, ValueError, UltronUnavailable, VisionUnavailable, BannerUnavailable, CloudUnavailable, CompanionError) as error:
         return switch_failure_message(kind, error)
     return ""
 
@@ -509,6 +542,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cloud-api-key-env", default=None, help="the environment variable holding the cloud API key")
     parser.add_argument("--cloud-tokens", type=int, default=None, help="maximum tokens per cloud answer")
     parser.add_argument("--cloud-temperature", type=float, default=None, help="sampling temperature for cloud answers")
+    parser.add_argument(
+        "--natasha",
+        action="store_true",
+        help="talk with Natasha, the companion (stable personality, lasting memory, changing tone; no citations), not from the sources",
+    )
+    parser.add_argument("--natasha-session", default=None, help="the companion session id to resume or create")
+    parser.add_argument("--natasha-model", default=None, help="the local model Natasha speaks through (default qwen3:4b)")
     args = parser.parse_args(argv)
 
     if args.list_sessions:
@@ -562,6 +602,10 @@ def main(argv: list[str] | None = None) -> int:
             max_tokens=args.cloud_tokens,
             temperature=args.cloud_temperature,
         ),
+        natasha_loader=lambda: natasha_mouth.load_natasha_assistant(
+            session_id=args.natasha_session,
+            model=args.natasha_model,
+        ),
     )
     if args.mind:
         failure = _apply_switch(switcher, MOUTH_MODEL)
@@ -598,6 +642,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if not args.json:
             print(switcher.cloud.describe())
+    if args.natasha:
+        failure = _apply_switch(switcher, MOUTH_NATASHA)
+        if failure:
+            print(failure)
+            return 1
+        if not args.json:
+            print(switcher.natasha.describe())
 
     if args.session:
         if not mode.resume_session(args.session):
@@ -621,6 +672,7 @@ __all__ = [
     "MOUTH_BANNER",
     "MOUTH_CLOUD",
     "MOUTH_MODEL",
+    "MOUTH_NATASHA",
     "MOUTH_SOURCES",
     "MOUTH_ULTRON",
     "MOUTH_VISION",

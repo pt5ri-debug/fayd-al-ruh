@@ -329,8 +329,8 @@ def test_screen_actions_are_hidden_from_the_sidebar() -> None:
 
 #: The visible CLI menu entries the window provides through its own controls
 #: (the window itself, the reading-voice picker, Jarvis, Ultron, Vision, Banner,
-#: Cloud and its free-provider hint, and the two text-chat mouths). The sidebar
-#: mirrors a later block instead of repeating them.
+#: Cloud and its free-provider hint, Natasha's companion action, and the two
+#: text-chat mouths). The sidebar mirrors a later block instead of repeating them.
 _WINDOW_OWNED_MENU_LABELS = frozenset(
     {
         "Open the graphical interface (ChatGPT-style)",
@@ -341,6 +341,7 @@ _WINDOW_OWNED_MENU_LABELS = frozenset(
         "Banner (presentation local model: outlines and slide content)",
         "Cloud (remote model: ChatGPT, Claude, Gemini; needs an API key)",
         "Cloud: free providers (no card) and how to start",
+        "Natasha (companion: lasting memory, tone, and relationship)",
         "Chat with the AI (text, like Jarvis without voice)",
         "Chat with the AI (trained model, no sources)",
     }
@@ -348,8 +349,8 @@ _WINDOW_OWNED_MENU_LABELS = frozenset(
 
 #: The visible CLI entries the sidebar mirrors, in order (the first one after the
 #: window-owned controls through the Code Studio screen).
-_MIRRORED_MENU_START = 13
-_MIRRORED_MENU_STOP = 20
+_MIRRORED_MENU_START = 14
+_MIRRORED_MENU_STOP = 21
 
 #: The Qwen3 speech entries sit before the window-owned controls (the window shows
 #: their status in the reading-voice picker), so they are mirrored as their own
