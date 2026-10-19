@@ -51,6 +51,7 @@ FEATURE_VISION = "vision"
 FEATURE_PPTX = "pptx"
 FEATURE_PRESENTATION = "presentation"
 FEATURE_BANNER = "banner"
+FEATURE_NATASHA = "natasha"
 FEATURE_QWEN_ASR = "qwen-asr"
 FEATURE_QWEN_TTS = "qwen-tts"
 
@@ -184,6 +185,22 @@ FEATURES: dict[str, OptionalFeature] = {
             "`.gguf` file into the data/presentation folder."
         ),
         system_missing_note="no `.gguf` presentation model file is present yet.",
+    ),
+    FEATURE_NATASHA: OptionalFeature(
+        key=FEATURE_NATASHA,
+        title="Natasha in-process model",
+        summary=(
+            "Let Natasha, the companion, talk through a local GGUF file loaded "
+            "in-process, with no Ollama server running."
+        ),
+        requirements_file="requirements-natasha.txt",
+        import_names=("llama_cpp", "huggingface_hub"),
+        system_note=(
+            "The model weights are a separate one-time, human-approved download: "
+            "run `python -m cli natasha download --approve` (~2.6 GB), or drop a "
+            "`.gguf` file into the data/natasha folder."
+        ),
+        system_missing_note="no `.gguf` companion model file is present yet.",
     ),
     FEATURE_QWEN_ASR: OptionalFeature(
         key=FEATURE_QWEN_ASR,
@@ -332,6 +349,20 @@ def _banner_model_cached() -> bool:
     return model_is_cached()
 
 
+def _natasha_model_cached() -> bool:
+    """Whether at least one Natasha model file (a ``.gguf``) is already on disk.
+
+    Natasha has her own ``[natasha]`` runtime extra (the same ``llama-cpp-python``
+    Ultron, Vision, Banner, and the two Studios use); the model file is a separate
+    one-time download (or a file the user drops in), so this is the second half of
+    "usable right now". Without a file Natasha still runs against an existing
+    Ollama server, which the status line reports separately.
+    """
+    from companion.model import model_is_cached
+
+    return model_is_cached()
+
+
 def _qwen_speech_model_cached(kind: str) -> bool:
     """Whether a Qwen3 speech model (``"asr"`` or ``"tts"``) is already on disk.
 
@@ -360,6 +391,8 @@ def status(key: str) -> FeatureStatus:
         system_ok = _vision_model_cached() if python_ok else False
     elif key == FEATURE_BANNER:
         system_ok = _banner_model_cached() if python_ok else False
+    elif key == FEATURE_NATASHA:
+        system_ok = _natasha_model_cached() if python_ok else False
     elif key == FEATURE_QWEN_ASR:
         system_ok = _qwen_speech_model_cached("asr") if python_ok else False
     elif key == FEATURE_QWEN_TTS:
@@ -517,6 +550,7 @@ def install(
 __all__ = [
     "FEATURE_BANNER",
     "FEATURE_IMAGE",
+    "FEATURE_NATASHA",
     "FEATURE_OCR",
     "FEATURE_PDF",
     "FEATURE_ULTRON",

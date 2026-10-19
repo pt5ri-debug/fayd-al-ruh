@@ -83,6 +83,16 @@ banner = [
     "llama-cpp-python>=0.3",
     "huggingface_hub>=0.23",
 ]
+# Natasha, the project's companion, runs her model in-process by default: a GGUF
+# file loaded through llama-cpp-python, so no Ollama server has to be left
+# running. Same runtime as Ultron/the Code Studio; the weights are a separate
+# one-time, human-approved download (`python -m cli natasha download --approve`).
+# Never required by the base install -- without it Natasha still runs against an
+# existing Ollama server -- and the imports are lazy.
+natasha = [
+    "llama-cpp-python>=0.3",
+    "huggingface_hub>=0.23",
+]
 # The Qwen3 speech models (ASR and TTS) are a separate optional extra. They run
 # locally through torch + Qwen's own `qwen-asr`/`qwen-tts` packages, so a chat can
 # transcribe with Qwen3-ASR (52 languages, including Arabic) and read aloud with

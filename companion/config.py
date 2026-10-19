@@ -18,12 +18,23 @@ import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from companion.model import DEFAULT_MODEL, DEFAULT_OLLAMA_URL
+from companion.model import (
+    BACKEND_AUTO,
+    BACKEND_NAMES,
+    DEFAULT_CONTEXT,
+    DEFAULT_GPU_LAYERS,
+    DEFAULT_MODEL,
+    DEFAULT_OLLAMA_URL,
+    DEFAULT_THREADS,
+    MAX_CONTEXT,
+)
 from core.paths import data_dir
 
 #: Environment overrides, following the project's ``FAYD_*`` convention, so a
 #: user can point Natasha elsewhere without editing code.
 ENV_MODEL = "FAYD_NATASHA_MODEL"
+ENV_BACKEND = "FAYD_NATASHA_BACKEND"
+ENV_MODEL_FILE = "FAYD_NATASHA_MODEL_FILE"
 ENV_OLLAMA_URL = "FAYD_NATASHA_OLLAMA_URL"
 ENV_DB = "FAYD_NATASHA_DB"
 ENV_TIMEOUT = "FAYD_NATASHA_TIMEOUT"
@@ -61,6 +72,15 @@ class CompanionConfig:
 
     # -- model connection -------------------------------------------------
     model: str = DEFAULT_MODEL
+    #: Which runtime speaks for Natasha: ``auto`` (prefer the in-process GGUF when
+    #: the extra and a model file are present, else Ollama), ``gguf`` (force the
+    #: in-process model), or ``ollama`` (force the server). ``auto`` means a user
+    #: who only has Ollama keeps working, and a user who downloads the weights gets
+    #: the daemon-free runtime without changing a flag.
+    backend: str = BACKEND_AUTO
+    #: An explicit GGUF file to load, overriding the folder scan. ``None`` uses
+    #: ``data/natasha`` (the registry, then the largest ``.gguf``).
+    model_file: Path | None = None
     base_url: str = DEFAULT_OLLAMA_URL
     #: Generous by default: a reasoning model on a CPU-only machine can take
     #: minutes for one turn, so a short timeout reports a false failure.
@@ -74,8 +94,14 @@ class CompanionConfig:
     #: Whether a reasoning model may emit its hidden reasoning trace. Left True,
     #: Ollama keeps that trace out of the reply, so the user sees only the answer
     #: (setting it False does not remove the reasoning on every build -- some
-    #: templates inline it into the reply text instead).
+    #: templates inline it into the reply text instead). The in-process runtime has
+    #: no such switch, so it always strips a `` thinking`` block instead.
     think: bool = True
+    #: Context window for the in-process model. Ignored by the Ollama runtime.
+    context: int = DEFAULT_CONTEXT
+    #: GPU offload and thread count for the in-process model; both CPU-friendly.
+    gpu_layers: int = DEFAULT_GPU_LAYERS
+    threads: int = DEFAULT_THREADS
 
     # -- storage ----------------------------------------------------------
     db_path: Path | None = field(default_factory=default_db_path)
@@ -104,6 +130,10 @@ class CompanionConfig:
     def __post_init__(self) -> None:
         if not self.model.strip():
             raise ValueError("A model name is required.")
+        if self.backend.strip().lower() not in BACKEND_NAMES:
+            raise ValueError(
+                f"backend must be one of {', '.join(BACKEND_NAMES)}."
+            )
         if not self.base_url.strip():
             raise ValueError("An Ollama base URL is required.")
         if self.timeout <= 0:
@@ -112,6 +142,8 @@ class CompanionConfig:
             raise ValueError("temperature must be in [0, 2].")
         if self.max_tokens < 1:
             raise ValueError("max_tokens must be at least 1.")
+        if not 1 <= self.context <= MAX_CONTEXT:
+            raise ValueError(f"context must be in [1, {MAX_CONTEXT}].")
         if self.history_window < 1:
             raise ValueError("history_window must be at least 1.")
         if self.memory_limit < 0:
@@ -135,6 +167,12 @@ class CompanionConfig:
         model = os.environ.get(ENV_MODEL)
         if model:
             env["model"] = model
+        backend = os.environ.get(ENV_BACKEND)
+        if backend:
+            env["backend"] = backend
+        model_file = os.environ.get(ENV_MODEL_FILE)
+        if model_file:
+            env["model_file"] = Path(model_file).expanduser()
         url = os.environ.get(ENV_OLLAMA_URL)
         if url:
             env["base_url"] = url
@@ -157,7 +195,11 @@ class CompanionConfig:
     def describe(self) -> str:
         """A one-line, honest description of the connection and storage."""
         storage = str(self.db_path) if self.persistent else "in-memory (no lasting record)"
-        return f"{self.model} at {self.base_url}; storage: {storage}"
+        if self.backend.strip().lower() == "ollama":
+            where = f"{self.model} at {self.base_url}"
+        else:
+            where = f"{self.model} ({self.backend})"
+        return f"{where}; storage: {storage}"
 
 
 __all__ = [
@@ -166,8 +208,10 @@ __all__ = [
     "DEFAULT_DB_FILENAME",
     "DEFAULT_MODEL",
     "DEFAULT_OLLAMA_URL",
+    "ENV_BACKEND",
     "ENV_DB",
     "ENV_MODEL",
+    "ENV_MODEL_FILE",
     "ENV_OLLAMA_URL",
     "ENV_THINK",
     "ENV_TIMEOUT",

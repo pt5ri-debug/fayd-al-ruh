@@ -5,9 +5,10 @@
     python -m cli natasha --session first-chat "..."  # keep one named session across runs
     python -m cli natasha --list-sessions          # the sessions saved so far
     python -m cli natasha --new                    # start a fresh session
-    python -m cli natasha status                   # is the local model reachable
-    python -m cli natasha models                   # list the models she can pull
-    python -m cli natasha download --approve        # one-time: pull a model (~2.6 GB)
+    python -m cli natasha status                   # which runtime answers, and the next step
+    python -m cli natasha models                   # list the models she can fetch
+    python -m cli natasha download --approve        # one-time: fetch the GGUF weights (~2.6 GB)
+    python -m cli natasha download --approve --backend ollama   # or pull an Ollama tag
     python -m cli natasha remember "أحب القهوة" --kind preference
     python -m cli natasha memories                 # what she remembers
     python -m cli natasha memories --correct MEM-... "نص مصحّح"
@@ -21,9 +22,13 @@
 
 Natasha is a *companion*, not the cognitive core: she keeps her own database and
 never writes to the project's entities, relations, evidence, beliefs, or knowledge
-graph. Everything stays on this machine -- the only call is to the local Ollama
-server. With no Ollama running the companion still runs; every command reports the
-real next step instead of pretending.
+graph. She runs the model **in this process** by default -- a GGUF file loaded with
+``llama-cpp-python``, the same runtime the other local models use, so no
+``ollama serve`` daemon has to sit in the background -- and falls back to a local
+Ollama server when that is what the machine has (``--backend ollama`` forces it).
+Everything stays on this machine either way. With neither runtime available the
+companion still runs; every command reports the real next step instead of
+pretending.
 """
 
 from __future__ import annotations
@@ -36,9 +41,11 @@ from collections.abc import Sequence
 from companion.companion_agent import CompanionAgent, CompanionError
 from companion.config import CompanionConfig
 from companion.model import (
+    BACKEND_NAMES,
     DEFAULT_SPEC_KEY,
     CompanionModelUnavailable,
     download_model,
+    pull_model,
     spec_summaries,
 )
 from companion.personality import NAME
@@ -60,6 +67,10 @@ def _agent(args: argparse.Namespace) -> CompanionAgent:
     overrides: dict[str, object] = {}
     if getattr(args, "model", None):
         overrides["model"] = args.model
+    if getattr(args, "backend", None):
+        overrides["backend"] = args.backend
+    if getattr(args, "model_file", None):
+        overrides["model_file"] = args.model_file
     if getattr(args, "base_url", None):
         overrides["base_url"] = args.base_url
     if getattr(args, "no_memory", False):
@@ -82,10 +93,12 @@ def run_status(args: argparse.Namespace) -> int:
             json.dumps(
                 {
                     "model": status.model,
+                    "backend": status.backend,
                     "available": status.available,
                     "server_reachable": status.server_reachable,
                     "installed": status.installed,
                     "detail": status.detail,
+                    "hint": status.hint,
                     "status": status.summary(),
                     "config": agent.config.describe(),
                 },
@@ -94,18 +107,18 @@ def run_status(args: argparse.Namespace) -> int:
         )
         return 0 if status.available else 1
     print(status.summary())
-    print(f"  model : {agent.config.model}")
-    print(f"  server: {agent.config.base_url}")
+    print(f"  model  : {agent.config.model}")
+    print(f"  backend: {agent.config.backend}")
+    if status.backend == "ollama":
+        print(f"  server : {agent.config.base_url}")
     print(f"  storage: {agent.config.describe().split('; storage: ')[-1]}")
-    if not status.available and status.server_reachable:
-        print("  next step: python -m cli natasha download --approve")
-    elif not status.server_reachable:
-        print("  next step: start Ollama with `ollama serve`")
+    if not status.available:
+        print(f"  next step: {status.hint}")
     return 0 if status.available else 1
 
 
 def run_models(args: argparse.Namespace) -> int:
-    """List the models Natasha can pull, the same menu the other mouths offer."""
+    """List the models Natasha can fetch, the same menu the other mouths offer."""
     if getattr(args, "as_json", False):
         print(
             json.dumps(
@@ -118,35 +131,54 @@ def run_models(args: argparse.Namespace) -> int:
             )
         )
         return 0
-    print(f"Models Natasha can pull with Ollama (default: {DEFAULT_SPEC_KEY}):")
+    print(f"Models Natasha can fetch (default: {DEFAULT_SPEC_KEY}):")
     for key, title, size, summary in spec_summaries():
         print(f"  {key:14s} {title:34s} ~{size:.1f} GB")
         print(f"  {'':14s} {summary}")
-    print("\nPull one with: python -m cli natasha download --approve --model <key>")
+    print("\nFetch one with: python -m cli natasha download --approve --model <key>")
+    print("(Or, into a local Ollama server: ... download --approve --model <key> --backend ollama)")
     return 0
 
 
 def run_download(args: argparse.Namespace) -> int:
-    """Pull a companion model through the permission + human-approval gates."""
+    """Fetch a companion model through the permission + human-approval gates.
+
+    The default is the in-process GGUF weights (``llama-cpp-python``); pass
+    ``--backend ollama`` to pull the same model into a local Ollama server instead.
+    """
     if not args.approve:
         print(
-            "error: pulling a model is an external action and needs --approve "
+            "error: fetching a model is an external action and needs --approve "
             "(it fetches several GB from the internet)."
         )
         return 2
+    backend = (getattr(args, "backend", None) or "gguf").strip().lower()
     try:
-        tag = download_model(
-            args.model or DEFAULT_SPEC_KEY,
-            approved=True,
-            progress=lambda message: print(message, file=sys.stderr),
-        )
+        if backend == "ollama":
+            tag = pull_model(
+                args.model or DEFAULT_SPEC_KEY,
+                approved=True,
+                progress=lambda message: print(message, file=sys.stderr),
+            )
+            result: str = tag
+            message = f"Natasha's model ready in Ollama: {tag}."
+        else:
+            path = download_model(
+                args.model or DEFAULT_SPEC_KEY,
+                approved=True,
+                progress=lambda message: print(message, file=sys.stderr),
+            )
+            result = str(path)
+            message = f"Natasha's model ready: {path}."
     except (CompanionModelUnavailable, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 5
     if getattr(args, "as_json", False):
-        print(json.dumps({"model": tag}, ensure_ascii=False))
+        print(json.dumps({"model": result, "backend": backend}, ensure_ascii=False))
         return 0
-    print(f"Natasha's model ready: {tag}.")
+    print(message)
+    if backend != "ollama":
+        print("She will use it automatically (backend: auto). No server needed.")
     return 0
 
 
@@ -391,6 +423,16 @@ def run_chat(args: argparse.Namespace) -> int:
 # -- argument parsing -----------------------------------------------------
 def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", default=None, help="the local model to use (default qwen3:4b).")
+    parser.add_argument(
+        "--backend",
+        choices=BACKEND_NAMES,
+        default=None,
+        help="which runtime answers: auto (default), gguf (in-process), or ollama.",
+    )
+    parser.add_argument(
+        "--model-file", dest="model_file", default=None,
+        help="a specific .gguf file to load (the gguf runtime).",
+    )
     parser.add_argument("--base-url", default=None, help="the Ollama server URL.")
     parser.add_argument(
         "--no-memory", dest="no_memory", action="store_true",
@@ -410,17 +452,23 @@ def _build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--list-sessions", action="store_true", help="list sessions and exit")
     chat.add_argument("--json", dest="as_json", action="store_true", help="emit machine-readable JSON")
 
-    status = sub.add_parser("status", help="Show whether the local model can answer.")
+    status = sub.add_parser("status", help="Show which runtime answers, and the next step.")
     _add_connection_arguments(status)
     status.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
 
-    models = sub.add_parser("models", help="List the models Natasha can pull with Ollama.")
+    models = sub.add_parser("models", help="List the models Natasha can fetch.")
     models.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
 
-    download = sub.add_parser("download", help="Pull a model with Ollama (one-time, several GB).")
-    download.add_argument("--approve", action="store_true", help="grant the external pull.")
+    download = sub.add_parser(
+        "download", help="Fetch a model: GGUF weights by default, or an Ollama tag."
+    )
+    download.add_argument("--approve", action="store_true", help="grant the external fetch.")
     download.add_argument(
-        "--model", default=None, help=f"which model to pull (default {DEFAULT_SPEC_KEY})."
+        "--model", default=None, help=f"which model to fetch (default {DEFAULT_SPEC_KEY})."
+    )
+    download.add_argument(
+        "--backend", choices=("gguf", "ollama"), default=None,
+        help="gguf fetches the in-process weights (default); ollama pulls the tag.",
     )
     download.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
 
