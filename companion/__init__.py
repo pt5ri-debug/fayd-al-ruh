@@ -30,6 +30,22 @@ from companion.companion_agent import (
     ModelStatus,
 )
 from companion.config import CompanionConfig, default_db_path
+from companion.model import (
+    CATALOG,
+    DEFAULT_MODEL,
+    DEFAULT_OLLAMA_URL,
+    DEFAULT_SPEC_KEY,
+    CompanionModelSpec,
+    CompanionModelUnavailable,
+    NatashaModelClient,
+    NatashaModelStatus,
+    OllamaNatashaClient,
+    download_model,
+    natasha_model_status,
+    resolve_spec,
+    spec_names,
+    spec_summaries,
+)
 from companion.conversation_manager import ConversationManager, SessionInfo
 from companion.emotion_state import DialogueEmotion, DialogueEmotionTracker
 from companion.memory_manager import Memory, MemoryManager
@@ -38,11 +54,17 @@ from companion.prompt_builder import PromptBuilder
 from companion.relationship_manager import RelationshipEvent, RelationshipManager
 
 __all__ = [
+    "CATALOG",
     "CompanionAgent",
     "CompanionConfig",
     "CompanionError",
+    "CompanionModelSpec",
+    "CompanionModelUnavailable",
     "CompanionReply",
     "ConversationManager",
+    "DEFAULT_MODEL",
+    "DEFAULT_OLLAMA_URL",
+    "DEFAULT_SPEC_KEY",
     "DialogueEmotion",
     "DialogueEmotionTracker",
     "Memory",
@@ -50,7 +72,10 @@ __all__ = [
     "ModelCaller",
     "ModelStatus",
     "NAME",
+    "NatashaModelClient",
+    "NatashaModelStatus",
     "NatashaPersonality",
+    "OllamaNatashaClient",
     "PersonalitySettings",
     "PromptBuilder",
     "RelationshipEvent",
@@ -58,4 +83,9 @@ __all__ = [
     "SessionInfo",
     "default_db_path",
     "default_personality",
+    "download_model",
+    "natasha_model_status",
+    "resolve_spec",
+    "spec_names",
+    "spec_summaries",
 ]

@@ -3,9 +3,12 @@
 :class:`CompanionAgent` is the one object a front end needs. It owns the database
 and the managers (conversations, memory, relationship, emotion), builds each
 prompt through :class:`~companion.prompt_builder.PromptBuilder`, and talks to the
-local Qwen3 model through the project's **existing** Ollama transport --
-``core.coder_model.OllamaCoderClient`` (standard library only, no new dependency).
-No second Ollama client is created; the project's own is reused.
+local model through :mod:`companion.model` -- Natasha's own model layer, which
+names her catalog, her client seam, and her honest status exactly as
+:mod:`core.ultron`, :mod:`core.vision_model`, and :mod:`core.banner` do for the
+other mouths. That layer speaks through the project's **existing** Ollama
+transport (``core.coder_model.OllamaCoderClient``, standard library only, no new
+dependency); no second Ollama client is created, the project's own is reused.
 
 It is deliberately free of any user interface: the CLI (:mod:`ai.natasha`), the
 chat mouth, and the GUI all call this same object, so they can never disagree
@@ -35,45 +38,26 @@ from companion.conversation_manager import ConversationManager, SessionInfo
 from companion.database import CompanionDatabase
 from companion.emotion_state import DialogueEmotion, DialogueEmotionTracker
 from companion.memory_manager import MemoryManager, MemoryCandidate
+from companion.model import (
+    NatashaModelClient,
+    NatashaModelStatus,
+    OllamaNatashaClient,
+    natasha_model_status,
+)
 from companion.personality import NAME, PersonalitySettings, PersonalityStore, NatashaPersonality
 from companion.prompt_builder import PromptBuilder
 from companion.relationship_manager import EventCandidate, RelationshipEvent, RelationshipManager
-from core.coder_model import CoderClient, CoderMessage, CoderUnavailable, OllamaCoderClient
+from core.coder_model import CoderMessage, CoderUnavailable
 
 
 class CompanionError(RuntimeError):
     """Raised when Natasha cannot produce a reply (server down, model missing, timeout)."""
 
 
-@dataclass(frozen=True)
-class ModelStatus:
-    """An honest report of whether Natasha's model can answer right now."""
-
-    available: bool
-    server_reachable: bool
-    model: str
-    installed: bool
-    models: tuple[str, ...] = ()
-    detail: str = ""
-
-    def summary(self) -> str:
-        if self.available:
-            return f"{NAME} is ready ({self.model})."
-        if not self.server_reachable:
-            return (
-                f"Natasha cannot reach Ollama at the configured address. "
-                f"Start it with `ollama serve`. ({self.detail})"
-            )
-        return (
-            f"Ollama is running but `{self.model}` is not installed. "
-            f"Install it with `ollama pull {self.model}`."
-        )
-
-
-def _model_present(model: str, models: Sequence[str]) -> bool:
-    """True when ``model`` is installed, accepting Ollama's implicit ``:latest``."""
-    wanted = model.strip()
-    return wanted in models or (":" not in wanted and f"{wanted}:latest" in models)
+#: An honest report of whether Natasha's model can answer right now. It lives in
+#: :mod:`companion.model` (the model layer, beside the client and the catalog, as
+#: in every other mouth) and is re-exported here for the companion's public shape.
+ModelStatus = NatashaModelStatus
 
 
 @dataclass
@@ -113,7 +97,7 @@ class CompanionAgent:
         self,
         config: CompanionConfig | None = None,
         *,
-        client: CoderClient | None = None,
+        client: NatashaModelClient | None = None,
         caller: ModelCaller | None = None,
         database: CompanionDatabase | None = None,
     ) -> None:
@@ -135,16 +119,18 @@ class CompanionAgent:
         self._client = client if caller is None else None
 
     # -- model connection -------------------------------------------------
-    def _active_client(self) -> CoderClient:
+    def _active_client(self) -> NatashaModelClient:
         if self._client is None:
-            self._client = OllamaCoderClient(
+            self._client = OllamaNatashaClient(
                 model=self.config.model,
                 base_url=self.config.base_url,
                 timeout=self.config.timeout,
                 max_tokens=self.config.max_tokens,
                 think=self.config.think,
             )
-        return self._client
+        client = self._client
+        assert client is not None
+        return client
 
     def _call_model(self, messages: Sequence[dict[str, str]]) -> str:
         if self._caller is not None:
@@ -158,17 +144,15 @@ class CompanionAgent:
         return client.chat(coder_messages, temperature=self.config.temperature)
 
     def model_status(self) -> ModelStatus:
-        """Report honestly whether the model can answer, without pretending."""
+        """Report honestly whether the model can answer, without pretending.
+
+        The check lives in :func:`companion.model.natasha_model_status`, the same
+        shape every other mouth uses; an injected ``caller`` (a test's) answers
+        without touching a server.
+        """
         if self._caller is not None:
             return ModelStatus(True, True, self.config.model, True, detail="injected caller")
-        client = self._active_client()
-        try:
-            models = client.list_models()
-        except CoderUnavailable as error:
-            return ModelStatus(False, False, self.config.model, False, detail=str(error))
-        installed = _model_present(self.config.model, models)
-        detail = "" if installed else f"`{self.config.model}` is not installed."
-        return ModelStatus(True, True, self.config.model, installed, models, detail)
+        return natasha_model_status(client=self._active_client())
 
     def is_available(self) -> bool:
         """True when a reply could be produced now."""

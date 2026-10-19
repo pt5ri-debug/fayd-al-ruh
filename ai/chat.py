@@ -387,8 +387,9 @@ _MOUTH_FAILURE = {
     ),
     MOUTH_NATASHA: (
         "Could not reach Natasha's local model: {error}",
-        "Start Ollama with `ollama serve`, then fetch the model with "
-        "`ollama pull qwen3:4b` (or run `python -m cli natasha status` to check).",
+        "Start Ollama with `ollama serve`, then pull the model with "
+        "`python -m cli natasha download --approve` (or run `python -m cli natasha status` "
+        "to check).",
     ),
 }
 

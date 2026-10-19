@@ -24,6 +24,8 @@ Usage:
     python -m cli natasha             # chat with Natasha, the companion (local Qwen3)
     python -m cli natasha "مرحبا"      # one message; --session <id> keeps one session
     python -m cli natasha status      # is the local companion model reachable
+    python -m cli natasha models      # list the models she can pull
+    python -m cli natasha download --approve  # one-time: pull a model (~2.6 GB)
     python -m cli chat                # chat with the AI in text (Jarvis, no voice)
     python -m cli chat --ultron       # chat answering from Ultron (general local model)
     python -m cli chat --vision       # chat answering from Vision (petroleum local model)
