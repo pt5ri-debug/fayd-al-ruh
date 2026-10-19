@@ -135,6 +135,22 @@ def presentation_models_dir() -> Path:
     return data_dir() / "presentation"
 
 
+def natasha_models_dir() -> Path:
+    """Where Natasha's in-process GGUF models live.
+
+    Natasha, the project's companion, speaks through a **GGUF file loaded into
+    this process** with ``llama-cpp-python`` by default -- the same runtime
+    Ultron, Vision, Banner, and the two Studios use -- so no ``ollama serve``
+    daemon has to sit in the background holding RAM. The file lives under
+    ``data/natasha`` (or is downloaded there with
+    ``python -m cli natasha download --approve``); an existing Ollama setup is
+    still honoured as a fallback. The folder is git-ignored, so a multi-gigabyte
+    model never dirties the working tree or bloats a program update.
+    ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "natasha"
+
+
 def qwen_speech_models_dir() -> Path:
     """Where the Qwen3 speech models (ASR and TTS) live.
 
@@ -231,8 +247,11 @@ __all__ = [
     "checkpoints_dir",
     "models_dir",
     "ultron_models_dir",
+    "vision_models_dir",
     "coder_models_dir",
     "presentation_models_dir",
+    "natasha_models_dir",
+    "qwen_speech_models_dir",
     "studio_dir",
     "studio_workspaces_dir",
     "bundled_artifacts_dir",

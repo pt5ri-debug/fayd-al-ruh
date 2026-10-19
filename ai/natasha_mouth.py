@@ -16,8 +16,9 @@ Two things stay honest:
 
 * a Natasha answer is the local model's own prose, shaped by her personality, so
   it is labelled with :data:`companion.personality.NAME` and carries no citations;
-* she runs entirely on this machine through the project's existing Ollama
-  transport; when the model cannot answer,
+* she runs entirely on this machine -- the model loads in-process from a GGUF file
+  by default, or through the project's existing Ollama transport as a fallback;
+  when the model cannot answer,
   :class:`~companion.companion_agent.CompanionError` carries the real next step
   instead of silently answering from a different mouth.
 """

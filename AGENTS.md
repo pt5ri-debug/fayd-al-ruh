@@ -354,21 +354,39 @@ Arabic is kept as secondary aliases where useful.
   `use <key>` to remember a provider, `--session` persistence).
 - `companion/` — **Natasha**, the project's *companion*: a self-contained layer
   (its own package, not a mouth over the cognitive core) that gives the project a
-  character to talk with through a **local Qwen3 model** (`qwen3:4b`, Ollama).
+  character to talk with through a **local Qwen3 model** (`qwen3:4b`).
   `companion/model.py` is her **model layer**, the counterpart of `core.ultron`/
   `core.vision_model`/`core.banner`: it owns `NAME`, `DEFAULT_MODEL`/`DEFAULT_OLLAMA_URL`,
-  a `CATALOG` of pullable Ollama models (`qwen3-4b` default, `qwen3-8b`,
-  `qwen2.5-7b`) with `resolve_spec`/`spec_names`/`spec_summaries`, the
-  `NatashaModelClient` protocol, the default `OllamaNatashaClient` (a thin
-  subclass of `core.coder_model.OllamaCoderClient`, so the project's own Ollama
-  transport is *reused*, no second client written), an honest
-  `NatashaModelStatus`/`natasha_model_status` (a missing server and a missing
-  model are reported separately, each with its own next step), `CompanionModelUnavailable`,
-  and a governed `download_model` that runs `ollama pull` only through the
-  permission + human-approval gates (`--approve`), like every other model
-  download. `companion.config` re-exports the model defaults from it, and
-  `CompanionAgent` builds its client through it, so the catalog, the client, and
-  the status live in one place.
+  a `CATALOG` (`qwen3-4b` default, `qwen3-8b`, `qwen2.5-7b`) with
+  `resolve_spec`/`spec_names`/`spec_summaries`, the
+  `NatashaModelClient` protocol, an honest `NatashaModelStatus`/`natasha_model_status`
+  (a missing runtime, model file, server, and Ollama tag are reported separately,
+  each with its own next step), and `CompanionModelUnavailable`. Like every other
+  mouth it runs the model **in this process** by default: a **GGUF file** loaded
+  with `llama-cpp-python` (`LlamaCppNatashaClient` + the `LlamaCppNatashaRunner`
+  seam a test injects), living in the git-ignored `data/natasha`
+  (`core.paths.natasha_models_dir`, resolved by `find_model_file`/`model_is_cached`),
+  so no `ollama serve` daemon has to sit in the background holding RAM. An existing
+  **Ollama** server is still honoured as a fallback through the project's own
+  transport (`OllamaNatashaClient`, a thin subclass of
+  `core.coder_model.OllamaCoderClient`, so no second Ollama client is written).
+  Each catalog entry carries both forms of the same model (the Ollama `tag` *and*
+  the Hugging Face `repo`/`filename`), so switching runtime does not change which
+  model she is. `resolve_backend`/`build_client` are the one place the choice is
+  made — `auto` (default) prefers the in-process model once the extra and a file
+  are present and otherwise falls back to Ollama, while an explicit `gguf`/`ollama`
+  is honoured. Two governed fetches, one per runtime: `download_model` (the GGUF
+  weights, via `huggingface_hub`) and `pull_model` (`ollama pull`), each running
+  only through the permission + human-approval gates (`--approve`), like every
+  other model download. `strip_thinking` drops a reasoning model's ` thinking`
+  block — Ollama's `think` setting normally keeps it out of the reply, but not on
+  every build, and in-process there is no such switch — and `CompanionAgent` applies
+  it to every reply, whichever runtime produced it, so the trace never reaches the
+  transcript or the database. The runtime is the optional `[natasha]` extra
+  (`core.optional_deps.FEATURE_NATASHA`, `requirements-natasha.txt`, `natasha = [...]`
+  in `pyproject.toml`), imported lazily. `companion.config` re-exports the model
+  defaults from it, and `CompanionAgent` builds its client through it, so the
+  catalog, the client, and the status live in one place.
   It is deliberately **not** the cognitive core: nothing here writes to entities,
   relations, evidence, beliefs, or the knowledge graph — the companion keeps its
   own SQLite database (`companion/database.py`, `CompanionDatabase`, tables

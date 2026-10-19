@@ -387,9 +387,10 @@ _MOUTH_FAILURE = {
     ),
     MOUTH_NATASHA: (
         "Could not reach Natasha's local model: {error}",
-        "Start Ollama with `ollama serve`, then pull the model with "
-        "`python -m cli natasha download --approve` (or run `python -m cli natasha status` "
-        "to check).",
+        "Fetch the in-process weights with `python -m cli natasha download --approve`, "
+        "or run a local Ollama server and pull the tag with "
+        "`python -m cli natasha download --approve --backend ollama` "
+        "(run `python -m cli natasha status` to see which runtime answers).",
     ),
 }
 

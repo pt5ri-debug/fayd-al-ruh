@@ -6,9 +6,12 @@ prompt through :class:`~companion.prompt_builder.PromptBuilder`, and talks to th
 local model through :mod:`companion.model` -- Natasha's own model layer, which
 names her catalog, her client seam, and her honest status exactly as
 :mod:`core.ultron`, :mod:`core.vision_model`, and :mod:`core.banner` do for the
-other mouths. That layer speaks through the project's **existing** Ollama
-transport (``core.coder_model.OllamaCoderClient``, standard library only, no new
-dependency); no second Ollama client is created, the project's own is reused.
+other mouths. That layer runs the model **in this process** by default (a GGUF
+file through ``llama-cpp-python``, the same runtime the other mouths use, so no
+``ollama serve`` daemon has to sit in the background), and falls back to the
+project's **existing** Ollama transport (``core.coder_model.OllamaCoderClient``,
+standard library only, no new dependency) when that is what the machine has; no
+second Ollama client is created, the project's own is reused.
 
 It is deliberately free of any user interface: the CLI (:mod:`ai.natasha`), the
 chat mouth, and the GUI all call this same object, so they can never disagree
@@ -41,8 +44,9 @@ from companion.memory_manager import MemoryManager, MemoryCandidate
 from companion.model import (
     NatashaModelClient,
     NatashaModelStatus,
-    OllamaNatashaClient,
+    build_client,
     natasha_model_status,
+    strip_thinking,
 )
 from companion.personality import NAME, PersonalitySettings, PersonalityStore, NatashaPersonality
 from companion.prompt_builder import PromptBuilder
@@ -120,13 +124,25 @@ class CompanionAgent:
 
     # -- model connection -------------------------------------------------
     def _active_client(self) -> NatashaModelClient:
+        """The client Natasha speaks through, built once for the configured runtime.
+
+        The choice between the in-process GGUF model and the Ollama fallback is
+        made in :func:`companion.model.build_client`, the one place it lives, so
+        the CLI, the chat mouth, and the window cannot disagree about it.
+        """
         if self._client is None:
-            self._client = OllamaNatashaClient(
-                model=self.config.model,
-                base_url=self.config.base_url,
-                timeout=self.config.timeout,
-                max_tokens=self.config.max_tokens,
-                think=self.config.think,
+            config = self.config
+            self._client = build_client(
+                backend=config.backend,
+                model=config.model,
+                model_file=config.model_file,
+                base_url=config.base_url,
+                timeout=config.timeout,
+                max_tokens=config.max_tokens,
+                think=config.think,
+                context=config.context,
+                gpu_layers=config.gpu_layers,
+                threads=config.threads,
             )
         client = self._client
         assert client is not None
@@ -250,7 +266,9 @@ class CompanionAgent:
             reply_text = self._call_model(built.messages)
         except (CoderUnavailable, TimeoutError) as error:
             raise CompanionError(str(error)) from error
-        reply_text = (reply_text or "").strip()
+        # A reasoning model's hidden trace is not something Natasha said, whichever
+        # runtime produced it, so it never reaches the transcript or the database.
+        reply_text = strip_thinking(reply_text or "")
         if not reply_text:
             raise CompanionError("The model returned an empty reply.")
 

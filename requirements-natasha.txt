@@ -1,0 +1,21 @@
+# Optional: Natasha's in-process companion model (the [natasha] extra).
+#
+# Install with:  python -m pip install -r requirements-natasha.txt
+#
+# This pulls ``llama-cpp-python``, which runs a GGUF model locally inside this
+# process -- no ``ollama serve`` daemon has to sit in the background holding RAM
+# while Natasha is idle -- and ``huggingface_hub``, used only to fetch the
+# weights. On a machine with no prebuilt wheel, ``llama-cpp-python`` compiles
+# from source and needs a C/C++ compiler.
+#
+# This is the *same* runtime Ultron, Vision, Banner, and the two Studios use, so
+# a machine that already has any of them needs nothing new here.
+#
+# The model weights are a *separate* one-time, human-approved download:
+#     python -m cli natasha download --approve
+# or drop any companion `.gguf` file into the data/natasha folder. The base
+# install needs none of this: the import is lazy, and without the extra or a
+# model file Natasha still runs against an existing Ollama server and reports
+# the real next step instead of pretending.
+llama-cpp-python>=0.3
+huggingface_hub>=0.23

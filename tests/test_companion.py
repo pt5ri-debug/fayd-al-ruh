@@ -41,7 +41,7 @@ from companion.personality import (
 )
 from companion.prompt_builder import PromptBuilder
 from companion.relationship_manager import KIND_FICTION, KIND_FACT as REL_FACT
-from core.coder_model import CoderUnavailable
+from core.coder_model import CoderMessage, CoderUnavailable
 
 
 # -- fixtures -------------------------------------------------------------
@@ -333,14 +333,16 @@ def test_status_accepts_an_implicit_latest_tag() -> None:
 
 
 def test_a_model_pull_is_denied_by_default() -> None:
-    from companion.model import CompanionModelUnavailable, download_model
+    from companion.model import CompanionModelUnavailable, download_model, pull_model
 
     with pytest.raises(CompanionModelUnavailable):
         download_model("qwen3-4b")
+    with pytest.raises(CompanionModelUnavailable):
+        pull_model("qwen3-4b")
 
 
 def test_an_approved_pull_runs_ollama_and_reports_the_tag() -> None:
-    from companion.model import download_model
+    from companion.model import pull_model
 
     calls: list[list[str]] = []
 
@@ -348,19 +350,223 @@ def test_an_approved_pull_runs_ollama_and_reports_the_tag() -> None:
         calls.append(list(argv))
         return 0, "success"
 
-    tag = download_model("qwen3-4b", approved=True, runner=runner)
+    tag = pull_model("qwen3-4b", approved=True, runner=runner)
     assert tag == "qwen3:4b"
     assert calls == [["ollama", "pull", "qwen3:4b"]]
 
 
 def test_a_failed_pull_is_an_honest_error() -> None:
-    from companion.model import CompanionModelUnavailable, download_model
+    from companion.model import CompanionModelUnavailable, pull_model
 
     def runner(argv) -> tuple[int, str]:
         return 1, "Error: pull access denied"
 
     with pytest.raises(CompanionModelUnavailable, match="pull access denied"):
-        download_model("qwen3-8b", approved=True, runner=runner)
+        pull_model("qwen3-8b", approved=True, runner=runner)
+
+
+# -- the in-process (GGUF) runtime ----------------------------------------
+def test_the_default_runtime_prefers_an_installed_gguf(tmp_path: Path, monkeypatch) -> None:
+    """``auto`` picks the daemon-free runtime once the extra and a file are present."""
+    from companion.model import (
+        BACKEND_GGUF,
+        BACKEND_OLLAMA,
+        LlamaCppNatashaClient,
+        NatashaModelClient,
+        resolve_backend,
+    )
+
+    assert resolve_backend("auto", root=tmp_path) == BACKEND_OLLAMA  # nothing installed
+    (tmp_path / "qwen.gguf").write_bytes(b"x")
+    monkeypatch.setattr("companion.model.extra_available", lambda: True)
+    assert resolve_backend("auto", root=tmp_path) == BACKEND_GGUF
+    # An explicitly named file is enough, even outside the folder scan.
+    assert resolve_backend("auto", model_file=tmp_path / "qwen.gguf") == BACKEND_GGUF
+    # An explicit choice is honoured either way.
+    assert resolve_backend("ollama", root=tmp_path) == BACKEND_OLLAMA
+    assert resolve_backend("gguf", root=tmp_path) == BACKEND_GGUF
+    client = LlamaCppNatashaClient(root=tmp_path)
+    assert isinstance(client, NatashaModelClient)
+
+
+def test_an_unknown_backend_is_refused() -> None:
+    from companion.model import CompanionModelUnavailable, resolve_backend
+
+    with pytest.raises(CompanionModelUnavailable):
+        resolve_backend("not-a-runtime")
+
+
+def test_the_config_carries_the_runtime_choice(tmp_path: Path) -> None:
+    from companion.model import BACKEND_GGUF
+
+    config = CompanionConfig(db_path=None, persistent=False, backend=BACKEND_GGUF)
+    assert config.backend == BACKEND_GGUF
+    assert "gguf" in config.describe()
+    with pytest.raises(ValueError):
+        CompanionConfig(db_path=None, persistent=False, backend="nope")
+    with pytest.raises(ValueError):
+        CompanionConfig(db_path=None, persistent=False, context=0)
+
+
+def test_the_agent_builds_the_in_process_client_when_asked(tmp_path: Path) -> None:
+    from companion.model import BACKEND_GGUF, LlamaCppNatashaClient
+
+    model_file = tmp_path / "m.gguf"
+    model_file.write_bytes(b"x")
+    config = CompanionConfig(
+        db_path=None, persistent=False, backend=BACKEND_GGUF, model_file=model_file
+    )
+    client = CompanionAgent(config)._active_client()
+    assert isinstance(client, LlamaCppNatashaClient)
+    assert client.model_path() == model_file
+
+
+def test_find_model_file_prefers_the_registry_and_picks_the_largest(tmp_path: Path) -> None:
+    from companion.model import find_model_file, model_is_cached
+
+    assert find_model_file(tmp_path) is None
+    assert model_is_cached(tmp_path) is False
+    small = tmp_path / "small.gguf"
+    small.write_bytes(b"x")
+    big = tmp_path / "big.gguf"
+    big.write_bytes(b"x" * 100)
+    assert find_model_file(tmp_path) == big  # largest wins with no registry
+    (tmp_path / "model.json").write_text(json.dumps({"file": "small.gguf"}), encoding="utf-8")
+    assert find_model_file(tmp_path) == small
+
+
+def test_the_in_process_client_reports_and_refuses_honestly(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from companion.model import CompanionModelUnavailable, LlamaCppNatashaClient
+
+    client = LlamaCppNatashaClient(root=tmp_path)
+    assert client.backend == "in-process"
+    assert client.list_models() == ()
+    assert client.is_installed() is False
+    with pytest.raises(CompanionModelUnavailable):
+        client.model_path()
+    # The next step names whichever half is missing: the runtime, or the file.
+    monkeypatch.setattr("companion.model.extra_available", lambda: True)
+    assert "no companion model file" in client.missing_detail().lower()
+    monkeypatch.setattr("companion.model.extra_available", lambda: False)
+    assert "requirements-natasha.txt" in client.missing_detail()
+
+
+class FakeRunner:
+    """A stand-in for the llama-cpp runner: records calls, returns a fixed reply."""
+
+    def __init__(self, reply: str = "أهلاً بك.") -> None:
+        self.reply_text = reply
+        self.calls: list[tuple[list[dict[str, str]], dict]] = []
+
+    def chat(self, messages: list[dict[str, str]], **kwargs) -> str:
+        self.calls.append((messages, kwargs))
+        return self.reply_text
+
+
+def test_an_injected_runner_makes_the_in_process_client_available(tmp_path: Path) -> None:
+    from companion.model import LlamaCppNatashaClient, natasha_model_status
+
+    client = LlamaCppNatashaClient(root=tmp_path, runner=FakeRunner())
+    assert client.is_installed() is True
+    status = natasha_model_status(client=client)
+    assert status.available is True
+    assert status.backend == "in-process"
+    assert "in-process" in status.summary()
+
+
+def test_the_in_process_client_sends_messages_and_reads_the_reply(tmp_path: Path) -> None:
+    from companion.model import LlamaCppNatashaClient
+
+    runner = FakeRunner("مرحبا!")
+    client = LlamaCppNatashaClient(root=tmp_path, runner=runner, max_tokens=64)
+    answer = client.chat([CoderMessage(role="user", content="hi")], temperature=0.5)
+    assert answer == "مرحبا!"
+    messages, kwargs = runner.calls[0]
+    assert messages == [{"role": "user", "content": "hi"}]
+    assert kwargs == {"temperature": 0.5, "max_tokens": 64}
+
+
+def test_a_reasoning_trace_is_stripped_from_an_in_process_reply(tmp_path: Path) -> None:
+    """Qwen3's `` thinking`` block is not something Natasha said."""
+    from companion.model import LlamaCppNatashaClient, strip_thinking
+
+    assert strip_thinking("hi <thinking>a\nb</thinking>there") == "hi there"
+    assert strip_thinking("<thinking>cut off") == ""
+
+    runner = FakeRunner("<thinking>hmm</thinking>أهلاً")
+    client = LlamaCppNatashaClient(root=tmp_path, runner=runner)
+    assert client.chat([CoderMessage(role="user", content="hi")]) == "<thinking>hmm</thinking>أهلاً"
+
+    # The agent is the boundary where a reply becomes "what Natasha said", so the
+    # trace is dropped there -- for any runtime, and before it is stored.
+    agent = CompanionAgent(
+        CompanionConfig(db_path=None, persistent=False, backend="gguf"), client=client
+    )
+    session = agent.new_session("t")
+    reply = agent.ask(session.id, "hi")
+    assert reply.text == "أهلاً"
+    stored = [m.content for m in agent.conversations.messages(session.id)]
+    assert stored[-1] == "أهلاً"
+
+
+def test_an_in_process_client_with_no_model_raises_honestly(tmp_path: Path) -> None:
+    from companion.model import CompanionModelUnavailable, LlamaCppNatashaClient
+
+    client = LlamaCppNatashaClient(root=tmp_path)  # no runner, no file
+    with pytest.raises(CompanionModelUnavailable):
+        client.chat([CoderMessage(role="user", content="hi")])
+
+
+def test_a_gguf_download_is_denied_by_default(tmp_path: Path) -> None:
+    from companion.model import CompanionModelUnavailable, download_model
+
+    with pytest.raises(CompanionModelUnavailable):
+        download_model("qwen3-4b", root=tmp_path)
+
+
+def test_an_approved_gguf_download_returns_a_cached_file(tmp_path: Path) -> None:
+    from companion.model import download_model, resolve_spec
+
+    spec = resolve_spec("qwen3-4b")
+    cached = tmp_path / spec.filename
+    cached.write_bytes(b"x")
+    assert download_model("qwen3-4b", root=tmp_path, approved=True) == cached
+
+
+def test_the_catalog_pairs_each_tag_with_its_gguf(tmp_path: Path) -> None:
+    """Switching runtime does not change which model she is."""
+    from companion.model import CATALOG
+
+    for spec in CATALOG.values():
+        assert spec.tag and spec.repo.endswith("-GGUF") and spec.filename.endswith(".gguf")
+
+
+def test_the_in_process_runtime_is_a_registered_optional_feature() -> None:
+    from core import optional_deps
+    from core.optional_deps import FEATURE_NATASHA
+
+    assert FEATURE_NATASHA in optional_deps.FEATURES
+    spec = optional_deps.feature(FEATURE_NATASHA)
+    assert spec.requirements_file == "requirements-natasha.txt"
+    assert "requirements-natasha.txt" in optional_deps.pip_install_command(FEATURE_NATASHA)
+
+
+def test_the_natasha_requirements_file_pins_the_shared_runtime() -> None:
+    """She shares the project's one in-process runtime, not a second copy of it."""
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "requirements-natasha.txt").read_text(encoding="utf-8")
+    assert "llama-cpp-python" in text
+    assert "huggingface_hub" in text
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert "\nnatasha = [" in pyproject
+
+
+def test_natasha_models_dir_is_under_the_writable_data_folder() -> None:
+    from core import paths
+
+    assert paths.natasha_models_dir() == paths.data_dir() / "natasha"
 
 
 def test_deleting_a_session_removes_its_messages(agent: CompanionAgent) -> None:
@@ -727,3 +933,45 @@ def test_cli_download_runs_the_gate_when_approved(monkeypatch, capsys) -> None:
     assert natasha.main(["download", "--approve"]) == 0
     assert calls == ["qwen3-4b"]
     assert "qwen3:4b" in capsys.readouterr().out
+
+
+def test_cli_download_can_pull_the_tag_into_ollama(monkeypatch, capsys) -> None:
+    """``--backend ollama`` is the fallback path: the same model, pulled as a tag."""
+    from ai import natasha
+
+    calls: list[str] = []
+
+    def fake_pull(spec_key, *, approved=False, progress=None):
+        calls.append(spec_key)
+        assert approved is True
+        return "qwen3:4b"
+
+    monkeypatch.setattr(natasha, "pull_model", fake_pull)
+    assert natasha.main(["download", "--approve", "--backend", "ollama"]) == 0
+    assert calls == ["qwen3-4b"]
+    out = capsys.readouterr().out
+    assert "Ollama" in out
+    assert "qwen3:4b" in out
+
+
+def test_cli_status_names_the_runtime(tmp_path: Path, monkeypatch, capsys) -> None:
+    from ai import natasha
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("FAYD_NATASHA_BACKEND", "gguf")
+    code = natasha.main(["status", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["backend"] == "in-process"
+    assert payload["available"] is False
+    # With the extra absent the detail names the real next step (the pip install).
+    assert "requirements-natasha.txt" in payload["detail"]
+    assert "natasha download" in payload["hint"]
+    assert code == 1
+
+
+def test_cli_accepts_the_backend_choice() -> None:
+    from ai import natasha
+
+    assert natasha._build_parser().parse_args(["chat", "--backend", "ollama"]).backend == "ollama"
+    with pytest.raises(SystemExit):
+        natasha._build_parser().parse_args(["chat", "--backend", "nope"])
