@@ -520,3 +520,75 @@ def test_gui_window_owns_the_reading_voice_control():
 
     labels = [action.label for action in actions.ACTIONS]
     assert not any("Read text aloud" in label for label in labels)
+
+
+# ------------------------------------------------- Arabic on the system engines
+
+
+def test_windows_sapi_script_selects_a_voice_for_the_spoken_language():
+    from pathlib import Path
+
+    from core import speech
+    from core.voices import find_voice
+
+    # Arabic narrows SAPI to an Arabic-culture voice, then to the chosen gender.
+    arabic = speech._windows_sapi_script("مرحبا", Path("C:/tmp/a.wav"), find_voice("man-1"), "ar")
+    assert "TwoLetterISOLanguageName -eq 'ar'" in arabic
+    assert "VoiceInfo.Gender -eq 'Male'" in arabic
+
+    # English leaves the language filter out, so the engine default is used.
+    english = speech._windows_sapi_script("hello", Path("C:/tmp/b.wav"), find_voice("man-1"), "en")
+    assert "TwoLetterISOLanguageName" not in english
+
+
+def test_windows_sapi_synthesizer_detects_arabic_and_selects_a_voice(monkeypatch):
+    from core import speech
+
+    seen: dict[str, str] = {}
+
+    def fake_run(argv, **_kwargs):
+        seen["script"] = argv[-1]
+        return speech.subprocess.CompletedProcess(argv, 1, b"", b"")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    speech.WindowsSapiSynthesizer().synthesize("مرحبا بكم")
+    assert "TwoLetterISOLanguageName -eq 'ar'" in seen["script"]
+
+
+def test_say_selects_an_installed_voice_for_a_non_english_language(monkeypatch):
+    from core import speech
+    from core.voices import find_voice
+
+    listing = "Majed               ar_SA    # مرحبا\nSamantha            en_US    # Hello\n"
+
+    def fake_run(argv, **_kwargs):
+        assert argv[:3] == ["say", "-v", "?"]
+        return speech.subprocess.CompletedProcess(argv, 0, listing.encode(), b"")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    speech._macos_voice_cache.clear()
+    try:
+        options = speech._say_voice_options(find_voice("man-1"), "ar")
+        assert "-v" in options and "Majed" in options
+        assert "-r" in options  # the catalog rate still carries over
+        # English keeps the engine default, so no voice name is forced.
+        english = speech._say_voice_options(find_voice("man-1"), "en")
+        assert "-v" not in english
+    finally:
+        speech._macos_voice_cache.clear()
+
+
+def test_say_leaves_the_default_when_no_voice_for_the_language_exists(monkeypatch):
+    from core import speech
+    from core.voices import find_voice
+
+    def fake_run(argv, **_kwargs):
+        return speech.subprocess.CompletedProcess(argv, 0, b"Samantha  en_US  # Hello\n", b"")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    speech._macos_voice_cache.clear()
+    try:
+        options = speech._say_voice_options(find_voice("man-1"), "ar")
+        assert "-v" not in options
+    finally:
+        speech._macos_voice_cache.clear()

@@ -510,7 +510,14 @@ Arabic is kept as secondary aliases where useful.
   SAPI, so `WindowsSapiSynthesizer` renders through `System.Speech` in PowerShell
   (`windows_speech_available`; `discover_synthesizer_name` falls back to it, and
   `load_synthesizer("windows-sapi")` loads it), and `Speaker` plays the WAV through
-  the built-in `SoundPlayer` when no aplay/afplay/sox exists. The install path
+  the built-in `SoundPlayer` when no aplay/afplay/sox exists. Both Windows SAPI and
+  macOS `say` read the *language* of the text, not just the timbre: the detected
+  language (Arabic script → `ar`) narrows SAPI to a voice whose culture matches
+  (`_sapi_select_voice`), and `say` is given `-v <installed voice>` for a
+  non-English language (`_macos_language_voice`), so Arabic is read as Arabic
+  instead of being mangled by the default English voice; when no voice for that
+  language is installed the engine keeps its own default rather than failing. The
+  install path
   prints its hint *once* (`install_speech_engine`'s message already carries it).
   CLI: `python -m ai.voice` / `python -m cli
   voice`; `python -m ai.speak --install-engine` / `python -m cli deps --install
@@ -526,8 +533,8 @@ Arabic is kept as secondary aliases where useful.
   a raised pitch on a male/female variant and say that plainly.
   `core/speech.py`'s `CommandSynthesizer`/`load_synthesizer` take that voice and
   insert its engine flags after the executable (`_espeak_voice_options`; `say`
-  carries only the rate; `flite` has none), and `load_synthesizer("auto")` still
-  falls to `silent` when nothing is installed.
+  selects a language voice and carries the rate; `flite` has none), and
+  `load_synthesizer("auto")` still falls to `silent` when nothing is installed.
 - `core/reading.py` — `TextReader`: read the chat's text aloud. Ties a catalog
   `Voice`, a `SpeechSynthesizer`, and a `Speaker` together behind `render`/
   `speak` (playback is best-effort, so a machine with no player still gets the
