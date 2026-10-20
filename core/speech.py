@@ -28,6 +28,7 @@ explicitly still reads Arabic through the system engine rather than failing.
 from __future__ import annotations
 
 import platform
+import re
 import shutil
 import signal
 import subprocess
@@ -166,11 +167,55 @@ def _espeak_voice_options(voice: Voice | None, language: str) -> tuple[str, ...]
     return voice.espeak_options(language)
 
 
+#: Cache of ``language -> installed macOS voice name`` (``None`` when none), so the
+#: voice list is read at most once per language.
+_macos_voice_cache: dict[str, str | None] = {}
+
+
+def _macos_language_voice(language: str) -> str | None:
+    """The name of an installed macOS ``say`` voice for ``language``, or ``None``.
+
+    ``say`` lists its voices as ``Name   <locale>   # example``; the first voice
+    whose locale matches ``language`` (e.g. ``ar``) is returned. ``None`` means no
+    such voice is installed here, so the caller leaves the engine default in place
+    rather than passing a name ``say`` would reject.
+    """
+    if language in _macos_voice_cache:
+        return _macos_voice_cache[language]
+    name: str | None = None
+    try:
+        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["say", "-v", "?"], capture_output=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        completed = None
+    if completed is not None and completed.returncode == 0:
+        for line in completed.stdout.decode("utf-8", "replace").splitlines():
+            match = re.match(r"^(.+?)\s+([a-z]{2})_[A-Z]{2}\s", line)
+            if match and match.group(2) == language:
+                name = match.group(1).strip()
+                break
+    _macos_voice_cache[language] = name
+    return name
+
+
 def _say_voice_options(voice: Voice | None, language: str) -> tuple[str, ...]:
-    """``say`` has no gender variant, so only the speaking rate carries over."""
-    if voice is None:
-        return ()
-    return ("-r", str(voice.speed))
+    """The ``say`` flags for a chosen voice and language.
+
+    ``say`` has no gender variant, so only the speaking rate carries over from the
+    catalog. It also has no automatic language detection: without ``-v`` it reads
+    with the system default voice, which mangles Arabic. When the text is not
+    English an installed voice for that language is selected, so Arabic is read as
+    Arabic; if none is installed the engine default is left in place.
+    """
+    options: list[str] = []
+    if language and language != "en":
+        name = _macos_language_voice(language)
+        if name:
+            options += ["-v", name]
+    if voice is not None:
+        options += ["-r", str(voice.speed)]
+    return tuple(options)
 
 
 def _flite_voice_options(_voice: Voice | None, _language: str) -> tuple[str, ...]:
@@ -196,36 +241,56 @@ def _sapi_rate(voice: Voice | None) -> int:
     return max(-10, min(10, round((voice.speed - 175) / 20)))
 
 
-def _sapi_select_voice(voice: Voice | None) -> str:
-    """A PowerShell fragment that picks a SAPI voice by the catalog voice's gender.
+def _sapi_select_voice(voice: Voice | None, language: str | None = None) -> str:
+    """A PowerShell fragment that picks a SAPI voice for the language and gender.
 
     SAPI voices are named and installed by the OS, so a catalog entry cannot choose
-    an exact timbre. It maps as far as SAPI allows: the variant's letter picks a
-    male or female installed voice, and the trailing number picks among them. When
-    no voice of that gender exists the engine keeps its default rather than failing.
+    an exact timbre. It maps as far as SAPI allows: a non-English ``language``
+    first narrows the candidates to voices whose culture matches (so Arabic text is
+    read by an Arabic voice when one is installed), then the variant's letter picks
+    a male or female voice and the trailing number picks among them. When no voice
+    of that language or gender exists the engine keeps its default rather than
+    failing.
     """
-    if voice is None:
+    non_english = bool(language) and language != "en"
+    if voice is None and not non_english:
         return ""
-    gender = "Male" if voice.variant[:1].lower() == "m" else "Female"
-    digits = "".join(character for character in voice.variant if character.isdigit())
-    index = max(0, int(digits) - 1) if digits else 0
-    return (
-        "$v=@($s.GetInstalledVoices()|?{$_.Enabled});"
-        f"$g=@($v|?{{$_.VoiceInfo.Gender -eq '{gender}'}});"
-        "if($g.Count -eq 0){$g=$v};"
-        f"if($g.Count -gt 0){{$s.SelectVoice($g[{index} % $g.Count].VoiceInfo.Name)}};"
-    )
+    script = ["$v=@($s.GetInstalledVoices()|?{$_.Enabled});"]
+    if non_english:
+        script.append(
+            "$c=@($v|?{$_.VoiceInfo.Culture.TwoLetterISOLanguageName -eq '"
+            + _ps_quote(language)
+            + "'});if($c.Count -gt 0){$v=$c};"
+        )
+    if voice is not None:
+        gender = "Male" if voice.variant[:1].lower() == "m" else "Female"
+        digits = "".join(character for character in voice.variant if character.isdigit())
+        index = max(0, int(digits) - 1) if digits else 0
+        script.append(
+            f"$g=@($v|?{{$_.VoiceInfo.Gender -eq '{gender}'}});"
+            "if($g.Count -eq 0){$g=$v};"
+            f"if($g.Count -gt 0){{$s.SelectVoice($g[{index} % $g.Count].VoiceInfo.Name)}};"
+        )
+    else:
+        script.append("if($v.Count -gt 0){$s.SelectVoice($v[0].VoiceInfo.Name)};")
+    return "".join(script)
 
 
-def _windows_sapi_script(text: str, target: Path, voice: Voice | None) -> str:
-    """The one-line PowerShell that renders ``text`` to the WAV file ``target``."""
+def _windows_sapi_script(
+    text: str, target: Path, voice: Voice | None, language: str | None = None
+) -> str:
+    """The one-line PowerShell that renders ``text`` to the WAV file ``target``.
+
+    ``language`` (e.g. ``"ar"``) selects a SAPI voice whose culture matches, so
+    Arabic is read as Arabic; ``None`` leaves the engine's own choice in place.
+    """
     script = [
         "$ErrorActionPreference='Stop';",
         "Add-Type -AssemblyName System.Speech;",
         "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;",
         f"$s.Rate={_sapi_rate(voice)};",
     ]
-    selection = _sapi_select_voice(voice)
+    selection = _sapi_select_voice(voice, language)
     if selection:
         script.append(selection)
     script.append(f"$s.SetOutputToWaveFile('{_ps_quote(str(target))}');")
@@ -508,8 +573,9 @@ class WindowsSapiSynthesizer:
     engine the project uses when no command-line engine is on PATH. It renders
     ``text`` to a WAV with ``SetOutputToWaveFile``/``Speak`` and reads it back, so
     the same :class:`~core.reading.TextReader` works unchanged. A chosen catalog
-    voice maps as far as SAPI allows (gender variant + rate); Arabic may be voiced
-    only when an Arabic SAPI voice is installed, which the engine itself decides.
+    voice maps as far as SAPI allows (language culture + gender variant + rate);
+    Arabic is read by an installed Arabic voice when one exists, and the engine
+    falls back to its own default when none is installed.
     """
 
     name = _WINDOWS_SAPI
@@ -524,7 +590,8 @@ class WindowsSapiSynthesizer:
             raise ValueError("Cannot synthesize empty text.")
         with tempfile.TemporaryDirectory(prefix="fayd-tts-") as folder:
             target = Path(folder) / "speech.wav"
-            script = _windows_sapi_script(text, target, self.voice)
+            language = self.language or detect_language(text)
+            script = _windows_sapi_script(text, target, self.voice, language)
             argv = [
                 self.executable,
                 "-NoProfile",

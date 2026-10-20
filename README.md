@@ -546,7 +546,14 @@ winget install -e --id eSpeak-NG.eSpeak-NG          # Windows (or: choco install
 ```
 
 On Windows this is usually unnecessary: the built-in SAPI engine is used when no
-command-line engine is on `PATH`, so **Read aloud** just works. The project can
+command-line engine is on `PATH`, so **Read aloud** just works. Both Windows SAPI
+and macOS `say` also read the *language* of the text: Arabic is spoken by an
+installed Arabic voice when one is present (SAPI voices whose culture is `ar`,
+or a `say` voice such as Majed), instead of being read by the default English
+voice. Install the Arabic voice from the OS if it is missing — on Windows,
+Settings → Time & Language → Speech → Add voices → Arabic; on macOS, System
+Settings → Accessibility → Spoken Content → System Voice → Manage Voices →
+Arabic. The project can
 also run the install for you: `python -m cli speak --install-engine` runs the
 platform's package manager, and `python -m cli deps` reports the speech engine
 beside the other optional features. macOS already has `say`; the project also
