@@ -94,8 +94,14 @@ class PromptBuilder:
         summary: str | None = None,
         emotion: DialogueEmotion | None = None,
         emotion_enabled: bool = True,
+        reply_language: str | None = None,
     ) -> BuiltPrompt:
-        """Assemble the request for ``question`` from the current state."""
+        """Assemble the request for ``question`` from the current state.
+
+        ``reply_language`` is the language the user's own message was written in
+        (resolved by :mod:`companion.language`); the system block names it so the
+        reply comes back in the language the user used.
+        """
         if not question.strip():
             raise ValueError("A question is required to build a prompt.")
 
@@ -106,6 +112,7 @@ class PromptBuilder:
             fictional_memories=fictional_memories,
             emotion=emotion,
             emotion_enabled=emotion_enabled,
+            reply_language=reply_language,
         )
 
         # The history budget is what is left after the system block and the
@@ -157,8 +164,9 @@ class PromptBuilder:
         fictional_memories: Sequence[Memory],
         emotion: DialogueEmotion | None,
         emotion_enabled: bool,
+        reply_language: str | None = None,
     ) -> str:
-        blocks: list[str] = [personality.system_prompt()]
+        blocks: list[str] = [personality.system_prompt(reply_language=reply_language)]
         blocks.append(f"## {SECTION_SETTINGS}\n{personality.settings.describe()}")
         blocks.append(f"## {SECTION_SUMMARY}\n{(summary or '').strip() or _NONE}")
         blocks.append(f"## {SECTION_MEMORIES}\n{_format_memories(memories)}")

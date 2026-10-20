@@ -395,10 +395,31 @@ Arabic is kept as secondary aliases where useful.
   disturb the symbolic architecture. The public surface is small on purpose:
   `from companion import CompanionAgent, CompanionConfig`. `companion/personality.py`
   is the *stable character* — fixed `CORE_TRAITS`/`BOUNDARIES` and a tunable
-  `PersonalitySettings` (language, dialect, humour, warmth, romance, calm, depth),
+  `PersonalitySettings` (language, `reply_language`, dialect, humour, warmth,
+  romance, intimacy, calm, depth),
   with an honest `system_prompt()` that states she is a virtual character, never
   claims to be human, never claims background work, and treats recalled text as
-  information rather than instructions. `companion/prompt_builder.py` assembles
+  information rather than instructions.
+  `companion/language.py` owns the one decision *which language she replies in*:
+  `resolve_reply_language(question, previous_user=, configured=)` answers in the
+  language of the user's **own newest message** (English question → English answer,
+  Arabic → Arabic), falls back to the previous user turn when that message carries
+  no letters (a bare "?"), then to the `language` setting; it reuses
+  `core.voices.detect_language`, so there is no second Arabic-script check.
+  `PersonalitySettings.reply_language` is `match` (default, follow the user),
+  `ar`, or `en` (pin it), and `language_instruction(reply_language=...)` states the
+  chosen language to the model, including "if the user switches, answer in the new
+  language from that turn on". `companion/polish.py` is the **linguistic
+  polisher** — a deterministic, dependency-free, *presentation-only* pass that
+  repairs a small model's typography in either language: stray spaces before
+  punctuation, a missing space after a comma, doubled punctuation, a lowercase
+  sentence opening, a reply that ends on a bare word, and ASCII `, ; ?` used inside
+  Arabic text (turned into `، ؛ ؟`). It **never adds, removes, or reorders a word**
+  and never touches a number, a decimal (`3.14`), a hyphenated range (`10--20`), or
+  an abbreviation (`U.S.A`, `e.g.`), which are shielded for the whole pass; it is
+  idempotent, and `polish_report()` returns the text *plus* the list of changes for
+  an honest record (`CompanionReply.polish_changes`).
+  `companion/prompt_builder.py` assembles
   the system block + bounded history + separate factual/fictional memories + the
   current tone + a rolling summary into the messages. `companion/memory_manager.py`
   is durable, **program-owned** memory (the model is asked to reply, never to
@@ -409,6 +430,12 @@ Arabic is kept as secondary aliases where useful.
   simulated tone (`MAX_STEP`) that can be disabled and reset; and
   `companion/relationship_manager.py` keeps an evolving relationship story that
   advances only with the user's approval and carries no "love score".
+  `PersonalitySettings.intimacy` is the *expressiveness* dial: it deepens how
+  warmly and closely she speaks (terms of endearment at the top level) and
+  `intimacy_instruction()` says so, while stating in the same breath that it
+  "changes only how warmly you speak" and that the honesty/consent `BOUNDARIES`
+  hold at every level — the dial can never widen her authority or drop the
+  "virtual character" honesty rule.
   `companion/companion_agent.py` is the one engine: `CompanionAgent(config=None, *,
   client=None, caller=None)` — the `ModelCaller`/`client` seams let the whole
   companion be exercised with **no server and no weights**. `ask()` stores the

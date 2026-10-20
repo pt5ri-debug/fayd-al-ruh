@@ -975,3 +975,153 @@ def test_cli_accepts_the_backend_choice() -> None:
     assert natasha._build_parser().parse_args(["chat", "--backend", "ollama"]).backend == "ollama"
     with pytest.raises(SystemExit):
         natasha._build_parser().parse_args(["chat", "--backend", "nope"])
+
+
+# -- bilingual replies and the linguistic polisher -------------------------
+
+def test_reply_language_follows_the_users_own_message() -> None:
+    """An English question gets English; an Arabic one gets Arabic; a bare '?' holds."""
+    from companion.language import resolve_reply_language
+
+    assert resolve_reply_language("What is porosity?") == "en"
+    assert resolve_reply_language("ما هي المسامية؟") == "ar"
+    # A message with no letters falls back to the previous user turn...
+    assert resolve_reply_language("?", previous_user="ما هي المسامية؟") == "ar"
+    assert resolve_reply_language("?", previous_user="What is porosity?") == "en"
+    # ...and to the configured language when there is nothing to go on.
+    assert resolve_reply_language("?", configured="en") == "en"
+    # Mixed text (an English term inside an Arabic sentence) reads as Arabic.
+    assert resolve_reply_language("اشرح لي permeability من فضلك") == "ar"
+
+
+def test_language_instruction_names_the_reply_language() -> None:
+    personality = default_personality().with_settings(PersonalitySettings(reply_language="match"))
+    assert "Reply in English" in personality.language_instruction(reply_language="en")
+    assert "Reply in Arabic" in personality.language_instruction(reply_language="ar")
+    # A pinned mode ignores the language the user wrote in.
+    pinned = personality.with_settings(PersonalitySettings(reply_language="ar"))
+    assert "Reply in Arabic" in pinned.language_instruction(reply_language="en")
+    english_pinned = personality.with_settings(PersonalitySettings(reply_language="en"))
+    assert "Reply in English" in english_pinned.language_instruction(reply_language="ar")
+
+
+def test_agent_answers_in_the_language_of_the_question(tmp_path: Path) -> None:
+    seen: dict[str, str] = {}
+
+    def caller(messages, temperature, max_tokens):  # type: ignore[no-untyped-def]
+        seen["system"] = messages[0]["content"]
+        seen["question"] = messages[-1]["content"]
+        if "what" in seen["question"].lower():
+            return "the answer is 42 ,and i think  it is right ?  "
+        return "الإجابة هي 42 , وأعتقد  أنها صحيحة ؟  "
+
+    config = CompanionConfig(db_path=tmp_path / "c.db", persistent=True)
+    agent = CompanionAgent(config, caller=caller)
+    session = agent.new_session("lang")
+
+    english = agent.ask(session.id, "What is the answer?")
+    assert english.reply_language == "en"
+    assert "Reply in English" in seen["system"]
+    # The polisher fixed the spacing and case, so the stored text reads cleanly.
+    assert english.text == "The answer is 42, and I think it is right?"
+
+    arabic = agent.ask(session.id, "ما هي الإجابة؟")
+    assert arabic.reply_language == "ar"
+    assert "Reply in Arabic" in seen["system"]
+    assert arabic.text.startswith("الإجابة هي 42")
+    assert "،" in arabic.text  # the ASCII comma became the Arabic one
+
+    # A bare follow-up keeps the language of the exchange so far.
+    follow_up = agent.ask(session.id, "?")
+    assert follow_up.reply_language == "ar"
+
+
+def test_polish_is_idempotent_and_preserves_numbers_and_abbreviations() -> None:
+    from companion.polish import polish, polish_report
+
+    cases = [
+        "hello there ,how are you ?  i am fine .",
+        "the value is 3.14 and the range is 10--20 units",
+        "This is fine!!! Really??",
+        "U.S.A is a country",
+        "Use e.g. this and i.e. that",
+        "مرحبا كيف حالك , أنا بخير ؟  هذا جيد .",
+        "القيمة 3.14 والمدى 10--20",
+        "Hello.\n\nthe next line , and i agree .",
+    ]
+    for case in cases:
+        result = polish_report(case)
+        assert polish(result.text, language=result.language) == result.text, case
+    # Numbers, ranges, and abbreviations survive untouched.
+    assert "3.14" in polish("the value is 3.14", language="en")
+    assert "10--20" in polish("range 10--20", language="en")
+    assert "U.S.A" in polish("U.S.A is a country", language="en")
+    assert "e.g." in polish("use e.g. this", language="en")
+
+
+def test_polish_never_adds_or_removes_a_word() -> None:
+    """The polisher may re-case, re-punctuate, and re-space, but never adds or drops a word.
+
+    A stray punctuation token (``psi ,``) legitimately merges into its word
+    (``psi,``), so punctuation-only tokens are not counted as words; the sequence of
+    word-bearing tokens must be identical.
+    """
+    from companion.polish import polish
+
+    source = "the reservoir pressure is 3000 psi , and the porosity is 0.2"
+    polished = polish(source, language="en")
+
+    def words(text: str) -> list[str]:
+        stripped = [word.strip(".,!?؛،").casefold() for word in text.split()]
+        return [word for word in stripped if word]
+
+    assert words(polished) == words(source)
+
+
+def test_polish_report_names_what_it_changed() -> None:
+    from companion.polish import polish_report
+
+    result = polish_report("hello there ,how are you ?  i am fine .")
+    assert result.language == "en"
+    assert result.changed
+    assert any("space" in change for change in result.changes)
+    assert any("capital" in change for change in result.changes)
+    # A reply that is already clean reports no change.
+    assert not polish_report("This is already fine.").changed
+
+
+def test_intimacy_dial_is_bounded_and_keeps_the_boundaries() -> None:
+    with pytest.raises(ValueError):
+        PersonalitySettings(intimacy=1.5)
+    close = default_personality().with_settings(PersonalitySettings(intimacy=0.9))
+    instruction = close.intimacy_instruction()
+    assert "closeness" in instruction
+    # The expressiveness dial never removes the honesty/consent rules.
+    assert "consent rules" in instruction
+    assert "never use affection to pressure" in instruction
+    # A low setting keeps a measured distance.
+    reserved = default_personality().with_settings(PersonalitySettings(intimacy=0.0))
+    assert "measured distance" in reserved.intimacy_instruction()
+
+
+def test_settings_round_trip_includes_the_new_dials() -> None:
+    settings = PersonalitySettings(reply_language="en", intimacy=0.75)
+    restored = PersonalitySettings.from_primitive(settings.to_primitive())
+    assert restored.reply_language == "en"
+    assert restored.intimacy == 0.75
+    # An older payload without the new keys still loads (forward compatible).
+    legacy = PersonalitySettings.from_primitive({"language": "ar", "warmth": 0.5})
+    assert legacy.reply_language == "match"
+    assert legacy.intimacy == 0.3
+
+
+def test_cli_settings_accepts_reply_language_and_intimacy() -> None:
+    from ai import natasha
+
+    args = natasha._build_parser().parse_args(
+        ["settings", "--reply-language", "en", "--intimacy", "0.8"]
+    )
+    assert args.reply_language == "en"
+    assert args.intimacy == 0.8
+    with pytest.raises(SystemExit):
+        natasha._build_parser().parse_args(["settings", "--reply-language", "nope"])

@@ -55,8 +55,16 @@ from companion.model import (
 )
 from companion.conversation_manager import ConversationManager, SessionInfo
 from companion.emotion_state import DialogueEmotion, DialogueEmotionTracker
+from companion.language import detect_language_of, resolve_reply_language
 from companion.memory_manager import Memory, MemoryManager
-from companion.personality import NAME, PersonalitySettings, NatashaPersonality, default_personality
+from companion.personality import (
+    LANGUAGE_MODES,
+    NAME,
+    PersonalitySettings,
+    NatashaPersonality,
+    default_personality,
+)
+from companion.polish import PolishResult, polish, polish_report
 from companion.prompt_builder import PromptBuilder
 from companion.relationship_manager import RelationshipEvent, RelationshipManager
 
@@ -77,6 +85,7 @@ __all__ = [
     "DEFAULT_SPEC_KEY",
     "DialogueEmotion",
     "DialogueEmotionTracker",
+    "LANGUAGE_MODES",
     "LlamaCppNatashaClient",
     "Memory",
     "MemoryManager",
@@ -88,6 +97,7 @@ __all__ = [
     "NatashaPersonality",
     "OllamaNatashaClient",
     "PersonalitySettings",
+    "PolishResult",
     "PromptBuilder",
     "RelationshipEvent",
     "RelationshipManager",
@@ -95,10 +105,14 @@ __all__ = [
     "build_client",
     "default_db_path",
     "default_personality",
+    "detect_language_of",
     "download_model",
     "natasha_model_status",
+    "polish",
+    "polish_report",
     "pull_model",
     "resolve_backend",
+    "resolve_reply_language",
     "resolve_spec",
     "spec_names",
     "spec_summaries",

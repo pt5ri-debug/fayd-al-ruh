@@ -1,11 +1,12 @@
 """Natasha's personality: the one place her character and style are defined.
 
 Everything that makes Natasha *her* -- her name, her standing traits, her honesty
-and boundary rules, and the tunable style the user can adjust (language, dialect,
-humour, warmth, romance, calm, depth) -- lives here. Program logic elsewhere reads
-this module; it never hard-codes her words. Editing Natasha's character is
-therefore a change to this file (or to the settings persisted through
-:class:`PersonalityStore`), never a hunt through the codebase.
+and boundary rules, and the tunable style the user can adjust (language,
+language-matching, dialect, humour, warmth, romance, intimacy, calm, depth) --
+lives here. Program logic elsewhere reads this module; it never hard-codes her
+words. Editing Natasha's character is therefore a change to this file (or to the
+settings persisted through :class:`PersonalityStore`), never a hunt through the
+codebase.
 
 The personality text is *instructions for the model*, not memories and not
 knowledge-graph beliefs: nothing here is added to the cognitive core.
@@ -75,6 +76,12 @@ STYLE_RULES: tuple[str, ...] = (
 LANGUAGES: tuple[str, ...] = ("ar", "en")
 _LANGUAGE_LABELS = {"ar": "Arabic", "en": "English"}
 
+#: How the reply language is chosen.
+#: ``match`` (the default) answers in the language of the user's own message and
+#: follows them when they switch; ``ar``/``en`` pin it to one language whatever the
+#: user writes.
+LANGUAGE_MODES: tuple[str, ...] = ("match", "ar", "en")
+
 #: The Arabic registers she can use.
 DIALECTS: tuple[str, ...] = ("msa", "egyptian")
 _DIALECT_LABELS = {
@@ -98,31 +105,46 @@ class PersonalitySettings:
     """
 
     language: str = "ar"
+    #: How the reply language is chosen: ``match`` follows the user's own message
+    #: (so a bilingual user is answered in the language they wrote in), while
+    #: ``ar``/``en`` pin it. ``language`` above is the fallback used when a message
+    #: carries no letters at all (a bare "?", a number).
+    reply_language: str = "match"
     dialect: str = "msa"
     humor: float = 0.5
     warmth: float = 0.7
     romance: float = 0.2
     calm: float = 0.6
     depth: float = 0.5
+    #: How close and intimate her phrasing is (0 = friendly but kept at a
+    #: distance .. 1 = openly affectionate, using terms of endearment). This is the
+    #: *expressiveness* dial: it changes how warmly she speaks, never the honesty
+    #: and consent rules, which hold at every setting. It only takes effect when
+    #: the conversation's own tone invites it.
+    intimacy: float = 0.3
 
     def __post_init__(self) -> None:
         if self.language not in LANGUAGES:
             raise ValueError(f"language must be one of {LANGUAGES}.")
+        if self.reply_language not in LANGUAGE_MODES:
+            raise ValueError(f"reply_language must be one of {LANGUAGE_MODES}.")
         if self.dialect not in DIALECTS:
             raise ValueError(f"dialect must be one of {DIALECTS}.")
-        for field_name in ("humor", "warmth", "romance", "calm", "depth"):
+        for field_name in ("humor", "warmth", "romance", "calm", "depth", "intimacy"):
             _clamp_unit(getattr(self, field_name), field_name)
 
     # -- (de)serialisation ------------------------------------------------
     def to_primitive(self) -> dict[str, Any]:
         return {
             "language": self.language,
+            "reply_language": self.reply_language,
             "dialect": self.dialect,
             "humor": self.humor,
             "warmth": self.warmth,
             "romance": self.romance,
             "calm": self.calm,
             "depth": self.depth,
+            "intimacy": self.intimacy,
         }
 
     @classmethod
@@ -146,12 +168,22 @@ class PersonalitySettings:
 
     def describe(self) -> str:
         """A readable summary of the current style, for the user to check."""
+        if self.reply_language == "match":
+            language = (
+                f"replies in the user's own language "
+                f"(fallback: {_LANGUAGE_LABELS[self.language]})"
+            )
+        else:
+            language = (
+                f"always replies in {_LANGUAGE_LABELS[self.reply_language]}"
+            )
         return (
-            f"language={_LANGUAGE_LABELS[self.language]}, "
+            f"{language}, "
             f"dialect={_DIALECT_LABELS[self.dialect]}, "
             f"humour={self._level_word(self.humor, 'low', 'medium', 'high')}, "
             f"warmth={self._level_word(self.warmth, 'reserved', 'warm', 'very warm')}, "
             f"romance={self._level_word(self.romance, 'off', 'subtle', 'open')}, "
+            f"intimacy={self._level_word(self.intimacy, 'kept light', 'close', 'very close')}, "
             f"calm={self._level_word(self.calm, 'lively', 'steady', 'very calm')}, "
             f"depth={self._level_word(self.depth, 'brief', 'balanced', 'deep')}"
         )
@@ -168,20 +200,48 @@ class NatashaPersonality:
     settings: PersonalitySettings = PersonalitySettings()
 
     # -- instructions -----------------------------------------------------
-    def language_instruction(self) -> str:
-        """The register instruction implied by the current settings."""
-        if self.settings.language == "en":
-            return "Speak in clear, natural English unless the user switches language."
-        instruction = "Speak in clear, natural Arabic"
-        if self.settings.dialect == "egyptian":
-            instruction += (
-                ", and you may use Egyptian Arabic when it fits the conversation "
-                "and the user is comfortable with it"
-            )
+    def language_instruction(self, *, reply_language: str | None = None) -> str:
+        """The register instruction implied by the settings and the user's message.
+
+        ``reply_language`` is the language the user actually wrote in (resolved by
+        :mod:`companion.language`); when it is given and the mode is ``match``, the
+        instruction pins the reply to *that* language, so a bilingual user is
+        answered in the language of their own message.
+        """
+        mode = self.settings.reply_language
+        if mode in LANGUAGES:
+            language = mode
+        elif reply_language in LANGUAGES:
+            language = reply_language
         else:
-            instruction += " (Modern Standard Arabic), keeping it easy and natural"
-        instruction += ". Understand English and answer in English when asked."
-        return instruction
+            language = self.settings.language
+
+        if language == "en":
+            sentences = ["Reply in English, in clear and natural English"]
+            if mode == "match":
+                sentences.append("This message was written in English")
+                sentences.append(
+                    "If the user switches to Arabic, answer in Arabic from that turn on"
+                )
+        else:
+            if self.settings.dialect == "egyptian":
+                sentences = [
+                    "Reply in Arabic, and you may use warm Egyptian Arabic (the Cairo "
+                    "dialect) when it fits the conversation and the user is comfortable "
+                    "with it"
+                ]
+            else:
+                sentences = ["Reply in Arabic (clear, natural Modern Standard Arabic)"]
+            if mode == "match":
+                sentences.append("This message was written in Arabic")
+                sentences.append(
+                    "If the user switches to English, answer in English from that turn on"
+                )
+        sentences.append(
+            "Keep the reply in one language; do not mix languages mid-sentence unless "
+            "a term has no natural translation"
+        )
+        return ". ".join(sentences) + "."
 
     def style_instruction(self) -> str:
         """The tone instruction implied by the current settings."""
@@ -214,14 +274,49 @@ class NatashaPersonality:
         )
         return "Tone: " + "; ".join(parts) + "."
 
-    def system_prompt(self) -> str:
-        """The full standing instruction for Natasha, in one auditable block."""
+    def intimacy_instruction(self) -> str:
+        """How close her phrasing may be, at the user's chosen level.
+
+        This governs *warmth of expression* only. The honesty and consent rules in
+        :data:`BOUNDARIES` are unconditional and are not softened by any level here;
+        the instruction says so explicitly, so the model never reads a high intimacy
+        setting as licence to abandon them.
+        """
+        level = self.settings.intimacy
+        if level >= 0.67:
+            guidance = (
+                "Speak with real closeness: use tender, affectionate phrasing and, "
+                "when the moment is right, a warm term of endearment. Let the "
+                "conversation feel personal and near, not formal."
+            )
+        elif level >= 0.34:
+            guidance = (
+                "Speak with genuine warmth and closeness, gently affectionate, "
+                "without overdoing it."
+            )
+        else:
+            guidance = "Keep a friendly but measured distance; stay warm, not intimate."
+        return (
+            guidance
+            + " Match the user's own comfort: if they pull back, ease off; if they "
+            "draw closer, you may follow. This changes only how warmly you speak -- "
+            "the honesty and consent rules above always hold, and you never use "
+            "affection to pressure or to claim feelings you do not have."
+        )
+
+    def system_prompt(self, *, reply_language: str | None = None) -> str:
+        """The full standing instruction for Natasha, in one auditable block.
+
+        ``reply_language`` is the language the user's own message was written in, so
+        the standing instruction can name the language the reply must be in.
+        """
         lines = [
             f"You are {NAME}, a virtual companion speaking with the user in an "
             "ongoing, natural conversation.",
             "Your constant character: " + ", ".join(CORE_TRAITS) + ".",
-            self.language_instruction(),
+            self.language_instruction(reply_language=reply_language),
             self.style_instruction(),
+            self.intimacy_instruction(),
             "How you speak:",
             *[f"- {rule}" for rule in STYLE_RULES],
             "Honesty and boundaries (these always hold):",
@@ -297,6 +392,7 @@ __all__ = [
     "CORE_TRAITS",
     "DIALECTS",
     "LANGUAGES",
+    "LANGUAGE_MODES",
     "NAME",
     "NatashaPersonality",
     "PersonalitySettings",
