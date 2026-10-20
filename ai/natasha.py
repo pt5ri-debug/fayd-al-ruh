@@ -258,10 +258,12 @@ def run_settings(args: argparse.Namespace) -> int:
     agent = _agent(args)
     changes = {
         "language": args.language,
+        "reply_language": args.reply_language,
         "dialect": args.dialect,
         "humor": args.humor,
         "warmth": args.warmth,
         "romance": args.romance,
+        "intimacy": args.intimacy,
         "calm": args.calm,
         "depth": args.depth,
     }
@@ -500,11 +502,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
     settings = sub.add_parser("settings", help="Show or change the dialogue style.")
     _add_connection_arguments(settings)
-    settings.add_argument("--language", choices=("ar", "en"), default=None)
+    settings.add_argument("--language", choices=("ar", "en"), default=None,
+                          help="the fallback language when a message carries no letters.")
+    settings.add_argument(
+        "--reply-language", dest="reply_language", choices=("match", "ar", "en"),
+        default=None,
+        help="match (default) answers in the user's own language; ar/en pin it.",
+    )
     settings.add_argument("--dialect", choices=("msa", "egyptian"), default=None)
     settings.add_argument("--humor", type=float, default=None)
     settings.add_argument("--warmth", type=float, default=None)
     settings.add_argument("--romance", type=float, default=None)
+    settings.add_argument(
+        "--intimacy", type=float, default=None,
+        help="how close and affectionate her phrasing is (0..1); never changes the honesty rules.",
+    )
     settings.add_argument("--calm", type=float, default=None)
     settings.add_argument("--depth", type=float, default=None)
 

@@ -40,6 +40,7 @@ from companion.config import CompanionConfig
 from companion.conversation_manager import ConversationManager, SessionInfo
 from companion.database import CompanionDatabase
 from companion.emotion_state import DialogueEmotion, DialogueEmotionTracker
+from companion.language import last_user_text, resolve_reply_language
 from companion.memory_manager import MemoryManager, MemoryCandidate
 from companion.model import (
     NatashaModelClient,
@@ -49,6 +50,7 @@ from companion.model import (
     strip_thinking,
 )
 from companion.personality import NAME, PersonalitySettings, PersonalityStore, NatashaPersonality
+from companion.polish import polish_report
 from companion.prompt_builder import PromptBuilder
 from companion.relationship_manager import EventCandidate, RelationshipEvent, RelationshipManager
 from core.coder_model import CoderMessage, CoderUnavailable
@@ -75,6 +77,10 @@ class CompanionReply:
     emotion: DialogueEmotion | None = None
     prompt_notes: tuple[str, ...] = ()
     history_used: int = 0
+    #: The language the reply was written in, chosen from the user's own message.
+    reply_language: str = "ar"
+    #: The typographic repairs the linguistic polisher made, for an honest record.
+    polish_changes: tuple[str, ...] = ()
 
     def to_primitive(self) -> dict[str, Any]:
         return {
@@ -85,6 +91,8 @@ class CompanionReply:
             "emotion": self.emotion.to_primitive() if self.emotion else None,
             "prompt_notes": list(self.prompt_notes),
             "history_used": self.history_used,
+            "reply_language": self.reply_language,
+            "polish_changes": list(self.polish_changes),
         }
 
 
@@ -243,6 +251,17 @@ class CompanionAgent:
                 raise CompanionError("No user message to answer.")
 
         history = self.conversations.recent(conversation_id, self.config.history_window)
+
+        # The reply language follows the user's own message: an English question
+        # gets an English answer, an Arabic one an Arabic answer. A bare "?" keeps
+        # the language of the exchange so far.
+        settings = self.settings()
+        reply_language = resolve_reply_language(
+            question,
+            previous_user=last_user_text(history[:-1]) if history else None,
+            configured=settings.language,
+        )
+
         relevant = self.memories.retrieve(
             question, limit=self.config.memory_limit, fictional=False
         )
@@ -260,6 +279,7 @@ class CompanionAgent:
             summary=summary,
             emotion=emotion,
             emotion_enabled=self.config.emotion_enabled,
+            reply_language=reply_language,
         )
 
         try:
@@ -271,6 +291,11 @@ class CompanionAgent:
         reply_text = strip_thinking(reply_text or "")
         if not reply_text:
             raise CompanionError("The model returned an empty reply.")
+        # The linguistic polisher repairs the model's typography (spacing,
+        # punctuation, sentence case) in the language of the reply. It never adds,
+        # removes, or reorders a word, so what is stored is still the model's own.
+        polish_result = polish_report(reply_text, language=reply_language)
+        reply_text = polish_result.text
 
         assistant = self.conversations.append(conversation_id, "assistant", reply_text)
         self._maybe_summarise(conversation_id)
@@ -282,6 +307,8 @@ class CompanionAgent:
             emotion=emotion if self.config.emotion_enabled else None,
             prompt_notes=built.notes,
             history_used=built.history_used,
+            reply_language=reply_language,
+            polish_changes=polish_result.changes,
         )
 
     def _latest_summary(self, conversation_id: str) -> str | None:
