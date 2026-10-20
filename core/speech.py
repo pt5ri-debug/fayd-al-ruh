@@ -252,11 +252,10 @@ def _sapi_select_voice(voice: Voice | None, language: str | None = None) -> str:
     of that language or gender exists the engine keeps its default rather than
     failing.
     """
-    non_english = bool(language) and language != "en"
-    if voice is None and not non_english:
+    if voice is None and not (language and language != "en"):
         return ""
     script = ["$v=@($s.GetInstalledVoices()|?{$_.Enabled});"]
-    if non_english:
+    if language and language != "en":
         script.append(
             "$c=@($v|?{$_.VoiceInfo.Culture.TwoLetterISOLanguageName -eq '"
             + _ps_quote(language)
