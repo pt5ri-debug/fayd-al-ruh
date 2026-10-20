@@ -264,6 +264,7 @@ def run_settings(args: argparse.Namespace) -> int:
         "warmth": args.warmth,
         "romance": args.romance,
         "intimacy": args.intimacy,
+        "explicitness": args.explicitness,
         "calm": args.calm,
         "depth": args.depth,
     }
@@ -516,6 +517,14 @@ def _build_parser() -> argparse.ArgumentParser:
     settings.add_argument(
         "--intimacy", type=float, default=None,
         help="how close and affectionate her phrasing is (0..1); never changes the honesty rules.",
+    )
+    settings.add_argument(
+        "--explicitness", type=float, default=None,
+        help=(
+            "how explicit the romantic writing may become once the conversation is "
+            "there (0..1): 1 removes the hedging and the fade-to-black. Adults only, "
+            "consent and honesty rules still hold."
+        ),
     )
     settings.add_argument("--calm", type=float, default=None)
     settings.add_argument("--depth", type=float, default=None)

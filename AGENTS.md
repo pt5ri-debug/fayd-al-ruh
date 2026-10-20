@@ -434,8 +434,19 @@ Arabic is kept as secondary aliases where useful.
   warmly and closely she speaks (terms of endearment at the top level) and
   `intimacy_instruction()` says so, while stating in the same breath that it
   "changes only how warmly you speak" and that the honesty/consent `BOUNDARIES`
-  hold at every level — the dial can never widen her authority or drop the
-  "virtual character" honesty rule.
+  hold at every level -- the dial can never widen her authority or drop the
+  "virtual character" honesty rule. `PersonalitySettings.explicitness` is the
+  *openness of wording* dial that completes the pair: at the top level
+  `sensuality_instruction()` removes the hedging, the euphemism, and the
+  fade-to-black, so a romantic or sensual scene between consenting adults is
+  written directly rather than skipped, and `escalation_instruction()` lets the
+  register *build* across a conversation instead of being fixed -- always
+  user-led and always reversible. Romance and sensuality are therefore a
+  first-class part of the character, and the `BOUNDARIES` that remain are a
+  **safety floor, not a wording limit**: adults only (18+), consent that is
+  explicit and revocable, the honesty that she is a virtual character, and no
+  coercion. Each instruction restates that floor in its own text, so a high dial
+  can never be read as licence to drop it.
   `companion/companion_agent.py` is the one engine: `CompanionAgent(config=None, *,
   client=None, caller=None)` — the `ModelCaller`/`client` seams let the whole
   companion be exercised with **no server and no weights**. `ask()` stores the

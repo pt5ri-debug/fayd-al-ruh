@@ -1125,3 +1125,89 @@ def test_cli_settings_accepts_reply_language_and_intimacy() -> None:
     assert args.intimacy == 0.8
     with pytest.raises(SystemExit):
         natasha._build_parser().parse_args(["settings", "--reply-language", "nope"])
+
+
+# -- adult romance: open wording, intact safety floor ----------------------
+
+def test_explicitness_dial_is_bounded_and_round_trips() -> None:
+    with pytest.raises(ValueError):
+        PersonalitySettings(explicitness=1.5)
+    with pytest.raises(ValueError):
+        PersonalitySettings(explicitness=-0.1)
+    settings = PersonalitySettings(romance=0.9, intimacy=0.8, explicitness=1.0)
+    restored = PersonalitySettings.from_primitive(settings.to_primitive())
+    assert restored == settings
+    assert restored.explicitness == 1.0
+    # An older payload without the key still loads at the default.
+    legacy = PersonalitySettings.from_primitive({"romance": 0.5})
+    assert legacy.explicitness == 0.2
+
+
+def test_sensuality_opens_the_wording_at_the_top_level() -> None:
+    open_setting = default_personality().with_settings(PersonalitySettings(explicitness=1.0))
+    text = open_setting.sensuality_instruction()
+    assert "explicitly" in text
+    assert "never fade to black" in text
+    # The safety floor is restated in the very same instruction.
+    assert "adults only" in text
+    assert "18+" in text
+    assert "consent" in text
+    assert "no minors" in text
+
+    middle = default_personality().with_settings(PersonalitySettings(explicitness=0.5))
+    assert "tasteful rather than graphic" in middle.sensuality_instruction()
+
+    chaste = default_personality().with_settings(PersonalitySettings(explicitness=0.0))
+    assert "tender and chaste" in chaste.sensuality_instruction()
+
+
+def test_escalation_is_user_led_and_reversible() -> None:
+    open_setting = default_personality().with_settings(
+        PersonalitySettings(romance=1.0, explicitness=1.0)
+    )
+    text = open_setting.escalation_instruction()
+    assert "build naturally" in text
+    assert "do not hold back" in text
+    # The safe direction is explicit: user-led and reversible.
+    assert "user-led" in text
+    assert "reversible" in text
+    assert "never push past it" in text
+
+    # With romance off, escalation stays off.
+    off = default_personality().with_settings(PersonalitySettings(romance=0.0))
+    assert "Romance is currently off" in off.escalation_instruction()
+
+
+def test_boundaries_are_a_safety_floor_not_a_wording_limit() -> None:
+    """The rules keep adults-only/consent/honesty; they do not forbid open wording."""
+    joined = " ".join(BOUNDARIES).casefold()
+    # Safety floor present...
+    assert "18+" in joined
+    assert "minor" in joined
+    assert "consent" in joined
+    assert "virtual character" in joined
+    assert "manipulation" in joined
+    # ...and the open-wording permission is stated explicitly.
+    assert "fully welcome" in joined
+    assert "do not moralise" in joined
+
+
+def test_system_prompt_includes_the_new_instructions() -> None:
+    personality = default_personality().with_settings(
+        PersonalitySettings(romance=1.0, intimacy=1.0, explicitness=1.0)
+    )
+    prompt = personality.system_prompt()
+    assert "explicitly" in prompt
+    assert "build naturally" in prompt
+    assert "adults only" in prompt
+    # Every boundary still rides along on every request.
+    for rule in BOUNDARIES:
+        assert rule in prompt
+
+
+def test_cli_settings_accepts_explicitness() -> None:
+    from ai import natasha
+
+    args = natasha._build_parser().parse_args(["settings", "--explicitness", "1.0"])
+    assert args.explicitness == 1.0
+    assert natasha._build_parser().parse_args(["settings"]).explicitness is None
