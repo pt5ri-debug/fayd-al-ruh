@@ -555,6 +555,22 @@ Arabic is kept as secondary aliases where useful.
   SAPI→OneCore `_fallback` now triggers whenever Windows speech is available
   rather than gating on the probe — a false-negative probe is one of the ways the
   Arabic voice goes missing, and the attempt is free once SAPI has returned silence.
+  The engine choice is then settled in **one** place: `windows_engine_name()` (the
+  engine that actually lists an Arabic voice first, via `windows_arabic_engine()`,
+  then `windows_onecore_usable()` as the tie-breaker), which both
+  `discover_synthesizer_name()` and `_windows_engine()` consult, so discovery, the
+  `--tts auto` load, and the Qwen3-TTS Arabic fallback can never disagree.
+  `windows_onecore_usable()` treats a listing that returned a OneCore voice as
+  proof the engine works, so the explicit `load_synthesizer('windows-onecore')`
+  gate no longer refuses the one engine that can read Arabic on a false-negative
+  probe. The reverse case is closed too: SAPI does **not** fail on a language it
+  has no voice for — it reads it with a mismatched voice — so
+  `WindowsSapiSynthesizer._render` hands a non-English language it cannot serve
+  (`_sapi_serves_language`, asked of SAPI itself) to the WinRT engine *before*
+  returning its own mangled output, and `WindowsOneCoreSynthesizer._fallback`
+  likewise refuses to hand a language SAPI cannot serve over to it. Either
+  direction therefore ends in real audio or honest silence, never a mangled
+  reading.
   `system_voices()` (cross-platform, cached, cleared by
   `refresh_windows_speech_caches`) is the **one** place the *real* installed voices
   are listed for the menus: the Windows voices (the union above, via
