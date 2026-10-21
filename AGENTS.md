@@ -571,6 +571,14 @@ Arabic is kept as secondary aliases where useful.
   likewise refuses to hand a language SAPI cannot serve over to it. Either
   direction therefore ends in real audio or honest silence, never a mangled
   reading.
+  The chosen voice is also named **inside the SSML** the WinRT engine is given
+  (`<voice name="…">`, XML-escaped, with `xml:lang` taken from that voice), not only
+  on the `Voice` property: the WinRT engine takes the voice from the markup, so a
+  bare `xml:lang` alone overrode the property and read *every* Arabic entry with the
+  language's default voice — a woman's entry and a man's entry both came out as the
+  same male voice. Naming the exact `DisplayName` in the SSML is what makes each
+  entry sound as itself. (SAPI is unaffected: it selects with `SelectVoice` and
+  speaks plain text, with no SSML to override it.)
   `system_voices()` (cross-platform, cached, cleared by
   `refresh_windows_speech_caches`) is the **one** place the *real* installed voices
   are listed for the menus: the Windows voices (the union above, via
