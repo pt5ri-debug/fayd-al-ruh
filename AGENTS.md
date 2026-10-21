@@ -610,7 +610,16 @@ Arabic is kept as secondary aliases where useful.
   speech` run it.
 - `core/voices.py` — the text-to-speech **voice catalog**: 16 `Voice`s in four
   categories (`man`/`woman`/`boy`/`girl`, four each), each naming a timbre
-  (engine `variant` `m1`..`m6` / `f1`..`f4`), a pitch, and a speed.
+  (engine `variant` `m1`..`m6` / `f1`..`f4`), a pitch, and a speed, plus the two
+  settings that make a synthetic voice read **naturally instead of mechanically**:
+  a `pitch_range` (the intonation range, `espeak-ng`'s `-P` — a living sentence
+  melody, kept above the flat engine default of 50) and a `word_gap` (`-g` — a
+  short pause between words for natural rhythm and breath). Speeds are tuned near a
+  human conversational rate (the SAPI/OneCore paths map them onto a near-neutral
+  rate), so men's and women's voices alike read like a person rather than a flat,
+  rushed machine; `MIN/MAX_PITCH_RANGE`, `MIN/MAX_WORD_GAP`, and the
+  `DEFAULT_PITCH_RANGE`/`DEFAULT_WORD_GAP` bound and default them, and a bad entry
+  is rejected in `__post_init__`.
   `CATEGORY_LABELS`/`voice_categories`, `voices_for`, `voice_keys`, `find_voice`
   (raises on an unknown key), `default_voice`/`DEFAULT_VOICE_KEY`, `voice_summaries`,
   and `detect_language` (Arabic script → `ar`, else `en`) so one voice reads both
@@ -618,9 +627,11 @@ Arabic is kept as secondary aliases where useful.
   `description` says so — `espeak-ng` has no true child voice, so `boy`/`girl` are
   a raised pitch on a male/female variant and say that plainly.
   `core/speech.py`'s `CommandSynthesizer`/`load_synthesizer` take that voice and
-  insert its engine flags after the executable (`_espeak_voice_options`; `say`
-  selects a language voice and carries the rate; `flite` has none), and
-  `load_synthesizer("auto")` still falls to `silent` when nothing is installed.
+  insert its engine flags after the executable (`_espeak_voice_options` emits the
+  timbre, pitch, speed, intonation range, and word gap; the Windows OneCore SSML
+  carries the voice's `rate` *and* `pitch` so a category's four voices stay
+  distinct; `say` selects a language voice and carries the rate; `flite` has none),
+  and `load_synthesizer("auto")` still falls to `silent` when nothing is installed.
   **Two kinds of voice** live here now. The synthetic `VOICE_CATALOG` above is
   *settings*; the new :class:`SystemVoice` is a voice the OS **really installed**,
   by its own name (`Microsoft Hoda`, `Majed`, ...). A `SystemVoice` carries the
@@ -1786,6 +1797,15 @@ clone, each optional so the base system still runs without it:
   (`_engine_for_voice`), and the SAPI→OneCore fallback no longer gates on the probe
   — so a machine whose only Arabic voice is OneCore is read aloud even when the
   WinRT probe is a false negative.
+- Phase 13 — natural voices, not mechanical ones: every catalog `Voice` (men and
+  women alike) carries an intonation range (`espeak-ng` `-P`) and a small word gap
+  (`-g`), and the speeds are retuned toward a human conversational rate, so a
+  reading has a living sentence melody and a natural word rhythm instead of the
+  engine's flat, rushed default. `Voice.espeak_options` emits the two new flags, the
+  Windows OneCore SSML carries a catalog voice's `pitch` alongside its `rate` (so
+  the four voices of a category stay distinct), and `core/voices.Voice` validates
+  the new settings. This is the direct answer to "make the voices read like ordinary
+  people, not machines".
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

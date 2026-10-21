@@ -212,7 +212,11 @@ def _say_argv(executable: str, text: str, path: Path) -> list[str]:
 
 
 def _espeak_voice_options(voice: SelectableVoice | None, language: str) -> tuple[str, ...]:
-    """The ``espeak-ng`` flags that select a catalog voice (gender variant, pitch, speed).
+    """The ``espeak-ng`` flags that select a catalog voice.
+
+    The catalog voice's own :meth:`~core.voices.Voice.espeak_options` carry the
+    timbre, pitch, and speed *and* the two settings that keep the reading natural
+    rather than mechanical: the intonation range (``-P``) and the word gap (``-g``).
 
     ``espeak-ng`` has no named voices, so a :class:`~core.voices.SystemVoice` --
     a voice the OS installed -- cannot be selected by name here; the language is
@@ -451,6 +455,21 @@ def _onecore_rate(voice: SelectableVoice | None) -> float:
     return max(0.5, min(2.0, round(voice.speed / 175, 2)))
 
 
+def _onecore_pitch(voice: SelectableVoice | None) -> str:
+    """Map a catalog voice's pitch onto an SSML ``prosody`` pitch offset.
+
+    The WinRT/SAPI engines carry their own sentence intonation, so the melody
+    cannot be set directly; what can be set is the voice's register. A catalog
+    voice's pitch (0..99, neutral 50) becomes a percentage offset from neutral, so
+    the four voices in a category stay clearly distinct instead of all sharing the
+    engine's one default register. An installed voice keeps its own register.
+    """
+    if voice is None or isinstance(voice, SystemVoice):
+        return "0%"
+    offset = max(-50, min(50, voice.pitch - 50))
+    return f"{offset:+d}%"
+
+
 def _windows_onecore_script(
     text_path: Path, target: Path, voice: SelectableVoice | None, language: str | None
 ) -> str:
@@ -474,12 +493,15 @@ def _windows_onecore_script(
     authoritative, and an installed voice keeps its own neutral rate, so no SSML is
     needed. A catalog voice still uses SSML, where the rate matters, with the picked
     voice named in the markup *and* its own language in ``xml:lang`` so the markup
-    cannot fall back to the language default either.
+    cannot fall back to the language default either. For a catalog voice the SSML
+    also carries the voice's ``rate`` and ``pitch``, so the four voices of a
+    category keep distinct speeds and registers instead of one engine default.
     """
     language = language or "en"
     gender = _voice_gender(voice)
     index = _variant_index(voice)
     rate = _onecore_rate(voice)
+    pitch = _onecore_pitch(voice)
     # An installed voice is spoken as plain text (the Voice property is authoritative
     # and its rate is already neutral); a catalog voice needs SSML for the rate.
     use_ssml = not isinstance(voice, SystemVoice)
@@ -537,6 +559,8 @@ def _windows_onecore_script(
             "xmlns=\"http://www.w3.org/2001/10/synthesis\" "
             "xml:lang=\"'+$lang+'\">'+$open+'<prosody rate=\""
             f"{rate}"
+            "\" pitch=\""
+            f"{pitch}"
             "\">'+$esc+'</prosody>'+$close+'</speak>';",
             "try{$stream=Await ($speak.SynthesizeSsmlToStreamAsync($ssml)) "
             "([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])}"

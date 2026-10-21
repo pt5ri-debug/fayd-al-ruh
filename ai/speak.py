@@ -72,7 +72,8 @@ def _list_voices(reader: TextReader) -> int:
             print(
                 f"  {catalog_voice.key:<9} {catalog_voice.label_en:<8} {catalog_voice.label_ar:<8} "
                 f"variant={catalog_voice.variant} pitch={catalog_voice.pitch} "
-                f"speed={catalog_voice.speed}"
+                f"speed={catalog_voice.speed} melody={catalog_voice.pitch_range} "
+                f"word_gap={catalog_voice.word_gap}"
             )
         print()
     return 0

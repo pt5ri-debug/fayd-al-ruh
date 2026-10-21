@@ -91,6 +91,52 @@ def test_voice_espeak_spec_uses_the_language_and_variant():
     assert "-p" in options and "-s" in options
 
 
+def test_every_voice_is_tuned_for_a_natural_reading():
+    """Men's and women's voices alike must not sound like a flat machine.
+
+    Two settings do that: a wide intonation range (a living sentence melody, above
+    the engine's flat default of 50) and a small word gap (a natural pause between
+    words). Every catalog entry carries both, for both genders.
+    """
+    from core.voices import CATEGORY_MAN, CATEGORY_WOMAN
+
+    for voice in VOICE_CATALOG:
+        assert voice.pitch_range > 50, f"{voice.key} would read as a flat monotone"
+        assert voice.word_gap > 0, f"{voice.key} would read with no word rhythm"
+        assert voice.espeak_options("ar")[-4:] == (
+            "-P",
+            str(voice.pitch_range),
+            "-g",
+            str(voice.word_gap),
+        )
+    # The user asked specifically for men's and women's voices to read naturally.
+    for category in (CATEGORY_MAN, CATEGORY_WOMAN):
+        assert all(voice.pitch_range > 50 for voice in voices_for(category))
+        assert all(voice.word_gap > 0 for voice in voices_for(category))
+
+
+def test_voice_prosody_validation_rejects_bad_data():
+    with pytest.raises(ValueError):
+        Voice("x", CATEGORY_MAN, "X", "س", "m1", 50, 150, 500, 2)  # pitch range out of range
+    with pytest.raises(ValueError):
+        Voice("x", CATEGORY_MAN, "X", "س", "m1", 50, 150, 60, 500)  # word gap out of range
+
+
+def test_onecore_ssml_carries_the_catalog_pitch():
+    from pathlib import Path
+
+    from core import speech
+    from core.voices import find_voice
+
+    # A catalog voice sets its register through the SSML, so the four voices of a
+    # category stay distinct instead of all sharing the engine default.
+    script = speech._windows_onecore_script(
+        Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), find_voice("woman-1"), "ar"
+    )
+    assert 'pitch="+10%"' in script  # woman-1 pitch 60 -> +10% from the neutral 50
+    assert "prosody rate=" in script
+
+
 def test_voice_labels_and_description_are_honest():
     boy = find_voice("boy-1")
     assert boy.label("en") == boy.label_en
@@ -381,7 +427,9 @@ def test_windows_sapi_script_renders_text_and_selects_a_gendered_voice():
     assert "ReadAllText('C:/tmp/t.txt',[System.Text.Encoding]::UTF8)" in script
     assert "$s.Speak($text)" in script
     assert "Female" in script  # girl-2 maps onto a female SAPI voice
-    assert "$s.Rate=1" in script  # speed 186 -> rate 1
+    # The natural catalog speeds sit near the neutral 175 wpm reference, so the
+    # SAPI rate lands at (or next to) zero instead of a rushed positive value.
+    assert "$s.Rate=0" in script  # speed 178 -> rate 0
 
     male = speech._windows_sapi_script(Path("C:/tmp/t.txt"), Path("C:/tmp/b.wav"), find_voice("man-4"))
     assert "Male" in male
