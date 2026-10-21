@@ -466,20 +466,27 @@ def _windows_onecore_script(
 
     ``text_path`` is read as UTF-8 so a long Arabic answer is neither truncated by
     the command-line limit nor mangled by console encoding. The rate is applied
-    through SSML, with a plain-text retry if the engine rejects the SSML. A
-    :class:`~core.voices.SystemVoice` is selected by its exact ``DisplayName``,
-    which is what makes the *real* installed voice speak.
+    through SSML, with a plain-text retry if the engine rejects the SSML. The chosen
+    voice is named **inside the SSML** (a ``<voice name="...">`` element) as well as
+    on the ``Voice`` property, because the WinRT engine takes the voice from the
+    markup: a bare ``xml:lang`` alone overrides the property and reads every Arabic
+    entry with the language's *default* voice, which is why a woman's entry and a
+    man's entry both came out as the same male voice.
     """
     language = language or "en"
     gender = _voice_gender(voice)
     index = _variant_index(voice)
     rate = _onecore_rate(voice)
-    selection: list[str] = ["$voices=@([Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices);"]
+    selection: list[str] = [
+        "$voices=@([Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices);",
+        "$pick=$null;",
+    ]
     if isinstance(voice, SystemVoice):
         # The exact installed voice the user picked, by the name the OS reports.
         selection.append(
-            "$pick=@($voices|?{$_.DisplayName -eq '" + _ps_quote(voice.name) + "'});"
-            "if($pick.Count -gt 0){$speak.Voice=$pick[0]};"
+            "$pick=@($voices|?{$_.DisplayName -eq '"
+            + _ps_quote(voice.name)
+            + "'})|Select-Object -First 1;"
         )
     else:
         if language and language != "en":
@@ -494,9 +501,7 @@ def _windows_onecore_script(
                 f"$g=@($voices|?{{$_.Gender.ToString() -eq '{gender}'}});"
                 "if($g.Count -gt 0){$voices=$g};"
             )
-        selection.append(
-            f"if($voices.Count -gt 0){{$speak.Voice=$voices[{index} % $voices.Count]}};"
-        )
+        selection.append(f"if($voices.Count -gt 0){{$pick=$voices[{index} % $voices.Count]}};")
     script = [
         "$ErrorActionPreference='Stop';",
         "Add-Type -AssemblyName System.Runtime.WindowsRuntime;",
@@ -513,9 +518,19 @@ def _windows_onecore_script(
         "[System.Text.Encoding]::UTF8);",
         "$speak=[Windows.Media.SpeechSynthesis.SpeechSynthesizer]::new();",
         *selection,
+        # Set the property *and* name the voice in the SSML below: the WinRT engine
+        # reads the voice from the markup, so the property alone is not enough.
+        "if($pick){$speak.Voice=$pick};",
         "$esc=[System.Security.SecurityElement]::Escape($text);",
-        f"$ssml='<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" "
-        f"xml:lang=\"{_ps_quote(language)}\"><prosody rate=\"{rate}\">'+$esc+'</prosody></speak>';",
+        "$lang='" + _ps_quote(language) + "';$open='';$close='';",
+        "if($pick){$lang=$pick.Language;"
+        "$open='<voice name=\"'+[System.Security.SecurityElement]::Escape($pick.DisplayName)+'\">';"
+        "$close='</voice>'};",
+        "$ssml='<speak version=\"1.0\" "
+        "xmlns=\"http://www.w3.org/2001/10/synthesis\" "
+        "xml:lang=\"'+$lang+'\">'+$open+'<prosody rate=\""
+        f"{rate}"
+        "\">'+$esc+'</prosody>'+$close+'</speak>';",
         "try{$stream=Await ($speak.SynthesizeSsmlToStreamAsync($ssml)) "
         "([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])}"
         "catch{$stream=Await ($speak.SynthesizeTextToStreamAsync($text)) "
