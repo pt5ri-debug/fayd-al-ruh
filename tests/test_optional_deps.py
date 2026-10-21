@@ -21,6 +21,7 @@ from core.optional_deps import (
     FEATURE_IMAGE,
     FEATURE_OCR,
     FEATURE_PDF,
+    FEATURE_PIPER,
     FeatureStatus,
     install,
     install_command,
@@ -104,7 +105,9 @@ def test_image_is_available_when_packages_and_weights_are_present(monkeypatch):
 # --- the bundled requirements files are real and correct ------------------
 
 
-@pytest.mark.parametrize("key", [FEATURE_PDF, FEATURE_OCR, FEATURE_IMAGE])
+@pytest.mark.parametrize(
+    "key", [FEATURE_PDF, FEATURE_OCR, FEATURE_IMAGE, FEATURE_PIPER]
+)
 def test_requirements_file_exists_and_lists_its_imports(key):
     path = requirements_path(key)
     assert path.exists(), f"{path} must ship with the project"

@@ -105,6 +105,13 @@ qwen-speech = [
     "qwen-asr",
     "qwen-tts",
 ]
+# Piper is a separate optional extra: a real, local neural text-to-speech engine
+# (VITS/ONNX) that sounds like a person rather than the robotic formant synthesis
+# of espeak-ng, and -- unlike Qwen3-TTS -- **speaks Arabic**. It runs entirely on
+# this machine, on the CPU, with nothing sent off it. Each voice is a separate
+# ONNX model (a one-time, human-approved download into `data/piper`); the base
+# install needs none of this, and the import is lazy.
+piper = ["piper-tts>=1.2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -176,4 +183,11 @@ ignore_missing_imports = true
 # must still type-check. The Qwen packages ship no type stubs.
 [[tool.mypy.overrides]]
 module = ["torch", "qwen_asr", "qwen_tts"]
+ignore_missing_imports = true
+
+# Piper is an optional extra (``pip install .[piper]``); ``core.piper_speech``
+# imports ``piper``/``onnxruntime`` lazily, so a base install must still
+# type-check. Piper ships no type stubs.
+[[tool.mypy.overrides]]
+module = ["piper", "piper.*", "onnxruntime"]
 ignore_missing_imports = true

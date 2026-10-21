@@ -349,8 +349,8 @@ _WINDOW_OWNED_MENU_LABELS = frozenset(
 
 #: The visible CLI entries the sidebar mirrors, in order (the first one after the
 #: window-owned controls through the Code Studio screen).
-_MIRRORED_MENU_START = 14
-_MIRRORED_MENU_STOP = 21
+_MIRRORED_MENU_START = 16
+_MIRRORED_MENU_STOP = 23
 
 #: The Qwen3 speech entries sit before the window-owned controls (the window shows
 #: their status in the reading-voice picker), so they are mirrored as their own

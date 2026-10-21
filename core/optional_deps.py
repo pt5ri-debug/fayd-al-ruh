@@ -54,6 +54,7 @@ FEATURE_BANNER = "banner"
 FEATURE_NATASHA = "natasha"
 FEATURE_QWEN_ASR = "qwen-asr"
 FEATURE_QWEN_TTS = "qwen-tts"
+FEATURE_PIPER = "piper"
 
 
 @dataclass(frozen=True)
@@ -235,6 +236,22 @@ FEATURES: dict[str, OptionalFeature] = {
         ),
         system_missing_note="no Qwen3-TTS model folder is present yet.",
     ),
+    FEATURE_PIPER: OptionalFeature(
+        key=FEATURE_PIPER,
+        title="Piper neural speech synthesis",
+        summary=(
+            "Read text aloud with a local neural voice that sounds like a person, "
+            "in Arabic and English, instead of the robotic system engine."
+        ),
+        requirements_file="requirements-piper.txt",
+        import_names=("piper",),
+        system_note=(
+            "The voice weights are a separate one-time, human-approved download: "
+            "run `python -m cli piper download --approve` (~63 MB), or drop a "
+            "`<voice>.onnx` file into the data/piper folder."
+        ),
+        system_missing_note="no Piper voice file is present yet.",
+    ),
 }
 
 
@@ -375,6 +392,17 @@ def _qwen_speech_model_cached(kind: str) -> bool:
     return model_is_cached(kind)
 
 
+def _piper_model_cached() -> bool:
+    """Whether at least one Piper voice file (a ``.onnx``) is already on disk.
+
+    The extra installs the runtime; a voice is a separate one-time download (or a
+    file the user drops in), so this is the second half of "usable right now".
+    """
+    from core.piper_speech import model_is_cached
+
+    return model_is_cached()
+
+
 def status(key: str) -> FeatureStatus:
     """Check one optional feature without importing its heavy packages eagerly."""
     missing = missing_imports(key)
@@ -397,6 +425,8 @@ def status(key: str) -> FeatureStatus:
         system_ok = _qwen_speech_model_cached("asr") if python_ok else False
     elif key == FEATURE_QWEN_TTS:
         system_ok = _qwen_speech_model_cached("tts") if python_ok else False
+    elif key == FEATURE_PIPER:
+        system_ok = _piper_model_cached() if python_ok else False
     else:
         system_ok = True
     return FeatureStatus(key=key, python_ok=python_ok, system_ok=system_ok, missing_python=missing)

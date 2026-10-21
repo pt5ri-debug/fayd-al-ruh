@@ -1247,6 +1247,12 @@ class FaydGUI:
             font=self._type.font("2xs"), anchor="w", padx=20, pady=2, wraplength=232, justify="left",
         ).pack(fill="x")
         tk.Label(
+            panel, text=self.service.piper_speech_status(),
+            bg=self._theme.surface, fg=self._theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", padx=20, pady=2,
+            wraplength=232, justify="left",
+        ).pack(fill="x")
+        tk.Label(
             panel, text=self.service.qwen_speech_status(),
             bg=self._theme.surface, fg=self._theme.text_dim,
             font=self._type.font("2xs"), anchor="w", padx=20, pady=2,

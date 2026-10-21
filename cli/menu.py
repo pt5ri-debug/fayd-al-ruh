@@ -112,6 +112,11 @@ def run_qwen_speech(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.qwen_speech", argv)
 
 
+def run_piper_speech(argv: Sequence[str] = ()) -> int:
+    """Manage the local Piper neural voices (natural, Arabic + English)."""
+    return _run_module("cli.piper_speech", argv)
+
+
 def run_agent(argv: Sequence[str] = ()) -> int:
     """Run a tool plan inside the safety sandbox."""
     return _run_module("ai.agent_demo", argv)
@@ -413,6 +418,12 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         "Qwen3 speech: download the local TTS model (~3.4 GB)",
         run_qwen_speech,
         ("qwen-tts", "download", "--approve"),
+    ),
+    ("Piper: status of the natural local voices (Arabic + English)", run_piper_speech, ("status",)),
+    (
+        "Piper: download the natural local voice (~63 MB)",
+        run_piper_speech,
+        ("download", "--approve"),
     ),
     ("Tool agent demo (sandbox)", run_agent, ()),
     ("Jarvis mode (listen, act, speak)", run_jarvis, ()),

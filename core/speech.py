@@ -1075,14 +1075,21 @@ SpeechCommandRunner = Callable[[Sequence[str]], tuple[int, str]]
 def discover_synthesizer_name() -> str:
     """Return the best installed TTS engine, or ``'silent'``.
 
-    The system engines (``espeak``, ``say``, Windows SAPI) come first because they
-    are tiny, already installed, and speak Arabic. On Windows the **OneCore** WinRT
-    engine is preferred over SAPI when it is reachable, because it is the only one
-    that can see the Arabic voice installed through *Settings -> Add voices*.
-    When no system engine exists but the local Qwen3-TTS model is fully present,
-    that model is used instead, so a machine with the Qwen3 extra still gets a
-    natural voice rather than silence.
+    The local **Piper** neural engine comes first when it is fully installed (the
+    extra and a voice file), because it sounds like a person rather than the
+    robotic formant synthesis of the system engines, and it speaks Arabic. The
+    system engines (``espeak``, ``say``, Windows SAPI) come next: they are tiny,
+    already installed, and speak Arabic. On Windows the **OneCore** WinRT engine is
+    preferred over SAPI when it is reachable, because it is the only one that can
+    see the Arabic voice installed through *Settings -> Add voices*. When nothing
+    else exists but the local Qwen3-TTS model is fully present, that model is used
+    instead, so a machine with the Qwen3 extra still gets a natural voice rather
+    than silence.
     """
+    from core.piper_speech import available_synthesizer as piper_available
+
+    if piper_available():
+        return "piper"
     for name, executable, _builder, _voice_options in TTS_ENGINES:
         if shutil.which(executable):
             return name
@@ -1524,6 +1531,37 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
         return SilentSynthesizer()
     voice = _resolve_voice(options.get("voice"))
     language = options.get("language")
+    if name in ("piper",):
+        from core.piper_speech import (
+            PiperSynthesizer,
+            PiperUnavailable,
+            available_synthesizer as piper_ready,
+        )
+
+        if not piper_ready(options.get("root")) and not options.get("runner"):
+            from core.piper_speech import piper_status
+
+            raise ValueError("TTS engine 'piper' is not ready. " + piper_status(options.get("root")).hint)
+        fallback = options.get("fallback")
+        if fallback is None:
+            # Only one of the two languages may have a voice downloaded; a system
+            # engine reads the other rather than leaving it silent. Chosen once here
+            # so every caller (window, CLI, voice loop) behaves the same.
+            system = _system_synthesizer(voice=voice, language=language)
+            if system is not None:
+                fallback = system
+        try:
+            return PiperSynthesizer(
+                voice=voice,
+                language=language,
+                spec_key=options.get("spec_key"),
+                model_dir=options.get("model_dir"),
+                runner=options.get("runner"),
+                fallback=fallback,
+                root=options.get("root"),
+            )
+        except PiperUnavailable as error:
+            raise ValueError(str(error)) from error
     if name in ("qwen3-tts", "qwen"):
         from core.qwen_speech import QwenSpeechUnavailable, QwenTtsSynthesizer, available_synthesizer
 

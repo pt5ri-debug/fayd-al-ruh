@@ -86,7 +86,7 @@ def test_loaders_fall_back_and_reject_unknown_engines():
     with pytest.raises(ValueError):
         load_recognizer("whisper")
     with pytest.raises(ValueError):
-        load_synthesizer("piper")
+        load_synthesizer("not-a-real-engine")
 
 
 def test_voice_assistant_runs_the_full_loop():
@@ -130,22 +130,22 @@ def test_audio_model_describes_a_clip():
 
 
 def test_discovery_returns_a_known_engine_name():
-    assert discover_synthesizer_name() in {"silent", "espeak-ng", "espeak", "flite", "say"}
-    assert discover_recognizer_name() in {"transcript", "whisper"}
+    assert discover_synthesizer_name() in {"silent", "espeak-ng", "espeak", "flite", "say", "piper"}
+    assert discover_recognizer_name() in {"transcript", "whisper", "qwen3-asr"}
 
 
 def test_auto_loader_always_returns_a_usable_engine():
     synth = load_synthesizer("auto")
     recog = load_recognizer("auto", transcript="hello")
-    assert synth.name in {"silent", "espeak-ng", "espeak", "flite", "say"}
-    assert recog.name in {"transcript", "whisper"}
+    assert synth.name in {"silent", "espeak-ng", "espeak", "flite", "say", "piper"}
+    assert recog.name in {"transcript", "whisper", "qwen3-asr"}
     assert synth.synthesize("hello").duration_seconds > 0
 
 
 def test_auto_loader_falls_back_and_named_engine_raises():
     # 'auto' never fails: it picks the best available engine or a safe stand-in.
-    assert load_synthesizer("auto").name in {"silent", "espeak-ng", "espeak", "flite", "say"}
-    assert load_recognizer("auto", transcript="hi").name in {"transcript", "whisper"}
+    assert load_synthesizer("auto").name in {"silent", "espeak-ng", "espeak", "flite", "say", "piper"}
+    assert load_recognizer("auto", transcript="hi").name in {"transcript", "whisper", "qwen3-asr"}
     # an explicitly named, uninstalled engine raises rather than faking audio.
     with pytest.raises(ValueError):
         load_synthesizer("definitely-not-installed")
