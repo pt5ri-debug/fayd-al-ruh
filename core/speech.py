@@ -465,18 +465,24 @@ def _windows_onecore_script(
     voice, so this script is what actually reads Arabic correctly.
 
     ``text_path`` is read as UTF-8 so a long Arabic answer is neither truncated by
-    the command-line limit nor mangled by console encoding. The rate is applied
-    through SSML, with a plain-text retry if the engine rejects the SSML. The chosen
-    voice is named **inside the SSML** (a ``<voice name="...">`` element) as well as
-    on the ``Voice`` property, because the WinRT engine takes the voice from the
-    markup: a bare ``xml:lang`` alone overrides the property and reads every Arabic
-    entry with the language's *default* voice, which is why a woman's entry and a
-    man's entry both came out as the same male voice.
+    the command-line limit nor mangled by console encoding. A chosen **installed**
+    voice is spoken through the documented path -- set the ``Voice`` property and
+    synthesise plain text -- because the WinRT engine takes the voice from any SSML
+    it is given, so a bare ``xml:lang`` there overrode the property and read every
+    Arabic entry with the language's *default* voice (a woman's entry and a man's
+    entry both came out as the same male voice). Plain text leaves the property
+    authoritative, and an installed voice keeps its own neutral rate, so no SSML is
+    needed. A catalog voice still uses SSML, where the rate matters, with the picked
+    voice named in the markup *and* its own language in ``xml:lang`` so the markup
+    cannot fall back to the language default either.
     """
     language = language or "en"
     gender = _voice_gender(voice)
     index = _variant_index(voice)
     rate = _onecore_rate(voice)
+    # An installed voice is spoken as plain text (the Voice property is authoritative
+    # and its rate is already neutral); a catalog voice needs SSML for the rate.
+    use_ssml = not isinstance(voice, SystemVoice)
     selection: list[str] = [
         "$voices=@([Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices);",
         "$pick=$null;",
@@ -518,23 +524,32 @@ def _windows_onecore_script(
         "[System.Text.Encoding]::UTF8);",
         "$speak=[Windows.Media.SpeechSynthesis.SpeechSynthesizer]::new();",
         *selection,
-        # Set the property *and* name the voice in the SSML below: the WinRT engine
-        # reads the voice from the markup, so the property alone is not enough.
         "if($pick){$speak.Voice=$pick};",
-        "$esc=[System.Security.SecurityElement]::Escape($text);",
-        "$lang='" + _ps_quote(language) + "';$open='';$close='';",
-        "if($pick){$lang=$pick.Language;"
-        "$open='<voice name=\"'+[System.Security.SecurityElement]::Escape($pick.DisplayName)+'\">';"
-        "$close='</voice>'};",
-        "$ssml='<speak version=\"1.0\" "
-        "xmlns=\"http://www.w3.org/2001/10/synthesis\" "
-        "xml:lang=\"'+$lang+'\">'+$open+'<prosody rate=\""
-        f"{rate}"
-        "\">'+$esc+'</prosody>'+$close+'</speak>';",
-        "try{$stream=Await ($speak.SynthesizeSsmlToStreamAsync($ssml)) "
-        "([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])}"
-        "catch{$stream=Await ($speak.SynthesizeTextToStreamAsync($text)) "
-        "([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])};",
+    ]
+    if use_ssml:
+        script += [
+            "$esc=[System.Security.SecurityElement]::Escape($text);",
+            "$lang='" + _ps_quote(language) + "';$open='';$close='';",
+            "if($pick){$lang=$pick.Language;"
+            "$open='<voice name=\"'+[System.Security.SecurityElement]::Escape($pick.DisplayName)+'\">';"
+            "$close='</voice>'};",
+            "$ssml='<speak version=\"1.0\" "
+            "xmlns=\"http://www.w3.org/2001/10/synthesis\" "
+            "xml:lang=\"'+$lang+'\">'+$open+'<prosody rate=\""
+            f"{rate}"
+            "\">'+$esc+'</prosody>'+$close+'</speak>';",
+            "try{$stream=Await ($speak.SynthesizeSsmlToStreamAsync($ssml)) "
+            "([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])}"
+            "catch{$stream=Await ($speak.SynthesizeTextToStreamAsync($text)) "
+            "([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])};",
+        ]
+    else:
+        # Plain text: nothing in markup can override the Voice property we just set.
+        script.append(
+            "$stream=Await ($speak.SynthesizeTextToStreamAsync($text)) "
+            "([Windows.Media.SpeechSynthesis.SpeechSynthesisStream]);"
+        )
+    script += [
         "$src=[System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($stream);",
         f"$out=[System.IO.File]::Create('{_ps_quote(str(target))}');",
         "$src.CopyTo($out);$out.Dispose();$src.Dispose();$stream.Dispose();$speak.Dispose();",
