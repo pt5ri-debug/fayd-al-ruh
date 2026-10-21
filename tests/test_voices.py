@@ -1327,42 +1327,54 @@ def test_onecore_script_selects_a_system_voice_by_display_name():
 
 
 def test_onecore_script_names_the_voice_inside_the_ssml():
-    """The WinRT engine takes the voice from the markup, not just the property.
+    """A catalog voice names the picked voice in the SSML, so it cannot fall back.
 
-    A bare ``xml:lang`` alone overrides ``$speak.Voice`` and reads every Arabic
-    entry with the language's default voice, which is why a woman's entry and a
-    man's entry both came out as the same male voice.
+    The WinRT engine takes the voice from the markup, so a bare ``xml:lang`` alone
+    overrode ``$speak.Voice`` and read every Arabic entry with the language's default
+    voice — a woman's entry and a man's entry both came out as the same male voice.
     """
     from pathlib import Path
 
     from core import speech
-    from core.voices import SystemVoice, find_voice
+    from core.voices import find_voice
 
     woman = speech._windows_onecore_script(
-        Path("C:/tmp/t.txt"),
-        Path("C:/tmp/a.wav"),
-        SystemVoice("Microsoft Hoda", "ar-SA", "Female"),
-        "ar",
+        Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), find_voice("woman-1"), "ar"
     )
     assert '<voice name="' in woman
     assert "$pick.DisplayName" in woman
     # The SSML's language follows the picked voice, not the bare request language.
     assert "$lang=$pick.Language" in woman
+    assert "$speak.Voice=$pick" in woman
 
-    man = speech._windows_onecore_script(
-        Path("C:/tmp/t.txt"),
-        Path("C:/tmp/a.wav"),
-        SystemVoice("Microsoft Naayf", "ar-SA", "Male"),
-        "ar",
-    )
-    assert "Microsoft Hoda" in woman and "Microsoft Naayf" in man
-    assert "Microsoft Naayf" not in woman and "Microsoft Hoda" not in man
 
-    # A catalog voice names whichever installed voice was picked the same way.
-    catalog = speech._windows_onecore_script(
-        Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), find_voice("woman-1"), "ar"
-    )
-    assert '<voice name="' in catalog
+def test_onecore_script_speaks_an_installed_voice_as_plain_text():
+    """An installed voice uses the documented path, so nothing can override it.
+
+    Microsoft's documented way to choose a voice is the ``Voice`` property with
+    ``SynthesizeTextToStreamAsync``. That is used for an installed voice (whose rate
+    is already neutral), so no SSML is built that could override the pick — which is
+    exactly how Hoda and Naayf both collapsed onto the language default before.
+    """
+    from pathlib import Path
+
+    from core import speech
+    from core.voices import SystemVoice
+
+    for name in ("Microsoft Hoda", "Microsoft Naayf"):
+        script = speech._windows_onecore_script(
+            Path("C:/tmp/t.txt"),
+            Path("C:/tmp/a.wav"),
+            SystemVoice(name, "ar-SA", "Female"),
+            "ar",
+        )
+        # Selected by its exact display name, set on the property, spoken as text.
+        assert f"$_.DisplayName -eq '{name}'" in script
+        assert "$speak.Voice=$pick" in script
+        assert "SynthesizeTextToStreamAsync" in script
+        # No SSML at all, so nothing in markup can override the chosen voice.
+        assert "SynthesizeSsmlToStreamAsync" not in script
+        assert "xml:lang" not in script
 
 
 def test_say_selects_a_system_voice_by_exact_name():
