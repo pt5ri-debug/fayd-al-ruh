@@ -1096,11 +1096,14 @@ def test_window_reads_a_message_aloud_and_picks_a_voice() -> None:
         widgets: list = []
         walk(app._settings_panel, widgets)
         keys = {voice.key for voice in VOICE_CATALOG}
+        installed_keys = {voice.key for voice in app.service.system_voices()}
         radios = [
             w for w in widgets
-            if isinstance(w, tk.Radiobutton) and w.cget("value") in keys
+            if isinstance(w, tk.Radiobutton) and w.cget("value") in keys | installed_keys
         ]
-        assert len(radios) == len(VOICE_CATALOG)
+        # One radio per catalog voice, plus one per real installed voice when the
+        # machine reports any (none on a headless CI box).
+        assert len(radios) == len(VOICE_CATALOG) + len(installed_keys)
 
         # Choosing a voice applies it to the service and persists the key.
         app._on_voice_change("girl-3")

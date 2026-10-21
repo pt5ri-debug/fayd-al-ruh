@@ -536,6 +536,16 @@ Arabic is kept as secondary aliases where useful.
   actually see (through OneCore when reachable, else SAPI) and say which engine is
   used and whether an Arabic voice is visible — or the exact *Add voices* step when
   it is not — surfaced by `TextReader.describe()` and `python -m cli speak list`.
+  `system_voices()` (cross-platform, cached, cleared by
+  `refresh_windows_speech_caches`) is the **one** place the *real* installed voices
+  are listed for the menus: the Windows voices (OneCore/SAPI, via
+  `windows_installed_voices`) or the macOS `say -v ?` voices, and `()` elsewhere so
+  a caller falls back to the synthetic catalog rather than inventing a voice.
+  `_WindowsPowerShellSynthesizer` now renders through a private `_render` and, when
+  it produces **no audio** (the classic Windows 11 case: the user's only voices are
+  OneCore, so SAPI writes an empty WAV — the reported `0.00 s`), it tries the
+  sibling engine (`_fallback`, SAPI → OneCore when the WinRT probe succeeds) before
+  the silent stand-in, so a blank reading becomes speech instead of silence.
   `AudioClip.read_wav` now decodes 8/16/32-bit and any channel count into mono
   16-bit (`_pcm_to_mono16`), because the OneCore stream is not always 16-bit mono
   and refusing it silently turned a real reading into silence. The
@@ -557,12 +567,35 @@ Arabic is kept as secondary aliases where useful.
   insert its engine flags after the executable (`_espeak_voice_options`; `say`
   selects a language voice and carries the rate; `flite` has none), and
   `load_synthesizer("auto")` still falls to `silent` when nothing is installed.
-- `core/reading.py` — `TextReader`: read the chat's text aloud. Ties a catalog
-  `Voice`, a `SpeechSynthesizer`, and a `Speaker` together behind `render`/
+  **Two kinds of voice** live here now. The synthetic `VOICE_CATALOG` above is
+  *settings*; the new :class:`SystemVoice` is a voice the OS **really installed**,
+  by its own name (`Microsoft Hoda`, `Majed`, ...). A `SystemVoice` carries the
+  engine's exact `name`, its `language` tag (`ar-SA`), its reported `gender`, and
+  the `engine` that listed it; `key` is a stable `system:<engine>:<name>` string
+  (marked by `SYSTEM_VOICE_PREFIX` / `is_system_voice_key`) so a saved choice
+  survives a restart and can never be confused with a catalog key. `language_code`
+  (two-letter), `arabic`, `language_label`/`category_label` (grouped by language,
+  `Arabic`/`العربية`), `label`/`label_en`/`label_ar` (the name, never translated),
+  an honest `description`, and `to_primitive` round out the API. `system_voices()`
+  wraps `core.speech.system_voices` (local import, since `core.speech` imports this
+  module) and `find_system_voice(key)` resolves a `system:` key against what is
+  *currently* installed — returning `None` (so the caller falls back) when the voice
+  was uninstalled. `find_voice` keeps raising for an unknown *catalog* key, so a
+  typo is still reported. This is what fixes the report that the list showed
+  invented espeak voices (Adam/آدم, Layla/ليلى) instead of the real Windows voices:
+  the menus now prefer `system_voices()` and fall back to the catalog only when the
+  OS reports none.
+- `core/reading.py` — `TextReader`: read the chat's text aloud. Ties a chosen
+  voice — a catalog `Voice` **or** a real installed `SystemVoice` — a
+  `SpeechSynthesizer`, and a `Speaker` together behind `render`/
   `speak` (playback is best-effort, so a machine with no player still gets the
   clip)/`save` (WAV), `set_voice`, `available`, `refresh` (re-discovers the engine
-  after one is installed mid-session), and an honest `describe()` that names the
-  voice and says when no engine exists rather than pretending. CLI:
+  after one is installed mid-session), `system_voices()` (the real installed voices,
+  for a menu), and an honest `describe()` that names the
+  voice and says when no engine exists rather than pretending. A
+  `system:<engine>:<name>` key is resolved against what the OS reports and falls
+  back to the catalog default when the voice is gone (`_as_voice`), so a saved
+  choice never asks the engine for a name it would reject. CLI:
   `python -m ai.speak [list] "<text>" --voice <key> [--write-wav f] [--no-play]`
   / `python -m cli speak` and `python -m cli voices`.
 - `core/qwen_speech.py` — the **Qwen3 speech models** (ASR + TTS) as a real, local
@@ -1680,6 +1713,17 @@ clone, each optional so the base system still runs without it:
   reads it through the system engine rather than the model. Surfaced as
   `python -m cli qwen-asr|qwen-tts`, the GUI sidebar's three *Qwen3 speech*
   actions, and a status note in the reading-voice picker.
+- Phase 12 — the **real** installed voices, not invented ones: `core/voices.py`
+  gains `SystemVoice` (a voice the OS reports by name, e.g. `Microsoft Hoda`, with
+  a stable `system:<engine>:<name>` key) and `core/speech.py` gains
+  `system_voices()` (Windows OneCore/SAPI, macOS `say -v ?`), so the voice menus
+  and `python -m cli speak list` show the voices the machine **actually** has —
+  grouped by language, Arabic first — instead of the synthetic espeak catalog
+  (Adam/آدم, Layla/ليلى), which is now shown below as the fallback. A chosen real
+  voice is selected by its exact name in every engine (SAPI `SelectVoice`, OneCore
+  `DisplayName`, `say -v`). The reported silent (`0.00 s`) reading is fixed too:
+  when the selected Windows engine produces an empty clip (all-OneCore machines
+  look empty to SAPI), the sibling engine is tried before the silent stand-in.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

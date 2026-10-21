@@ -244,9 +244,14 @@ _SPEAK_KEY = "auto_speak"
 
 
 def load_reading_voice() -> str:
-    """The saved reading-voice key, defaulting to the catalog default."""
+    """The saved reading-voice key, defaulting to the catalog default.
+
+    A saved ``system:<engine>:<name>`` key is accepted as-is (it names a real
+    installed voice); the voice is resolved against what the OS reports when it is
+    used, so a voice that was uninstalled falls back honestly rather than erroring.
+    """
     from storage.json_store import JsonStore
-    from core.voices import VOICE_CATALOG, DEFAULT_VOICE_KEY
+    from core.voices import VOICE_CATALOG, DEFAULT_VOICE_KEY, is_system_voice_key
 
     valid = {voice.key for voice in VOICE_CATALOG}
     try:
@@ -254,7 +259,11 @@ def load_reading_voice() -> str:
     except Exception:
         return DEFAULT_VOICE_KEY
     key = saved.get("voice") if isinstance(saved, dict) else None
-    return key if key in valid else DEFAULT_VOICE_KEY
+    if not isinstance(key, str):
+        return DEFAULT_VOICE_KEY
+    if key in valid or is_system_voice_key(key):
+        return key
+    return DEFAULT_VOICE_KEY
 
 
 def save_reading_voice(key: str) -> None:
@@ -1223,7 +1232,13 @@ class FaydGUI:
         self._add_bubble("note", f"Cloud will answer from {self._cloud_provider_line(stored)}")
 
     def _build_voice_picker(self, panel: tk.Misc) -> None:
-        """The reading-voice menu (grouped by category) plus the auto-speak toggle."""
+        """The reading-voice menu plus the auto-speak toggle.
+
+        The **real** voices the machine reports (Windows OneCore/SAPI, macOS ``say``)
+        are listed first, grouped by language, because those are what the engine will
+        actually speak with; the synthetic espeak-ng catalog follows for a machine
+        with no named voices.
+        """
         from core.voices import voice_categories, voices_for
 
         note = self.service.reading_status()
@@ -1238,16 +1253,45 @@ class FaydGUI:
             wraplength=232, justify="left",
         ).pack(fill="x")
 
+        installed = self.service.system_voices()
+        if installed:
+            tk.Label(
+                panel, text="Installed voices", bg=self._theme.surface,
+                fg=self._theme.text_secondary, font=self._type.font("2xs"),
+                anchor="w", padx=22,
+            ).pack(fill="x", pady=(4, 0))
+            groups: dict[str, list] = {}
+            for voice in installed:
+                groups.setdefault(voice.language_code, []).append(voice)
+            for code in sorted(groups, key=lambda c: (c != "ar", c)):
+                voices = groups[code]
+                tk.Label(
+                    panel, text=voices[0].language_label(),
+                    bg=self._theme.surface, fg=self._theme.text_dim,
+                    font=self._type.font("2xs"), anchor="w", padx=28,
+                ).pack(fill="x", pady=(2, 0))
+                for voice in voices:
+                    suffix = f"  ({voice.gender})" if voice.gender else ""
+                    tk.Radiobutton(
+                        panel, text=f"{voice.name}{suffix}",
+                        value=voice.key, variable=self._speak_var,
+                        command=partial(self._on_voice_change, voice.key),
+                        bg=self._theme.surface, fg=self._theme.foreground,
+                        selectcolor=self._theme.surface, activebackground=self._theme.surface,
+                        activeforeground=self._theme.foreground, font=self._type.font("xs"),
+                        anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
+                    ).pack(fill="x", padx=28, pady=0)
+
         for category, label_en, _label_ar in voice_categories():
             tk.Label(
                 panel, text=label_en, bg=self._theme.surface, fg=self._theme.text_secondary,
                 font=self._type.font("2xs"), anchor="w", padx=22,
             ).pack(fill="x", pady=(4, 0))
-            for voice in voices_for(category):
+            for catalog_voice in voices_for(category):
                 tk.Radiobutton(
-                    panel, text=f"{voice.label_en}  ·  {voice.label_ar}",
-                    value=voice.key, variable=self._speak_var,
-                    command=partial(self._on_voice_change, voice.key),
+                    panel, text=f"{catalog_voice.label_en}  ·  {catalog_voice.label_ar}",
+                    value=catalog_voice.key, variable=self._speak_var,
+                    command=partial(self._on_voice_change, catalog_voice.key),
                     bg=self._theme.surface, fg=self._theme.foreground,
                     selectcolor=self._theme.surface, activebackground=self._theme.surface,
                     activeforeground=self._theme.foreground, font=self._type.font("xs"),
@@ -1784,13 +1828,18 @@ class FaydGUI:
             )
 
     def _voice_label(self) -> str:
-        from core.voices import find_voice
+        from core.voices import find_system_voice, find_voice, is_system_voice_key
 
+        if is_system_voice_key(self._voice_key):
+            installed = find_system_voice(self._voice_key)
+            if installed is None:
+                return self._voice_key
+            return f"{installed.category_label()} “{installed.label()}”"
         try:
-            voice = find_voice(self._voice_key)
+            catalog_voice = find_voice(self._voice_key)
         except ValueError:
             return self._voice_key
-        return f"{voice.category_label()} “{voice.label()}”"
+        return f"{catalog_voice.category_label()} “{catalog_voice.label()}”"
 
     def _on_voice_change(self, key: str) -> None:
         """Apply the chosen reading voice, persist it, and say which one is active."""

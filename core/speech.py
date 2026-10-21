@@ -40,9 +40,22 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from core.model_interface import CognitiveModel, ModelRequest
-from core.voices import Voice, default_voice, detect_language, find_voice
+from core.voices import (
+    SystemVoice,
+    Voice,
+    default_voice,
+    detect_language,
+    find_system_voice,
+    find_voice,
+    is_system_voice_key,
+)
 
 SAMPLE_RATE = 16_000
+
+#: A voice the caller can choose: either a synthetic catalog :class:`Voice` or a
+#: :class:`SystemVoice` naming a voice the OS really reports. The engine treats a
+#: ``SystemVoice`` as an exact name to select, and a ``Voice`` as settings to map.
+SelectableVoice = Voice | SystemVoice
 
 
 def _pcm_to_mono16(frames: bytes, channels: int, width: int) -> tuple[int, ...]:
@@ -198,9 +211,14 @@ def _say_argv(executable: str, text: str, path: Path) -> list[str]:
     return [executable, "-o", str(path), text]
 
 
-def _espeak_voice_options(voice: Voice | None, language: str) -> tuple[str, ...]:
-    """The ``espeak-ng`` flags that select a catalog voice (gender variant, pitch, speed)."""
-    if voice is None:
+def _espeak_voice_options(voice: SelectableVoice | None, language: str) -> tuple[str, ...]:
+    """The ``espeak-ng`` flags that select a catalog voice (gender variant, pitch, speed).
+
+    ``espeak-ng`` has no named voices, so a :class:`~core.voices.SystemVoice` --
+    a voice the OS installed -- cannot be selected by name here; the language is
+    still honoured, which is the honest best it can do.
+    """
+    if voice is None or isinstance(voice, SystemVoice):
         return ()
     return voice.espeak_options(language)
 
@@ -237,16 +255,20 @@ def _macos_language_voice(language: str) -> str | None:
     return name
 
 
-def _say_voice_options(voice: Voice | None, language: str) -> tuple[str, ...]:
+def _say_voice_options(voice: SelectableVoice | None, language: str) -> tuple[str, ...]:
     """The ``say`` flags for a chosen voice and language.
 
     ``say`` has no gender variant, so only the speaking rate carries over from the
     catalog. It also has no automatic language detection: without ``-v`` it reads
-    with the system default voice, which mangles Arabic. When the text is not
-    English an installed voice for that language is selected, so Arabic is read as
-    Arabic; if none is installed the engine default is left in place.
+    with the system default voice, which mangles Arabic. A :class:`~core.voices.SystemVoice`
+    is selected by its own exact name (``-v <name>``), which is how the real
+    installed voice the user picked is used; otherwise an installed voice for the
+    language is chosen, and if none is installed the engine default is left in
+    place.
     """
     options: list[str] = []
+    if isinstance(voice, SystemVoice):
+        return ("-v", voice.name)
     if language and language != "en":
         name = _macos_language_voice(language)
         if name:
@@ -280,31 +302,43 @@ def _ps_quote(value: str) -> str:
     return value.replace("'", "''")
 
 
-def _voice_gender(voice: Voice | None) -> str | None:
-    """``"Male"``/``"Female"`` for a catalog voice, or ``None`` when unspecified."""
+def _voice_gender(voice: SelectableVoice | None) -> str | None:
+    """``"Male"``/``"Female"`` for a chosen voice, or ``None`` when unspecified.
+
+    A :class:`~core.voices.SystemVoice` carries the gender the OS reported, which
+    is exact; a catalog :class:`~core.voices.Voice` derives it from its variant
+    letter.
+    """
     if voice is None:
         return None
+    if isinstance(voice, SystemVoice):
+        gender = voice.gender.strip().capitalize()
+        return gender if gender in ("Male", "Female") else None
     return "Male" if voice.variant[:1].lower() == "m" else "Female"
 
 
-def _sapi_rate(voice: Voice | None) -> int:
+def _sapi_rate(voice: SelectableVoice | None) -> int:
     """Map a catalog voice's speed onto SAPI's ``-10..10`` rate (175 wpm is neutral)."""
-    if voice is None:
+    if voice is None or isinstance(voice, SystemVoice):
         return 0
     return max(-10, min(10, round((voice.speed - 175) / 20)))
 
 
-def _sapi_select_voice(voice: Voice | None, language: str | None = None) -> str:
+def _sapi_select_voice(voice: SelectableVoice | None, language: str | None = None) -> str:
     """A PowerShell fragment that picks a SAPI voice for the language and gender.
 
-    SAPI voices are named and installed by the OS, so a catalog entry cannot choose
-    an exact timbre. It maps as far as SAPI allows: a non-English ``language``
-    first narrows the candidates to voices whose culture matches (so Arabic text is
-    read by an Arabic voice when one is installed), then the variant's letter picks
-    a male or female voice and the trailing number picks among them. When no voice
-    of that language or gender exists the engine keeps its default rather than
-    failing.
+    SAPI voices are named and installed by the OS. A :class:`~core.voices.SystemVoice`
+    is selected by its **exact name** -- the whole point of listing the real
+    voices, so the one the user picked is the one that speaks. A catalog
+    :class:`~core.voices.Voice` cannot name an exact timbre, so it maps as far as
+    SAPI allows: a non-English ``language`` first narrows the candidates to voices
+    whose culture matches (so Arabic text is read by an Arabic voice when one is
+    installed), then the variant's letter picks a male or female voice and the
+    trailing number picks among them. When no voice of that language or gender
+    exists the engine keeps its default rather than failing.
     """
+    if isinstance(voice, SystemVoice):
+        return f"$s.SelectVoice('{_ps_quote(voice.name)}');"
     if voice is None and not (language and language != "en"):
         return ""
     script = ["$v=@($s.GetInstalledVoices()|?{$_.Enabled});"]
@@ -328,7 +362,7 @@ def _sapi_select_voice(voice: Voice | None, language: str | None = None) -> str:
 
 
 def _windows_sapi_script(
-    text_path: Path, target: Path, voice: Voice | None, language: str | None = None
+    text_path: Path, target: Path, voice: SelectableVoice | None, language: str | None = None
 ) -> str:
     """The one-line PowerShell that renders a text file to the WAV file ``target``.
 
@@ -357,27 +391,28 @@ def _windows_sapi_script(
     return " ".join(script)
 
 
-def _variant_index(voice: Voice | None) -> int:
+def _variant_index(voice: SelectableVoice | None) -> int:
     """The catalog variant's trailing number as a zero-based index (``m3`` -> 2)."""
-    if voice is None:
+    if voice is None or isinstance(voice, SystemVoice):
         return 0
     digits = "".join(character for character in voice.variant if character.isdigit())
     return max(0, int(digits) - 1) if digits else 0
 
 
-def _onecore_rate(voice: Voice | None) -> float:
+def _onecore_rate(voice: SelectableVoice | None) -> float:
     """Map a catalog voice's speed onto a WinRT SSML ``prosody`` rate multiplier.
 
     175 wpm is the neutral reference the SAPI path uses; the multiplier is clamped
-    so an extreme catalog entry cannot ask the engine for an unreadable speed.
+    so an extreme catalog entry cannot ask the engine for an unreadable speed. A
+    real installed voice keeps the engine's own neutral rate.
     """
-    if voice is None:
+    if voice is None or isinstance(voice, SystemVoice):
         return 1.0
     return max(0.5, min(2.0, round(voice.speed / 175, 2)))
 
 
 def _windows_onecore_script(
-    text_path: Path, target: Path, voice: Voice | None, language: str | None
+    text_path: Path, target: Path, voice: SelectableVoice | None, language: str | None
 ) -> str:
     """PowerShell that renders ``text_path`` to the WAV ``target`` with a WinRT voice.
 
@@ -391,26 +426,37 @@ def _windows_onecore_script(
 
     ``text_path`` is read as UTF-8 so a long Arabic answer is neither truncated by
     the command-line limit nor mangled by console encoding. The rate is applied
-    through SSML, with a plain-text retry if the engine rejects the SSML.
+    through SSML, with a plain-text retry if the engine rejects the SSML. A
+    :class:`~core.voices.SystemVoice` is selected by its exact ``DisplayName``,
+    which is what makes the *real* installed voice speak.
     """
     language = language or "en"
     gender = _voice_gender(voice)
     index = _variant_index(voice)
     rate = _onecore_rate(voice)
     selection: list[str] = ["$voices=@([Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices);"]
-    if language and language != "en":
-        # Narrow to the spoken language first, so Arabic is read by an Arabic
-        # voice; when none is installed the engine default is kept (honest).
+    if isinstance(voice, SystemVoice):
+        # The exact installed voice the user picked, by the name the OS reports.
         selection.append(
-            "$m=@($voices|?{$_.Language -like '" + _ps_quote(language) + "*'});"
-            "if($m.Count -gt 0){$voices=$m};"
+            "$pick=@($voices|?{$_.DisplayName -eq '" + _ps_quote(voice.name) + "'});"
+            "if($pick.Count -gt 0){$speak.Voice=$pick[0]};"
         )
-    if gender is not None:
+    else:
+        if language and language != "en":
+            # Narrow to the spoken language first, so Arabic is read by an Arabic
+            # voice; when none is installed the engine default is kept (honest).
+            selection.append(
+                "$m=@($voices|?{$_.Language -like '" + _ps_quote(language) + "*'});"
+                "if($m.Count -gt 0){$voices=$m};"
+            )
+        if gender is not None:
+            selection.append(
+                f"$g=@($voices|?{{$_.Gender.ToString() -eq '{gender}'}});"
+                "if($g.Count -gt 0){$voices=$g};"
+            )
         selection.append(
-            f"$g=@($voices|?{{$_.Gender.ToString() -eq '{gender}'}});"
-            "if($g.Count -gt 0){$voices=$g};"
+            f"if($voices.Count -gt 0){{$speak.Voice=$voices[{index} % $voices.Count]}};"
         )
-    selection.append(f"if($voices.Count -gt 0){{$speak.Voice=$voices[{index} % $voices.Count]}};")
     script = [
         "$ErrorActionPreference='Stop';",
         "Add-Type -AssemblyName System.Runtime.WindowsRuntime;",
@@ -460,6 +506,7 @@ def refresh_windows_speech_caches() -> None:
     """
     _onecore_cache[0] = None
     _windows_voices_cache[0] = None
+    _system_voices_cache[0] = None
 
 
 def windows_onecore_available(*, refresh: bool = False) -> bool:
@@ -592,6 +639,60 @@ def windows_voice_report() -> str:
         "so Arabic would be read by a non-Arabic voice. Add one in Settings -> Time & "
         "Language -> Speech -> Add voices -> Arabic, then reopen this window."
     )
+
+
+#: Cache of the real installed voices, cross-platform (``None`` = not listed yet).
+_system_voices_cache: list[tuple[SystemVoice, ...] | None] = [None]
+
+
+def _macos_system_voices() -> tuple[SystemVoice, ...]:
+    """The real voices macOS ``say`` reports, parsed from ``say -v ?``.
+
+    ``say`` prints ``Name              locale    # example`` per voice; the name and
+    the locale are all that is needed to list and then select a voice by name.
+    """
+    try:
+        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["say", "-v", "?"], capture_output=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ()
+    if completed.returncode != 0:
+        return ()
+    voices: list[SystemVoice] = []
+    for line in completed.stdout.decode("utf-8", "replace").splitlines():
+        match = re.match(r"^(.+?)\s+([a-z]{2}[-_][A-Z]{2})\s", line)
+        if match:
+            voices.append(
+                SystemVoice(match.group(1).strip(), match.group(2).replace("_", "-"), engine="say")
+            )
+    return tuple(voices)
+
+
+def system_voices(*, refresh: bool = False) -> tuple[SystemVoice, ...]:
+    """The **real** voices installed on this machine, or ``()`` when none are known.
+
+    This is the honest list a menu should prefer: the voices the OS itself reports
+    by name (``Microsoft Hoda``, ``Majed``, ...), not the synthetic espeak-ng
+    settings. On Windows the OneCore engine is asked first (it sees the voices
+    added through *Settings -> Add voices*); macOS is read through ``say -v ?``.
+    Other platforms -- and any machine where the query fails -- return ``()``, so a
+    caller falls back to the synthetic catalog rather than inventing a voice.
+    """
+    if _system_voices_cache[0] is not None and not refresh:
+        return _system_voices_cache[0]
+    system = platform.system().lower()
+    voices: tuple[SystemVoice, ...] = ()
+    if system == "windows":
+        engine = _WINDOWS_ONE_CORE if windows_onecore_available() else _WINDOWS_SAPI
+        voices = tuple(
+            SystemVoice(voice.name, voice.language, voice.gender, engine=engine)
+            for voice in windows_installed_voices(refresh=refresh)
+        )
+    elif system == "darwin":
+        voices = _macos_system_voices()
+    _system_voices_cache[0] = voices
+    return voices
 
 
 TTS_ENGINES: tuple[tuple[str, str, "object", "object"], ...] = (
@@ -819,7 +920,7 @@ class CommandSynthesizer:
         executable: str,
         builder,
         *,
-        voice: Voice | None = None,
+        voice: SelectableVoice | None = None,
         language: str | None = None,
         voice_options=None,
     ) -> None:
@@ -878,21 +979,29 @@ class _WindowsPowerShellSynthesizer:
     name = _WINDOWS_SAPI
     executable = _WINDOWS_SHELL
 
-    def __init__(self, *, voice: Voice | None = None, language: str | None = None) -> None:
+    def __init__(self, *, voice: SelectableVoice | None = None, language: str | None = None) -> None:
         self.voice = voice
         self.language = language
 
     def _script(self, text_path: Path, target: Path, language: str) -> str:
         raise NotImplementedError
 
-    def synthesize(self, text: str) -> AudioClip:
-        if not text.strip():
-            raise ValueError("Cannot synthesize empty text.")
+    def _fallback(self) -> _WindowsPowerShellSynthesizer | None:
+        """The sibling Windows engine to try when this one produces no audio.
+
+        The two Windows engines see *different* voice stores: SAPI cannot see the
+        OneCore voices installed through *Settings -> Add voices*, so on a machine
+        whose only voices are OneCore, SAPI writes an empty WAV. Trying the sibling
+        turns that silence into speech instead of a blank reading.
+        """
+        return None
+
+    def _render(self, text: str, language: str) -> AudioClip | None:
+        """Render ``text`` to a clip, or ``None`` when the engine produced nothing."""
         with tempfile.TemporaryDirectory(prefix="fayd-tts-") as folder:
             target = Path(folder) / "speech.wav"
             text_path = Path(folder) / "text.txt"
             text_path.write_text(text, encoding="utf-8")
-            language = self.language or detect_language(text)
             script = self._script(text_path, target, language)
             argv = [
                 self.executable,
@@ -909,13 +1018,30 @@ class _WindowsPowerShellSynthesizer:
                     check=False,
                 )
             except (OSError, subprocess.SubprocessError):
-                return SilentSynthesizer().synthesize(text)
+                return None
             if completed.returncode != 0 or not target.exists():
-                return SilentSynthesizer().synthesize(text)
+                return None
             try:
                 return AudioClip.read_wav(target)
             except (OSError, ValueError):
-                return SilentSynthesizer().synthesize(text)
+                return None
+
+    def synthesize(self, text: str) -> AudioClip:
+        if not text.strip():
+            raise ValueError("Cannot synthesize empty text.")
+        language = self.language or detect_language(text)
+        clip = self._render(text, language)
+        if clip is not None and clip.samples:
+            return clip
+        # No audio: the selected engine has no usable voice (all OneCore voices on
+        # Windows 11 look empty to SAPI). Try the sibling engine before falling back
+        # to silence, so the reading is not silently blank.
+        fallback = self._fallback()
+        if fallback is not None:
+            other = fallback._render(text, language)
+            if other is not None and other.samples:
+                return other
+        return SilentSynthesizer().synthesize(text)
 
 
 class WindowsSapiSynthesizer(_WindowsPowerShellSynthesizer):
@@ -937,6 +1063,13 @@ class WindowsSapiSynthesizer(_WindowsPowerShellSynthesizer):
 
     def _script(self, text_path: Path, target: Path, language: str) -> str:
         return _windows_sapi_script(text_path, target, self.voice, language)
+
+    def _fallback(self) -> _WindowsPowerShellSynthesizer | None:
+        # SAPI cannot see OneCore voices; the WinRT engine can, so prefer it when it
+        # is reachable (the same rule discovery uses).
+        if windows_onecore_available():
+            return WindowsOneCoreSynthesizer(voice=self.voice, language=self.language)
+        return None
 
 
 class WindowsOneCoreSynthesizer(_WindowsPowerShellSynthesizer):
@@ -1083,7 +1216,7 @@ def load_recognizer(name: str = "transcript", **options) -> SpeechRecognizer:
 
 
 def _windows_engine(
-    *, voice: Voice | None = None, language: str | None = None
+    *, voice: SelectableVoice | None = None, language: str | None = None
 ) -> SpeechSynthesizer:
     """The best Windows built-in engine: OneCore (WinRT) when reachable, else SAPI.
 
@@ -1098,7 +1231,7 @@ def _windows_engine(
 
 
 def _system_synthesizer(
-    *, voice: Voice | None = None, language: str | None = None
+    *, voice: SelectableVoice | None = None, language: str | None = None
 ) -> SpeechSynthesizer | None:
     """The installed system TTS engine, or ``None`` when there is none.
 
@@ -1203,18 +1336,24 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
     )
 
 
-def _resolve_voice(value) -> Voice | None:
-    """Coerce a voice key or object into a :class:`~core.voices.Voice`.
+def _resolve_voice(value) -> SelectableVoice | None:
+    """Coerce a voice key or object into a catalog ``Voice`` or a ``SystemVoice``.
 
     ``None`` returns the default catalog voice so a plain ``--tts espeak-ng``
-    still speaks with a real, named timbre; an unknown key raises, so a typo is
-    reported rather than silently replaced.
+    still speaks with a real, named timbre. A ``system:<engine>:<name>`` key is
+    resolved against the voices the OS really reports, so a real installed voice is
+    used exactly; when it is no longer installed the default catalog voice is
+    returned rather than asking the engine for a name it would reject. An unknown
+    catalog key raises, so a typo is reported rather than silently replaced.
     """
     if value is None:
         return default_voice()
-    if isinstance(value, Voice):
+    if isinstance(value, (Voice, SystemVoice)):
         return value
-    return find_voice(str(value))
+    key = str(value)
+    if is_system_voice_key(key):
+        return find_system_voice(key) or default_voice()
+    return find_voice(key)
 
 
 class MicRecording:
@@ -1573,6 +1712,7 @@ __all__ = [
     "MicrophoneRecorder",
     "MicRecording",
     "Playback",
+    "SelectableVoice",
     "SilentSynthesizer",
     "Speaker",
     "SpeechCommandRunner",
@@ -1595,6 +1735,7 @@ __all__ = [
     "refresh_windows_speech_caches",
     "speech_available",
     "speech_install_plan",
+    "system_voices",
     "windows_installed_voices",
     "windows_onecore_available",
     "windows_speech_available",

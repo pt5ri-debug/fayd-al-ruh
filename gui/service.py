@@ -34,7 +34,7 @@ from core.speech import (
     discover_recognizer_name,
     load_recognizer,
 )
-from core.voices import Voice, voice_keys
+from core.voices import SystemVoice, Voice, voice_keys
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
 from gui.import_center import ImportReport, KnowledgeImporter
 from gui.image_edit import ImageEditService
@@ -757,13 +757,25 @@ class ChatService:
         """The key of the voice currently used to read."""
         return self._reader.voice.key
 
-    def set_voice(self, key: str) -> Voice:
-        """Choose a reading voice by key; raises for an unknown key."""
+    def set_voice(self, key: str) -> Voice | SystemVoice:
+        """Choose a reading voice by key; raises for an unknown catalog key.
+
+        A ``system:<engine>:<name>`` key names a real installed voice and is
+        resolved against what the OS reports; a catalog key is resolved as before.
+        """
         return self._reader.set_voice(key)
 
     def voice_keys(self) -> tuple[str, ...]:
         """Every selectable voice key, in catalog order."""
         return voice_keys()
+
+    def system_voices(self) -> tuple[SystemVoice, ...]:
+        """The *real* voices installed on this machine (empty when none are known).
+
+        The window prefers these over the synthetic catalog: they are what the
+        machine will actually speak with, by their own names.
+        """
+        return self._reader.system_voices()
 
     def reading_status(self) -> str:
         """An honest, human-readable status of the reader."""

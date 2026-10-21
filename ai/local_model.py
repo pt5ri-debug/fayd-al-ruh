@@ -57,7 +57,10 @@ class LocalLanguageModel(CallableModel):
 
     def _generate_prompt(self, prompt: str) -> str:
         full = self.generator.generate(
-            prompt, max_new_tokens=self.max_new_tokens, temperature=self.temperature
+            prompt,
+            max_new_tokens=self.max_new_tokens,
+            temperature=self.temperature,
+            seed=self.seed,
         )
         # The generator returns prompt + continuation; a model response is the
         # continuation only, so callers never see their own prompt echoed back.

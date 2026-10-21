@@ -27,15 +27,17 @@ from core.speech import (
     speech_install_plan,
     windows_voice_report,
 )
-from core.voices import Voice, default_voice, find_voice
+from core.voices import SystemVoice, Voice, default_voice, find_system_voice, find_voice, is_system_voice_key
 
 
 class TextReader:
-    """Reads text aloud through the system speech engine, with a catalog voice.
+    """Reads text aloud through the system speech engine, with a chosen voice.
 
     ``engine`` is a synthesizer name (``'auto'`` picks the best installed system
     engine, else the silent stand-in). ``voice`` is a catalog key or
-    :class:`~core.voices.Voice`; ``language`` pins the spoken language and
+    :class:`~core.voices.Voice` -- or a ``system:<engine>:<name>`` key or
+    :class:`~core.voices.SystemVoice` naming a voice the OS really reports, which
+    is preferred when it exists; ``language`` pins the spoken language and
     ``None`` lets the engine decide from the text, so Arabic is read as Arabic.
     """
 
@@ -43,7 +45,7 @@ class TextReader:
         self,
         *,
         engine: str = "auto",
-        voice: str | Voice | None = None,
+        voice: str | Voice | SystemVoice | None = None,
         language: str | None = None,
         speaker: Speaker | None = None,
         synthesizer: SpeechSynthesizer | None = None,
@@ -59,15 +61,25 @@ class TextReader:
     # ------------------------------------------------------------------ voice
 
     @property
-    def voice(self) -> Voice:
+    def voice(self) -> Voice | SystemVoice:
         """The voice currently used to read."""
         return self._voice
 
-    def set_voice(self, voice: str | Voice) -> Voice:
-        """Choose a different catalog voice and rebuild the engine for it."""
+    def set_voice(self, voice: str | Voice | SystemVoice) -> Voice | SystemVoice:
+        """Choose a different voice and rebuild the engine for it."""
         self._voice = _as_voice(voice)
         self._synthesizer = None  # rebuilt lazily with the new voice
         return self._voice
+
+    def system_voices(self) -> tuple[SystemVoice, ...]:
+        """The *real* voices installed on this machine (empty when none are known).
+
+        The menus prefer these over the synthetic catalog: they are what the
+        machine will actually speak with, by their own names.
+        """
+        from core.speech import system_voices
+
+        return system_voices()
 
     # ------------------------------------------------------------- synthesizer
 
@@ -166,12 +178,20 @@ class TextReader:
         return line
 
 
-def _as_voice(value: str | Voice | None) -> Voice:
+def _as_voice(value: str | Voice | SystemVoice | None) -> Voice | SystemVoice:
     if value is None:
         return default_voice()
-    if isinstance(value, Voice):
+    if isinstance(value, (Voice, SystemVoice)):
         return value
-    return find_voice(str(value))
+    key = str(value)
+    if is_system_voice_key(key):
+        resolved = find_system_voice(key)
+        if resolved is not None:
+            return resolved
+        # The voice is no longer installed; fall back to the catalog default so a
+        # saved choice never asks the engine for a name it would reject.
+        return default_voice()
+    return find_voice(key)
 
 
 __all__ = ["TextReader"]

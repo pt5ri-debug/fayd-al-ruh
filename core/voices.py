@@ -20,6 +20,16 @@ Honesty is a hard rule, as everywhere in this project:
 
 The language a voice speaks is chosen from the *text* (Arabic script -> ``ar``,
 otherwise ``en``), so the same voice reads Arabic and English.
+
+Two kinds of voice live here, and the distinction matters:
+
+* :data:`VOICE_CATALOG` -- *synthetic* voices: named settings for ``espeak-ng``
+  (a gender variant, a pitch, a speed). They are always available and portable,
+  but they are not the voices a Windows or macOS user actually installed.
+* :class:`SystemVoice` -- *real* voices: the voices the OS itself reports by name
+  (``Microsoft Hoda``, ``Majed``, ...). They are what the machine really speaks
+  with, so the menus prefer them when they exist and the engine is asked for that
+  exact voice. They are listed through :func:`core.speech.system_voices`.
 """
 
 from __future__ import annotations
@@ -42,6 +52,18 @@ CATEGORY_LABELS: tuple[tuple[str, str, str], ...] = (
 )
 
 _CATEGORY_KEYS = tuple(key for key, _en, _ar in CATEGORY_LABELS)
+
+#: Prefix that marks a key as a *real installed* voice (see :class:`SystemVoice`)
+#: rather than an entry of the synthetic :data:`VOICE_CATALOG`.
+SYSTEM_VOICE_PREFIX = "system:"
+
+#: The categories a *real* system voice is grouped under in a menu, keyed by its
+#: two-letter language code, so the voices a user can actually hear are listed
+#: under the language they speak instead of a synthetic man/woman/child split.
+LANGUAGE_LABELS: dict[str, tuple[str, str]] = {
+    "ar": ("Arabic", "العربية"),
+    "en": ("English", "الإنجليزية"),
+}
 
 #: The lowest and highest pitch and speed an engine accepts, so a bad catalog
 #: entry can never be handed to the engine.
@@ -154,6 +176,99 @@ class Voice:
         }
 
 
+@dataclass(frozen=True)
+class SystemVoice:
+    """A voice that is **really installed** on this machine, by its own name.
+
+    The synthetic :data:`VOICE_CATALOG` is a set of *settings* -- an espeak-ng
+    variant, a pitch, and a speed -- which is honest but cannot name the voice a
+    Windows or macOS user actually has (Microsoft Hoda, Majed, ...). This class is
+    the other half: it wraps a voice the OS reports by name, so the menus can list
+    what the machine will really speak with, and the engine can be asked for that
+    exact voice instead of an approximation.
+
+    Honesty rules, as everywhere:
+
+    * ``name`` is the engine's own voice name (e.g. ``"Microsoft Hoda"``), the
+      exact string the engine is given.
+    * ``language`` is the engine's language tag (``ar-SA``), so Arabic voices are
+      grouped and chosen by the language they truly speak.
+    * ``key`` is a stable ``system:<engine>:<name>`` string, so a saved choice
+      survives a restart and cannot be confused with a catalog key.
+    """
+
+    name: str
+    language: str
+    gender: str = ""
+    engine: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("A system voice needs a name.")
+
+    @property
+    def language_code(self) -> str:
+        """The two-letter language code (``ar-SA`` -> ``ar``; ``en-US`` -> ``en``)."""
+        return self.language.strip().lower().split("-")[0][:2] or "en"
+
+    @property
+    def arabic(self) -> bool:
+        """True when this voice speaks Arabic."""
+        return self.language_code == "ar"
+
+    @property
+    def key(self) -> str:
+        """A stable ``system:<engine>:<name>`` key for menus and persistence."""
+        engine = self.engine or "system"
+        return f"{SYSTEM_VOICE_PREFIX}{engine}:{self.name}"
+
+    def language_label(self, language: str = "en") -> str:
+        """The voice's language group name (``Arabic`` / ``العربية``)."""
+        english, arabic = LANGUAGE_LABELS.get(self.language_code, (self.language, self.language))
+        return arabic if language == "ar" else english
+
+    def label(self, language: str = "en") -> str:
+        """The voice's name as the engine reports it (never translated)."""
+        return self.name
+
+    @property
+    def label_en(self) -> str:
+        """The voice's name (English), for interface parity with :class:`Voice`."""
+        return self.name
+
+    @property
+    def label_ar(self) -> str:
+        """The voice's name (unchanged: an installed voice is not translated)."""
+        return self.name
+
+    def category_label(self, language: str = "en") -> str:
+        """The voice's language group, so a menu can group by language."""
+        return self.language_label(language)
+
+    def description(self, language: str = "en") -> str:
+        """An honest note about what this voice is."""
+        gender = f" ({self.gender})" if self.gender else ""
+        if language == "ar":
+            return (
+                f"صوت حقيقي مثبّت في النظام: {self.name}{gender}، اللغة {self.language}. "
+                "يُنطق مباشرة من محرّك النظام، وليس من إعدادات مختصرة."
+            )
+        return (
+            f"A real voice installed on this machine: {self.name}{gender}, "
+            f"language {self.language}. It is spoken directly by the system engine, "
+            "not approximated from settings."
+        )
+
+    def to_primitive(self) -> dict[str, object]:
+        return {
+            "key": self.key,
+            "name": self.name,
+            "language": self.language,
+            "gender": self.gender,
+            "engine": self.engine,
+        }
+
+
 #: Every selectable voice, grouped by category (four per category). The variants
 #: and pitches are chosen so the four voices in a category sound clearly distinct.
 VOICE_CATALOG: tuple[Voice, ...] = (
@@ -214,6 +329,39 @@ def find_voice(key: str) -> Voice:
         ) from None
 
 
+def is_system_voice_key(key: str) -> bool:
+    """True when ``key`` names a *real installed* voice rather than a catalog one."""
+    return key.strip().startswith(SYSTEM_VOICE_PREFIX)
+
+
+def find_system_voice(key: str) -> SystemVoice | None:
+    """The installed voice a ``system:<engine>:<name>`` key names, or ``None``.
+
+    Resolves against the voices the engine really reports (see
+    :func:`core.speech.system_voices`), so a saved choice points at a voice that
+    exists. ``None`` means the voice is no longer installed here, so the caller can
+    fall back honestly instead of asking the engine for a name it would reject.
+    """
+    if not is_system_voice_key(key):
+        return None
+    for voice in system_voices():
+        if voice.key == key.strip():
+            return voice
+    return None
+
+
+def system_voices() -> tuple[SystemVoice, ...]:
+    """The real voices installed on this machine, or ``()`` when none are known.
+
+    A thin wrapper over :func:`core.speech.system_voices` so callers that only need
+    the catalog module do not have to import the engine layer; the import is local
+    because :mod:`core.speech` itself imports this module.
+    """
+    from core.speech import system_voices as _system_voices
+
+    return _system_voices()
+
+
 def default_voice() -> Voice:
     """The voice used when none was chosen."""
     return _BY_KEY[DEFAULT_VOICE_KEY]
@@ -233,15 +381,21 @@ __all__ = [
     "CATEGORY_MAN",
     "CATEGORY_WOMAN",
     "DEFAULT_VOICE_KEY",
+    "LANGUAGE_LABELS",
     "MAX_PITCH",
     "MAX_SPEED",
     "MIN_PITCH",
     "MIN_SPEED",
+    "SYSTEM_VOICE_PREFIX",
+    "SystemVoice",
     "VOICE_CATALOG",
     "Voice",
     "default_voice",
     "detect_language",
+    "find_system_voice",
     "find_voice",
+    "is_system_voice_key",
+    "system_voices",
     "voice_categories",
     "voice_keys",
     "voice_summaries",
