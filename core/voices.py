@@ -21,6 +21,14 @@ Honesty is a hard rule, as everywhere in this project:
 The language a voice speaks is chosen from the *text* (Arabic script -> ``ar``,
 otherwise ``en``), so the same voice reads Arabic and English.
 
+Each :class:`Voice` carries, besides its timbre, pitch, and speed, the two settings
+that keep the reading from sounding mechanical: an **intonation range** (a living
+sentence melody, ``espeak-ng``'s ``-P``) and a small **word gap** (a natural pause
+between words, ``-g``). A flat pitch and a rushed, gapless delivery are the two
+things that make a synthetic voice sound like a machine; giving every voice a wide
+melody and a conversational pace is what makes men's and women's voices alike read
+like a person. Every catalog entry is tuned that way -- see :data:`VOICE_CATALOG`.
+
 Two kinds of voice live here, and the distinction matters:
 
 * :data:`VOICE_CATALOG` -- *synthetic* voices: named settings for ``espeak-ng``
@@ -72,6 +80,25 @@ MAX_PITCH = 99
 MIN_SPEED = 80
 MAX_SPEED = 450
 
+#: Intonation range (``espeak-ng``'s ``-P``): how far the pitch is allowed to move
+#: across a sentence. A wider range gives the natural sentence melody that a flat
+#: monotone lacks; the default is 50, and the catalog keeps every voice above it so
+#: none reads as a machine. Clamped so a bad entry is never handed to the engine.
+MIN_PITCH_RANGE = 0
+MAX_PITCH_RANGE = 99
+
+#: Word gap (``espeak-ng``'s ``-g``): a short pause between words in units of 10 ms
+#: at the default speed. A small value restores the natural word rhythm and breath
+#: that a rushed, robotic reading loses; ``0`` is the engine's own (rushed) default.
+MIN_WORD_GAP = 0
+MAX_WORD_GAP = 20
+
+#: The intonation range and word gap a voice gets when it does not name its own.
+#: They are the two settings that make a synthetic reading sound less mechanical:
+#: a living sentence melody and a natural pause between words.
+DEFAULT_PITCH_RANGE = 62
+DEFAULT_WORD_GAP = 2
+
 #: Arabic letters (the base block plus the presentation forms), used to pick the
 #: language a piece of text should be spoken in.
 _ARABIC_RE = re.compile(r"[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff]")
@@ -95,8 +122,17 @@ class Voice:
 
     ``variant`` is the engine's own timbre code (``espeak-ng`` uses ``m1``..``m7``
     for male and ``f1``..``f5`` for female); ``pitch`` and ``speed`` shape it
-    further. Nothing here is a recorded person -- the settings are applied to
-    whatever engine is installed, which is why :meth:`description` says so.
+    further, and the two prosody settings below are what keep the reading from
+    sounding mechanical:
+
+    * ``pitch_range`` (``espeak-ng``'s ``-P``) is how far the pitch rises and falls
+      across a sentence. A flat, fixed pitch is the single biggest giveaway of a
+      synthetic voice; a living sentence melody is what a human speaker has.
+    * ``word_gap`` (``espeak-ng``'s ``-g``) is a short pause between words, which
+      restores the natural rhythm and breath a rushed reading loses.
+
+    Nothing here is a recorded person -- the settings are applied to whatever
+    engine is installed, which is why :meth:`description` says so.
     """
 
     key: str
@@ -106,6 +142,8 @@ class Voice:
     variant: str
     pitch: int
     speed: int
+    pitch_range: int = DEFAULT_PITCH_RANGE
+    word_gap: int = DEFAULT_WORD_GAP
 
     def __post_init__(self) -> None:
         if not self.key.strip():
@@ -121,6 +159,15 @@ class Voice:
             raise ValueError(f"Voice {self.key!r} pitch must be in [{MIN_PITCH}, {MAX_PITCH}].")
         if not MIN_SPEED <= self.speed <= MAX_SPEED:
             raise ValueError(f"Voice {self.key!r} speed must be in [{MIN_SPEED}, {MAX_SPEED}].")
+        if not MIN_PITCH_RANGE <= self.pitch_range <= MAX_PITCH_RANGE:
+            raise ValueError(
+                f"Voice {self.key!r} pitch range must be in "
+                f"[{MIN_PITCH_RANGE}, {MAX_PITCH_RANGE}]."
+            )
+        if not MIN_WORD_GAP <= self.word_gap <= MAX_WORD_GAP:
+            raise ValueError(
+                f"Voice {self.key!r} word gap must be in [{MIN_WORD_GAP}, {MAX_WORD_GAP}]."
+            )
 
     def label(self, language: str = "en") -> str:
         """The voice's name in ``language`` (falling back to English)."""
@@ -138,7 +185,12 @@ class Voice:
         return f"{language}+{self.variant}"
 
     def espeak_options(self, language: str = "ar") -> tuple[str, ...]:
-        """The extra argv an ``espeak-ng``/``espeak`` invocation needs for this voice."""
+        """The extra argv an ``espeak-ng``/``espeak`` invocation needs for this voice.
+
+        Alongside the timbre, pitch, and speed, the intonation range (``-P``) and
+        word gap (``-g``) are passed so the reading has a natural sentence melody
+        and word rhythm instead of the engine's flat, rushed default.
+        """
         return (
             "-v",
             self.espeak_voice(language),
@@ -146,6 +198,10 @@ class Voice:
             str(self.pitch),
             "-s",
             str(self.speed),
+            "-P",
+            str(self.pitch_range),
+            "-g",
+            str(self.word_gap),
         )
 
     def description(self, language: str = "en") -> str:
@@ -154,13 +210,17 @@ class Voice:
         if language == "ar":
             return (
                 f"صوت {kind} ({self.label_ar}) من إعدادات محرّك النطق: "
-                f"النمط {self.variant}، النغمة {self.pitch}، السرعة {self.speed}. "
-                "ليس تسجيلاً لشخص حقيقي، ولا صوت طفل حقيقي في فئتي الأولاد والبنات."
+                f"النمط {self.variant}، النغمة {self.pitch}، السرعة {self.speed}، "
+                f"مدى النغمة {self.pitch_range}، فاصل الكلمات {self.word_gap}. "
+                "الإيقاع والتلوين مضبوطان ليقرأ قراءة طبيعية لا آلية، "
+                "وليس تسجيلاً لشخص حقيقي، ولا صوت طفل حقيقي في فئتي الأولاد والبنات."
             )
         return (
             f"A {kind} voice ({self.label_en}) built from the speech engine's settings: "
-            f"variant {self.variant}, pitch {self.pitch}, speed {self.speed}. It is not a "
-            "recording of a real person, and the boys'/girls' categories are a raised "
+            f"variant {self.variant}, pitch {self.pitch}, speed {self.speed}, "
+            f"pitch range {self.pitch_range}, word gap {self.word_gap}. The melody and "
+            "rhythm are tuned so it reads naturally rather than mechanically. It is not "
+            "a recording of a real person, and the boys'/girls' categories are a raised "
             "pitch on a male/female voice, not a real child."
         )
 
@@ -173,6 +233,8 @@ class Voice:
             "variant": self.variant,
             "pitch": self.pitch,
             "speed": self.speed,
+            "pitch_range": self.pitch_range,
+            "word_gap": self.word_gap,
         }
 
 
@@ -270,28 +332,33 @@ class SystemVoice:
 
 
 #: Every selectable voice, grouped by category (four per category). The variants
-#: and pitches are chosen so the four voices in a category sound clearly distinct.
+#: and pitches are chosen so the four voices in a category sound clearly distinct,
+#: and the speeds are kept near a human conversational rate rather than a rushed,
+#: machine-gun clip. The last two numbers per entry are the prosody that keeps the
+#: reading from sounding synthetic: ``pitch_range`` (a wide, living sentence melody
+#: -- every entry is above the flat engine default of 50) and ``word_gap`` (a short
+#: pause between words, restoring natural rhythm and breath).
 VOICE_CATALOG: tuple[Voice, ...] = (
     # --- men ---------------------------------------------------------------
-    Voice("man-1", CATEGORY_MAN, "Adam", "آدم", "m1", 45, 165),
-    Voice("man-2", CATEGORY_MAN, "Basil", "باسل", "m2", 32, 150),
-    Voice("man-3", CATEGORY_MAN, "Faris", "فارس", "m4", 58, 178),
-    Voice("man-4", CATEGORY_MAN, "Tariq", "طارق", "m6", 26, 142),
+    Voice("man-1", CATEGORY_MAN, "Adam", "آدم", "m1", 42, 160, 60, 3),
+    Voice("man-2", CATEGORY_MAN, "Basil", "باسل", "m2", 32, 152, 66, 2),
+    Voice("man-3", CATEGORY_MAN, "Faris", "فارس", "m4", 54, 168, 58, 2),
+    Voice("man-4", CATEGORY_MAN, "Tariq", "طارق", "m6", 28, 148, 68, 3),
     # --- women -------------------------------------------------------------
-    Voice("woman-1", CATEGORY_WOMAN, "Layla", "ليلى", "f1", 60, 165),
-    Voice("woman-2", CATEGORY_WOMAN, "Mariam", "مريم", "f2", 72, 172),
-    Voice("woman-3", CATEGORY_WOMAN, "Salma", "سلمى", "f3", 54, 155),
-    Voice("woman-4", CATEGORY_WOMAN, "Noor", "نور", "f4", 66, 182),
+    Voice("woman-1", CATEGORY_WOMAN, "Layla", "ليلى", "f1", 60, 162, 70, 2),
+    Voice("woman-2", CATEGORY_WOMAN, "Mariam", "مريم", "f2", 70, 168, 68, 2),
+    Voice("woman-3", CATEGORY_WOMAN, "Salma", "سلمى", "f3", 56, 156, 74, 3),
+    Voice("woman-4", CATEGORY_WOMAN, "Noor", "نور", "f4", 66, 172, 66, 2),
     # --- boys (a male voice at a raised pitch: espeak-ng has no child voice) --
-    Voice("boy-1", CATEGORY_BOY, "Omar", "عمر", "m3", 76, 180),
-    Voice("boy-2", CATEGORY_BOY, "Zaid", "زيد", "m5", 82, 186),
-    Voice("boy-3", CATEGORY_BOY, "Yusuf", "يوسف", "m2", 72, 174),
-    Voice("boy-4", CATEGORY_BOY, "Hamza", "حمزة", "m1", 80, 192),
+    Voice("boy-1", CATEGORY_BOY, "Omar", "عمر", "m3", 70, 172, 72, 3),
+    Voice("boy-2", CATEGORY_BOY, "Zaid", "زيد", "m5", 76, 178, 70, 2),
+    Voice("boy-3", CATEGORY_BOY, "Yusuf", "يوسف", "m2", 68, 168, 74, 3),
+    Voice("boy-4", CATEGORY_BOY, "Hamza", "حمزة", "m1", 74, 180, 66, 2),
     # --- girls (a female voice at a raised pitch) --------------------------
-    Voice("girl-1", CATEGORY_GIRL, "Hala", "هالة", "f1", 86, 180),
-    Voice("girl-2", CATEGORY_GIRL, "Lina", "لينا", "f2", 92, 186),
-    Voice("girl-3", CATEGORY_GIRL, "Reem", "ريم", "f3", 84, 174),
-    Voice("girl-4", CATEGORY_GIRL, "Dana", "دانة", "f4", 90, 192),
+    Voice("girl-1", CATEGORY_GIRL, "Hala", "هالة", "f1", 80, 172, 76, 3),
+    Voice("girl-2", CATEGORY_GIRL, "Lina", "لينا", "f2", 86, 178, 72, 2),
+    Voice("girl-3", CATEGORY_GIRL, "Reem", "ريم", "f3", 78, 168, 74, 3),
+    Voice("girl-4", CATEGORY_GIRL, "Dana", "دانة", "f4", 84, 180, 70, 2),
 )
 
 _BY_KEY = {voice.key: voice for voice in VOICE_CATALOG}
@@ -380,12 +447,18 @@ __all__ = [
     "CATEGORY_LABELS",
     "CATEGORY_MAN",
     "CATEGORY_WOMAN",
+    "DEFAULT_PITCH_RANGE",
     "DEFAULT_VOICE_KEY",
+    "DEFAULT_WORD_GAP",
     "LANGUAGE_LABELS",
     "MAX_PITCH",
+    "MAX_PITCH_RANGE",
     "MAX_SPEED",
+    "MAX_WORD_GAP",
     "MIN_PITCH",
+    "MIN_PITCH_RANGE",
     "MIN_SPEED",
+    "MIN_WORD_GAP",
     "SYSTEM_VOICE_PREFIX",
     "SystemVoice",
     "VOICE_CATALOG",
