@@ -23,7 +23,9 @@ from core.speech import (
     Speaker,
     SpeechSynthesizer,
     load_synthesizer,
+    refresh_windows_speech_caches,
     speech_install_plan,
+    windows_voice_report,
 )
 from core.voices import Voice, default_voice, find_voice
 
@@ -92,10 +94,12 @@ class TextReader:
         """Drop the cached engine and speaker, so a newly installed engine is found.
 
         The synthesizer is built once and cached; after the user installs a speech
-        engine mid-session this re-discovers it instead of keeping the silent one.
+        engine -- or adds an Arabic voice in Windows Settings -- mid-session this
+        re-discovers it instead of keeping the silent one or an English voice.
         """
         self._synthesizer = None
         self._speaker = None
+        refresh_windows_speech_caches()
 
     @property
     def speaker(self) -> Speaker:
@@ -152,10 +156,14 @@ class TextReader:
                 + speech_install_plan().hint
             )
         played = "played through the speakers" if self.can_play() else "saved but not played (no audio player)"
-        return (
+        line = (
             f"Reading with the {self._voice.category_label()} voice “{self._voice.label()}” "
             f"through {self.engine_name}; audio is {played}."
         )
+        note = windows_voice_report()
+        if note:
+            line = f"{line} {note}"
+        return line
 
 
 def _as_voice(value: str | Voice | None) -> Voice:

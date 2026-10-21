@@ -27,6 +27,7 @@ explicitly still reads Arabic through the system engine rather than failing.
 
 from __future__ import annotations
 
+import array
 import platform
 import re
 import shutil
@@ -42,6 +43,34 @@ from core.model_interface import CognitiveModel, ModelRequest
 from core.voices import Voice, default_voice, detect_language, find_voice
 
 SAMPLE_RATE = 16_000
+
+
+def _pcm_to_mono16(frames: bytes, channels: int, width: int) -> tuple[int, ...]:
+    """Decode raw PCM ``frames`` into mono 16-bit samples.
+
+    ``channels`` and ``width`` come straight from the WAV header. 8-bit WAV is
+    unsigned, 16/32-bit are signed little-endian; 24-bit is not produced by the
+    engines used here and raises so a caller sees an honest failure rather than a
+    misread clip. Several channels are averaged to mono.
+    """
+    if width == 1:
+        samples = [(value - 128) << 8 for value in frames]
+    elif width == 2:
+        buffer = array.array("h")
+        buffer.frombytes(frames[: len(frames) - (len(frames) % 2)])
+        samples = list(buffer)
+    elif width == 4:
+        buffer = array.array("i")
+        buffer.frombytes(frames[: len(frames) - (len(frames) % 4)])
+        samples = [value >> 16 for value in buffer]
+    else:
+        raise ValueError(f"Unsupported WAV sample width: {width} bytes.")
+    if channels <= 1:
+        return tuple(samples)
+    mono: list[int] = []
+    for start in range(0, len(samples) - channels + 1, channels):
+        mono.append(sum(samples[start : start + channels]) // channels)
+    return tuple(mono)
 
 
 @dataclass(frozen=True)
@@ -99,12 +128,21 @@ class AudioClip:
 
     @classmethod
     def read_wav(cls, path) -> "AudioClip":
+        """Read a WAV file of any common shape, down-mixing it to mono 16-bit.
+
+        A speech engine does not always hand back 16-bit mono: the Windows OneCore
+        synthesizer can emit 8-bit or stereo audio, and refusing it silently turned
+        a real reading into silence. The decode below accepts 8/16/32-bit samples
+        and any channel count, so the clip is read instead of discarded.
+        """
         import wave
 
         with wave.open(str(Path(path)), "rb") as handle:
-            if handle.getnchannels() != 1 or handle.getsampwidth() != 2:
-                raise ValueError("Only 16-bit mono WAV files are supported.")
-            return cls.from_bytes(handle.readframes(handle.getnframes()), sample_rate=handle.getframerate())
+            channels = handle.getnchannels()
+            width = handle.getsampwidth()
+            rate = handle.getframerate()
+            frames = handle.readframes(handle.getnframes())
+        return cls(_pcm_to_mono16(frames, channels, width), sample_rate=rate)
 
 
 @runtime_checkable
@@ -226,12 +264,27 @@ def _flite_voice_options(_voice: Voice | None, _language: str) -> tuple[str, ...
 #: Windows ships its own speech engine (SAPI, reached through ``System.Speech``);
 #: this is the name the project gives it, and the shell that drives it.
 _WINDOWS_SAPI = "windows-sapi"
+#: The WinRT speech engine (``Windows.Media.SpeechSynthesis``). On Windows 10/11
+#: the voices added under Settings -> Speech -> Add voices are *OneCore* voices,
+#: which the legacy ``System.Speech`` engine cannot list at all; this engine can.
+_WINDOWS_ONE_CORE = "windows-onecore"
 _WINDOWS_SHELL = "powershell"
+
+#: How long a Windows synthesis run may take. A long Arabic answer is a long
+#: utterance, and the old 60 s cap could cut it off mid-sentence.
+_WINDOWS_TTS_TIMEOUT = 180
 
 
 def _ps_quote(value: str) -> str:
     """Escape ``value`` for a single-quoted Windows PowerShell string literal."""
     return value.replace("'", "''")
+
+
+def _voice_gender(voice: Voice | None) -> str | None:
+    """``"Male"``/``"Female"`` for a catalog voice, or ``None`` when unspecified."""
+    if voice is None:
+        return None
+    return "Male" if voice.variant[:1].lower() == "m" else "Female"
 
 
 def _sapi_rate(voice: Voice | None) -> int:
@@ -262,9 +315,8 @@ def _sapi_select_voice(voice: Voice | None, language: str | None = None) -> str:
             + "'});if($c.Count -gt 0){$v=$c};"
         )
     if voice is not None:
-        gender = "Male" if voice.variant[:1].lower() == "m" else "Female"
-        digits = "".join(character for character in voice.variant if character.isdigit())
-        index = max(0, int(digits) - 1) if digits else 0
+        gender = _voice_gender(voice)
+        index = _variant_index(voice)
         script.append(
             f"$g=@($v|?{{$_.VoiceInfo.Gender -eq '{gender}'}});"
             "if($g.Count -eq 0){$g=$v};"
@@ -276,12 +328,15 @@ def _sapi_select_voice(voice: Voice | None, language: str | None = None) -> str:
 
 
 def _windows_sapi_script(
-    text: str, target: Path, voice: Voice | None, language: str | None = None
+    text_path: Path, target: Path, voice: Voice | None, language: str | None = None
 ) -> str:
-    """The one-line PowerShell that renders ``text`` to the WAV file ``target``.
+    """The one-line PowerShell that renders a text file to the WAV file ``target``.
 
     ``language`` (e.g. ``"ar"``) selects a SAPI voice whose culture matches, so
-    Arabic is read as Arabic; ``None`` leaves the engine's own choice in place.
+    Arabic is read as Arabic; ``None`` leaves the engine's own choice in place. The
+    text is read from ``text_path`` as UTF-8 rather than embedded in the command,
+    so a long Arabic answer is neither truncated by the command-line limit nor
+    dependent on how the shell would have encoded it.
     """
     script = [
         "$ErrorActionPreference='Stop';",
@@ -292,15 +347,251 @@ def _windows_sapi_script(
     selection = _sapi_select_voice(voice, language)
     if selection:
         script.append(selection)
+    script.append(
+        f"$text=[System.IO.File]::ReadAllText('{_ps_quote(str(text_path))}',"
+        "[System.Text.Encoding]::UTF8);"
+    )
     script.append(f"$s.SetOutputToWaveFile('{_ps_quote(str(target))}');")
-    script.append(f"$s.Speak('{_ps_quote(text)}');")
+    script.append("$s.Speak($text);")
     script.append("$s.Dispose()")
+    return " ".join(script)
+
+
+def _variant_index(voice: Voice | None) -> int:
+    """The catalog variant's trailing number as a zero-based index (``m3`` -> 2)."""
+    if voice is None:
+        return 0
+    digits = "".join(character for character in voice.variant if character.isdigit())
+    return max(0, int(digits) - 1) if digits else 0
+
+
+def _onecore_rate(voice: Voice | None) -> float:
+    """Map a catalog voice's speed onto a WinRT SSML ``prosody`` rate multiplier.
+
+    175 wpm is the neutral reference the SAPI path uses; the multiplier is clamped
+    so an extreme catalog entry cannot ask the engine for an unreadable speed.
+    """
+    if voice is None:
+        return 1.0
+    return max(0.5, min(2.0, round(voice.speed / 175, 2)))
+
+
+def _windows_onecore_script(
+    text_path: Path, target: Path, voice: Voice | None, language: str | None
+) -> str:
+    """PowerShell that renders ``text_path`` to the WAV ``target`` with a WinRT voice.
+
+    Why this exists at all: on Windows 10/11 the voices a user adds under
+    *Settings -> Time & Language -> Speech -> Add voices* are **OneCore** voices.
+    The legacy ``System.Speech`` engine the project used first cannot see them --
+    ``GetInstalledVoices()`` simply omits them -- so an Arabic voice that the OS
+    offers to every other app was invisible here and Arabic came out mangled by an
+    English voice. ``Windows.Media.SpeechSynthesis`` *can* see every installed
+    voice, so this script is what actually reads Arabic correctly.
+
+    ``text_path`` is read as UTF-8 so a long Arabic answer is neither truncated by
+    the command-line limit nor mangled by console encoding. The rate is applied
+    through SSML, with a plain-text retry if the engine rejects the SSML.
+    """
+    language = language or "en"
+    gender = _voice_gender(voice)
+    index = _variant_index(voice)
+    rate = _onecore_rate(voice)
+    selection: list[str] = ["$voices=@([Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices);"]
+    if language and language != "en":
+        # Narrow to the spoken language first, so Arabic is read by an Arabic
+        # voice; when none is installed the engine default is kept (honest).
+        selection.append(
+            "$m=@($voices|?{$_.Language -like '" + _ps_quote(language) + "*'});"
+            "if($m.Count -gt 0){$voices=$m};"
+        )
+    if gender is not None:
+        selection.append(
+            f"$g=@($voices|?{{$_.Gender.ToString() -eq '{gender}'}});"
+            "if($g.Count -gt 0){$voices=$g};"
+        )
+    selection.append(f"if($voices.Count -gt 0){{$speak.Voice=$voices[{index} % $voices.Count]}};")
+    script = [
+        "$ErrorActionPreference='Stop';",
+        "Add-Type -AssemblyName System.Runtime.WindowsRuntime;",
+        "[void][Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media.SpeechSynthesis,"
+        "ContentType=WindowsRuntime];",
+        "[void][Windows.Media.SpeechSynthesis.SpeechSynthesisStream,Windows.Media.SpeechSynthesis,"
+        "ContentType=WindowsRuntime];",
+        "$asTask=([System.WindowsRuntimeSystemExtensions].GetMethods()|?"
+        "{$_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and "
+        "$_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'})[0];",
+        "function Await($t,$r){$m=$asTask.MakeGenericMethod($r);"
+        "$n=$m.Invoke($null,@($t));$n.Wait(-1)|Out-Null;$n.Result};",
+        f"$text=[System.IO.File]::ReadAllText('{_ps_quote(str(text_path))}',"
+        "[System.Text.Encoding]::UTF8);",
+        "$speak=[Windows.Media.SpeechSynthesis.SpeechSynthesizer]::new();",
+        *selection,
+        "$esc=[System.Security.SecurityElement]::Escape($text);",
+        f"$ssml='<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" "
+        f"xml:lang=\"{_ps_quote(language)}\"><prosody rate=\"{rate}\">'+$esc+'</prosody></speak>';",
+        "try{$stream=Await ($speak.SynthesizeSsmlToStreamAsync($ssml)) "
+        "([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])}"
+        "catch{$stream=Await ($speak.SynthesizeTextToStreamAsync($text)) "
+        "([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])};",
+        "$src=[System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($stream);",
+        f"$out=[System.IO.File]::Create('{_ps_quote(str(target))}');",
+        "$src.CopyTo($out);$out.Dispose();$src.Dispose();$stream.Dispose();$speak.Dispose();",
+    ]
     return " ".join(script)
 
 
 def windows_speech_available() -> bool:
     """True when Windows' built-in speech engine can be driven here (SAPI/PowerShell)."""
     return platform.system().lower() == "windows" and shutil.which(_WINDOWS_SHELL) is not None
+
+
+#: Cache of the WinRT/OneCore availability probe (``None`` = not probed yet).
+_onecore_cache: list[bool | None] = [None]
+
+
+def refresh_windows_speech_caches() -> None:
+    """Forget the cached Windows engine/voice probes, so a new voice is seen.
+
+    Windows only reveals a voice added through *Settings -> Add voices* after the
+    caches are dropped; :meth:`core.reading.TextReader.refresh` calls this, which is
+    how the window's *Install a speech engine* flow picks up a newly added voice
+    without a restart.
+    """
+    _onecore_cache[0] = None
+    _windows_voices_cache[0] = None
+
+
+def windows_onecore_available(*, refresh: bool = False) -> bool:
+    """True when the WinRT speech engine can be reached here (Windows 10/11).
+
+    The legacy ``System.Speech`` engine cannot list the OneCore voices Windows
+    installs through *Settings -> Add voices*, which is exactly how an Arabic
+    voice is added on Windows 11. This probes ``Windows.Media.SpeechSynthesis``
+    once and caches the verdict, so a chat window does not run PowerShell on every
+    answer. A machine where the probe fails simply keeps the SAPI path.
+    """
+    if not windows_speech_available():
+        return False
+    if _onecore_cache[0] is not None and not refresh:
+        return bool(_onecore_cache[0])
+    script = (
+        "$ErrorActionPreference='Stop';"
+        "Add-Type -AssemblyName System.Runtime.WindowsRuntime;"
+        "[void][Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media.SpeechSynthesis,"
+        "ContentType=WindowsRuntime];"
+        "if([Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices.Count -gt 0){'ok'}"
+    )
+    try:
+        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [_WINDOWS_SHELL, "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        _onecore_cache[0] = False
+        return False
+    available = completed.returncode == 0 and b"ok" in completed.stdout
+    _onecore_cache[0] = available
+    return available
+
+
+@dataclass(frozen=True)
+class WindowsVoice:
+    """One voice the Windows speech engine reports (name, language tag, gender)."""
+
+    name: str
+    language: str
+    gender: str
+
+    @property
+    def arabic(self) -> bool:
+        """True when this voice speaks Arabic (a language tag such as ``ar-SA``)."""
+        return self.language.strip().lower().startswith("ar")
+
+
+#: Cache of the installed Windows voices (``None`` = not listed yet).
+_windows_voices_cache: list[tuple[WindowsVoice, ...] | None] = [None]
+
+
+def _parse_voice_lines(output: bytes) -> tuple[WindowsVoice, ...]:
+    """Parse ``name|language|gender`` lines emitted by the listing script."""
+    voices: list[WindowsVoice] = []
+    for line in output.decode("utf-8", "replace").splitlines():
+        parts = line.strip().split("|")
+        if len(parts) == 3 and parts[0]:
+            voices.append(WindowsVoice(parts[0], parts[1], parts[2]))
+    return tuple(voices)
+
+
+def windows_installed_voices(*, refresh: bool = False) -> tuple[WindowsVoice, ...]:
+    """The voices Windows actually offers, preferring the engine that sees them all.
+
+    Lists through the OneCore (WinRT) engine when it is reachable -- it reports the
+    voices added under *Settings -> Speech -> Add voices*, which SAPI omits -- and
+    falls back to SAPI otherwise. Empty on a non-Windows machine, so the caller can
+    report honestly instead of pretending.
+    """
+    if not windows_speech_available():
+        return ()
+    if _windows_voices_cache[0] is not None and not refresh:
+        return _windows_voices_cache[0]
+    if windows_onecore_available():
+        script = (
+            "$ErrorActionPreference='Stop';"
+            "Add-Type -AssemblyName System.Runtime.WindowsRuntime;"
+            "[void][Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media.SpeechSynthesis,"
+            "ContentType=WindowsRuntime];"
+            "[Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices|%{"
+            "$_.DisplayName+'|'+$_.Language+'|'+$_.Gender}"
+        )
+    else:
+        script = (
+            "$ErrorActionPreference='Stop';"
+            "Add-Type -AssemblyName System.Speech;"
+            "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+            "$s.GetInstalledVoices()|%{$_.VoiceInfo}|%{$_.Name+'|'+$_.Culture.Name+'|'+$_.Gender}"
+        )
+    try:
+        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [_WINDOWS_SHELL, "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        voices: tuple[WindowsVoice, ...] = ()
+    else:
+        voices = _parse_voice_lines(completed.stdout) if completed.returncode == 0 else ()
+    _windows_voices_cache[0] = voices
+    return voices
+
+
+def windows_voice_report() -> str:
+    """An honest, human-readable note about Arabic speech on this Windows machine.
+
+    It exists because the failure this fixes was silent: a voice the OS offered to
+    every other app was invisible to the engine the project used, so Arabic came
+    out mangled. The report says which engine is used, whether an Arabic voice is
+    actually visible to it, and -- when none is -- the exact step to install one.
+    Empty on a non-Windows machine, so a caller can append it unconditionally.
+    """
+    if platform.system().lower() != "windows":
+        return ""
+    if not windows_speech_available():
+        return "No Windows speech engine is available (PowerShell was not found)."
+    engine = _WINDOWS_ONE_CORE if windows_onecore_available() else _WINDOWS_SAPI
+    voices = windows_installed_voices()
+    arabic = [voice for voice in voices if voice.arabic]
+    if arabic:
+        names = ", ".join(voice.name for voice in arabic[:3])
+        return f"Windows speech engine {engine} sees {len(voices)} voice(s), including Arabic: {names}."
+    return (
+        f"Windows speech engine {engine} sees {len(voices)} voice(s) but no Arabic one, "
+        "so Arabic would be read by a non-Arabic voice. Add one in Settings -> Time & "
+        "Language -> Speech -> Add voices -> Arabic, then reopen this window."
+    )
 
 
 TTS_ENGINES: tuple[tuple[str, str, "object", "object"], ...] = (
@@ -374,11 +665,14 @@ def speech_install_plan() -> SpeechInstallPlan:
     """
     system = platform.system().lower()
     if system == "windows" and windows_speech_available():
+        engine = "OneCore" if windows_onecore_available() else "SAPI"
         return SpeechInstallPlan(
             system,
             (),
-            "Windows already provides a speech engine (SAPI), so read-aloud works "
-            "without installing anything.",
+            f"Windows already provides a speech engine ({engine}), so read-aloud works "
+            "without installing anything. For Arabic, add a voice in Settings -> Time & "
+            "Language -> Speech -> Add voices -> Arabic; the OneCore engine reads it "
+            "directly (the older SAPI engine cannot see voices added that way).",
         )
     command = _package_manager_command()
     if command:
@@ -483,15 +777,21 @@ def discover_synthesizer_name() -> str:
     """Return the best installed TTS engine, or ``'silent'``.
 
     The system engines (``espeak``, ``say``, Windows SAPI) come first because they
-    are tiny, already installed, and speak Arabic. When none exists but the local
-    Qwen3-TTS model is fully present, that model is used instead, so a machine
-    with the Qwen3 extra still gets a natural voice rather than silence.
+    are tiny, already installed, and speak Arabic. On Windows the **OneCore** WinRT
+    engine is preferred over SAPI when it is reachable, because it is the only one
+    that can see the Arabic voice installed through *Settings -> Add voices*.
+    When no system engine exists but the local Qwen3-TTS model is fully present,
+    that model is used instead, so a machine with the Qwen3 extra still gets a
+    natural voice rather than silence.
     """
     for name, executable, _builder, _voice_options in TTS_ENGINES:
         if shutil.which(executable):
             return name
     if windows_speech_available():
-        return _WINDOWS_SAPI
+        # OneCore sees the voices added through Settings -> Speech -> Add voices
+        # (how an Arabic voice is installed on Windows 11); SAPI cannot, so try it
+        # first and fall back to SAPI only when the WinRT engine is unreachable.
+        return _WINDOWS_ONE_CORE if windows_onecore_available() else _WINDOWS_SAPI
     from core.qwen_speech import available_synthesizer
 
     if available_synthesizer():
@@ -564,17 +864,15 @@ class CommandSynthesizer:
                 return SilentSynthesizer().synthesize(text)
 
 
-class WindowsSapiSynthesizer:
-    """A real TTS engine using the speech engine Windows already ships (SAPI).
+class _WindowsPowerShellSynthesizer:
+    """Shared plumbing for the two Windows engines (SAPI and WinRT/OneCore).
 
-    Windows bundles SAPI, reachable from ``System.Speech`` through PowerShell, so a
-    Windows user does **not** need to install ``espeak-ng`` at all: this is the
-    engine the project uses when no command-line engine is on PATH. It renders
-    ``text`` to a WAV with ``SetOutputToWaveFile``/``Speak`` and reads it back, so
-    the same :class:`~core.reading.TextReader` works unchanged. A chosen catalog
-    voice maps as far as SAPI allows (language culture + gender variant + rate);
-    Arabic is read by an installed Arabic voice when one exists, and the engine
-    falls back to its own default when none is installed.
+    Both render a WAV through a short PowerShell script, so the temp-folder life
+    cycle, the timeout, the silent fallback, and the honest WAV read live here
+    once. The text is written to a UTF-8 temp file and read back by the script
+    rather than being embedded in the command line: a long Arabic answer would
+    otherwise hit the ~32 KB command-line limit, and console encoding could mangle
+    it. A subclass supplies :meth:`_script` and its own name.
     """
 
     name = _WINDOWS_SAPI
@@ -584,13 +882,18 @@ class WindowsSapiSynthesizer:
         self.voice = voice
         self.language = language
 
+    def _script(self, text_path: Path, target: Path, language: str) -> str:
+        raise NotImplementedError
+
     def synthesize(self, text: str) -> AudioClip:
         if not text.strip():
             raise ValueError("Cannot synthesize empty text.")
         with tempfile.TemporaryDirectory(prefix="fayd-tts-") as folder:
             target = Path(folder) / "speech.wav"
+            text_path = Path(folder) / "text.txt"
+            text_path.write_text(text, encoding="utf-8")
             language = self.language or detect_language(text)
-            script = _windows_sapi_script(text, target, self.voice, language)
+            script = self._script(text_path, target, language)
             argv = [
                 self.executable,
                 "-NoProfile",
@@ -602,7 +905,7 @@ class WindowsSapiSynthesizer:
                 completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
                     argv,
                     capture_output=True,
-                    timeout=60,
+                    timeout=_WINDOWS_TTS_TIMEOUT,
                     check=False,
                 )
             except (OSError, subprocess.SubprocessError):
@@ -613,6 +916,45 @@ class WindowsSapiSynthesizer:
                 return AudioClip.read_wav(target)
             except (OSError, ValueError):
                 return SilentSynthesizer().synthesize(text)
+
+
+class WindowsSapiSynthesizer(_WindowsPowerShellSynthesizer):
+    """A real TTS engine using the legacy speech engine Windows ships (SAPI).
+
+    Windows bundles SAPI, reachable from ``System.Speech`` through PowerShell, so a
+    Windows user does **not** need to install ``espeak-ng`` at all. It renders
+    ``text`` to a WAV with ``SetOutputToWaveFile``/``Speak`` and reads it back, so
+    the same :class:`~core.reading.TextReader` works unchanged. A chosen catalog
+    voice maps as far as SAPI allows (language culture + gender variant + rate);
+    Arabic is read by an installed Arabic voice when one exists.
+
+    Caveat, and why :class:`WindowsOneCoreSynthesizer` exists: this engine cannot
+    see the OneCore voices Windows installs through *Settings -> Add voices*, so on
+    Windows 11 an Arabic voice added that way is invisible here.
+    """
+
+    name = _WINDOWS_SAPI
+
+    def _script(self, text_path: Path, target: Path, language: str) -> str:
+        return _windows_sapi_script(text_path, target, self.voice, language)
+
+
+class WindowsOneCoreSynthesizer(_WindowsPowerShellSynthesizer):
+    """The WinRT/OneCore TTS engine: the one that actually sees Windows 11 voices.
+
+    Windows 10/11 keeps the voices a user adds under *Settings -> Speech -> Add
+    voices* in a separate store (``Speech_OneCore``) that the legacy
+    ``System.Speech`` engine does not list. ``Windows.Media.SpeechSynthesis``
+    exposes every installed voice, so this engine reads Arabic with the Arabic
+    voice the user installed instead of falling back to an English one and mangling
+    it. It is preferred over :class:`WindowsSapiSynthesizer` whenever the WinRT
+    probe succeeds; the catalog voice maps onto language, gender, and an SSML rate.
+    """
+
+    name = _WINDOWS_ONE_CORE
+
+    def _script(self, text_path: Path, target: Path, language: str) -> str:
+        return _windows_onecore_script(text_path, target, self.voice, language)
 
 
 class WhisperRecognizer:
@@ -740,6 +1082,21 @@ def load_recognizer(name: str = "transcript", **options) -> SpeechRecognizer:
     )
 
 
+def _windows_engine(
+    *, voice: Voice | None = None, language: str | None = None
+) -> SpeechSynthesizer:
+    """The best Windows built-in engine: OneCore (WinRT) when reachable, else SAPI.
+
+    One place decides, so discovery, loading, and the Qwen3-TTS Arabic fallback all
+    agree. OneCore is preferred because it can see the voices installed through
+    *Settings -> Speech -> Add voices* -- the way an Arabic voice is added on
+    Windows 11 -- which SAPI cannot.
+    """
+    if windows_onecore_available():
+        return WindowsOneCoreSynthesizer(voice=voice, language=language)
+    return WindowsSapiSynthesizer(voice=voice, language=language)
+
+
 def _system_synthesizer(
     *, voice: Voice | None = None, language: str | None = None
 ) -> SpeechSynthesizer | None:
@@ -760,7 +1117,7 @@ def _system_synthesizer(
                 voice_options=voice_options,
             )
     if windows_speech_available():
-        return WindowsSapiSynthesizer(voice=voice, language=language)
+        return _windows_engine(voice=voice, language=language)
     return None
 
 
@@ -768,7 +1125,8 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
     """Load a named TTS engine, optionally with a chosen catalog voice.
 
     ``name='auto'`` picks the first installed system engine (``espeak``,
-    ``say``, ...), else the silent synthesizer. An explicitly named engine that
+    ``say``, ...), else the silent synthesizer. On Windows it prefers the OneCore
+    engine over SAPI (see :func:`_windows_engine`). An explicitly named engine that
     is unavailable raises, so the caller never mistakes silence for speech.
 
     ``voice`` selects a :class:`~core.voices.Voice` from the catalog, by key or
@@ -811,13 +1169,20 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
             )
         except QwenSpeechUnavailable as error:
             raise ValueError(str(error)) from error
-    if name == _WINDOWS_SAPI:
-        if windows_speech_available():
-            return WindowsSapiSynthesizer(voice=voice, language=language)
-        raise ValueError(
-            "The Windows speech engine (SAPI) is not available here. "
-            "Use --tts auto or --tts silent."
-        )
+    if name in (_WINDOWS_SAPI, _WINDOWS_ONE_CORE):
+        if not windows_speech_available():
+            raise ValueError(
+                "The Windows speech engine is not available here. "
+                "Use --tts auto or --tts silent."
+            )
+        if name == _WINDOWS_ONE_CORE:
+            if not windows_onecore_available():
+                raise ValueError(
+                    "The Windows OneCore speech engine is not available here. "
+                    "Use --tts auto or --tts windows-sapi."
+                )
+            return WindowsOneCoreSynthesizer(voice=voice, language=language)
+        return WindowsSapiSynthesizer(voice=voice, language=language)
     for engine_name, executable, builder, voice_options in TTS_ENGINES:
         if name == engine_name:
             if shutil.which(executable):
@@ -1221,12 +1586,17 @@ __all__ = [
     "VoiceTurn",
     "WhisperRecognizer",
     "WindowsSapiSynthesizer",
+    "WindowsOneCoreSynthesizer",
     "discover_recognizer_name",
     "discover_synthesizer_name",
     "install_speech_engine",
     "load_recognizer",
     "load_synthesizer",
+    "refresh_windows_speech_caches",
     "speech_available",
     "speech_install_plan",
+    "windows_installed_voices",
+    "windows_onecore_available",
     "windows_speech_available",
+    "windows_voice_report",
 ]
