@@ -350,7 +350,11 @@ def test_windows_builtin_engine_needs_no_install(monkeypatch):
 
     monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
     monkeypatch.setattr(speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None)
-    # Windows ships SAPI, so the plan honestly says there is nothing to install...
+    # Pin the engine choice so the test is the same on any host: the OneCore
+    # preference has its own tests, and this one is about the built-in fallback.
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)
+    # Windows ships a speech engine, so the plan honestly says there is nothing to
+    # install...
     plan = speech.speech_install_plan()
     assert not plan.can_install
     assert "already provides a speech engine" in plan.hint
@@ -369,14 +373,17 @@ def test_windows_sapi_script_renders_text_and_selects_a_gendered_voice():
     from core import speech
     from core.voices import find_voice
 
-    script = speech._windows_sapi_script("hello", Path("C:/tmp/a.wav"), find_voice("girl-2"))
+    script = speech._windows_sapi_script(Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), find_voice("girl-2"))
     assert "System.Speech" in script
     assert "SetOutputToWaveFile('C:/tmp/a.wav')" in script
-    assert "$s.Speak('hello')" in script
+    # The text is read from a UTF-8 file, not embedded in the command line, so a
+    # long Arabic answer is neither truncated nor dependent on the console encoding.
+    assert "ReadAllText('C:/tmp/t.txt',[System.Text.Encoding]::UTF8)" in script
+    assert "$s.Speak($text)" in script
     assert "Female" in script  # girl-2 maps onto a female SAPI voice
     assert "$s.Rate=1" in script  # speed 186 -> rate 1
 
-    male = speech._windows_sapi_script("x", Path("C:/tmp/b.wav"), find_voice("man-4"))
+    male = speech._windows_sapi_script(Path("C:/tmp/t.txt"), Path("C:/tmp/b.wav"), find_voice("man-4"))
     assert "Male" in male
 
 
@@ -385,8 +392,8 @@ def test_windows_sapi_script_escapes_single_quotes():
 
     from core import speech
 
-    script = speech._windows_sapi_script("it's fine", Path("C:/tmp/a.wav"), None)
-    assert "$s.Speak('it''s fine')" in script
+    script = speech._windows_sapi_script(Path("C:/tmp/it's.txt"), Path("C:/tmp/a.wav"), None)
+    assert "ReadAllText('C:/tmp/it''s.txt'" in script
 
 
 def test_windows_sapi_synthesizer_falls_back_when_powershell_fails(monkeypatch):
@@ -532,12 +539,12 @@ def test_windows_sapi_script_selects_a_voice_for_the_spoken_language():
     from core.voices import find_voice
 
     # Arabic narrows SAPI to an Arabic-culture voice, then to the chosen gender.
-    arabic = speech._windows_sapi_script("مرحبا", Path("C:/tmp/a.wav"), find_voice("man-1"), "ar")
+    arabic = speech._windows_sapi_script(Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), find_voice("man-1"), "ar")
     assert "TwoLetterISOLanguageName -eq 'ar'" in arabic
     assert "VoiceInfo.Gender -eq 'Male'" in arabic
 
     # English leaves the language filter out, so the engine default is used.
-    english = speech._windows_sapi_script("hello", Path("C:/tmp/b.wav"), find_voice("man-1"), "en")
+    english = speech._windows_sapi_script(Path("C:/tmp/t.txt"), Path("C:/tmp/b.wav"), find_voice("man-1"), "en")
     assert "TwoLetterISOLanguageName" not in english
 
 
@@ -553,6 +560,231 @@ def test_windows_sapi_synthesizer_detects_arabic_and_selects_a_voice(monkeypatch
     monkeypatch.setattr(speech.subprocess, "run", fake_run)
     speech.WindowsSapiSynthesizer().synthesize("مرحبا بكم")
     assert "TwoLetterISOLanguageName -eq 'ar'" in seen["script"]
+
+
+# --------------------------------------------------- Windows 11 OneCore voices
+
+
+def test_windows_onecore_script_uses_winrt_and_selects_an_arabic_voice():
+    from pathlib import Path
+
+    from core import speech
+    from core.voices import find_voice
+
+    script = speech._windows_onecore_script(
+        Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), find_voice("man-1"), "ar"
+    )
+    # The WinRT engine is what can see the voices added through Settings.
+    assert "Windows.Media.SpeechSynthesis.SpeechSynthesizer" in script
+    assert "AllVoices" in script
+    # Arabic narrows to an Arabic voice, then to the chosen gender.
+    assert "Language -like 'ar*'" in script
+    assert "Gender.ToString() -eq 'Male'" in script
+    # The text is read as UTF-8 from a file, not embedded in the command line.
+    assert "ReadAllText('C:/tmp/t.txt',[System.Text.Encoding]::UTF8)" in script
+    # The rate is applied through SSML, with a plain-text retry if that fails.
+    assert "SynthesizeSsmlToStreamAsync" in script
+    assert "SynthesizeTextToStreamAsync" in script
+    assert "prosody rate=" in script
+    assert "[System.IO.File]::Create('C:/tmp/a.wav')" in script
+
+    # English leaves the language filter out, so the engine default is used.
+    english = speech._windows_onecore_script(
+        Path("C:/tmp/t.txt"), Path("C:/tmp/b.wav"), find_voice("man-1"), "en"
+    )
+    assert "Language -like" not in english
+
+
+def test_windows_onecore_engine_is_preferred_over_sapi(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None
+    )
+    monkeypatch.setattr(
+        speech.subprocess,
+        "run",
+        lambda *a, **k: speech.subprocess.CompletedProcess(a[0], 0, b"ok", b""),
+    )
+    speech._onecore_cache[0] = None
+    try:
+        assert speech.windows_onecore_available() is True
+        assert speech.discover_synthesizer_name() == "windows-onecore"
+        synth = speech.load_synthesizer("auto")
+        assert isinstance(synth, speech.WindowsOneCoreSynthesizer)
+    finally:
+        speech._onecore_cache[0] = None
+
+
+def test_windows_onecore_falls_back_to_sapi_when_the_probe_fails(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None
+    )
+    monkeypatch.setattr(
+        speech.subprocess,
+        "run",
+        lambda *a, **k: speech.subprocess.CompletedProcess(a[0], 1, b"", b"boom"),
+    )
+    speech._onecore_cache[0] = None
+    try:
+        assert speech.windows_onecore_available() is False
+        assert speech.discover_synthesizer_name() == "windows-sapi"
+        assert isinstance(speech.load_synthesizer("auto"), speech.WindowsSapiSynthesizer)
+    finally:
+        speech._onecore_cache[0] = None
+
+
+def test_windows_voice_report_names_an_installed_arabic_voice(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None
+    )
+    listing = "Microsoft Hamed|ar-SA|Male\nMicrosoft Zira|en-US|Female\n".encode()
+
+    def fake_run(argv, **_kwargs):
+        script = argv[-1]
+        if "AllVoices.Count" in script:
+            return speech.subprocess.CompletedProcess(argv, 0, b"ok", b"")
+        return speech.subprocess.CompletedProcess(argv, 0, listing, b"")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    speech._onecore_cache[0] = None
+    speech._windows_voices_cache[0] = None
+    try:
+        report = speech.windows_voice_report()
+        assert "windows-onecore" in report
+        assert "Arabic" in report and "Microsoft Hamed" in report
+    finally:
+        speech._onecore_cache[0] = None
+        speech._windows_voices_cache[0] = None
+
+
+def test_windows_voice_report_says_how_to_add_arabic_when_missing(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None
+    )
+    listing = b"Microsoft Zira|en-US|Female\n"
+
+    def fake_run(argv, **_kwargs):
+        if "AllVoices.Count" in argv[-1]:
+            return speech.subprocess.CompletedProcess(argv, 0, b"ok", b"")
+        return speech.subprocess.CompletedProcess(argv, 0, listing, b"")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    speech._onecore_cache[0] = None
+    speech._windows_voices_cache[0] = None
+    try:
+        report = speech.windows_voice_report()
+        assert "no Arabic" in report
+        assert "Add voices" in report
+    finally:
+        speech._onecore_cache[0] = None
+        speech._windows_voices_cache[0] = None
+
+
+def test_windows_powershell_synthesizer_reads_utf8_text_and_returns_audio(monkeypatch):
+    from pathlib import Path
+
+    from core import speech
+
+    seen: dict[str, str] = {}
+
+    class _FakeEngine(speech._WindowsPowerShellSynthesizer):
+        name = "fake"
+
+        def _script(self, text_path: Path, target: Path, language: str) -> str:
+            seen["text"] = Path(text_path).read_text(encoding="utf-8")
+            seen["language"] = language
+            # Emulate the engine writing a WAV where the real script would have.
+            speech.AudioClip(tuple([1200] * 800), sample_rate=8000).write_wav(target)
+            return "dummy"
+
+    monkeypatch.setattr(
+        speech.subprocess,
+        "run",
+        lambda *a, **k: speech.subprocess.CompletedProcess(a[0], 0, b"", b""),
+    )
+    clip = _FakeEngine().synthesize("مرحبا بكم في فيض الروح")
+    assert seen["text"] == "مرحبا بكم في فيض الروح"  # Arabic survives the round trip
+    assert seen["language"] == "ar"  # detected from the text
+    assert not clip.is_silent
+    assert clip.sample_rate == 8000
+
+
+def test_windows_powershell_synthesizer_rejects_empty_text():
+    from core import speech
+
+    with pytest.raises(ValueError):
+        speech.WindowsOneCoreSynthesizer().synthesize("   ")
+
+
+def test_pcm_decode_mixes_stereo_and_converts_bit_depths():
+    from core import speech
+
+    # 16-bit little-endian stereo: frames (256, 768) then (1280, 1792).
+    stereo = b"\x00\x01\x00\x03\x00\x05\x00\x07"
+    assert speech._pcm_to_mono16(stereo, 2, 2) == (512, 1536)
+    # 8-bit PCM is unsigned, centred at 128.
+    assert speech._pcm_to_mono16(bytes([128, 255, 0]), 1, 1) == (0, 32512, -32768)
+    # 32-bit PCM is shifted down to 16-bit.
+    assert speech._pcm_to_mono16((1 << 16).to_bytes(4, "little"), 1, 4) == (1,)
+    with pytest.raises(ValueError):
+        speech._pcm_to_mono16(b"\x00", 1, 3)
+
+
+def test_audio_clip_reads_a_stereo_wav(tmp_path):
+    import wave
+
+    from core.speech import AudioClip
+
+    target = tmp_path / "stereo.wav"
+    with wave.open(str(target), "wb") as handle:
+        handle.setnchannels(2)
+        handle.setsampwidth(2)
+        handle.setframerate(22_050)
+        handle.writeframes(b"\x10\x00\x20\x00" * 4)
+    clip = AudioClip.read_wav(target)
+    assert clip.sample_rate == 22_050
+    assert not clip.is_silent
+    assert clip.samples[0] == 0x18  # (16 + 32) // 2
+
+
+def test_refresh_windows_speech_caches_rediscovers_a_new_voice(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None
+    )
+    listings = [b"Microsoft Zira|en-US|Female\n"]
+
+    def fake_run(argv, **_kwargs):
+        if "AllVoices.Count" in argv[-1]:
+            return speech.subprocess.CompletedProcess(argv, 0, b"ok", b"")
+        return speech.subprocess.CompletedProcess(argv, 0, listings[0], b"")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    speech._onecore_cache[0] = None
+    speech._windows_voices_cache[0] = None
+    try:
+        assert "no Arabic" in speech.windows_voice_report()
+        # The user installs an Arabic voice in Windows Settings...
+        listings[0] = b"Microsoft Hamed|ar-SA|Male\n"
+        # ...and a reader refresh picks it up instead of the stale cache.
+        speech.refresh_windows_speech_caches()
+        assert "Microsoft Hamed" in speech.windows_voice_report()
+    finally:
+        speech._onecore_cache[0] = None
+        speech._windows_voices_cache[0] = None
 
 
 def test_say_selects_an_installed_voice_for_a_non_english_language(monkeypatch):

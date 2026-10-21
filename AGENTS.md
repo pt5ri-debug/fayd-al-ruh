@@ -507,16 +507,38 @@ Arabic is kept as secondary aliases where useful.
   `install_speech_engine` (never raises; an
   injected `runner` makes it testable with no real install) give the app a real
   next step when no engine is present. **Windows needs no install**: the OS ships
-  SAPI, so `WindowsSapiSynthesizer` renders through `System.Speech` in PowerShell
-  (`windows_speech_available`; `discover_synthesizer_name` falls back to it, and
-  `load_synthesizer("windows-sapi")` loads it), and `Speaker` plays the WAV through
-  the built-in `SoundPlayer` when no aplay/afplay/sox exists. Both Windows SAPI and
-  macOS `say` read the *language* of the text, not just the timbre: the detected
-  language (Arabic script → `ar`) narrows SAPI to a voice whose culture matches
-  (`_sapi_select_voice`), and `say` is given `-v <installed voice>` for a
+  two engines and the project prefers the right one. The modern **OneCore** engine
+  (`Windows.Media.SpeechSynthesis`, reached through WinRT) is used when
+  `windows_onecore_available()` succeeds — it is the *only* one that can see the
+  voices installed through *Settings → Time & Language → Speech → Add voices*,
+  which is how an Arabic voice is added on Windows 11, so it is what actually reads
+  Arabic instead of mangling it with an English voice. `WindowsOneCoreSynthesizer`
+  renders through it (voices picked by language, gender, and an SSML `prosody`
+  rate; the SSML call falls back to plain text if the engine rejects it), and the
+  older **SAPI** engine (`WindowsSapiSynthesizer`, `System.Speech`) is the fallback
+  when the WinRT probe fails. `_windows_engine` is the one place that choice is
+  made, so discovery, `load_synthesizer`, and the Qwen3-TTS Arabic fallback agree;
+  `load_synthesizer("windows-onecore")` / `("windows-sapi")` name one explicitly.
+  Both Windows engines render through a shared `_WindowsPowerShellSynthesizer` that
+  writes the text to a **UTF-8 temp file** and reads it back in the script (the
+  text is *not* embedded in the command line: a long Arabic answer would otherwise
+  hit the ~32 KB limit and console encoding could mangle it) with a 180 s timeout,
+  and `Speaker` plays the WAV through
+  the built-in `SoundPlayer` when no aplay/afplay/sox exists. Both Windows engines
+  and macOS `say` read the *language* of the text, not just the timbre: the detected
+  language (Arabic script → `ar`) narrows the engine to a voice whose culture
+  matches (`_sapi_select_voice`; the OneCore script's `Language -like 'ar*'`), and
+  `say` is given `-v <installed voice>` for a
   non-English language (`_macos_language_voice`), so Arabic is read as Arabic
   instead of being mangled by the default English voice; when no voice for that
-  language is installed the engine keeps its own default rather than failing. The
+  language is installed the engine keeps its own default rather than failing.
+  `windows_installed_voices`/`windows_voice_report` list the voices the engine can
+  actually see (through OneCore when reachable, else SAPI) and say which engine is
+  used and whether an Arabic voice is visible — or the exact *Add voices* step when
+  it is not — surfaced by `TextReader.describe()` and `python -m cli speak list`.
+  `AudioClip.read_wav` now decodes 8/16/32-bit and any channel count into mono
+  16-bit (`_pcm_to_mono16`), because the OneCore stream is not always 16-bit mono
+  and refusing it silently turned a real reading into silence. The
   install path
   prints its hint *once* (`install_speech_engine`'s message already carries it).
   CLI: `python -m ai.voice` / `python -m cli

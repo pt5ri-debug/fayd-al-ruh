@@ -524,15 +524,23 @@ are in `core/speech.py`:
 Engines are loaded by name on demand. Real engines are ordinary system programs,
 so no pip package and no network access is needed: TTS uses `espeak-ng`,
 `espeak`, `flite`, or macOS `say`; ASR uses `whisper` when it is installed. On
-**Windows** the project uses the speech engine the OS already ships (SAPI, reached
-through `System.Speech` in PowerShell), so read-aloud works with nothing to
-install; Windows also plays the rendered WAV through the built-in `SoundPlayer`.
-If none is present, the project can still run a complete *text loop*: the
+**Windows** the project uses the speech engine the OS already ships, so read-aloud
+works with nothing to install; Windows also plays the rendered WAV through the
+built-in `SoundPlayer`. Windows 10/11 has two of those engines and the project
+picks the right one: the modern **OneCore** engine
+(`Windows.Media.SpeechSynthesis`, reached through WinRT) when it is reachable,
+else the older **SAPI** engine (`System.Speech`). OneCore is preferred because it
+is the only one that can see the voices installed through *Settings → Time &
+Language → Speech → Add voices* — which is how an Arabic voice is added on
+Windows 11 — so Arabic is read by the Arabic voice you installed instead of being
+mangled by an English one. If none is present, the project can still run a
+complete *text loop*: the
 recognizer returns supplied text, and the synthesizer produces a real silent WAV
 clip. This
 way the whole voice path is tested on a fresh clone, and a real ASR/TTS engine
 can be plugged in later without touching the core. Use `--tts auto` / `--asr auto`
-to pick the best installed engine, or name one explicitly (`--tts espeak`); an
+to pick the best installed engine, or name one explicitly (`--tts espeak`,
+`--tts windows-onecore`, `--tts windows-sapi`); an
 explicitly named engine that is missing raises rather than faking audio.
 
 The TTS engine itself is an ordinary *system* program, not a Python package, so
@@ -545,15 +553,18 @@ sudo apt install espeak-ng                          # Debian/Ubuntu (also Fedora
 winget install -e --id eSpeak-NG.eSpeak-NG          # Windows (or: choco install espeak-ng)
 ```
 
-On Windows this is usually unnecessary: the built-in SAPI engine is used when no
-command-line engine is on `PATH`, so **Read aloud** just works. Both Windows SAPI
-and macOS `say` also read the *language* of the text: Arabic is spoken by an
-installed Arabic voice when one is present (SAPI voices whose culture is `ar`,
-or a `say` voice such as Majed), instead of being read by the default English
-voice. Install the Arabic voice from the OS if it is missing — on Windows,
+On Windows this is usually unnecessary: the built-in engine is used when no
+command-line engine is on `PATH`, so **Read aloud** just works. Both Windows and
+macOS also read the *language* of the text: Arabic is spoken by an
+installed Arabic voice when one is present (a OneCore voice whose language is
+`ar`, a SAPI voice whose culture is `ar`, or a `say` voice such as Majed), instead
+of being read by the default English voice. Install the Arabic voice from the OS
+if it is missing — on Windows,
 Settings → Time & Language → Speech → Add voices → Arabic; on macOS, System
 Settings → Accessibility → Spoken Content → System Voice → Manage Voices →
-Arabic. The project can
+Arabic. `python -m cli speak list` and the window's Settings panel report which
+engine is used and whether it can actually see an Arabic voice, and say what to
+do when it cannot. The project can
 also run the install for you: `python -m cli speak --install-engine` runs the
 platform's package manager, and `python -m cli deps` reports the speech engine
 beside the other optional features. macOS already has `say`; the project also
