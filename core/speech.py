@@ -643,8 +643,11 @@ def windows_installed_voices(*, refresh: bool = False) -> tuple[WindowsVoice, ..
     cannot see at all, while SAPI can still expose voices the WinRT probe happens
     not to reach. So both are asked and the results merged -- OneCore first, so a
     voice present in both keeps the modern engine -- rather than picking one engine
-    and silently missing whatever only the other knows. Empty on a non-Windows
-    machine, so the caller can report honestly instead of pretending.
+    and silently missing whatever only the other knows. The WinRT listing is always
+    attempted (its script is tolerant, so an unavailable store simply yields no
+    lines) rather than gated on the availability probe, because a false-negative
+    probe would otherwise hide the Arabic voice. Empty on a non-Windows machine, so
+    the caller can report honestly instead of pretending.
     """
     if not windows_speech_available():
         return ()
@@ -652,12 +655,16 @@ def windows_installed_voices(*, refresh: bool = False) -> tuple[WindowsVoice, ..
         return _windows_voices_cache[0]
     merged: list[WindowsVoice] = []
     seen: set[tuple[str, str]] = set()
-    if windows_onecore_available():
-        for voice in _list_windows_voices(_ONECORE_LIST_SCRIPT, _WINDOWS_ONE_CORE):
-            key = (voice.name, voice.language)
-            if key not in seen:
-                seen.add(key)
-                merged.append(voice)
+    # Always attempt the WinRT listing: the script is tolerant (a failure yields no
+    # lines, not an error), and it is the only store that holds the voices added
+    # through Settings -> Add voices. Gating it on the availability probe meant a
+    # false-negative probe silently hid the Arabic voice; letting the listing itself
+    # decide recovers it whenever the store really is reachable.
+    for voice in _list_windows_voices(_ONECORE_LIST_SCRIPT, _WINDOWS_ONE_CORE):
+        key = (voice.name, voice.language)
+        if key not in seen:
+            seen.add(key)
+            merged.append(voice)
     for voice in _list_windows_voices(_SAPI_LIST_SCRIPT, _WINDOWS_SAPI):
         key = (voice.name, voice.language)
         if key not in seen:
@@ -681,7 +688,6 @@ def windows_voice_report() -> str:
         return ""
     if not windows_speech_available():
         return "No Windows speech engine is available (PowerShell was not found)."
-    onecore = windows_onecore_available()
     voices = windows_installed_voices()
     arabic = [voice for voice in voices if voice.arabic]
     engines = sorted({voice.engine for voice in voices if voice.engine})
@@ -697,9 +703,9 @@ def windows_voice_report() -> str:
         "so Arabic would be read by a non-Arabic voice. Add one in Settings -> Time & "
         "Language -> Speech -> Add voices -> Arabic, then reopen this window."
     )
-    if not onecore:
+    if not any(voice.engine == _WINDOWS_ONE_CORE for voice in voices):
         note += (
-            " (The WinRT/OneCore voice store could not be reached, so voices added "
+            " (The WinRT/OneCore voice store listed no voices, so voices added "
             "through Settings -> Add voices may be missing from this list.)"
         )
     return note

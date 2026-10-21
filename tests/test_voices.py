@@ -938,15 +938,48 @@ def test_windows_installed_voices_merges_both_stores(monkeypatch):
     assert voices[2].engine == speech._WINDOWS_SAPI
 
 
-def test_windows_installed_voices_still_lists_sapi_when_onecore_probe_fails(monkeypatch):
-    """A failed WinRT probe must not blank the list: SAPI is still asked."""
+def test_windows_installed_voices_recovers_onecore_voices_when_probe_fails(monkeypatch):
+    """A false-negative probe must not hide the OneCore voices.
+
+    The WinRT listing is attempted regardless of the probe (its script is tolerant),
+    so an Arabic voice the OS offers to every other app is still listed here even
+    when the availability probe wrongly says "no OneCore".
+    """
     from core import speech
 
     monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
     monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)
+    attempts: list[str] = []
 
     def fake_run(argv, **_kwargs):
-        assert "AllVoices" not in argv[-1]  # the WinRT listing is not attempted
+        script = argv[-1]
+        attempts.append("onecore" if "AllVoices" in script else "sapi")
+        if "AllVoices" in script:
+            return speech.subprocess.CompletedProcess(argv, 0, b"Microsoft Hoda|ar-SA|Female\n", b"")
+        return speech.subprocess.CompletedProcess(argv, 0, b"Microsoft Zira|en-US|Female\n", b"")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    speech._windows_voices_cache[0] = None
+    try:
+        voices = speech.windows_installed_voices()
+    finally:
+        speech._windows_voices_cache[0] = None
+    assert attempts == ["onecore", "sapi"]  # both stores are asked
+    assert [voice.name for voice in voices] == ["Microsoft Hoda", "Microsoft Zira"]
+    assert voices[0].engine == speech._WINDOWS_ONE_CORE
+    assert voices[1].engine == speech._WINDOWS_SAPI
+
+
+def test_windows_installed_voices_lists_sapi_when_the_onecore_listing_is_empty(monkeypatch):
+    """An unavailable WinRT store yields no lines, not an error: SAPI still answers."""
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+
+    def fake_run(argv, **_kwargs):
+        if "AllVoices" in argv[-1]:
+            # The tolerant script prints nothing when the store is unreachable.
+            return speech.subprocess.CompletedProcess(argv, 0, b"", b"")
         return speech.subprocess.CompletedProcess(argv, 0, b"Microsoft Zira|en-US|Female\n", b"")
 
     monkeypatch.setattr(speech.subprocess, "run", fake_run)

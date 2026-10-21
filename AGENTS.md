@@ -546,7 +546,10 @@ Arabic is kept as secondary aliases where useful.
   probe, are wrapped in `try`/`catch{}` with `$ErrorActionPreference='Continue'`:
   a non-terminating WinRT warning used to abort the probe under `Stop` and report
   "no OneCore", which is exactly how a voice the OS offered to every other app
-  stayed invisible here. `_engine_for_voice` points a chosen `SystemVoice` at the
+  stayed invisible here. The WinRT listing is attempted unconditionally (its
+  tolerant script yields no lines when the store is unreachable) rather than gated
+  on the probe, so a false-negative probe can no longer hide the Arabic voice.
+  `_engine_for_voice` points a chosen `SystemVoice` at the
   engine that listed it (so `load_synthesizer('auto', voice=…)` uses WinRT for a
   WinRT voice instead of handing it to SAPI, which cannot see it), and the
   SAPI→OneCore `_fallback` now triggers whenever Windows speech is available
