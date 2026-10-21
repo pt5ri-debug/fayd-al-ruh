@@ -76,6 +76,7 @@ class UpdateStatus:
     head_branch: str = ""
     applied: bool = False
     changed_files: tuple[str, ...] = ()
+    conflicting_files: tuple[str, ...] = ()
     commands: list[GitCommand] | None = None
 
     @property
@@ -106,9 +107,11 @@ class UpdateStatus:
                 f"Update available on {self.branch} ({self.behind} commit(s) behind), "
                 f"but this checkout is on {self.head_branch}."
             )
-        if self.dirty:
+        if self.conflicting_files:
+            files = ", ".join(self.conflicting_files)
             return (
-                "An update is available but this checkout has local changes. "
+                f"Update available on {self.branch} ({self.behind} commit(s) behind), "
+                f"but your local changes to {files} would be overwritten. "
                 "Commit or stash them first."
             )
         return f"Update available: {self.behind} commit(s) behind {self.repository_url}."
@@ -257,6 +260,16 @@ def check_for_updates(repository_url: str = DEFAULT_REPOSITORY_URL, *, root: Pat
     commands.append(changed)
     changed_files = tuple(line for line in changed.stdout.splitlines() if line.strip())
 
+    # Which of the update's files does the user's own uncommitted edit touch? Those
+    # are the only ones a fast-forward cannot move past, so they are named exactly
+    # (a local change to any *other* file does not block an update -- see below).
+    conflicts: tuple[str, ...] = ()
+    if dirty and changed_files:
+        modified = _run_git(root, "diff", "--name-only", "HEAD")
+        commands.append(modified)
+        locally_changed = {line for line in modified.stdout.splitlines() if line.strip()}
+        conflicts = tuple(name for name in changed_files if name in locally_changed)
+
     return UpdateStatus(
         available=behind > 0,
         current_version=__version__,
@@ -270,6 +283,7 @@ def check_for_updates(repository_url: str = DEFAULT_REPOSITORY_URL, *, root: Pat
         reason="" if behind > 0 else "The checkout already matches the remote branch.",
         head_branch=head_branch,
         changed_files=changed_files,
+        conflicting_files=conflicts,
         commands=commands,
     )
 
@@ -355,13 +369,23 @@ def apply_update(
             f"This checkout is on {status.head_branch}; check out {status.branch} to update it."
         )
         return status
-    if status.dirty:
-        status.reason = "Local changes would be overwritten; commit or stash them first."
-        return status
     if status.ahead > 0:
         status.reason = (
             f"The branch has {status.ahead} local commit(s) not on the remote; "
             "refusing a non-fast-forward update."
+        )
+        return status
+    # A local change only blocks an update when it touches a file the update would
+    # also change: those are the files git cannot fast-forward past. A change to any
+    # other file is left exactly as it is by the merge, so it must not refuse one --
+    # the earlier blanket refusal turned a harmless scratch edit into a dead end.
+    # The names are reported so the user knows precisely what to commit or stash.
+    if status.dirty and status.conflicting_files:
+        status.reason = (
+            "These locally changed file(s) are also changed by the update, so it "
+            "cannot be applied without overwriting them: "
+            + ", ".join(status.conflicting_files)
+            + ". Commit or stash them first."
         )
         return status
 
@@ -369,7 +393,12 @@ def apply_update(
     commands.append(merge)
     status.commands = commands
     if not merge.ok:
-        status.reason = merge.stderr or "The fast-forward merge failed."
+        # git is the real guard: it aborts an overlapping fast-forward with no
+        # partial application, so a failed merge leaves the tree exactly as it was.
+        status.reason = (
+            merge.stderr
+            or "The fast-forward merge failed; your local changes were left untouched."
+        )
         return status
 
     status.applied = True
@@ -402,8 +431,12 @@ def format_status(status: UpdateStatus, *, verbose: bool = False) -> str:
         lines.extend(f"    - {name}" for name in preview)
         if len(status.changed_files) > len(preview):
             lines.append(f"    … and {len(status.changed_files) - len(preview)} more")
-    if status.dirty:
-        lines.append("  local changes  : present (an update would refuse to overwrite them)")
+    if status.conflicting_files:
+        lines.append("  local changes  : present in file(s) the update also changes")
+        for name in status.conflicting_files:
+            lines.append(f"    ! {name}")
+    elif status.dirty:
+        lines.append("  local changes  : present (in files the update does not touch)")
     learned = status.learned_files_changed
     if learned:
         lines.append(

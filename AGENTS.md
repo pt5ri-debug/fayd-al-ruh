@@ -54,11 +54,18 @@ Arabic is kept as secondary aliases where useful.
 - `core/updater.py` — program updates for a source checkout. `check_for_updates`
   fetches the remote (never touching the working tree) and reports how many
   commits the checkout is behind; `apply_update` fast-forwards the tracked branch
-  only when the tree is clean and the branch is not ahead, so local work is never
-  destroyed. It reports when a commit touches the committed training files, but
-  never copies or moves the user's own data in `data/` — a fast-forward cannot
-  touch the git-ignored folder, so it is left exactly as it is. It is a thin
-  wrapper over the project's own `git`, carries no extra dependency, strips
+  only when the branch is not ahead, so local work is never destroyed. A local
+  uncommitted change blocks the update **only when it touches a file the update
+  also changes** — those are the files git cannot fast-forward past, and they are
+  named (`UpdateStatus.conflicting_files`, shown as `! <file>`) so the user knows
+  exactly what to commit or stash; a change to any *other* file is left exactly as
+  it is by the merge, so it no longer refuses one (a blanket "local changes"
+  refusal turned a harmless scratch edit into a dead end). git's own `--ff-only`
+  is the backstop and aborts with no partial application, so a failed merge leaves
+  the tree untouched. It reports when a commit touches the committed training
+  files, but never copies or moves the user's own data in `data/` — a
+  fast-forward cannot touch the git-ignored folder, so it is left as it is. It is
+  a thin wrapper over the project's own `git`, carries no extra dependency, strips
   embedded credentials from every message, and tells a frozen portable build to
   download a new bundle instead. Surfaced as the CLI command
   `python -m cli update [--apply]` and the GUI/CLI "Search for program updates
