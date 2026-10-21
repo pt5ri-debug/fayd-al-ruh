@@ -1059,6 +1059,214 @@ def test_engine_for_voice_skips_a_onecore_voice_when_the_probe_fails(monkeypatch
     )
 
 
+def test_windows_onecore_usable_survives_a_false_negative_probe(monkeypatch):
+    """A listing that returned a OneCore voice is proof the engine works."""
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)
+    monkeypatch.setattr(
+        speech,
+        "windows_installed_voices",
+        lambda **_: (
+            speech.WindowsVoice("Microsoft Hoda", "ar-SA", "", engine=speech._WINDOWS_ONE_CORE),
+        ),
+    )
+    assert speech.windows_onecore_usable() is True
+
+
+def test_windows_onecore_usable_is_false_when_truly_absent(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)
+    monkeypatch.setattr(
+        speech,
+        "windows_installed_voices",
+        lambda **_: (
+            speech.WindowsVoice("Microsoft David", "en-US", "", engine=speech._WINDOWS_SAPI),
+        ),
+    )
+    assert speech.windows_onecore_usable() is False
+
+
+def test_load_synthesizer_accepts_onecore_when_the_probe_lied(monkeypatch):
+    """The explicit OneCore gate must not trust a false-negative probe either."""
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)
+    monkeypatch.setattr(
+        speech,
+        "windows_installed_voices",
+        lambda **_: (
+            speech.WindowsVoice("Microsoft Hoda", "ar-SA", "", engine=speech._WINDOWS_ONE_CORE),
+        ),
+    )
+    assert isinstance(
+        speech.load_synthesizer("windows-onecore"), speech.WindowsOneCoreSynthesizer
+    )
+
+
+def test_onecore_falls_back_to_sapi_when_its_own_store_is_empty(monkeypatch):
+    """The mirror of SAPI's fallback: a SAPI voice can still read the text."""
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech._WindowsPowerShellSynthesizer, "_language_in_sapi", lambda self, l: True)
+    monkeypatch.setattr(
+        speech._WindowsPowerShellSynthesizer, "_render", lambda self, text, lang: None
+    )
+    good = speech.AudioClip((7, 7, 7), sample_rate=speech.SAMPLE_RATE)
+    monkeypatch.setattr(speech.WindowsSapiSynthesizer, "_render", lambda self, text, lang: good)
+    clip = speech.WindowsOneCoreSynthesizer(language="ar").synthesize("مرحبا")
+    assert clip.samples == good.samples
+
+
+def test_onecore_does_not_hand_an_unserved_language_to_sapi(monkeypatch):
+    """A language SAPI cannot serve is not passed on; it would be mangled, not blank."""
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(
+        speech._WindowsPowerShellSynthesizer, "_language_in_sapi", lambda self, l: False
+    )
+    assert speech.WindowsOneCoreSynthesizer(language="ar")._fallback() is None
+
+
+def test_windows_engine_name_prefers_the_arabic_capable_engine(monkeypatch):
+    """One place decides the engine, so discovery and the fallback cannot disagree."""
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_arabic_engine", lambda: speech._WINDOWS_ONE_CORE)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)
+    assert speech.windows_engine_name() == speech._WINDOWS_ONE_CORE
+
+    # With no Arabic voice the probe decides, so an English-only machine still works.
+    monkeypatch.setattr(speech, "windows_arabic_engine", lambda: None)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: True)
+    assert speech.windows_engine_name() == speech._WINDOWS_ONE_CORE
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)
+    assert speech.windows_engine_name() == speech._WINDOWS_SAPI
+
+
+def test_windows_arabic_engine_picks_the_store_that_has_an_arabic_voice(monkeypatch):
+    """The engine that can see an Arabic voice is reported, OneCore first."""
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(
+        speech,
+        "windows_installed_voices",
+        lambda **_: (
+            speech.WindowsVoice("Microsoft Hoda", "ar-SA", "Female", engine=speech._WINDOWS_ONE_CORE),
+            speech.WindowsVoice("Microsoft David", "en-US", "Male", engine=speech._WINDOWS_SAPI),
+        ),
+    )
+    assert speech.windows_arabic_engine() == speech._WINDOWS_ONE_CORE
+
+
+def test_windows_arabic_engine_is_none_without_an_arabic_voice(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(
+        speech,
+        "windows_installed_voices",
+        lambda **_: (
+            speech.WindowsVoice("Microsoft David", "en-US", "Male", engine=speech._WINDOWS_SAPI),
+        ),
+    )
+    assert speech.windows_arabic_engine() is None
+
+
+def test_discovery_prefers_the_engine_that_can_see_an_arabic_voice(monkeypatch):
+    """An all-OneCore Arabic machine is not read by SAPI, which cannot see it.
+
+    Discovery used to follow the OneCore availability probe; a false-negative probe
+    therefore picked SAPI, which reads Arabic with an English voice -- audibly but
+    mangled. The engine that actually lists an Arabic voice now wins.
+    """
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)  # false negative
+    monkeypatch.setattr(
+        speech,
+        "windows_installed_voices",
+        lambda **_: (
+            speech.WindowsVoice("Microsoft Hoda", "ar-SA", "Female", engine=speech._WINDOWS_ONE_CORE),
+            speech.WindowsVoice("Microsoft David", "en-US", "Male", engine=speech._WINDOWS_SAPI),
+        ),
+    )
+    assert speech.discover_synthesizer_name() == speech._WINDOWS_ONE_CORE
+
+
+def test_sapi_defers_arabic_to_onecore_when_it_has_no_arabic_voice(monkeypatch):
+    """SAPI does not fail on Arabic without an Arabic voice -- it mangles it.
+
+    So the sibling engine is tried *before* returning SAPI's own output, not only
+    when SAPI produced nothing.
+    """
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech.WindowsSapiSynthesizer, "_serves_language", lambda self, lang: False)
+
+    sapi_audio = speech.AudioClip((1, 2, 3), sample_rate=speech.SAMPLE_RATE)
+    onecore_audio = speech.AudioClip((9, 9, 9), sample_rate=speech.SAMPLE_RATE)
+    monkeypatch.setattr(
+        speech._WindowsPowerShellSynthesizer, "_render", lambda self, text, lang: sapi_audio
+    )
+    monkeypatch.setattr(
+        speech.WindowsOneCoreSynthesizer, "_render", lambda self, text, lang: onecore_audio
+    )
+    clip = speech.WindowsSapiSynthesizer().synthesize("مرحبا بالعالم")
+    assert clip.samples == onecore_audio.samples  # the Arabic-capable engine won
+
+
+def test_sapi_keeps_its_own_output_when_it_can_serve_the_language(monkeypatch):
+    """An installed Arabic SAPI voice is used; no needless WinRT round trip."""
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech.WindowsSapiSynthesizer, "_serves_language", lambda self, lang: True)
+
+    sapi_audio = speech.AudioClip((1, 2, 3), sample_rate=speech.SAMPLE_RATE)
+    monkeypatch.setattr(
+        speech._WindowsPowerShellSynthesizer, "_render", lambda self, text, lang: sapi_audio
+    )
+
+    def boom(self, text, lang):  # pragma: no cover - must not be called
+        raise AssertionError("OneCore should not be tried when SAPI serves the language")
+
+    monkeypatch.setattr(speech.WindowsOneCoreSynthesizer, "_render", boom)
+    clip = speech.WindowsSapiSynthesizer().synthesize("مرحبا بالعالم")
+    assert clip.samples == sapi_audio.samples
+
+
+def test_engine_for_voice_does_not_send_an_arabic_voice_to_sapi(monkeypatch):
+    """A SAPI Arabic voice is re-routed to OneCore when only OneCore sees Arabic."""
+    from core import speech
+    from core.voices import SystemVoice
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech, "windows_arabic_engine", lambda: speech._WINDOWS_ONE_CORE)
+    arabic = SystemVoice("Microsoft Hoda", "ar-SA", engine=speech._WINDOWS_SAPI)
+    assert speech._engine_for_voice(arabic) == speech._WINDOWS_ONE_CORE
+    # An English SAPI voice stays on SAPI.
+    english = SystemVoice("Microsoft David", "en-US", engine=speech._WINDOWS_SAPI)
+    assert speech._engine_for_voice(english) == speech._WINDOWS_SAPI
+
+
+def test_sapi_script_language_probe_checks_installed_voices():
+    """`_serves_language` asks SAPI itself, so the answer is what SAPI really has."""
+    from core import speech
+
+    script = speech._sapi_language_probe_script("ar")
+    assert "GetInstalledVoices()" in script
+    assert "TwoLetterISOLanguageName -eq 'ar'" in script
+    assert "$_.Enabled" in script  # a disabled voice cannot serve the language
+
+
 def test_load_synthesizer_auto_uses_the_engine_that_reported_the_voice(monkeypatch):
     """Selecting a real voice in 'auto' uses its own engine, not the discovered one."""
     from core import speech

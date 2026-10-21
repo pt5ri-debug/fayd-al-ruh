@@ -361,6 +361,46 @@ def _sapi_select_voice(voice: SelectableVoice | None, language: str | None = Non
     return "".join(script)
 
 
+def _sapi_language_probe_script(code: str) -> str:
+    """PowerShell that prints ``yes`` when SAPI has an enabled voice for ``code``."""
+    return (
+        "$ErrorActionPreference='Continue';"
+        "try{"
+        "Add-Type -AssemblyName System.Speech;"
+        "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+        "if(@($s.GetInstalledVoices()|?{$_.Enabled -and "
+        f"$_.VoiceInfo.Culture.TwoLetterISOLanguageName -eq '{_ps_quote(code)}'}}).Count -gt 0)"
+        "{'yes'}"
+        "}catch{}"
+    )
+
+
+def _sapi_serves_language(language: str) -> bool:
+    """True when a SAPI voice for ``language`` is installed and enabled here.
+
+    Asks SAPI itself, because the voice store it *can* see is the only thing that
+    decides whether handing it the text would produce the right voice or a mangled
+    reading by a mismatched one.
+    """
+    code = language.strip().lower().split("-")[0][:2]
+    try:
+        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [
+                _WINDOWS_SHELL,
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                _sapi_language_probe_script(code),
+            ],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0 and b"yes" in completed.stdout
+
+
 def _windows_sapi_script(
     text_path: Path, target: Path, voice: SelectableVoice | None, language: str | None = None
 ) -> str:
@@ -675,6 +715,34 @@ def windows_installed_voices(*, refresh: bool = False) -> tuple[WindowsVoice, ..
     return voices
 
 
+def windows_onecore_usable() -> bool:
+    """True when the WinRT engine can be driven here.
+
+    The availability probe is tried first, but its verdict is not trusted on its
+    own: a listing that actually returned a OneCore voice is proof the engine works,
+    so a false-negative probe cannot refuse the one engine that can see an Arabic
+    voice added through *Settings -> Add voices*. Both calls are cached.
+    """
+    if windows_onecore_available():
+        return True
+    return any(voice.engine == _WINDOWS_ONE_CORE for voice in windows_installed_voices())
+
+
+def windows_arabic_engine() -> str | None:
+    """The Windows engine that can actually see an Arabic voice, or ``None``.
+
+    Both voice stores are listed rather than the availability probe, so this
+    reflects what the machine really has. It is what keeps an all-OneCore machine
+    (Arabic added through *Settings -> Add voices*) from being read by SAPI, which
+    cannot see that voice and would render Arabic with an English one instead --
+    audibly, but mangled.
+    """
+    for engine in (_WINDOWS_ONE_CORE, _WINDOWS_SAPI):
+        if any(voice.arabic for voice in windows_installed_voices() if voice.engine == engine):
+            return engine
+    return None
+
+
 def windows_voice_report() -> str:
     """An honest, human-readable note about Arabic speech on this Windows machine.
 
@@ -965,10 +1033,9 @@ def discover_synthesizer_name() -> str:
         if shutil.which(executable):
             return name
     if windows_speech_available():
-        # OneCore sees the voices added through Settings -> Speech -> Add voices
-        # (how an Arabic voice is installed on Windows 11); SAPI cannot, so try it
-        # first and fall back to SAPI only when the WinRT engine is unreachable.
-        return _WINDOWS_ONE_CORE if windows_onecore_available() else _WINDOWS_SAPI
+        # One place decides (the engine that can actually see an Arabic voice wins),
+        # so discovery and the Qwen3-TTS Arabic fallback can never disagree.
+        return windows_engine_name()
     from core.qwen_speech import available_synthesizer
 
     if available_synthesizer():
@@ -1072,6 +1139,10 @@ class _WindowsPowerShellSynthesizer:
         """
         return None
 
+    def _language_in_sapi(self, language: str) -> bool:
+        """True when SAPI has an enabled voice for ``language`` on this machine."""
+        return _sapi_serves_language(language)
+
     def _render(self, text: str, language: str) -> AudioClip | None:
         """Render ``text`` to a clip, or ``None`` when the engine produced nothing."""
         with tempfile.TemporaryDirectory(prefix="fayd-tts-") as folder:
@@ -1141,16 +1212,36 @@ class WindowsSapiSynthesizer(_WindowsPowerShellSynthesizer):
         return _windows_sapi_script(text_path, target, self.voice, language)
 
     def _fallback(self) -> _WindowsPowerShellSynthesizer | None:
-        # SAPI cannot see OneCore voices, and this is only reached *after* SAPI
-        # produced no audio -- the exact signature of an all-OneCore machine. So try
-        # the WinRT engine whenever Windows speech is available rather than gating on
-        # the availability probe: a false-negative probe is one of the ways the
+        # SAPI cannot see OneCore voices, and this is reached *after* SAPI produced
+        # no audio -- the classic all-OneCore machine, where SAPI writes an empty WAV.
+        # Try the WinRT engine whenever Windows speech is available rather than gating
+        # on the availability probe: a false-negative probe is one of the ways the
         # Arabic voice goes missing, and the attempt costs nothing when SAPI already
         # returned silence. The WinRT run fails harmlessly (no audio) if it truly is
         # unavailable.
         if windows_speech_available():
             return WindowsOneCoreSynthesizer(voice=self.voice, language=self.language)
         return None
+
+    def _render(self, text: str, language: str) -> AudioClip | None:
+        # A SAPI voice whose culture does not match the text is worse than silence:
+        # SAPI does not fail, it reads the text with the wrong voice, so Arabic comes
+        # out mangled by an English voice. That is not the "no audio" case
+        # `_fallback` is reached by, so hand a language SAPI cannot serve to the
+        # WinRT engine -- the one that sees the Arabic voice added through Settings ->
+        # Add voices -- and only then fall back to SAPI's own output.
+        if language and language != "en" and not self._serves_language(language):
+            if windows_speech_available():
+                other = WindowsOneCoreSynthesizer(voice=self.voice, language=self.language)._render(
+                    text, language
+                )
+                if other is not None and other.samples:
+                    return other
+        return super()._render(text, language)
+
+    def _serves_language(self, language: str) -> bool:
+        """True when a SAPI voice for ``language`` is installed and enabled here."""
+        return _sapi_serves_language(language)
 
 
 class WindowsOneCoreSynthesizer(_WindowsPowerShellSynthesizer):
@@ -1169,6 +1260,20 @@ class WindowsOneCoreSynthesizer(_WindowsPowerShellSynthesizer):
 
     def _script(self, text_path: Path, target: Path, language: str) -> str:
         return _windows_onecore_script(text_path, target, self.voice, language)
+
+    def _fallback(self) -> _WindowsPowerShellSynthesizer | None:
+        # The mirror of SAPI's fallback: if the WinRT engine cannot be driven after
+        # all (its store is empty or the run failed), a legacy SAPI voice can still
+        # read the text, so the reading is not blank when a SAPI voice exists. A
+        # language SAPI cannot serve is not handed over, because SAPI would read it
+        # with a mismatched voice rather than fail.
+        if windows_speech_available() and (
+            self.language is None
+            or self.language == "en"
+            or self._language_in_sapi(self.language)
+        ):
+            return WindowsSapiSynthesizer(voice=self.voice, language=self.language)
+        return None
 
 
 class WhisperRecognizer:
@@ -1296,17 +1401,27 @@ def load_recognizer(name: str = "transcript", **options) -> SpeechRecognizer:
     )
 
 
+def windows_engine_name() -> str:
+    """The Windows engine that reads this machine best, by name (Arabic-aware).
+
+    One place decides, so discovery, loading, and the Qwen3-TTS Arabic fallback all
+    agree. The engine that actually lists an Arabic voice wins first, because that
+    is the one that reads Arabic correctly; a false-negative WinRT probe must not
+    send an Arabic reading to SAPI, which cannot see the Arabic voice added through
+    *Settings -> Speech -> Add voices* and would mangle it with an English voice.
+    The availability probe is the tie-breaker when no Arabic voice is installed.
+    """
+    engine = windows_arabic_engine()
+    if engine is not None:
+        return engine
+    return _WINDOWS_ONE_CORE if windows_onecore_usable() else _WINDOWS_SAPI
+
+
 def _windows_engine(
     *, voice: SelectableVoice | None = None, language: str | None = None
 ) -> SpeechSynthesizer:
-    """The best Windows built-in engine: OneCore (WinRT) when reachable, else SAPI.
-
-    One place decides, so discovery, loading, and the Qwen3-TTS Arabic fallback all
-    agree. OneCore is preferred because it can see the voices installed through
-    *Settings -> Speech -> Add voices* -- the way an Arabic voice is added on
-    Windows 11 -- which SAPI cannot.
-    """
-    if windows_onecore_available():
+    """The best Windows built-in engine for ``voice``/``language`` (:func:`windows_engine_name`)."""
+    if windows_engine_name() == _WINDOWS_ONE_CORE:
         return WindowsOneCoreSynthesizer(voice=voice, language=language)
     return WindowsSapiSynthesizer(voice=voice, language=language)
 
@@ -1390,7 +1505,7 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
                 "Use --tts auto or --tts silent."
             )
         if name == _WINDOWS_ONE_CORE:
-            if not windows_onecore_available():
+            if not windows_onecore_usable():
                 raise ValueError(
                     "The Windows OneCore speech engine is not available here. "
                     "Use --tts auto or --tts windows-sapi."
@@ -1457,9 +1572,13 @@ def _engine_for_voice(value: object) -> str | None:
         return None
     if voice is None:
         return None
-    if voice.engine == _WINDOWS_ONE_CORE and windows_onecore_available():
+    if voice.engine == _WINDOWS_ONE_CORE and windows_onecore_usable():
         return _WINDOWS_ONE_CORE
     if voice.engine == _WINDOWS_SAPI and windows_speech_available():
+        # Do not send an Arabic voice to SAPI when only OneCore can see an Arabic
+        # voice: SAPI would read the text with an English voice instead.
+        if voice.arabic and windows_arabic_engine() == _WINDOWS_ONE_CORE:
+            return _WINDOWS_ONE_CORE
         return _WINDOWS_SAPI
     return None
 
@@ -1844,8 +1963,11 @@ __all__ = [
     "speech_available",
     "speech_install_plan",
     "system_voices",
+    "windows_arabic_engine",
+    "windows_engine_name",
     "windows_installed_voices",
     "windows_onecore_available",
+    "windows_onecore_usable",
     "windows_speech_available",
     "windows_voice_report",
 ]
