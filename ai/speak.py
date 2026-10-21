@@ -7,8 +7,11 @@
 
 This is the headless twin of the window's "Read aloud" control: the same
 :class:`~core.reading.TextReader`, the same :mod:`core.voices` catalog, and the
-same system speech engine. ``list`` prints the catalog grouped by category so a
-user can see every man, woman, boy, and girl voice and its key. The engine itself
+same system speech engine. ``list`` prints the **real** voices the machine reports
+first (the Windows OneCore/SAPI or macOS ``say`` voices, by their own names, e.g.
+``Microsoft Hoda``) -- those are what the engine will actually speak with -- then
+the synthetic ``espeak-ng`` catalog grouped by category so a user can see every
+man, woman, boy, and girl voice and its key. The engine itself
 (``espeak-ng``) is an ordinary system program, not a Python package, so it is
 installed as an OS package -- ``--install-engine`` runs the platform's package
 manager, and says plainly what to do when it cannot.
@@ -23,19 +26,39 @@ from core.speech import (
     install_speech_engine,
     speech_available,
     speech_install_plan,
+    system_voices,
 )
 from core.voices import voice_categories, voices_for
 
 
 def _list_voices(reader: TextReader) -> int:
     print(f"Speech engine: {reader.engine_name}  ({reader.describe()})")
-    print("\nReading voices (use the key with --voice):\n")
+    installed = system_voices()
+    if installed:
+        # The real voices the machine reports, grouped by language. This is the
+        # honest list: these are the voices the engine will actually speak with.
+        print("\nInstalled voices (the real voices on this machine; use the key with --voice):\n")
+        groups: dict[str, list] = {}
+        for voice in installed:
+            groups.setdefault(voice.language_code, []).append(voice)
+        for code in sorted(groups, key=lambda c: (c != "ar", c)):
+            voices = groups[code]
+            label = voices[0].language_label()
+            print(f"{label} ({code}):")
+            for voice in voices:
+                gender = f" {voice.gender}" if voice.gender else ""
+                print(f"  {voice.key:<40} {voice.name}{gender}  [{voice.language}]")
+            print()
+        print("These installed voices are what the system really speaks with.")
+        print("A synthetic catalog voice is also available (--voice man-1 ...).\n")
+    print("Reading voices (use the key with --voice):\n")
     for category, label_en, label_ar in voice_categories():
         print(f"{label_en} / {label_ar}:")
-        for voice in voices_for(category):
+        for catalog_voice in voices_for(category):
             print(
-                f"  {voice.key:<9} {voice.label_en:<8} {voice.label_ar:<8} "
-                f"variant={voice.variant} pitch={voice.pitch} speed={voice.speed}"
+                f"  {catalog_voice.key:<9} {catalog_voice.label_en:<8} {catalog_voice.label_ar:<8} "
+                f"variant={catalog_voice.variant} pitch={catalog_voice.pitch} "
+                f"speed={catalog_voice.speed}"
             )
         print()
     return 0

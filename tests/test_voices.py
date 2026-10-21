@@ -824,3 +824,216 @@ def test_say_leaves_the_default_when_no_voice_for_the_language_exists(monkeypatc
         assert "-v" not in options
     finally:
         speech._macos_voice_cache.clear()
+
+
+# ------------------------------------------------------- real installed voices
+
+
+def test_system_voice_key_round_trips_and_is_marked():
+    from core.voices import SYSTEM_VOICE_PREFIX, SystemVoice, is_system_voice_key
+
+    voice = SystemVoice("Microsoft Hoda", "ar-SA", "Female", engine="windows-onecore")
+    assert voice.key == f"{SYSTEM_VOICE_PREFIX}windows-onecore:Microsoft Hoda"
+    assert is_system_voice_key(voice.key)
+    assert not is_system_voice_key("man-1")
+    assert voice.arabic and voice.language_code == "ar"
+    assert voice.label_en == voice.label_ar == "Microsoft Hoda"
+
+
+def test_system_voice_rejects_an_empty_name():
+    from core.voices import SystemVoice
+
+    with pytest.raises(ValueError):
+        SystemVoice("", "ar-SA")
+
+
+def test_system_voice_description_names_the_real_voice():
+    from core.voices import SystemVoice
+
+    voice = SystemVoice("Majed", "ar-SA", "Male")
+    assert "Majed" in voice.description("en")
+    assert "real voice" in voice.description("en")
+    assert "Majed" in voice.description("ar")
+
+
+def test_system_voice_language_label_groups_arabic():
+    from core.voices import SystemVoice
+
+    arabic = SystemVoice("Hoda", "ar-SA")
+    english = SystemVoice("Zira", "en-US")
+    assert arabic.language_label() == "Arabic"
+    assert arabic.language_label("ar") == "العربية"
+    assert english.language_label() == "English"
+    assert SystemVoice("Odd", "fr-FR").language_label() == "fr-FR"  # honest fallback
+
+
+def test_system_voices_lists_windows_onecore_voices(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: True)
+    monkeypatch.setattr(
+        speech,
+        "windows_installed_voices",
+        lambda **_: (
+            speech.WindowsVoice("Microsoft Hamed", "ar-SA", "Male"),
+            speech.WindowsVoice("Microsoft Zira", "en-US", "Female"),
+        ),
+    )
+    speech._system_voices_cache[0] = None
+    try:
+        voices = speech.system_voices()
+    finally:
+        speech._system_voices_cache[0] = None
+    assert [voice.name for voice in voices] == ["Microsoft Hamed", "Microsoft Zira"]
+    assert voices[0].arabic and voices[0].engine == speech._WINDOWS_ONE_CORE
+    assert voices[1].language_code == "en"
+
+
+def test_system_voices_is_empty_off_windows_and_macos(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Linux")
+    speech._system_voices_cache[0] = None
+    try:
+        assert speech.system_voices() == ()
+    finally:
+        speech._system_voices_cache[0] = None
+
+
+def test_system_voices_parses_macos_say_listing(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Darwin")
+    listing = "Majed               ar_SA    # مرحبا\nSamantha            en_US    # Hello\n"
+    monkeypatch.setattr(
+        speech.subprocess,
+        "run",
+        lambda argv, **_kwargs: speech.subprocess.CompletedProcess(argv, 0, listing.encode(), b""),
+    )
+    speech._system_voices_cache[0] = None
+    try:
+        voices = speech.system_voices()
+    finally:
+        speech._system_voices_cache[0] = None
+    assert [voice.name for voice in voices] == ["Majed", "Samantha"]
+    assert voices[0].language == "ar-SA" and voices[0].engine == "say"
+
+
+def test_sapi_script_selects_a_system_voice_by_exact_name():
+    from pathlib import Path
+
+    from core import speech
+    from core.voices import SystemVoice
+
+    voice = SystemVoice("Microsoft Hoda", "ar-SA", "Female")
+    script = speech._windows_sapi_script(Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), voice)
+    assert "$s.SelectVoice('Microsoft Hoda');" in script
+
+
+def test_onecore_script_selects_a_system_voice_by_display_name():
+    from pathlib import Path
+
+    from core import speech
+    from core.voices import SystemVoice
+
+    voice = SystemVoice("Microsoft Hamed", "ar-SA", "Male")
+    script = speech._windows_onecore_script(
+        Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), voice, "ar"
+    )
+    assert "$_.DisplayName -eq 'Microsoft Hamed'" in script
+    assert "$speak.Voice=$pick[0]" in script
+
+
+def test_say_selects_a_system_voice_by_exact_name():
+    from core import speech
+    from core.voices import SystemVoice
+
+    options = speech._say_voice_options(SystemVoice("Majed", "ar-SA", "Male"), "ar")
+    assert options == ("-v", "Majed")
+
+
+def test_resolve_voice_accepts_a_system_voice_key(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech, "system_voices", lambda **_: ())
+    voice = speech._resolve_voice("system:windows-onecore:Microsoft Hoda")
+    # Not installed here, so the catalog default is used rather than a bad name.
+    assert voice is not None and voice.key == "woman-1"
+    # An unknown *catalog* key still raises, so a typo is reported.
+    with pytest.raises(ValueError):
+        speech._resolve_voice("no-such-voice")
+
+
+def test_reader_accepts_a_system_voice_key(monkeypatch):
+    from core import speech
+    from core.reading import TextReader
+    from core.voices import SystemVoice
+
+    installed = SystemVoice("Microsoft Hoda", "ar-SA", "Female", engine="windows-onecore")
+    monkeypatch.setattr(speech, "system_voices", lambda **_: (installed,))
+    reader = TextReader(synthesizer=SilentSynthesizer(), voice=installed.key)
+    assert reader.voice.key == installed.key
+    # A saved key whose voice is gone falls back to the catalog default.
+    monkeypatch.setattr(speech, "system_voices", lambda **_: ())
+    gone = TextReader(synthesizer=SilentSynthesizer(), voice=installed.key)
+    assert gone.voice.key == DEFAULT_VOICE_KEY
+
+
+def test_speak_list_shows_installed_voices_when_present(monkeypatch, capsys):
+    from ai import speak
+    from core.voices import SystemVoice
+
+    monkeypatch.setattr(
+        speak,
+        "system_voices",
+        lambda: (SystemVoice("Microsoft Hoda", "ar-SA", "Female"),),
+    )
+    assert speak.main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert "Installed voices" in out
+    assert "Microsoft Hoda" in out
+    # The synthetic catalog is still listed below it.
+    assert "Men" in out and "man-1" in out
+
+
+def test_sapi_synthesizer_falls_back_to_onecore_when_it_has_no_voice(monkeypatch):
+    from core import speech
+
+    # SAPI renders nothing (all voices are OneCore on this machine)...
+    monkeypatch.setattr(speech.WindowsSapiSynthesizer, "_render", lambda self, text, lang: None)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: True)
+
+    good = speech.AudioClip((1000, -1000, 2000), sample_rate=speech.SAMPLE_RATE)
+
+    def fake_render(self, text, lang):
+        assert self.name == speech._WINDOWS_ONE_CORE
+        return good
+
+    monkeypatch.setattr(speech.WindowsOneCoreSynthesizer, "_render", fake_render)
+    clip = speech.WindowsSapiSynthesizer().synthesize("مرحبا بالعالم")
+    assert clip.samples == good.samples  # the sibling engine's audio, not silence
+
+
+def test_windows_synthesizer_returns_silence_only_when_both_engines_fail(monkeypatch):
+    from core import speech
+
+    monkeypatch.setattr(speech.WindowsSapiSynthesizer, "_render", lambda self, text, lang: None)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)
+    clip = speech.WindowsSapiSynthesizer().synthesize("مرحبا بالعالم")
+    assert clip.is_silent  # honest last resort, not a crash
+
+
+def test_onecore_script_keeps_the_default_voice_when_no_language_match():
+    from pathlib import Path
+
+    from core import speech
+    from core.voices import find_voice
+
+    # A catalog voice on a machine with no Arabic voice: the engine default is kept
+    # rather than failing, so the reading is audible (just not Arabic).
+    script = speech._windows_onecore_script(
+        Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), find_voice("woman-1"), "ar"
+    )
+    assert "$m=@($voices|?{$_.Language -like 'ar*'});" in script
