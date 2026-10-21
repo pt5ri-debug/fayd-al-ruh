@@ -121,6 +121,41 @@ def test_apply_refuses_when_there_are_local_changes(tmp_path: Path) -> None:
     assert status.dirty is True
     assert (installed / "app.txt").read_text(encoding="utf-8") == "local edit\n"
     assert "local changes" in status.summary().lower()
+    # The refused file is named, so the user knows exactly what to commit or stash.
+    assert status.conflicting_files == ("app.txt",)
+    assert "app.txt" in status.reason
+
+
+def test_local_change_to_an_untouched_file_does_not_block_an_update(tmp_path: Path) -> None:
+    """A scratch edit to a file the update does not change must not refuse it.
+
+    git's own ``--ff-only`` leaves such a file exactly as it is, so refusing was a
+    dead end for a harmless edit.
+    """
+    _origin, installed = _repo_pair(tmp_path)
+    (installed / ".gitignore").write_text("data/\n# my scratch note\n", encoding="utf-8")
+
+    status = check_for_updates(str(installed), root=installed)
+    assert status.dirty is True
+    assert status.conflicting_files == ()
+
+    applied = apply_update(str(installed), root=installed)
+
+    assert applied.applied is True
+    assert (installed / "new_module.py").read_text(encoding="utf-8") == "x = 1\n"
+    # The user's own edit is left untouched by the fast-forward.
+    assert "# my scratch note" in (installed / ".gitignore").read_text(encoding="utf-8")
+
+
+def test_conflicting_files_names_only_the_overlapping_ones(tmp_path: Path) -> None:
+    _origin, installed = _repo_pair(tmp_path)
+    (installed / "app.txt").write_text("local edit\n", encoding="utf-8")  # overlaps
+    (installed / ".gitignore").write_text("data/\n# scratch\n", encoding="utf-8")  # does not
+
+    status = check_for_updates(str(installed), root=installed)
+
+    assert status.conflicting_files == ("app.txt",)
+    assert status.dirty is True
 
 
 def test_untracked_files_do_not_block_an_update(tmp_path: Path) -> None:
