@@ -391,8 +391,16 @@ def test_speech_install_plan_uses_winget_on_windows(monkeypatch):
     assert plan.command == ("winget", "install", "-e", "--id", "eSpeak-NG.eSpeak-NG")
 
 
+def _pin_piper_off(monkeypatch):
+    """These tests exercise the system/Windows engine choice, so Piper is hidden."""
+    from core import piper_speech
+
+    monkeypatch.setattr(piper_speech, "available_synthesizer", lambda *a, **k: False)
+
+
 def test_windows_builtin_engine_needs_no_install(monkeypatch):
     from core import speech
+    _pin_piper_off(monkeypatch)
 
     monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
     monkeypatch.setattr(speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None)
@@ -645,6 +653,7 @@ def test_windows_onecore_script_uses_winrt_and_selects_an_arabic_voice():
 
 def test_windows_onecore_engine_is_preferred_over_sapi(monkeypatch):
     from core import speech
+    _pin_piper_off(monkeypatch)
 
     monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
     monkeypatch.setattr(
@@ -667,6 +676,7 @@ def test_windows_onecore_engine_is_preferred_over_sapi(monkeypatch):
 
 def test_windows_onecore_falls_back_to_sapi_when_the_probe_fails(monkeypatch):
     from core import speech
+    _pin_piper_off(monkeypatch)
 
     monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
     monkeypatch.setattr(
@@ -1234,6 +1244,7 @@ def test_discovery_prefers_the_engine_that_can_see_an_arabic_voice(monkeypatch):
     mangled. The engine that actually lists an Arabic voice now wins.
     """
     from core import speech
+    _pin_piper_off(monkeypatch)
 
     monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
     monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)  # false negative
@@ -1246,6 +1257,19 @@ def test_discovery_prefers_the_engine_that_can_see_an_arabic_voice(monkeypatch):
         ),
     )
     assert speech.discover_synthesizer_name() == speech._WINDOWS_ONE_CORE
+
+
+def test_discovery_prefers_piper_when_it_is_installed(monkeypatch):
+    """A natural neural voice beats the robotic system engines once it is present.
+
+    The whole point of Piper is that the reading sounds like a person; discovery
+    therefore prefers it over espeak/SAPI/OneCore whenever the extra and a voice are
+    both installed.
+    """
+    from core import piper_speech, speech
+
+    monkeypatch.setattr(piper_speech, "available_synthesizer", lambda *a, **k: True)
+    assert speech.discover_synthesizer_name() == "piper"
 
 
 def test_sapi_defers_arabic_to_onecore_when_it_has_no_arabic_voice(monkeypatch):
