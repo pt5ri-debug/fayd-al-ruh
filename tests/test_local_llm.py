@@ -109,6 +109,30 @@ def test_local_language_model_serves_the_cognitive_interface(tmp_path):
     assert response.text
 
 
+def test_local_language_model_seed_makes_generation_reproducible(tmp_path):
+    """A seeded ``LocalLanguageModel`` must not silently sample unseeded.
+
+    The cognitive-interface test above always passed *by luck*: the plain-text
+    path used to drop ``seed``, so the sampler was unseeded and roughly one run in
+    two hundred returned an empty continuation. Forwarding the seed fixes that and
+    makes the reply reproducible.
+    """
+    model = TransformerLM(_SMALL, seed=0)
+    train_language_model(model, _token_stream(), steps=20, batch_size=4, seed=0)
+    checkpoint = tmp_path / "llm.npz"
+    model.save(checkpoint)
+
+    def reply() -> str:
+        cognitive_model = LocalLanguageModel(
+            checkpoint, max_new_tokens=8, temperature=0.7, seed=0
+        )
+        return cognitive_model.generate(
+            ModelRequest(inputs=(), system_instruction="", context=("water",))
+        ).text
+
+    assert reply() == reply()
+
+
 def test_missing_checkpoint_is_reported_clearly(tmp_path):
     with pytest.raises(FileNotFoundError):
         LocalLanguageModel(tmp_path / "absent.npz")
