@@ -799,6 +799,19 @@ class ChatService:
             f"Qwen3-TTS (text to speech): {tts_line}"
         )
 
+    def piper_speech_status(self) -> str:
+        """An honest note about the local Piper voices, for the window.
+
+        Piper is the natural voice: it sounds like a person rather than the
+        robotic system engine, and it speaks Arabic *and* English -- so it is
+        offered as the preferred reader whenever it is installed.
+        """
+        from core.piper_speech import piper_status
+
+        status = piper_status()
+        line = "ready" if status.available else f"not ready — {status.hint}"
+        return f"Piper (natural voice, Arabic + English): {line}"
+
     def reading_available(self) -> bool:
         """True when a real speech engine is installed."""
         return self._reader.available()

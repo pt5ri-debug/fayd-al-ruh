@@ -35,6 +35,7 @@ from cli.menu import (
     run_llm,
     run_ml,
     run_natasha_chat,
+    run_piper_speech,
     run_presentation,
     run_qwen_speech,
     run_release,
@@ -182,6 +183,18 @@ ACTIONS: tuple[GuiAction, ...] = (
         "Qwen3 speech: download the local TTS model (~3.4 GB)",
         run_qwen_speech,
         ("qwen-tts", "download", "--approve"),
+    ),
+    GuiAction(
+        "piper",
+        "Piper: status of the natural local voices (Arabic + English)",
+        run_piper_speech,
+        ("status",),
+    ),
+    GuiAction(
+        "piper-download",
+        "Piper: download the natural local voice (~63 MB)",
+        run_piper_speech,
+        ("download", "--approve"),
     ),
     GuiAction(
         "deps",

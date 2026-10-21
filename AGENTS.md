@@ -15,7 +15,8 @@ Arabic is kept as secondary aliases where useful.
   over an optional extra must skip when it is absent (`pdf_available()`,
   `ocr_available()`, `pytest.importorskip`), and `pyproject.toml`'s mypy
   overrides must ignore every optional import name (`pypdf`, `pypdfium2`,
-  `pytesseract`, `PIL`, `diffusers`, `llama_cpp`, `huggingface_hub`, `pptx`).
+  `pytesseract`, `PIL`, `diffusers`, `llama_cpp`, `huggingface_hub`, `pptx`,
+  `piper`, `onnxruntime`).
 - Push branches and open PRs with the `create_pr` tool. Merge only on the user's
   explicit approval ("نعم قم بالدمج").
 
@@ -682,8 +683,41 @@ Arabic is kept as secondary aliases where useful.
   Qwen3-ASR covers **Arabic** (52 languages), but **Qwen3-TTS does not speak
   Arabic** (ten languages: Chinese, English, Japanese, Korean, German, French,
   Russian, Portuguese, Spanish, Italian) — `QWEN_TTS_LANGUAGES` states this, the
-  synthesizer refuses Arabic with a clear message, and a `fallback` synthesizer
+  synthesizer refuses Arabic with a clear message, and   a `fallback` synthesizer
   (the system engine) can be supplied so Arabic is still read aloud.
+- `core/piper_speech.py` — **Piper**, a real, local **neural** text-to-speech
+  engine: the honest answer to "the voices sound robotic". Piper
+  (`rhasspy/piper`, maintained by the Open Home Foundation) renders speech with a
+  small VITS model exported to ONNX, so a voice sounds like a person instead of
+  `espeak-ng`'s formant synthesis -- and it runs **entirely on this machine**, on
+  the CPU, with nothing sent off it. Unlike Qwen3-TTS it **speaks Arabic**
+  (`ar_JO-kareem`), which is why it is the one engine that gives a natural
+  Arabic *and* English voice without leaving the machine. `PiperSynthesizer`
+  satisfies `core.speech.SpeechSynthesizer`, so the window, Jarvis, the voice
+  loop, and every mouth use it unchanged. **One voice = one model**:
+  `PIPER_VOICES` names the fetchable voices and `spec_for_voice` maps a project
+  catalog voice (`man-1` … `girl-4`) onto one, so the picker keeps working and
+  each entry stays distinct (Arabic has a *single* released voice, so every
+  Arabic reading uses it -- stated plainly, not hidden). **Prosody from the
+  catalog**: a voice's `speed`/`pitch_range` become Piper's
+  `length_scale`/`noise_scale`/`noise_w_scale`, so the two voice systems agree on
+  how a voice should read.
+  `PiperRunner` is the injection seam and `PiperOnnxRunner` the default (lazy
+  import of `piper`/`onnxruntime`), so the engine is exercised with no extra and
+  no weights. The model is an **ONNX file under `data/piper`**
+  (`core.paths.piper_models_dir`, git-ignored) with a `model.json` registry:
+  `find_model_file`/`model_is_cached`/`resolve_spec`/`spec_names`/`spec_summaries`
+  read them. The runtime is the optional `[piper]` extra (`FEATURE_PIPER`,
+  `requirements-piper.txt`, `piper-tts`), imported lazily. `piper_status`/
+  `available_synthesizer` report *exactly* what is installed and the real next
+  step, and `download_model` runs only through the permission + human-approval
+  gates (`--approve`), like every other model download. **One voice does not
+  silence the other**: when the voice a language needs is not downloaded yet and a
+  `fallback` synthesizer (the system engine) was supplied, the fallback reads that
+  language -- the same pattern as Qwen3-TTS's Arabic fallback. CLI:
+  `python -m cli piper status|models|download --approve|say "<text>" --write-wav f`
+  (`cli/piper_speech.py`, the headless twin of the window's controls), mirrored as
+  the GUI sidebar's two *Piper* actions and the reading-voice picker's status note.
 - `core/speech.py`'s two factories are the **one** place every chat interface gets
   its speech, so Qwen3 is wired there and nowhere else: `discover_recognizer_name`
   prefers `qwen3-asr` when the extra and weights are present (else `whisper`, else
@@ -1806,6 +1840,20 @@ clone, each optional so the base system still runs without it:
   the four voices of a category stay distinct), and `core/voices.Voice` validates
   the new settings. This is the direct answer to "make the voices read like ordinary
   people, not machines".
+- Phase 14 — a real **neural** voice, not a better formant one: `core/piper_speech.py`
+  adds **Piper**, a local VITS/ONNX engine that renders speech which sounds like a
+  person rather than the robotic `espeak-ng` synthesis. Unlike the system engines it
+  needs a model file per voice and unlike Qwen3-TTS it **speaks Arabic**
+  (`ar_JO-kareem`), so it is the honest way to give the project a natural Arabic
+  *and* English voice while staying on this machine. It satisfies the same
+  `SpeechSynthesizer` protocol, maps the catalog's voices onto real Piper voices
+  (`spec_for_voice`), and reads a catalog voice's `speed`/`pitch_range` as Piper's
+  `length_scale`/`noise_scale`/`noise_w_scale`. Wired into `core/speech.py`'s
+  `discover_synthesizer_name`/`load_synthesizer` (preferred once installed, with the
+  system engine as the fallback for a language whose voice is not downloaded), the
+  optional `[piper]` extra, the CLI `python -m cli piper …`, and the window's
+  sidebar, `AGENTS.md` documents it and `tests/test_piper_speech.py` exercises the
+  runner seam, the catalog mapping, the prosody, the fallback, and the real render.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

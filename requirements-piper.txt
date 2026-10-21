@@ -1,0 +1,21 @@
+# Optional: Piper, a local neural text-to-speech engine (the [piper] extra).
+#
+# Install with:  python -m pip install -r requirements-piper.txt
+#
+# Piper renders speech with a small VITS model exported to ONNX, so a voice
+# sounds like a person instead of the robotic formant synthesis of espeak-ng --
+# and it runs **entirely on this machine**, on the CPU, with nothing sent off it.
+# Unlike Qwen3-TTS it **speaks Arabic** (ar_JO-kareem), which is why it is the
+# honest way to give the project a natural Arabic *and* English voice without
+# leaving the machine.
+#
+# ``piper-tts`` bundles ONNX Runtime and the espeak-ng phonemization data, so on
+# most systems there are no extra system packages to chase.
+#
+# The voice weights are a *separate* one-time, human-approved download:
+#     python -m cli piper download --approve            # the default Arabic voice (~63 MB)
+#     python -m cli piper download en_US-amy-medium --approve
+# or drop a `<voice>.onnx` + `<voice>.onnx.json` pair into the data/piper folder.
+# The base install needs none of this: the import is lazy, and the app reports
+# the real next step when the runtime or a voice is absent.
+piper-tts>=1.2

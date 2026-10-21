@@ -165,6 +165,17 @@ def qwen_speech_models_dir() -> Path:
     return data_dir() / "qwen-speech"
 
 
+def piper_models_dir() -> Path:
+    """Where the Piper text-to-speech voices live.
+
+    Piper is a local neural TTS engine: each voice is an ONNX model the user drops
+    into ``data/piper`` (or downloads there with ``python -m cli piper download
+    --approve``). The folder is git-ignored, so a downloaded voice never dirties
+    the working tree or bloats a program update.
+    """
+    return data_dir() / "piper"
+
+
 def studio_dir() -> Path:
     """Where the Code Studio keeps its own state (git worktrees, run logs).
 
@@ -252,6 +263,7 @@ __all__ = [
     "presentation_models_dir",
     "natasha_models_dir",
     "qwen_speech_models_dir",
+    "piper_models_dir",
     "studio_dir",
     "studio_workspaces_dir",
     "bundled_artifacts_dir",
