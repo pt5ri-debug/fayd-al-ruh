@@ -533,18 +533,34 @@ Arabic is kept as secondary aliases where useful.
   instead of being mangled by the default English voice; when no voice for that
   language is installed the engine keeps its own default rather than failing.
   `windows_installed_voices`/`windows_voice_report` list the voices the engine can
-  actually see (through OneCore when reachable, else SAPI) and say which engine is
-  used and whether an Arabic voice is visible — or the exact *Add voices* step when
-  it is not — surfaced by `TextReader.describe()` and `python -m cli speak list`.
+  actually see and say which engine is used and whether an Arabic voice is visible
+  — or the exact *Add voices* step when it is not — surfaced by
+  `TextReader.describe()` and `python -m cli speak list`. The two Windows engines
+  keep **separate** voice stores and neither is a superset of the other, so
+  `windows_installed_voices` asks **both** (the WinRT `AllVoices` listing and the
+  SAPI `GetInstalledVoices` listing) and returns their **union**, de-duplicated by
+  name+language and OneCore-first, tagging each `WindowsVoice` with the engine that
+  reported it; asking only one engine silently dropped whatever only the other
+  knew (a OneCore Arabic voice is invisible to SAPI, and a legacy SAPI voice can be
+  absent from the WinRT store). Both listing scripts, and the OneCore availability
+  probe, are wrapped in `try`/`catch{}` with `$ErrorActionPreference='Continue'`:
+  a non-terminating WinRT warning used to abort the probe under `Stop` and report
+  "no OneCore", which is exactly how a voice the OS offered to every other app
+  stayed invisible here. `_engine_for_voice` points a chosen `SystemVoice` at the
+  engine that listed it (so `load_synthesizer('auto', voice=…)` uses WinRT for a
+  WinRT voice instead of handing it to SAPI, which cannot see it), and the
+  SAPI→OneCore `_fallback` now triggers whenever Windows speech is available
+  rather than gating on the probe — a false-negative probe is one of the ways the
+  Arabic voice goes missing, and the attempt is free once SAPI has returned silence.
   `system_voices()` (cross-platform, cached, cleared by
   `refresh_windows_speech_caches`) is the **one** place the *real* installed voices
-  are listed for the menus: the Windows voices (OneCore/SAPI, via
+  are listed for the menus: the Windows voices (the union above, via
   `windows_installed_voices`) or the macOS `say -v ?` voices, and `()` elsewhere so
   a caller falls back to the synthetic catalog rather than inventing a voice.
   `_WindowsPowerShellSynthesizer` now renders through a private `_render` and, when
   it produces **no audio** (the classic Windows 11 case: the user's only voices are
   OneCore, so SAPI writes an empty WAV — the reported `0.00 s`), it tries the
-  sibling engine (`_fallback`, SAPI → OneCore when the WinRT probe succeeds) before
+  sibling engine (`_fallback`, SAPI → OneCore) before
   the silent stand-in, so a blank reading becomes speech instead of silence.
   `AudioClip.read_wav` now decodes 8/16/32-bit and any channel count into mono
   16-bit (`_pcm_to_mono16`), because the OneCore stream is not always 16-bit mono
@@ -1724,6 +1740,14 @@ clone, each optional so the base system still runs without it:
   `DisplayName`, `say -v`). The reported silent (`0.00 s`) reading is fixed too:
   when the selected Windows engine produces an empty clip (all-OneCore machines
   look empty to SAPI), the sibling engine is tried before the silent stand-in.
+  Phase 12b hardens the listing so the real voices cannot hide: the two Windows
+  voice stores are **unioned** rather than one being chosen, the WinRT listing and
+  availability probe tolerate a non-terminating warning (`$ErrorActionPreference
+  ='Continue'` + `try/catch{}`, which used to abort the probe and report "no
+  OneCore"), a chosen `SystemVoice` is routed to the engine that reported it
+  (`_engine_for_voice`), and the SAPI→OneCore fallback no longer gates on the probe
+  — so a machine whose only Arabic voice is OneCore is read aloud even when the
+  WinRT probe is a false negative.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

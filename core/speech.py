@@ -522,12 +522,20 @@ def windows_onecore_available(*, refresh: bool = False) -> bool:
         return False
     if _onecore_cache[0] is not None and not refresh:
         return bool(_onecore_cache[0])
+    # Deliberately tolerant: the WinRT projection can emit a non-terminating
+    # warning (a missing optional assembly, a PowerShell 7 host, a locked store),
+    # and with ``$ErrorActionPreference='Stop'`` any of those would abort the probe
+    # and hide the OneCore voices -- including the Arabic one added through
+    # Settings -> Add voices. A try/catch that only prints on success means a
+    # transient warning degrades to "SAPI only" rather than a false negative.
     script = (
-        "$ErrorActionPreference='Stop';"
+        "$ErrorActionPreference='Continue';"
+        "try{"
         "Add-Type -AssemblyName System.Runtime.WindowsRuntime;"
         "[void][Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media.SpeechSynthesis,"
         "ContentType=WindowsRuntime];"
         "if([Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices.Count -gt 0){'ok'}"
+        "}catch{}"
     )
     try:
         completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
@@ -546,11 +554,18 @@ def windows_onecore_available(*, refresh: bool = False) -> bool:
 
 @dataclass(frozen=True)
 class WindowsVoice:
-    """One voice the Windows speech engine reports (name, language tag, gender)."""
+    """One voice the Windows speech engine reports (name, language tag, gender).
+
+    ``engine`` names the Windows engine that reported it (``windows-onecore`` or
+    ``windows-sapi``). The two engines keep *separate* voice stores, so the same
+    machine can offer a voice to one and not the other; recording which engine saw
+    it is what lets the synthesizer be pointed at the right one.
+    """
 
     name: str
     language: str
     gender: str
+    engine: str = ""
 
     @property
     def arabic(self) -> bool:
@@ -562,44 +577,24 @@ class WindowsVoice:
 _windows_voices_cache: list[tuple[WindowsVoice, ...] | None] = [None]
 
 
-def _parse_voice_lines(output: bytes) -> tuple[WindowsVoice, ...]:
-    """Parse ``name|language|gender`` lines emitted by the listing script."""
+def _parse_voice_lines(output: bytes, *, engine: str = "") -> tuple[WindowsVoice, ...]:
+    """Parse ``name|language|gender`` lines emitted by a listing script.
+
+    The gender is optional -- a listing that omits it (or leaves it blank) still
+    yields a usable voice, because the name and the language are what matter for
+    selecting and grouping it. A line without a name is skipped.
+    """
     voices: list[WindowsVoice] = []
     for line in output.decode("utf-8", "replace").splitlines():
-        parts = line.strip().split("|")
-        if len(parts) == 3 and parts[0]:
-            voices.append(WindowsVoice(parts[0], parts[1], parts[2]))
+        parts = [part.strip() for part in line.strip().split("|")]
+        if len(parts) >= 2 and parts[0]:
+            gender = parts[2] if len(parts) > 2 else ""
+            voices.append(WindowsVoice(parts[0], parts[1], gender, engine=engine))
     return tuple(voices)
 
 
-def windows_installed_voices(*, refresh: bool = False) -> tuple[WindowsVoice, ...]:
-    """The voices Windows actually offers, preferring the engine that sees them all.
-
-    Lists through the OneCore (WinRT) engine when it is reachable -- it reports the
-    voices added under *Settings -> Speech -> Add voices*, which SAPI omits -- and
-    falls back to SAPI otherwise. Empty on a non-Windows machine, so the caller can
-    report honestly instead of pretending.
-    """
-    if not windows_speech_available():
-        return ()
-    if _windows_voices_cache[0] is not None and not refresh:
-        return _windows_voices_cache[0]
-    if windows_onecore_available():
-        script = (
-            "$ErrorActionPreference='Stop';"
-            "Add-Type -AssemblyName System.Runtime.WindowsRuntime;"
-            "[void][Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media.SpeechSynthesis,"
-            "ContentType=WindowsRuntime];"
-            "[Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices|%{"
-            "$_.DisplayName+'|'+$_.Language+'|'+$_.Gender}"
-        )
-    else:
-        script = (
-            "$ErrorActionPreference='Stop';"
-            "Add-Type -AssemblyName System.Speech;"
-            "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
-            "$s.GetInstalledVoices()|%{$_.VoiceInfo}|%{$_.Name+'|'+$_.Culture.Name+'|'+$_.Gender}"
-        )
+def _list_windows_voices(script: str, engine: str) -> tuple[WindowsVoice, ...]:
+    """Run one listing ``script`` and parse its voices, or ``()`` on any failure."""
     try:
         completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
             [_WINDOWS_SHELL, "-NoProfile", "-NonInteractive", "-Command", script],
@@ -608,9 +603,67 @@ def windows_installed_voices(*, refresh: bool = False) -> tuple[WindowsVoice, ..
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        voices: tuple[WindowsVoice, ...] = ()
-    else:
-        voices = _parse_voice_lines(completed.stdout) if completed.returncode == 0 else ()
+        return ()
+    if completed.returncode != 0:
+        return ()
+    return _parse_voice_lines(completed.stdout, engine=engine)
+
+
+#: The WinRT listing: every voice Windows installs, including the OneCore store.
+#: Tolerant on purpose -- a non-terminating warning must not abort the listing and
+#: hide the Arabic voice the user installed.
+_ONECORE_LIST_SCRIPT = (
+    "$ErrorActionPreference='Continue';"
+    "try{"
+    "Add-Type -AssemblyName System.Runtime.WindowsRuntime;"
+    "[void][Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media.SpeechSynthesis,"
+    "ContentType=WindowsRuntime];"
+    "[Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices|%{"
+    "$_.DisplayName+'|'+$_.Language+'|'+$_.Gender}"
+    "}catch{}"
+)
+
+#: The legacy listing: only what ``System.Speech`` can see (never OneCore voices).
+_SAPI_LIST_SCRIPT = (
+    "$ErrorActionPreference='Continue';"
+    "try{"
+    "Add-Type -AssemblyName System.Speech;"
+    "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+    "$s.GetInstalledVoices()|%{$_.VoiceInfo}|%{$_.Name+'|'+$_.Culture.Name+'|'+$_.Gender}"
+    "}catch{}"
+)
+
+
+def windows_installed_voices(*, refresh: bool = False) -> tuple[WindowsVoice, ...]:
+    """The voices Windows actually offers, as the **union** of both engines.
+
+    The two Windows engines keep separate voice stores, and neither is a superset
+    of the other: the OneCore (WinRT) store holds the voices added under *Settings
+    -> Speech -> Add voices* (how an Arabic voice is added on Windows 11) that SAPI
+    cannot see at all, while SAPI can still expose voices the WinRT probe happens
+    not to reach. So both are asked and the results merged -- OneCore first, so a
+    voice present in both keeps the modern engine -- rather than picking one engine
+    and silently missing whatever only the other knows. Empty on a non-Windows
+    machine, so the caller can report honestly instead of pretending.
+    """
+    if not windows_speech_available():
+        return ()
+    if _windows_voices_cache[0] is not None and not refresh:
+        return _windows_voices_cache[0]
+    merged: list[WindowsVoice] = []
+    seen: set[tuple[str, str]] = set()
+    if windows_onecore_available():
+        for voice in _list_windows_voices(_ONECORE_LIST_SCRIPT, _WINDOWS_ONE_CORE):
+            key = (voice.name, voice.language)
+            if key not in seen:
+                seen.add(key)
+                merged.append(voice)
+    for voice in _list_windows_voices(_SAPI_LIST_SCRIPT, _WINDOWS_SAPI):
+        key = (voice.name, voice.language)
+        if key not in seen:
+            seen.add(key)
+            merged.append(voice)
+    voices = tuple(merged)
     _windows_voices_cache[0] = voices
     return voices
 
@@ -628,17 +681,28 @@ def windows_voice_report() -> str:
         return ""
     if not windows_speech_available():
         return "No Windows speech engine is available (PowerShell was not found)."
-    engine = _WINDOWS_ONE_CORE if windows_onecore_available() else _WINDOWS_SAPI
+    onecore = windows_onecore_available()
     voices = windows_installed_voices()
     arabic = [voice for voice in voices if voice.arabic]
+    engines = sorted({voice.engine for voice in voices if voice.engine})
+    seen = " and ".join(engines) if engines else _WINDOWS_SAPI
     if arabic:
         names = ", ".join(voice.name for voice in arabic[:3])
-        return f"Windows speech engine {engine} sees {len(voices)} voice(s), including Arabic: {names}."
-    return (
-        f"Windows speech engine {engine} sees {len(voices)} voice(s) but no Arabic one, "
+        return (
+            f"Windows speech engine {seen} sees {len(voices)} voice(s), "
+            f"including Arabic: {names}."
+        )
+    note = (
+        f"Windows speech engine {seen} sees {len(voices)} voice(s) but no Arabic one, "
         "so Arabic would be read by a non-Arabic voice. Add one in Settings -> Time & "
         "Language -> Speech -> Add voices -> Arabic, then reopen this window."
     )
+    if not onecore:
+        note += (
+            " (The WinRT/OneCore voice store could not be reached, so voices added "
+            "through Settings -> Add voices may be missing from this list.)"
+        )
+    return note
 
 
 #: Cache of the real installed voices, cross-platform (``None`` = not listed yet).
@@ -684,9 +748,15 @@ def system_voices(*, refresh: bool = False) -> tuple[SystemVoice, ...]:
     system = platform.system().lower()
     voices: tuple[SystemVoice, ...] = ()
     if system == "windows":
-        engine = _WINDOWS_ONE_CORE if windows_onecore_available() else _WINDOWS_SAPI
+        # Each voice records the engine that reported it (the two stores differ),
+        # so a chosen voice is selected through the engine that can actually see it.
         voices = tuple(
-            SystemVoice(voice.name, voice.language, voice.gender, engine=engine)
+            SystemVoice(
+                voice.name,
+                voice.language,
+                voice.gender,
+                engine=voice.engine or _WINDOWS_SAPI,
+            )
             for voice in windows_installed_voices(refresh=refresh)
         )
     elif system == "darwin":
@@ -1065,9 +1135,14 @@ class WindowsSapiSynthesizer(_WindowsPowerShellSynthesizer):
         return _windows_sapi_script(text_path, target, self.voice, language)
 
     def _fallback(self) -> _WindowsPowerShellSynthesizer | None:
-        # SAPI cannot see OneCore voices; the WinRT engine can, so prefer it when it
-        # is reachable (the same rule discovery uses).
-        if windows_onecore_available():
+        # SAPI cannot see OneCore voices, and this is only reached *after* SAPI
+        # produced no audio -- the exact signature of an all-OneCore machine. So try
+        # the WinRT engine whenever Windows speech is available rather than gating on
+        # the availability probe: a false-negative probe is one of the ways the
+        # Arabic voice goes missing, and the attempt costs nothing when SAPI already
+        # returned silence. The WinRT run fails harmlessly (no audio) if it truly is
+        # unavailable.
+        if windows_speech_available():
             return WindowsOneCoreSynthesizer(voice=self.voice, language=self.language)
         return None
 
@@ -1269,7 +1344,7 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
     ``name`` stays ``'silent'`` so a caller can tell it apart from real speech.
     """
     if name == "auto":
-        name = discover_synthesizer_name()
+        name = _engine_for_voice(options.get("voice")) or discover_synthesizer_name()
     if name == "silent":
         return SilentSynthesizer()
     voice = _resolve_voice(options.get("voice"))
@@ -1354,6 +1429,33 @@ def _resolve_voice(value) -> SelectableVoice | None:
     if is_system_voice_key(key):
         return find_system_voice(key) or default_voice()
     return find_voice(key)
+
+
+def _engine_for_voice(value: object) -> str | None:
+    """The Windows engine a chosen ``SystemVoice`` belongs to, or ``None``.
+
+    The two Windows voice stores are separate, so a voice listed by the WinRT
+    engine must be spoken by the WinRT engine and a voice listed by SAPI by SAPI.
+    When the chosen voice names an engine that is actually available here, that
+    engine is used directly instead of the discovered default -- otherwise a
+    WinRT-only voice could be handed to SAPI, which cannot see it, and the reading
+    would come out silent. Returns ``None`` for a catalog voice (the default
+    discovery decides) or for a Windows engine that is not available, so the
+    caller falls back to :func:`discover_synthesizer_name`.
+    """
+    if isinstance(value, SystemVoice):
+        voice: SystemVoice | None = value
+    elif isinstance(value, str) and is_system_voice_key(value):
+        voice = find_system_voice(value)
+    else:
+        return None
+    if voice is None:
+        return None
+    if voice.engine == _WINDOWS_ONE_CORE and windows_onecore_available():
+        return _WINDOWS_ONE_CORE
+    if voice.engine == _WINDOWS_SAPI and windows_speech_available():
+        return _WINDOWS_SAPI
+    return None
 
 
 class MicRecording:

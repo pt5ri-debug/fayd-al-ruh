@@ -11,7 +11,10 @@ same system speech engine. ``list`` prints the **real** voices the machine repor
 first (the Windows OneCore/SAPI or macOS ``say`` voices, by their own names, e.g.
 ``Microsoft Hoda``) -- those are what the engine will actually speak with -- then
 the synthetic ``espeak-ng`` catalog grouped by category so a user can see every
-man, woman, boy, and girl voice and its key. The engine itself
+man, woman, boy, and girl voice and its key. When the OS reports no named voice at
+all it says so plainly (with the Windows reason, if any) rather than printing only
+the catalog and looking as though the invented voices are all this machine has.
+The engine itself
 (``espeak-ng``) is an ordinary system program, not a Python package, so it is
 installed as an OS package -- ``--install-engine`` runs the platform's package
 manager, and says plainly what to do when it cannot.
@@ -27,6 +30,7 @@ from core.speech import (
     speech_available,
     speech_install_plan,
     system_voices,
+    windows_voice_report,
 )
 from core.voices import voice_categories, voices_for
 
@@ -51,6 +55,16 @@ def _list_voices(reader: TextReader) -> int:
             print()
         print("These installed voices are what the system really speaks with.")
         print("A synthetic catalog voice is also available (--voice man-1 ...).\n")
+    else:
+        # No named voice was reported. Say so plainly (with the reason on Windows)
+        # rather than listing only the synthetic catalog and looking like the
+        # invented voices are all this machine has.
+        print("\nInstalled voices: none were reported by this machine's speech engine.")
+        note = windows_voice_report()
+        if note:
+            print(f"  {note}")
+        print("The synthetic catalog below still works, but it is engine settings,")
+        print("not the voices installed in the OS.\n")
     print("Reading voices (use the key with --voice):\n")
     for category, label_en, label_ar in voice_categories():
         print(f"{label_en} / {label_ar}:")

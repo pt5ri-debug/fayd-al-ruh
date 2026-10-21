@@ -877,8 +877,8 @@ def test_system_voices_lists_windows_onecore_voices(monkeypatch):
         speech,
         "windows_installed_voices",
         lambda **_: (
-            speech.WindowsVoice("Microsoft Hamed", "ar-SA", "Male"),
-            speech.WindowsVoice("Microsoft Zira", "en-US", "Female"),
+            speech.WindowsVoice("Microsoft Hamed", "ar-SA", "Male", engine=speech._WINDOWS_ONE_CORE),
+            speech.WindowsVoice("Microsoft Zira", "en-US", "Female", engine=speech._WINDOWS_ONE_CORE),
         ),
     )
     speech._system_voices_cache[0] = None
@@ -900,6 +900,145 @@ def test_system_voices_is_empty_off_windows_and_macos(monkeypatch):
         assert speech.system_voices() == ()
     finally:
         speech._system_voices_cache[0] = None
+
+
+def test_windows_installed_voices_merges_both_stores(monkeypatch):
+    """The union of the two engines: a voice only SAPI sees is not lost.
+
+    Neither store is a superset of the other, so listing only the WinRT engine can
+    silently drop a voice that only SAPI reports (and vice versa).
+    """
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: True)
+
+    def fake_run(argv, **_kwargs):
+        script = argv[-1]
+        if "AllVoices" in script:
+            # OneCore reports the Arabic voice plus one English voice.
+            out = b"Microsoft Hoda|ar-SA|Female\nMicrosoft David|en-US|Male\n"
+        else:
+            # SAPI cannot see the OneCore Arabic voice, but knows a legacy one.
+            out = b"Microsoft David|en-US|Male\nLegacy Voice|en-GB|Female\n"
+        return speech.subprocess.CompletedProcess(argv, 0, out, b"")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    speech._windows_voices_cache[0] = None
+    try:
+        voices = speech.windows_installed_voices()
+    finally:
+        speech._windows_voices_cache[0] = None
+    names = [voice.name for voice in voices]
+    assert names == ["Microsoft Hoda", "Microsoft David", "Legacy Voice"]
+    # A voice in both stores keeps the modern engine; the SAPI-only voice is tagged
+    # with the engine that can actually speak it.
+    assert voices[0].engine == speech._WINDOWS_ONE_CORE
+    assert voices[1].engine == speech._WINDOWS_ONE_CORE
+    assert voices[2].engine == speech._WINDOWS_SAPI
+
+
+def test_windows_installed_voices_still_lists_sapi_when_onecore_probe_fails(monkeypatch):
+    """A failed WinRT probe must not blank the list: SAPI is still asked."""
+    from core import speech
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)
+
+    def fake_run(argv, **_kwargs):
+        assert "AllVoices" not in argv[-1]  # the WinRT listing is not attempted
+        return speech.subprocess.CompletedProcess(argv, 0, b"Microsoft Zira|en-US|Female\n", b"")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    speech._windows_voices_cache[0] = None
+    try:
+        voices = speech.windows_installed_voices()
+    finally:
+        speech._windows_voices_cache[0] = None
+    assert [voice.name for voice in voices] == ["Microsoft Zira"]
+    assert voices[0].engine == speech._WINDOWS_SAPI
+
+
+def test_parse_voice_lines_tolerates_a_missing_gender():
+    """A listing without a gender column still yields a usable voice."""
+    from core import speech
+
+    voices = speech._parse_voice_lines(b"Microsoft Hoda|ar-SA\n\nMalformed\n", engine="windows-sapi")
+    assert [voice.name for voice in voices] == ["Microsoft Hoda"]
+    assert voices[0].gender == "" and voices[0].arabic
+
+
+def test_onecore_probe_tolerates_a_non_terminating_warning(monkeypatch):
+    """The probe must not abort on a warning, which would hide the Arabic voice.
+
+    The WinRT projection can emit a non-terminating warning; with
+    ``$ErrorActionPreference='Stop'`` that aborted the probe and reported "no
+    OneCore", so a voice the OS offered to every other app was invisible here.
+    """
+    from core import speech
+
+    seen: list[str] = []
+
+    def fake_run(argv, **_kwargs):
+        seen.append(argv[-1])
+        return speech.subprocess.CompletedProcess(argv, 0, b"ok\n", b"")
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    speech._onecore_cache[0] = None
+    try:
+        assert speech.windows_onecore_available()
+    finally:
+        speech._onecore_cache[0] = None
+    assert "ErrorActionPreference='Continue'" in seen[0]
+    assert "catch{}" in seen[0]
+
+
+def test_engine_for_voice_picks_the_engine_that_saw_the_voice(monkeypatch):
+    """A chosen real voice is spoken by the engine that listed it."""
+    from core import speech
+    from core.voices import SystemVoice
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: True)
+    assert (
+        speech._engine_for_voice(SystemVoice("Microsoft Hoda", "ar-SA", engine=speech._WINDOWS_ONE_CORE))
+        == speech._WINDOWS_ONE_CORE
+    )
+    assert (
+        speech._engine_for_voice(SystemVoice("Legacy", "en-GB", engine=speech._WINDOWS_SAPI))
+        == speech._WINDOWS_SAPI
+    )
+    # A catalog voice leaves the choice to discovery.
+    assert speech._engine_for_voice("man-1") is None
+
+
+def test_engine_for_voice_skips_a_onecore_voice_when_the_probe_fails(monkeypatch):
+    """A OneCore voice is not handed to SAPI (which cannot see it) blindly."""
+    from core import speech
+    from core.voices import SystemVoice
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)
+    assert (
+        speech._engine_for_voice(SystemVoice("Microsoft Hoda", "ar-SA", engine=speech._WINDOWS_ONE_CORE))
+        is None
+    )
+
+
+def test_load_synthesizer_auto_uses_the_engine_that_reported_the_voice(monkeypatch):
+    """Selecting a real voice in 'auto' uses its own engine, not the discovered one."""
+    from core import speech
+    from core.voices import SystemVoice
+
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
+    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: True)
+    # Discovery would say SAPI, but the chosen voice is a OneCore voice.
+    monkeypatch.setattr(speech, "discover_synthesizer_name", lambda: speech._WINDOWS_SAPI)
+    synthesizer = speech.load_synthesizer(
+        "auto", voice=SystemVoice("Microsoft Hoda", "ar-SA", engine=speech._WINDOWS_ONE_CORE)
+    )
+    assert synthesizer.name == speech._WINDOWS_ONE_CORE
 
 
 def test_system_voices_parses_macos_say_listing(monkeypatch):
@@ -998,12 +1137,32 @@ def test_speak_list_shows_installed_voices_when_present(monkeypatch, capsys):
     assert "Men" in out and "man-1" in out
 
 
+def test_speak_list_says_so_when_no_installed_voice_is_reported(monkeypatch, capsys):
+    """With no OS voice reported, say it plainly instead of only the catalog.
+
+    This is the reported symptom (the machine's real Arabic voice never appeared):
+    the list must not look as though the invented catalog is all there is.
+    """
+    from ai import speak
+
+    monkeypatch.setattr(speak, "system_voices", lambda: ())
+    monkeypatch.setattr(speak, "windows_voice_report", lambda: "Windows note here")
+    assert speak.main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert "none were reported" in out
+    assert "Windows note here" in out
+    assert "not the voices installed in the OS" in out
+
+
 def test_sapi_synthesizer_falls_back_to_onecore_when_it_has_no_voice(monkeypatch):
     from core import speech
 
     # SAPI renders nothing (all voices are OneCore on this machine)...
     monkeypatch.setattr(speech.WindowsSapiSynthesizer, "_render", lambda self, text, lang: None)
-    monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: True)
+    # The fallback does not gate on the OneCore probe (a false-negative probe is one
+    # of the ways the Arabic voice goes missing); Windows speech being available is
+    # enough, so the sibling is attempted and fails harmlessly if truly absent.
+    monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
 
     good = speech.AudioClip((1000, -1000, 2000), sample_rate=speech.SAMPLE_RATE)
 
