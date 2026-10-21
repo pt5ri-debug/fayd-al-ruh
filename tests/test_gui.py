@@ -1185,6 +1185,64 @@ def test_microphone_reports_honestly_when_no_recorder_is_installed() -> None:
         root.update()
         notes = [entry.text for entry in app._rows if entry.role == "note"]
         assert any("no microphone recorder is installed" in note.lower() for note in notes)
+        # The next step names the real platform, not a Linux-only command.
+        from core.speech import microphone_install_hint
+
+        assert any(microphone_install_hint() in note for note in notes)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_microphone_button_toggles_listening_on_then_off() -> None:
+    """One click listens; a second click stops and transcribes (the report).
+
+    The button is a real toggle: the first click starts a recording and shows the
+    recording state, and the *second* click ends it -- no third state, no click
+    that silently does nothing.
+    """
+    import tkinter as tk
+
+    from core.speech import AudioClip
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+
+        class _Recording:
+            recording = True
+
+            def stop(self) -> None:
+                self.recording = False
+
+            def result(self, *, timeout=None):
+                return AudioClip(tuple([500, -500] * 100))
+
+        app.service.microphone_available = lambda: True  # type: ignore[method-assign]
+        app.service.recognizer_name = lambda: "qwen3-asr"  # type: ignore[method-assign]
+        app.service.start_recording = lambda: _Recording()  # type: ignore[assignment,method-assign,return-value]
+        app.service.stop_recording = lambda: _Recording()  # type: ignore[assignment,method-assign,return-value]
+        app.service.transcribe = lambda clip: "ما هي المسامية؟"  # type: ignore[method-assign]
+        root.update()
+
+        button = app._mic_button
+        assert button is not None
+
+        # Click 1: listening starts, and the button says so.
+        app._toggle_mic()
+        root.update()
+        assert app._recording is not None
+        assert app._listening is True
+        assert str(button.cget("text")) == "⏺"
+
+        # Click 2: listening stops and the transcript lands in the composer.
+        app._toggle_mic()
+        root.update()
+        assert app._recording is None
+        assert app._listening is False
+        assert str(button.cget("text")) == "🎤"
+        assert _wait(app, root, lambda: "المسامية" in app._entry.get("1.0", "end"))
     finally:
         root.destroy()
 

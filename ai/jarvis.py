@@ -44,6 +44,7 @@ from core.speech import (
     VoiceAssistant,
     load_recognizer,
     load_synthesizer,
+    microphone_install_hint,
 )
 from core.tool_agent import ToolAgent
 from core.tools import build_sandbox
@@ -270,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.mic:
         recorder = MicrophoneRecorder()
         if not recorder.available():
-            print("No microphone recorder found (install arecord or sox).")
+            print("No microphone recorder found. " + microphone_install_hint())
             return 1
         if mode.voice.recognizer.name == "transcript":
             print("No speech recognizer found (install whisper, or use a text request).")

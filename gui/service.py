@@ -33,6 +33,7 @@ from core.speech import (
     Playback,
     discover_recognizer_name,
     load_recognizer,
+    microphone_install_hint,
 )
 from core.voices import SystemVoice, Voice, voice_keys
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
@@ -856,8 +857,8 @@ class ChatService:
         """An honest, human-readable status of the microphone path."""
         if not self.microphone_available():
             return (
-                "No microphone recorder is installed (install arecord or sox), "
-                "so the microphone button cannot record."
+                "No microphone recorder is installed, so the microphone button cannot "
+                "record. " + microphone_install_hint()
             )
         name = self._resolve_recognizer_name()
         if name == "transcript":

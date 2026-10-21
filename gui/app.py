@@ -1780,13 +1780,7 @@ class FaydGUI:
             self._finish_recording()
             return
         if not self.service.microphone_available():
-            from core.speech import speech_install_plan
-
-            self._add_bubble(
-                "note",
-                "No microphone recorder is installed (install arecord or sox), "
-                "so I cannot listen. " + speech_install_plan().hint,
-            )
+            self._add_bubble("note", self.service.asr_status())
             return
         if self.service.recognizer_name() == "transcript":
             self._add_bubble("note", self.service.asr_status())
