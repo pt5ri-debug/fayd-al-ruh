@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from core.arabic_speech import prepare_for_speech
 from core.human_approval import HumanApprovalGate
 from core.optional_deps import FEATURE_PIPER, pip_install_command
 from core.paths import piper_models_dir
@@ -459,6 +460,9 @@ class PiperSynthesizer:
                 f"python -m cli piper download {spec.key} --approve"
             )
         assert self._runner is not None  # guaranteed by __init__ / _ensure_model
+        # Piper phonemizes through espeak-ng, so its Arabic voice has the same
+        # blind spot for ``25%``/``1500 psi``/``10-20``: spell them as words.
+        text = prepare_for_speech(text, language=self.language or detect_language(text))
         samples, sample_rate = self._runner.synthesize(
             text,
             speaker=_speaker_id(self._voice),

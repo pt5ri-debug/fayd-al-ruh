@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from core.arabic_speech import prepare_for_speech
 from core.human_approval import HumanApprovalGate
 from core.optional_deps import FEATURE_QWEN_ASR, FEATURE_QWEN_TTS, pip_install_command
 from core.paths import qwen_speech_models_dir
@@ -567,12 +568,15 @@ class QwenTtsSynthesizer:
         code = self.language or detect_language(text)
         if not qwen_tts_supports(code):
             if self.fallback is not None:
-                return self.fallback.synthesize(text)
+                # The fallback (a system engine) reads the Arabic, so hand it the
+                # prepared text: numbers and units as words, not symbols.
+                return self.fallback.synthesize(prepare_for_speech(text, language=code))
             raise ValueError(
                 f"Qwen3-TTS cannot speak {code!r}; it speaks "
                 f"{', '.join(QWEN_TTS_LANGUAGES)} (no Arabic). Use a system engine "
                 "for Arabic, or pass a fallback synthesizer."
             )
+        text = prepare_for_speech(text, language=code)
         wavs, sample_rate = self._runner.synthesize(
             text,
             language=_LANGUAGE_NAMES.get(code, code),
