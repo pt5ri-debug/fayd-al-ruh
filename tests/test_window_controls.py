@@ -1,4 +1,4 @@
-"""The shared minimize / maximize controls every dialog window installs.
+"""The shared minimize / maximize / close controls every window's title bar installs.
 
 Two levels are tested, matching how the module is built:
 
@@ -6,7 +6,7 @@ Two levels are tested, matching how the module is built:
   real full-screen window otherwise, and the honest restore that undoes exactly
   what was done) through small duck-typed fakes, so it is deterministic on any
   platform and needs no display;
-* the real installation into a Tk header, which skips when no display is
+* the real installation into a Tk title bar, which skips when no display is
   available, like the other window tests.
 """
 
@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from gui.window_controls import (
+    _CLOSE_GLYPH,
     _MAXIMIZE_GLYPH,
     _RESTORE_GLYPH,
     WindowControls,
@@ -47,11 +48,15 @@ class FakeWindow:
     def __init__(self, *, supports_zoom: bool = True) -> None:
         self.supports_zoom = supports_zoom
         self.iconified = 0
+        self.destroyed = 0
         self.states: list[str] = []
         self.fullscreen: dict[str, bool] = {}
 
     def iconify(self) -> None:
         self.iconified += 1
+
+    def destroy(self) -> None:
+        self.destroyed += 1
 
     def state(self, value: str | None = None) -> str:
         if value is None:
@@ -122,6 +127,28 @@ def test_maximize_is_idempotent_while_grown() -> None:
     assert window.states == ["zoomed"]
 
 
+# --- close ----------------------------------------------------------------
+
+
+def test_close_runs_the_callers_handler() -> None:
+    """The ✕ takes the window's own close path, not a second one of its own."""
+    window = FakeWindow()
+    closed: list[int] = []
+    controls = WindowControls(
+        window, None, FakeButton(), close=lambda: closed.append(1)  # type: ignore[arg-type]
+    )
+    controls.close()
+    assert closed == [1]
+    assert window.destroyed == 0
+
+
+def test_close_destroys_a_window_that_has_no_handler() -> None:
+    window = FakeWindow()
+    controls = WindowControls(window, None, FakeButton())  # type: ignore[arg-type]
+    controls.close()
+    assert window.destroyed == 1
+
+
 # --- the real installation (needs a display) -------------------------------
 
 
@@ -154,10 +181,15 @@ def test_install_builds_the_buttons_and_wires_close() -> None:
             on_close=lambda: closed.append(1),
         )
         root.update()
-        # The two buttons live in one frame in the header.
+        # The three controls live in one frame in the title bar: minimize,
+        # maximize, and the ✕ that takes the caller's own close path.
         assert controls.frame.master is header
-        assert len(controls.frame.winfo_children()) == 2
+        assert len(controls.frame.winfo_children()) == 3
         assert controls.maximize_button.cget("text") == _MAXIMIZE_GLYPH
+        assert controls.close_button is not None
+        assert controls.close_button.cget("text") == _CLOSE_GLYPH
+        controls.close()
+        assert closed == [1]
         # The close protocol now carries the caller's handler rather than Tk's
         # default: querying it returns the registered command string.
         assert window.protocol("WM_DELETE_WINDOW")

@@ -989,3 +989,106 @@ def test_main_window_composer_has_attach_dot_mic_and_send(tmp_path) -> None:
         assert composer.send_button.winfo_rooty() > composer.entry.winfo_rooty()
     finally:
         root.destroy()
+
+
+# --- every window's title bar ------------------------------------------------
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_every_window_title_bar_has_the_three_controls(tmp_path) -> None:
+    """Minimize, maximize, and close live on the main window and every dialog.
+
+    One shared trio, built by ``install_window_controls``, is what makes "every
+    window" true rather than aspirational: the main window is checked here, and
+    each dialog is checked where it is exercised, so a window that forgot the
+    controls fails rather than quietly differing from the rest.
+    """
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+    from gui.window_controls import _CLOSE_GLYPH, _MAXIMIZE_GLYPH, _MINIMIZE_GLYPH
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        controls = app._window_controls
+        assert controls.frame.winfo_ismapped()
+        glyphs = [
+            child.cget("text") for child in controls.frame.winfo_children()
+        ]
+        assert glyphs == [_MINIMIZE_GLYPH, _MAXIMIZE_GLYPH, _CLOSE_GLYPH]
+        # The close control is the window's own close path, not a second one.
+        assert controls.close_button is not None
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_title_bars_use_the_dark_grey_band(tmp_path) -> None:
+    """The title bar is the dark grey token in both appearances."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME, LIGHT_THEME, FaydGUI
+
+    # A dark grey band, clearly darker than the raised surfaces it sits among,
+    # and not the page base it used to be.
+    assert DARK_THEME.titlebar != DARK_THEME.base
+    assert DARK_THEME.titlebar != LIGHT_THEME.titlebar
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path), theme="dark")
+        root.update()
+        bar = app._window_controls.frame.master
+        assert bar.cget("bg") == DARK_THEME.titlebar
+        app._toggle_theme()
+        root.update()
+        assert app._window_controls.frame.master.cget("bg") == LIGHT_THEME.titlebar
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_a_destroyed_window_releases_its_title_bar_handlers() -> None:
+    """A closed window must not be kept alive by its title-bar controls.
+
+    Each button's ``command`` holds a bound method on the controller, which holds
+    the window, which owns the buttons -- a cycle a destroyed window only leaves
+    when the cyclic collector happens to run, and on a worker thread the Tcl call
+    that follows deadlocks (which is how a deck export used to hang). The
+    controls drop the handler and clear both commands with the window, so the
+    chain is broken the moment the window dies rather than whenever a collection
+    happens to run.
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.typography import for_root
+    from gui.window_controls import install_window_controls
+
+    root = tk.Tk()
+    try:
+        root.withdraw()
+        window = tk.Toplevel(root)
+        header = tk.Frame(window)
+        header.pack(fill="x")
+        closed: list[int] = []
+        controls = install_window_controls(
+            window, header, theme=DARK_THEME, typography=for_root(root),
+            on_close=lambda: closed.append(1),
+        )
+        root.update()
+        assert controls._close is not None
+
+        window.destroy()
+        root.update()
+
+        # The caller's handler is dropped and no button still calls back into it.
+        assert controls._close is None
+        # The buttons themselves are gone, and the caller's handler was never
+        # called again, so a stray event cannot reach the closed window.
+        assert not controls.maximize_button.winfo_exists()
+        assert closed == []
+    finally:
+        root.destroy()
