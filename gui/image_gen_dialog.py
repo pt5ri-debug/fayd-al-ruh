@@ -30,6 +30,7 @@ from tkinter import filedialog
 
 from core.imagegen_diffusion import DEFAULT_PRESET, PRESETS
 from core.optional_deps import FEATURE_IMAGE, pip_install_command
+from gui.chat_composer import ChatComposer
 from gui.image_preview import load_scaled
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
@@ -143,19 +144,30 @@ class ImageGenDialog:
         self._body = body
         body.bind("<Configure>", self._on_body_configure)
 
-        prompt_frame = self._section("1.  Prompt", parent=controls)
-        self._prompt = tk.Text(
-            prompt_frame, height=3, wrap="word", relief="flat", borderwidth=0,
-            highlightthickness=1, highlightbackground=theme.border,
-            highlightcolor=theme.primary, bg=theme.surface, fg=theme.foreground,
-            insertbackground=theme.primary, font=self._type.font("body"), padx=8, pady=8,
+        # 1. Prompt: the shared chat composer, so the text entry and its Generate
+        # action read the same as every other screen's input panel.
+        self._composer = ChatComposer(
+            controls, theme=theme, typography=self._type,
+            placeholder="Describe the image you want…",
+            on_submit=self._on_generate, outer_bg=theme.base,
+            with_attach=False, min_lines=3,
         )
-        self._prompt.pack(fill="x", padx=12, pady=(2, 4))
+        self._composer.wrap.pack(fill="x", padx=20, pady=(8, 4))
+        self._prompt = self._composer.entry
+        self._generate_button = self._button(
+            self._composer.right_tools, "Generate", self._on_generate
+        )
+        self._composer.add_tool(self._generate_button)
+        self._save_button = self._button(
+            self._composer.right_tools, "Save a copy…", self._on_save_copy
+        )
+        self._composer.add_tool(self._save_button)
+        self._save_button.configure(state="disabled")
         tk.Label(
-            prompt_frame,
+            controls,
             text="Tip: end the prompt with a size, e.g. “a red spiral 768x512”.",
-            bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"), anchor="w",
-        ).pack(fill="x", padx=12, pady=(0, 8))
+            bg=theme.base, fg=theme.text_dim, font=self._type.font("2xs"), anchor="w",
+        ).pack(fill="x", padx=20, pady=(0, 8))
 
         options = self._section("2.  Options", parent=controls)
         backend_row = tk.Frame(options, bg=theme.surface)
@@ -226,11 +238,6 @@ class ImageGenDialog:
 
         actions = tk.Frame(self.window, bg=theme.base)
         actions.pack(fill="x", padx=20, pady=(6, 4))
-        self._generate_button = self._button(actions, "Generate", self._on_generate)
-        self._generate_button.pack(side="left")
-        self._save_button = self._button(actions, "Save a copy…", self._on_save_copy)
-        self._save_button.pack(side="left", padx=8)
-        self._save_button.configure(state="disabled")
         self._status = tk.Label(
             actions, text="", bg=theme.base, fg=theme.text_secondary,
             font=self._type.font("xs"), anchor="w", justify="left", wraplength=520,
@@ -392,7 +399,7 @@ class ImageGenDialog:
     def _on_generate(self) -> None:
         if self._busy:
             return
-        prompt = self._prompt.get("1.0", "end").strip()
+        prompt = self._composer.text().strip()
         if not prompt:
             self._set_status("Write a prompt first.", error=True)
             return

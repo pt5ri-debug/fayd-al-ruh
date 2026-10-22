@@ -1168,6 +1168,36 @@ Arabic is kept as secondary aliases where useful.
   `gui/code_studio_dialog.py` both call it, so every window draws Markdown with
   the one scale and the one palette; the painting logic used to be duplicated in
   both.
+- `gui/chat_composer.py` — the shared **chat composer**, the sibling of
+  `gui/rich_text.py` for the *input* side: one wide, generously rounded dark card
+  every chat-style screen builds instead of growing its own panel, so the window
+  and the dialogs can no longer drift apart. `ChatComposer(parent, theme=,
+  typography=, placeholder=, on_submit=, with_attach=, with_status=, variable=,
+  min_lines=, max_lines=)` lays out a borderless multiline `tk.Text` across the
+  top and a single toolbar row beneath it: the bottom-left holds the ＋ attach
+  control (only when the screen really has attachments) and whatever
+  `add_mode_selector(...)` pills the caller supplies, the bottom-right holds a
+  subtle non-interactive status dot, an optional `add_mic(...)` control, any
+  `add_tool(widget)` action the caller built, and the circular Send disc.
+  `text`/`set_text`/`clear`, `set_submit`, `set_send_enabled`, `set_status_dot`,
+  `set_mic_recording`, `focus`, `set_tooltip`. The placeholder is an overlay
+  *label*, never text inside the entry, so `text()` is always the user's own
+  words and the existing handlers can keep reading `entry.get(...)`. The input
+  grows with the message and then scrolls inside itself at `max_lines`, so the
+  surrounding layout never jumps. Send is greyed for an empty or whitespace-only
+  box and while the caller's own gate is closed. `ModeSelector` is the compact
+  pill (icon + label + chevron) with a real menu of the caller's own options, so
+  it never invents a mode. The panel is **presentation only** -- it never decides
+  what a message means -- and it **releases what a destroyed window must not keep
+  alive**: the caller's bound submit handler, its `StringVar` (held weakly), and
+  that variable's trace are dropped on `<Destroy>`. Keeping them would leave the
+  dead window in a reference cycle only the cyclic collector could break, and
+  that can run on a worker thread, where a Tcl call deadlocks -- which is exactly
+  how the Presentation Studio's export hung. `gui/app.py`, `gui/presentation_dialog.py`,
+  `gui/presentation_finalize_dialog.py`, `gui/code_studio_dialog.py`,
+  `gui/image_gen_dialog.py`, and `gui/image_edit_dialog.py` all build on it, each
+  keeping its own attributes (`_entry`, `_question`, `_request_var`, …) pointed at
+  the panel's widgets so every existing handler and test is untouched.
 - `gui/app.py` — a professional desktop front end styled after the **OpenHands
   chat UI**: the same cool-grey token scale (base `cool-grey-950`, surface
   `cool-grey-925`, raised `cool-grey-900`), the gold primary accent, and
@@ -1197,7 +1227,12 @@ Arabic is kept as secondary aliases where useful.
   On a narrow (mobile-sized) window the sidebar becomes a drawer that
   `_toggle_sidebar` shows or hides and that is restored when the window widens.
   Assistant answers are rendered as **Markdown** through `gui/markdown.py`
-  (`_insert_rich`/`_insert_styled_line`/`_inline_tags`). A **＋** button beside
+  (`_insert_rich`/`_insert_styled_line`/`_inline_tags`). The input is the shared
+  `gui/chat_composer.ChatComposer` (the window's attributes `_entry`/`_send`/
+  `_attach_button`/`_mic_button` point at its widgets), and its bottom-left
+  toolbar carries the two mode pills -- *Code Studio* (opens the one real code
+  surface) and the operating-mode pill, fed by `gui.modes.MODES` so it lists the
+  modes the app really has. A **＋** button beside
   the input attaches a Word (`.docx`/`.docm`) or text file: the file's text is
   indexed into the source assistant's store and previewed in the transcript, a
   removable chip tracks it, and detaching (the chip's ✕, or a new chat) removes

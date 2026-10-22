@@ -756,3 +756,236 @@ def test_attach_menu_offers_image_editing(tmp_path) -> None:
         assert app._image_edit_dialog is None
     finally:
         root.destroy()
+
+
+# --- the shared chat composer (only when a display is available) -----------
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_placeholder_is_not_the_user_text() -> None:
+    """The hint is an overlay label, so the input holds only the user's words."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    root = tk.Tk()
+    try:
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="What do you want to build?", on_submit=lambda: None,
+        )
+        composer.wrap.pack(fill="x")
+        root.update()
+        assert composer.text() == ""
+        assert composer.placeholder_label.winfo_ismapped()
+        composer.set_text("hello")
+        root.update()
+        assert composer.text() == "hello"
+        assert not composer.placeholder_label.winfo_ismapped()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_disables_send_for_whitespace_only() -> None:
+    """Send is refused for an empty or whitespace-only message."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    root = tk.Tk()
+    try:
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask", on_submit=lambda: None,
+        )
+        root.update()
+        assert composer._submit_enabled and not composer.text().strip()
+        # The disc is greyed while there is nothing to send.
+        assert composer.send_button.itemcget(composer.send_button._shape, "fill") == DARK_THEME.disabled
+        composer.set_text("   ")
+        root.update()
+        assert composer.send_button.itemcget(composer.send_button._shape, "fill") == DARK_THEME.disabled
+        composer.set_text("a real question")
+        root.update()
+        assert composer.send_button.itemcget(composer.send_button._shape, "fill") == DARK_THEME.primary
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_enter_submits_and_shift_enter_does_not() -> None:
+    """Enter sends; Shift+Enter keeps the newline the Text widget inserts."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    root = tk.Tk()
+    try:
+        calls: list[int] = []
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask", on_submit=lambda: calls.append(1),
+        )
+        composer.wrap.pack(fill="x")
+        root.update()
+        composer.entry.focus_force()
+        root.update()
+        composer.entry.event_generate("<Return>")
+        root.update()
+        assert calls == [1]
+        # Shift+Enter inserts a newline and never submits.
+        composer.entry.event_generate("<Shift-Return>")
+        root.update()
+        assert calls == [1]
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_grows_then_caps_within_its_limits() -> None:
+    """The input grows with the message and then stops at its maximum height."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    root = tk.Tk()
+    try:
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask", on_submit=lambda: None, min_lines=1, max_lines=3,
+        )
+        composer.wrap.pack(fill="x")
+        root.update()
+        assert int(composer.entry.cget("height")) == 1
+        composer.set_text("one\ntwo\nthree\nfour\nfive")
+        root.update()
+        assert int(composer.entry.cget("height")) == 3
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_mirrors_a_callers_string_variable() -> None:
+    """A screen that drives its panel through a StringVar keeps it in step."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    root = tk.Tk()
+    try:
+        var = tk.StringVar(value="")
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask", on_submit=lambda: None, variable=var,
+        )
+        root.update()
+        composer.set_text("typed here")
+        root.update()
+        assert var.get() == "typed here"
+        var.set("set outside")
+        root.update()
+        assert composer.text() == "set outside"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_has_no_attach_button_when_not_supported() -> None:
+    """A screen with no attachments gets no ＋ button that would lie."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    root = tk.Tk()
+    try:
+        without = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask", on_submit=lambda: None, with_attach=False,
+        )
+        without.wrap.pack(fill="x")
+        root.update()
+        assert without.attach_button is None
+        with_attach = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask", on_submit=lambda: None,
+        )
+        with_attach.wrap.pack(fill="x")
+        root.update()
+        assert with_attach.attach_button is not None
+        assert with_attach.attach_button.winfo_ismapped()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_main_window_composer_carries_both_mode_selectors(tmp_path) -> None:
+    """The bottom-left toolbar has the Code Studio and Chat Studio pills."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        code = app._code_mode_selector
+        chat = app._chat_mode_selector
+        assert code.winfo_ismapped() and chat.winfo_ismapped()
+        assert "Code Studio" in code.cget("text")
+        assert "AI Mode" in chat.cget("text")
+
+        # The Chat Studio pill lists the real operating modes and switches them.
+        from gui.app import MODES
+
+        chat_menu = chat.nametowidget(chat.cget("menu"))
+        labels = [
+            chat_menu.entrycget(index, "label")
+            for index in range(chat_menu.index("end") + 1)
+        ]
+        assert labels == [mode.label for mode in MODES]
+        chat_menu.invoke(1)
+        root.update()
+        assert app.service.operating_mode.label == labels[1]
+        assert labels[1] in chat.cget("text")
+
+        # The Code Studio pill opens the one real code surface.
+        code_menu = code.nametowidget(code.cget("menu"))
+        assert code_menu.type(0) == "command"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_main_window_composer_has_attach_dot_mic_and_send(tmp_path) -> None:
+    """The composer carries the ＋, the status dot, the microphone, and Send."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        composer = app._composer
+        assert composer.attach_button is not None and composer.attach_button.winfo_ismapped()
+        assert composer.status_dot is not None and composer.status_dot.winfo_ismapped()
+        assert composer.mic_button is not None and composer.mic_button.winfo_ismapped()
+        assert composer.send_button.winfo_ismapped()
+        # The toolbars sit below the input, and Send is rightmost.
+        assert composer.send_button.winfo_rootx() > composer.mic_button.winfo_rootx()
+        assert composer.send_button.winfo_rooty() > composer.entry.winfo_rooty()
+    finally:
+        root.destroy()

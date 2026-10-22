@@ -50,6 +50,7 @@ from core.presentation import (
 from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
+from gui.chat_composer import ChatComposer
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
 
@@ -412,30 +413,19 @@ class PresentationDialog:
         self._add_message("note", HONESTY_LINE)
 
     def _build_composer(self, parent: tk.Frame) -> None:
-        """The rounded composer card, pinned to the bottom like the chat window."""
-        theme = self.theme
-        wrap = tk.Frame(parent, bg=theme.base)
-        wrap.pack(side="bottom", fill="x", padx=self._column_pad(), pady=(8, 12))
-        card = RoundedBox(
-            wrap, bg=theme.base, fill=theme.surface, outline=theme.border_subtle,
-            corner=RADIUS_LARGE, parent_bg=theme.base,
+        """The shared rounded composer card, pinned to the bottom like the chat window."""
+        composer = ChatComposer(
+            parent, theme=self.theme, typography=self._type,
+            placeholder="Ask the assistant about the subject…", on_submit=self._on_discuss,
+            outer_bg=self.theme.base, with_attach=False,
         )
-        card.pack(fill="x")
-        inner = card.inner
-        self._question = tk.Text(
-            inner, height=2, wrap="word", relief="flat", borderwidth=0, highlightthickness=0,
-            bg=theme.surface, fg=theme.foreground, insertbackground=theme.primary,
-            font=self._type.font("body"), padx=4, pady=4,
-        )
-        self._question.pack(fill="x", padx=14, pady=(12, 6))
-        actions = tk.Frame(inner, bg=theme.surface)
-        actions.pack(fill="x", padx=12, pady=(0, 10))
-        self._ask_button = self._button(actions, "Discuss", self._on_discuss)
-        self._ask_button.pack(side="right")
-        tk.Label(
-            actions, text="Ask the assistant about the subject…", bg=theme.surface,
-            fg=theme.text_dim, font=self._type.font("2xs"), anchor="w",
-        ).pack(side="left")
+        composer.wrap.pack(side="bottom", fill="x", padx=self._column_pad(), pady=(8, 12))
+        self._composer = composer
+        self._question = composer.entry
+        # The Studio's own action sits on the composer's action toolbar, beside the
+        # shared Send disc, so the panel is one consistent composer everywhere.
+        self._ask_button = self._button(composer.right_tools, "Discuss", self._on_discuss)
+        composer.add_tool(self._ask_button)
 
     # -- slide editor panel ------------------------------------------------
 
@@ -1171,11 +1161,11 @@ class PresentationDialog:
         if not self._project_id:
             self._set_status("Create a presentation first.", error=True)
             return
-        question = self._question.get("1.0", "end").strip()
+        question = self._composer.text().strip()
         if not question:
             self._set_status("Type a question to discuss first.", error=True)
             return
-        self._question.delete("1.0", "end")
+        self._composer.clear()
         self._add_message("user", question)
 
         def job() -> Any:
@@ -1402,10 +1392,9 @@ class PresentationDialog:
         decides whether to ask the assistant about them. The Studio never drafts
         on its own, so the user keeps control of what enters the deck.
         """
-        current = self._question.get("1.0", "end").strip()
+        current = self._composer.text().strip()
         merged = f"{current}\n{text}".strip() if current else text
-        self._question.delete("1.0", "end")
-        self._question.insert("1.0", merged)
+        self._composer.set_text(merged)
         self._set_status("Concepts copied into the question box — press Discuss to use them.")
 
     def reveal_slide_number(self, number: int) -> None:

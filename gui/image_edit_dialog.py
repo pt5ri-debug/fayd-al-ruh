@@ -43,6 +43,7 @@ from gui.image_edit import (
     READABLE_SUFFIXES,
     ImageEditService,
 )
+from gui.chat_composer import ChatComposer
 from gui.image_preview import load_scaled
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
@@ -218,31 +219,33 @@ class ImageEditDialog:
                 highlightthickness=0, borderwidth=0,
             ).pack(side="left", padx=(0, 12))
 
-        instruction_frame = self._section("3.  Instruction", parent=controls)
-        self._instruction = tk.Text(
-            instruction_frame, height=3, wrap="word", relief="flat", borderwidth=0,
-            highlightthickness=1, highlightbackground=theme.border,
-            highlightcolor=theme.primary, bg=theme.surface, fg=theme.foreground,
-            insertbackground=theme.primary, font=self._type.font("body"), padx=8, pady=8,
+        # 3. Instruction: the shared chat composer, so the text entry and its Apply
+        # action read the same as every other screen's input panel.
+        self._composer = ChatComposer(
+            controls, theme=theme, typography=self._type,
+            placeholder=INSTRUCTION_HINT, on_submit=self._on_apply,
+            outer_bg=theme.base, with_attach=False, min_lines=3,
         )
-        self._instruction.pack(fill="x", padx=12, pady=(2, 4))
-        tk.Label(
-            instruction_frame, text=INSTRUCTION_HINT, bg=theme.surface,
-            fg=theme.text_dim, font=self._type.font("2xs"), anchor="w", justify="left",
-            wraplength=560,
-        ).pack(fill="x", padx=12, pady=(0, 8))
+        self._composer.wrap.pack(fill="x", padx=20, pady=(8, 4))
+        self._instruction = self._composer.entry
+        self._apply_button = self._button(
+            self._composer.right_tools, "Apply", self._on_apply
+        )
+        self._composer.add_tool(self._apply_button)
+        self._apply_button.configure(state="disabled")
+        self._undo_button = self._button(
+            self._composer.right_tools, "Undo", self._on_undo
+        )
+        self._composer.add_tool(self._undo_button)
+        self._undo_button.configure(state="disabled")
+        self._save_button = self._button(
+            self._composer.right_tools, "Save a copy…", self._on_save_copy
+        )
+        self._composer.add_tool(self._save_button)
+        self._save_button.configure(state="disabled")
 
         actions = tk.Frame(self.window, bg=theme.base)
         actions.pack(fill="x", padx=20, pady=(6, 4))
-        self._apply_button = self._button(actions, "Apply", self._on_apply)
-        self._apply_button.pack(side="left")
-        self._apply_button.configure(state="disabled")
-        self._undo_button = self._button(actions, "Undo", self._on_undo)
-        self._undo_button.pack(side="left", padx=8)
-        self._undo_button.configure(state="disabled")
-        self._save_button = self._button(actions, "Save a copy…", self._on_save_copy)
-        self._save_button.pack(side="left")
-        self._save_button.configure(state="disabled")
         self._status = tk.Label(
             actions, text="", bg=theme.base, fg=theme.text_secondary,
             font=self._type.font("xs"), anchor="w", justify="left", wraplength=520,
@@ -392,15 +395,15 @@ class ImageEditDialog:
         self._apply_button.configure(state="normal")
         self._save_button.configure(state="normal")
         self._undo_button.configure(state="disabled")
-        if not self._instruction.get("1.0", "end").strip():
-            self._instruction.insert("1.0", EXAMPLE_INSTRUCTION)
+        if not self._composer.text().strip():
+            self._composer.set_text(EXAMPLE_INSTRUCTION)
         self._show_preview(path)
         self._set_status("Image loaded. Describe an edit and press Apply.")
 
     def _on_apply(self) -> None:
         if self._busy or self._session is None:
             return
-        instruction = self._instruction.get("1.0", "end").strip()
+        instruction = self._composer.text().strip()
         if not instruction:
             self._set_status("Write an instruction first.", error=True)
             return

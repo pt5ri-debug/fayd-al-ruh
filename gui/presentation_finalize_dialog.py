@@ -43,6 +43,7 @@ from core.presentation import (
 )
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
+from gui.chat_composer import ChatComposer
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
 
@@ -510,26 +511,17 @@ class PresentationFinalizeDialog:
     # -- composer ---------------------------------------------------------
 
     def _build_composer(self, parent: tk.Frame) -> None:
-        theme = self.theme
-        wrap = tk.Frame(parent, bg=theme.base)
-        wrap.pack(fill="x", padx=16, pady=(0, 12))
-        self._composer = RoundedBox(
-            wrap, bg=theme.surface, fill=theme.surface, outline=theme.border_subtle,
-            corner=RADIUS_LARGE, parent_bg=theme.base,
+        composer = ChatComposer(
+            parent, theme=self.theme, typography=self._type,
+            placeholder="Describe what you want to change in the deck…",
+            on_submit=self._on_ask, outer_bg=self.theme.base, with_attach=False,
+            variable=self._question_var,
         )
-        self._composer.pack(fill="x")
-        row = tk.Frame(self._composer.inner, bg=theme.surface)
-        row.pack(fill="x", padx=12, pady=10)
-        tk.Label(
-            row, text="Ask for a change", bg=theme.surface, fg=theme.text_dim,
-            font=self._type.font("2xs", weight="bold"),
-        ).pack(side="left")
-        tk.Entry(
-            row, textvariable=self._question_var, bg=theme.surface, fg=theme.foreground,
-            insertbackground=theme.primary, relief="flat", highlightthickness=0,
-            font=self._type.font("body"),
-        ).pack(side="left", fill="x", expand=True, padx=(8, 8))
-        self._button(row, "Send", self._on_ask).pack(side="right")
+        composer.wrap.pack(fill="x", padx=16, pady=(0, 12))
+        self._composer = composer
+        # The deck's own action sits on the composer's action toolbar, beside the
+        # shared Send disc, so the panel is one consistent composer everywhere.
+        composer.add_tool(self._button(composer.right_tools, "Send", self._on_ask))
 
     def _on_ask(self) -> None:
         """Apply a plain instruction to the whole deck (the shared command parser)."""
