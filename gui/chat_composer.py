@@ -47,6 +47,25 @@ DEFAULT_MAX_LINES = 12
 DEFAULT_MIN_LINES = 2
 
 
+def _blend(base: str, other: str, amount: float) -> str:
+    """Mix ``base`` toward ``other`` by ``amount`` (0..1), returning ``#rrggbb``.
+
+    Used for the send disc's hover, so the lightened shade is derived from the
+    theme's own primary rather than a second hard-coded colour. A value that is
+    not a plain ``#rrggbb`` string is returned unchanged, so a named or
+    ``#rgb`` colour can never make the control disappear on hover.
+    """
+    if not (isinstance(base, str) and base.startswith("#") and len(base) == 7):
+        return base
+    try:
+        base_rgb = tuple(int(base[i:i + 2], 16) for i in (1, 3, 5))
+        other_rgb = tuple(int(other[i:i + 2], 16) for i in (1, 3, 5))
+    except ValueError:
+        return base
+    mixed = tuple(round(b + (o - b) * amount) for b, o in zip(base_rgb, other_rgb))
+    return "#" + "".join(f"{channel:02X}" for channel in mixed)
+
+
 class RoundedBox(tk.Canvas):
     """A canvas that paints a rounded-rectangle surface, then holds real widgets.
 
@@ -151,6 +170,10 @@ class CircleButton(tk.Canvas):
             font=scale.font("lg", weight="bold"),
         )
         self.bind("<Button-1>", self._on_click)
+        # A hover lightens the disc slightly (only while it is enabled), so the
+        # primary action answers the pointer without a heavy ring or a size change.
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
         # ``_command`` is a plain attribute, so Tk's own destroy never drops it: a
         # bound method there would keep the caller in a reference cycle that only
         # the cyclic collector could break -- and that can run on a worker thread,
@@ -164,6 +187,13 @@ class CircleButton(tk.Canvas):
     def _on_click(self, _event: tk.Event) -> None:
         if self._enabled and self._command is not None:
             self._command()
+
+    def _on_enter(self, _event: tk.Event) -> None:
+        if self._enabled:
+            self.itemconfigure(self._shape, fill=_blend(self._fill, "#FFFFFF", 0.16))
+
+    def _on_leave(self, _event: tk.Event) -> None:
+        self.itemconfigure(self._shape, fill=self._fill)
 
     def set_state(self, *, enabled: bool, fill: str, ink: str) -> None:
         """Repaint the disc for an enabled/disabled state."""
@@ -256,6 +286,10 @@ class ModeSelector(tk.Menubutton):
         self.configure(menu=menu)
         if tip:
             Tooltip(self, tip, theme, typography)
+        # The subtle hover tint of the reference design (Tk's ``activebackground``
+        # only paints while the button is held).
+        self.bind("<Enter>", lambda _e: self.configure(bg=theme.surface_raised), add="+")
+        self.bind("<Leave>", lambda _e: self.configure(bg=theme.surface), add="+")
 
     def set_label(self, label: str) -> None:
         """Show the active choice (the caller keeps the menu itself in step)."""
@@ -437,6 +471,9 @@ class ChatComposer:
         # After the dot, so the group reads [dot] [mic] [actions] left to right.
         button.pack(side="left", padx=(0, 4))
         Tooltip(button, tip, self.theme, self._type)
+        # Hover tints the background only: the foreground is the recording state
+        # (``set_mic_recording`` recolours it), so it must not be restored here.
+        self._bind_hover(button, self.theme.surface_raised)
         self.mic_button = button
         return button
 
@@ -471,7 +508,32 @@ class ChatComposer:
             padx=10, pady=0, cursor="hand2",
         )
         Tooltip(button, tip, self.theme, self._type)
+        self._bind_hover(button, self.theme.surface_raised)
         return button
+
+    def _bind_hover(self, widget: tk.Widget, hover_bg: str, hover_fg: str | None = None) -> None:
+        """Give a toolbar control the subtle hover tint the reference design shows.
+
+        Tk has no CSS ``:hover``; ``activebackground`` only paints while the mouse
+        button is held, so a real hover is bound here. It is added with ``add="+"``
+        so the tooltip's own ``<Enter>``/``<Leave>`` handlers still run, and it
+        restores the control's own resting colour on leave rather than assuming one.
+        """
+        rest_bg = str(widget.cget("bg"))
+        rest_fg = str(widget.cget("fg"))
+
+        def on_enter(_event: tk.Event) -> None:
+            widget.configure(**{"bg": hover_bg})
+            if hover_fg is not None:
+                widget.configure(**{"fg": hover_fg})
+
+        def on_leave(_event: tk.Event) -> None:
+            widget.configure(**{"bg": rest_bg})
+            if hover_fg is not None:
+                widget.configure(**{"fg": rest_fg})
+
+        widget.bind("<Enter>", on_enter, add="+")
+        widget.bind("<Leave>", on_leave, add="+")
 
     def set_tooltip(self, widget: tk.Widget, text: str) -> None:
         """Attach a hover hint to a control the panel built for the caller."""
@@ -520,6 +582,10 @@ class ChatComposer:
         return "break"
 
     def _on_focus_in(self, _event: tk.Event) -> None:
+        # The subtle focus treatment is the caret and the I-beam cursor, not a
+        # recoloured border: the project deliberately keeps the composer's hairline
+        # the neutral stroke (``test_window_composer_has_no_gold_focus_outline``),
+        # because a bright ring around the input reads as heavy rather than quiet.
         self._sync_placeholder()
         self.box.configure(cursor="xterm")
 

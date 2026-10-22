@@ -117,6 +117,11 @@ def run_piper_speech(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.piper_speech", argv)
 
 
+def run_audio_speech(argv: Sequence[str] = ()) -> int:
+    """Manage the local VoiceTut-TTS Arabic voice (over the audio.cpp engine)."""
+    return _run_module("cli.audio", argv)
+
+
 def run_agent(argv: Sequence[str] = ()) -> int:
     """Run a tool plan inside the safety sandbox."""
     return _run_module("ai.agent_demo", argv)
@@ -423,6 +428,13 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     (
         "Piper: download the natural local voice (~63 MB)",
         run_piper_speech,
+        ("download", "--approve"),
+    ),
+    ("audio.cpp: status of the natural Arabic voice (VoiceTut-TTS)", run_audio_speech, ("status",)),
+    ("audio.cpp: the local model's own voices", run_audio_speech, ("voices",)),
+    (
+        "audio.cpp: download the natural Arabic voice model (~1.3 GB)",
+        run_audio_speech,
         ("download", "--approve"),
     ),
     ("Tool agent demo (sandbox)", run_agent, ()),

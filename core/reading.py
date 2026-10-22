@@ -27,7 +27,17 @@ from core.speech import (
     speech_install_plan,
     windows_voice_report,
 )
-from core.voices import SystemVoice, Voice, default_voice, find_system_voice, find_voice, is_system_voice_key
+from core.voices import (
+    ModelVoice,
+    SystemVoice,
+    Voice,
+    default_voice,
+    find_model_voice,
+    find_system_voice,
+    find_voice,
+    is_model_voice_key,
+    is_system_voice_key,
+)
 
 
 class TextReader:
@@ -45,7 +55,7 @@ class TextReader:
         self,
         *,
         engine: str = "auto",
-        voice: str | Voice | SystemVoice | None = None,
+        voice: str | Voice | SystemVoice | ModelVoice | None = None,
         language: str | None = None,
         speaker: Speaker | None = None,
         synthesizer: SpeechSynthesizer | None = None,
@@ -61,11 +71,11 @@ class TextReader:
     # ------------------------------------------------------------------ voice
 
     @property
-    def voice(self) -> Voice | SystemVoice:
+    def voice(self) -> Voice | SystemVoice | ModelVoice:
         """The voice currently used to read."""
         return self._voice
 
-    def set_voice(self, voice: str | Voice | SystemVoice) -> Voice | SystemVoice:
+    def set_voice(self, voice: str | Voice | SystemVoice | ModelVoice) -> Voice | SystemVoice | ModelVoice:
         """Choose a different voice and rebuild the engine for it."""
         self._voice = _as_voice(voice)
         self._synthesizer = None  # rebuilt lazily with the new voice
@@ -178,10 +188,10 @@ class TextReader:
         return line
 
 
-def _as_voice(value: str | Voice | SystemVoice | None) -> Voice | SystemVoice:
+def _as_voice(value: str | Voice | SystemVoice | ModelVoice | None) -> Voice | SystemVoice | ModelVoice:
     if value is None:
         return default_voice()
-    if isinstance(value, (Voice, SystemVoice)):
+    if isinstance(value, (Voice, SystemVoice, ModelVoice)):
         return value
     key = str(value)
     if is_system_voice_key(key):
@@ -190,6 +200,12 @@ def _as_voice(value: str | Voice | SystemVoice | None) -> Voice | SystemVoice:
             return resolved
         # The voice is no longer installed; fall back to the catalog default so a
         # saved choice never asks the engine for a name it would reject.
+        return default_voice()
+    if is_model_voice_key(key):
+        resolved_model = find_model_voice(key)
+        if resolved_model is not None:
+            return resolved_model
+        # The model (or that speaker) is no longer installed here.
         return default_voice()
     return find_voice(key)
 

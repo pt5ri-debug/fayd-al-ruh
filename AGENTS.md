@@ -663,9 +663,13 @@ Arabic is kept as secondary aliases where useful.
   carries the voice's `rate` *and* `pitch` so a category's four voices stay
   distinct; `say` selects a language voice and carries the rate; `flite` has none),
   and `load_synthesizer("auto")` still falls to `silent` when nothing is installed.
-  **Two kinds of voice** live here now. The synthetic `VOICE_CATALOG` above is
-  *settings*; the new :class:`SystemVoice` is a voice the OS **really installed**,
-  by its own name (`Microsoft Hoda`, `Majed`, ...). A `SystemVoice` carries the
+  **Three kinds of voice** live here now. The synthetic `VOICE_CATALOG` above is
+  *settings*; the :class:`SystemVoice` is a voice the OS **really installed**,
+  by its own name (`Microsoft Hoda`, `Majed`, ...); and the :class:`ModelVoice` is
+  a voice that lives inside a **local model** (`model:audio.cpp:Sarah`), described
+  in its own entry below. `group_system_voices`/`group_model_voices` are the one
+  language-grouping rule every voice menu uses (Arabic first, then alphabetical),
+  so the two menus that list these voices cannot order them differently. A `SystemVoice` carries the
   engine's exact `name`, its `language` tag (`ar-SA`), its reported `gender`, and
   the `engine` that listed it; `key` is a stable `system:<engine>:<name>` string
   (marked by `SYSTEM_VOICE_PREFIX` / `is_system_voice_key`) so a saved choice
@@ -682,16 +686,17 @@ Arabic is kept as secondary aliases where useful.
   the menus now prefer `system_voices()` and fall back to the catalog only when the
   OS reports none.
 - `core/reading.py` — `TextReader`: read the chat's text aloud. Ties a chosen
-  voice — a catalog `Voice` **or** a real installed `SystemVoice` — a
-  `SpeechSynthesizer`, and a `Speaker` together behind `render`/
+  voice — a catalog `Voice`, a real installed `SystemVoice`, **or** a local
+  `ModelVoice` — a `SpeechSynthesizer`, and a `Speaker` together behind `render`/
   `speak` (playback is best-effort, so a machine with no player still gets the
   clip)/`save` (WAV), `set_voice`, `available`, `refresh` (re-discovers the engine
   after one is installed mid-session), `system_voices()` (the real installed voices,
   for a menu), and an honest `describe()` that names the
   voice and says when no engine exists rather than pretending. A
-  `system:<engine>:<name>` key is resolved against what the OS reports and falls
-  back to the catalog default when the voice is gone (`_as_voice`), so a saved
-  choice never asks the engine for a name it would reject. CLI:
+  `system:<engine>:<name>` or `model:<engine>:<name>` key is resolved against what
+  the OS or the local model reports and falls back to the catalog default when the
+  voice is gone (`_as_voice`), so a saved choice never asks the engine for a name it
+  would reject. CLI:
   `python -m ai.speak [list] "<text>" --voice <key> [--write-wav f] [--no-play]`
   / `python -m cli speak` and `python -m cli voices`.
 - `core/qwen_speech.py` — the **Qwen3 speech models** (ASR + TTS) as a real, local
@@ -792,6 +797,69 @@ Arabic is kept as secondary aliases where useful.
   `python -m cli piper status|models|download --approve|say "<text>" --write-wav f`
   (`cli/piper_speech.py`, the headless twin of the window's controls), mirrored as
   the GUI sidebar's two *Piper* actions and the reading-voice picker's status note.
+- `core/audiocpp_speech.py` — **VoiceTut-TTS over audio.cpp**, the local Arabic
+  **model voice**: the engine behind the project's `ModelVoice` kind (see
+  `core/voices.py`). VoiceTut is a zero-shot voice-cloning TTS model shipped as a
+  GGUF and run by the `audiocpp_cli` program from
+  [audio.cpp](https://github.com/0xShug0/audio.cpp), so it runs **entirely on this
+  machine** -- nothing is sent off it -- and speaks natural **Egyptian Arabic with
+  Arabic/English code-switching**, which the single-voice Piper Arabic model and
+  Qwen3-TTS (no Arabic at all) cannot match. It is the honest answer to "give the
+  reader a voice that sounds like a person *and* reads Arabic properly".
+  `AudioCppSynthesizer` satisfies `core.speech.SpeechSynthesizer`, so the window,
+  Jarvis, the voice loop, and every mouth use it unchanged, and `AudioCppRunner` is
+  the injection seam (the default `AudioCppCliRunner` writes the request sequence,
+  runs the binary with its own folder on the loader path -- the prebuilt release
+  ships `libggml*.so` beside the executable and finds them through `$ORIGIN` -- and
+  copies the WAV out of the run folder), so the engine is exercised with no binary
+  and no weights. The text it speaks is prepared by `core.arabic_speech`'s
+  `prepare_for_speech` first, so Arabic numbers, units, ranges, and decimals are
+  *spoken, not spelled*, exactly as every other engine reads them. **One voice = one
+  reference clip**: `VOICETUT_SPEAKERS` names the 19 released voices and
+  `voice_list` returns one `ModelVoice` per clip that is actually present (so an
+  engine with no reference yields no voice rather than a silent one), each keyed
+  `model:audio.cpp:<speaker>` (`MODEL_VOICE_PREFIX`). The **engine binary** lives
+  under `data/audio.cpp/bin` and the **model + voices** under `data/audio.cpp`
+  (`core.paths.audiocpp_models_dir`, git-ignored) with a `model.json` registry:
+  `find_cli`/`find_model_file`/`model_is_cached`/`resolve_spec`/`spec_names`/
+  `spec_summaries` read them. The runtime is the optional `[audiocpp]` feature
+  (`FEATURE_AUDIOCPP`, `requirements-audiocpp.txt`, which is deliberately **empty**:
+  audio.cpp is a native program and this module fetches it with `urllib`, so there
+  is no Python package to install and the module claims none -- the honest
+  `import_names=()` means the status never tells a user to run a pip install that
+  cannot fix anything).
+  `audiocpp_status` reports *exactly* what is installed -- engine, model, and how
+  many voices -- each with its own real next step, and the two fetches
+  (`install_engine`, `download_model`/`download_speakers`) run only through the
+  permission + human-approval gates (`--approve`), like every other model download;
+  `install_engine` stages the archive and installs the folder that actually holds
+  the binary, so its shared libraries come with it. **It is not the silent default**:
+  `discover_synthesizer_name` deliberately leaves it out of the automatic order
+  because it is much slower than the other engines on a CPU, so making it the
+  default would slow every reading on a machine that has it. It is reached
+  **explicitly** instead -- picking one of its voices in the reading-voice menu (or
+  naming one on the CLI) routes the reading to it through
+  `core.speech._engine_for_voice` -- so a user who wants it gets it and a user who
+  does not is unaffected. CLI:
+  `python -m cli audio status|models|voices|install-engine --approve|download
+  [--speakers] --approve|say "<text>" --voice model:audio.cpp:Sarah --write-wav f`
+  (`cli/audio.py`, the headless twin of the window's voice menu), mirrored as the
+  GUI sidebar's three *audio.cpp* actions (status, voices, download) and a *Model
+  voices (local Arabic model)* group in the reading-voice picker.
+- `core/voices.py`'s **model voices**: a `ModelVoice` is a voice that lives inside a
+  local model rather than in the synthetic catalog or the OS. It carries the
+  engine's exact `name` (the speaker's own name, never translated), the `engine`
+  that owns it, its `language` tag, the reported `gender`, and the `reference` clip
+  (plus its transcript) a zero-shot engine clones; `key` is a stable
+  `model:<engine>:<name>` string (`MODEL_VOICE_PREFIX`, `is_model_voice_key`) so a
+  saved choice survives a restart and can never be confused with a catalog or
+  `system:` key. `model_voices(engine=None)` lists what the local engines really
+  have, `find_model_voice(key)` resolves a key against what is *currently*
+  installed (returning `None`, so the caller falls back, when the model is gone),
+  and `group_model_voices`/`group_system_voices` are the one language-grouping rule
+  both voice menus use (Arabic first). This is the voice kind the
+  `gui/app.py` sidebar's **Voices** dropdown and `gui/service.py`'s
+  `model_voices`/`model_speech_status` present.
 - `core/speech.py`'s two factories are the **one** place every chat interface gets
   its speech, so Qwen3 is wired there and nowhere else: `discover_recognizer_name`
   prefers `qwen3-asr` when the extra and weights are present (else `whisper`, else
@@ -1196,7 +1264,15 @@ Arabic is kept as secondary aliases where useful.
   subtle non-interactive status dot, an optional `add_mic(...)` control, any
   `add_tool(widget)` action the caller built, and the circular Send disc.
   `text`/`set_text`/`clear`, `set_submit`, `set_send_enabled`, `set_status_dot`,
-  `set_mic_recording`, `focus`, `set_tooltip`. The placeholder is an overlay
+  `set_mic_recording`, `focus`, `set_tooltip`. Every toolbar control (＋, the mode
+  pills, the mic, and the Send disc) carries a real hover state -- Tk's
+  ``activebackground`` only paints while the button is held, so the tint is bound
+  on ``<Enter>``/``<Leave>`` and restored to the control's own resting colour on
+  leave; the disc lightens a shade derived from the theme's primary (``_blend``),
+  and a disabled disc deliberately does not lighten. The message area's focus
+  treatment is the caret and the I-beam cursor, not a recoloured border: the
+  project keeps the composer's hairline the neutral stroke on purpose
+  (``test_window_composer_has_no_gold_focus_outline``). The placeholder is an overlay
   *label*, never text inside the entry, so `text()` is always the user's own
   words and the existing handlers can keep reading `entry.get(...)`. The input
   grows with the message and then scrolls inside itself at `max_lines`, so the
@@ -1265,13 +1341,23 @@ Arabic is kept as secondary aliases where useful.
   training loop never freezes the window. The composer's **＋** menu also opens
   the **Code Studio** (below).
   The window also **reads text aloud**: every message footer carries a
-  "🔊 Read aloud" control (`_speak_label`/`_speak_text`), and the Settings panel
-  holds the reading-voice menu (`_build_voice_picker`) — every catalog voice,
-  grouped under Men/Women/Boys/Girls with its English and Arabic name — plus an
-  opt-in **auto-speak** check and a "Test the reading voice" button. The chosen
+  "🔊 Read aloud" control (`_speak_label`/`_speak_text`), and the sidebar holds the
+  reading-voice menus. A dedicated **Voices** dropdown (`_toggle_voices`, right
+  under Chats) puts the voice choice one click away, and the Settings panel holds
+  the same list (`_build_voice_picker`); both call the one
+  `_build_voice_sections`, so the two menus can never drift apart. Each lists the
+  voices the machine **really** has first — the installed system voices
+  (`group_system_voices`), then the **local model voices**
+  (`group_model_voices`, e.g. the VoiceTut-TTS Arabic speakers), then the synthetic
+  catalog grouped under Men/Women/Boys/Girls — each with its own honest status line
+  and next step (`reading_status`, `model_speech_status`, `piper_speech_status`,
+  `qwen_speech_status`), an opt-in **auto-speak** check, and a "Test the reading
+  voice" button. Choosing a `model:` voice is what routes a reading to that local
+  engine. The chosen
   voice and the auto-speak flag persist through `JsonStore`
   (`load_reading_voice`/`save_reading_voice`, `load_auto_speak`/`save_auto_speak`,
-  the same `gui`/`appearance` namespace as the theme), the window and the service
+  the same `gui`/`appearance` namespace as the theme; a `system:` or `model:` key is
+  kept as-is), the window and the service
   agree from the first message (`ChatService.set_voice`), and Markdown is stripped
   (`_strip_markdown`) so the engine speaks words, not `**`/backticks. Reading runs
   on the worker thread and reports honestly: a missing engine says to install
@@ -1775,7 +1861,10 @@ Arabic is kept as secondary aliases where useful.
   install it cannot do; `install` runs the command and returns an
   `InstallResult`, and takes an injected `runner` so it is tested without the
   network. Dependency-free and import-safe. `requirements-pdf.txt` /
-  `requirements-ocr.txt` mirror the extras. Surfaced as the CLI
+  `requirements-ocr.txt` mirror the extras, and the `audiocpp` feature
+  (`FEATURE_AUDIOCPP`) points at `requirements-audiocpp.txt` and reports the
+  `audiocpp_cli` program and the VoiceTut-TTS GGUF as what pip cannot fetch (it
+  declares no Python package, so pip is never named for it). Surfaced as the CLI
   `python -m cli deps [--install pdf|ocr]` and the window's **＋ → Install OCR
   support…** entry and the Import Center's **Install OCR support…** button.
 - `core/pdf_extract.py` — read text out of a **digital** PDF page by page with
@@ -1984,6 +2073,29 @@ clone, each optional so the base system still runs without it:
   Piper, or Qwen3-TTS's Arabic fallback — the reading is the words a listener
   hears. `tests/test_arabic_speech.py` pins the number words, each measured
   failure, the safety rules, and the wiring.
+- Phase 16 — the **local model voice**: the reading engine can now select a voice
+  that lives inside a local model, not just a catalog or an OS voice. `core/voices.py`
+  gains `ModelVoice` (a stable `model:<engine>:<name>` key, the engine that owns it,
+  the language and gender it was reported with, and the `reference` clip a zero-shot
+  engine clones) plus `model_voices`/`find_model_voice` and the shared
+  `group_system_voices`/`group_model_voices` language grouping. `core/audiocpp_speech.py`
+  is the first engine of that kind: **VoiceTut-TTS over audio.cpp** -- a real, local
+  GGUF model (`audiocpp_cli`) that speaks natural **Egyptian Arabic** with
+  Arabic/English code-switching, the one thing neither the single-voice Piper Arabic
+  model nor Qwen3-TTS (no Arabic) could give. It is a full `SpeechSynthesizer`, so
+  every mouth and the voice loop use it unchanged, and the text it speaks is prepared
+  by `core/arabic_speech` first, so Arabic numbers and units are *spoken, not
+  spelled*. The engine and the model download only through the permission + approval
+  gates (`install_engine`, `download_model`, `--approve`), and **it is deliberately
+  not the silent default** -- it is slower than the system engines on a CPU, so it is
+  reached *explicitly* by picking one of its voices, which
+  `core.speech._engine_for_voice` routes to it; a machine without it is entirely
+  unaffected. Surfaced as `python -m cli audio status|models|voices|install-engine|
+  download|say` and the GUI sidebar's *Voices* dropdown, which groups the installed
+  system voices, the local model voices, and the synthetic catalog in one place with
+  a status line and next step for each. `tests/test_audiocpp_speech.py` exercises the
+  catalog, the availability states, the approval gates, the runner seam, the Arabic
+  text preparation, the fallback, the voice routing, and the CLI.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

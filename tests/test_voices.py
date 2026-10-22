@@ -11,6 +11,7 @@ import shutil
 
 import pytest
 
+from core import voices
 from core.reading import TextReader
 from core.speech import CommandSynthesizer, SilentSynthesizer, load_synthesizer
 from core.voices import (
@@ -1564,3 +1565,46 @@ def test_onecore_script_keeps_the_default_voice_when_no_language_match():
         Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), find_voice("woman-1"), "ar"
     )
     assert "$m=@($voices|?{$_.Language -like 'ar*'});" in script
+
+
+# ------------------------------------------------------- voice-menu grouping
+
+
+def _model_voice(name: str, language: str, engine: str = "audio.cpp") -> "voices.ModelVoice":
+    from pathlib import Path
+
+    return voices.ModelVoice(
+        name=name, engine=engine, language=language, gender="Female", reference=Path(f"{name}.wav")
+    )
+
+
+def test_grouping_puts_arabic_first_then_alphabetical():
+    """The one ordering rule both voice menus share: Arabic first, then A-Z."""
+    from core.voices import group_model_voices
+
+    voices = (
+        _model_voice("Zed", "en-US"),
+        _model_voice("Sarah", "ar-EG"),
+        _model_voice("Ahmed", "ar-EG"),
+        _model_voice("Anna", "en-GB"),
+    )
+    groups = group_model_voices(voices)
+
+    assert [code for code, _ in groups] == ["ar", "en"]
+    arabic = dict(groups)["ar"]
+    assert [v.name for v in arabic] == ["Sarah", "Ahmed"], "the caller's order is preserved"
+    assert [v.name for v in dict(groups)["en"]] == ["Zed", "Anna"]
+
+
+def test_grouping_accepts_an_explicit_voice_list():
+    """Both helpers group a fixed list, so a menu (and a test) needs no live engine."""
+    from core.voices import group_system_voices
+
+    assert group_system_voices(()) == ()
+    groups = group_system_voices(
+        (
+            voices.SystemVoice(name="Majed", engine="windows-sapi", language="ar-SA"),
+            voices.SystemVoice(name="David", engine="windows-sapi", language="en-US"),
+        )
+    )
+    assert [code for code, _ in groups] == ["ar", "en"]

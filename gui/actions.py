@@ -18,6 +18,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from cli.menu import (
+    run_audio_speech,
     run_banner_chat,
     run_cloud_chat,
     run_code_studio,
@@ -194,6 +195,24 @@ ACTIONS: tuple[GuiAction, ...] = (
         "piper-download",
         "Piper: download the natural local voice (~63 MB)",
         run_piper_speech,
+        ("download", "--approve"),
+    ),
+    GuiAction(
+        "audio-speech",
+        "audio.cpp: status of the natural Arabic voice (VoiceTut-TTS)",
+        run_audio_speech,
+        ("status",),
+    ),
+    GuiAction(
+        "audio-speech-voices",
+        "audio.cpp: the local model's own voices",
+        run_audio_speech,
+        ("voices",),
+    ),
+    GuiAction(
+        "audio-speech-download",
+        "audio.cpp: download the natural Arabic voice model (~1.3 GB)",
+        run_audio_speech,
         ("download", "--approve"),
     ),
     GuiAction(

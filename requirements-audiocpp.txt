@@ -1,0 +1,13 @@
+# The audio.cpp speech engine (VoiceTut-TTS) needs **no** Python package.
+#
+# audio.cpp is a native C++ (ggml) program, not a pip package, and this module
+# downloads it and the model with the standard library's `urllib`, so there is
+# nothing to `pip install` for this feature. Install the engine with:
+#
+#     python -m cli audio install-engine --approve
+#
+# (or build https://github.com/0xShug0/audio.cpp and put `audiocpp_cli` on PATH),
+# then fetch the model with `python -m cli audio download --approve`.
+#
+# This file is kept (and stays empty on purpose) so every optional feature has one
+# requirements file, and `python -m cli deps` can report the feature honestly.
