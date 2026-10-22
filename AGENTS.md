@@ -693,7 +693,16 @@ Arabic is kept as secondary aliases where useful.
   weights) and the real next step; `download_model` runs only through the
   permission + human-approval gates (`--approve`), like every other model
   download. The runtime is the optional `[qwen-speech]` extra
-  (`requirements-qwen-speech.txt`), imported lazily. **Honest by construction:**
+  (`requirements-qwen-speech.txt`), imported lazily. The readiness probe is
+  **exact**: `qwen_asr_extra_installed` requires `qwen_asr` itself, because
+  `transformers` is only its transitive dependency and cannot stand in for it --
+  the `[image]` extra installs `torch` + `transformers` without `qwen-asr`, so
+  accepting `transformers` as a substitute made the microphone report "ready",
+  pick `qwen3-asr`, and then fail with a raw `ModuleNotFoundError: No module
+  named 'qwen_asr'` *after* the user had already recorded. A broken or partial
+  extra now raises `QwenSpeechUnavailable` naming the install command from inside
+  the runners, so the failure is the next step rather than a bare import error.
+  **Honest by construction:**
   Qwen3-ASR covers **Arabic** (52 languages), but **Qwen3-TTS does not speak
   Arabic** (ten languages: Chinese, English, Japanese, Korean, German, French,
   Russian, Portuguese, Spanish, Italian) — `QWEN_TTS_LANGUAGES` states this, the

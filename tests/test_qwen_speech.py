@@ -236,6 +236,59 @@ def test_extra_install_status_never_imports_torch_eagerly():
     assert set(ASR_CATALOG) and set(TTS_CATALOG)
 
 
+def test_transformers_alone_does_not_count_as_asr_ready(monkeypatch):
+    """`transformers` is a dependency of `qwen-asr`, not a substitute for it.
+
+    The `[image]` extra pulls torch + transformers, so a machine can have both and
+    still have no `qwen-asr`. Treating that as "ready" is what made the microphone
+    fail with a raw `ModuleNotFoundError: No module named 'qwen_asr'` after the
+    user had already recorded.
+    """
+    import importlib.util
+
+    real_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name, *args, **kwargs):
+        if name in ("torch", "transformers"):
+            return object()
+        if name == "qwen_asr":
+            return None
+        return real_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+    assert qwen_speech.qwen_asr_extra_installed() is False
+    assert qwen_speech.available_recognizer() is False
+
+
+def test_asr_runner_names_the_install_step_when_the_extra_is_broken(tmp_path, monkeypatch):
+    """A missing `qwen_asr` must surface as the install step, not a bare ImportError."""
+    import sys
+
+    from core.qwen_speech import TransformersAsrRunner
+
+    # Force the import to fail even on a machine that has the extra installed.
+    monkeypatch.setitem(sys.modules, "qwen_asr", None)
+    runner = TransformersAsrRunner(tmp_path)
+    with pytest.raises(QwenSpeechUnavailable) as caught:
+        runner._load()
+    message = str(caught.value)
+    assert "Qwen3-ASR" in message
+    assert "pip install" in message
+    assert "requirements-qwen-speech.txt" in message
+
+
+def test_tts_runner_names_the_install_step_when_the_extra_is_broken(tmp_path, monkeypatch):
+    import sys
+
+    from core.qwen_speech import QwenTtsRunner
+
+    monkeypatch.setitem(sys.modules, "qwen_tts", None)
+    runner = QwenTtsRunner(tmp_path)
+    with pytest.raises(QwenSpeechUnavailable) as caught:
+        runner._load()
+    assert "pip install" in str(caught.value)
+
+
 # ------------------------------------------------------- menu / GUI wiring
 
 
