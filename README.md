@@ -667,7 +667,9 @@ You: help                         # list the controls
 
 With no speech engine installed, Jarvis still runs as a complete text loop — the
 same fallback philosophy as the rest of the project. `--mic` records from the
-system microphone when `arecord` or `sox` is available, and `--play` uses
+system microphone when a recorder is available — `arecord`, `pw-record`/`parecord`,
+or `sox` on Linux/macOS, and Windows' own MCI audio device (through PowerShell) on
+Windows, so it works there with nothing to install — and `--play` uses
 `aplay`/`afplay`/`sox` when one is installed.
 
 ### Chatting in text (Jarvis without the voice)

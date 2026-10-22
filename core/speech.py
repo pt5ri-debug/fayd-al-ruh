@@ -28,6 +28,7 @@ explicitly still reads Arabic through the system engine rather than failing.
 from __future__ import annotations
 
 import array
+import contextlib
 import platform
 import re
 import shutil
@@ -581,9 +582,68 @@ def _windows_onecore_script(
     return " ".join(script)
 
 
+def _windows_recorder_script(
+    target: Path, marker: Path, sample_rate: int, seconds: float
+) -> str:
+    """PowerShell that records the microphone to the WAV ``target`` until stopped.
+
+    Why this exists at all: Windows ships no ``arecord``/``sox``, so a Windows user
+    who clicks the microphone icon had **nothing** to capture with -- the button
+    simply reported "install arecord or sox", a Linux-only instruction. Windows
+    does have its own capture through the MCI ``waveaudio`` device (``winmm.dll``),
+    reachable from PowerShell with no extra install, so the icon records out of the
+    box the same way read-aloud already does.
+
+    ``marker`` is the stop signal: the caller creates that file (a second click on
+    the icon) and the loop below then stops and **saves** the clip. A marker file
+    is used rather than a signal because MCI finalises the WAV in the ``save``
+    step -- killing the process (what ``SIGINT`` does to ``arecord``) would leave
+    an unusable file. ``seconds`` is the same safety bound ``arecord -d`` has, so
+    a forgotten recording cannot grow without end.
+    """
+    alias = "faydmic"
+    deadline = f"(Get-Date).AddSeconds({float(seconds):.3f})"
+    return " ".join(
+        [
+            "$ErrorActionPreference='Stop';",
+            # One P/Invoke into winmm.dll; the MCI command language then opens the
+            # default recording device, records, and writes a WAV on `save`.
+            "Add-Type -MemberDefinition "
+            "'[DllImport(\"winmm.dll\", CharSet=CharSet.Unicode)] "
+            "public static extern int mciSendString(string c, System.Text.StringBuilder r, "
+            "int l, System.IntPtr h);' -Name WinMM -Namespace Fayd;",
+            f"$target='{_ps_quote(str(target))}';",
+            f"$marker='{_ps_quote(str(marker))}';",
+            f"$alias='{alias}';",
+            f"$rate={int(sample_rate)};",
+            f"$stopAt={deadline};",
+            "[Fayd.WinMM]::mciSendString('open new type waveaudio alias '+$alias,"
+            "$null,0,[IntPtr]::Zero)|Out-Null;",
+            # Ask for mono 16-bit at our sample rate; a driver that refuses keeps its
+            # own format, and AudioClip.read_wav decodes whatever comes back.
+            "[Fayd.WinMM]::mciSendString('set '+$alias+' time format ms bitspersample 16 "
+            "channels 1 samplespersec '+$rate,$null,0,[IntPtr]::Zero)|Out-Null;",
+            "[Fayd.WinMM]::mciSendString('record '+$alias,$null,0,[IntPtr]::Zero)|Out-Null;",
+            "while(-not (Test-Path -LiteralPath $marker) -and (Get-Date) -lt $stopAt)"
+            "{Start-Sleep -Milliseconds 100};",
+            "[Fayd.WinMM]::mciSendString('stop '+$alias,$null,0,[IntPtr]::Zero)|Out-Null;",
+            # MCI wants the path quoted (`save <alias> "<file>"`); a temp folder can
+            # contain spaces, so the quotes are built explicitly.
+            "$save='save '+$alias+' \"'+$target+'\"';",
+            "[Fayd.WinMM]::mciSendString($save,$null,0,[IntPtr]::Zero)|Out-Null;",
+            "[Fayd.WinMM]::mciSendString('close '+$alias,$null,0,[IntPtr]::Zero)|Out-Null",
+        ]
+    )
+
+
+def _windows_shell_available() -> bool:
+    """True when Windows PowerShell is on PATH (the shell both Windows paths drive)."""
+    return platform.system().lower() == "windows" and shutil.which(_WINDOWS_SHELL) is not None
+
+
 def windows_speech_available() -> bool:
     """True when Windows' built-in speech engine can be driven here (SAPI/PowerShell)."""
-    return platform.system().lower() == "windows" and shutil.which(_WINDOWS_SHELL) is not None
+    return _windows_shell_available()
 
 
 #: Cache of the WinRT/OneCore availability probe (``None`` = not probed yet).
@@ -998,6 +1058,33 @@ def speech_install_plan() -> SpeechInstallPlan:
         "Install espeak-ng with your system package manager "
         "(e.g. `sudo apt install espeak-ng`).",
     )
+
+
+def microphone_install_hint() -> str:
+    """The platform-aware next step when no microphone recorder exists.
+
+    The old message was ``install arecord or sox`` on every platform, which is a
+    Linux-only instruction: Windows ships neither, and macOS has neither by
+    default either. This names the real step per platform, and says plainly when
+    there is nothing to install because the OS already provides a recorder.
+    """
+    system = platform.system().lower()
+    if system == "windows":
+        return (
+            "Windows can record through its own audio device (MCI waveaudio); if that "
+            "failed, check that a microphone is connected and allowed in "
+            "Settings -> Privacy & security -> Microphone."
+        )
+    if system == "darwin":
+        return (
+            "Install a recorder with Homebrew (`brew install sox`) to capture audio."
+        )
+    if shutil.which("apt-get") or shutil.which("dnf") or shutil.which("pacman") or shutil.which("apk"):
+        return (
+            "Install a recorder such as `sox` or `alsa-utils` (e.g. "
+            "`sudo apt install sox`) to capture audio."
+        )
+    return "Install a microphone recorder such as `sox` to capture audio."
 
 
 @dataclass(frozen=True)
@@ -1682,9 +1769,11 @@ class MicRecording:
     a fixed number of seconds: the caller :meth:`stop` s it when the user is done
     talking (a second click on the microphone icon) and :meth:`result` returns the
     clip. ``arecord`` stops cleanly on ``SIGINT`` (it finalises the WAV header);
-    ``sox`` is asked for a long capture and terminated the same way. The handle
-    also works with an injected process, so the flow is testable with no audio
-    hardware.
+    ``sox`` is asked for a long capture and terminated the same way. A recorder
+    that needs a *file* to stop -- the Windows MCI recorder, whose ``save`` step
+    writes the WAV -- passes ``stop_path`` instead, and :meth:`stop` creates it.
+    The handle also works with an injected process, so the flow is testable with
+    no audio hardware.
     """
 
     def __init__(
@@ -1694,11 +1783,13 @@ class MicRecording:
         path: Path,
         recorder: str,
         folder: Path,
+        stop_path: Path | None = None,
     ) -> None:
         self._process = process
         self._path = path
         self._recorder = recorder
         self._folder = folder
+        self._stop_path = stop_path
 
     @property
     def recorder(self) -> str:
@@ -1714,18 +1805,25 @@ class MicRecording:
 
         ``SIGINT`` is used rather than ``terminate()`` because ``arecord`` flushes
         its WAV header on interrupt; a recorder that ignores it is killed after a
-        short grace period, so ``stop`` never hangs.
+        short grace period, so ``stop`` never hangs. The Windows MCI recorder is
+        stopped through its marker file instead, because it finalises the WAV in a
+        ``save`` step a signal would skip.
         """
-        if self._process.poll() is None:
+        if self._process.poll() is not None:
+            return
+        if self._stop_path is not None:
+            with contextlib.suppress(OSError):
+                self._stop_path.write_text("stop", encoding="utf-8")
+        else:
             try:
                 self._process.send_signal(signal.SIGINT)
             except (OSError, ValueError):
                 self._process.terminate()
-            try:
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-                self._process.wait(timeout=5)
+        try:
+            self._process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._process.kill()
+            self._process.wait(timeout=5)
 
     def result(self, *, timeout: float | None = 30.0) -> AudioClip:
         """Stop if needed and return the recorded clip.
@@ -1751,15 +1849,21 @@ class MicRecording:
             shutil.rmtree(self._folder, ignore_errors=True)
 
 
+#: The Windows recorder name (MCI ``waveaudio`` through PowerShell). It is
+#: discovered without ``shutil.which`` because the "program" is the shell itself.
+_WINDOWS_RECORDER = "windows-mci"
+
+
 class MicrophoneRecorder:
     """Records a clip from the system microphone, when a recorder exists.
 
-    Uses ``arecord`` (Linux/ALSA) or ``sox`` (cross-platform) if installed; when
-    neither exists, :meth:`available` is False and the caller should fall back to
-    the text loop. No pip package and no network access is involved.
-    :meth:`record` blocks for a fixed number of seconds (the CLI's behaviour);
-    :meth:`start` returns a :class:`MicRecording` the caller stops when the user
-    is done -- which is how the window's microphone icon toggles.
+    Uses ``arecord`` (Linux/ALSA), ``pw-record``/``parecord`` (PipeWire/PulseAudio),
+    ``sox`` (cross-platform), or Windows' own MCI ``waveaudio`` device when none of
+    those exist; when nothing is available, :meth:`available` is False and the
+    caller should fall back to the text loop. No pip package and no network access
+    is involved. :meth:`record` blocks for a fixed number of seconds (the CLI's
+    behaviour); :meth:`start` returns a :class:`MicRecording` the caller stops when
+    the user is done -- which is how the window's microphone icon toggles.
     """
 
     def __init__(self, *, seconds: float = 4.0, sample_rate: int = SAMPLE_RATE) -> None:
@@ -1770,8 +1874,18 @@ class MicrophoneRecorder:
     def recorder(self) -> str | None:
         if shutil.which("arecord"):
             return "arecord"
+        # Modern Linux desktops are PipeWire/PulseAudio first and may have no ALSA
+        # ``arecord`` at all; ``pw-record``/``parecord`` capture the same microphone.
+        if shutil.which("pw-record"):
+            return "pw-record"
+        if shutil.which("parecord"):
+            return "parecord"
         if shutil.which("sox"):
             return "sox"
+        # Windows ships neither arecord nor sox, so fall back to its own capture
+        # (MCI waveaudio) rather than telling a Windows user to install ALSA tools.
+        if _windows_shell_available():
+            return _WINDOWS_RECORDER
         return None
 
     def available(self) -> bool:
@@ -1784,6 +1898,18 @@ class MicrophoneRecorder:
             return [
                 "arecord", "-q", "-f", "S16_LE", "-r", str(sample_rate),
                 "-d", str(int(seconds)), str(target),
+            ]
+        if recorder == "pw-record":
+            # ``pw-record`` infers the format from the suffix; --rate keeps the
+            # sample rate the recognizers expect.
+            return [
+                "pw-record", "--rate", str(sample_rate), "--channels", "1",
+                "--format", "s16", str(target),
+            ]
+        if recorder == "parecord":
+            return [
+                "parecord", "--rate", str(sample_rate), "--channels", "1",
+                "--format", "s16le", "--file-format=wav", str(target),
             ]
         return [
             "sox", "-d", "-r", str(sample_rate), "-c", "1", "-b", "16",
@@ -1799,10 +1925,18 @@ class MicrophoneRecorder:
         """
         recorder = self.recorder
         if recorder is None:
-            raise ValueError("No microphone recorder is available (install arecord or sox).")
+            raise ValueError("No microphone recorder is available. " + microphone_install_hint())
         folder = Path(tempfile.mkdtemp(prefix="fayd-mic-"))
         target = folder / "input.wav"
-        argv = self._argv(recorder, target, self.sample_rate, self.seconds)
+        stop_path: Path | None = None
+        if recorder == _WINDOWS_RECORDER:
+            # The Windows recorder stops on a marker file, not a signal, because its
+            # WAV is written by a `save` step a signal would skip.
+            stop_path = folder / "stop"
+            script = _windows_recorder_script(target, stop_path, self.sample_rate, self.seconds)
+            argv = [_WINDOWS_SHELL, "-NoProfile", "-NonInteractive", "-Command", script]
+        else:
+            argv = self._argv(recorder, target, self.sample_rate, self.seconds)
         try:
             process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
                 argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -1811,7 +1945,7 @@ class MicrophoneRecorder:
             shutil.rmtree(folder, ignore_errors=True)
             raise ValueError(f"Microphone recorder {recorder!r} failed: {error}") from error
         return MicRecording(
-            process, path=target, recorder=recorder, folder=folder
+            process, path=target, recorder=recorder, folder=folder, stop_path=stop_path
         )
 
     def record(self) -> AudioClip:
@@ -2051,6 +2185,7 @@ __all__ = [
     "install_speech_engine",
     "load_recognizer",
     "load_synthesizer",
+    "microphone_install_hint",
     "refresh_windows_speech_caches",
     "speech_available",
     "speech_install_plan",

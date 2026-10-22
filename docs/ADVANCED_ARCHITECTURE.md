@@ -78,7 +78,12 @@ nothing the sandbox does not already permit.
 - `core/speech.py`: `CommandSynthesizer` drives an installed system TTS engine
   (`espeak-ng`, `espeak`, `flite`, `say`) through a fixed argv and falls back to a
   silent clip on any failure; `WhisperRecognizer` drives `whisper` when present;
-  `MicrophoneRecorder` uses `arecord`/`sox`; `Speaker` plays a clip through
+  `MicrophoneRecorder` uses `arecord`, `pw-record`/`parecord`, or `sox`, and falls
+  back to Windows' own MCI audio device (driven through PowerShell) when none of
+  those exist, so the microphone works on Windows with nothing to install; a
+  recording is stopped by `SIGINT` or, for the Windows recorder, by a marker file
+  its `save` step needs. `microphone_install_hint()` names the real next step per
+  platform. `Speaker` plays a clip through
   `aplay`/`afplay`/`sox`. `load_synthesizer("auto")` / `load_recognizer("auto")`
   pick the best installed engine; a named engine that is missing raises rather
   than faking audio. `JarvisMode.play` is best-effort and reports, rather than

@@ -514,7 +514,21 @@ Arabic is kept as secondary aliases where useful.
   choco on Windows — or an honest hint when the app knows none), and
   `install_speech_engine` (never raises; an
   injected `runner` makes it testable with no real install) give the app a real
-  next step when no engine is present. **Windows needs no install**: the OS ships
+  next step when no engine is present. The **microphone** side is
+  platform-complete, which is what makes the chat window's mic icon toggle work
+  everywhere. `MicrophoneRecorder` discovers a recorder in order — `arecord`
+  (ALSA), `pw-record`/`parecord` (PipeWire/PulseAudio, because a modern Linux
+  desktop often has no `arecord`), `sox`, then **Windows' own MCI `waveaudio`
+  device** (`_WINDOWS_RECORDER`, `_windows_recorder_script` driving `winmm.dll`
+  through PowerShell) — so a Windows user, who has neither `arecord` nor `sox`,
+  records with nothing to install. The stop signal is part of the recorder
+  contract: `MicRecording.stop()` sends `SIGINT` (arecord/sox flush their WAV
+  header on interrupt) or, when the recording carries a `stop_path`, **creates
+  that marker file** — the Windows script polls it and then runs its MCI `save`,
+  because a signal would kill the process before the WAV is written.
+  `microphone_install_hint()` is the one platform-aware "next step" string, used
+  by the window, `ChatService.asr_status`, and the Jarvis CLI in place of the old
+  Linux-only "install arecord or sox". **Windows needs no install**: the OS ships
   two engines and the project prefers the right one. The modern **OneCore** engine
   (`Windows.Media.SpeechSynthesis`, reached through WinRT) is used when
   `windows_onecore_available()` succeeds — it is the *only* one that can see the

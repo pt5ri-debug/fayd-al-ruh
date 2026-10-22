@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import pytest
 
 from core.assistant import GroundedAssistant
@@ -253,3 +256,201 @@ def test_microphone_recording_stops_and_finalises():
     recording.stop()
     assert recording.recording is False
     assert process.signals  # SIGINT was delivered
+
+
+class _FakeScriptProcess(_FakeProcess):
+    """A recorder child that finishes only once its stop marker appears."""
+
+    def __init__(self, marker: Path) -> None:
+        super().__init__()
+        self._marker = marker
+
+    def wait(self, timeout=None) -> int:
+        if self._marker.exists():
+            self.returncode = 0
+        assert self.returncode is not None, "the process was not told to stop"
+        return self.returncode
+
+
+def test_microphone_recording_stops_through_a_marker_file():
+    """The Windows MCI recorder is stopped by a marker, not a signal.
+
+    A signal would kill the process before its ``save`` step writes the WAV, so the
+    stop must create the marker file the script polls instead.
+    """
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as folder:
+        marker = Path(folder) / "stop"
+        process = _FakeScriptProcess(marker)
+        recording = MicRecording(
+            process,
+            path=Path(folder) / "input.wav",
+            recorder="windows-mci",
+            folder=Path(folder),
+            stop_path=marker,
+        )
+        assert recording.recording is True
+        recording.stop()
+        assert marker.exists()  # the script's own stop condition
+        assert not process.signals  # a signal would skip the MCI `save`
+
+
+def test_microphone_recorder_prefers_arecord_then_pipewire_then_sox(monkeypatch):
+    """Discovery falls through to the modern Linux recorders before sox."""
+    import core.speech as speech
+
+    def only(*names: str):
+        return lambda name: f"/usr/bin/{name}" if name in names else None
+
+    monkeypatch.setattr(speech.shutil, "which", only("arecord"))
+    assert MicrophoneRecorder().recorder == "arecord"
+    monkeypatch.setattr(speech.shutil, "which", only("pw-record", "sox"))
+    assert MicrophoneRecorder().recorder == "pw-record"
+    monkeypatch.setattr(speech.shutil, "which", only("parecord", "sox"))
+    assert MicrophoneRecorder().recorder == "parecord"
+    monkeypatch.setattr(speech.shutil, "which", only("sox"))
+    assert MicrophoneRecorder().recorder == "sox"
+
+
+def test_microphone_recorder_uses_windows_capture_when_nothing_else_exists(monkeypatch):
+    """A Windows machine with no arecord/sox still has a working recorder.
+
+    This is the reported bug: the microphone icon did nothing on Windows because
+    discovery only knew the Linux tools.
+    """
+    import core.speech as speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None
+    )
+    recorder = MicrophoneRecorder()
+    assert recorder.recorder == "windows-mci"
+    assert recorder.available() is True
+    assert MicrophoneRecorder().recorder is not None
+
+
+def test_microphone_recorder_is_honestly_unavailable_without_any_recorder(monkeypatch):
+    import core.speech as speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(speech.shutil, "which", lambda name: None)
+    assert MicrophoneRecorder().available() is False
+    with pytest.raises(ValueError):
+        MicrophoneRecorder().start()
+
+
+def test_pipewire_and_pulse_recorder_argv_are_mono_at_our_rate():
+    from pathlib import Path
+
+    pw = MicrophoneRecorder._argv("pw-record", Path("/tmp/a.wav"), 16000, 5.0)
+    assert pw[0] == "pw-record" and "--rate" in pw and "16000" in pw
+    assert pw[pw.index("--channels") + 1] == "1"
+    pulse = MicrophoneRecorder._argv("parecord", Path("/tmp/a.wav"), 16000, 5.0)
+    assert pulse[0] == "parecord" and pulse[pulse.index("--channels") + 1] == "1"
+    assert any("wav" in part for part in pulse)
+
+
+def test_windows_recorder_script_records_and_saves_a_wav():
+    """The script drives winmm/MCI, records, then saves the WAV on the marker."""
+    from pathlib import Path
+
+    import core.speech as speech
+
+    script = speech._windows_recorder_script(
+        Path(r"C:\Users\A B\AppData\Local\Temp\fayd-mic-1\input.wav"),
+        Path(r"C:\Users\A B\AppData\Local\Temp\fayd-mic-1\stop"),
+        16000,
+        120.0,
+    )
+    assert "winmm.dll" in script  # the Windows capture API
+    assert "'record '" in script  # starts capturing
+    assert "save" in script  # writes the WAV the recognizer reads
+    assert "Test-Path -LiteralPath $marker" in script  # stops on the second click
+    assert "input.wav" in script  # the target path is passed through
+    # Every PowerShell single-quoted literal must close, or the whole script is a
+    # syntax error -- which is exactly how a broken `save` line hides.
+    assert _single_quotes_balanced(script), script
+
+
+def _single_quotes_balanced(script: str) -> bool:
+    """True when every PowerShell single-quoted literal in ``script`` is closed."""
+    index = 0
+    while index < len(script):
+        if script[index] != "'":
+            index += 1
+            continue
+        cursor = index + 1
+        while cursor < len(script):
+            if script[cursor] == "'":
+                if cursor + 1 < len(script) and script[cursor + 1] == "'":
+                    cursor += 2  # an escaped quote inside the literal
+                    continue
+                break
+            cursor += 1
+        if cursor >= len(script):
+            return False
+        index = cursor + 1
+    return True
+
+
+def test_microphone_install_hint_is_platform_aware(monkeypatch):
+    """The next step names the real platform, not a Linux-only command."""
+    import core.speech as speech
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    windows = speech.microphone_install_hint()
+    assert "arecord" not in windows and "Windows" in windows
+    monkeypatch.setattr(speech.platform, "system", lambda: "Darwin")
+    assert "brew" in speech.microphone_install_hint()
+    monkeypatch.setattr(speech.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        speech.shutil, "which", lambda name: "/usr/bin/apt-get" if name == "apt-get" else None
+    )
+    assert "sox" in speech.microphone_install_hint()
+
+
+def test_microphone_start_runs_the_windows_script_with_a_stop_marker(monkeypatch):
+    """``start`` launches PowerShell and hands back a marker-stopped recording."""
+    import core.speech as speech
+
+    captured: dict[str, object] = {}
+
+    def fake_popen(argv, **kwargs):
+        captured["argv"] = argv
+        process = _FakeProcess()
+        captured["process"] = process
+        return process
+
+    monkeypatch.setattr(speech.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None
+    )
+    monkeypatch.setattr(speech.subprocess, "Popen", fake_popen)
+
+    recording = MicrophoneRecorder(seconds=30.0).start()
+    try:
+        argv = captured["argv"]
+        assert isinstance(argv, list) and argv[0] == "powershell"
+        assert "winmm.dll" in argv[-1]
+        assert recording.recorder == "windows-mci"
+        stop_path = recording._stop_path
+        assert stop_path is not None
+        # The recorder only finishes once the marker exists -- exactly what the
+        # script's own `Test-Path` loop waits for.
+        process = captured["process"]
+        assert isinstance(process, _FakeProcess)
+
+        def wait(timeout=None):
+            assert stop_path.exists(), "stop() must create the marker before waiting"
+            process.returncode = 0
+            return 0
+
+        process.wait = wait  # type: ignore[method-assign]
+        recording.stop()
+        assert stop_path.exists()
+    finally:
+        import shutil as _shutil
+
+        _shutil.rmtree(recording._folder, ignore_errors=True)
