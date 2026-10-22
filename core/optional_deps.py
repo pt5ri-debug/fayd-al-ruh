@@ -210,12 +210,14 @@ FEATURES: dict[str, OptionalFeature] = {
             "Transcribe speech with the local Qwen3-ASR model (52 languages, "
             "including Arabic) instead of the system `whisper` engine."
         ),
-        requirements_file="requirements-qwen-speech.txt",
+        requirements_file="requirements-qwen-asr.txt",
         import_names=("torch", "qwen_asr"),
         system_note=(
             "The model weights are a separate one-time, human-approved download: "
             "run `python -m cli qwen-asr download --approve` (~3.4 GB), or drop a "
-            "model folder into the data/qwen-speech folder."
+            "model folder into the data/qwen-speech folder. Qwen3-ASR and "
+            "Qwen3-TTS pin different `transformers` versions, so install this "
+            "file or requirements-qwen-tts.txt, not both."
         ),
         system_missing_note="no Qwen3-ASR model folder is present yet.",
     ),
@@ -226,13 +228,15 @@ FEATURES: dict[str, OptionalFeature] = {
             "Read chat text aloud with the local Qwen3-TTS model (expressive, ten "
             "languages; it does not speak Arabic)."
         ),
-        requirements_file="requirements-qwen-speech.txt",
+        requirements_file="requirements-qwen-tts.txt",
         import_names=("torch", "qwen_tts"),
         system_note=(
             "The model weights are a separate one-time, human-approved download: "
             "run `python -m cli qwen-tts download --approve` (~3.4 GB), or drop a "
             "model folder into the data/qwen-speech folder. Qwen3-TTS does not "
-            "speak Arabic; the system engine still reads Arabic aloud."
+            "speak Arabic; the system engine still reads Arabic aloud. Qwen3-TTS "
+            "and Qwen3-ASR pin different `transformers` versions, so install this "
+            "file or requirements-qwen-asr.txt, not both."
         ),
         system_missing_note="no Qwen3-TTS model folder is present yet.",
     ),

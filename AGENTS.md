@@ -692,8 +692,15 @@ Arabic is kept as secondary aliases where useful.
   `qwen_asr_status`/`qwen_tts_status` report *exactly* what is installed (extra +
   weights) and the real next step; `download_model` runs only through the
   permission + human-approval gates (`--approve`), like every other model
-  download. The runtime is the optional `[qwen-speech]` extra
-  (`requirements-qwen-speech.txt`), imported lazily. The readiness probe is
+  download. The runtime is the optional `[qwen-asr]` / `[qwen-tts]` extras
+  (`requirements-qwen-asr.txt`, `requirements-qwen-tts.txt`), imported lazily.
+  They are **two** extras on purpose: `qwen-asr` pins `transformers==4.57.6` and
+  `qwen-tts` pins `transformers==4.57.3`, so no single environment satisfies
+  both -- a combined requirements file left pip no common `transformers`, and it
+  backtracked to an old release that caps `numpy<2.0`, then tried to *build*
+  numpy 1.26.4 from source, which fails on Windows with a long-path `OSError`
+  (and on any machine with no compiler). Each file now pins only its own engine
+  and lets that engine own its `transformers` version. The readiness probe is
   **exact**: `qwen_asr_extra_installed` requires `qwen_asr` itself, because
   `transformers` is only its transitive dependency and cannot stand in for it --
   the `[image]` extra installs `torch` + `transformers` without `qwen-asr`, so
@@ -1829,7 +1836,9 @@ clone, each optional so the base system still runs without it:
   **Qwen3-TTS** (expressive, ten languages, **no Arabic**) as real local engines,
   wired into `core/speech.py`'s `load_recognizer`/`load_synthesizer` so the GUI,
   Jarvis, `ai.voice`, `ai.speak`, and every future mouth get them by construction.
-  Both run locally through the optional `[qwen-speech]` extra, the weights are a
+  Both run locally through the optional `[qwen-asr]` / `[qwen-tts]` extras (two,
+  because the two engines pin different exact `transformers` versions and cannot
+  share one environment), the weights are a
   one-time human-approved download under `data/qwen-speech`, and each engine is a
   seam a test injects. Arabic is handled honestly: ASR transcribes it, and TTS
   reads it through the system engine rather than the model. Surfaced as

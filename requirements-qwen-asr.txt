@@ -1,0 +1,29 @@
+# Optional: Qwen3-ASR speech recognition (the [qwen-asr] extra).
+#
+# Install with:  python -m pip install -r requirements-qwen-asr.txt
+#
+# This is the engine behind the chat's microphone: **Qwen3-ASR** transcribes
+# speech in 52 languages **including Arabic**, where the system `whisper` engine
+# is English-first. It runs **locally** in this process -- nothing is sent off the
+# machine. The base install needs none of this: the import is lazy and the app
+# reports the real next step when it is absent.
+#
+# ``transformers`` is deliberately *not* listed here. ``qwen-asr`` pins the exact
+# version it was built against (``transformers==4.57.6``), and restating a looser
+# ``transformers>=4.40`` alongside that pin is what made pip backtrack through
+# every older ``transformers`` -- including the releases that cap ``numpy<2.0`` --
+# until it tried to *build* numpy 1.26.4 from source, which fails on Windows with
+# a long-path ``OSError`` (and on any machine with no compiler). Letting
+# ``qwen-asr`` own the pin resolves straight to a modern numpy with a wheel.
+#
+# NOTE: ``qwen-asr`` and ``qwen-tts`` pin *different* exact ``transformers``
+# versions (4.57.6 vs 4.57.3), so the two cannot share one environment. Install
+# this file for the microphone, ``requirements-qwen-tts.txt`` for speech
+# synthesis -- not both. ``core/qwen_speech.py`` reports whichever is present.
+#
+# The model weights are a *separate* one-time, human-approved download:
+#     python -m cli qwen-asr download --approve      # ~3.4 GB (1.7B) or ~1.2 GB (0.6B)
+# or drop a model folder into the data/qwen-speech folder. The model is Qwen's
+# own, released under Apache-2.0.
+torch>=2.2
+qwen-asr

@@ -93,16 +93,22 @@ natasha = [
     "llama-cpp-python>=0.3",
     "huggingface_hub>=0.23",
 ]
-# The Qwen3 speech models (ASR and TTS) are a separate optional extra. They run
-# locally through torch + Qwen's own `qwen-asr`/`qwen-tts` packages, so a chat can
-# transcribe with Qwen3-ASR (52 languages, including Arabic) and read aloud with
-# Qwen3-TTS (ten languages, no Arabic). Same runtime for both; the weights are a
-# separate one-time, human-approved download. Never required by the base install,
-# and imported lazily.
-qwen-speech = [
+# The Qwen3 speech models are two *separate* optional extras, because they cannot
+# share one environment: `qwen-asr` pins `transformers==4.57.6` while `qwen-tts`
+# pins `transformers==4.57.3`, so installing both leaves pip no common
+# `transformers` and it backtracks to an old release that caps `numpy<2.0` --
+# which then has to be *built* from source (failing on Windows with a long-path
+# error). Each extra therefore pins only its own package and lets that package
+# own its `transformers` version. Pick one: `qwen-asr` for the microphone
+# (52 languages, including Arabic) or `qwen-tts` for speech synthesis (ten
+# languages, no Arabic). The weights are a separate one-time, human-approved
+# download. Never required by the base install, and imported lazily.
+qwen-asr = [
     "torch>=2.2",
-    "transformers>=4.40",
     "qwen-asr",
+]
+qwen-tts = [
+    "torch>=2.2",
     "qwen-tts",
 ]
 # Piper is a separate optional extra: a real, local neural text-to-speech engine
@@ -178,7 +184,8 @@ ignore_missing_imports = true
 module = ["pptx", "pptx.*"]
 ignore_missing_imports = true
 
-# The Qwen3 speech models are an optional extra (``pip install .[qwen-speech]``);
+# The Qwen3 speech models are optional extras (``pip install .[qwen-asr]`` or
+# ``.[qwen-tts]``);
 # ``core.qwen_speech`` imports torch/qwen-asr/qwen-tts lazily, so a base install
 # must still type-check. The Qwen packages ship no type stubs.
 [[tool.mypy.overrides]]

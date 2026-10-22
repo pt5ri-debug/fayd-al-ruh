@@ -154,8 +154,80 @@ def test_status_reports_the_next_step_when_absent(tmp_path):
     # The optional packages are absent on CI, so both report "not available" and
     # a real, actionable next step rather than pretending.
     assert asr.available is False and tts.available is False
-    assert "requirements-qwen-speech.txt" in asr.hint
+    assert "requirements-qwen-asr.txt" in asr.hint
     assert "does not speak Arabic" in tts.hint
+
+
+def test_the_two_engines_have_separate_requirements_files():
+    """The engines cannot share an environment, so they must not share a file.
+
+    ``qwen-asr`` pins ``transformers==4.57.6`` and ``qwen-tts`` pins
+    ``transformers==4.57.3``. One file listing both leaves pip no common
+    ``transformers``, so it backtracks to an old release that caps ``numpy<2.0``
+    and then *builds* numpy 1.26.4 from source -- which fails on Windows with a
+    long-path ``OSError``. Two files, one engine each, keep the resolution direct.
+    """
+    from core.optional_deps import (
+        FEATURE_QWEN_ASR,
+        FEATURE_QWEN_TTS,
+        feature,
+        requirements_path,
+    )
+
+    asr = feature(FEATURE_QWEN_ASR)
+    tts = feature(FEATURE_QWEN_TTS)
+    assert asr.requirements_file != tts.requirements_file
+    for spec in (asr, tts):
+        assert requirements_path(spec.key).exists(), f"{spec.requirements_file} must ship"
+
+
+def test_each_requirements_file_names_only_its_own_engine():
+    """A file must not pull the other engine in, or the conflict comes back."""
+    from core.optional_deps import (
+        FEATURE_QWEN_ASR,
+        FEATURE_QWEN_TTS,
+        requirements_path,
+    )
+
+    asr_text = requirements_path(FEATURE_QWEN_ASR).read_text(encoding="utf-8").lower()
+    tts_text = requirements_path(FEATURE_QWEN_TTS).read_text(encoding="utf-8").lower()
+
+    def requirements(text: str) -> list[str]:
+        # Only real requirement lines: comments explain the conflict by name.
+        return [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+    assert "qwen-asr" in requirements(asr_text)
+    assert not any("qwen-tts" in line for line in requirements(asr_text))
+    assert "qwen-tts" in requirements(tts_text)
+    assert not any("qwen-asr" in line for line in requirements(tts_text))
+
+
+def test_the_requirements_do_not_restate_transformers():
+    """A loose ``transformers`` pin is what made pip backtrack into a numpy build.
+
+    Each engine pins the exact ``transformers`` it was built against, so restating
+    a range here only widens the search space back to the numpy<2 releases.
+    """
+    from core.optional_deps import (
+        FEATURE_QWEN_ASR,
+        FEATURE_QWEN_TTS,
+        requirements_path,
+    )
+
+    for key in (FEATURE_QWEN_ASR, FEATURE_QWEN_TTS):
+        text = requirements_path(key).read_text(encoding="utf-8")
+        lines = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        assert not any(line.startswith("transformers") for line in lines), (
+            f"{requirements_path(key).name} must let the engine own its transformers pin"
+        )
 
 
 def test_model_is_cached_reads_a_model_folder(tmp_path):
@@ -274,7 +346,7 @@ def test_asr_runner_names_the_install_step_when_the_extra_is_broken(tmp_path, mo
     message = str(caught.value)
     assert "Qwen3-ASR" in message
     assert "pip install" in message
-    assert "requirements-qwen-speech.txt" in message
+    assert "requirements-qwen-asr.txt" in message
 
 
 def test_tts_runner_names_the_install_step_when_the_extra_is_broken(tmp_path, monkeypatch):
@@ -286,7 +358,9 @@ def test_tts_runner_names_the_install_step_when_the_extra_is_broken(tmp_path, mo
     runner = QwenTtsRunner(tmp_path)
     with pytest.raises(QwenSpeechUnavailable) as caught:
         runner._load()
-    assert "pip install" in str(caught.value)
+    message = str(caught.value)
+    assert "pip install" in message
+    assert "requirements-qwen-tts.txt" in message
 
 
 # ------------------------------------------------------- menu / GUI wiring
