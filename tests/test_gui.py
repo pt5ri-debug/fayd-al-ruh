@@ -347,19 +347,29 @@ _WINDOW_OWNED_MENU_LABELS = frozenset(
     }
 )
 
-#: The visible CLI entries the sidebar mirrors, in order (the first one after the
-#: window-owned controls through the Code Studio screen).
-_MIRRORED_MENU_START = 16
-_MIRRORED_MENU_STOP = 23
+#: The visible CLI entries the sidebar mirrors, in order: the first one after the
+#: window-owned controls through the Code Studio screen. The block is anchored on
+#: its own first and last *labels*, not on raw indices -- an index range silently
+#: moved whenever a new menu entry was added above it (which is what the audio.cpp
+#: entries did), so the test would have checked a different block than it meant to.
+_MIRRORED_MENU_FIRST = "Ask the AI: what can it do and what has it learned"
+_MIRRORED_MENU_LAST = "Code Studio: edit and merge the project's own code"
 
-#: The Qwen3 speech entries sit before the window-owned controls (the window shows
+#: The speech-engine entries sit before the window-owned controls (the window shows
 #: their status in the reading-voice picker), so they are mirrored as their own
-#: block rather than inside the range above.
-_QWEN_MENU_LABELS = frozenset(
+#: block rather than inside the range above. Each engine the sidebar exposes is
+#: named here, so a new one cannot be added to the menu without the sidebar (or
+#: this list) being updated.
+_SPEECH_MENU_LABELS = frozenset(
     {
         "Qwen3 speech: status of the local ASR + TTS models",
         "Qwen3 speech: download the local ASR model (~3.4 GB)",
         "Qwen3 speech: download the local TTS model (~3.4 GB)",
+        "Piper: status of the natural local voices (Arabic + English)",
+        "Piper: download the natural local voice (~63 MB)",
+        "audio.cpp: status of the natural Arabic voice (VoiceTut-TTS)",
+        "audio.cpp: the local model's own voices",
+        "audio.cpp: download the natural Arabic voice model (~1.3 GB)",
     }
 )
 
@@ -374,13 +384,17 @@ def test_action_labels_match_the_mirrored_cli_menu_block() -> None:
     """
     from cli.menu import visible_menu
 
-    mirrored = visible_menu()[_MIRRORED_MENU_START:_MIRRORED_MENU_STOP]
+    entries = visible_menu()
+    labels = [title for title, _command, _argv in entries]
+    start = labels.index(_MIRRORED_MENU_FIRST)
+    stop = labels.index(_MIRRORED_MENU_LAST) + 1
+    mirrored = entries[start:stop]
     gui_labels = [action.label for action in gui_actions.ACTIONS]
     for title, _command, _argv in mirrored:
         assert gui_labels.count(title) == 1, f"{title!r} must appear exactly once"
     for title in _WINDOW_OWNED_MENU_LABELS:
         assert title not in gui_labels, f"{title!r} is a window control, not a sidebar action"
-    for title in _QWEN_MENU_LABELS:
+    for title in _SPEECH_MENU_LABELS:
         assert gui_labels.count(title) == 1, f"{title!r} must appear exactly once"
 
 

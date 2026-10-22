@@ -520,6 +520,10 @@ class ChatComposer:
         return "break"
 
     def _on_focus_in(self, _event: tk.Event) -> None:
+        # The subtle focus treatment is the caret and the I-beam cursor, not a
+        # recoloured border: the project deliberately keeps the composer's hairline
+        # the neutral stroke (``test_window_composer_has_no_gold_focus_outline``),
+        # because a bright ring around the input reads as heavy rather than quiet.
         self._sync_placeholder()
         self.box.configure(cursor="xterm")
 

@@ -38,12 +38,19 @@ Two kinds of voice live here, and the distinction matters:
   (``Microsoft Hoda``, ``Majed``, ...). They are what the machine really speaks
   with, so the menus prefer them when they exist and the engine is asked for that
   exact voice. They are listed through :func:`core.speech.system_voices`.
+
+A third kind, :class:`ModelVoice`, names a voice *inside a local model* the project
+runs itself (VoiceTut-TTS's studio speakers over the audio.cpp engine, for example).
+Its key is ``model:<engine>:<name>``, so a saved choice is routed to the engine that
+can actually speak it.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable
 
 #: The four voice categories, in the order the menus show them.
 CATEGORY_MAN = "man"
@@ -331,6 +338,120 @@ class SystemVoice:
         }
 
 
+#: A voice the caller can choose: a synthetic catalog :class:`Voice`, a
+#: :class:`SystemVoice` naming a voice the OS really reports, or a
+#: :class:`ModelVoice` naming a voice of a **local model** the project can run
+#: (VoiceTut-TTS over audio.cpp, Piper, Qwen3-TTS). The engine treats a
+#: ``SystemVoice`` as an exact name to select and a ``Voice`` as settings to map;
+#: a ``ModelVoice`` is handed to the synthesizer that owns its ``engine``.
+MODEL_VOICE_PREFIX = "model:"
+
+
+@dataclass(frozen=True)
+class ModelVoice:
+    """A voice of a **local speech model**, by the name that model gives it.
+
+    The synthetic :data:`VOICE_CATALOG` is a set of *settings* for a formant
+    engine, and :class:`SystemVoice` names a voice the operating system installed.
+    This class is the third kind: a named voice *inside a model the project runs
+    itself* -- VoiceTut-TTS's built-in studio speakers (``Ahmed``, ``Sarah``, ...)
+    over the audio.cpp engine, for example.
+
+    Honesty rules, as everywhere:
+
+    * ``name`` is the model's own speaker name (``"Ahmed"``), the exact string the
+      engine is asked for.
+    * ``engine`` is the speech engine that can speak it (``"audio.cpp"``), so the
+      reader routes the choice to the right synthesizer instead of the default.
+    * ``key`` is a stable ``model:<engine>:<name>`` string, so a saved choice
+      survives a restart and can never be confused with a catalog or system key.
+    * ``reference``/``reference_text`` are what a *cloning* engine needs for this
+      voice: a short reference clip and its transcript. ``None`` means the engine
+      can speak the name without them.
+    """
+
+    name: str
+    engine: str
+    language: str = "ar"
+    gender: str = ""
+    model: str = ""
+    reference: Path | None = None
+    reference_text: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("A model voice needs a name.")
+        if not self.engine.strip():
+            raise ValueError("A model voice needs the engine that speaks it.")
+
+    @property
+    def language_code(self) -> str:
+        """The two-letter language code (``arz`` -> ``ar``; ``en-US`` -> ``en``)."""
+        code = self.language.strip().lower().split("-")[0]
+        # ``arz`` is Egyptian Arabic: an Arabic language id written with three
+        # letters, so it must not be mistaken for a non-Arabic one.
+        if code in ("arz", "arb", "ara"):
+            return "ar"
+        return code[:2] or "en"
+
+    @property
+    def arabic(self) -> bool:
+        """True when this voice speaks Arabic."""
+        return self.language_code == "ar"
+
+    @property
+    def key(self) -> str:
+        """A stable ``model:<engine>:<name>`` key for menus and persistence."""
+        return f"{MODEL_VOICE_PREFIX}{self.engine}:{self.name}"
+
+    def language_label(self, language: str = "en") -> str:
+        """The voice's language group name (``Arabic`` / ``العربية``)."""
+        english, arabic = LANGUAGE_LABELS.get(self.language_code, (self.language, self.language))
+        return arabic if language == "ar" else english
+
+    def label(self, language: str = "en") -> str:
+        """The voice's name as the model reports it (never translated)."""
+        return self.name
+
+    @property
+    def label_en(self) -> str:
+        """The voice's name (English), for interface parity with :class:`Voice`."""
+        return self.name
+
+    @property
+    def label_ar(self) -> str:
+        """The voice's name (unchanged: a model's speaker is not translated)."""
+        return self.name
+
+    def category_label(self, language: str = "en") -> str:
+        """The voice's language group, so a menu can group by language."""
+        return self.language_label(language)
+
+    def description(self, language: str = "en") -> str:
+        """An honest note about what this voice is."""
+        gender = f" ({self.gender})" if self.gender else ""
+        if language == "ar":
+            return (
+                f"صوت من موديل محلي: {self.name}{gender} من {self.model or self.engine}. "
+                f"يُنطق عبر محرّك {self.engine} على هذا الجهاز، ولا يخرج من الجهاز."
+            )
+        return (
+            f"A voice of a local model: {self.name}{gender} from "
+            f"{self.model or self.engine}. It is spoken by the {self.engine} engine "
+            "on this machine; nothing leaves it."
+        )
+
+    def to_primitive(self) -> dict[str, object]:
+        return {
+            "key": self.key,
+            "name": self.name,
+            "engine": self.engine,
+            "language": self.language,
+            "gender": self.gender,
+            "model": self.model,
+        }
+
+
 #: Every selectable voice, grouped by category (four per category). The variants
 #: and pitches are chosen so the four voices in a category sound clearly distinct,
 #: and the speeds are kept near a human conversational rate rather than a rushed,
@@ -429,6 +550,53 @@ def system_voices() -> tuple[SystemVoice, ...]:
     return _system_voices()
 
 
+def is_model_voice_key(key: str) -> bool:
+    """True when ``key`` names a voice *inside a local model* rather than a catalog one."""
+    return key.strip().startswith(MODEL_VOICE_PREFIX)
+
+
+def model_voices(engine: str | None = None) -> tuple[ModelVoice, ...]:
+    """The voices of the local speech models this machine can actually run.
+
+    Every engine that owns named voices is asked, and each one returns ``()`` when
+    it is not installed -- so the list is exactly what can be spoken *here*, never a
+    promise of a model that is absent. ``engine`` narrows the answer to one engine.
+
+    The import is local because each engine module imports this one, so a top-level
+    import would be circular.
+    """
+    from core.audiocpp_speech import AUDIOCPP_ENGINE_NAME, voice_list as _audiocpp_voices
+
+    engines: tuple[tuple[str, Callable[[], tuple[ModelVoice, ...]]], ...] = (
+        (AUDIOCPP_ENGINE_NAME, _audiocpp_voices),
+    )
+    collected: list[ModelVoice] = []
+    for name, reader in engines:
+        if engine is not None and engine != name:
+            continue
+        try:
+            collected.extend(reader())
+        except Exception:  # a broken optional engine must never break a menu
+            continue
+    return tuple(collected)
+
+
+def find_model_voice(key: str) -> ModelVoice | None:
+    """The model voice a ``model:<engine>:<name>`` key names, or ``None``.
+
+    Resolves against the voices the installed models really report (see
+    :func:`model_voices`), so a saved choice points at a voice that exists. ``None``
+    means the model (or that speaker) is no longer installed here, so the caller can
+    fall back honestly instead of asking an engine for a name it would reject.
+    """
+    if not is_model_voice_key(key):
+        return None
+    for voice in model_voices():
+        if voice.key == key.strip():
+            return voice
+    return None
+
+
 def default_voice() -> Voice:
     """The voice used when none was chosen."""
     return _BY_KEY[DEFAULT_VOICE_KEY]
@@ -439,6 +607,45 @@ def voice_summaries() -> tuple[tuple[str, str, str, str], ...]:
     return tuple(
         (voice.key, voice.category, voice.label_en, voice.label_ar) for voice in VOICE_CATALOG
     )
+
+
+def _group_by_language(voices: tuple[Any, ...]) -> tuple[tuple[str, tuple[Any, ...]], ...]:
+    """``(language_code, voices)`` groups, Arabic first then alphabetical.
+
+    One ordering rule for every voice menu: the language a voice truly speaks is
+    what groups it, and Arabic comes first because it is the language this project
+    is read in most. The voices inside a group keep the order they were given in,
+    so a caller's own ordering (catalog order, the OS's listing) is preserved.
+    """
+    grouped: dict[str, list[Any]] = {}
+    for voice in voices:
+        grouped.setdefault(voice.language_code, []).append(voice)
+    return tuple(
+        (code, tuple(grouped[code]))
+        for code in sorted(grouped, key=lambda code: (code != "ar", code))
+    )
+
+
+def group_system_voices(
+    voices: tuple[SystemVoice, ...] | None = None,
+) -> tuple[tuple[str, tuple[SystemVoice, ...]], ...]:
+    """The installed voices grouped by language (Arabic first).
+
+    ``voices`` defaults to :func:`system_voices`, so a menu can group the real
+    installed voices with one call and a test can group a fixed list.
+    """
+    return _group_by_language(voices if voices is not None else system_voices())
+
+
+def group_model_voices(
+    voices: tuple[ModelVoice, ...] | None = None, *, engine: str | None = None
+) -> tuple[tuple[str, tuple[ModelVoice, ...]], ...]:
+    """The local model voices grouped by language (Arabic first).
+
+    ``voices`` defaults to :func:`model_voices` for the engine, so a menu can group
+    the voices of the local models with one call and a test can group a fixed list.
+    """
+    return _group_by_language(voices if voices is not None else model_voices(engine))
 
 
 __all__ = [
@@ -459,15 +666,22 @@ __all__ = [
     "MIN_PITCH_RANGE",
     "MIN_SPEED",
     "MIN_WORD_GAP",
+    "MODEL_VOICE_PREFIX",
+    "ModelVoice",
     "SYSTEM_VOICE_PREFIX",
     "SystemVoice",
     "VOICE_CATALOG",
     "Voice",
     "default_voice",
     "detect_language",
+    "find_model_voice",
     "find_system_voice",
     "find_voice",
+    "group_model_voices",
+    "group_system_voices",
+    "is_model_voice_key",
     "is_system_voice_key",
+    "model_voices",
     "system_voices",
     "voice_categories",
     "voice_keys",

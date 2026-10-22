@@ -43,21 +43,37 @@ from typing import Protocol, runtime_checkable
 from core.arabic_speech import prepare_for_speech
 from core.model_interface import CognitiveModel, ModelRequest
 from core.voices import (
+    ModelVoice,
     SystemVoice,
     Voice,
     default_voice,
     detect_language,
+    find_model_voice,
     find_system_voice,
     find_voice,
+    is_model_voice_key,
     is_system_voice_key,
 )
 
 SAMPLE_RATE = 16_000
 
-#: A voice the caller can choose: either a synthetic catalog :class:`Voice` or a
-#: :class:`SystemVoice` naming a voice the OS really reports. The engine treats a
-#: ``SystemVoice`` as an exact name to select, and a ``Voice`` as settings to map.
-SelectableVoice = Voice | SystemVoice
+#: A voice the caller can choose: a synthetic catalog :class:`Voice`, a
+#: :class:`SystemVoice` naming a voice the OS really reports, or a
+#: :class:`ModelVoice` naming a voice of a **local model** the project runs. The
+#: engine treats a ``SystemVoice`` as an exact name to select, a ``Voice`` as
+#: settings to map, and a ``ModelVoice`` as a name for the synthesizer that owns its
+#: engine (so the reader can route it there rather than to the default).
+SelectableVoice = Voice | SystemVoice | ModelVoice
+
+
+#: The voice kinds an engine selects by **name** rather than by mapping catalog
+#: settings: a :class:`~core.voices.SystemVoice` (a voice the OS installed) and a
+#: :class:`~core.voices.ModelVoice` (one inside a local model). Neither carries a
+#: catalog ``variant``/``pitch``/``speed``, so every engine that maps those onto its
+#: own knobs must leave a named voice alone. One tuple, used through
+#: ``isinstance`` -- which also narrows the union for the type checker -- so adding a
+#: voice kind cannot leave one of those engines behind.
+NAMED_VOICE_TYPES = (SystemVoice, ModelVoice)
 
 
 def _pcm_to_mono16(frames: bytes, channels: int, width: int) -> tuple[int, ...]:
@@ -220,11 +236,14 @@ def _espeak_voice_options(voice: SelectableVoice | None, language: str) -> tuple
     timbre, pitch, and speed *and* the two settings that keep the reading natural
     rather than mechanical: the intonation range (``-P``) and the word gap (``-g``).
 
-    ``espeak-ng`` has no named voices, so a :class:`~core.voices.SystemVoice` --
-    a voice the OS installed -- cannot be selected by name here; the language is
-    still honoured, which is the honest best it can do.
+    ``espeak-ng`` has no named voices, so a :class:`~core.voices.SystemVoice` (a
+    voice the OS installed) or a :class:`~core.voices.ModelVoice` (a voice of a
+    local model) cannot be selected by name here; the language is still honoured,
+    which is the honest best it can do.
     """
-    if voice is None or isinstance(voice, SystemVoice):
+    if voice is None:
+        return ()
+    if isinstance(voice, NAMED_VOICE_TYPES):
         return ()
     return voice.espeak_options(language)
 
@@ -275,6 +294,9 @@ def _say_voice_options(voice: SelectableVoice | None, language: str) -> tuple[st
     options: list[str] = []
     if isinstance(voice, SystemVoice):
         return ("-v", voice.name)
+    if isinstance(voice, ModelVoice):
+        # ``say`` cannot speak a local model's voice; leave it to the engine default.
+        return ()
     if language and language != "en":
         name = _macos_language_voice(language)
         if name:
@@ -311,13 +333,13 @@ def _ps_quote(value: str) -> str:
 def _voice_gender(voice: SelectableVoice | None) -> str | None:
     """``"Male"``/``"Female"`` for a chosen voice, or ``None`` when unspecified.
 
-    A :class:`~core.voices.SystemVoice` carries the gender the OS reported, which
-    is exact; a catalog :class:`~core.voices.Voice` derives it from its variant
-    letter.
+    A :class:`~core.voices.SystemVoice` and a :class:`~core.voices.ModelVoice` both
+    carry the gender they were reported with, which is exact; a catalog
+    :class:`~core.voices.Voice` derives it from its variant letter.
     """
     if voice is None:
         return None
-    if isinstance(voice, SystemVoice):
+    if isinstance(voice, NAMED_VOICE_TYPES):
         gender = voice.gender.strip().capitalize()
         return gender if gender in ("Male", "Female") else None
     return "Male" if voice.variant[:1].lower() == "m" else "Female"
@@ -325,7 +347,9 @@ def _voice_gender(voice: SelectableVoice | None) -> str | None:
 
 def _sapi_rate(voice: SelectableVoice | None) -> int:
     """Map a catalog voice's speed onto SAPI's ``-10..10`` rate (175 wpm is neutral)."""
-    if voice is None or isinstance(voice, SystemVoice):
+    if voice is None:
+        return 0
+    if isinstance(voice, NAMED_VOICE_TYPES):
         return 0
     return max(-10, min(10, round((voice.speed - 175) / 20)))
 
@@ -345,6 +369,10 @@ def _sapi_select_voice(voice: SelectableVoice | None, language: str | None = Non
     """
     if isinstance(voice, SystemVoice):
         return f"$s.SelectVoice('{_ps_quote(voice.name)}');"
+    if isinstance(voice, ModelVoice):
+        # A local model's voice is not a SAPI voice; keep the engine default rather
+        # than asking SAPI for a name it does not have.
+        return ""
     if voice is None and not (language and language != "en"):
         return ""
     script = ["$v=@($s.GetInstalledVoices()|?{$_.Enabled});"]
@@ -439,7 +467,9 @@ def _windows_sapi_script(
 
 def _variant_index(voice: SelectableVoice | None) -> int:
     """The catalog variant's trailing number as a zero-based index (``m3`` -> 2)."""
-    if voice is None or isinstance(voice, SystemVoice):
+    if voice is None:
+        return 0
+    if isinstance(voice, NAMED_VOICE_TYPES):
         return 0
     digits = "".join(character for character in voice.variant if character.isdigit())
     return max(0, int(digits) - 1) if digits else 0
@@ -452,7 +482,9 @@ def _onecore_rate(voice: SelectableVoice | None) -> float:
     so an extreme catalog entry cannot ask the engine for an unreadable speed. A
     real installed voice keeps the engine's own neutral rate.
     """
-    if voice is None or isinstance(voice, SystemVoice):
+    if voice is None:
+        return 1.0
+    if isinstance(voice, NAMED_VOICE_TYPES):
         return 1.0
     return max(0.5, min(2.0, round(voice.speed / 175, 2)))
 
@@ -466,7 +498,9 @@ def _onecore_pitch(voice: SelectableVoice | None) -> str:
     the four voices in a category stay clearly distinct instead of all sharing the
     engine's one default register. An installed voice keeps its own register.
     """
-    if voice is None or isinstance(voice, SystemVoice):
+    if voice is None:
+        return "0%"
+    if isinstance(voice, NAMED_VOICE_TYPES):
         return "0%"
     offset = max(-50, min(50, voice.pitch - 50))
     return f"{offset:+d}%"
@@ -506,7 +540,7 @@ def _windows_onecore_script(
     pitch = _onecore_pitch(voice)
     # An installed voice is spoken as plain text (the Voice property is authoritative
     # and its rate is already neutral); a catalog voice needs SSML for the rate.
-    use_ssml = not isinstance(voice, SystemVoice)
+    use_ssml = not isinstance(voice, NAMED_VOICE_TYPES)
     selection: list[str] = [
         "$voices=@([Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices);",
         "$pick=$null;",
@@ -1173,6 +1207,14 @@ def discover_synthesizer_name() -> str:
     else exists but the local Qwen3-TTS model is fully present, that model is used
     instead, so a machine with the Qwen3 extra still gets a natural voice rather
     than silence.
+
+    The **VoiceTut-TTS over audio.cpp** engine is deliberately *not* part of this
+    automatic order. It is the highest-quality Arabic voice available here, but it
+    is also much slower on a CPU (seconds per sentence), so making it the silent
+    default would slow every reading on a machine that has it. It is reached
+    explicitly instead: picking one of its voices in the reading-voice menu routes
+    the reading to it through :func:`_engine_for_voice`, so a user who wants it gets
+    it and a user who does not is unaffected.
     """
     from core.piper_speech import available_synthesizer as piper_available
 
@@ -1626,6 +1668,39 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
         return SilentSynthesizer()
     voice = _resolve_voice(options.get("voice"))
     language = options.get("language")
+    if name == "audio.cpp":
+        from core.audiocpp_speech import (
+            AUDIOCPP_ENGINE_NAME,
+            AudioCppSynthesizer,
+            AudioCppUnavailable,
+            audiocpp_status,
+            available_synthesizer as audiocpp_ready,
+        )
+
+        if not audiocpp_ready(options.get("root")) and not options.get("runner"):
+            raise ValueError(
+                f"TTS engine {AUDIOCPP_ENGINE_NAME!r} is not ready. "
+                + audiocpp_status(options.get("root")).hint
+            )
+        fallback = options.get("fallback")
+        if fallback is None:
+            # A missing engine or model must degrade to real speech, not silence: the
+            # system engine reads the text instead, and the synthesizer reports it.
+            fallback = _system_synthesizer(voice=voice, language=language)
+        model_voice = voice if isinstance(voice, ModelVoice) else None
+        try:
+            return AudioCppSynthesizer(
+                voice=model_voice,
+                language=options.get("language"),
+                spec_key=options.get("spec_key"),
+                model_file=options.get("model_file"),
+                runner=options.get("runner"),
+                fallback=fallback,
+                root=options.get("root"),
+                steps=options.get("steps", 8),
+            )
+        except AudioCppUnavailable as error:
+            raise ValueError(str(error)) from error
     if name in ("piper",):
         from core.piper_speech import (
             PiperSynthesizer,
@@ -1720,39 +1795,52 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
 
 
 def _resolve_voice(value) -> SelectableVoice | None:
-    """Coerce a voice key or object into a catalog ``Voice`` or a ``SystemVoice``.
+    """Coerce a voice key or object into a catalog ``Voice`` or a named voice.
 
     ``None`` returns the default catalog voice so a plain ``--tts espeak-ng``
     still speaks with a real, named timbre. A ``system:<engine>:<name>`` key is
     resolved against the voices the OS really reports, so a real installed voice is
     used exactly; when it is no longer installed the default catalog voice is
-    returned rather than asking the engine for a name it would reject. An unknown
-    catalog key raises, so a typo is reported rather than silently replaced.
+    returned rather than asking the engine for a name it would reject. A
+    ``model:<engine>:<name>`` key is resolved the same way against the local models
+    that are actually installed. An unknown catalog key raises, so a typo is
+    reported rather than silently replaced.
     """
     if value is None:
         return default_voice()
-    if isinstance(value, (Voice, SystemVoice)):
+    if isinstance(value, (Voice, SystemVoice, ModelVoice)):
         return value
     key = str(value)
     if is_system_voice_key(key):
         return find_system_voice(key) or default_voice()
+    if is_model_voice_key(key):
+        return find_model_voice(key) or default_voice()
     return find_voice(key)
 
 
 def _engine_for_voice(value: object) -> str | None:
-    """The Windows engine a chosen ``SystemVoice`` belongs to, or ``None``.
+    """The engine a chosen named voice must be spoken by, or ``None``.
 
-    The two Windows voice stores are separate, so a voice listed by the WinRT
-    engine must be spoken by the WinRT engine and a voice listed by SAPI by SAPI.
-    When the chosen voice names an engine that is actually available here, that
-    engine is used directly instead of the discovered default -- otherwise a
-    WinRT-only voice could be handed to SAPI, which cannot see it, and the reading
-    would come out silent. Returns ``None`` for a catalog voice (the default
-    discovery decides) or for a Windows engine that is not available, so the
-    caller falls back to :func:`discover_synthesizer_name`.
+    A ``SystemVoice`` names a voice one OS engine installed, and a ``ModelVoice``
+    names a voice inside one local model, so each must be handed to the engine that
+    owns it. Returns ``None`` for a catalog voice (the default discovery decides) or
+    for an engine that is not actually available here, so the caller falls back to
+    :func:`discover_synthesizer_name`.
     """
+    if isinstance(value, ModelVoice):
+        from core.audiocpp_speech import (
+            AUDIOCPP_ENGINE_NAME,
+            available_synthesizer as audiocpp_ready,
+        )
+
+        if value.engine == AUDIOCPP_ENGINE_NAME and audiocpp_ready():
+            return AUDIOCPP_ENGINE_NAME
+        return None
     if isinstance(value, SystemVoice):
         voice: SystemVoice | None = value
+    elif isinstance(value, str) and is_model_voice_key(value):
+        resolved = find_model_voice(value)
+        return _engine_for_voice(resolved) if resolved is not None else None
     elif isinstance(value, str) and is_system_voice_key(value):
         voice = find_system_voice(value)
     else:

@@ -262,12 +262,18 @@ _SPEAK_KEY = "auto_speak"
 def load_reading_voice() -> str:
     """The saved reading-voice key, defaulting to the catalog default.
 
-    A saved ``system:<engine>:<name>`` key is accepted as-is (it names a real
-    installed voice); the voice is resolved against what the OS reports when it is
-    used, so a voice that was uninstalled falls back honestly rather than erroring.
+    A saved ``system:<engine>:<name>`` or ``model:<engine>:<name>`` key is accepted
+    as-is (it names a real installed voice or a voice of a local model); the voice is
+    resolved against what the OS or the model reports when it is used, so a voice
+    that was uninstalled falls back honestly rather than erroring.
     """
     from storage.json_store import JsonStore
-    from core.voices import VOICE_CATALOG, DEFAULT_VOICE_KEY, is_system_voice_key
+    from core.voices import (
+        VOICE_CATALOG,
+        DEFAULT_VOICE_KEY,
+        is_model_voice_key,
+        is_system_voice_key,
+    )
 
     valid = {voice.key for voice in VOICE_CATALOG}
     try:
@@ -277,7 +283,7 @@ def load_reading_voice() -> str:
     key = saved.get("voice") if isinstance(saved, dict) else None
     if not isinstance(key, str):
         return DEFAULT_VOICE_KEY
-    if key in valid or is_system_voice_key(key):
+    if key in valid or is_system_voice_key(key) or is_model_voice_key(key):
         return key
     return DEFAULT_VOICE_KEY
 
@@ -440,6 +446,7 @@ class FaydGUI:
         self._sidebar_visible = True
         self._auto_hidden = False
         self._settings_open = False
+        self._voices_open = False
         # The settings-panel radio only exists once the panel is expanded; the
         # mouth can still be switched from the header before that, so the
         # variable is created here and the radio simply attaches to it.
@@ -615,6 +622,14 @@ class FaydGUI:
         self._history_panel.pack(fill="x")
         self._history_buttons: list[tk.Widget] = []
         self.refresh_history()
+
+        self._section_label(panel, "Voices", top=14)
+        self._voices_button = self._sidebar_button(
+            panel, "🔊   Voices  ▸", self._toggle_voices, small=True
+        )
+        self._voices_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._voices_panel = tk.Frame(panel, bg=self._theme.surface)
+        self._voices_panel.pack(fill="x")
 
         self._section_label(panel, "Settings", top=14)
         settings = tk.Frame(panel, bg=self._theme.surface)
@@ -1096,74 +1111,11 @@ class FaydGUI:
 
         The **real** voices the machine reports (Windows OneCore/SAPI, macOS ``say``)
         are listed first, grouped by language, because those are what the engine will
-        actually speak with; the synthetic espeak-ng catalog follows for a machine
-        with no named voices.
+        actually speak with; then the voices of the local **speech models** (VoiceTut-
+        TTS over audio.cpp), which are the highest-quality Arabic voices here; then
+        the synthetic espeak-ng catalog, for a machine with no named voices.
         """
-        from core.voices import voice_categories, voices_for
-
-        note = self.service.reading_status()
-        tk.Label(
-            panel, text=note, bg=self._theme.surface, fg=self._theme.text_dim,
-            font=self._type.font("2xs"), anchor="w", padx=20, pady=2, wraplength=232, justify="left",
-        ).pack(fill="x")
-        tk.Label(
-            panel, text=self.service.piper_speech_status(),
-            bg=self._theme.surface, fg=self._theme.text_dim,
-            font=self._type.font("2xs"), anchor="w", padx=20, pady=2,
-            wraplength=232, justify="left",
-        ).pack(fill="x")
-        tk.Label(
-            panel, text=self.service.qwen_speech_status(),
-            bg=self._theme.surface, fg=self._theme.text_dim,
-            font=self._type.font("2xs"), anchor="w", padx=20, pady=2,
-            wraplength=232, justify="left",
-        ).pack(fill="x")
-
-        installed = self.service.system_voices()
-        if installed:
-            tk.Label(
-                panel, text="Installed voices", bg=self._theme.surface,
-                fg=self._theme.text_secondary, font=self._type.font("2xs"),
-                anchor="w", padx=22,
-            ).pack(fill="x", pady=(4, 0))
-            groups: dict[str, list] = {}
-            for voice in installed:
-                groups.setdefault(voice.language_code, []).append(voice)
-            for code in sorted(groups, key=lambda c: (c != "ar", c)):
-                voices = groups[code]
-                tk.Label(
-                    panel, text=voices[0].language_label(),
-                    bg=self._theme.surface, fg=self._theme.text_dim,
-                    font=self._type.font("2xs"), anchor="w", padx=28,
-                ).pack(fill="x", pady=(2, 0))
-                for voice in voices:
-                    suffix = f"  ({voice.gender})" if voice.gender else ""
-                    tk.Radiobutton(
-                        panel, text=f"{voice.name}{suffix}",
-                        value=voice.key, variable=self._speak_var,
-                        command=partial(self._on_voice_change, voice.key),
-                        bg=self._theme.surface, fg=self._theme.foreground,
-                        selectcolor=self._theme.surface, activebackground=self._theme.surface,
-                        activeforeground=self._theme.foreground, font=self._type.font("xs"),
-                        anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
-                    ).pack(fill="x", padx=28, pady=0)
-
-        for category, label_en, _label_ar in voice_categories():
-            tk.Label(
-                panel, text=label_en, bg=self._theme.surface, fg=self._theme.text_secondary,
-                font=self._type.font("2xs"), anchor="w", padx=22,
-            ).pack(fill="x", pady=(4, 0))
-            for catalog_voice in voices_for(category):
-                tk.Radiobutton(
-                    panel, text=f"{catalog_voice.label_en}  ·  {catalog_voice.label_ar}",
-                    value=catalog_voice.key, variable=self._speak_var,
-                    command=partial(self._on_voice_change, catalog_voice.key),
-                    bg=self._theme.surface, fg=self._theme.foreground,
-                    selectcolor=self._theme.surface, activebackground=self._theme.surface,
-                    activeforeground=self._theme.foreground, font=self._type.font("xs"),
-                    anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
-                ).pack(fill="x", padx=22, pady=0)
-
+        self._build_voice_sections(panel)
         tk.Checkbutton(
             panel, text="Read new answers aloud automatically", variable=self._auto_speak,
             command=self._on_auto_speak_toggle, bg=self._theme.surface, fg=self._theme.foreground,
@@ -1177,6 +1129,114 @@ class FaydGUI:
         if not self.service.reading_available():
             self._sidebar_button(
                 panel, "⤓   Install a speech engine…", self._on_install_speech,
+                small=True,
+            ).pack(fill="x", padx=12, pady=(2, 0))
+
+    def _build_voice_sections(self, panel: tk.Misc) -> None:
+        """The voice groups themselves, shared by the dropdown and the settings panel.
+
+        One builder for both menus, so they can never drift apart: the status lines,
+        the installed system voices, the local model voices, and the synthetic
+        catalog are the *same* widgets in the *same* order wherever they appear.
+        """
+        from core.voices import (
+            group_model_voices,
+            group_system_voices,
+            voice_categories,
+            voices_for,
+        )
+
+        tk.Label(
+            panel, text=self.service.reading_status(), bg=self._theme.surface,
+            fg=self._theme.text_dim, font=self._type.font("2xs"), anchor="w", padx=20, pady=2,
+            wraplength=232, justify="left",
+        ).pack(fill="x")
+        for note in (
+            self.service.model_speech_status(),
+            self.service.piper_speech_status(),
+            self.service.qwen_speech_status(),
+        ):
+            tk.Label(
+                panel, text=note, bg=self._theme.surface, fg=self._theme.text_dim,
+                font=self._type.font("2xs"), anchor="w", padx=20, pady=2,
+                wraplength=232, justify="left",
+            ).pack(fill="x")
+
+        installed = self.service.system_voices()
+        if installed:
+            self._voice_group_label(panel, "Installed voices", indent=22)
+            for _code, system_group in group_system_voices(installed):
+                self._voice_group_label(panel, system_group[0].language_label(), indent=28, dim=True)
+                for system_voice in system_group:
+                    suffix = f"  ({system_voice.gender})" if system_voice.gender else ""
+                    self._voice_radio(panel, f"{system_voice.name}{suffix}", system_voice.key, indent=28)
+
+        model = self.service.model_voices()
+        if model:
+            self._voice_group_label(panel, "Model voices (local Arabic model)", indent=22)
+            for _code, model_group in group_model_voices(model):
+                self._voice_group_label(panel, model_group[0].language_label(), indent=28, dim=True)
+                for model_voice in model_group:
+                    suffix = f"  ({model_voice.gender})" if model_voice.gender else ""
+                    self._voice_radio(panel, f"{model_voice.name}{suffix}", model_voice.key, indent=28)
+
+        for category, label_en, _label_ar in voice_categories():
+            self._voice_group_label(panel, label_en, indent=22)
+            for catalog_voice in voices_for(category):
+                self._voice_radio(
+                    panel,
+                    f"{catalog_voice.label_en}  ·  {catalog_voice.label_ar}",
+                    catalog_voice.key,
+                    indent=22,
+                )
+
+    def _voice_group_label(
+        self, panel: tk.Misc, text: str, *, indent: int, dim: bool = False
+    ) -> None:
+        """A group header inside a voice menu (the two menus share this too)."""
+        tk.Label(
+            panel, text=text, bg=self._theme.surface,
+            fg=self._theme.text_dim if dim else self._theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", padx=indent,
+        ).pack(fill="x", pady=(4, 0))
+
+    def _voice_radio(self, panel: tk.Misc, label: str, key: str, *, indent: int) -> None:
+        """One selectable voice, wired to the same handler in both menus."""
+        tk.Radiobutton(
+            panel, text=label, value=key, variable=self._speak_var,
+            command=partial(self._on_voice_change, key),
+            bg=self._theme.surface, fg=self._theme.foreground,
+            selectcolor=self._theme.surface, activebackground=self._theme.surface,
+            activeforeground=self._theme.foreground, font=self._type.font("xs"),
+            anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
+        ).pack(fill="x", padx=indent, pady=0)
+
+    def _toggle_voices(self) -> None:
+        """Expand/collapse the sidebar's Voices dropdown.
+
+        A dedicated dropdown rather than a trip through Settings, so choosing a
+        reading voice -- including a voice of the local Arabic model -- is one click
+        away. The radio list it builds is the same one the settings panel builds,
+        because both call :meth:`_build_voice_sections`.
+        """
+        if self._voices_open:
+            for child in self._voices_panel.winfo_children():
+                child.destroy()
+            self._voices_open = False
+            self._voices_button.configure(text="🔊   Voices  ▸")
+            return
+        self._voices_open = True
+        self._voices_button.configure(text="🔊   Voices  ▾")
+        # A stored voice that is no longer installed must not leave the list with
+        # nothing selected, so the live key is re-applied to the variable first.
+        self._speak_var.set(self._voice_key)
+        self._build_voice_sections(self._voices_panel)
+        self._sidebar_button(
+            self._voices_panel, "▷   Test the reading voice", self._test_voice, small=True
+        ).pack(fill="x", padx=12, pady=(6, 0))
+        if not self.service.reading_available():
+            self._sidebar_button(
+                self._voices_panel, "⤓   Install a speech engine…", self._on_install_speech,
                 small=True,
             ).pack(fill="x", padx=12, pady=(2, 0))
 
@@ -1196,6 +1256,23 @@ class FaydGUI:
         from core.speech import install_speech_engine
 
         return install_speech_engine()
+
+    def _refresh_voice_menus(self) -> None:
+        """Rebuild an open voice menu so newly installed voices appear at once.
+
+        Both menus are rebuilt from the same builder, so this only has to run the
+        one that is currently open; a closed menu picks the new voices up when it is
+        next opened.
+        """
+        for open_flag, panel, builder in (
+            (self._settings_open, self._settings_panel, self._build_voice_picker),
+            (self._voices_open, self._voices_panel, self._build_voice_sections),
+        ):
+            if not open_flag:
+                continue
+            for child in panel.winfo_children():
+                child.destroy()
+            builder(panel)
 
     def _test_voice(self) -> None:
         """Speak a short sample so the user can hear the chosen voice."""
@@ -1695,13 +1772,24 @@ class FaydGUI:
             self._composer.set_mic_recording(recording)
 
     def _voice_label(self) -> str:
-        from core.voices import find_system_voice, find_voice, is_system_voice_key
+        from core.voices import (
+            find_model_voice,
+            find_system_voice,
+            find_voice,
+            is_model_voice_key,
+            is_system_voice_key,
+        )
 
         if is_system_voice_key(self._voice_key):
             installed = find_system_voice(self._voice_key)
             if installed is None:
                 return self._voice_key
             return f"{installed.category_label()} “{installed.label()}”"
+        if is_model_voice_key(self._voice_key):
+            model_voice = find_model_voice(self._voice_key)
+            if model_voice is None:
+                return self._voice_key
+            return f"{model_voice.category_label()} “{model_voice.label()}”"
         try:
             catalog_voice = find_voice(self._voice_key)
         except ValueError:
@@ -2547,6 +2635,7 @@ class FaydGUI:
         self._add_bubble("note", result.message)
         if result.ok:
             self.service.refresh_reading()
+            self._refresh_voice_menus()
             self._add_bubble("note", "You can now use “Read aloud” with the chosen voice.")
 
     def _on_attach(self, path: str, *, ocr: bool = False) -> AttachmentNotice:

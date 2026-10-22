@@ -55,6 +55,7 @@ FEATURE_NATASHA = "natasha"
 FEATURE_QWEN_ASR = "qwen-asr"
 FEATURE_QWEN_TTS = "qwen-tts"
 FEATURE_PIPER = "piper"
+FEATURE_AUDIOCPP = "audio.cpp"
 
 
 @dataclass(frozen=True)
@@ -256,6 +257,27 @@ FEATURES: dict[str, OptionalFeature] = {
         ),
         system_missing_note="no Piper voice file is present yet.",
     ),
+    FEATURE_AUDIOCPP: OptionalFeature(
+        key=FEATURE_AUDIOCPP,
+        title="audio.cpp speech engine (VoiceTut-TTS)",
+        summary=(
+            "Read text aloud with the local audio.cpp engine and the VoiceTut-TTS "
+            "model: natural Egyptian Arabic with Arabic/English code-switching."
+        ),
+        requirements_file="requirements-audiocpp.txt",
+        # audio.cpp is a native program and its downloads use ``urllib``, so there
+        # is no Python package to check for: the engine and the model are what can
+        # be missing, and both are named in ``system_note``.
+        import_names=(),
+        system_note=(
+            "The engine itself is a native build, not a pip package: download a "
+            "prebuilt audio.cpp binary with `python -m cli audio install-engine "
+            "--approve`, or build it from https://github.com/0xShug0/audio.cpp. "
+            "The model weights are a separate one-time, human-approved download: "
+            "run `python -m cli audio download --approve` (~1.3 GB)."
+        ),
+        system_missing_note="the audio.cpp engine or its model file is not present yet.",
+    ),
 }
 
 
@@ -396,6 +418,18 @@ def _qwen_speech_model_cached(kind: str) -> bool:
     return model_is_cached(kind)
 
 
+def _audiocpp_engine_cached() -> bool:
+    """Whether the audio.cpp engine and a VoiceTut model are both already on disk.
+
+    This feature has no Python package (the engine is a native program and its
+    downloads use ``urllib``), so "usable right now" is entirely this: the engine
+    binary and the model file, both one-time human-approved fetches.
+    """
+    from core.audiocpp_speech import available_synthesizer
+
+    return available_synthesizer()
+
+
 def _piper_model_cached() -> bool:
     """Whether at least one Piper voice file (a ``.onnx``) is already on disk.
 
@@ -431,6 +465,8 @@ def status(key: str) -> FeatureStatus:
         system_ok = _qwen_speech_model_cached("tts") if python_ok else False
     elif key == FEATURE_PIPER:
         system_ok = _piper_model_cached() if python_ok else False
+    elif key == FEATURE_AUDIOCPP:
+        system_ok = _audiocpp_engine_cached() if python_ok else False
     else:
         system_ok = True
     return FeatureStatus(key=key, python_ok=python_ok, system_ok=system_ok, missing_python=missing)

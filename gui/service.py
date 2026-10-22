@@ -35,7 +35,7 @@ from core.speech import (
     load_recognizer,
     microphone_install_hint,
 )
-from core.voices import SystemVoice, Voice, voice_keys
+from core.voices import ModelVoice, SystemVoice, Voice, model_voices, voice_keys
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
 from gui.import_center import ImportReport, KnowledgeImporter
 from gui.image_edit import ImageEditService
@@ -758,11 +758,13 @@ class ChatService:
         """The key of the voice currently used to read."""
         return self._reader.voice.key
 
-    def set_voice(self, key: str) -> Voice | SystemVoice:
+    def set_voice(self, key: str) -> Voice | SystemVoice | ModelVoice:
         """Choose a reading voice by key; raises for an unknown catalog key.
 
         A ``system:<engine>:<name>`` key names a real installed voice and is
-        resolved against what the OS reports; a catalog key is resolved as before.
+        resolved against what the OS reports; a ``model:<engine>:<name>`` key names
+        a voice of a local model and is resolved the same way; a catalog key is
+        resolved as before.
         """
         return self._reader.set_voice(key)
 
@@ -777,6 +779,29 @@ class ChatService:
         machine will actually speak with, by their own names.
         """
         return self._reader.system_voices()
+
+    def model_voices(self) -> tuple[ModelVoice, ...]:
+        """The voices of the local speech models this machine can run.
+
+        VoiceTut-TTS over audio.cpp is the one engine that owns named voices today,
+        and it returns ``()`` unless it is fully installed, so this list is exactly
+        what can be spoken here -- never a promise of a model that is absent.
+        """
+        return model_voices()
+
+    def model_speech_status(self) -> str:
+        """An honest note about the local model voices, for the window.
+
+        Names the engines that can actually speak here and the real next step when
+        none can, so a user who sees an empty "Model voices" section knows why.
+        """
+        from core.audiocpp_speech import audiocpp_status
+
+        status = audiocpp_status()
+        voices = self.model_voices()
+        if voices:
+            return f"VoiceTut-TTS (local Arabic model): {len(voices)} voices ready"
+        return f"VoiceTut-TTS (local Arabic model): not ready — {status.hint}"
 
     def reading_status(self) -> str:
         """An honest, human-readable status of the reader."""
