@@ -9,8 +9,9 @@
 #
 # ``qwen-asr`` provides the ASR model class (``Qwen3ASRModel``); ``qwen-tts``
 # provides the TTS model class (``Qwen3TTSModel``). ``transformers`` is pulled in
-# by ``qwen-asr`` and is listed here so the ASR path works even when a user
-# installs only part of the extra.
+# by both, so it is pinned here for a reproducible install -- but it is *not* a
+# substitute for either package: a runtime with ``torch`` + ``transformers`` and
+# no ``qwen-asr`` cannot transcribe, and the app says so instead of failing later.
 #
 # The model weights are a *separate* one-time, human-approved download:
 #     python -m cli qwen-asr download --approve      # ~3.4 GB (1.7B) or ~1.2 GB (0.6B)

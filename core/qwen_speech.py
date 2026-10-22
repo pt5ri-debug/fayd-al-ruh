@@ -14,10 +14,10 @@ the way Ultron and Vision add a real local *language* model:
 * :class:`QwenTtsSynthesizer` -- speech synthesis with **Qwen3-TTS** (12 Hz,
   1.7B or 0.6B), expressive and natural across its ten languages.
 
-Both are **local**: the weights are a ``transformers``/``qwen-*`` model loaded
-into this process (not a GGUF through ``llama.cpp``), nothing is sent off the
-machine, and the runtime is an optional extra so the base install imports neither
-``torch`` nor a model file. The models are Qwen's own, Apache-2.0.
+Both are **local**: the weights are a ``qwen-*`` model loaded into this process
+(not a GGUF through ``llama.cpp``), nothing is sent off the machine, and the
+runtime is an optional extra so the base install imports neither ``torch`` nor a
+model file. The models are Qwen's own, Apache-2.0.
 
 Three things stay honest, exactly as in :mod:`core.ultron` and
 :mod:`core.presentation_model`:
@@ -264,12 +264,21 @@ def model_is_cached(kind: str, root: Path | str | None = None) -> bool:
 
 
 def qwen_asr_extra_installed() -> bool:
-    """Whether the Python runtime for Qwen3-ASR is importable."""
+    """Whether the Python runtime for Qwen3-ASR is importable.
+
+    ``qwen-asr`` is the package that actually provides the model class the runner
+    loads (``Qwen3ASRModel``); ``transformers`` is only its transitive dependency
+    and cannot stand in for it. A machine with ``torch`` + ``transformers`` but no
+    ``qwen-asr`` -- exactly what the ``[image]`` extra pulls -- is therefore *not*
+    ready, and saying otherwise turned a missing package into a raw
+    ``ModuleNotFoundError: No module named 'qwen_asr'`` at transcribe time instead
+    of the honest install step. This matches
+    ``core.optional_deps``'s own ``import_names=("torch", "qwen_asr")``.
+    """
     import importlib.util
 
     return importlib.util.find_spec("torch") is not None and (
         importlib.util.find_spec("qwen_asr") is not None
-        or importlib.util.find_spec("transformers") is not None
     )
 
 
@@ -343,8 +352,8 @@ def qwen_tts_status(root: Path | str | None = None) -> QwenSpeechStatus:
 class AsrRunner(Protocol):
     """The seam that runs ASR: raw samples in, transcript out.
 
-    The default runner is a ``qwen-asr``/``transformers`` wrapper; a test injects
-    its own, so the recognizer is exercised with no extra and no weights.
+    The default runner is a ``qwen-asr`` wrapper; a test injects its own, so the
+    recognizer is exercised with no extra and no weights.
     """
 
     def transcribe(self, samples: Any, sample_rate: int, *, language: str | None) -> str: ...
@@ -379,8 +388,16 @@ class TransformersAsrRunner:
 
     def _load(self) -> Any:
         if self._model is None:
-            import torch  # noqa: F401 - imported for the dtype/device side effect
-            from qwen_asr import Qwen3ASRModel
+            try:
+                import torch  # noqa: F401 - imported for the dtype/device side effect
+                from qwen_asr import Qwen3ASRModel
+            except ImportError as error:
+                # A partial or broken extra must name the install step, not surface
+                # as a bare "No module named 'qwen_asr'" in the transcript.
+                raise QwenSpeechUnavailable(
+                    "Qwen3-ASR is not importable. Install the Qwen3 speech runtime with: "
+                    f"{pip_install_command(FEATURE_QWEN_ASR)}"
+                ) from error
 
             self._model = Qwen3ASRModel.from_pretrained(
                 str(self.model_dir),
@@ -410,7 +427,13 @@ class QwenTtsRunner:
 
     def _load(self) -> Any:
         if self._model is None:
-            from qwen_tts import Qwen3TTSModel
+            try:
+                from qwen_tts import Qwen3TTSModel
+            except ImportError as error:
+                raise QwenSpeechUnavailable(
+                    "Qwen3-TTS is not importable. Install the Qwen3 speech runtime with: "
+                    f"{pip_install_command(FEATURE_QWEN_TTS)}"
+                ) from error
 
             self._model = Qwen3TTSModel.from_pretrained(str(self.model_dir), device_map=self.device)
         return self._model
@@ -459,7 +482,7 @@ class QwenAsrRecognizer:
     """Speech recognition through Qwen3-ASR, satisfying :class:`SpeechRecognizer`.
 
     ``runner`` is the injection seam; when it is ``None`` the engine loads the
-    model folder itself (the ``qwen-asr``/``transformers`` path). ``language``
+    model folder itself (the ``qwen-asr`` path). ``language``
     pins the spoken language (``"Arabic"``/``"English"``); ``None`` lets the model
     identify it, which is the model's own strength.
     """
