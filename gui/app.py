@@ -48,8 +48,15 @@ from core.vision_model import VisionUnavailable
 from core.version import __version__
 from gui import markdown as md
 from gui import rich_text
+from gui import chat_composer
 from gui.actions import GuiAction, visible_actions
 from gui.attachments import Attachment, AttachmentNotice
+from gui.chat_composer import (
+    ChatComposer,
+    CircleButton,
+    RoundedBox,
+    Tooltip as _Tooltip,
+)
 from gui.modes import (
     MODES,
     HistoryItem,
@@ -86,11 +93,13 @@ MOUTH_LABELS: dict[str, str] = {key: label for key, label in MOUTH_CHOICES}
 # window read like OpenHands rather than a generic form.
 
 #: The small↔large radius pair OpenHands uses (HeroUI ``radius.small``/``large``).
-RADIUS_SMALL = 5
-RADIUS_LARGE = 20
+#: They live in :mod:`gui.chat_composer` (the shared composer), so the window,
+#: the dialogs, and the panel cannot drift apart; they are re-exported here.
+RADIUS_SMALL = chat_composer.RADIUS_SMALL
+RADIUS_LARGE = chat_composer.RADIUS_LARGE
 
 #: The send control is a disc, so its side length is a single diameter in pixels.
-SEND_BUTTON_SIZE = 36
+SEND_BUTTON_SIZE = chat_composer.SEND_BUTTON_SIZE
 
 #: Below this width the sidebar starts hidden (a drawer), like ChatGPT on mobile.
 _COMPACT_WIDTH = 900
@@ -316,166 +325,6 @@ def _strip_markdown(text: str) -> str:
     return text
 
 
-class RoundedBox(tk.Canvas):
-    """A canvas that paints a rounded-rectangle surface, then holds real widgets.
-
-    Tk has no corner radius, so a rounded panel (the composer, a user bubble) is
-    a Canvas that draws the rounded fill and border and hosts its children in an
-    interior frame placed with :meth:`place`. ``corner`` is the HeroUI radius
-    (5 for small controls, 20 for the composer and message cards).
-    """
-
-    def __init__(
-        self,
-        parent: tk.Misc,
-        *,
-        bg: str,
-        fill: str,
-        outline: str,
-        corner: int = RADIUS_SMALL,
-        width_pad: int = 24,
-        height_pad: int = 8,
-        parent_bg: str | None = None,
-    ) -> None:
-        super().__init__(
-            parent, bg=parent_bg or bg, highlightthickness=0, borderwidth=0,
-            takefocus=0,
-        )
-        self._fill = fill
-        self._outline = outline
-        self._corner = corner
-        self._pad_x = width_pad // 2
-        self._pad_y = height_pad // 2
-        self._shape: int | None = None
-        self.inner = tk.Frame(self, bg=fill)
-        # relwidth/height fill the canvas exactly, with the padding as an offset,
-        # so the interior can never spill past the rounded background.
-        self.inner.place(
-            x=self._pad_x, y=self._pad_y, relwidth=1, width=-self._pad_x * 2
-        )
-        self.inner.bind("<Configure>", self._sync_height)
-        self.bind("<Configure>", self._redraw)
-
-    def _sync_height(self, _event: tk.Event | None = None) -> None:
-        """Match the canvas height to its content, growing with wrapped text."""
-        wanted = self.inner.winfo_reqheight() + self._pad_y * 2
-        if wanted > 2 and self.winfo_reqheight() != wanted:
-            self.configure(height=wanted)
-
-    def _redraw(self, _event: tk.Event | None = None) -> None:
-        self.delete("shape")
-        w, h = self.winfo_width(), self.winfo_height()
-        if w <= 2 or h <= 2:
-            return
-        self._shape = self._rounded(1, 1, w - 1, h - 1, self._corner)
-        # Draw first, then push it behind the interior frame.
-        self.tag_lower(self._shape)
-
-    def _rounded(self, x1: int, y1: int, x2: int, y2: int, r: int) -> int:
-        points = [
-            x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
-            x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
-            x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
-        ]
-        return self.create_polygon(
-            points, smooth=True, splinesteps=24,
-            fill=self._fill, outline=self._outline, width=1,
-        )
-
-
-class CircleButton(tk.Canvas):
-    """A circular button: a canvas-painted disc that still behaves like a button.
-
-    Tk's ``Button`` cannot be round, so the send control is a Canvas that draws a
-    filled circle and a glyph, and forwards clicks to a command. ``enabled`` (and
-    the fill/ink) can be changed later without rebuilding it, which is how the
-    window greys the control out while it is busy.
-    """
-
-    def __init__(
-        self,
-        parent: tk.Misc,
-        *,
-        size: int,
-        bg: str,
-        fill: str,
-        ink: str,
-        text: str,
-        command: Callable[[], Any],
-        typography: Typography | None = None,
-    ) -> None:
-        super().__init__(
-            parent, width=size, height=size, bg=bg, highlightthickness=0,
-            borderwidth=0, takefocus=0, cursor="hand2",
-        )
-        self._size = size
-        self._fill = fill
-        self._ink = ink
-        self._command = command
-        self._enabled = True
-        self._shape = self.create_oval(1, 1, size - 1, size - 1, fill=fill, outline="")
-        scale = typography or for_root(None)
-        self._glyph = self.create_text(
-            size // 2, size // 2, text=text, fill=ink,
-            font=scale.font("lg", weight="bold"),
-        )
-        self.bind("<Button-1>", self._on_click)
-
-    def _on_click(self, _event: tk.Event) -> None:
-        if self._enabled:
-            self._command()
-
-    def set_state(self, *, enabled: bool, fill: str, ink: str) -> None:
-        """Repaint the disc for an enabled/disabled state."""
-        self._enabled = enabled
-        self._fill = fill
-        self._ink = ink
-        self.itemconfigure(self._shape, fill=fill)
-        self.itemconfigure(self._glyph, fill=ink)
-        self.configure(cursor="hand2" if enabled else "arrow")
-
-
-class _Tooltip:
-    """A small hover hint for a control, shown after a short delay."""
-
-    def __init__(self, widget: tk.Widget, text: str, theme: Theme, typography: Typography) -> None:
-        self._widget = widget
-        self._text = text
-        self._theme = theme
-        self._type = typography
-        self._window: tk.Toplevel | None = None
-        self._after: str | None = None
-        widget.bind("<Enter>", self._schedule, add="+")
-        widget.bind("<Leave>", self._hide, add="+")
-        widget.bind("<ButtonPress>", self._hide, add="+")
-
-    def _schedule(self, _event: tk.Event) -> None:
-        self._after = self._widget.after(450, self._show)
-
-    def _show(self) -> None:
-        if self._window is not None:
-            return
-        window = tk.Toplevel(self._widget)
-        window.wm_overrideredirect(True)
-        window.configure(bg=self._theme.border)
-        tk.Label(
-            window, text=self._text, bg=self._theme.surface, fg=self._theme.foreground,
-            font=self._type.font("xs"), padx=8, pady=4, relief="flat",
-        ).pack()
-        x = self._widget.winfo_rootx() + 4
-        y = self._widget.winfo_rooty() - 32
-        window.wm_geometry(f"+{max(x, 0)}+{max(y, 0)}")
-        self._window = window
-
-    def _hide(self, _event: tk.Event | None = None) -> None:
-        if self._after is not None:
-            self._widget.after_cancel(self._after)
-            self._after = None
-        if self._window is not None:
-            self._window.destroy()
-            self._window = None
-
-
 class LineStream(io.TextIOBase):
     """A text stream that forwards each complete line to a queue.
 
@@ -536,6 +385,10 @@ class _Transcript:
 
 class FaydGUI:
     """The application window and its wiring to :class:`ChatService`."""
+
+    #: The general-purpose composer hint (the reference wording), kept as a class
+    #: constant so a caller or a test can name it without a live window.
+    COMPOSER_PLACEHOLDER = "What do you want to build?"
 
     def __init__(
         self,
@@ -1819,13 +1672,8 @@ class FaydGUI:
     def _set_mic_recording(self, recording: bool) -> None:
         """Reflect the recording state on the microphone button."""
         self._listening = recording
-        if self._mic_button is None:
-            return
         with contextlib.suppress(tk.TclError):
-            self._mic_button.configure(
-                fg=self._theme.primary if recording else self._theme.text_dim,
-                text="⏺" if recording else "🎤",
-            )
+            self._composer.set_mic_recording(recording)
 
     def _voice_label(self) -> str:
         from core.voices import find_system_voice, find_voice, is_system_voice_key
@@ -2071,56 +1919,52 @@ class FaydGUI:
         self._attachment_chips: list[tk.Widget] = []
         self._attachments_row.pack(side="top", fill="x", pady=(0, 6))
 
-        self._composer_box = RoundedBox(
-            composer, bg=self._theme.surface, fill=self._theme.surface,
-            outline=self._theme.border, corner=RADIUS_LARGE, parent_bg=self._theme.base,
+        # The shared chat composer: the wide, rounded panel with the input on top
+        # and the toolbars beneath it. The window keeps its own attribute names
+        # (``_composer_box``, ``_entry``, ``_send``, ``_mic_button``) pointed at
+        # the panel's widgets, so the send handler, the microphone flow, and the
+        # tests all keep working unchanged.
+        self._composer = ChatComposer(
+            composer, theme=self._theme, typography=self._type,
+            placeholder=self.COMPOSER_PLACEHOLDER, on_submit=self._on_send,
+            outer_bg=self._theme.base,
         )
-        self._composer_box.pack(side="top", fill="x")
-        field = self._composer_box.inner
+        self._composer.wrap.pack(side="top", fill="x")
+        self._composer_box = self._composer.box
+        self._entry = self._composer.entry
+        self._send = self._composer.send_button
 
-        self._attach_button = tk.Button(
-            field, text="＋", command=self._on_attach_clicked,
-            bg=self._theme.surface, fg=self._theme.text_dim,
-            activebackground=self._theme.surface, activeforeground=self._theme.contrast,
-            font=self._type.font("xl", weight="bold"), relief="flat", borderwidth=0,
-            padx=12, pady=0, cursor="hand2",
-        )
-        self._attach_button.pack(side="left", fill="y")
-        _Tooltip(self._attach_button, "Attach a Word (.docx) or text file", self._theme, self._type)
-
-        self._entry = tk.Text(
-            field, height=2, width=1, bg=self._theme.surface, fg=self._theme.contrast,
-            insertbackground=self._theme.primary, font=self._type.font("chatInput"),
-            relief="flat", wrap="word", padx=6, pady=12,
-            highlightthickness=0, borderwidth=0,
-        )
-        self._entry.pack(side="left", fill="both", expand=True)
-        self._entry.bind("<Return>", self._on_enter)
-        self._entry.bind("<Shift-Return>", lambda _e: None)
-
-        self._send = CircleButton(
-            field, size=SEND_BUTTON_SIZE, bg=self._theme.surface,
-            fill=self._theme.primary, ink=self._theme.primary_foreground,
-            text="↑", command=self._on_send, typography=self._type,
-        )
-        self._send.pack(side="right", padx=(6, 6), pady=6)
+        self._attach_button = self._composer.attach_button
+        assert self._attach_button is not None  # the window builds with_attach=True
+        self._attach_button.configure(command=self._on_attach_clicked)
+        self._composer.set_tooltip(self._attach_button, "Attach a Word (.docx) or text file")
 
         # The microphone: one click starts recording (through the local Qwen3-ASR
         # model when installed), a second click stops and transcribes into the
         # composer. Kept beside Send, in the composer, so voice is a first-class
         # input rather than a separate window.
-        self._mic_button = tk.Button(
-            field, text="🎤", command=self._toggle_mic,
-            bg=self._theme.surface, fg=self._theme.text_dim,
-            activebackground=self._theme.surface, activeforeground=self._theme.primary,
-            font=self._type.font("lg"), relief="flat", borderwidth=0,
-            padx=8, pady=0, cursor="hand2",
+        self._mic_button = self._composer.add_mic(
+            self._toggle_mic, "Dictate with the microphone (Qwen3-ASR)"
         )
-        self._mic_button.pack(side="right", fill="y")
-        _Tooltip(self._mic_button, "Dictate with the microphone (Qwen3-ASR)", self._theme, self._type)
+
+        # The two compact mode selectors of the composer's bottom-left toolbar.
+        # They are *views* of the real controls, not a second source of truth: the
+        # Code Studio pill opens the Studio (its only real "code mode"), and the
+        # Chat Studio pill lists the operating modes the header already switches,
+        # so nothing here invents a mode the app does not have.
+        self._code_mode_selector = self._composer.add_mode_selector(
+            icon="⌘", label="Code Studio",
+            options=[("Open the Code Studio…", self._open_code_studio)],
+            tip="Code Studio: edit and merge the project's own code",
+        )
+        self._chat_mode_selector = self._composer.add_mode_selector(
+            icon="💬", label=self.service.operating_mode.label,
+            options=[(mode.label, partial(self._on_mode_menu, mode.label)) for mode in MODES],
+            tip="The operating mode for this conversation",
+        )
 
         self._render_attachment_chips()
-        self._entry.focus_set()
+        self._composer.focus()
 
     # ------------------------------------------------------------- behavior
 
@@ -2130,6 +1974,7 @@ class FaydGUI:
         self._mode_var.set(spec.label)
         self._mode_label.configure(text=f"{spec.label} · {spec.description}")
         self._mode_menu.configure(fg=self._theme.contrast)
+        self._chat_mode_selector.set_label(spec.label)
 
     def _source_choice_label(self) -> str:
         return MOUTH_LABELS.get(self.service.source, MOUTH_LABELS[chat_module.MOUTH_SOURCES])
@@ -2224,12 +2069,12 @@ class FaydGUI:
     def _on_send(self) -> None:
         if self._busy:
             return
-        message = self._entry.get("1.0", "end").strip()
+        message = self._composer.text().strip()
         if not message:
             return
         self._stop_speaking()
         self._cancel_recording()
-        self._entry.delete("1.0", "end")
+        self._composer.clear()
         self._add_bubble("user", message)
 
         # In Jarvics Mode a destructive plan asks first; everything else sends now.
@@ -2353,6 +2198,7 @@ class FaydGUI:
         imported documents are available to every future chat.
         """
         menu = self._build_attach_menu()
+        assert self._attach_button is not None
         try:
             menu.tk_popup(
                 self._attach_button.winfo_rootx(),
@@ -2872,11 +2718,8 @@ class FaydGUI:
         threading.Thread(target=run, daemon=True).start()
 
     def _set_send_enabled(self, enabled: bool) -> None:
-        self._send.set_state(
-            enabled=enabled,
-            fill=self._theme.primary if enabled else self._theme.disabled,
-            ink=self._theme.primary_foreground if enabled else self._theme.text_dim,
-        )
+        """Open or close the composer's own Send gate (a busy screen closes it)."""
+        self._composer.set_send_enabled(enabled)
 
     def _pump(self) -> None:
         self._drain_lines(cap=500)
@@ -2924,9 +2767,8 @@ class FaydGUI:
             self._add_bubble("note", "I could not make out any words — please try again.")
             self._update_status()
             return
-        self._entry.delete("1.0", "end")
-        self._entry.insert("1.0", text)
-        self._entry.focus_set()
+        self._composer.set_text(text)
+        self._composer.focus()
         self._status.configure(text="Transcribed with " + self.service.recognizer_name() + ".")
         self._add_bubble("note", f"🎤 Heard: {text}")
 
@@ -2955,7 +2797,7 @@ class FaydGUI:
                 self._speak_text(payload.text)
         else:
             self._add_bubble("assistant", str(payload))
-        self._entry.focus_set()
+        self._composer.focus()
 
     @staticmethod
     def _render_steps(payload: ChatReply) -> str:
@@ -3029,4 +2871,15 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["FaydGUI", "main"]
+# ``RoundedBox``/``CircleButton``/``RADIUS_LARGE``/``SEND_BUTTON_SIZE`` are
+# re-exported for the dialogs and the tests, which build on the window's own
+# widget vocabulary; they are defined once in :mod:`gui.chat_composer`.
+__all__ = [
+    "CircleButton",
+    "FaydGUI",
+    "RADIUS_LARGE",
+    "RADIUS_SMALL",
+    "RoundedBox",
+    "SEND_BUTTON_SIZE",
+    "main",
+]

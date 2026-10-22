@@ -45,6 +45,7 @@ from core.coder_model import PULL_HINT
 from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
+from gui.chat_composer import ChatComposer
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
 
@@ -301,34 +302,26 @@ class CodeStudioDialog:
         self._add_message("note", HONESTY_LINE)
 
     def _build_composer(self, parent: tk.Frame) -> None:
-        """The rounded composer card, pinned to the bottom like the chat window."""
+        """The shared rounded composer card, pinned to the bottom like the chat window."""
         theme = self.theme
-        wrap = tk.Frame(parent, bg=theme.base)
-        wrap.pack(side="bottom", fill="x", padx=self._column_pad(), pady=(8, 12))
-        card = RoundedBox(
-            wrap, bg=theme.base, fill=theme.surface, outline=theme.border_subtle,
-            corner=RADIUS_LARGE, parent_bg=theme.base,
+        composer = ChatComposer(
+            parent, theme=theme, typography=self._type,
+            placeholder="Describe the code changes you want to make…",
+            on_submit=self._on_ask_model, outer_bg=theme.base, with_attach=False,
+            variable=self._request_var,
         )
-        card.pack(fill="x")
-        inner = card.inner
-        entry = tk.Entry(
-            inner, textvariable=self._request_var, bg=theme.surface, fg=theme.foreground,
-            insertbackground=theme.primary, relief="flat", highlightthickness=0,
-            font=self._type.font("body"),
-        )
-        entry.pack(fill="x", padx=14, pady=(12, 6))
-        entry.bind("<Return>", lambda _event: self._on_ask_model())
-
-        actions = tk.Frame(inner, bg=theme.surface)
-        actions.pack(fill="x", padx=12, pady=(0, 10))
-        self._ask_button = self._button(actions, "Send", self._on_ask_model)
-        self._ask_button.pack(side="right")
-        self._apply_button = self._button(actions, "Apply to the project", self._on_merge)
-        self._apply_button.pack(side="right", padx=(0, 6))
+        composer.wrap.pack(side="bottom", fill="x", padx=self._column_pad(), pady=(8, 12))
+        self._composer = composer
+        # The Studio's own actions sit on the composer's action toolbar, beside the
+        # shared Send disc, so the panel is one consistent composer everywhere.
+        self._ask_button = self._button(composer.right_tools, "Send", self._on_ask_model)
+        composer.add_tool(self._ask_button)
+        self._apply_button = self._button(composer.right_tools, "Apply to the project", self._on_merge)
+        composer.add_tool(self._apply_button)
         self._apply_button.configure(state="disabled")
-        self._checks_button = self._button(actions, "Run checks", self._on_run_checks)
-        self._checks_button.pack(side="right", padx=(0, 6))
-        self._button(actions, "Show diff", self._on_show_diff).pack(side="right", padx=(0, 6))
+        self._checks_button = self._button(composer.right_tools, "Run checks", self._on_run_checks)
+        composer.add_tool(self._checks_button)
+        composer.add_tool(self._button(composer.right_tools, "Show diff", self._on_show_diff))
 
     def _build_editor_panel(self, parent: tk.Frame) -> None:
         """The file editor, revealed in the column when a file is opened."""
