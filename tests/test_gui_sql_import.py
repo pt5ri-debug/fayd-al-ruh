@@ -370,6 +370,8 @@ class _Theme:
     danger = "#d05050"
     interactive_active = "#2a2a2a"
     border_subtle = "#242424"
+    titlebar = "#181c25"
+    titlebar_edge = "#2c313f"
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")

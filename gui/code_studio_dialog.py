@@ -169,19 +169,19 @@ class CodeStudioDialog:
 
     def _build_header(self) -> None:
         theme = self.theme
-        bar = tk.Frame(self.window, bg=theme.base)
+        bar = tk.Frame(self.window, bg=theme.titlebar)
         bar.pack(fill="x")
-        inner = tk.Frame(bar, bg=theme.base)
+        inner = tk.Frame(bar, bg=theme.titlebar)
         inner.pack(fill="x", padx=16, pady=(12, 8))
 
-        titles = tk.Frame(inner, bg=theme.base)
+        titles = tk.Frame(inner, bg=theme.titlebar)
         titles.pack(side="left", anchor="w")
         tk.Label(
-            titles, text=TITLE, bg=theme.base, fg=theme.contrast,
+            titles, text=TITLE, bg=theme.titlebar, fg=theme.contrast,
             font=self._type.font("heading3", weight="bold"), anchor="w",
         ).pack(anchor="w")
         tk.Label(
-            titles, text=SUBTITLE, bg=theme.base, fg=theme.text_secondary,
+            titles, text=SUBTITLE, bg=theme.titlebar, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=760,
         ).pack(anchor="w", pady=(2, 0))
 
@@ -189,7 +189,7 @@ class CodeStudioDialog:
         self._window_controls = install_window_controls(
             self.window, inner, theme=theme, typography=self._type, on_close=self._close
         )
-        tk.Frame(self.window, bg=theme.border_subtle, height=1).pack(fill="x")
+        tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
 
     # -- sidebar ----------------------------------------------------------
 

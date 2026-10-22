@@ -486,16 +486,32 @@ Arabic is kept as secondary aliases where useful.
   is not a cloud mouth; with no Ollama running she still runs and every command
   reports the real next step instead of pretending. `ai/natasha.py` is the CLI
   entry point.
-- `gui/window_controls.py` — the shared **minimize / maximize** controls every
-  dialog window installs. `install_window_controls(window, header, theme=,
-  typography=, on_close=)` builds one frame of two buttons into the window's
-  header and returns a `WindowControls`; `WindowControls` grows the window with
+- `gui/window_controls.py` — the shared **minimize / maximize / close** controls
+  every window's title bar installs. `install_window_controls(window, header,
+  theme=, typography=, on_close=)` builds one frame of three buttons into the
+  title bar and returns a `WindowControls`: minimize (`–`, `iconify()`), maximize
+  (`□` / restore `❐`), and close (`✕`, which runs the caller's own `on_close`, or
+  destroys the window when it has none). `WindowControls` grows the window with
   `state("zoomed")` where the window manager supports it and falls back to a real
   full-screen window where it does not (many X11 desktops), restoring exactly
-  what it did. Rolled into the eight dialog windows (Code Studio, Presentation
+  what it did. Each button's `command` is a bound method on the controller, which
+  holds the window, which owns the buttons — a cycle a destroyed window would only
+  leave when the cyclic collector happens to run, and on a worker thread the Tcl
+  call that follows deadlocks (this is what hung a deck export). So each button
+  clears its own command on its own `<Destroy>` (while the widget still exists,
+  which a frame-level handler cannot promise) and the frame drops the caller's
+  handler, exactly like `gui.chat_composer`; a closed window dies at once.
+  Rolled into the **main window** and the eight dialogs (Code Studio, Presentation
   Studio and its finalize/course windows, the Import Center, the SQL import
-  screen, and the two image windows) so a secondary window behaves like the main
-  one without each dialog re-implementing the logic.
+  screen, and the two image windows), so every window is closed and grown the same
+  way without each one re-implementing the logic.
+- **Every window's title bar** is the `Theme.titlebar` band (a dark grey a step
+  above the page base, `#181C25` dark / `#DCE3EE` light) closed by a
+  `titlebar_edge` hairline, and carries the three controls above on its right. The
+  main window's bar is the same band, so the header's mode switch, model selector,
+  and controls read as one piece with every dialog; `Theme` gained the two tokens
+  and each window paints its bar, its title labels, and the control frame with
+  them, so one appearance switch restyles every window at once.
 - `core/composition.py` — the deterministic composer: dependency-free rules that
   render evidence (retrieved passages, web sources, causal/reasoning/decision
   traces) into clean attributed prose. Shared by the assistant's extractive
@@ -1219,11 +1235,14 @@ Arabic is kept as secondary aliases where useful.
   list and the answering-mouth radios are deliberately *not* in the sidebar --
   the header's model selector is the one visible mouth switch) behind a
   scrollbar that
-  appears only when the content overflows, a header showing the active mode by
+  appears only when the content overflows, a title bar showing the active mode by
   name (one switch) plus the **model selector** (`MOUTH_CHOICES`: *From sources
   (cited)* / *From trained model* / *Ultron (general local model)*, matched to the
-  mouth keys `ai.chat` uses), and a centred hero/empty state that
+  mouth keys `ai.chat` uses) and the three **title-bar controls** (minimize /
+  maximize / close, the same trio every dialog carries, through
+  `gui.window_controls`), and a centred hero/empty state that
   gives way to the first message (and returns when the transcript is cleared).
+  The bar is the `Theme.titlebar` dark-grey band, like every other window's.
   On a narrow (mobile-sized) window the sidebar becomes a drawer that
   `_toggle_sidebar` shows or hides and that is restored when the window widens.
   Assistant answers are rendered as **Markdown** through `gui/markdown.py`

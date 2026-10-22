@@ -68,6 +68,7 @@ from gui.modes import (
 from gui.options import build_parser
 from gui.service import ChatReply, ChatService
 from gui.typography import Typography, for_root
+from gui.window_controls import install_window_controls
 
 #: The answering mouths the header's model selector offers, in order. The label
 #: is what the user reads; the key is the value :class:`ChatService` expects.
@@ -139,6 +140,8 @@ class Theme:
     code_bg: str           # fenced/inline code background
     code_fg: str           # fenced code text
     quote_bar: str         # blockquote accent
+    titlebar: str          # every window's title bar (a dark grey band)
+    titlebar_edge: str     # the hairline under a window's title bar
     success: str
     danger: str
     disabled: str
@@ -165,6 +168,8 @@ DARK_THEME = Theme(
     code_bg="#151A24",            # a touch deeper than the base
     code_fg="#DCE3EE",
     quote_bar="#4B5468",
+    titlebar="#181C25",         # a dark grey band, a step above the base
+    titlebar_edge="#2C313F",    # cool-grey-900, the hairline under it
     success="#A5E75E",
     danger="#E76A5E",
     disabled="#383F50",
@@ -191,6 +196,8 @@ LIGHT_THEME = Theme(
     code_bg="#F0F3F8",
     code_fg="#1B2029",
     quote_bar="#C4CEDD",
+    titlebar="#DCE3EE",         # a light grey band in the light appearance
+    titlebar_edge="#C4CEDD",    # the hairline under it
     success="#3F7D1E",
     danger="#C0473C",
     disabled="#DCE3EE",
@@ -1225,10 +1232,15 @@ class FaydGUI:
         self._build_composer(main)
 
     def _build_header(self, main: tk.Frame) -> None:
-        """The slim top bar: mode switch, model selector, and menu controls."""
-        bar = tk.Frame(main, bg=self._theme.base)
+        """The slim title bar: mode switch, model selector, and menu controls.
+
+        The bar is the window's own title band, in the same dark grey every
+        dialog uses, and it carries the same three controls on its right -- so
+        the main window and every secondary one read as one program.
+        """
+        bar = tk.Frame(main, bg=self._theme.titlebar)
         bar.pack(fill="x")
-        inner = tk.Frame(bar, bg=self._theme.base)
+        inner = tk.Frame(bar, bg=self._theme.titlebar)
         inner.pack(fill="x", padx=12, pady=8)
 
         # Left: the sidebar toggle (also the mobile drawer handle) and the title.
@@ -1251,7 +1263,7 @@ class FaydGUI:
         self._mode_menu["menu"].configure(bg=self._theme.surface, fg=self._theme.foreground)
         self._mode_menu.pack(side="left", padx=(8, 0))
         self._mode_label = tk.Label(
-            inner, text="", bg=self._theme.base, fg=self._theme.text_secondary,
+            inner, text="", bg=self._theme.titlebar, fg=self._theme.text_secondary,
             font=self._type.font("xs"), anchor="w",
         )
         self._mode_label.pack(side="left", padx=(10, 0))
@@ -1263,7 +1275,7 @@ class FaydGUI:
             *[label for _key, label in MOUTH_CHOICES], command=self._on_source_menu,
         )
         self._source_menu.configure(
-            bg=self._theme.base, fg=self._theme.foreground, activebackground=self._theme.surface_raised,
+            bg=self._theme.titlebar, fg=self._theme.foreground, activebackground=self._theme.surface_raised,
             activeforeground=self._theme.contrast, relief="flat", highlightthickness=0,
             font=self._type.font("xs"), padx=6, pady=3, bd=0, cursor="hand2",
         )
@@ -1273,11 +1285,18 @@ class FaydGUI:
             side="right", padx=(0, 6)
         )
 
-        tk.Frame(main, bg=self._theme.border_subtle, height=1).pack(fill="x")
+        # The same minimize / maximize / close trio every dialog carries, in the
+        # same place, so the main window is closed and grown the same way.
+        self._window_controls = install_window_controls(
+            self.root, inner, theme=self._theme, typography=self._type,
+            on_close=self._on_close,
+        )
+
+        tk.Frame(main, bg=self._theme.titlebar_edge, height=1).pack(fill="x")
 
     def _icon_button(self, parent: tk.Misc, glyph: str, command: Callable[[], Any], *, tip: str = "") -> tk.Button:
         button = tk.Button(
-            parent, text=glyph, command=command, bg=self._theme.base, fg=self._theme.foreground,
+            parent, text=glyph, command=command, bg=self._theme.titlebar, fg=self._theme.foreground,
             activebackground=self._theme.surface_raised, activeforeground=self._theme.contrast,
             font=self._type.font("sm"), relief="flat", borderwidth=0, padx=8, pady=2, cursor="hand2",
         )
