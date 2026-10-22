@@ -1092,3 +1092,98 @@ def test_a_destroyed_window_releases_its_title_bar_handlers() -> None:
         assert closed == []
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_toolbar_controls_have_a_subtle_hover() -> None:
+    """The ＋, the mode pills, and Send tint on hover, then restore their rest colour.
+
+    Tk's ``activebackground`` only paints while the button is held, so the
+    reference design's hover needs a real ``<Enter>``/``<Leave>`` treatment; the
+    control must return to exactly its resting colour on leave.
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    root = tk.Tk()
+    try:
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask", on_submit=lambda: None,
+        )
+        composer.wrap.pack(fill="x")
+        selector = composer.add_mode_selector(
+            icon="⌘", label="Code Studio", options=[("Open", lambda: None)],
+        )
+        root.update()
+
+        attach = composer.attach_button
+        assert attach is not None
+        for widget, rest in (
+            (attach, DARK_THEME.surface),
+            (selector, DARK_THEME.surface),
+        ):
+            assert str(widget.cget("bg")) == rest
+            widget.event_generate("<Enter>")
+            root.update()
+            assert str(widget.cget("bg")) == DARK_THEME.surface_raised
+            widget.event_generate("<Leave>")
+            root.update()
+            assert str(widget.cget("bg")) == rest
+
+        # The send disc is a canvas, so its hover is the oval's fill, not a ``bg``.
+        # Type a message first: an empty box greys Send out, and a disabled disc
+        # deliberately does not lighten (see the next test).
+        composer.set_text("hello")
+        root.update()
+        send = composer.send_button
+        rest_fill = str(send.itemcget(send._shape, "fill"))
+        send.event_generate("<Enter>")
+        root.update()
+        hovered = str(send.itemcget(send._shape, "fill"))
+        assert hovered != rest_fill
+        send.event_generate("<Leave>")
+        root.update()
+        assert str(send.itemcget(send._shape, "fill")) == rest_fill
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_disabled_send_does_not_lighten_on_hover() -> None:
+    """A disabled Send disc keeps its disabled fill when the pointer passes over it."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    root = tk.Tk()
+    try:
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask", on_submit=lambda: None,
+        )
+        composer.wrap.pack(fill="x")
+        root.update()
+        # An empty box already greys Send out.
+        disabled_fill = str(composer.send_button.itemcget(composer.send_button._shape, "fill"))
+        composer.send_button.event_generate("<Enter>")
+        root.update()
+        assert str(composer.send_button.itemcget(composer.send_button._shape, "fill")) == disabled_fill
+    finally:
+        root.destroy()
+
+
+def test_composer_hover_blend_derives_from_the_theme_colour() -> None:
+    """``_blend`` mixes toward the other colour and passes odd input through."""
+    from gui.chat_composer import _blend
+
+    assert _blend("#000000", "#FFFFFF", 0.5) == "#808080"
+    assert _blend("#C9B974", "#FFFFFF", 0.0) == "#C9B974"
+    # A non-#rrggbb colour (a name, or #rgb) is returned untouched, never mangled.
+    assert _blend("gold", "#FFFFFF", 0.2) == "gold"
+    assert _blend("#abc", "#FFFFFF", 0.2) == "#abc"

@@ -1264,7 +1264,15 @@ Arabic is kept as secondary aliases where useful.
   subtle non-interactive status dot, an optional `add_mic(...)` control, any
   `add_tool(widget)` action the caller built, and the circular Send disc.
   `text`/`set_text`/`clear`, `set_submit`, `set_send_enabled`, `set_status_dot`,
-  `set_mic_recording`, `focus`, `set_tooltip`. The placeholder is an overlay
+  `set_mic_recording`, `focus`, `set_tooltip`. Every toolbar control (＋, the mode
+  pills, the mic, and the Send disc) carries a real hover state -- Tk's
+  ``activebackground`` only paints while the button is held, so the tint is bound
+  on ``<Enter>``/``<Leave>`` and restored to the control's own resting colour on
+  leave; the disc lightens a shade derived from the theme's primary (``_blend``),
+  and a disabled disc deliberately does not lighten. The message area's focus
+  treatment is the caret and the I-beam cursor, not a recoloured border: the
+  project keeps the composer's hairline the neutral stroke on purpose
+  (``test_window_composer_has_no_gold_focus_outline``). The placeholder is an overlay
   *label*, never text inside the entry, so `text()` is always the user's own
   words and the existing handlers can keep reading `entry.get(...)`. The input
   grows with the message and then scrolls inside itself at `max_lines`, so the
