@@ -715,6 +715,34 @@ Arabic is kept as secondary aliases where useful.
   Russian, Portuguese, Spanish, Italian) — `QWEN_TTS_LANGUAGES` states this, the
   synthesizer refuses Arabic with a clear message, and   a `fallback` synthesizer
   (the system engine) can be supplied so Arabic is still read aloud.
+- `core/arabic_speech.py` — **how Arabic is *said*, not spelled.** A deterministic,
+  dependency-free, **presentation-only** pass that prepares Arabic text before it
+  reaches any engine, because the engines read Arabic *words* well and Arabic
+  *symbols* badly. Measured on this project's own output, `espeak-ng -v ar` reads
+  `25%` as `خمسة وعشرون` (the unit silently vanishes), switches to an **English**
+  voice in the middle of `1500 psi`/`2000 ft`/`3.5 mD`, and turns `10-20` into
+  gibberish; spelled out (`خمسة وعشرين بالمئة`) the same text is read correctly.
+  So `prepare_for_speech(text, language=)` spells **numbers** in Arabic words
+  (`1500` -> `ألف وخمسمئة`), translates a **known unit** to its Arabic name
+  (`psi` -> `باوند لكل بوصة مربعة`, `ft` -> `قدم`, `%` -> `بالمئة`), reads a
+  **range** as a range (`10-20` -> `عشرة إلى عشرين`), reads a **decimal** digit by
+  digit (`3.5` -> `ثلاثة فاصلة خمسة`), turns ASCII `, ; ?` into `، ؛ ؟` inside
+  Arabic text, and drops the decorative **tatweel** (the kashida made the engine
+  spell a word out letter by letter). `number_to_arabic_words` uses the real
+  Arabic counting rules — the dual (`ألفان`), the plural after 3..10
+  (`ثلاثة آلاف`), the singular from 11 (`أحد عشر ألف`) — and an `oblique` form
+  (`ألفين`, `عشرين`) for a number a preposition governs, which is what a spoken
+  range needs. **Honest by construction**: it is gated to Arabic
+  (`detect_language`), so an English answer is returned **byte-identical**; it
+  never invents a unit (an unknown token is left alone), never rewrites a Latin
+  identifier that has no Arabic name (`SPE`, `API`, `ISO`), never touches a code
+  span, and deliberately adds **no** tashkeel (a *wrong* vowel mark sounds worse
+  than none). It is idempotent, and it is wired into **every** synthesizer
+  (`CommandSynthesizer`, the Windows SAPI/OneCore path, `PiperSynthesizer`, and
+  the Qwen3-TTS path including its Arabic fallback), so whichever engine speaks,
+  the reading is the words a listener hears. This is the fix for "the Arabic
+  voices still sound robotic": the neural voice (Piper) is the *quality* answer
+  and already existed, but the *text* it was handed was not speech-ready.
 - `core/piper_speech.py` — **Piper**, a real, local **neural** text-to-speech
   engine: the honest answer to "the voices sound robotic". Piper
   (`rhasspy/piper`, maintained by the Open Home Foundation) renders speech with a
@@ -1886,6 +1914,22 @@ clone, each optional so the base system still runs without it:
   optional `[piper]` extra, the CLI `python -m cli piper …`, and the window's
   sidebar, `AGENTS.md` documents it and `tests/test_piper_speech.py` exercises the
   runner seam, the catalog mapping, the prosody, the fallback, and the real render.
+- Phase 15 — Arabic that is **spoken, not spelled**: `core/arabic_speech.py` is the
+  deterministic, presentation-only pass that fixes the remaining "still robotic"
+  report. The neural voice (Piper, Phase 14) was already the *quality* answer, but
+  the text it was handed was not speech-ready: every engine reads Arabic *words*
+  well and Arabic *symbols* badly, so `25%` lost its unit, `1500 psi` switched the
+  engine to an English voice mid-phrase, and `10-20` collapsed to gibberish.
+  `prepare_for_speech` spells the numbers in Arabic words (with the real dual /
+  plural / singular counting forms, and an oblique form a preposition governs),
+  translates a known unit to its Arabic name, reads a range as a range and a
+  decimal digit by digit, normalises Arabic punctuation, and drops the decorative
+  tatweel. It is gated to Arabic, so English is byte-identical, it never invents a
+  unit, and it adds no tashkeel (a wrong vowel mark sounds worse than none). Wired
+  into **every** synthesizer, so whichever engine speaks — system, Windows,
+  Piper, or Qwen3-TTS's Arabic fallback — the reading is the words a listener
+  hears. `tests/test_arabic_speech.py` pins the number words, each measured
+  failure, the safety rules, and the wiring.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

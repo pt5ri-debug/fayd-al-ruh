@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from core.arabic_speech import prepare_for_speech
 from core.model_interface import CognitiveModel, ModelRequest
 from core.voices import (
     SystemVoice,
@@ -1231,6 +1232,10 @@ class CommandSynthesizer:
     def synthesize(self, text: str) -> AudioClip:
         if not text.strip():
             raise ValueError("Cannot synthesize empty text.")
+        # Speak the numbers and units as words, not as the symbols this engine
+        # cannot say (``25%``, ``1500 psi``, ``10-20``). Presentation only, and a
+        # no-op for English, so the engine is handed the same words a listener hears.
+        text = prepare_for_speech(text, language=self.language)
         with tempfile.TemporaryDirectory(prefix="fayd-tts-") as folder:
             target = Path(folder) / "speech.wav"
             argv = self._builder(self.executable, text, target)
@@ -1325,6 +1330,9 @@ class _WindowsPowerShellSynthesizer:
         if not text.strip():
             raise ValueError("Cannot synthesize empty text.")
         language = self.language or detect_language(text)
+        # Speak the numbers and units as words rather than the symbols the engine
+        # cannot say; a no-op for English, so only Arabic text changes.
+        text = prepare_for_speech(text, language=language)
         clip = self._render(text, language)
         if clip is not None and clip.samples:
             return clip

@@ -1245,6 +1245,10 @@ def test_discovery_prefers_the_engine_that_can_see_an_arabic_voice(monkeypatch):
     """
     from core import speech
     _pin_piper_off(monkeypatch)
+    # The subject is the Windows engine choice, so a real system engine on the host
+    # (espeak-ng, which this project asks an Arabic user to install) must not win
+    # discovery first and mask the Windows decision under test.
+    monkeypatch.setattr(speech.shutil, "which", lambda name: None)
 
     monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
     monkeypatch.setattr(speech, "windows_onecore_available", lambda **_: False)  # false negative
