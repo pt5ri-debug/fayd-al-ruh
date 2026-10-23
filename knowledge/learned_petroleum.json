@@ -12,18 +12,6 @@
     }
   },
   {
-    "doc_id": "learned:e344b321",
-    "title": "Learned statement: reservoir study",
-    "text": "Quabbin Reservoir is the largest inland body of water in Massachusetts.",
-    "source": "learned/https://en.wikipedia.org/?curid=520049",
-    "metadata": {
-      "topic": "reservoir study",
-      "confidence": "0.7000",
-      "source_url": "https://en.wikipedia.org/?curid=520049",
-      "source_title": "Quabbin Reservoir"
-    }
-  },
-  {
     "doc_id": "learned:5ab188c4",
     "title": "Learned statement: drilling rig",
     "text": "Drilling engineering is a subset of petroleum engineering.",

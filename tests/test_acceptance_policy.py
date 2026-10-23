@@ -89,6 +89,60 @@ def test_topic_match_ignores_case_and_punctuation():
     assert is_relevant_to_topic("well test", "well test")
 
 
+# --- sense disambiguation for ambiguous head-nouns ------------------------
+# "reservoir" is also an everyday word, so a water-reservoir article must not
+# slip into a petroleum store. The check reads the statement itself, so the
+# petroleum sense (a different context word present) is still accepted.
+
+
+def test_a_water_reservoir_is_refused():
+    assert not is_relevant_to_topic(
+        "reservoir study",
+        "Quabbin Reservoir",
+        "Quabbin Reservoir is the largest inland body of water in Massachusetts.",
+    )
+    assert not is_relevant_to_topic(
+        "reservoir", "Water reservoir", "The reservoir stores drinking water for the city."
+    )
+
+
+def test_the_petroleum_sense_is_still_accepted():
+    # The same ambiguous word, but the statement is unmistakably petroleum.
+    assert is_relevant_to_topic(
+        "reservoir",
+        "Reservoir",
+        "A petroleum reservoir is a subsurface accumulation of hydrocarbons.",
+    )
+    assert is_relevant_to_topic(
+        "reservoir",
+        "Reservoir pressure",
+        "Water drive supports reservoir pressure as the aquifer advances.",
+    )
+
+
+def test_the_ambiguous_word_alone_is_not_evidence_of_the_petroleum_sense():
+    # "reservoir" appears in the statement, but no *other* petroleum word does.
+    assert not is_relevant_to_topic(
+        "reservoir", "Reservoir", "The reservoir is the largest inland body of water."
+    )
+
+
+def test_an_unambiguous_term_is_unaffected_by_the_sense_check():
+    assert is_relevant_to_topic("gamma ray log", "Gamma ray logging")
+    assert is_relevant_to_topic("Effective Porosity", "effective porosity")
+
+
+def test_a_water_reservoir_reaches_the_topic_gate_through_rejection_reason():
+    reason = rejection_reason(
+        url="https://en.wikipedia.org/wiki/Quabbin_Reservoir",
+        title="Quabbin Reservoir",
+        topic="reservoir study",
+        snippet="Quabbin Reservoir is the largest inland body of water in Massachusetts.",
+        credibility=0.9,
+    )
+    assert reason is not None and "reservoir study" in reason
+
+
 def test_threshold_is_documented_and_midrange():
     assert 0.0 < TITLE_COVERAGE < 1.0
 

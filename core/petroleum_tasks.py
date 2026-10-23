@@ -332,6 +332,57 @@ def _flow_assurance_task() -> SandboxTask:
     )
 
 
+def _geomechanics_task() -> SandboxTask:
+    """Held-out: geomechanics, never trained on."""
+    return SandboxTask(
+        name="geomechanics-study",
+        description="Predict sanding: measure stress, model failure, choose a completion.",
+        discipline="geomechanics",
+        allowed_actions=(
+            _step("measure_stress", "rock_sample", "stress_measured"),
+            _step("model_failure", "stress_measured", "failure_modelled"),
+            _step("choose_completion", "failure_modelled", "completion_chosen"),
+            _step("log_core", "rock_sample", "core_logged"),
+        ),
+        initial_facts=frozenset({"rock_sample"}),
+        max_steps=5,
+    )
+
+
+def _waterflood_task() -> SandboxTask:
+    """Held-out: reservoir management, never trained on."""
+    return SandboxTask(
+        name="waterflood-design",
+        description="Design a waterflood: characterise, pattern, forecast.",
+        discipline="reservoir_management",
+        allowed_actions=(
+            _step("characterise_reservoir", "static_model", "reservoir_characterised"),
+            _step("design_pattern", "reservoir_characterised", "pattern_designed"),
+            _step("forecast_recovery", "pattern_designed", "recovery_forecast"),
+            _step("sample_water", "static_model", "water_sampled"),
+        ),
+        initial_facts=frozenset({"static_model"}),
+        max_steps=5,
+    )
+
+
+def _decommission_task() -> SandboxTask:
+    """Held-out: decommissioning, never trained on."""
+    return SandboxTask(
+        name="well-decommissioning",
+        description="Abandon a well: isolate, verify, remove the surface equipment.",
+        discipline="decommissioning",
+        allowed_actions=(
+            _step("isolate_zones", "wellbore_access", "zones_isolated"),
+            _step("verify_barrier", "zones_isolated", "barrier_verified"),
+            _step("remove_surface", "barrier_verified", "surface_removed"),
+            _step("survey_wellhead", "wellbore_access", "wellhead_surveyed"),
+        ),
+        initial_facts=frozenset({"wellbore_access"}),
+        max_steps=5,
+    )
+
+
 PETROLEUM_TASKS: tuple[SandboxTask, ...] = (
     _reservoir_appraisal_task(),
     _drill_well_task(),
@@ -353,9 +404,14 @@ PETROLEUM_TASKS: tuple[SandboxTask, ...] = (
 )
 
 # Disciplines the learning agents never train on; used to measure generalisation.
+# Kept deliberately broader than a token pair so the check is graded: a single
+# unlucky task moves it, but it takes a real regression to collapse it.
 PETROLEUM_HELD_OUT_TASKS: tuple[SandboxTask, ...] = (
     _seismic_interpretation_task(),
     _flow_assurance_task(),
+    _geomechanics_task(),
+    _waterflood_task(),
+    _decommission_task(),
 )
 
 # The fact whose presence marks success, keyed by task name.
@@ -379,6 +435,9 @@ PETROLEUM_SUCCESS_FACTS: dict[str, str] = {
     "complete-shale-well": "proppant_placed",
     "seismic-interpretation": "prospect_located",
     "flow-assurance": "flow_assured",
+    "geomechanics-study": "completion_chosen",
+    "waterflood-design": "recovery_forecast",
+    "well-decommissioning": "surface_removed",
 }
 
 

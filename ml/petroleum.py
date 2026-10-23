@@ -58,6 +58,22 @@ def petroleum_learning_accuracy(episodes: int = PETROLEUM_LEARNING_EPISODES) -> 
     return sum(report.discipline_success.values()) / len(report.discipline_success)
 
 
+def petroleum_generalisation_accuracy(episodes: int = PETROLEUM_LEARNING_EPISODES) -> float:
+    """Mean success over the disciplines the learner never trained on.
+
+    ``petroleum_learning_accuracy`` measures disciplines whose tasks *were* in
+    the training set, so a memorising learner scores well on it. This one trains
+    the same machinery on the trained catalog and scores the **held-out**
+    disciplines, so it is the honest half of the question "did it learn the
+    field, or the tasks?". It falls to 0.0 when the held-out set is empty, so a
+    caller can tell "no check" from "a perfect check".
+    """
+    report = train_petroleum(episodes=episodes, include_held_out=True)
+    if not report.generalisation_success:
+        return 0.0
+    return sum(report.generalisation_success.values()) / len(report.generalisation_success)
+
+
 @dataclass(frozen=True)
 class TaskOutcome:
     """How one petroleum task learned."""
@@ -268,6 +284,7 @@ __all__ = [
     "PetroleumReport",
     "TaskOutcome",
     "format_report",
+    "petroleum_generalisation_accuracy",
     "petroleum_learning_accuracy",
     "petroleum_success",
     "train_petroleum",

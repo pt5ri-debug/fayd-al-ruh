@@ -241,6 +241,81 @@ def test_petroleum_domain_score_is_reported():
     assert 0.0 <= report.domain_scores[Domain.PETROLEUM.value] <= 1.0
 
 
+# --- the held-out checks --------------------------------------------------
+# These two are the suite's only measurements that do *not* come from the
+# project's own seeds: one scores disciplines the learner never trained on, the
+# other scores the acceptance gate against a stated verdict per source. They
+# exist so a closed self-test cannot report a perfect score while the system has
+# stopped discriminating.
+
+
+def test_gate_discrimination_scenario_exists_and_passes():
+    gate = [scenario for scenario in SCENARIOS if scenario.id == "gate-discrimination"]
+    assert gate, "expected the held-out gate scenario"
+    assert gate[0].domain is Domain.SAFETY
+    results = {result.scenario_id: result for result in run_suite().scenarios}
+    assert results["gate-discrimination"].passed
+
+
+def test_gate_scenario_states_both_accepts_and_refusals():
+    scenario = next(s for s in SCENARIOS if s.id == "gate-discrimination")
+    verdicts = {case.expect_accept for case in scenario.gate_cases}
+    assert verdicts == {True, False}, "a one-sided gate test cannot detect a permissive gate"
+    assert len(scenario.gate_cases) >= 6
+
+
+def test_acceptance_gate_metric_is_reported():
+    metrics = run_suite().metrics
+    assert 0.0 <= metrics.acceptance_gate_accuracy <= 1.0
+    assert Domain.SAFETY.value in run_suite().domain_scores
+
+
+def test_gate_metric_falls_when_a_trap_is_accepted(monkeypatch):
+    # A permissive policy must move the metric: this is what makes it a real
+    # check rather than a restatement of the seeds.
+    import evaluation.runner as runner
+    import core.acceptance_policy as policy
+
+    monkeypatch.setattr(runner, "rejection_reason", lambda **_: None)
+    scenario = next(s for s in SCENARIOS if s.id == "gate-discrimination")
+    result = runner.run_scenario(scenario)
+    assert result.checks["acceptance_gate_accuracy"] < 1.0
+    # The policy itself is untouched by the monkeypatch.
+    assert policy.rejection_reason(
+        url="https://random.example/x", title="t", topic="t", snippet="s", credibility=0.9
+    ) is not None
+
+
+def test_petroleum_generalisation_metric_is_reported():
+    metrics = run_suite().metrics
+    assert 0.0 <= metrics.petroleum_generalisation_accuracy <= 1.0
+
+
+def test_generalisation_uses_the_held_out_disciplines():
+    from ml.petroleum import PETROLEUM_LEARNING_EPISODES, petroleum_generalisation_accuracy
+    from core.petroleum_tasks import PETROLEUM_HELD_OUT_TASKS
+
+    assert PETROLEUM_HELD_OUT_TASKS, "the generalisation check needs a held-out set"
+    # At the evaluation gate's own budget the held-out disciplines are solved, so
+    # the metric is a real measurement rather than the empty-set default.
+    assert petroleum_generalisation_accuracy() > 0.0
+    assert PETROLEUM_LEARNING_EPISODES >= 80
+
+
+def test_generalisation_needs_the_full_budget():
+    # Honest record of a real limit: the held-out check is effectively
+    # all-or-nothing -- the learners only converge on unseen tasks at the gate's
+    # budget, so a small episode count reads 0.0. This test documents the cliff
+    # rather than hiding it; the metric is still a genuine generalisation check
+    # (five unseen disciplines), but it moves as a step, not a gradient.
+    from ml.petroleum import petroleum_generalisation_accuracy
+    from core.petroleum_tasks import PETROLEUM_HELD_OUT_TASKS
+
+    assert len(PETROLEUM_HELD_OUT_TASKS) >= 5
+    assert petroleum_generalisation_accuracy(episodes=20) == 0.0
+    assert petroleum_generalisation_accuracy() > 0.0
+
+
 def test_metric_specs_cover_every_metric():
     assert set(spec.name for spec in METRIC_SPECS) == set(metric_names(EvaluationMetrics))
 

@@ -13,6 +13,7 @@ class Domain(str, Enum):
     PLANNING = "planning"
     UNCERTAINTY = "uncertainty"
     PETROLEUM = "petroleum"
+    SAFETY = "safety"
 
 
 @dataclass(frozen=True)
@@ -150,6 +151,28 @@ class OntologyFeedbackSpec:
 
 
 @dataclass(frozen=True)
+class GateCase:
+    """One acceptance-gate judgement with a known-correct verdict.
+
+    Unlike a retrieval expectation, whose answer the project's own seeds supply,
+    a gate case states what the *policy* must decide for a source that was never
+    part of the corpus. Half the cases are traps the policy must refuse (an
+    untrusted host, thin credibility, a formula fragment, broken prose, an
+    article about the wrong kind of "reservoir"), so a gate that accepts
+    everything -- the failure mode a closed self-test cannot see -- scores below
+    1.0 and moves this metric.
+    """
+
+    url: str
+    title: str
+    topic: str
+    snippet: str
+    credibility: float
+    expect_accept: bool
+    note: str = ""
+
+
+@dataclass(frozen=True)
 class Scenario:
     """A single, fixed evaluation case."""
 
@@ -177,6 +200,8 @@ class Scenario:
     ontology_reinforcement: tuple[OntologyReinforcementSpec, ...] = ()
     # Recalls whose outcomes should credit/blame the learned link behind them.
     ontology_feedback: tuple[OntologyFeedbackSpec, ...] = ()
+    # Acceptance-gate judgements with a known-correct verdict (a held-out check).
+    gate_cases: tuple[GateCase, ...] = ()
 
 
 def _scenario_memory() -> Scenario:
@@ -570,6 +595,121 @@ def _scenario_petroleum_ontology_feedback() -> Scenario:
     )
 
 
+def _scenario_gate_discrimination() -> Scenario:
+    """Held-out gate discrimination: the acceptance policy must refuse the traps.
+
+    Every other scenario checks that the project agrees with its *own* seeds, so
+    a policy that accepted everything would still score 1.0. This one states the
+    verdict for sources that were never part of the corpus -- five traps the gate
+    must refuse and five statements it must accept -- so the metric moves when
+    the gate weakens. It is the one place the project's judgement is measured
+    against an external standard rather than against itself.
+    """
+    return Scenario(
+        id="gate-discrimination",
+        domain=Domain.SAFETY,
+        description="The acceptance gate refuses the traps and keeps the real statements.",
+        gate_cases=(
+            # Must be refused: an untrusted host.
+            GateCase(
+                url="https://some-random-blog.example/petroleum",
+                title="Reservoir pressure",
+                topic="reservoir pressure",
+                snippet="Reservoir pressure declines as hydrocarbons are produced.",
+                credibility=0.95,
+                expect_accept=False,
+                note="untrusted host",
+            ),
+            # Must be refused: credibility below the floor.
+            GateCase(
+                url="https://en.wikipedia.org/wiki/Porosity",
+                title="Porosity",
+                topic="porosity",
+                snippet="Porosity is the fraction of the bulk volume that is void.",
+                credibility=0.35,
+                expect_accept=False,
+                note="credibility below floor",
+            ),
+            # Must be refused: symbolic markup, not a statement.
+            GateCase(
+                url="https://en.wikipedia.org/wiki/Darcy%27s_law",
+                title="Darcy's law",
+                topic="darcy law",
+                snippet=r"\displaystyle q = \frac{kA}{\mu} \nabla p",
+                credibility=0.9,
+                expect_accept=False,
+                note="formula fragment",
+            ),
+            # Must be refused: broken prose, not a quotable statement.
+            GateCase(
+                url="https://en.wikipedia.org/wiki/Drilling_fluid",
+                title="Drilling fluid",
+                topic="drilling fluid",
+                snippet="drawbacks\u2014mud filtrate soaks into the earth's",
+                credibility=0.9,
+                expect_accept=False,
+                note="incomplete statement",
+            ),
+            # Must be refused: a water reservoir is not a petroleum reservoir.
+            GateCase(
+                url="https://en.wikipedia.org/wiki/Quabbin_Reservoir",
+                title="Quabbin Reservoir",
+                topic="reservoir study",
+                snippet="Quabbin Reservoir is the largest inland body of water in Massachusetts.",
+                credibility=0.9,
+                expect_accept=False,
+                note="article about the wrong kind of reservoir",
+            ),
+            # Must be accepted: real, trusted, on-topic statements.
+            GateCase(
+                url="https://en.wikipedia.org/wiki/Porosity",
+                title="Porosity",
+                topic="porosity",
+                snippet="Porosity is the fraction of the bulk volume that is void.",
+                credibility=0.9,
+                expect_accept=True,
+                note="trusted and on topic",
+            ),
+            GateCase(
+                url="https://www.spe.org/petrophysics/permeability",
+                title="Permeability",
+                topic="permeability",
+                snippet="Permeability measures the ability of a rock to transmit fluids.",
+                credibility=0.9,
+                expect_accept=True,
+                note="trusted and on topic",
+            ),
+            GateCase(
+                url="https://en.wikipedia.org/wiki/Reservoir",
+                title="Reservoir",
+                topic="reservoir",
+                snippet="A petroleum reservoir is a subsurface accumulation of hydrocarbons.",
+                credibility=0.9,
+                expect_accept=True,
+                note="trusted and on topic",
+            ),
+            GateCase(
+                url="https://en.wikipedia.org/wiki/Well_logging",
+                title="Well logging",
+                topic="well logging",
+                snippet="Well logging records the properties of a borehole in a well.",
+                credibility=0.9,
+                expect_accept=True,
+                note="trusted and on topic",
+            ),
+            GateCase(
+                url="https://www.energy.gov/petroleum",
+                title="Petroleum",
+                topic="petroleum",
+                snippet="Petroleum is a naturally occurring liquid found in geological formations.",
+                credibility=0.9,
+                expect_accept=True,
+                note="trusted and on topic",
+            ),
+        ),
+    )
+
+
 SCENARIOS: tuple[Scenario, ...] = (
     _scenario_memory(),
     _scenario_reasoning(),
@@ -588,6 +728,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     _scenario_petroleum_ontology_learning(),
     _scenario_petroleum_ontology_reinforcement(),
     _scenario_petroleum_ontology_feedback(),
+    _scenario_gate_discrimination(),
 )
 
 

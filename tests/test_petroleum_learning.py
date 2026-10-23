@@ -27,7 +27,9 @@ def test_held_out_tasks_are_not_trained_on():
     trained = {task.name for task in PETROLEUM_TASKS}
     held_out = {task.name for task in PETROLEUM_HELD_OUT_TASKS}
     assert trained.isdisjoint(held_out)
-    assert len(held_out) >= 1
+    # A broad held-out set makes generalisation a graded check rather than a
+    # single-task coin flip.
+    assert len(held_out) >= 5
 
 
 def test_each_task_is_solvable_by_an_explicit_plan():
@@ -73,7 +75,13 @@ def test_train_petroleum_learns_every_trained_discipline():
 def test_train_petroleum_generalises_to_unseen_disciplines():
     report = train_petroleum(episodes=120)
     assert report.generalisation_success
-    assert set(report.generalisation_success) == {"geoscience", "flow_assurance"}
+    assert set(report.generalisation_success) == {
+        "geoscience",
+        "flow_assurance",
+        "geomechanics",
+        "reservoir_management",
+        "decommissioning",
+    }
     assert all(value == 1.0 for value in report.generalisation_success.values())
 
 

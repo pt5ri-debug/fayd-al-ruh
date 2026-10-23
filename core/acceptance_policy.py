@@ -79,6 +79,43 @@ REJECT_INCOMPLETE = "incomplete statement"
 _TERMINAL_RE = re.compile(r"[.!?][\"')\]]?\s*$")
 _MIN_STATEMENT_WORDS = 4
 
+# --- sense disambiguation for ambiguous head-nouns ------------------------
+# A handful of petroleum terms are also everyday words, so a title that shares
+# only that word may be about an entirely different thing. Each entry lists the
+# words that mark the *other* sense; a shared word whose other-sense marker
+# appears (and with no petroleum-context word in sight) is refused. The mapping
+# is deliberately small and explicit: it names only the confusions the project
+# has actually seen, and a term with no entry is treated as unambiguous.
+
+_AMBIGUOUS_SENSES: dict[str, frozenset[str]] = {
+    "reservoir": frozenset(
+        {"water", "lake", "river", "dam", "catchment", "drinking", "municipal", "aqueduct", "body"}
+    ),
+    "screen": frozenset({"computer", "display", "monitor", "phone", "movie", "door", "death"}),
+    "trap": frozenset({"animal", "mouse", "insect", "steam"}),
+    "seal": frozenset({"animal", "mammal", "harbor", "navy"}),
+    "core": frozenset({"apple", "earth", "planet", "cpu", "processor"}),
+    "log": frozenset({"wood", "tree", "forest", "lumber"}),
+    "pool": frozenset({"swimming", "water", "gene", "billiard"}),
+    "field": frozenset({"farm", "crop", "sports", "athletic", "magnetic", "electric"}),
+}
+"""Words that mark the *non-petroleum* sense of an ambiguous shared term."""
+
+_AMBIGUOUS_TERMS = frozenset(_AMBIGUOUS_SENSES)
+"""The ambiguous terms, for a quick ``shared <= ...`` test."""
+
+_PETROLEUM_CONTEXT = frozenset(
+    {
+        "oil", "gas", "petroleum", "hydrocarbon", "hydrocarbons", "well", "wellbore",
+        "drilling", "drill", "borehole", "formation", "porosity", "permeability",
+        "saturation", "pressure", "geolog", "geological", "subsurface", "aquifer",
+        "seismic", "logging", "production", "crude", "sandstone", "carbonate",
+        "shale", "fluid", "mud", "cement", "completion", "caprock", "petrophysics",
+        "geophysics", "wellhead", "wellbore", "payzone", "wireline", "trap",
+    }
+)
+"""A *different* petroleum-context word in a snippet clears the sense check."""
+
 
 def title_words(text: str) -> set[str]:
     """The lowercase word set of a title, for topic/title comparison."""
@@ -144,7 +181,7 @@ def sanitize_statement(text: str) -> str:
     return ensure_terminal(whole)
 
 
-def is_relevant_to_topic(topic: str, title: str) -> bool:
+def is_relevant_to_topic(topic: str, title: str, text: str = "") -> bool:
     """Whether a result's article is genuinely about the topic.
 
     A search for an ambiguous term returns results that merely share a word
@@ -154,16 +191,33 @@ def is_relevant_to_topic(topic: str, title: str) -> bool:
     the topic's words and the title's words must overlap substantially in both
     directions. A shared head-noun is not enough -- the article must not be
     mostly about something else.
+
+    A word like ``reservoir`` is ambiguous on its own, so when the *only* shared
+    word is one of those terms, ``text`` (the article's own statement) and the
+    title are checked for a marker of a different sense ("body of water"); if one
+    is present and no petroleum-context word appears, the result is refused.
+    This is what keeps "Quabbin Reservoir ... body of water" out of a petroleum
+    store while still accepting "water drive supports reservoir pressure".
     """
     topic_set = title_words(topic)
     title_set = title_words(title)
     if not topic_set or not title_set:
         return False
     shared = topic_set & title_set
-    return (
+    if not (
         len(shared) / len(topic_set) >= TITLE_COVERAGE
         and len(shared) / len(title_set) >= TITLE_COVERAGE
-    )
+    ):
+        return False
+    if shared and shared <= _AMBIGUOUS_TERMS:
+        body = title_words(text) | title_set
+        # The shared word itself is not evidence of the petroleum sense; only a
+        # *different* petroleum-context word clears the check.
+        if not ((body - shared) & _PETROLEUM_CONTEXT):
+            for word in shared:
+                if body & _AMBIGUOUS_SENSES[word]:
+                    return False
+    return True
 
 
 def source_rejection_reason(
@@ -219,7 +273,7 @@ def rejection_reason(
     )
     if source_reason is not None:
         return source_reason
-    if not is_relevant_to_topic(topic, title):
+    if not is_relevant_to_topic(topic, title, snippet):
         return f"not about '{topic}' (article is '{title}')"
     return None
 

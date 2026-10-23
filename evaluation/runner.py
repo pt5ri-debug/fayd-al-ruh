@@ -25,8 +25,9 @@ from evaluation.scenarios import (
     SCENARIOS,
     DecisionActionSpec,
 )
-from ml.petroleum import petroleum_learning_accuracy
+from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
 from core.curriculum_knowledge import curriculum_coverage_score
+from core.acceptance_policy import rejection_reason
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,10 @@ class EvaluationMetrics:
     petroleum_ontology_feedback_accuracy: float
     # Petroleum learning across disciplines (trained tasks, held-out success)
     petroleum_learning_accuracy: float
+    # Held-out disciplines never trained on (a genuine generalisation check)
+    petroleum_generalisation_accuracy: float
+    # Acceptance gate: held-out judgements the policy must get right
+    acceptance_gate_accuracy: float
     # Curriculum: fraction of the seeded degree the ontology carries
     curriculum_coverage: float
     # Aggregate
@@ -584,7 +589,41 @@ def _has_relation(controller: CognitiveController, source_label: str, target_lab
     )
 
 
+def _run_gate_discrimination(scenario: Scenario) -> ScenarioResult:
+    """Score the acceptance policy against a held-out verdict for each source.
+
+    This is the one check in the suite whose answer does not come from the
+    project's own seeds: it states whether each source *should* be accepted, so a
+    gate that drifts (accepting an untrusted host, a water reservoir, or broken
+    prose) scores below 1.0 and regresses the metric.
+    """
+    hits = 0
+    for case in scenario.gate_cases:
+        accepted = (
+            rejection_reason(
+                url=case.url,
+                title=case.title,
+                topic=case.topic,
+                snippet=case.snippet,
+                credibility=case.credibility,
+            )
+            is None
+        )
+        hits += int(accepted == case.expect_accept)
+    total = len(scenario.gate_cases)
+    accuracy = hits / total if total else 0.0
+    return ScenarioResult(
+        scenario.id,
+        scenario.domain.value,
+        passed=accuracy == 1.0,
+        checks={"acceptance_gate_accuracy": round(accuracy, 6)},
+        details={"correct": str(hits), "expected": str(total)},
+    )
+
+
 def run_scenario(scenario: Scenario) -> ScenarioResult:
+    if scenario.gate_cases:
+        return _run_gate_discrimination(scenario)
     if scenario.decisions:
         return _run_decisions(scenario)
     if scenario.expected_conflicts or (scenario.beliefs and not scenario.observations and not scenario.predictions):
@@ -672,6 +711,14 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # retrieval score, so it regresses if any discipline stops being learnable.
     petroleum_task_learning = petroleum_learning_accuracy()
 
+    # Generalisation: the disciplines the learner never trained on. A closed
+    # self-test cannot see this, so it is the honest half of "did it learn?".
+    petroleum_generalisation = petroleum_generalisation_accuracy()
+
+    # Acceptance gate: judgements the project must get right against an external
+    # standard (a held-out verdict per source), not against its own seeds.
+    acceptance_gate = domain_metric(Domain.SAFETY, "acceptance_gate_accuracy")
+
     # Curriculum: how much of the seeded degree (every course's concepts and
     # relations) the live ontology actually carries.
     curriculum_coverage_value = curriculum_coverage_score(CognitiveController().ontology)
@@ -706,6 +753,8 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_reinforcement,
         petroleum_feedback,
         petroleum_task_learning,
+        petroleum_generalisation,
+        acceptance_gate,
         curriculum_coverage_value,
     ])
 
@@ -731,6 +780,8 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_ontology_reinforcement_accuracy=round(petroleum_reinforcement, 6),
         petroleum_ontology_feedback_accuracy=round(petroleum_feedback, 6),
         petroleum_learning_accuracy=round(petroleum_task_learning, 6),
+        petroleum_generalisation_accuracy=round(petroleum_generalisation, 6),
+        acceptance_gate_accuracy=round(acceptance_gate, 6),
         curriculum_coverage=round(curriculum_coverage_value, 6),
         overall=round(overall, 6),
     )
@@ -742,6 +793,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         Domain.PLANNING.value: round(planning_success, 6),
         Domain.UNCERTAINTY.value: round(calibrated, 6),
         Domain.PETROLEUM.value: round(petroleum_score, 6),
+        Domain.SAFETY.value: round(acceptance_gate, 6),
     }
 
     return EvaluationReport(

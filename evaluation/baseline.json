@@ -42,9 +42,11 @@
     "petroleum": 1.0,
     "planning": 1.0,
     "reasoning": 1.0,
+    "safety": 1.0,
     "uncertainty": 0.867935
   },
   "metrics": {
+    "acceptance_gate_accuracy": 1.0,
     "brier_score": 0.018302,
     "calibration_error": 0.132065,
     "causal_chain_accuracy": 1.0,
@@ -52,8 +54,9 @@
     "contradiction_rate": 1.0,
     "curriculum_coverage": 1.0,
     "decision_explanation_quality": 1.0,
-    "overall": 0.992231,
+    "overall": 0.993049,
     "petroleum_causal_accuracy": 1.0,
+    "petroleum_generalisation_accuracy": 1.0,
     "petroleum_inference_accuracy": 1.0,
     "petroleum_learning_accuracy": 1.0,
     "petroleum_multihop_retrieval_accuracy": 1.0,
@@ -217,6 +220,14 @@
       },
       "domain": "petroleum",
       "id": "petroleum-ontology-feedback",
+      "passed": true
+    },
+    {
+      "checks": {
+        "acceptance_gate_accuracy": 1.0
+      },
+      "domain": "safety",
+      "id": "gate-discrimination",
       "passed": true
     }
   ],
