@@ -35,7 +35,7 @@ from core.speech import (
     load_recognizer,
     microphone_install_hint,
 )
-from core.voices import ModelVoice, SystemVoice, Voice, model_voices, voice_keys
+from core.voices import ModelVoice, SystemVoice, Voice, model_voices, voice_keys, voice_sections
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
 from gui.import_center import ImportReport, KnowledgeImporter
 from gui.image_edit import ImageEditService
@@ -783,25 +783,85 @@ class ChatService:
     def model_voices(self) -> tuple[ModelVoice, ...]:
         """The voices of the local speech models this machine can run.
 
-        VoiceTut-TTS over audio.cpp is the one engine that owns named voices today,
-        and it returns ``()`` unless it is fully installed, so this list is exactly
-        what can be spoken here -- never a promise of a model that is absent.
+        VoiceTut-TTS over audio.cpp, Piper, and Qwen3-TTS each report their own
+        named voices, and each returns ``()`` unless it is fully installed, so this
+        list is exactly what can be spoken here -- never a promise of a model that
+        is absent.
         """
         return model_voices()
+
+    def voice_sections(self):
+        """The voices grouped under the source each came from, for the menus.
+
+        One section per source -- *Installed Voices*, *VoiceTut-TTS*, *Piper*,
+        *Qwen3-TTS*, and the synthetic catalog -- each carrying only the voices that
+        engine actually reports here, so the sidebar can never list a voice that
+        would fail to speak.
+        """
+        return voice_sections()
+
+    def voice_source_notes(self) -> tuple[str, ...]:
+        """One honest line per voice source that contributed no voice here.
+
+        So a menu that lists only some of the sources says *why* the others are
+        missing and what the real next step is, instead of silently omitting them.
+        """
+        from core.voices import SOURCE_SYSTEM, SOURCE_SYNTHETIC
+
+        present = {section.source for section in self.voice_sections()}
+        notes: list[str] = []
+        if SOURCE_SYSTEM not in present:
+            from core.speech import system_engine_available
+
+            if system_engine_available():
+                notes.append(
+                    "Installed Voices: none were reported by this machine's speech engine."
+                )
+            else:
+                notes.append(
+                    "Installed Voices: no system speech engine is installed "
+                    "(espeak-ng, say, or Windows speech)."
+                )
+        if SOURCE_SYNTHETIC not in present:
+            notes.append(
+                "Synthetic catalog: no speech engine is installed to speak these "
+                "settings, so they are not offered."
+            )
+        for note in (
+            self.model_speech_status(),
+            self.piper_speech_status(),
+            self.qwen_tts_voice_status(),
+        ):
+            if "not ready" in note:
+                notes.append(note)
+        return tuple(notes)
+
+    def qwen_tts_voice_status(self) -> str:
+        """The Qwen3-TTS voice line alone, for the reading-voice menu.
+
+        :meth:`qwen_speech_status` also reports Qwen3-*ASR*, which is speech to text
+        and so belongs to the microphone, not to the voice menu.
+        """
+        from core.qwen_speech import qwen_tts_status
+
+        tts = qwen_tts_status()
+        line = "ready" if tts.available else f"not ready — {tts.hint}"
+        return f"Qwen3-TTS (English): {line}"
 
     def model_speech_status(self) -> str:
         """An honest note about the local model voices, for the window.
 
         Names the engines that can actually speak here and the real next step when
-        none can, so a user who sees an empty "Model voices" section knows why.
+        none can, so a user who sees an absent model-voice section knows why. The
+        count is VoiceTut-TTS's *own* speakers, never another engine's voices.
         """
-        from core.audiocpp_speech import audiocpp_status
+        from core.audiocpp_speech import AUDIOCPP_ENGINE_NAME, audiocpp_status
 
         status = audiocpp_status()
-        voices = self.model_voices()
+        voices = model_voices(AUDIOCPP_ENGINE_NAME)
         if voices:
-            return f"VoiceTut-TTS (local Arabic model): {len(voices)} voices ready"
-        return f"VoiceTut-TTS (local Arabic model): not ready — {status.hint}"
+            return f"VoiceTut-TTS (Local Arabic): {len(voices)} voices ready"
+        return f"VoiceTut-TTS (Local Arabic): not ready — {status.hint}"
 
     def reading_status(self) -> str:
         """An honest, human-readable status of the reader."""
@@ -836,7 +896,7 @@ class ChatService:
 
         status = piper_status()
         line = "ready" if status.available else f"not ready — {status.hint}"
-        return f"Piper (natural voice, Arabic + English): {line}"
+        return f"Piper (Arabic + English): {line}"
 
     def reading_available(self) -> bool:
         """True when a real speech engine is installed."""

@@ -422,3 +422,44 @@ def test_cli_qwen_speech_help_is_available():
     with pytest.raises(SystemExit), redirect_stdout(buffer):
         main(["--help"])
     assert "qwen-asr" in buffer.getvalue() and "qwen-tts" in buffer.getvalue()
+
+
+# --------------------------------------------------- the voice menu by source
+
+
+def test_voice_list_is_empty_until_the_runtime_and_weights_are_present(tmp_path):
+    """A Qwen3-TTS voice is listed only when the model can really speak here."""
+    from core.qwen_speech import voice_list
+
+    assert voice_list(tmp_path) == ()
+
+
+def test_voice_list_names_the_built_in_speakers(monkeypatch, tmp_path):
+    """With the runtime and weights present, each speaker is a ModelVoice."""
+    from types import SimpleNamespace
+
+    from core import qwen_speech
+    from core.qwen_speech import TTS_ENGINE_NAME, voice_list
+
+    monkeypatch.setattr(
+        qwen_speech, "qwen_tts_status", lambda root=None: SimpleNamespace(available=True)
+    )
+    listed = voice_list(tmp_path)
+    assert [v.name for v in listed] == ["Serena", "Aiden"]
+    for voice in listed:
+        assert voice.engine == TTS_ENGINE_NAME
+        assert voice.source == "qwen3-tts"
+        assert voice.language == "en" and not voice.arabic
+        assert voice.key == f"model:qwen3-tts:{voice.name}"
+        assert voice.title and voice.title.endswith("(English)")
+
+
+def test_speech_factory_uses_the_chosen_speaker_from_a_model_voice():
+    """Choosing a Qwen3-TTS voice picks that built-in speaker for the reading."""
+    from core.qwen_speech import TTS_ENGINE_NAME
+    from core.voices import ModelVoice
+
+    runner = _FakeTtsRunner()
+    chosen = ModelVoice(name="Aiden", engine=TTS_ENGINE_NAME, language="en")
+    synth = load_synthesizer("qwen3-tts", runner=runner, voice=chosen)
+    assert synth.speaker == "Aiden"

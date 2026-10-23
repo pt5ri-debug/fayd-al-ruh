@@ -1139,6 +1139,20 @@ def speech_available() -> bool:
     return discover_synthesizer_name() != "silent"
 
 
+def system_engine_available() -> bool:
+    """True when a *system* TTS engine (the target of the synthetic catalog) exists.
+
+    The synthetic :data:`core.voices.VOICE_CATALOG` is a set of settings for the
+    system engine (``espeak-ng``/``espeak``/``flite``/``say``, or Windows SAPI), not
+    for the local model engines, so a menu should offer those voices only when that
+    engine is really present -- otherwise they would come out empty.
+    """
+    for _name, executable, _builder, _voice_options in TTS_ENGINES:
+        if shutil.which(executable):
+            return True
+    return windows_speech_available()
+
+
 def install_speech_engine(
     *,
     runner: "SpeechCommandRunner | None" = None,
@@ -1733,7 +1747,12 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
         except PiperUnavailable as error:
             raise ValueError(str(error)) from error
     if name in ("qwen3-tts", "qwen"):
-        from core.qwen_speech import QwenSpeechUnavailable, QwenTtsSynthesizer, available_synthesizer
+        from core.qwen_speech import (
+            TTS_ENGINE_NAME,
+            QwenSpeechUnavailable,
+            QwenTtsSynthesizer,
+            available_synthesizer,
+        )
 
         if not available_synthesizer() and not options.get("runner"):
             from core.qwen_speech import qwen_tts_status
@@ -1747,11 +1766,16 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
             system = _system_synthesizer(voice=voice, language=language)
             if system is not None:
                 fallback = system
+        # A chosen Qwen3-TTS voice names its own built-in speaker, so it is used
+        # unless an explicit ``speaker`` was given.
+        speaker = options.get("speaker")
+        if speaker is None and isinstance(voice, ModelVoice) and voice.engine == TTS_ENGINE_NAME:
+            speaker = voice.name
         try:
             return QwenTtsSynthesizer(
                 model_dir=options.get("model_dir"),
                 runner=options.get("runner"),
-                speaker=options.get("speaker"),
+                speaker=speaker,
                 language=language,
                 instruct=options.get("instruct"),
                 fallback=fallback,
@@ -1828,13 +1852,27 @@ def _engine_for_voice(value: object) -> str | None:
     :func:`discover_synthesizer_name`.
     """
     if isinstance(value, ModelVoice):
-        from core.audiocpp_speech import (
-            AUDIOCPP_ENGINE_NAME,
-            available_synthesizer as audiocpp_ready,
-        )
+        if value.engine == "audio.cpp":
+            from core.audiocpp_speech import (
+                AUDIOCPP_ENGINE_NAME,
+                available_synthesizer as audiocpp_ready,
+            )
 
-        if value.engine == AUDIOCPP_ENGINE_NAME and audiocpp_ready():
-            return AUDIOCPP_ENGINE_NAME
+            if audiocpp_ready():
+                return AUDIOCPP_ENGINE_NAME
+            return None
+        if value.engine == "piper":
+            from core.piper_speech import PIPER_ENGINE_NAME, available_synthesizer as piper_ready
+
+            if piper_ready():
+                return PIPER_ENGINE_NAME
+            return None
+        if value.engine == "qwen3-tts":
+            from core.qwen_speech import TTS_ENGINE_NAME, available_synthesizer as qwen_ready
+
+            if qwen_ready():
+                return TTS_ENGINE_NAME
+            return None
         return None
     if isinstance(value, SystemVoice):
         voice: SystemVoice | None = value

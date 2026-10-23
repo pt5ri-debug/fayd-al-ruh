@@ -208,3 +208,51 @@ def test_real_piper_renders_audio():
     clip = synth.synthesize(sample)
     assert clip.duration_seconds > 0.2
     assert not clip.is_silent
+
+
+# --------------------------------------------------- the voice menu by source
+
+
+def test_voice_list_is_empty_without_the_runtime_or_a_voice(tmp_path):
+    """A Piper voice is listed only when it can really be spoken here."""
+    from core.piper_speech import voice_list
+
+    assert voice_list(tmp_path) == ()
+    if piper_extra_installed():
+        (tmp_path / f"{ARABIC_VOICE_KEY}.onnx").write_bytes(b"stub")
+        listed = voice_list(tmp_path)
+        assert [v.name for v in listed] == [ARABIC_VOICE_KEY]
+        voice = listed[0]
+        assert voice.key == f"model:piper:{ARABIC_VOICE_KEY}"
+        assert voice.engine == PIPER_ENGINE_NAME
+        assert voice.source == "piper"
+        assert voice.language == "ar" and voice.arabic
+        # The menu label is readable; the key still names the model file.
+        assert voice.title and voice.name == ARABIC_VOICE_KEY
+
+
+def test_voice_list_title_is_a_readable_name(monkeypatch, tmp_path):
+    """Each listed Piper voice carries a human title, never the raw file key."""
+    from core import piper_speech
+    from core.piper_speech import voice_list
+
+    monkeypatch.setattr(piper_speech, "piper_extra_installed", lambda: True)
+    (tmp_path / f"{ARABIC_VOICE_KEY}.onnx").write_bytes(b"stub")
+    (tmp_path / "en_US-amy-medium.onnx").write_bytes(b"stub")
+    listed = voice_list(tmp_path)
+    assert {v.name for v in listed} == {ARABIC_VOICE_KEY, "en_US-amy-medium"}
+    for voice in listed:
+        assert voice.title
+        assert voice.title != voice.name
+        assert voice.label() == voice.title
+
+
+def test_synthesizer_loads_the_chosen_piper_voice_by_name(tmp_path):
+    """A chosen Piper ModelVoice loads exactly the model file it names."""
+    from core.voices import ModelVoice
+
+    runner = _EchoRunner()
+    chosen = ModelVoice(name="en_US-amy-medium", engine=PIPER_ENGINE_NAME, language="en")
+    synth = PiperSynthesizer(root=tmp_path, runner=runner, voice=chosen)
+    # No file for that voice: the spec still resolves to it (not the default).
+    assert synth._spec("Hello").key == "en_US-amy-medium"

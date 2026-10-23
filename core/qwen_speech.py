@@ -49,7 +49,7 @@ from core.optional_deps import FEATURE_QWEN_ASR, FEATURE_QWEN_TTS, pip_install_c
 from core.paths import qwen_speech_models_dir
 from core.permissions import Capability, PermissionPolicy
 from core.speech import AudioClip, SpeechSynthesizer
-from core.voices import detect_language
+from core.voices import ModelVoice, detect_language
 
 #: The registry file written after a download, naming the model to load.
 REGISTRY_FILENAME = "model.json"
@@ -82,6 +82,13 @@ QWEN_TTS_LANGUAGES: tuple[str, ...] = (
 #: installed model ships.
 DEFAULT_TTS_SPEAKER = "Serena"
 KNOWN_TTS_SPEAKERS: tuple[str, ...] = ("Serena", "Aiden")
+
+#: The built-in speakers a menu offers, with the gender each is reported with. The
+#: voices are English only, because Qwen3-TTS has no Arabic.
+_SPEAKER_GENDERS: tuple[tuple[str, str], ...] = (
+    ("Serena", "Female"),
+    ("Aiden", "Male"),
+)
 
 #: Project language code -> the model's own language name.
 _LANGUAGE_NAMES: dict[str, str] = {"en": "English", "ar": "Arabic"}
@@ -602,6 +609,29 @@ def available_synthesizer() -> bool:
     return qwen_tts_status().available
 
 
+def voice_list(root: Path | str | None = None) -> tuple[ModelVoice, ...]:
+    """Qwen3-TTS's built-in speakers, as :class:`~core.voices.ModelVoice` objects.
+
+    Returns ``()`` unless the runtime is installed *and* the TTS weights are on
+    disk, so the reading-voice menu lists a Qwen3-TTS voice only when it can really
+    be spoken here. Each voice is keyed ``model:qwen3-tts:<speaker>`` and carries
+    its readable title; the language is English, because Qwen3-TTS has no Arabic.
+    """
+    if not qwen_tts_status(root).available:
+        return ()
+    return tuple(
+        ModelVoice(
+            name=speaker,
+            engine=TTS_ENGINE_NAME,
+            language="en",
+            gender=gender,
+            model="Qwen3-TTS",
+            title=f"{speaker} (English)",
+        )
+        for speaker, gender in _SPEAKER_GENDERS
+    )
+
+
 # ----------------------------------------------------------------- download
 
 
@@ -719,4 +749,5 @@ __all__ = [
     "resolve_tts_spec",
     "tts_spec_names",
     "tts_spec_summaries",
+    "voice_list",
 ]
