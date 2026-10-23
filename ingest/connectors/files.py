@@ -89,6 +89,7 @@ from core.pdf_ocr import (
     PageOcrEngine,
     extract_pdf_pages,
     ocr_available,
+    parse_ocr_languages,
 )
 from core.text_encoding import EncodingDetectionError, decode_bytes, detect_encoding
 from ingest.errors import ConnectorError
@@ -684,14 +685,7 @@ def _flag(value: object) -> bool:
 
 def _ocr_languages(value: object) -> tuple[str, ...]:
     """Parse an OCR ``languages`` option: a tuple/list, or a ``+``/``,`` string."""
-    if value is None or value == "":
-        return ("eng",)
-    if isinstance(value, (tuple, list)):
-        languages = tuple(str(item).strip() for item in value if str(item).strip())
-    else:
-        text = str(value).replace("+", ",")
-        languages = tuple(part.strip() for part in text.split(",") if part.strip())
-    return languages or ("eng",)
+    return parse_ocr_languages(value, default=("eng",))
 
 
 def _ocr_config(metadata: dict) -> OcrConfig:

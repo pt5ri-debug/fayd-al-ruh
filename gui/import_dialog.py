@@ -380,7 +380,7 @@ class ImportCenterDialog:
         if result.ok and not optional_deps.status(optional_deps.FEATURE_OCR).system_ok:
             # pip succeeded but the engine is still missing; its own result message
             # would name that step, but the app can offer to run it here.
-            engine = install_ocr_engine()
+            engine = install_ocr_engine(languages=self._ocr_languages())
             result = optional_deps.InstallResult(
                 key=optional_deps.FEATURE_OCR,
                 ok=engine.ok,
@@ -394,7 +394,7 @@ class ImportCenterDialog:
     def _install_ocr_engine_job(self, progress: Any) -> "optional_deps.InstallResult":
         from core.pdf_ocr import install_ocr_engine
 
-        engine = install_ocr_engine()
+        engine = install_ocr_engine(languages=self._ocr_languages())
         return optional_deps.InstallResult(
             key=optional_deps.FEATURE_OCR,
             ok=engine.ok,

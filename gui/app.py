@@ -2624,24 +2624,28 @@ class FaydGUI:
             self._add_bubble("note", "Installing OCR support… this can take a moment.")
         else:
             # The packages are present; the engine is what is missing.
-            from core.pdf_ocr import ocr_install_plan
+            from core.pdf_ocr import DEFAULT_OCR_LANGUAGES, ocr_install_plan
 
-            plan = ocr_install_plan()
+            plan = ocr_install_plan(DEFAULT_OCR_LANGUAGES)
             if plan.can_install:
                 self._add_bubble(
-                    "note", f"Installing the Tesseract OCR engine: {' '.join(plan.command)}"
+                    "note",
+                    "Installing the Tesseract OCR engine and its "
+                    f"{'/'.join(DEFAULT_OCR_LANGUAGES)} language data: "
+                    f"{' '.join(plan.command)}",
                 )
         self._start_work(self._install_ocr_worker)
 
     def _install_ocr_worker(self) -> Any:
-        """Install the OCR Python packages, then the Tesseract engine if needed.
+        """Install the OCR Python packages, then the Tesseract engine + language data.
 
         Returns an :class:`~core.optional_deps.InstallResult` when pip ran (its
         message already names the engine step when the engine is still missing),
         or an :class:`~core.pdf_ocr.OcrInstallResult` when only the engine was
-        left to install.
+        left to install. The engine install always fetches English *and* Arabic
+        language data, so a scanned Arabic page is readable without a second step.
         """
-        from core.pdf_ocr import install_ocr_engine
+        from core.pdf_ocr import DEFAULT_OCR_LANGUAGES, install_ocr_engine
 
         if optional_deps.missing_imports(optional_deps.FEATURE_OCR):
             result = optional_deps.install(optional_deps.FEATURE_OCR)
@@ -2651,7 +2655,7 @@ class FaydGUI:
             return optional_deps.InstallResult(
                 key=optional_deps.FEATURE_OCR, ok=True, message="OCR support is installed."
             )
-        return install_ocr_engine()
+        return install_ocr_engine(languages=DEFAULT_OCR_LANGUAGES)
 
     def _render_install_result(self, result: "optional_deps.InstallResult") -> None:
         self._add_bubble("note", result.message)

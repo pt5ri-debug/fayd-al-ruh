@@ -1,15 +1,18 @@
 """Install the optional features (PDF, OCR, learned image) from the command line.
 
-    python -m cli deps               # show what is installed and what is missing
-    python -m cli deps --install ocr # install the OCR packages
-    python -m cli deps --install pdf --install ocr
+    python -m cli deps                          # show what is installed and what is missing
+    python -m cli deps --install ocr             # install the OCR packages + Tesseract
+    python -m cli deps --install ocr --ocr-languages ara+eng
 
 The installer is the same one the window offers (:mod:`core.optional_deps`): it
 runs the bundled ``requirements-<feature>.txt`` with the interpreter that is
 running this program, which is the command that actually works from a source
-checkout. It never claims to install the Tesseract *system* package -- that is
-reported separately, because pip cannot install it. The learned image backend's
-model weights are a similar separate step (a one-time download).
+checkout. For OCR it then installs the *system* half too -- the Tesseract engine
+**and its language data** (English + Arabic by default) -- through the platform
+package manager, because pip cannot install an OS package. ``--ocr-languages``
+chooses which trained-data packages to fetch, so a scanned Arabic page is
+readable in one run. The learned image backend's model weights are a similar
+separate step (a one-time download).
 """
 
 from __future__ import annotations
@@ -33,6 +36,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FEATURE",
         help="install a feature's Python packages (pdf, ocr, image); "
         "use 'speech' for the espeak-ng system engine; repeatable.",
+    )
+    parser.add_argument(
+        "--ocr-languages",
+        default="",
+        metavar="LANGS",
+        help="Tesseract language data to fetch for OCR, e.g. ara+eng "
+        "(default: eng+ara). Only used with --install ocr.",
     )
     parser.add_argument(
         "--check",
@@ -93,20 +103,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not result.ok:
             failed = True
         # OCR has a *system* half too: pip installs the packages, but the
-        # Tesseract engine is an OS package. Offer the real next step here, the
-        # same way `--install speech` does for espeak-ng.
+        # Tesseract engine and its language data are OS packages. Offer the real
+        # next step here, the same way `--install speech` does for espeak-ng.
         if key == optional_deps.FEATURE_OCR and result.ok:
-            failed = _install_ocr_engine(failed)
+            failed = _install_ocr_engine(failed, args.ocr_languages)
     return 1 if failed else 0
 
 
-def _install_ocr_engine(failed: bool) -> bool:
-    """Install the Tesseract engine (a system package) via the platform package manager."""
+def _install_ocr_engine(failed: bool, languages: str = "") -> bool:
+    """Install the Tesseract engine *and its language data* (system packages)."""
     from core.pdf_ocr import (
         install_ocr_engine,
+        missing_ocr_languages,
         missing_ocr_python_packages,
         ocr_available,
         ocr_install_plan,
+        parse_ocr_languages,
     )
 
     # The engine is only worth installing once the Python packages are actually
@@ -115,13 +127,17 @@ def _install_ocr_engine(failed: bool) -> bool:
     # installed, so this keeps `--install ocr` honest and exits 0 there.)
     if missing_ocr_python_packages():
         return failed
-    if ocr_available():
-        print("The Tesseract OCR engine is already installed.")
+    codes = parse_ocr_languages(languages)
+    if ocr_available() and not missing_ocr_languages(codes):
+        print("The Tesseract OCR engine and its language data are already installed.")
         return failed
-    plan = ocr_install_plan()
+    plan = ocr_install_plan(codes)
     if plan.can_install:
-        print(f"Installing the Tesseract OCR engine: {' '.join(plan.command)}")
-    result = install_ocr_engine()
+        print(
+            f"Installing the Tesseract OCR engine and language data "
+            f"({' '.join(codes)}): {' '.join(plan.command)}"
+        )
+    result = install_ocr_engine(languages=codes)
     print(result.message)
     return failed or not result.ok
 

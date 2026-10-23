@@ -90,8 +90,10 @@ FEATURES: dict[str, OptionalFeature] = {
         requirements_file="requirements-ocr.txt",
         import_names=("pypdfium2", "pytesseract", "PIL"),
         system_note=(
-            "The Tesseract engine and its language data are separate system packages "
-            "(e.g. `apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara`)."
+            "The Tesseract engine and its language data are separate system packages; "
+            "the app can install them for you with `python -m cli deps --install ocr` "
+            "(engine + English/Arabic data), or manually with "
+            "`apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara`."
         ),
     ),
     FEATURE_IMAGE: OptionalFeature(
