@@ -2597,6 +2597,46 @@ clone, each optional so the base system still runs without it:
   systematicity, the state budget, role abstraction, the candidate inferences, the
   no-assertion rule), the domain layer, and the CLI.
 
+- Phase 21 — a **learned semantic space**, not a hash: the project's "semantic"
+  signal used to be :func:`core.semantic_memory.hashed_embedding`, which scatters
+  tokens into buckets, so two words shared a dimension only by accident -- the
+  retriever could match a *word* but never a *meaning*, and a synonym that never
+  appeared in the seeds matched nothing at all. `core/embeddings.py` replaces it
+  with a real **distributional** space learned from the project's own text:
+  `cooccurrence_counts` counts which words appear near which, `_ppmi_matrix`
+  weights each pair by positive pointwise mutual information, and `_factorize`
+  reduces the matrix to `DEFAULT_DIMENSIONS` (128) dense dimensions with a
+  truncated SVD (numpy, already a base dependency, imported lazily). Everything is
+  deterministic -- the SVD's sign ambiguity is fixed and any sampling is seeded --
+  so a space can be cached and compared between runs. `core/tokenize.py` is the
+  shared normaliser (`normalize_token` with light Arabic normalisation: strip
+  diacritics, unify letters, drop affixes) that both the space and the retriever
+  now use, so they cannot disagree about what a token is.
+  **Honest by construction**: a space is *learned from text*, so it is only as good
+  as the corpus, and `evaluate_held_out` measures that with a real held-out test
+  rather than asserting it -- `held_out_split` holds out by **relation** (not by
+  entry) so the pairs it checks were never seen as such, and a `SemanticReport`
+  reports how much closer related terms sit than randomly paired ones
+  (`separation`) and how often a term's true partner is among its nearest
+  neighbours. On the project's own corpus: related 0.556 vs random 0.014
+  (separation +0.542), the partner in the top-10 for 42.9% of held-out pairs,
+  leaks 0. Wired into `core/rag.py`'s `RagRetriever`: when a space is available it
+  backs the semantic signal *in the same slot and at the same weight* as the hash
+  it replaces (`_load_embeddings`, `_semantic_scores`), so a query about "flow
+  through rock" can reach a passage about permeability with no shared word -- and
+  the calibrated fused-score scale is unchanged, which is what keeps the
+  weak-evidence gate meaningful (raising the semantic weight was tried and
+  reverted: a distributional prior is a better *ranking* signal but not evidence
+  that the corpus answers the question, and it inflated every in-domain score past
+  the web-search threshold). Trained with
+  `python -m cli embeddings train` (cached under `data/ml/semantic_space.json`,
+  git-ignored, via `core.paths.semantic_space_path`), inspected with `similar` /
+  `compare`, and gated by the evaluation's new `semantic_separation` metric so a
+  regression in the space is a gate failure. `tests/test_embeddings.py` and
+  `tests/test_embeddings_cli.py` pin the counts, the PPMI, the factorisation, the
+  held-out split, the honest tiny-corpus limit, the retriever wiring and its
+  fallback, and the CLI.
+
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
 regression monitor each can refuse a change.

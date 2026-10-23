@@ -355,6 +355,11 @@ def run_analogy(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.analogy", argv)
 
 
+def run_embeddings(argv: Sequence[str] = ()) -> int:
+    """Inspect or train the project's learned distributional semantic space."""
+    return _run_module("cli.embeddings", argv)
+
+
 def run_deps(argv: Sequence[str] = ()) -> int:
     """Show or install the optional PDF/OCR features (``python -m cli deps``)."""
     return _run_module("cli.deps", argv)
@@ -485,6 +490,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Scene Studio: build, pose, and render a 3D figure locally", run_scene3d, ("status",)),
     ("Scene Studio: render the built-in figure to a PNG", run_scene3d, ("render",)),
     ("Reason by analogy: what a concept is structurally like", run_analogy, ("like", "porosity")),
+    ("Semantic space: what a word is used with (learned, local)", run_embeddings, ("status",)),
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~4 GB)", run_image, ("download", "--approve")),
     ("Install optional PDF/OCR/image support", run_deps, ()),
@@ -629,6 +635,7 @@ __all__ = [
     "run_demo",
     "run_deps",
     "run_docs",
+    "run_embeddings",
     "run_evaluation",
     "run_gui",
     "run_import_center",

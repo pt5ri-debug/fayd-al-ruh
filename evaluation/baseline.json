@@ -55,7 +55,7 @@
     "contradiction_rate": 1.0,
     "curriculum_coverage": 1.0,
     "decision_explanation_quality": 1.0,
-    "overall": 0.993397,
+    "overall": 0.971934,
     "petroleum_causal_accuracy": 1.0,
     "petroleum_generalisation_accuracy": 1.0,
     "petroleum_inference_accuracy": 1.0,
@@ -71,7 +71,8 @@
     "reliability": 0.017733,
     "resolution": 0.18858,
     "retrieval_accuracy": 1.0,
-    "retrieval_mrr": 1.0
+    "retrieval_mrr": 1.0,
+    "semantic_separation": 0.542689
   },
   "scenarios": [
     {
