@@ -258,8 +258,10 @@ module = ["torch", "qwen_asr", "qwen_tts"]
 ignore_missing_imports = true
 
 # Piper is an optional extra (``pip install .[piper]``); ``core.piper_speech``
-# imports ``piper``/``onnxruntime`` lazily, so a base install must still
-# type-check. Piper ships no type stubs.
+# imports ``piper.voice``/``piper.config`` lazily, so a base install must still
+# type-check. Piper ships no type stubs. The glob covers the submodules that are
+# actually imported; a bare "piper" entry would be redundant (mypy matches a
+# dotted module against the pattern, not its top-level parent).
 [[tool.mypy.overrides]]
-module = ["piper", "piper.*", "onnxruntime"]
+module = ["piper.*"]
 ignore_missing_imports = true

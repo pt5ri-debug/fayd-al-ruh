@@ -52,3 +52,54 @@ def test_runtime_dependencies_are_declared():
     dependencies = _pyproject()["project"]["dependencies"]
     names = {dep.split(">")[0].split("=")[0].split("[")[0].strip() for dep in dependencies}
     assert {"numpy", "requests"} <= names
+
+
+def test_every_optional_import_is_ignored_for_type_checking():
+    """An optional dependency imported lazily must not fail mypy on a base install.
+
+    The project's own rule: every optional import name carries a mypy override.
+    This scans the *actual* imports of the optional feature modules and checks
+    each third-party one is covered, so adding an extra without its override is
+    caught here rather than in CI's mypy step.
+    """
+    import ast
+    import sys
+
+    overrides: set[str] = set()
+    for entry in _pyproject()["tool"]["mypy"]["overrides"]:
+        for name in entry.get("module", []):
+            # "piper.*" covers the "piper" top-level name and its submodules.
+            overrides.add(name.split(".")[0] if name.endswith(".*") else name)
+
+    local = {"core", "storage", "ai", "ml", "gui", "cli", "ingest"}
+    # The base runtime dependencies ship their own type information, so they are
+    # installed and checked rather than ignored.
+    stubbed = {
+        dep.split(">")[0].split("=")[0].split("[")[0].split("<")[0].strip()
+        for dep in _pyproject()["project"]["dependencies"]
+    }
+    optional_modules = [
+        "core/piper_speech.py",
+        "core/qwen_speech.py",
+        "core/pptx_engine.py",
+        "core/imagegen_diffusion.py",
+        "core/ultron.py",
+        "core/pdf_extract.py",
+    ]
+    missing: set[str] = set()
+    for relative in optional_modules:
+        tree = ast.parse((ROOT / relative).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module]
+            else:
+                continue
+            for name in names:
+                top = name.split(".")[0]
+                if top in local or top in stubbed or top in sys.stdlib_module_names or top in overrides:
+                    continue
+                missing.add(f"{relative}: {top}")
+    assert not missing, f"optional imports without a mypy override: {sorted(missing)}"
+
