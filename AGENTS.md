@@ -2669,7 +2669,11 @@ clone, each optional so the base system still runs without it:
   two concepts, yields nothing); the object's head is the noun the verb governs,
   so a concept inside a prepositional phrase ("a blowout **in the reservoir**") is
   not read as the object; the head must *end* its phrase, so a modifier ("well" in
-  "well control") is not mistaken for the head noun; and every candidate carries
+  "well control") is not mistaken for the head noun; a relative clause is never
+  glued onto the object before it; and a *negated* clause ("does not increase",
+  "never increases", "cannot measure", or a trailing ", not flow") asserts nothing
+  and is refused, so the reader can never report the opposite of what a sentence
+  says. Every candidate carries
   the pattern and the sentence that produced it (`ExtractedRelation.pattern` /
   `.sentence`). `read`/`extract` never touches the graph;
   `apply`/`learn_extracted_relations` is the writing path and folds each
