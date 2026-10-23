@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from core.audit_log import AuditLog
+from core.best_effort import best_effort
 from core.human_approval import HumanApprovalGate
 from core.permissions import Capability, PermissionDecision, PermissionPolicy
 
@@ -362,10 +363,8 @@ def save_provider_key(root: str | Path, key: str) -> str:
     resolved = resolve_provider(key).key
     from storage.json_store import JsonStore
 
-    try:
+    with best_effort("remember the cloud provider"):
         JsonStore(root).save(PROVIDER_NAMESPACE, PROVIDER_KEY, {"provider": resolved})
-    except Exception:
-        pass
     return resolved
 
 
@@ -412,14 +411,12 @@ def save_model_key(root: str | Path, provider_key: str, model: str) -> str:
         raise ValueError("A model name is required.")
     from storage.json_store import JsonStore
 
-    try:
+    with best_effort("remember the cloud model"):
         store = JsonStore(root)
         current = store.load(PROVIDER_NAMESPACE, MODEL_KEY)
         mapping = dict(current) if isinstance(current, dict) else {}
         mapping[resolved] = name
         store.save(PROVIDER_NAMESPACE, MODEL_KEY, mapping)
-    except Exception:
-        pass
     return name
 
 
