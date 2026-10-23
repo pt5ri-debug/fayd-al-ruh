@@ -1882,6 +1882,12 @@ Arabic is kept as secondary aliases where useful.
   a page rather than answer about it -- what turns a scanned page into readable
   content -- and `batch_pages` groups 1-based page numbers into bounded batches
   (`MAX_PAGES_PER_REQUEST`) in order, so a long scan is read in pieces.
+  `file_uri` builds the page image's ``file://`` URI with ``Path.as_uri()``, so it
+  works on Windows too: ``f"file://{path}"`` looks right but puts a drive path
+  (``C:\\...``) in the URI's *authority* and leaves its path empty, which is the
+  ``WinError 3 (cannot find the path '')`` a Windows user hit -- ``as_uri``
+  percent-encodes the path and keeps the drive in the path, the form
+  ``urllib.request`` opens on every platform.
   `parse_page_range` reads a plain selection ("7", "1-3", "1 to 3", "2,5,7") so
   the window and the CLI share one parser. `SUPPORTED_SUFFIXES` /
   `UNSUPPORTED_SUFFIXES` are the one place the accepted formats are declared.
@@ -2326,6 +2332,17 @@ clone, each optional so the base system still runs without it:
   `tests/test_docs_cli.py`, and `tests/test_docs_window.py` pin the transcription
   prompt, the batching, the remembered reading, the honest render failure, the CLI
   `read`, and the window's auto-read.
+- Phase 18c — Doc's Studio works on **Windows**: the page image was attached to the
+  vision model as ``f"file://{path}"``, which looks right but is not a URI. On
+  Windows a drive path (``C:\\...``) lands in the URI's *authority* and the path
+  stays empty, so ``llama-cpp-python``'s ``urlopen`` looked for the empty path and
+  the model failed with ``WinError 3 (cannot find the path '')`` -- the whole
+  vision path was unusable on Windows while it happened to work on Linux/macOS
+  (where the path starts with ``/``). `core.docs_studio.file_uri` now builds the
+  URI with ``Path.as_uri()`` (percent-encoded, drive in the path, empty authority),
+  the one form ``urllib.request`` opens on every platform.
+  `tests/test_docs_studio.py` opens the built URI with ``urllib.request`` and pins
+  that the authority is empty and a space is percent-encoded.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

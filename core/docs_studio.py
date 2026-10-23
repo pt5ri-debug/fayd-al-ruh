@@ -556,6 +556,18 @@ def batch_pages(
     return tuple(tuple(ordered[start : start + limit]) for start in range(0, len(ordered), limit))
 
 
+def file_uri(path: str | Path) -> str:
+    """A ``file://`` URI for ``path`` that every OS and ``urlopen`` can open.
+
+    ``f"file://{path}"`` looks right but breaks on Windows: a drive path
+    (``C:\\...``) lands in the URI's *authority* and its path stays empty, so
+    ``urlopen`` raises ``WinError 3 (cannot find the path '')``. ``Path.as_uri``
+    percent-encodes the path and puts the drive in the path, which is the form
+    ``urllib.request`` expects on every platform.
+    """
+    return Path(path).expanduser().resolve().as_uri()
+
+
 def build_vision_messages(
     document: LoadedDocument,
     question: str,
@@ -620,7 +632,7 @@ def build_vision_messages(
         parts.append(
             {
                 "type": "image_url",
-                "image_url": {"url": f"file://{Path(page.image_path).resolve()}"},
+                "image_url": {"url": file_uri(page.image_path)},
             }
         )
 
@@ -648,6 +660,7 @@ __all__ = [
     "WORD_SUFFIXES",
     "batch_pages",
     "build_vision_messages",
+    "file_uri",
     "load_document",
     "parse_page_range",
     "render_page_image",
