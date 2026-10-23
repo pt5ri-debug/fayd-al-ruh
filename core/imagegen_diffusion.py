@@ -49,6 +49,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from core.best_effort import best_effort
 from core.human_approval import HumanApprovalGate
 from core.imageedit import ImageEditError, Raster
 from core.imagegen import (
@@ -475,10 +476,8 @@ def _default_runner(model_dir: str, scheduler: str = "") -> DiffusionPipelineRun
         pipeline.set_progress_bar_config(disable=True)
         # CPU memory: attention slicing trades a little speed for a lot of headroom,
         # so a photorealistic model fits without exhausting RAM.
-        try:
+        with best_effort("enable diffusion attention slicing"):
             pipeline.enable_attention_slicing()
-        except Exception:  # pragma: no cover - pipelines differ across versions
-            pass
         generator = torch.Generator(device="cpu").manual_seed(seed)
         # Snap to the model's grid for crisp output, then resample back to the
         # requested size so the returned rows match the request exactly.
@@ -664,10 +663,8 @@ def _default_edit_runner(model_dir: str) -> ImageEditRunner:
         diffusers, torch = _require_extra()
         pipeline = _load_edit_pipeline(diffusers, model_dir, torch)
         pipeline.set_progress_bar_config(disable=True)
-        try:
+        with best_effort("enable diffusion attention slicing"):
             pipeline.enable_attention_slicing()
-        except Exception:  # pragma: no cover - pipelines differ across versions
-            pass
         source = _PILImage.frombytes("RGB", (width, height), b"".join(bytes(row) for row in image))
         generator = torch.Generator(device="cpu").manual_seed(seed)
         work_w, work_h = _work_size(width, height)

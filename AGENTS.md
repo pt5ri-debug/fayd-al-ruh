@@ -16,7 +16,26 @@ Arabic is kept as secondary aliases where useful.
   `ocr_available()`, `pytest.importorskip`), and `pyproject.toml`'s mypy
   overrides must ignore every optional import name (`pypdf`, `pypdfium2`,
   `pytesseract`, `PIL`, `diffusers`, `llama_cpp`, `huggingface_hub`, `pptx`,
-  `piper`, `onnxruntime`).
+  `piper.*`). `tests/test_packaging.py` enforces the last two rules by reading
+  `pyproject.toml` and scanning the optional modules' real imports.
+- CI runs pytest **under `xvfb-run`**. Without a display every Tk window test
+  skips silently, so a GUI regression would pass CI unnoticed; the test job
+  installs Xvfb and the `package` job builds the wheel and smoke-tests the
+  console script, so a packaging break fails the build instead of shipping.
+- `ruff` selects `E4/E7/E9/F/W/I/UP/B/C4/RUF` (not only `F`), with four
+  documented ignores in `pyproject.toml`: `E501` (the 100-column convention),
+  `UP042` (`str` + `Enum` is a genuine string enum; `StrEnum` would change
+  `str()` output and persisted data), and `RUF001`-`RUF003` (intentional Arabic
+  and typographic punctuation). `ruff format` is deliberately not enabled.
+- The version string lives in **three** places that must agree —
+  `core/version.py`, `pyproject.toml`, and the README status line —
+  `tests/test_version_consistency.py` fails if they drift.
+- A deliberate "must not fail the caller" operation (a cosmetic preference
+  written to a possibly read-only folder, an optional engine that may not
+  import, a pipeline feature an older version lacks) uses
+  `core.best_effort.best_effort`, which keeps it non-fatal **and** records what
+  was dropped (`swallowed_errors()`), rather than a bare `except Exception:
+  pass` that leaves a real bug no trace.
 - Push branches and open PRs with the `create_pr` tool. Merge only on the user's
   explicit approval ("نعم قم بالدمج").
 
@@ -51,10 +70,17 @@ Arabic is kept as secondary aliases where useful.
   (`data/studio`) and `studio_workspaces_dir()` (`data/studio/workspaces`) are
   where the Code Studio keeps its git worktrees, git-ignored like the rest of
   `data/`. `docs_models_dir()` (`data/docs`) holds Doc's Studio's Qwen3-VL weights
-  (the language GGUF *and* its `mmproj` projector), and `docs_pages_dir()`
+  (the language GGUF *and* its `mmproj` projector), and   `docs_pages_dir()`
   (`data/docs/pages`) holds the page images it rasterises from a scanned PDF --
   a reproducible cache, so both are git-ignored.
-  `core/version.py` — the single version string.
+  `core/version.py` — the single version string; `core/best_effort.py` — the one
+  place a deliberate "must not fail the caller" operation lives
+  (`best_effort(what)`, `swallowed_errors()`, `clear_swallowed()`). Swallowing an
+  error is *correct* for a cosmetic preference written to a read-only folder, an
+  optional engine that may not import here, or a pipeline feature an older
+  version lacks -- but swallowing it invisibly means a real bug leaves no trace,
+  so the helper records what was dropped instead of discarding it, and it is
+  bounded (`MAX_RECORDED`) so a long run cannot grow without limit.
 - `core/updater.py` — program updates for a source checkout. `check_for_updates`
   fetches the remote (never touching the working tree) and reports how many
   commits the checkout is behind; `apply_update` fast-forwards the tracked branch

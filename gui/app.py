@@ -38,6 +38,7 @@ from ai import chat as chat_module
 from companion.companion_agent import CompanionError
 from core import optional_deps, pdf_ocr, speech
 from core.banner import BannerUnavailable
+from core.best_effort import best_effort
 from core.cloud_model import CloudUnavailable
 from core.paths import data_dir
 from core.ultron import UltronUnavailable
@@ -243,15 +244,13 @@ def load_theme_name() -> str:
 
 
 def save_theme_name(name: str) -> None:
-    """Persist the chosen theme; a store error is silently ignored."""
+    """Persist the chosen theme; a store error is recorded, not fatal."""
     from storage.json_store import JsonStore
 
     if name not in THEMES:
         return
-    try:
+    with best_effort("save the theme"):
         JsonStore(data_dir()).save(_THEME_NAMESPACE, _THEME_KEY, {"theme": name})
-    except Exception:
-        pass
 
 
 _VOICE_KEY = "reading_voice"
@@ -288,13 +287,11 @@ def load_reading_voice() -> str:
 
 
 def save_reading_voice(key: str) -> None:
-    """Persist the chosen reading voice; a store error is silently ignored."""
+    """Persist the chosen reading voice; a store error is recorded, not fatal."""
     from storage.json_store import JsonStore
 
-    try:
+    with best_effort("save the reading voice"):
         JsonStore(data_dir()).save(_THEME_NAMESPACE, _VOICE_KEY, {"voice": key})
-    except Exception:
-        pass
 
 
 def load_auto_speak() -> bool:
@@ -310,13 +307,11 @@ def load_auto_speak() -> bool:
 
 
 def save_auto_speak(enabled: bool) -> None:
-    """Persist the auto-speak choice; a store error is silently ignored."""
+    """Persist the auto-speak choice; a store error is recorded, not fatal."""
     from storage.json_store import JsonStore
 
-    try:
+    with best_effort("save the auto-speak choice"):
         JsonStore(data_dir()).save(_THEME_NAMESPACE, _SPEAK_KEY, {"enabled": bool(enabled)})
-    except Exception:
-        pass
 
 
 def _strip_markdown(text: str) -> str:

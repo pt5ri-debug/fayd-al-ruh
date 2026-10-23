@@ -1,5 +1,8 @@
 [build-system]
-requires = []
+# The backend is setuptools, so setuptools must be declared here -- with an
+# empty list pip's isolated build cannot import `setuptools.build_meta` at all
+# and every `pip install .` / `pip wheel .` fails with BackendUnavailable.
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +10,28 @@ name = "fayd-al-ruh"
 version = "2.3.0"
 description = "An evidence-aware symbolic cognitive architecture."
 requires-python = ">=3.12"
+# The two libraries the base install genuinely needs at runtime: numpy backs the
+# learning layers and requests backs the governed web source. Everything else is
+# an optional extra below.
+dependencies = [
+    "numpy>=2.0",
+    "requests>=2.31",
+]
+
+[project.scripts]
+# `pip install .` gives the same entry point as `python -m cli`.
+fayd-al-ruh = "cli.__main__:main"
+
+[tool.setuptools.packages.find]
+# The project is a set of top-level packages beside the checkout root, so
+# discovery is scoped explicitly: without this, setuptools' flat-layout guessing
+# either refuses the build ("multiple top-level packages") or sweeps in the
+# tests. `scripts/` has no __init__.py and `main.py` is a demo module.
+include = ["ai*", "cli*", "companion*", "core*", "evaluation*", "gui*", "ingest*", "ml*", "storage*"]
+exclude = ["tests*", "data*", "docs*", "knowledge*"]
+
+[tool.setuptools]
+py-modules = ["main"]
 
 [project.optional-dependencies]
 # PDF ingestion is optional: the reader imports pypdf lazily and reports a clear
@@ -233,8 +258,10 @@ module = ["torch", "qwen_asr", "qwen_tts"]
 ignore_missing_imports = true
 
 # Piper is an optional extra (``pip install .[piper]``); ``core.piper_speech``
-# imports ``piper``/``onnxruntime`` lazily, so a base install must still
-# type-check. Piper ships no type stubs.
+# imports ``piper.voice``/``piper.config`` lazily, so a base install must still
+# type-check. Piper ships no type stubs. The glob covers the submodules that are
+# actually imported; a bare "piper" entry would be redundant (mypy matches a
+# dotted module against the pattern, not its top-level parent).
 [[tool.mypy.overrides]]
-module = ["piper", "piper.*", "onnxruntime"]
+module = ["piper.*"]
 ignore_missing_imports = true

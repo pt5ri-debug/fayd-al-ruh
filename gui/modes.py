@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from core.best_effort import best_effort
 from core.command_router import NaturalLanguageRouter, RoutedCommand, RouteKind
 
 #: The exact labels the task requires, and their one-line descriptions.
@@ -131,15 +132,13 @@ def load_mode_key(root: Any) -> str:
 
 
 def save_mode_key(root: Any, key: str) -> None:
-    """Persist the chosen operating mode; a store error is silently ignored."""
+    """Persist the chosen operating mode; a store error is recorded, not fatal."""
     from storage.json_store import JsonStore
 
     if key not in MODES_BY_KEY:
         return
-    try:
+    with best_effort("save the operating mode"):
         JsonStore(root).save(_NAMESPACE, _KEY, {"mode": key})
-    except Exception:
-        pass
 
 
 # --------------------------------------------------------- history grouping

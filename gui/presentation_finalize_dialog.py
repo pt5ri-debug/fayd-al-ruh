@@ -35,6 +35,7 @@ from pathlib import Path
 from tkinter import filedialog, simpledialog, ttk
 from typing import Any, Literal
 
+from core.best_effort import best_effort
 from core.presentation import (
     CONTENT_TYPES,
     PresentationError,
@@ -917,10 +918,8 @@ class PresentationFinalizeDialog:
 
     def _close(self) -> None:
         self._closed = True
-        try:
+        with best_effort("unbind the canvas wheel handler"):
             self._canvas.unbind_all("<MouseWheel>")
-        except Exception:
-            pass
         if self._on_close is not None:
             self._on_close()
         self.window.destroy()

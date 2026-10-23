@@ -38,6 +38,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter import font as tkfont
 from typing import Any, Literal
 
+from core.best_effort import best_effort
 from core.presentation import (
     CONTENT_TYPES,
     DEFAULT_SLIDE_BATCH,
@@ -1201,10 +1202,8 @@ class PresentationDialog:
         ensure = self._ensure_author
         if not callable(ensure):
             return
-        try:
+        with best_effort("load the Studio's authoring model"):
             ensure()
-        except Exception:
-            pass
 
     def draft_outline(self, text: str | None = None) -> None:
         """Draft an outline (from ``text``, or by asking the assistant)."""
