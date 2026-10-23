@@ -149,7 +149,9 @@ def test_deps_install_ocr_also_installs_the_tesseract_engine(monkeypatch, capsys
             key=key, ok=True, message="OCR support installed."
         ),
     )
-    # The engine is missing right after the packages, so the plan runs.
+    # The packages are present (so the engine step is meaningful) but the engine is
+    # not; pinning this keeps the test independent of the [ocr] extra.
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
     monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
     monkeypatch.setattr(
         pdf_ocr,
@@ -173,6 +175,7 @@ def test_deps_install_ocr_reports_a_failed_engine_install(monkeypatch, capsys):
             key=key, ok=True, message="OCR support installed."
         ),
     )
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
     monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
     monkeypatch.setattr(
         pdf_ocr,
@@ -181,6 +184,27 @@ def test_deps_install_ocr_reports_a_failed_engine_install(monkeypatch, capsys):
     )
     assert deps_cli.main(["--install", "ocr"]) == 1
     assert "failed" in capsys.readouterr().out.lower()
+
+
+def test_deps_install_ocr_skips_the_engine_when_the_packages_are_absent(monkeypatch, capsys):
+    """With no OCR packages, the engine step is skipped (a package manager would be for nothing)."""
+    from core import pdf_ocr
+
+    monkeypatch.setattr(optional_deps, "is_available", lambda key: False)
+    monkeypatch.setattr(
+        optional_deps,
+        "install",
+        lambda key, *, progress=None: optional_deps.InstallResult(
+            key=key, ok=True, message="OCR support installed."
+        ),
+    )
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ("pytesseract",))
+    called = []
+    monkeypatch.setattr(
+        pdf_ocr, "install_ocr_engine", lambda **kwargs: called.append(True) or pdf_ocr.OcrInstallResult(ok=True)
+    )
+    assert deps_cli.main(["--install", "ocr"]) == 0
+    assert called == []
 
 
 def test_deps_report_names_the_engine_step_when_only_the_engine_is_missing(monkeypatch, capsys):

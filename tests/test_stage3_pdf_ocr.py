@@ -587,7 +587,9 @@ def test_install_ocr_engine_runs_the_plan_with_an_injected_runner(monkeypatch):
     )
     state = {"installed": False}
     # `install_ocr_engine` checks `ocr_available()` up front and `tesseract_available()`
-    # afterwards; the second reflects the fake package manager's success.
+    # afterwards; the second reflects the fake package manager's success. The Python
+    # packages are pinned present so the test does not depend on the [ocr] extra.
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
     monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: state["installed"])
     monkeypatch.setattr(pdf_ocr, "tesseract_available", lambda: state["installed"])
     seen = []
@@ -612,6 +614,7 @@ def test_install_ocr_engine_reports_a_failed_command(monkeypatch):
     monkeypatch.setattr(
         pdf_ocr.shutil, "which", lambda name: "/usr/bin/apt-get" if name == "apt-get" else None
     )
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
     monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
     monkeypatch.setattr(pdf_ocr, "tesseract_available", lambda: False)
     result = pdf_ocr.install_ocr_engine(runner=lambda argv: (100, "no permission"))
@@ -623,6 +626,7 @@ def test_install_ocr_engine_reports_a_failed_command(monkeypatch):
 def test_install_ocr_engine_says_so_when_already_installed(monkeypatch):
     from core import pdf_ocr
 
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
     monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: True)
     result = pdf_ocr.install_ocr_engine(runner=lambda argv: (0, ""))
     assert result.ok is True

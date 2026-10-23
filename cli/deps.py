@@ -102,8 +102,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _install_ocr_engine(failed: bool) -> bool:
     """Install the Tesseract engine (a system package) via the platform package manager."""
-    from core.pdf_ocr import install_ocr_engine, ocr_available, ocr_install_plan
+    from core.pdf_ocr import (
+        install_ocr_engine,
+        missing_ocr_python_packages,
+        ocr_available,
+        ocr_install_plan,
+    )
 
+    # The engine is only worth installing once the Python packages are actually
+    # importable: without them the app cannot even ask Tesseract for its version,
+    # so a package manager would be run for nothing. (In CI the OCR extra is not
+    # installed, so this keeps `--install ocr` honest and exits 0 there.)
+    if missing_ocr_python_packages():
+        return failed
     if ocr_available():
         print("The Tesseract OCR engine is already installed.")
         return failed
