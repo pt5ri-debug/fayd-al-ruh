@@ -1110,11 +1110,10 @@ class FaydGUI:
     def _build_voice_picker(self, panel: tk.Misc) -> None:
         """The reading-voice menu plus the auto-speak toggle.
 
-        The **real** voices the machine reports (Windows OneCore/SAPI, macOS ``say``)
-        are listed first, grouped by language, because those are what the engine will
-        actually speak with; then the voices of the local **speech models** (VoiceTut-
-        TTS over audio.cpp), which are the highest-quality Arabic voices here; then
-        the synthetic espeak-ng catalog, for a machine with no named voices.
+        The voices are grouped by the **source** they came from -- the OS's own
+        installed voices, the local VoiceTut-TTS model, Piper, Qwen3-TTS, and the
+        synthetic catalog -- each under the name of its source, with an honest note
+        for any source that contributed no voice here.
         """
         self._build_voice_sections(panel)
         tk.Checkbutton(
@@ -1136,60 +1135,29 @@ class FaydGUI:
     def _build_voice_sections(self, panel: tk.Misc) -> None:
         """The voice groups themselves, shared by the dropdown and the settings panel.
 
-        One builder for both menus, so they can never drift apart: the status lines,
-        the installed system voices, the local model voices, and the synthetic
-        catalog are the *same* widgets in the *same* order wherever they appear.
+        One builder for both menus, so they can never drift apart: every voice sits
+        under the name of the **source** it came from -- *Installed Voices*,
+        *VoiceTut-TTS*, *Piper*, *Qwen3-TTS*, and the synthetic catalog -- and each
+        source shows only the voices its engine really reports here, so a listed
+        voice is always one that can actually speak (an engine that is not installed
+        contributes no voices, and the synthetic catalog is dropped entirely when the
+        system engine itself is absent, since those settings would produce silence).
         """
-        from core.voices import (
-            group_model_voices,
-            group_system_voices,
-            voice_categories,
-            voices_for,
-        )
+        for section in self.service.voice_sections():
+            self._voice_group_label(panel, section.title, indent=22)
+            for header, group in section.groups:
+                self._voice_group_label(panel, header, indent=28, dim=True)
+                for voice in group:
+                    suffix = f"  ({voice.gender})" if getattr(voice, "gender", "") else ""
+                    label = voice.label() if hasattr(voice, "label") else voice.label_en
+                    self._voice_radio(panel, f"{label}{suffix}", voice.key, indent=28)
 
-        tk.Label(
-            panel, text=self.service.reading_status(), bg=self._theme.surface,
-            fg=self._theme.text_dim, font=self._type.font("2xs"), anchor="w", padx=20, pady=2,
-            wraplength=232, justify="left",
-        ).pack(fill="x")
-        for note in (
-            self.service.model_speech_status(),
-            self.service.piper_speech_status(),
-            self.service.qwen_speech_status(),
-        ):
+        for note in self.service.voice_source_notes():
             tk.Label(
                 panel, text=note, bg=self._theme.surface, fg=self._theme.text_dim,
                 font=self._type.font("2xs"), anchor="w", padx=20, pady=2,
                 wraplength=232, justify="left",
             ).pack(fill="x")
-
-        installed = self.service.system_voices()
-        if installed:
-            self._voice_group_label(panel, "Installed voices", indent=22)
-            for _code, system_group in group_system_voices(installed):
-                self._voice_group_label(panel, system_group[0].language_label(), indent=28, dim=True)
-                for system_voice in system_group:
-                    suffix = f"  ({system_voice.gender})" if system_voice.gender else ""
-                    self._voice_radio(panel, f"{system_voice.name}{suffix}", system_voice.key, indent=28)
-
-        model = self.service.model_voices()
-        if model:
-            self._voice_group_label(panel, "Model voices (local Arabic model)", indent=22)
-            for _code, model_group in group_model_voices(model):
-                self._voice_group_label(panel, model_group[0].language_label(), indent=28, dim=True)
-                for model_voice in model_group:
-                    suffix = f"  ({model_voice.gender})" if model_voice.gender else ""
-                    self._voice_radio(panel, f"{model_voice.name}{suffix}", model_voice.key, indent=28)
-
-        for category, label_en, _label_ar in voice_categories():
-            self._voice_group_label(panel, label_en, indent=22)
-            for catalog_voice in voices_for(category):
-                self._voice_radio(
-                    panel,
-                    f"{catalog_voice.label_en}  ·  {catalog_voice.label_ar}",
-                    catalog_voice.key,
-                    indent=22,
-                )
 
     def _voice_group_label(
         self, panel: tk.Misc, text: str, *, indent: int, dim: bool = False
@@ -1656,6 +1624,19 @@ class FaydGUI:
         """Play a rendered clip, unless a newer click has superseded it."""
         if payload.token != self._speak_token:
             # A stop or a newer click happened while this clip was rendering.
+            return
+        if payload.clip.is_silent:
+            # The engine produced no audio at all. Report it honestly rather than
+            # showing a "Reading aloud (0.0 s)" note as though it had spoken, and
+            # point at the real next step (a different voice, or an engine install).
+            self._speaking = False
+            self._reset_speak_control()
+            self._add_bubble(
+                "note",
+                "That voice produced no audio on this machine (the engine returned "
+                "silence). Try another voice, or install a speech engine from the "
+                "Voices menu.",
+            )
             return
         playback = self.service.play_clip(payload.clip)
         if playback is None:

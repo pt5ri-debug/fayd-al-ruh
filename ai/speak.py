@@ -32,29 +32,15 @@ from core.speech import (
     system_voices,
     windows_voice_report,
 )
-from core.voices import voice_categories, voices_for
+from core.voices import model_voices, voice_sections
 
 
 def _list_voices(reader: TextReader) -> int:
     print(f"Speech engine: {reader.engine_name}  ({reader.describe()})")
     installed = system_voices()
     if installed:
-        # The real voices the machine reports, grouped by language. This is the
-        # honest list: these are the voices the engine will actually speak with.
-        print("\nInstalled voices (the real voices on this machine; use the key with --voice):\n")
-        groups: dict[str, list] = {}
-        for voice in installed:
-            groups.setdefault(voice.language_code, []).append(voice)
-        for code in sorted(groups, key=lambda c: (c != "ar", c)):
-            voices = groups[code]
-            label = voices[0].language_label()
-            print(f"{label} ({code}):")
-            for voice in voices:
-                gender = f" {voice.gender}" if voice.gender else ""
-                print(f"  {voice.key:<40} {voice.name}{gender}  [{voice.language}]")
-            print()
+        print("\nInstalled voices (the real voices on this machine; use the key with --voice).")
         print("These installed voices are what the system really speaks with.")
-        print("A synthetic catalog voice is also available (--voice man-1 ...).\n")
     else:
         # No named voice was reported. Say so plainly (with the reason on Windows)
         # rather than listing only the synthetic catalog and looking like the
@@ -64,18 +50,17 @@ def _list_voices(reader: TextReader) -> int:
         if note:
             print(f"  {note}")
         print("The synthetic catalog below still works, but it is engine settings,")
-        print("not the voices installed in the OS.\n")
-    print("Reading voices (use the key with --voice):\n")
-    for category, label_en, label_ar in voice_categories():
-        print(f"{label_en} / {label_ar}:")
-        for catalog_voice in voices_for(category):
-            print(
-                f"  {catalog_voice.key:<9} {catalog_voice.label_en:<8} {catalog_voice.label_ar:<8} "
-                f"variant={catalog_voice.variant} pitch={catalog_voice.pitch} "
-                f"speed={catalog_voice.speed} melody={catalog_voice.pitch_range} "
-                f"word_gap={catalog_voice.word_gap}"
-            )
-        print()
+        print("not the voices installed in the OS.")
+    print("\nReading voices (grouped by the source each came from; use the key with --voice):")
+    for section in voice_sections(system=installed, model=model_voices()):
+        print(f"\n{section.title}:")
+        for header, group in section.groups:
+            print(f"  {header}:")
+            for voice in group:
+                gender = f" {voice.gender}" if getattr(voice, "gender", "") else ""
+                label = voice.label() if hasattr(voice, "label") else voice.label_en
+                detail = voice.language if hasattr(voice, "language") else voice.category
+                print(f"    {voice.key:<34} {label}{gender}  [{detail}]")
     return 0
 
 

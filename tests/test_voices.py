@@ -1523,6 +1523,52 @@ def test_speak_list_says_so_when_no_installed_voice_is_reported(monkeypatch, cap
     assert "not the voices installed in the OS" in out
 
 
+def test_speak_list_groups_voices_under_the_source_they_came_from(monkeypatch, capsys):
+    """The list is grouped by source, and only lists voices that can speak here."""
+    from ai import speak
+
+    monkeypatch.setattr(
+        speak,
+        "system_voices",
+        lambda: (voices.SystemVoice("Microsoft Hoda", "ar-SA", "Female"),),
+    )
+    monkeypatch.setattr(speak, "model_voices", lambda engine=None: ())
+    assert speak.main(["list"]) == 0
+    out = capsys.readouterr().out
+    # One heading per source, titled with the source's own name.
+    assert "Installed Voices (Arabic + English)" in out
+    assert "Synthetic Voices (Arabic + English)" in out
+    # A source with no installed voice is absent from the list, not empty.
+    assert "VoiceTut-TTS" not in out and "Piper" not in out and "Qwen3-TTS" not in out
+
+
+def test_speak_list_prints_each_models_voices_under_its_source(monkeypatch, capsys):
+    """A local model's voices appear under its own heading when it is installed."""
+    from ai import speak
+
+    monkeypatch.setattr(speak, "system_voices", lambda: ())
+    monkeypatch.setattr(speak, "windows_voice_report", lambda: "")
+    monkeypatch.setattr(
+        speak,
+        "model_voices",
+        lambda engine=None: (
+            voices.ModelVoice(name="Ahmed", engine="audio.cpp", language="ar-EG"),
+            voices.ModelVoice(
+                name="ar_JO-kareem-medium",
+                engine="piper",
+                language="ar",
+                title="Kareem (Arabic, male)",
+            ),
+            voices.ModelVoice(name="Serena", engine="qwen3-tts", language="en", title="Serena (English)"),
+        ),
+    )
+    assert speak.main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert "VoiceTut-TTS (Local Arabic)" in out and "Ahmed" in out
+    assert "Piper (Arabic + English)" in out and "Kareem (Arabic, male)" in out
+    assert "Qwen3-TTS (English)" in out and "Serena (English)" in out
+
+
 def test_sapi_synthesizer_falls_back_to_onecore_when_it_has_no_voice(monkeypatch):
     from core import speech
 
@@ -1608,3 +1654,164 @@ def test_grouping_accepts_an_explicit_voice_list():
         )
     )
     assert [code for code, _ in groups] == ["ar", "en"]
+
+
+# --- voices grouped by the source each came from ------------------------------
+
+
+def _fake_system(name: str, language: str) -> "voices.SystemVoice":
+    return voices.SystemVoice(name=name, engine="windows-onecore", language=language, gender="Female")
+
+
+def test_every_voice_reports_the_source_it_came_from():
+    """Each voice kind names its own source, so a menu can group by it."""
+    assert voices.SystemVoice(name="Hoda", language="ar-SA").source == voices.SOURCE_SYSTEM
+    assert default_voice().source == voices.SOURCE_SYNTHETIC
+    assert (
+        voices.ModelVoice(name="Ahmed", engine="audio.cpp").source == voices.SOURCE_AUDIOCPP
+    )
+    assert voices.ModelVoice(name="ar_JO-kareem-medium", engine="piper").source == voices.SOURCE_PIPER
+    assert voices.ModelVoice(name="Serena", engine="qwen3-tts").source == voices.SOURCE_QWEN
+
+
+def test_voice_sections_group_by_source_and_title_each_group():
+    """One section per source, titled with the source's own name, in menu order."""
+    system = (_fake_system("Microsoft Hoda", "ar-SA"), _fake_system("David", "en-US"))
+    model = (
+        voices.ModelVoice(name="Ahmed", engine="audio.cpp", language="ar-EG"),
+        voices.ModelVoice(
+            name="ar_JO-kareem-medium", engine="piper", language="ar", title="Kareem (Arabic, male)"
+        ),
+        voices.ModelVoice(name="en_US-amy-medium", engine="piper", language="en"),
+        voices.ModelVoice(name="Serena", engine="qwen3-tts", language="en", title="Serena (English)"),
+    )
+
+    sections = voices.voice_sections(system=system, model=model, catalog=True)
+    assert [s.source for s in sections] == [
+        voices.SOURCE_SYSTEM,
+        voices.SOURCE_AUDIOCPP,
+        voices.SOURCE_PIPER,
+        voices.SOURCE_QWEN,
+        voices.SOURCE_SYNTHETIC,
+    ]
+    assert [s.title for s in sections] == [
+        "Installed Voices (Arabic + English)",
+        "VoiceTut-TTS (Local Arabic)",
+        "Piper (Arabic + English)",
+        "Qwen3-TTS (English)",
+        "Synthetic Voices (Arabic + English)",
+    ]
+    by_source = {s.source: s for s in sections}
+    assert [v.name for v in by_source[voices.SOURCE_AUDIOCPP].voices] == ["Ahmed"]
+    assert [v.name for v in by_source[voices.SOURCE_PIPER].voices] == [
+        "ar_JO-kareem-medium",
+        "en_US-amy-medium",
+    ]
+    assert [v.name for v in by_source[voices.SOURCE_QWEN].voices] == ["Serena"]
+    assert len(by_source[voices.SOURCE_SYNTHETIC].voices) == len(VOICE_CATALOG)
+
+
+def test_voice_sections_drop_a_source_that_has_no_voice_here():
+    """A source with no installed voice is absent, never an empty promise."""
+    sections = voices.voice_sections(system=(), model=(), catalog=True)
+    assert [s.source for s in sections] == [voices.SOURCE_SYNTHETIC]
+    # With no system engine either, the catalog is dropped as a whole.
+    assert voices.voice_sections(system=(), model=(), catalog=False) == ()
+
+    only_piper = voices.voice_sections(
+        system=(),
+        model=(voices.ModelVoice(name="en_US-amy-medium", engine="piper", language="en"),),
+        catalog=False,
+    )
+    assert [s.source for s in only_piper] == [voices.SOURCE_PIPER]
+    assert only_piper[0].title == "Piper (Arabic + English)"
+
+
+def test_voice_sections_group_model_voices_by_language_arabic_first():
+    model = (
+        voices.ModelVoice(name="Ahmed", engine="audio.cpp", language="ar-EG"),
+        voices.ModelVoice(name="Sarah", engine="audio.cpp", language="ar-EG"),
+    )
+    section = next(
+        s
+        for s in voices.voice_sections(system=(), model=model, catalog=False)
+        if s.source == voices.SOURCE_AUDIOCPP
+    )
+    headers = [header for header, _ in section.groups]
+    assert headers == ["Arabic"]
+    assert [v.name for _, group in section.groups for v in group] == ["Ahmed", "Sarah"]
+
+
+def test_synthetic_section_groups_by_category():
+    section = next(
+        s
+        for s in voices.voice_sections(system=(), model=(), catalog=True)
+        if s.source == voices.SOURCE_SYNTHETIC
+    )
+    assert [header for header, _ in section.groups] == ["Men", "Women", "Boys", "Girls"]
+    for header, group in section.groups:
+        assert all(v.category == group[0].category for v in group)
+
+
+def test_voice_sections_default_to_what_the_machine_reports(monkeypatch):
+    """With nothing injected, the sections come from the live engines, in order."""
+    from unittest import mock
+
+    system = (_fake_system("David", "en-US"),)
+    model = (voices.ModelVoice(name="Ahmed", engine="audio.cpp", language="ar-EG"),)
+    with mock.patch.object(voices, "system_voices", lambda: system), mock.patch.object(
+        voices, "model_voices", lambda engine=None: model
+    ), mock.patch("core.speech.speech_available", lambda: True):
+        sections = voices.voice_sections()
+    assert [s.source for s in sections] == [
+        voices.SOURCE_SYSTEM,
+        voices.SOURCE_AUDIOCPP,
+        voices.SOURCE_SYNTHETIC,
+    ]
+    # Every section's voices are exactly the union, in the same order.
+    assert tuple(v for s in sections for v in s.voices) == (
+        system[0],
+        model[0],
+        *VOICE_CATALOG,
+    )
+
+
+def test_model_voice_title_is_the_label_but_name_stays_the_key():
+    """A model voice can carry a readable title; its key still names the file."""
+    voice = voices.ModelVoice(
+        name="ar_JO-kareem-medium", engine="piper", language="ar", title="Kareem (Arabic, male)"
+    )
+    assert voice.label() == "Kareem (Arabic, male)"
+    assert voice.label_ar == "Kareem (Arabic, male)"
+    assert voice.key == "model:piper:ar_JO-kareem-medium"
+    assert voice.to_primitive()["title"] == "Kareem (Arabic, male)"
+    # Without a title the model's own name is the label (VoiceTut's speakers).
+    plain = voices.ModelVoice(name="Ahmed", engine="audio.cpp")
+    assert plain.label() == "Ahmed"
+
+
+def test_engine_for_voice_routes_each_model_voice_to_its_own_engine(monkeypatch):
+    """Choosing a Piper or Qwen3-TTS voice routes the reading to that engine."""
+    from core import speech
+
+    monkeypatch.setattr("core.piper_speech.available_synthesizer", lambda root=None: True)
+    monkeypatch.setattr("core.qwen_speech.available_synthesizer", lambda root=None: True)
+
+    assert (
+        speech._engine_for_voice(
+            voices.ModelVoice(name="ar_JO-kareem-medium", engine="piper", language="ar")
+        )
+        == "piper"
+    )
+    assert (
+        speech._engine_for_voice(voices.ModelVoice(name="Serena", engine="qwen3-tts"))
+        == "qwen3-tts"
+    )
+    # An engine that is not actually installed is not chosen.
+    monkeypatch.setattr("core.piper_speech.available_synthesizer", lambda root=None: False)
+    assert (
+        speech._engine_for_voice(
+            voices.ModelVoice(name="ar_JO-kareem-medium", engine="piper", language="ar")
+        )
+        is None
+    )

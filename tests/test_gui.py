@@ -79,6 +79,30 @@ def _service_with_retriever() -> ChatService:
 # --- service --------------------------------------------------------------
 
 
+def test_service_groups_reading_voices_by_source() -> None:
+    """The service exposes the menu's grouping, and never a source with no voice."""
+    service = _service(FakeSession())
+    sections = service.voice_sections()
+    sources = [section.source for section in sections]
+    # The order the user asked for, with no empty section among them.
+    order = ["system", "audio.cpp", "piper", "qwen3-tts", "synthetic"]
+    assert sources == [source for source in order if source in sources]
+    for section in sections:
+        assert section.voices, section.source
+        assert section.title
+
+
+def test_service_notes_name_each_source_that_contributed_nothing(monkeypatch) -> None:
+    """A missing source is explained, not silently dropped from the menu."""
+    service = _service(FakeSession())
+    # No voices at all from any source: every source is explained.
+    monkeypatch.setattr(service, "voice_sections", lambda: ())
+    notes = " ".join(service.voice_source_notes())
+    assert "Installed Voices" in notes
+    assert "Synthetic catalog" in notes
+    assert "VoiceTut-TTS" in notes and "Piper" in notes and "Qwen3-TTS" in notes
+
+
 def test_service_attach_file_indexes_and_detaches(tmp_path) -> None:
     import zipfile
 
@@ -1432,5 +1456,98 @@ def test_window_shows_the_free_cloud_providers() -> None:
         posted = app._bubbles[-1].get("1.0", "end-1c")
         assert "GEMINI_API_KEY" in posted
         assert "https://aistudio.google.com/apikey" in posted
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_voice_menu_groups_voices_by_the_source_they_came_from() -> None:
+    """The Voices dropdown lists each set under the name of its source.
+
+    A fixed set of voices is injected through the service, so the assertion does
+    not depend on what this machine happens to have installed: the menu shows one
+    heading per source, and each voice sits under its own source's heading.
+    """
+    import tkinter as tk
+    from unittest import mock
+
+    from core import voices as voices_module
+    from gui.app import FaydGUI
+
+    system = (voices_module.SystemVoice("Microsoft Hoda", "ar-SA", "Female"),)
+    model = (
+        voices_module.ModelVoice(name="Ahmed", engine="audio.cpp", language="ar-EG"),
+        voices_module.ModelVoice(
+            name="ar_JO-kareem-medium", engine="piper", language="ar", title="Kareem (Arabic, male)"
+        ),
+        voices_module.ModelVoice(name="Serena", engine="qwen3-tts", language="en", title="Serena (English)"),
+    )
+    sections = voices_module.voice_sections(system=system, model=model, catalog=True)
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        with mock.patch.object(app.service, "voice_sections", lambda: sections):
+            app._toggle_voices()
+            root.update()
+
+        def walk(widget, out):
+            for child in widget.winfo_children():
+                out.append(child)
+                walk(child, out)
+
+        widgets: list = []
+        walk(app._voices_panel, widgets)
+        labels = [w.cget("text") for w in widgets if isinstance(w, tk.Label)]
+        for title in (
+            "Installed Voices (Arabic + English)",
+            "VoiceTut-TTS (Local Arabic)",
+            "Piper (Arabic + English)",
+            "Qwen3-TTS (English)",
+            "Synthetic Voices (Arabic + English)",
+        ):
+            assert title in labels, title
+
+        # Each voice is a radio, under its own source's heading.
+        radios = {w.cget("value") for w in widgets if isinstance(w, tk.Radiobutton)}
+        assert "model:audio.cpp:Ahmed" in radios
+        assert "model:piper:ar_JO-kareem-medium" in radios
+        assert "model:qwen3-tts:Serena" in radios
+        assert system[0].key in radios
+    finally:
+        root.destroy()
+
+
+class _SilentVoiceEngine:
+    """A synthesizer that claims a real engine but returns no audio at all."""
+
+    name = "fake-silent-engine"
+
+    def synthesize(self, text):
+        from core.speech import AudioClip
+
+        return AudioClip.silence(0.0)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_reading_a_silent_clip_says_so_instead_of_pretending_it_spoke() -> None:
+    """An engine that returns no audio is reported honestly, not as a 0.0 s read."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(FakeSession()))
+        app.service.reader._synthesizer = _SilentVoiceEngine()
+        app.service.reader._speaker = _FakeSpeaker()  # type: ignore[assignment]
+        root.update()
+
+        app._speak_text("porosity is the fraction of pore space")
+        assert _wait(app, root, lambda: any(e.role == "note" for e in app._rows))
+        notes = [entry.text for entry in app._rows if entry.role == "note"]
+        assert any("no audio" in note for note in notes), notes
+        assert not any("reading aloud" in note.lower() for note in notes)
+        assert app._playback is None
     finally:
         root.destroy()

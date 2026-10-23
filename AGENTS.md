@@ -669,7 +669,25 @@ Arabic is kept as secondary aliases where useful.
   a voice that lives inside a **local model** (`model:audio.cpp:Sarah`), described
   in its own entry below. `group_system_voices`/`group_model_voices` are the one
   language-grouping rule every voice menu uses (Arabic first, then alphabetical),
-  so the two menus that list these voices cannot order them differently. A `SystemVoice` carries the
+  so the two menus that list these voices cannot order them differently.
+  **Voices are grouped by the source they came from.** `voice_sections(*, system=,
+  model=, catalog=)` returns one `VoiceSection` per source -- `SOURCE_SYSTEM`
+  (*Installed Voices (Arabic + English)*), `SOURCE_AUDIOCPP` (*VoiceTut-TTS (Local
+  Arabic)*), `SOURCE_PIPER` (*Piper (Arabic + English)*), `SOURCE_QWEN`
+  (*Qwen3-TTS (English)*), and `SOURCE_SYNTHETIC` (*Synthetic Voices (Arabic +
+  English)*) -- in that fixed order (`SOURCE_TITLES`), each carrying only the
+  voices its engine really reports here, with its own `groups` (a language label
+  for the real/model voices, the category for the catalog) and a flat `voices`
+  tuple. An empty source is dropped, and the synthetic catalog is dropped as a
+  whole when no engine can speak it here (it is settings for whichever engine
+  discovery picks -- the system engine, Piper, or Qwen3-TTS), so a menu built from
+  this can never offer a voice that would come out silent. Each voice carries a
+  `.source` (a `Voice` is `SOURCE_SYNTHETIC`, a `SystemVoice` is `SOURCE_SYSTEM`, a
+  `ModelVoice` is its owning engine), and a `ModelVoice` may carry a readable
+  `title` so a model key (`ar_JO-kareem-medium`) reads as a name while its `key`
+  still names the file. `model_voices()` now collects from **all three** local
+  engines (VoiceTut-TTS, Piper, Qwen3-TTS), each `voice_list` returning `()` unless
+  that engine and its weights are present. A `SystemVoice` carries the
   engine's exact `name`, its `language` tag (`ar-SA`), its reported `gender`, and
   the `engine` that listed it; `key` is a stable `system:<engine>:<name>` string
   (marked by `SYSTEM_VOICE_PREFIX` / `is_system_voice_key`) so a saved choice
@@ -844,8 +862,8 @@ Arabic is kept as secondary aliases where useful.
   `python -m cli audio status|models|voices|install-engine --approve|download
   [--speakers] --approve|say "<text>" --voice model:audio.cpp:Sarah --write-wav f`
   (`cli/audio.py`, the headless twin of the window's voice menu), mirrored as the
-  GUI sidebar's three *audio.cpp* actions (status, voices, download) and a *Model
-  voices (local Arabic model)* group in the reading-voice picker.
+  GUI sidebar's three *audio.cpp* actions (status, voices, download) and a
+  *VoiceTut-TTS (Local Arabic)* section in the reading-voice picker.
 - `core/voices.py`'s **model voices**: a `ModelVoice` is a voice that lives inside a
   local model rather than in the synthetic catalog or the OS. It carries the
   engine's exact `name` (the speaker's own name, never translated), the `engine`
@@ -1345,15 +1363,15 @@ Arabic is kept as secondary aliases where useful.
   reading-voice menus. A dedicated **Voices** dropdown (`_toggle_voices`, right
   under Chats) puts the voice choice one click away, and the Settings panel holds
   the same list (`_build_voice_picker`); both call the one
-  `_build_voice_sections`, so the two menus can never drift apart. Each lists the
-  voices the machine **really** has first — the installed system voices
-  (`group_system_voices`), then the **local model voices**
-  (`group_model_voices`, e.g. the VoiceTut-TTS Arabic speakers), then the synthetic
-  catalog grouped under Men/Women/Boys/Girls — each with its own honest status line
-  and next step (`reading_status`, `model_speech_status`, `piper_speech_status`,
-  `qwen_speech_status`), an opt-in **auto-speak** check, and a "Test the reading
-  voice" button. Choosing a `model:` voice is what routes a reading to that local
-  engine. The chosen
+  `_build_voice_sections`, so the two menus can never drift apart. Each voice sits
+  under the **source** it came from -- *Installed Voices*, *VoiceTut-TTS*, *Piper*,
+  *Qwen3-TTS*, and the synthetic catalog (`ChatService.voice_sections` →
+  `core.voices.voice_sections`) -- with the catalog grouped under
+  Men/Women/Boys/Girls; a source that contributed no voice is replaced by one
+  honest note and its real next step (`ChatService.voice_source_notes`, built from
+  `model_speech_status`/`piper_speech_status`/`qwen_tts_voice_status`), an opt-in
+  **auto-speak** check, and a "Test the reading voice" button. Choosing a `model:`
+  voice is what routes a reading to that local engine. The chosen
   voice and the auto-speak flag persist through `JsonStore`
   (`load_reading_voice`/`save_reading_voice`, `load_auto_speak`/`save_auto_speak`,
   the same `gui`/`appearance` namespace as the theme; a `system:` or `model:` key is
@@ -2122,6 +2140,25 @@ clone, each optional so the base system still runs without it:
   a status line and next step for each. `tests/test_audiocpp_speech.py` exercises the
   catalog, the availability states, the approval gates, the runner seam, the Arabic
   text preparation, the fallback, the voice routing, and the CLI.
+- Phase 17 — the reading-voice menu **grouped by source**: the Voices dropdown and
+  the Settings panel (and the CLI `python -m ai.speak list` / `python -m cli voices`)
+  now list every voice under the name of the source it came from -- *Installed
+  Voices (Arabic + English)*, *VoiceTut-TTS (Local Arabic)*, *Piper (Arabic +
+  English)*, *Qwen3-TTS (English)*, and the *Synthetic Voices* catalog -- through the
+  one `core.voices.voice_sections`. A source shows only the voices its engine really
+  reports here (each `voice_list` returns `()` unless the engine and its weights are
+  present) and is dropped when empty, so a listed voice is always one that can
+  actually speak; the synthetic catalog is dropped whole when no engine can speak it.
+  `model_voices()` now unions **all three** local engines, `_engine_for_voice` routes
+  a chosen `model:piper:`/`model:qwen3-tts:` voice to its own engine (and
+  `load_synthesizer` passes a Qwen speaker through), and a `ModelVoice` carries a
+  readable `title` and a `.source`. A source that contributed no voice is replaced by
+  one honest note and its real next step (`ChatService.voice_source_notes`,
+  `qwen_tts_voice_status`), and a render that returns **no audio** is now named as
+  such in the window instead of shown as a `0.0 s` success. `tests/test_voices.py`,
+  `tests/test_piper_speech.py`, `tests/test_qwen_speech.py`, and `tests/test_gui.py`
+  pin the grouping, the union, the source property, the engine routing, the CLI
+  listing, and the honest notes.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

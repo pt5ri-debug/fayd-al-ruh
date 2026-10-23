@@ -80,6 +80,28 @@ LANGUAGE_LABELS: dict[str, tuple[str, str]] = {
     "en": ("English", "الإنجليزية"),
 }
 
+#: Where a voice comes from. A menu groups its voices by this, so a user reads
+#: each set under the name of the source it actually came from -- the voices the
+#: OS installed, the local VoiceTut model, Piper, Qwen3-TTS, or the synthetic
+#: catalog the system engine speaks. The value is the *engine* that owns the
+#: voices (``"system"`` is the OS itself, not an engine name).
+SOURCE_SYSTEM = "system"
+SOURCE_AUDIOCPP = "audio.cpp"
+SOURCE_PIPER = "piper"
+SOURCE_QWEN = "qwen3-tts"
+SOURCE_SYNTHETIC = "synthetic"
+
+#: ``(source, title)`` per source, in the order a menu shows them. The titles are
+#: the ones the user asked for: each set of voices sits under the name of the
+#: source it came from, with the language(s) it can really speak.
+SOURCE_TITLES: tuple[tuple[str, str], ...] = (
+    (SOURCE_SYSTEM, "Installed Voices (Arabic + English)"),
+    (SOURCE_AUDIOCPP, "VoiceTut-TTS (Local Arabic)"),
+    (SOURCE_PIPER, "Piper (Arabic + English)"),
+    (SOURCE_QWEN, "Qwen3-TTS (English)"),
+    (SOURCE_SYNTHETIC, "Synthetic Voices (Arabic + English)"),
+)
+
 #: The lowest and highest pitch and speed an engine accepts, so a bad catalog
 #: entry can never be handed to the engine.
 MIN_PITCH = 0
@@ -180,6 +202,11 @@ class Voice:
         """The voice's name in ``language`` (falling back to English)."""
         return self.label_ar if language == "ar" else self.label_en
 
+    @property
+    def source(self) -> str:
+        """The source this voice came from: the synthetic catalog."""
+        return SOURCE_SYNTHETIC
+
     def category_label(self, language: str = "en") -> str:
         """The voice's category name in ``language``."""
         for key, english, arabic in CATEGORY_LABELS:
@@ -274,6 +301,11 @@ class SystemVoice:
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("A system voice needs a name.")
+
+    @property
+    def source(self) -> str:
+        """The source this voice came from: the OS itself."""
+        return SOURCE_SYSTEM
 
     @property
     def language_code(self) -> str:
@@ -377,12 +409,21 @@ class ModelVoice:
     model: str = ""
     reference: Path | None = None
     reference_text: str = ""
+    #: A human-readable name for a menu, when the engine's own ``name`` is a model
+    #: key (Piper's ``ar_JO-kareem-medium`` reads as "Kareem (Arabic, male)"). Empty
+    #: means ``name`` is already the label.
+    title: str = ""
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("A model voice needs a name.")
         if not self.engine.strip():
             raise ValueError("A model voice needs the engine that speaks it.")
+
+    @property
+    def source(self) -> str:
+        """The source this voice came from (its owning engine)."""
+        return self.engine
 
     @property
     def language_code(self) -> str:
@@ -410,18 +451,18 @@ class ModelVoice:
         return arabic if language == "ar" else english
 
     def label(self, language: str = "en") -> str:
-        """The voice's name as the model reports it (never translated)."""
-        return self.name
+        """The voice's display name: its readable title, else the model's own name."""
+        return self.title or self.name
 
     @property
     def label_en(self) -> str:
-        """The voice's name (English), for interface parity with :class:`Voice`."""
-        return self.name
+        """The voice's display name (English), for parity with :class:`Voice`."""
+        return self.label()
 
     @property
     def label_ar(self) -> str:
-        """The voice's name (unchanged: a model's speaker is not translated)."""
-        return self.name
+        """The voice's display name (unchanged: a model's speaker is not translated)."""
+        return self.label()
 
     def category_label(self, language: str = "en") -> str:
         """The voice's language group, so a menu can group by language."""
@@ -449,6 +490,7 @@ class ModelVoice:
             "language": self.language,
             "gender": self.gender,
             "model": self.model,
+            "title": self.title,
         }
 
 
@@ -562,16 +604,31 @@ def model_voices(engine: str | None = None) -> tuple[ModelVoice, ...]:
     it is not installed -- so the list is exactly what can be spoken *here*, never a
     promise of a model that is absent. ``engine`` narrows the answer to one engine.
 
-    The import is local because each engine module imports this one, so a top-level
-    import would be circular.
+    The three engines are **VoiceTut-TTS** over audio.cpp (its studio speakers),
+    **Piper** (its per-language ONNX voices), and **Qwen3-TTS** (its built-in
+    English speakers). The import is local because each engine module imports this
+    one, so a top-level import would be circular.
     """
+    readers: list[tuple[str, Callable[[], tuple[ModelVoice, ...]]]] = []
+
     from core.audiocpp_speech import AUDIOCPP_ENGINE_NAME, voice_list as _audiocpp_voices
 
-    engines: tuple[tuple[str, Callable[[], tuple[ModelVoice, ...]]], ...] = (
-        (AUDIOCPP_ENGINE_NAME, _audiocpp_voices),
-    )
+    readers.append((AUDIOCPP_ENGINE_NAME, _audiocpp_voices))
+    try:
+        from core.piper_speech import PIPER_ENGINE_NAME, voice_list as _piper_voices
+
+        readers.append((PIPER_ENGINE_NAME, _piper_voices))
+    except Exception:  # a module that cannot import here simply contributes nothing
+        pass
+    try:
+        from core.qwen_speech import TTS_ENGINE_NAME, voice_list as _qwen_voices
+
+        readers.append((TTS_ENGINE_NAME, _qwen_voices))
+    except Exception:
+        pass
+
     collected: list[ModelVoice] = []
-    for name, reader in engines:
+    for name, reader in readers:
         if engine is not None and engine != name:
             continue
         try:
@@ -579,6 +636,97 @@ def model_voices(engine: str | None = None) -> tuple[ModelVoice, ...]:
         except Exception:  # a broken optional engine must never break a menu
             continue
     return tuple(collected)
+
+
+@dataclass(frozen=True)
+class VoiceSection:
+    """One source's voices, as a menu shows them: a title and its voices.
+
+    ``voices`` is a flat tuple so a caller can list or select them directly, and
+    ``groups`` pairs a readable header with each subset of them: a language label
+    (Arabic first) for the real and model voices, and the category label
+    (Men/Women/Boys/Girls) for the synthetic catalog.
+    """
+
+    source: str
+    title: str
+    voices: tuple[Any, ...]
+    groups: tuple[tuple[str, tuple[Any, ...]], ...]
+
+    @property
+    def empty(self) -> bool:
+        """True when this source contributed no voice (so a menu can skip it)."""
+        return not self.voices
+
+
+def _labeled_language_groups(
+    voices: tuple[Any, ...],
+) -> tuple[tuple[str, tuple[Any, ...]], ...]:
+    """The language groups with each group's display label (Arabic first)."""
+    return tuple(
+        (group[0].language_label(), group) for _code, group in _group_by_language(voices)
+    )
+
+
+def _catalog_groups(voices: tuple[Any, ...]) -> tuple[tuple[str, tuple[Any, ...]], ...]:
+    """The synthetic catalog grouped by category (Men/Women/Boys/Girls)."""
+    return tuple(
+        (label_en, tuple(voice for voice in voices if voice.category == category))
+        for category, label_en, _label_ar in CATEGORY_LABELS
+        if any(voice.category == category for voice in voices)
+    )
+
+
+def voice_sections(
+    *,
+    system: tuple[SystemVoice, ...] | None = None,
+    model: tuple[ModelVoice, ...] | None = None,
+    catalog: bool | None = None,
+) -> tuple[VoiceSection, ...]:
+    """The voices grouped under the source each came from, in menu order.
+
+    One section per source -- *Installed Voices*, *VoiceTut-TTS*, *Piper*,
+    *Qwen3-TTS*, and the synthetic catalog -- each carrying only the voices that
+    engine actually reports here, so a menu built from this can never list a voice
+    that would fail to speak. Empty sections are dropped, and the synthetic catalog
+    is dropped as a whole when no engine can speak it here, because those settings
+    would otherwise come out silent.
+
+    ``system``/``model`` default to what this machine really reports and
+    ``catalog`` to whether any engine can speak the catalog here; a caller (or a
+    test) may pass fixed values instead.
+    """
+    system_voices_ = system_voices() if system is None else system
+    model_voices_ = model_voices() if model is None else model
+    if catalog is None:
+        # A catalog voice is spoken by whichever engine discovery picks -- the
+        # system engine, Piper, or Qwen3-TTS -- so it is offered exactly when one of
+        # them can really speak it. A named system voice is proof on its own.
+        from core.speech import speech_available
+
+        catalog = bool(system_voices_) or speech_available()
+
+    by_source: dict[str, list[Any]] = {}
+    for system_voice in system_voices_:
+        by_source.setdefault(SOURCE_SYSTEM, []).append(system_voice)
+    for model_voice in model_voices_:
+        by_source.setdefault(model_voice.source, []).append(model_voice)
+    if catalog:
+        for catalog_voice in VOICE_CATALOG:
+            by_source.setdefault(SOURCE_SYNTHETIC, []).append(catalog_voice)
+
+    sections: list[VoiceSection] = []
+    for source, title in SOURCE_TITLES:
+        voices = tuple(by_source.get(source, ()))
+        if not voices:
+            continue
+        groups = (
+            _catalog_groups(voices)
+            if source == SOURCE_SYNTHETIC
+            else _labeled_language_groups(voices)
+        )
+        sections.append(VoiceSection(source, title, voices, groups))
+    return tuple(sections)
 
 
 def find_model_voice(key: str) -> ModelVoice | None:
@@ -668,10 +816,17 @@ __all__ = [
     "MIN_WORD_GAP",
     "MODEL_VOICE_PREFIX",
     "ModelVoice",
+    "SOURCE_AUDIOCPP",
+    "SOURCE_PIPER",
+    "SOURCE_QWEN",
+    "SOURCE_SYNTHETIC",
+    "SOURCE_SYSTEM",
+    "SOURCE_TITLES",
     "SYSTEM_VOICE_PREFIX",
     "SystemVoice",
     "VOICE_CATALOG",
     "Voice",
+    "VoiceSection",
     "default_voice",
     "detect_language",
     "find_model_voice",
@@ -685,6 +840,7 @@ __all__ = [
     "system_voices",
     "voice_categories",
     "voice_keys",
+    "voice_sections",
     "voice_summaries",
     "voices_for",
 ]

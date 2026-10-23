@@ -46,6 +46,7 @@ from core.voices import (
     CATEGORY_GIRL,
     CATEGORY_MAN,
     CATEGORY_WOMAN,
+    ModelVoice,
     Voice,
     detect_language,
     voices_for,
@@ -425,6 +426,9 @@ class PiperSynthesizer:
         code = self.language or detect_language(text)
         if self._spec_key:
             return resolve_spec(self._spec_key)
+        if isinstance(self._voice, ModelVoice) and self._voice.engine == PIPER_ENGINE_NAME:
+            # A chosen Piper voice names its own model file, so load exactly it.
+            return resolve_spec(self._voice.name)
         return spec_for_voice(self._voice, code)
 
     def _ensure_model(self, spec: PiperVoiceSpec) -> bool:
@@ -586,6 +590,47 @@ def model_is_cached(key: str | None = None, root: Path | str | None = None) -> b
     return find_model_file(key, root) is not None
 
 
+def _gender_for_category(category: str) -> str:
+    """The gender a catalog category reports (Piper's voices are one or the other)."""
+    return "Female" if category in (CATEGORY_WOMAN, CATEGORY_GIRL) else "Male"
+
+
+def cached_keys(root: Path | str | None = None) -> tuple[str, ...]:
+    """The Piper voice keys whose ONNX model is present on disk here.
+
+    A key is reported only when *its* file exists (``find_model_file(key)``), so a
+    menu built from this can never offer a voice that is not downloaded yet.
+    """
+    return tuple(spec.key for spec in PIPER_VOICES if find_model_file(spec.key, root) is not None)
+
+
+def voice_list(root: Path | str | None = None) -> tuple[ModelVoice, ...]:
+    """The Piper voices downloaded here, as :class:`~core.voices.ModelVoice` objects.
+
+    Returns ``()`` unless the ONNX runtime is installed *and* at least one voice
+    file is present, so the reading-voice menu lists exactly the Piper voices that
+    can really be spoken here. Each voice is keyed ``model:piper:<key>`` and carries
+    its readable title, so choosing one routes the reading to Piper (see
+    :func:`core.speech._engine_for_voice`) with the right voice file loaded.
+    """
+    if not piper_extra_installed():
+        return ()
+    voices: list[ModelVoice] = []
+    for key in cached_keys(root):
+        spec = _BY_KEY[key]
+        voices.append(
+            ModelVoice(
+                name=spec.key,
+                engine=PIPER_ENGINE_NAME,
+                language=spec.language,
+                gender=_gender_for_category(spec.category),
+                model="Piper",
+                title=spec.title,
+            )
+        )
+    return tuple(voices)
+
+
 # ------------------------------------------------------------------ download
 
 
@@ -676,6 +721,7 @@ __all__ = [
     "PiperUnavailable",
     "PiperVoiceSpec",
     "available_synthesizer",
+    "cached_keys",
     "download_model",
     "find_model_file",
     "length_scale",
@@ -688,4 +734,5 @@ __all__ = [
     "spec_for_voice",
     "spec_names",
     "spec_summaries",
+    "voice_list",
 ]
