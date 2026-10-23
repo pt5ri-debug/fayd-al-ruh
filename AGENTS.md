@@ -1865,7 +1865,11 @@ Arabic is kept as secondary aliases where useful.
   keeps the pages it collected and renders each to an image with
   `render_page_image` (`pypdfium2`, lazy) -- a wholly scanned report therefore
   becomes readable instead of failing, and with rendering refused the failure
-  names that next step. A page with a real text layer is never replaced by an
+  names that next step. When rendering was *attempted* but no page produced an
+  image (the classic missing-`pypdfium2` case), the failure names **that** reason
+  -- the render note, not the generic "no extractable text ... needs OCR" line,
+  which used to report a scanned file as an empty document with no explanation.
+  A page with a real text layer is never replaced by an
   image; a page without one is rendered and marked `from_image`, so
   `LoadedDocument.vision_pages` names exactly the pages the model must *look* at.
   `select_pages` ranks the pages worth attaching for a question (a page that names
@@ -1874,6 +1878,10 @@ Arabic is kept as secondary aliases where useful.
   extracted text in front of the selected pages' images as OpenAI-style
   `image_url` parts (a `file://` URI), in document order and bounded by
   `max_pages`/`max_text_chars`, stating plainly when a page has no text layer.
+  `TRANSCRIBE_QUESTION` is the fixed instruction that asks the model to *transcribe*
+  a page rather than answer about it -- what turns a scanned page into readable
+  content -- and `batch_pages` groups 1-based page numbers into bounded batches
+  (`MAX_PAGES_PER_REQUEST`) in order, so a long scan is read in pieces.
   `parse_page_range` reads a plain selection ("7", "1-3", "1 to 3", "2,5,7") so
   the window and the CLI share one parser. `SUPPORTED_SUFFIXES` /
   `UNSUPPORTED_SUFFIXES` are the one place the accepted formats are declared.
@@ -1885,17 +1893,26 @@ Arabic is kept as secondary aliases where useful.
   caller supply the project's own assistant for the grounded path
   (`set_ask`/`ask_assistant`), saves the extracted text (`save_text`), and
   reports the model honestly (`model_status`, `model_names`, `model_summaries`,
-  `download_model`). An empty model reply becomes the named `DOCS_EMPTY` message
-  rather than a blank answer, and the vision runner is an injectable seam, so the
-  whole service is exercised with no extra and no weights. `picker_filetypes()`
-  is the one file-dialog filter, derived from `SUPPORTED_SUFFIXES`.
+  `download_model`). **`read` is what puts a scanned document's *contents* on
+  screen**: it transcribes the document's image pages with the fixed
+  `TRANSCRIBE_QUESTION` (never an answer-a-question prompt), in `batch_pages`
+  batches, and returns a `DocReading` (text, pages read, or an honest failure).
+  The reading is remembered on the `OpenDocument` (`reading`), so
+  `document_text`/`save_text` return the text layer **plus** the transcription --
+  otherwise "save the extracted text" would save an empty file for exactly the
+  documents that need the model. An empty model reply becomes the named
+  `DOCS_EMPTY` message rather than a blank answer, and the vision runner is an
+  injectable seam, so the whole service is exercised with no extra and no weights.
+  `picker_filetypes()` is the one file-dialog filter, derived from
+  `SUPPORTED_SUFFIXES`.
 - `gui/docs_dialog.py` — the Doc's Studio **window** (Tk, imported lazily), built
   the way the chat, Code Studio, and Presentation Studio windows are built: the
   same `Theme` tokens, `RoundedBox`, `gui.rich_text` Markdown painting, the shared
   `gui.chat_composer.ChatComposer`, the three `gui.window_controls` title-bar
   buttons, and a centred conversation column capped at `_COLUMN_MAX`. A left
   sidebar holds **Open a document…** / **Open a folder…** / **Close this document**
-  / **Save the extracted text**, the open-documents list, the reading-voice-free
+  / **Read the document (scanned pages)** / **Save the extracted text**, the
+  open-documents list, the reading-voice-free
   page controls, and the model note with its real next step; the conversation
   column shows the transcript and the composer, and a right column previews the
   current page's image (a `tk.PhotoImage` scaled through `gui.image_preview`, or an
@@ -1903,22 +1920,31 @@ Arabic is kept as secondary aliases where useful.
   worker thread whose result is handed back through a **queue the UI thread
   drains** (Tk is not thread-safe), the document's text and its vision pages are
   reported, and asking a question runs `DocsStudioService.ask` the same way and
-  posts the answer under the honesty header. Long work never blocks the window.
+  posts the answer under the honesty header. **Opening a scanned document
+  auto-reads it**: `_maybe_auto_read` calls `DocsStudioService.read` and posts the
+  transcription as a *contents* row, so a scan shows its content instead of only a
+  page image -- and when the model is not ready it states the real next step
+  (`Reading needs the model`) rather than leaving a blank-looking document. The
+  sidebar **Read the document (scanned pages)** button re-reads on demand. Long
+  work never blocks the window.
   Reachable from the composer's **＋** menu (**Doc's Studio — read any document
   (incl. scanned)…**), whose sidebar action is hidden; the headless twin is
   `python -m cli docs`.
 - `cli/docs.py` — the Doc's Studio CLI, the headless twin of the window:
-  `status`/`models`/`open`/`text`/`pages`/`ask`/`download` (`python -m cli docs …`,
+  `status`/`models`/`open`/`text`/`read`/`pages`/`ask`/`download` (`python -m cli docs …`,
   wired in `cli/menu.py` as `run_docs` and in the menu as *Doc's Studio: read any
   document (incl. scanned) with the local vision model* plus a second entry to
   download the model). It drives the *same* `gui.docs_studio.DocsStudioService` the
   window drives, so the CLI and the window share one set of documents, one model,
-  and one download gate -- no document logic is reimplemented here. `--json` gives
-  machine-readable output for `models`/`open`/`ask`/`pages`, `--pages` selects
+  and one download gate -- no document logic is reimplemented here. `read` is the
+  headless twin of the window's auto-read: it transcribes the scanned pages (a
+  `--pages` selection, progress on stderr) and prints the contents under the
+  honesty header. `--json` gives
+  machine-readable output for `models`/`open`/`ask`/`read`/`pages`, `--pages` selects
   pages with the shared `parse_page_range`, and `--no-render` refuses to rasterise
   a scanned PDF (so the CLI can say "this needs rendering" without doing it).
   Exit codes: `0` success, `2` invalid arguments, `3` the vision model is not
-  available (`ask`/`download`), `4` the document could not be read, `5` an
+  available (`ask`/`read`/`download`), `4` the document could not be read, `5` an
   unexpected failure. A `status` report succeeds even when the model is missing --
   it *states* the next step.
 - `core/document_reader.py` — read text out of a Word file with no third-party
@@ -2284,6 +2310,22 @@ clone, each optional so the base system still runs without it:
   `tests/test_docs_window.py` pin the catalog, the two-file rule, the projector
   exclusion, the scanned-PDF render, the page selection, the vision messages, the
   service, the CLI, the ＋-menu wiring, and the real Tk window.
+- Phase 18b — Doc's Studio **reads a scanned document's contents, not just its
+  image**: a scan has no text layer, so the window used to show only a page image
+  and a "ask a question" note -- its content never appeared. `DocsStudioService.read`
+  now transcribes the image pages with the fixed `TRANSCRIBE_QUESTION` in
+  `batch_pages` batches, the window auto-reads a scanned document when it opens
+  (`_maybe_auto_read` → a *contents* row under the honesty header) and offers a
+  **Read the document (scanned pages)** button to re-read on demand, and the CLI
+  gains `python -m cli docs read`. The reading is remembered on the document, so
+  "save the extracted text" saves the transcription too. When the model is not
+  ready the window states the real next step instead of a blank-looking document,
+  and a scanned PDF whose pages could not be *rendered* now names that reason (the
+  missing raster extra) rather than the generic "needs OCR" line that made a scan
+  look like an empty file with no explanation. `tests/test_docs_studio.py`,
+  `tests/test_docs_cli.py`, and `tests/test_docs_window.py` pin the transcription
+  prompt, the batching, the remembered reading, the honest render failure, the CLI
+  `read`, and the window's auto-read.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

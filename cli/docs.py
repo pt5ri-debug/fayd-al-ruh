@@ -5,6 +5,7 @@
     python -m cli docs download --approve        # one-time, ~3.4 GB (weights + projector)
     python -m cli docs open report.pdf           # load it and show its contents
     python -m cli docs text report.pdf           # print the extracted text
+    python -m cli docs read scan.pdf             # transcribe the scanned pages (vision)
     python -m cli docs pages report.pdf          # which pages need the vision model
     python -m cli docs ask report.pdf "what is the porosity on page 3?"
     python -m cli docs ask scan.pdf "summarise this" --pages 1-3
@@ -59,6 +60,14 @@ def _build_parser() -> argparse.ArgumentParser:
         command.add_argument("document", help="Path to the document.")
         command.add_argument("--no-render", action="store_true", help="Do not render page images.")
         command.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+
+    read = sub.add_parser(
+        "read", help="Transcribe a scanned document's pages with the vision model."
+    )
+    read.add_argument("document", help="Path to the document.")
+    read.add_argument("--pages", default="", help="Restrict to pages, e.g. 1-3 or 2,5,7.")
+    read.add_argument("--no-render", action="store_true", help="Do not render page images.")
+    read.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
     ask = sub.add_parser("ask", help="Ask the vision model a question about a document.")
     ask.add_argument("document", help="Path to the document.")
@@ -210,6 +219,47 @@ def run_pages(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_read(args: argparse.Namespace) -> int:
+    loaded = _load(args)
+    if isinstance(loaded, int):
+        return loaded
+    service, key = loaded
+    pages: tuple[int, ...] | None = None
+    if args.pages:
+        try:
+            pages = parse_page_range(args.pages)
+        except ValueError as error:
+            print(f"Invalid --pages: {error}")
+            return EXIT_USAGE
+    reading = service.read(
+        key, pages=pages, progress=lambda message: print(message, file=sys.stderr)
+    )
+    if args.json:
+        import json
+
+        print(json.dumps(
+            {
+                "ok": reading.ok,
+                "text": reading.text,
+                "pages_read": list(reading.pages_read),
+                "message": reading.message,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ))
+        return EXIT_OK if reading.ok else EXIT_DOCUMENT
+    if not reading.ok:
+        print(f"Cannot read the document: {reading.message}")
+        return EXIT_MODEL if "model" in reading.message.lower() else EXIT_DOCUMENT
+    if not reading.text.strip():
+        print(reading.message or "The model returned no readable text.")
+        return EXIT_OK
+    print(f"{reading.header}\n{reading.text}")
+    pages_read = ", ".join(str(number) for number in reading.pages_read) or "—"
+    print(f"\n(pages read: {pages_read})")
+    return EXIT_OK
+
+
 def run_ask(args: argparse.Namespace) -> int:
     loaded = _load(args)
     if isinstance(loaded, int):
@@ -253,6 +303,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "download": run_download,
         "open": run_open,
         "text": run_text,
+        "read": run_read,
         "pages": run_pages,
         "ask": run_ask,
     }

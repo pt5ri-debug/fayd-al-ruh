@@ -35,6 +35,7 @@ from core.docs_studio import (
     DocsStudioError,
     DocumentPage,
     LoadedDocument,
+    batch_pages,
     build_vision_messages,
     load_document,
     parse_page_range,
@@ -453,6 +454,95 @@ def test_picker_patterns_cover_every_supported_suffix() -> None:
     patterns = " ".join(pattern for _label, pattern in picker_filetypes())
     for suffix in SUPPORTED_SUFFIXES:
         assert f"*{suffix}" in patterns
+
+
+# --- reading a scanned document's contents --------------------------------
+
+
+def test_batch_pages_bounds_and_keeps_order() -> None:
+    assert batch_pages([1, 2, 3, 4, 5], limit=2) == ((1, 2), (3, 4), (5,))
+    assert batch_pages([], limit=2) == ()
+    with pytest.raises(ValueError):
+        batch_pages([1], limit=0)
+
+
+def test_service_read_says_a_text_document_needs_no_reading(tmp_path: Path) -> None:
+    service = DocsStudioService(runner=RecordingRunner(), model_root=tmp_path)
+    opened = service.open_document(write(tmp_path / "n.md", "the casing design"))
+    reading = service.read(opened.key)
+    assert reading.ok is True
+    assert reading.text == ""
+    assert reading.pages_read == ()
+    assert "text layer" in reading.message
+
+
+def test_service_read_asks_the_model_to_transcribe(tmp_path: Path) -> None:
+    # A plain image is a one-page vision document, so `read` must send the
+    # transcribe instruction -- not an answer-a-question prompt.
+    from core.docs_studio import TRANSCRIBE_QUESTION
+
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    runner = RecordingRunner(answer="POROSITY REPORT")
+    service = DocsStudioService(runner=runner, model_root=tmp_path)
+    opened = service.open_document(str(image))
+    reading = service.read(opened.key)
+    assert reading.ok is True
+    assert reading.pages_read == (1,)
+    assert "POROSITY REPORT" in reading.text
+    parts = runner.calls[-1][-1]["content"]
+    text = " ".join(part.get("text", "") for part in parts if part["type"] == "text")
+    assert TRANSCRIBE_QUESTION in text
+    assert any(part["type"] == "image_url" for part in parts)
+
+
+def test_service_read_reports_a_missing_model_honestly(tmp_path: Path) -> None:
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    service = DocsStudioService(model_root=tmp_path)  # no runner -> no model
+    opened = service.open_document(str(image))
+    reading = service.read(opened.key)
+    assert reading.ok is False
+    assert "docs extra" in reading.message or "model" in reading.message.lower()
+
+
+def test_service_read_records_the_reading_for_saving(tmp_path: Path) -> None:
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    service = DocsStudioService(
+        runner=RecordingRunner(answer="the casing is set at 2000 ft"), model_root=tmp_path
+    )
+    opened = service.open_document(str(image))
+    assert service.document_text(opened.key) == ""  # nothing readable yet
+    service.read(opened.key)
+    held = service.get(opened.key)
+    assert held is not None and held.reading is not None
+    target = service.save_text(opened.key, tmp_path / "out.txt")
+    assert "the casing is set at 2000 ft" in target.read_text(encoding="utf-8")
+
+
+def test_read_failure_names_the_real_reason_not_the_ocr_red_herring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scanned PDF whose pages cannot be rendered must name *that* reason.
+
+    Reporting the generic "no extractable text ... needs OCR" instead is exactly
+    what made a scanned file look like an empty document with no explanation.
+    """
+    pytest.importorskip("pypdf", reason="pypdf (the [pdf] extra) is not installed")
+    from core import docs_studio as engine
+    from tests.pdf_fixtures import image_page, write_pdf
+
+    def refuse(*_args, **_kwargs):
+        raise engine.DocsStudioError("Rendering a scanned page needs the docs extra.")
+
+    monkeypatch.setattr(engine, "render_page_image", refuse)
+    path = write_pdf(tmp_path / "scan.pdf", [image_page()])
+    with pytest.raises(DocsStudioError) as error:
+        load_document(path, render=True)
+    message = str(error.value)
+    assert "could not be turned into images" in message
+    assert "docs extra" in message
 
 
 # --- a real PDF (only when the [pdf] extra is present) ---------------------

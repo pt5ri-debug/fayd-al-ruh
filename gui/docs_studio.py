@@ -34,8 +34,10 @@ from core.docs_model import (
 from core.docs_studio import (
     MAX_PAGES_PER_REQUEST,
     SUPPORTED_SUFFIXES,
+    TRANSCRIBE_QUESTION,
     DocsStudioError,
     LoadedDocument,
+    batch_pages,
     build_vision_messages,
     load_document,
     select_pages,
@@ -78,12 +80,33 @@ class DocAnswer:
         return f"{self.header}\n{self.text}\n\n(pages read: {pages})"
 
 
+@dataclass(frozen=True)
+class DocReading:
+    """A transcription of a document's vision pages, ready for the window."""
+
+    ok: bool
+    text: str
+    filename: str = ""
+    pages_read: tuple[int, ...] = ()
+    message: str = ""
+    header: str = HEADER
+
+    def summary(self) -> str:
+        """A one-block, human-readable report."""
+        if not self.ok:
+            return f"Could not read the document: {self.message}"
+        pages = ", ".join(str(number) for number in self.pages_read) or "—"
+        return f"{self.header}\n{self.text}\n\n(pages read: {pages})"
+
+
 @dataclass
 class OpenDocument:
     """A document the service is holding open, plus what it knows about it."""
 
     document: LoadedDocument
     key: str = ""
+    reading: DocReading | None = None
+    """The last transcription of its image pages, when one has been made."""
 
     @property
     def filename(self) -> str:
@@ -208,6 +231,83 @@ class DocsStudioService:
             pages_used=tuple(chosen),
         )
 
+    def read(
+        self,
+        key: str,
+        *,
+        pages: tuple[int, ...] | None = None,
+        batch: int = MAX_PAGES_PER_REQUEST,
+        progress: Callable[[str], None] | None = None,
+    ) -> DocReading:
+        """Transcribe the open document's vision pages with the vision model.
+
+        This is what puts a **scanned** document's *contents* in the window: a page
+        with no text layer is transcribed (not answered about), in bounded batches,
+        so the user can read the document before asking anything. A page with a real
+        text layer already contributes its text, so it is not transcribed again.
+        """
+        opened = self._documents.get(key)
+        if opened is None:
+            return DocReading(ok=False, text="", message=f"No document is open under {key!r}.")
+        document = opened.document
+        wanted = tuple(pages) if pages is not None else document.vision_pages
+        # Only pages that really need the vision model are transcribed: a page with
+        # a text layer already contributes its text, so re-reading it would only add
+        # cost and risk disagreeing with the text the window already shows.
+        ordered: list[int] = []
+        for number in wanted:
+            page = document.page(number)
+            if page is not None and page.image_path and number not in ordered:
+                ordered.append(number)
+        if not ordered:
+            return DocReading(
+                ok=True, text="", filename=opened.filename, pages_read=(),
+                message=(
+                    "This document has a text layer; its contents are shown as text."
+                    if not document.vision_pages
+                    else "No rendered page images are available to read."
+                ),
+            )
+        pieces: list[str] = []
+        read: list[int] = []
+        for group in batch_pages(ordered, limit=max(1, batch)):
+            if progress is not None:
+                span = f"{group[0]}–{group[-1]}" if len(group) > 1 else str(group[0])
+                progress(f"Reading page(s) {span}…")
+            messages = build_vision_messages(
+                document,
+                TRANSCRIBE_QUESTION,
+                pages=group,
+                system_prompt=SYSTEM_PROMPT,
+                max_pages=batch,
+            )
+            try:
+                text = self._client.chat(messages)
+            except DocsModelUnavailable as error:
+                return DocReading(
+                    ok=False, text="", filename=opened.filename,
+                    pages_read=tuple(read), message=str(error),
+                )
+            text = (text or "").strip()
+            if not text:
+                continue
+            label = f"page {group[0]}" if len(group) == 1 else f"pages {group[0]}–{group[-1]}"
+            pieces.append(f"**{label}**\n\n{text}")
+            read.extend(group)
+        if not pieces:
+            result = DocReading(
+                ok=True, text="", filename=opened.filename, pages_read=(),
+                message="The model returned no readable text for these page(s).",
+            )
+            opened.reading = result
+            return result
+        result = DocReading(
+            ok=True, text="\n\n".join(pieces), filename=opened.filename,
+            pages_read=tuple(read),
+        )
+        opened.reading = result
+        return result
+
     def ask_assistant(self, question: str) -> str:
         """Answer with the caller's own assistant, when one was supplied.
 
@@ -247,10 +347,22 @@ class DocsStudioService:
 
     # --- text -----------------------------------------------------------
     def document_text(self, key: str) -> str:
+        """The document's readable text: its text layer, then any transcription.
+
+        A scanned page has no text layer, so once the vision model has read it the
+        transcription is appended -- otherwise "save the extracted text" would save
+        an empty file for exactly the documents that need the model.
+        """
         opened = self._documents.get(key)
         if opened is None:
             raise DocsStudioError(f"No document is open under {key!r}.")
-        return opened.document.text
+        parts: list[str] = []
+        if opened.document.text.strip():
+            parts.append(opened.document.text)
+        reading = opened.reading
+        if reading is not None and reading.ok and reading.text.strip():
+            parts.append(reading.text)
+        return "\n\n".join(parts)
 
     def save_text(self, key: str, target: str | Path) -> Path:
         """Write a document's extracted text to ``target`` (a UTF-8 .txt file)."""
@@ -282,6 +394,7 @@ def picker_filetypes() -> tuple[tuple[str, str], ...]:
 __all__ = [
     "DOCS_EMPTY",
     "DocAnswer",
+    "DocReading",
     "DocsStudioService",
     "OpenDocument",
     "SYSTEM_PROMPT",

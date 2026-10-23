@@ -108,6 +108,41 @@ def test_pages_reports_the_text_layer(wired, document, capsys) -> None:
     assert "text" in out
 
 
+def test_read_says_a_text_document_needs_no_reading(wired, document, capsys) -> None:
+    code = docs_cli.main(["read", str(document)])
+    out = capsys.readouterr().out
+    assert code == docs_cli.EXIT_OK
+    assert "text layer" in out
+
+
+def test_read_transcribes_a_scanned_document(wired, tmp_path, capsys) -> None:
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    code = docs_cli.main(["read", str(image)])
+    out = capsys.readouterr().out
+    assert code == docs_cli.EXIT_OK
+    assert "not grounded in cited sources" in out
+    assert "pages read: 1" in out
+
+
+def test_read_json_is_machine_readable(wired, tmp_path, capsys) -> None:
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    code = docs_cli.main(["read", str(image), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == docs_cli.EXIT_OK
+    assert payload["ok"] is True
+    assert payload["pages_read"] == [1]
+
+
+def test_read_without_a_model_exits_with_the_model_code(tmp_path, capsys) -> None:
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    code = docs_cli.main(["read", str(image)])
+    assert code == docs_cli.EXIT_MODEL
+    assert "Cannot read" in capsys.readouterr().out
+
+
 def test_ask_prints_the_answer_with_the_honesty_header(wired, document, capsys) -> None:
     code = docs_cli.main(["ask", str(document), "what is porosity?"])
     out = capsys.readouterr().out
