@@ -99,6 +99,11 @@ class OntologyLearner:
         self.relation_type = relation_type
         self.ceiling = ceiling
         self.reinforcement = reinforcement
+        # Which relations this learner created. The type alone used to answer
+        # "is this learned?" (everything of ``relation_type`` was), but a typed
+        # relation read from a sentence (see :mod:`core.relation_extraction`)
+        # carries a real relation type, so membership is the honest test.
+        self._learned: set[str] = set()
 
     def concepts_in(self, text: str) -> list[Concept]:
         """Return the known concepts whose terms occur in the text, in label order."""
@@ -126,15 +131,72 @@ class OntologyLearner:
             if existing is not None:
                 reinforced.append((source.label, target.label, self._strengthen(existing)))
                 continue
-            self.ontology.add_relation(
-                SemanticRelation(source.id, target.id, self.relation_type, self.confidence)
-            )
+            relation = SemanticRelation(source.id, target.id, self.relation_type, self.confidence)
+            self.ontology.add_relation(relation)
+            self._learned.add(relation.id)
             added.append((source.label, self.relation_type, target.label))
         return OntologyLearning(
             concepts=tuple(concept.label for concept in concepts),
             added=tuple(added),
             skipped=skipped,
             reinforced=tuple(reinforced),
+        )
+
+    def observe_relation(
+        self,
+        source_label: str,
+        target_label: str,
+        relation_type: str,
+        confidence: float,
+    ) -> OntologyLearning:
+        """Record one *typed* relation between two known concepts.
+
+        This is the entry point for :mod:`core.relation_extraction`: the caller
+        has already decided the endpoints and the relation type from the
+        sentence's own grammar. The learner's job is only to keep the graph
+        honest -- both endpoints must already be concepts, a pair that already
+        has an explicit (non-learned) relation is left alone, and the confidence
+        is clamped to the learner's ceiling, so a sentence can suggest a link but
+        can never override curated knowledge. An identical typed relation that
+        already exists is reinforced rather than duplicated.
+
+        Raises ``KeyError`` when either endpoint is not a known concept, so a
+        caller that reads a raw noun cannot silently invent a node.
+        """
+        if not relation_type.strip():
+            raise ValueError("A typed relation needs a relation type.")
+        sources = self.ontology.find_concepts(source_label)
+        targets = self.ontology.find_concepts(target_label)
+        if not sources or not targets:
+            raise KeyError(f"Unknown concept: {source_label} / {target_label}")
+        source = sources[0]
+        target = targets[0]
+        if source.id == target.id:
+            return OntologyLearning(concepts=(source.label,), added=(), skipped=1)
+        if self._has_explicit(source.id, target.id):
+            return OntologyLearning(concepts=(source.label, target.label), added=(), skipped=1)
+        existing = self.relation_by_triple(source.id, relation_type, target.id)
+        if existing is not None:
+            if existing.id not in self._learned:
+                # A seeded relation with this exact triple: never duplicate it.
+                return OntologyLearning(
+                    concepts=(source.label, target.label), added=(), skipped=1
+                )
+            new_confidence = self._strengthen(existing)
+            return OntologyLearning(
+                concepts=(source.label, target.label),
+                added=(),
+                skipped=0,
+                reinforced=((source.label, target.label, new_confidence),),
+            )
+        bounded = round(min(self.ceiling, max(0.0, confidence)), 6)
+        relation = SemanticRelation(source.id, target.id, relation_type, bounded)
+        self.ontology.add_relation(relation)
+        self._learned.add(relation.id)
+        return OntologyLearning(
+            concepts=(source.label, target.label),
+            added=((source.label, relation_type, target.label),),
+            skipped=0,
         )
 
     def learn_from_observations(self, texts: list[str]) -> OntologyLearning:
@@ -185,13 +247,14 @@ class OntologyLearner:
         decayed: list[tuple[str, str, float]] = []
         removed: list[tuple[str, str]] = []
         for relation in list(self.ontology.relations.values()):
-            if relation.relation_type != self.relation_type:
+            if relation.id not in self._learned:
                 continue
             source = self._label(relation.source_id)
             target = self._label(relation.target_id)
             new_confidence = round(relation.confidence - step, 6)
             if new_confidence <= 0.0:
                 self.ontology.remove_relation(relation.id)
+                self._learned.discard(relation.id)
                 removed.append((source, target))
             else:
                 self.ontology.replace_relation(replace(relation, confidence=new_confidence))
@@ -214,7 +277,7 @@ class OntologyLearner:
         relation = self.ontology.relations.get(relation_id)
         if relation is None:
             raise KeyError(f"Unknown semantic relation: {relation_id}")
-        if relation.relation_type != self.relation_type:
+        if relation.id not in self._learned:
             raise KeyError(f"Relation {relation_id} is not a learned relation.")
         return self._strengthen(relation, amount)
 
@@ -227,7 +290,7 @@ class OntologyLearner:
         relation = self.ontology.relations.get(relation_id)
         if relation is None:
             raise KeyError(f"Unknown semantic relation: {relation_id}")
-        if relation.relation_type != self.relation_type:
+        if relation.id not in self._learned:
             raise KeyError(f"Relation {relation_id} is not a learned relation.")
         step = self.reinforcement if amount is None else amount
         if step <= 0.0:
@@ -235,6 +298,7 @@ class OntologyLearner:
         new_confidence = round(relation.confidence - step, 6)
         if new_confidence <= 0.0:
             self.ontology.remove_relation(relation.id)
+            self._learned.discard(relation.id)
             return True
         self.ontology.replace_relation(replace(relation, confidence=new_confidence))
         return False
@@ -242,6 +306,14 @@ class OntologyLearner:
     def relation(self, relation_id: str) -> SemanticRelation | None:
         """Return a relation by id, or ``None`` if it does not exist."""
         return self.ontology.relations.get(relation_id)
+
+    def is_learned(self, relation_id: str) -> bool:
+        """Whether this learner created the relation (so it may be reshaped).
+
+        A seeded relation is never learned, so this is the honest test a caller
+        should use before reinforcing or decaying a link.
+        """
+        return relation_id in self._learned
 
     def relation_by_triple(
         self, source_id: str, relation_type: str, target_id: str
@@ -280,9 +352,17 @@ class OntologyLearner:
         )
 
     def _has_explicit(self, source_id: str, target_id: str) -> bool:
+        """Whether a *seeded* relation already connects the pair, in either direction.
+
+        A relation this learner created is not explicit, so it never blocks the
+        pair: an untyped association may still be learned beside a typed one, and
+        a typed relation can be reinforced by a later sentence.
+        """
         pair = {(source_id, target_id), (target_id, source_id)}
         return any(
-            (relation.source_id, relation.target_id) in pair and relation.relation_type != self.relation_type
+            (relation.source_id, relation.target_id) in pair
+            and relation.relation_type != self.relation_type
+            and relation.id not in self._learned
             for relation in self.ontology.relations.values()
         )
 

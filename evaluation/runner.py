@@ -14,6 +14,7 @@ from core.embeddings import evaluate_held_out
 from core.evidence import Evidence
 from core.goal import Goal
 from core.observation import Observation
+from core.relation_extraction import extraction_accuracy
 from core.state import State
 from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
 
@@ -81,6 +82,8 @@ class EvaluationMetrics:
     curriculum_coverage: float
     # Analogy: held-out judgements of which concept pairs are structurally alike
     analogy_accuracy: float
+    # Relation extraction: held-out sentences, including negative controls
+    relation_extraction_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -733,6 +736,12 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # including negative controls, so a permissive engine cannot pass.
     analogy_value = analogy_accuracy(ontology=CognitiveController().ontology)
 
+    # Relation extraction: held-out sentences the reader must read *exactly* --
+    # both directions of voice, plus negative controls (an unknown endpoint, a
+    # concept inside a preposition, an unmapped verb), so an over-firing extractor
+    # fails the gate as surely as one that misses.
+    extraction_value = extraction_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -775,6 +784,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         curriculum_coverage_value,
         analogy_value,
         clamp(semantic_separation),
+        extraction_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -803,6 +813,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         acceptance_gate_accuracy=round(acceptance_gate, 6),
         curriculum_coverage=round(curriculum_coverage_value, 6),
         analogy_accuracy=round(analogy_value, 6),
+        relation_extraction_accuracy=round(extraction_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )
