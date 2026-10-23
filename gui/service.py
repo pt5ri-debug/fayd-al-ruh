@@ -38,6 +38,7 @@ from core.speech import (
 from core.voices import ModelVoice, SystemVoice, Voice, model_voices, voice_keys, voice_sections
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
 from gui.docs_studio import DocsStudioService
+from gui.scene3d import SceneStudioService
 from gui.import_center import ImportReport, KnowledgeImporter
 from gui.image_edit import ImageEditService
 from gui.image_gen import ImageGenerationService
@@ -252,6 +253,11 @@ class ChatService:
         # ``None`` means the model folder is the default ``data/docs``.
         self._docs_model_root: Path | None = None
         self._docs = DocsStudioService(model_root=self._docs_model_root)
+        # The Scene Studio: build, pose, and render a 3D figure locally with the
+        # project's own CPU software rasteriser. It needs no model, no extra, and
+        # no network -- the figures and props are generated in code -- so it is
+        # always available. The window and the CLI drive this same service.
+        self._scene3d = SceneStudioService()
         # The text-to-speech reader: it reads the chat's own text aloud with a
         # chosen catalog voice (core/voices.py). It is always available; when no
         # speech engine is installed it reports honestly instead of pretending.
@@ -703,6 +709,16 @@ class ChatService:
     def docs(self) -> DocsStudioService:
         """Doc's Studio engine (the same service the CLI's ``docs`` command drives)."""
         return self._docs
+
+    @property
+    def scene3d(self) -> SceneStudioService:
+        """The Scene Studio engine (the same service the CLI's ``scene3d`` drives).
+
+        It builds, poses, and renders 3D figures locally with the project's own CPU
+        software rasteriser -- no GPU, no model download, no network -- so the
+        window and the CLI share one scene, one renderer, and one command box.
+        """
+        return self._scene3d
 
     def docs_assistant_answer(self, question: str) -> str:
         """Answer one Doc's Studio question with *this* session's assistant.

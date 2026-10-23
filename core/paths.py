@@ -212,6 +212,33 @@ def docs_pages_dir() -> Path:
     return docs_models_dir() / "pages"
 
 
+def scene_studio_dir() -> Path:
+    """Where the Scene Studio keeps its scenes, renders, and imported models.
+
+    The Studio (the local DAZ-style 3D figure studio) writes everything it makes
+    under this folder: saved scenes (``scenes/``), rendered PNGs (``renders/``),
+    and any models the user imports (``library/``). It is git-ignored, so a saved
+    scene or a multi-megabyte imported mesh never dirties the working tree or
+    bloats a program update. ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "scene3d"
+
+
+def scene_studio_scenes_dir() -> Path:
+    """Where the Scene Studio saves its scenes."""
+    return scene_studio_dir() / "scenes"
+
+
+def scene_studio_renders_dir() -> Path:
+    """Where the Scene Studio writes rendered images."""
+    return scene_studio_dir() / "renders"
+
+
+def scene_studio_library_dir() -> Path:
+    """Where the Scene Studio keeps models the user imported or saved."""
+    return scene_studio_dir() / "library"
+
+
 def studio_dir() -> Path:
     """Where the Code Studio keeps its own state (git worktrees, run logs).
 
