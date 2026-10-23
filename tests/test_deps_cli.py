@@ -132,3 +132,75 @@ def test_non_ocr_failure_is_returned_unchanged():
 @pytest.mark.parametrize("key", [FEATURE_PDF, FEATURE_OCR, FEATURE_IMAGE])
 def test_install_hint_never_names_the_unpublished_package(key):
     assert "fayd-al-ruh[" not in optional_deps.install_hint(key)
+
+
+# --- the OCR *system* half is offered too (mirroring the speech engine) ----
+
+
+def test_deps_install_ocr_also_installs_the_tesseract_engine(monkeypatch, capsys):
+    """pip installs the packages; the Tesseract engine is a system package."""
+    from core import pdf_ocr
+
+    monkeypatch.setattr(optional_deps, "is_available", lambda key: False)
+    monkeypatch.setattr(
+        optional_deps,
+        "install",
+        lambda key, *, progress=None: optional_deps.InstallResult(
+            key=key, ok=True, message="OCR support installed."
+        ),
+    )
+    # The engine is missing right after the packages, so the plan runs.
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
+    monkeypatch.setattr(
+        pdf_ocr,
+        "install_ocr_engine",
+        lambda **kwargs: pdf_ocr.OcrInstallResult(ok=True, message="Installed the Tesseract OCR engine."),
+    )
+    code = deps_cli.main(["--install", "ocr"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Installed the Tesseract OCR engine." in out
+
+
+def test_deps_install_ocr_reports_a_failed_engine_install(monkeypatch, capsys):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(optional_deps, "is_available", lambda key: False)
+    monkeypatch.setattr(
+        optional_deps,
+        "install",
+        lambda key, *, progress=None: optional_deps.InstallResult(
+            key=key, ok=True, message="OCR support installed."
+        ),
+    )
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
+    monkeypatch.setattr(
+        pdf_ocr,
+        "install_ocr_engine",
+        lambda **kwargs: pdf_ocr.OcrInstallResult(ok=False, message="The install command failed."),
+    )
+    assert deps_cli.main(["--install", "ocr"]) == 1
+    assert "failed" in capsys.readouterr().out.lower()
+
+
+def test_deps_report_names_the_engine_step_when_only_the_engine_is_missing(monkeypatch, capsys):
+    """Packages present, engine missing: the report shows the system-package step."""
+    from core import pdf_ocr
+
+    monkeypatch.setattr(
+        optional_deps,
+        "status",
+        lambda key: optional_deps.FeatureStatus(
+            key=key,
+            python_ok=key == FEATURE_OCR,
+            system_ok=key != FEATURE_OCR,
+            missing_python=(),
+        ),
+    )
+    monkeypatch.setattr(
+        pdf_ocr, "ocr_install_plan", lambda: pdf_ocr.OcrInstallPlan("linux", ("apt",), "run apt")
+    )
+    code = deps_cli.main(["--check"])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "run apt" in out

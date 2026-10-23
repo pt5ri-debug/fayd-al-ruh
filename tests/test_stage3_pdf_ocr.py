@@ -527,3 +527,127 @@ def test_real_engine_reports_its_installed_languages():
     languages = TesseractOcrEngine().available_languages()
     assert "eng" in languages
     assert isinstance(languages, tuple)
+
+
+# --------------------------------------------------------------------------- #
+# Installing the Tesseract engine itself (a *system* package, not a pip extra)
+# --------------------------------------------------------------------------- #
+
+
+def test_ocr_install_plan_knows_a_linux_package_manager(monkeypatch):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        pdf_ocr.shutil, "which", lambda name: "/usr/bin/apt-get" if name == "apt-get" else None
+    )
+    plan = pdf_ocr.ocr_install_plan()
+    assert plan.can_install
+    assert plan.command[:3] == ("sudo", "apt-get", "install")
+    assert plan.command[-1] == "tesseract-ocr-ara"
+    assert "tesseract-ocr" in plan.command
+
+
+def test_ocr_install_plan_is_honest_when_it_cannot_install(monkeypatch):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(pdf_ocr.shutil, "which", lambda name: None)
+    plan = pdf_ocr.ocr_install_plan()
+    assert not plan.can_install
+    assert "tesseract" in plan.hint.lower()
+
+
+def test_ocr_install_plan_uses_winget_on_windows(monkeypatch):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(pdf_ocr.shutil, "which", lambda name: "winget" if name == "winget" else None)
+    plan = pdf_ocr.ocr_install_plan()
+    assert plan.can_install
+    assert plan.command == ("winget", "install", "-e", "--id", "UB-Mannheim.TesseractOCR")
+
+
+def test_ocr_install_plan_uses_brew_on_macos(monkeypatch):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(pdf_ocr.shutil, "which", lambda name: "/opt/homebrew/bin/brew" if name == "brew" else None)
+    plan = pdf_ocr.ocr_install_plan()
+    assert plan.can_install
+    assert plan.command == ("brew", "install", "tesseract", "tesseract-lang")
+
+
+def test_install_ocr_engine_runs_the_plan_with_an_injected_runner(monkeypatch):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        pdf_ocr.shutil, "which", lambda name: "/usr/bin/apt-get" if name == "apt-get" else None
+    )
+    state = {"installed": False}
+    # `install_ocr_engine` checks `ocr_available()` up front and `tesseract_available()`
+    # afterwards; the second reflects the fake package manager's success.
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: state["installed"])
+    monkeypatch.setattr(pdf_ocr, "tesseract_available", lambda: state["installed"])
+    seen = []
+
+    def runner(argv):
+        seen.append(tuple(argv))
+        state["installed"] = True
+        return 0, "ok"
+
+    result = pdf_ocr.install_ocr_engine(runner=runner)
+    assert seen == [
+        ("sudo", "apt-get", "install", "-y", "tesseract-ocr", "tesseract-ocr-eng", "tesseract-ocr-ara")
+    ]
+    assert result.ok is True
+    assert result.returncode == 0
+
+
+def test_install_ocr_engine_reports_a_failed_command(monkeypatch):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        pdf_ocr.shutil, "which", lambda name: "/usr/bin/apt-get" if name == "apt-get" else None
+    )
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
+    monkeypatch.setattr(pdf_ocr, "tesseract_available", lambda: False)
+    result = pdf_ocr.install_ocr_engine(runner=lambda argv: (100, "no permission"))
+    assert result.ok is False
+    assert result.returncode == 100
+    assert "failed" in result.message.lower()
+
+
+def test_install_ocr_engine_says_so_when_already_installed(monkeypatch):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: True)
+    result = pdf_ocr.install_ocr_engine(runner=lambda argv: (0, ""))
+    assert result.ok is True
+    assert result.ran is False
+    assert "already installed" in result.message
+
+
+def test_install_ocr_engine_asks_for_the_python_packages_first(monkeypatch):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ("pytesseract",))
+    called = []
+    result = pdf_ocr.install_ocr_engine(runner=lambda argv: called.append(argv) or (0, ""))
+    assert result.ok is False
+    assert result.ran is False
+    assert called == []  # no package manager was run without the Python packages
+    assert "requirements-ocr.txt" in result.message
+
+
+def test_ocr_system_status_delegates_to_the_engine_probe(monkeypatch):
+    from core import optional_deps, pdf_ocr
+
+    monkeypatch.setattr(optional_deps, "missing_imports", lambda key: ())
+    monkeypatch.setattr(pdf_ocr, "tesseract_available", lambda: False)
+    assert optional_deps._ocr_system_ok() is False
+    monkeypatch.setattr(pdf_ocr, "tesseract_available", lambda: True)
+    assert optional_deps._ocr_system_ok() is True

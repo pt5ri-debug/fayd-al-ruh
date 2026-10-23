@@ -38,6 +38,7 @@ from tkinter import simpledialog
 
 from ai import chat as chat_module
 from core import optional_deps
+from core import pdf_ocr
 from core import speech
 from core.paths import data_dir
 from core.ultron import UltronUnavailable
@@ -2604,25 +2605,64 @@ class FaydGUI:
         self._switch_mouth(chat_module.MOUTH_CLOUD)
 
     def _on_install_ocr(self) -> None:
-        """Install the optional OCR packages from within the window.
+        """Install OCR support from within the window.
 
-        The window used to fail an attach with a pip command the user could not
-        run (the project is not on PyPI). This runs the working command on a
-        worker thread and reports the outcome, then re-checks the feature so the
-        ＋ menu label reflects the new state.
+        OCR has two halves: the Python packages (pip installs them) and the
+        Tesseract *engine* (an OS package pip cannot install). This installs
+        whichever half is missing and reports the outcome, then re-checks the
+        feature so the ＋ menu label reflects the new state.
         """
         if self._busy:
             return
         if optional_deps.is_available(optional_deps.FEATURE_OCR):
             self._add_bubble("note", "OCR support is already installed.")
             return
-        if optional_deps.install_command(optional_deps.FEATURE_OCR) is None:
-            self._add_bubble("note", optional_deps.install_hint(optional_deps.FEATURE_OCR))
-            return
-        self._add_bubble("note", "Installing OCR support… this can take a moment.")
-        self._start_work(lambda: optional_deps.install(optional_deps.FEATURE_OCR))
+        if optional_deps.missing_imports(optional_deps.FEATURE_OCR):
+            if optional_deps.install_command(optional_deps.FEATURE_OCR) is None:
+                self._add_bubble("note", optional_deps.install_hint(optional_deps.FEATURE_OCR))
+                return
+            self._add_bubble("note", "Installing OCR support… this can take a moment.")
+        else:
+            # The packages are present; the engine is what is missing.
+            from core.pdf_ocr import ocr_install_plan
+
+            plan = ocr_install_plan()
+            if plan.can_install:
+                self._add_bubble(
+                    "note", f"Installing the Tesseract OCR engine: {' '.join(plan.command)}"
+                )
+        self._start_work(self._install_ocr_worker)
+
+    def _install_ocr_worker(self) -> Any:
+        """Install the OCR Python packages, then the Tesseract engine if needed.
+
+        Returns an :class:`~core.optional_deps.InstallResult` when pip ran (its
+        message already names the engine step when the engine is still missing),
+        or an :class:`~core.pdf_ocr.OcrInstallResult` when only the engine was
+        left to install.
+        """
+        from core.pdf_ocr import install_ocr_engine
+
+        if optional_deps.missing_imports(optional_deps.FEATURE_OCR):
+            result = optional_deps.install(optional_deps.FEATURE_OCR)
+            if not result.ok:
+                return result
+        if optional_deps.status(optional_deps.FEATURE_OCR).system_ok:
+            return optional_deps.InstallResult(
+                key=optional_deps.FEATURE_OCR, ok=True, message="OCR support is installed."
+            )
+        return install_ocr_engine()
 
     def _render_install_result(self, result: "optional_deps.InstallResult") -> None:
+        self._add_bubble("note", result.message)
+        if result.ok:
+            self._add_bubble(
+                "note",
+                "You can now attach a scanned PDF with “Attach a scanned PDF (OCR)…”.",
+            )
+
+    def _render_ocr_install(self, result: "pdf_ocr.OcrInstallResult") -> None:
+        """Show the outcome of installing the Tesseract engine (a system package)."""
         self._add_bubble("note", result.message)
         if result.ok:
             self._add_bubble(
@@ -2892,6 +2932,8 @@ class FaydGUI:
     def _render_result(self, payload: Any) -> None:
         if isinstance(payload, optional_deps.InstallResult):
             self._render_install_result(payload)
+        elif isinstance(payload, pdf_ocr.OcrInstallResult):
+            self._render_ocr_install(payload)
         elif isinstance(payload, speech.SpeechInstallResult):
             self._render_speech_install(payload)
         elif isinstance(payload, ChatReply):

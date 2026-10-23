@@ -41,9 +41,12 @@ Design points, matched to the stage requirements:
 from __future__ import annotations
 
 import importlib.util
+import platform
+import shutil
+import subprocess
 import tempfile
 import time
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -74,6 +77,18 @@ OCR_SYSTEM_PACKAGES: dict[str, str] = {
     "ara": "tesseract-ocr-ara",
     "deu": "tesseract-ocr-deu",
     "fra": "tesseract-ocr-fra",
+}
+
+#: The engine and the language data, per package manager. pip cannot install any
+#: of these -- Tesseract is an OS package, like ``espeak-ng`` -- so the app runs
+#: the platform's own package manager (see :func:`ocr_install_plan`).
+OCR_SYSTEM_PACKAGES_BY_MANAGER: dict[str, tuple[str, ...]] = {
+    "debian": ("tesseract-ocr", "tesseract-ocr-eng", "tesseract-ocr-ara"),
+    "fedora": ("tesseract", "tesseract-langpack-eng", "tesseract-langpack-ara"),
+    "arch": ("tesseract", "tesseract-data-eng", "tesseract-data-ara"),
+    "alpine": ("tesseract-ocr", "tesseract-ocr-data-eng", "tesseract-ocr-data-ara"),
+    "macos": ("tesseract", "tesseract-lang"),
+    "windows": ("UB-Mannheim.TesseractOCR",),
 }
 
 #: Default rasterisation resolution (dots per inch). 200 keeps a typical A4 page
@@ -280,7 +295,17 @@ class PageOcrEngine(Protocol):
 
 def ocr_available() -> bool:
     """Whether the OCR Python packages *and* the Tesseract engine are present."""
-    if any(importlib.util.find_spec(name) is None for name in OCR_DEPENDENCIES):
+    return tesseract_available()
+
+
+def tesseract_available() -> bool:
+    """Whether the Tesseract engine itself is reachable.
+
+    This is the *system* half of OCR: it needs the Python packages to ask the
+    engine, but pip cannot install the engine -- only the OS package manager can
+    (see :func:`install_ocr_engine`).
+    """
+    if missing_ocr_python_packages():
         return False
     try:
         import pytesseract  # type: ignore[import-not-found]
@@ -289,6 +314,16 @@ def ocr_available() -> bool:
     except Exception:
         return False
     return True
+
+
+def missing_ocr_python_packages() -> tuple[str, ...]:
+    """The OCR import names that are absent (empty when the packages are present).
+
+    Split out from :func:`ocr_available` so the two halves of "usable right now"
+    -- the pip packages and the system engine -- can be told apart: pip can fix
+    the first, only the OS package manager can fix the second.
+    """
+    return tuple(name for name in OCR_DEPENDENCIES if importlib.util.find_spec(name) is None)
 
 
 def _require_dependencies() -> tuple[Any, Any]:
@@ -450,6 +485,168 @@ def usable_languages(
     return resolve_languages(engine, requested)
 
 
+# --------------------------------------------------------------------------- #
+# Installing the Tesseract engine itself (a *system* package, not a pip extra)
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class OcrInstallPlan:
+    """How to get the Tesseract engine, honest about what pip cannot do.
+
+    Tesseract and its language data are ordinary *system* packages, not Python
+    packages, so ``pip`` cannot install them -- the same distinction the speech
+    engine makes for ``espeak-ng``. ``command`` is a ready-to-run package-manager
+    command on this platform, or empty when the app does not know one (so the
+    caller shows ``hint`` instead of pretending it can install).
+    """
+
+    platform: str
+    command: tuple[str, ...]
+    hint: str
+
+    @property
+    def can_install(self) -> bool:
+        return bool(self.command)
+
+
+def _ocr_package_manager_command() -> tuple[str, ...]:
+    """A package-manager command for this OS, or empty when the app knows none."""
+    system = platform.system().lower()
+    if system == "linux":
+        if shutil.which("apt-get"):
+            return ("sudo", "apt-get", "install", "-y", *OCR_SYSTEM_PACKAGES_BY_MANAGER["debian"])
+        if shutil.which("dnf"):
+            return ("sudo", "dnf", "install", "-y", *OCR_SYSTEM_PACKAGES_BY_MANAGER["fedora"])
+        if shutil.which("pacman"):
+            return ("sudo", "pacman", "-S", "--noconfirm", *OCR_SYSTEM_PACKAGES_BY_MANAGER["arch"])
+        if shutil.which("apk"):
+            return ("sudo", "apk", "add", *OCR_SYSTEM_PACKAGES_BY_MANAGER["alpine"])
+        return ()
+    if system == "darwin" and shutil.which("brew"):
+        return ("brew", "install", *OCR_SYSTEM_PACKAGES_BY_MANAGER["macos"])
+    if system == "windows":
+        if shutil.which("winget"):
+            return (
+                "winget",
+                "install",
+                "-e",
+                "--id",
+                *OCR_SYSTEM_PACKAGES_BY_MANAGER["windows"],
+            )
+        if shutil.which("choco"):
+            return ("choco", "install", "-y", "tesseract")
+    return ()
+
+
+def ocr_install_plan() -> OcrInstallPlan:
+    """The platform-aware way to install the Tesseract engine and its language data.
+
+    This is the OCR twin of :func:`core.speech.speech_install_plan`: it lets the
+    app offer a real next step for the *system* half of OCR, which pip cannot
+    install. When the app does not know a package manager for this OS the plan
+    says so and ``can_install`` stays False.
+    """
+    command = _ocr_package_manager_command()
+    if command:
+        return OcrInstallPlan(platform.system().lower(), command, " ".join(command))
+    system = platform.system().lower()
+    if system == "darwin":
+        return OcrInstallPlan(
+            system,
+            (),
+            "Install Tesseract with Homebrew (`brew install tesseract tesseract-lang`) "
+            "so Arabic and English language data are present.",
+        )
+    if system == "windows":
+        return OcrInstallPlan(
+            system,
+            (),
+            "Install Tesseract with `winget install -e --id UB-Mannheim.TesseractOCR` "
+            "(or `choco install tesseract`), then open a new terminal so `tesseract` "
+            "is on PATH.",
+        )
+    return OcrInstallPlan(
+        system,
+        (),
+        "Install Tesseract and its language data with your system package manager "
+        "(e.g. `sudo apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara`).",
+    )
+
+
+#: Runs one command and returns ``(returncode, combined_output)``.
+OcrCommandRunner = Callable[[Sequence[str]], tuple[int, str]]
+
+
+def _default_ocr_runner(argv: Sequence[str]) -> tuple[int, str]:
+    completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        list(argv),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    combined = (completed.stdout or "") + (completed.stderr or "")
+    return completed.returncode, combined
+
+
+@dataclass(frozen=True)
+class OcrInstallResult:
+    """The outcome of an attempted Tesseract install, ready to show the user."""
+
+    ok: bool
+    command: tuple[str, ...] = ()
+    returncode: int | None = None
+    output: str = ""
+    message: str = ""
+    ran: bool = True
+
+
+def install_ocr_engine(*, runner: OcrCommandRunner | None = None) -> OcrInstallResult:
+    """Try to install the Tesseract engine as a system package. Never raises.
+
+    ``pip`` cannot install Tesseract (it is an OS package, like ``espeak-ng``), so
+    this runs the platform's package manager through ``sudo`` when the app knows
+    one. If it succeeds and the engine is now reachable, ``ok`` is True. When the
+    app does not know an install command (or the runner fails), ``ran``/``ok`` are
+    False and ``message`` carries the manual hint instead of a false promise.
+    """
+    if ocr_available():
+        return OcrInstallResult(
+            ok=True, ran=False, message="The Tesseract OCR engine is already installed."
+        )
+    if missing_ocr_python_packages():
+        return OcrInstallResult(
+            ok=False,
+            ran=False,
+            message=(
+                "Install the OCR Python packages first with "
+                f"`{pip_install_command(FEATURE_OCR)}`, then the {OCR_ENGINE_NAME} engine."
+            ),
+        )
+    plan = ocr_install_plan()
+    if not plan.can_install:
+        return OcrInstallResult(ok=False, ran=False, message=plan.hint)
+    run = runner or _default_ocr_runner
+    returncode, output = run(plan.command)
+    ok = returncode == 0 and tesseract_available()
+    if ok:
+        message = f"Installed the {OCR_ENGINE_NAME} OCR engine."
+    elif returncode == 0:
+        message = (
+            "The package manager reported success, but the OCR engine is not reachable "
+            "yet (a new terminal may be needed for PATH). " + plan.hint
+        )
+    else:
+        message = f"The install command failed.\n{plan.hint}"
+    return OcrInstallResult(
+        ok=ok,
+        command=plan.command,
+        returncode=returncode,
+        output=output,
+        message=message,
+    )
+
+
 def _usable_languages(engine: PageOcrEngine, config: OcrConfig) -> tuple[str, ...]:
     """The requested languages the engine actually has, or raise if none remain."""
     return resolve_languages(engine, config.languages)
@@ -592,9 +789,12 @@ __all__ = [
     "OCR_EXTRA",
     "OCR_PIP_PACKAGES",
     "OCR_SYSTEM_PACKAGES",
+    "OCR_SYSTEM_PACKAGES_BY_MANAGER",
     "OcrConfig",
     "OcrError",
     "OcrFailure",
+    "OcrInstallPlan",
+    "OcrInstallResult",
     "OcrLanguageError",
     "OcrLimitError",
     "OcrPage",
@@ -604,8 +804,12 @@ __all__ = [
     "TesseractOcrEngine",
     "check_raster_limits",
     "extract_pdf_pages",
+    "install_ocr_engine",
+    "missing_ocr_python_packages",
     "ocr_available",
+    "ocr_install_plan",
     "page_needs_ocr",
     "resolve_languages",
+    "tesseract_available",
     "usable_languages",
 ]

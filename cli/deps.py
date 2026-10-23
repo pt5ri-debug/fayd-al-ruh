@@ -52,6 +52,12 @@ def _report() -> int:
         if not state.available:
             any_missing = True
             print("    " + optional_deps.install_hint(key).replace("\n", "\n    "))
+            if key == optional_deps.FEATURE_OCR and state.python_ok and not state.system_ok:
+                # The packages are present; the *engine* is what is missing, and
+                # pip cannot install it. Show the real system-package step.
+                from core.pdf_ocr import ocr_install_plan
+
+                print("    " + ocr_install_plan().hint)
     any_missing = _report_speech(any_missing)
     return 1 if any_missing else 0
 
@@ -86,7 +92,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(result.message)
         if not result.ok:
             failed = True
+        # OCR has a *system* half too: pip installs the packages, but the
+        # Tesseract engine is an OS package. Offer the real next step here, the
+        # same way `--install speech` does for espeak-ng.
+        if key == optional_deps.FEATURE_OCR and result.ok:
+            failed = _install_ocr_engine(failed)
     return 1 if failed else 0
+
+
+def _install_ocr_engine(failed: bool) -> bool:
+    """Install the Tesseract engine (a system package) via the platform package manager."""
+    from core.pdf_ocr import install_ocr_engine, ocr_available, ocr_install_plan
+
+    if ocr_available():
+        print("The Tesseract OCR engine is already installed.")
+        return failed
+    plan = ocr_install_plan()
+    if plan.can_install:
+        print(f"Installing the Tesseract OCR engine: {' '.join(plan.command)}")
+    result = install_ocr_engine()
+    print(result.message)
+    return failed or not result.ok
 
 
 def _install_speech(failed: bool) -> bool:

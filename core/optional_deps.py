@@ -324,13 +324,9 @@ def missing_imports(key: str) -> tuple[str, ...]:
 
 def _ocr_system_ok() -> bool:
     """Whether the Tesseract engine is reachable (only meaningful with the packages)."""
-    try:
-        import pytesseract  # type: ignore[import-not-found]
+    from core.pdf_ocr import tesseract_available
 
-        pytesseract.get_tesseract_version()
-    except Exception:
-        return False
-    return True
+    return tesseract_available()
 
 
 def _image_weights_cached() -> bool:

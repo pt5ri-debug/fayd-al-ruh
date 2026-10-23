@@ -1848,8 +1848,17 @@ Arabic is kept as secondary aliases where useful.
   `resolve_languages` intersect the requested codes with what Tesseract has and
   report the missing model by name, so Arabic + English work only when
   `tesseract-ocr-ara` / `tesseract-ocr-eng` are installed. OCR reads pixels; it
-  never executes the document. (System packages are listed in
-  `OCR_SYSTEM_PACKAGES`; the extra is `[ocr]`.)
+  never executes the document. The **system half** has an installer of its own,
+  mirroring `core.speech`'s: `ocr_install_plan()` returns an `OcrInstallPlan`
+  (a platform package-manager command — apt/dnf/pacman/apk, `brew install
+  tesseract tesseract-lang`, `winget install -e --id UB-Mannheim.TesseractOCR`,
+  or `choco`) with an honest `hint` when the app knows none, and
+  `install_ocr_engine(runner=…)` runs it through an injectable runner (never
+  raises) and re-checks `tesseract_available()`; `missing_ocr_python_packages`
+  and `tesseract_available` split the two halves so the app installs the pip
+  packages first and the engine second. `OCR_SYSTEM_PACKAGES_BY_MANAGER` is the
+  one per-manager list. (System packages are listed in `OCR_SYSTEM_PACKAGES`;
+  the extra is `[ocr]`.)
 - `core/optional_deps.py` — the **optional-feature installer**, so a user who
   hits "OCR/PDF is not installed" has a next step the app can actually perform.
   It owns, per feature (`pdf`, `ocr`), the bundled requirements file, the import
@@ -1866,7 +1875,11 @@ Arabic is kept as secondary aliases where useful.
   `audiocpp_cli` program and the VoiceTut-TTS GGUF as what pip cannot fetch (it
   declares no Python package, so pip is never named for it). Surfaced as the CLI
   `python -m cli deps [--install pdf|ocr]` and the window's **＋ → Install OCR
-  support…** entry and the Import Center's **Install OCR support…** button.
+  support…** entry and the Import Center's **Install OCR support…** button; for
+  OCR, `--install ocr` runs the engine step too (and `deps` prints the engine
+  plan when only the system half is missing), and both the window and the Import
+  Center install whichever half is absent, so the pip packages and Tesseract are
+  no longer two separate dead ends.
 - `core/pdf_extract.py` — read text out of a **digital** PDF page by page with
   `pypdf` (maintained, pure-Python, BSD; the optional `[pdf]` extra), imported
   lazily so the base install stays dependency-light. `PdfPageStream` opens and
