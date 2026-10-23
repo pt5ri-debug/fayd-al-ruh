@@ -2007,7 +2007,7 @@ of the application and the user.
 
 ## Status
 
-- Version: 2.2.0
+- Version: 2.3.0
 - Python: 3.12 or newer
 - License: MIT — see `LICENSE.txt`
 - The release is trained and ready: all outputs are inside `ml/artifacts/` and
