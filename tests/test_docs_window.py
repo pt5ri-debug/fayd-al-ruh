@@ -205,6 +205,40 @@ def test_the_window_previews_a_vision_page(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_window_reads_a_scanned_document_and_shows_its_contents(tmp_path: Path) -> None:
+    # A plain image is a one-page document with no text layer, so the window must
+    # *read* it (transcribe it) and show the contents -- not only the page image.
+    image = tmp_path / "scan.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    root, dialog, _service = _dialog(tmp_path)
+    try:
+        dialog._load(str(image))
+        assert _wait_until(root, lambda: HEADER in _transcript_text(dialog))
+        text = _transcript_text(dialog)
+        assert "Porosity is the void fraction" in text
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_window_names_the_next_step_when_a_scanned_file_needs_the_model(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "scan.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        # Clear the client's injected runner so the real "model not installed" path
+        # is exercised: the window must name the next step, not show a blank file.
+        service._client._runner = None  # type: ignore[attr-defined]
+        dialog._load(str(image))
+        assert _wait_until(root, lambda: "not ready yet" in _transcript_text(dialog))
+        assert "docs extra" in _transcript_text(dialog)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_the_window_closes_cleanly(tmp_path: Path) -> None:
     root, dialog, _service = _dialog(tmp_path)
     dialog._close()

@@ -304,9 +304,16 @@ def _load_pdf(path: Path, *, render: bool, max_pages: int, dpi: int) -> LoadedDo
                 "(drop --no-render) so the vision model can read them."
             ) from failure
         if not any(page.image_path for page in pages):
-            # Rendering was attempted for every page and none succeeded, so this is
-            # an honest failure rather than an empty document.
-            raise DocsStudioError(str(failure)) from failure
+            # Rendering was attempted for every page and none succeeded. The real
+            # reason (almost always the missing raster dependency) is in the notes,
+            # so it is named here rather than replaced by the generic "needs OCR"
+            # text -- reporting that instead is what made a scanned file look like
+            # an empty document with no explanation.
+            reason = notes[0] if notes else str(failure)
+            raise DocsStudioError(
+                f"{path.name!r} is a scanned PDF with no text layer, and its pages "
+                f"could not be turned into images: {reason}"
+            ) from failure
     elif failure is not None:
         raise DocsStudioError(str(failure)) from failure
 
@@ -522,6 +529,33 @@ def parse_page_range(text: str) -> tuple[int, ...]:
     return tuple(dict.fromkeys(pages))
 
 
+#: The instruction that asks the vision model to *transcribe* a page instead of
+#: answering a question about it. This is what turns a scanned page -- which has
+#: no text layer -- into readable content, so the window can show a document's
+#: contents before the user asks anything.
+TRANSCRIBE_QUESTION = (
+    "Transcribe the full text of this page exactly as it appears, keeping the "
+    "reading order, the headings, and any table rows. Return only the document's "
+    "own words, with no commentary or preamble, and write '(no readable text)' if "
+    "the page is blank."
+)
+
+
+def batch_pages(
+    numbers: Sequence[int], *, limit: int = MAX_PAGES_PER_REQUEST
+) -> tuple[tuple[int, ...], ...]:
+    """Group 1-based page numbers into bounded batches, keeping their order.
+
+    A scanned report can be hundreds of pages, and image tokens are expensive on a
+    CPU, so the pages are read in batches of at most ``limit`` rather than all at
+    once. The order given is preserved, so a transcription reads in page order.
+    """
+    if limit < 1:
+        raise ValueError("limit must be at least 1.")
+    ordered = list(numbers)
+    return tuple(tuple(ordered[start : start + limit]) for start in range(0, len(ordered), limit))
+
+
 def build_vision_messages(
     document: LoadedDocument,
     question: str,
@@ -609,8 +643,10 @@ __all__ = [
     "MIN_CHARS_PER_PAGE",
     "SUPPORTED_SUFFIXES",
     "TEXT_SUFFIXES",
+    "TRANSCRIBE_QUESTION",
     "UNSUPPORTED_SUFFIXES",
     "WORD_SUFFIXES",
+    "batch_pages",
     "build_vision_messages",
     "load_document",
     "parse_page_range",

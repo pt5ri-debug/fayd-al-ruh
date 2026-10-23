@@ -234,6 +234,11 @@ class DocsDialog:
 
         text_actions = tk.Frame(sidebar, bg=theme.surface)
         text_actions.pack(fill="x", padx=12, pady=(0, 6))
+        self._read_button = self._button(
+            text_actions, "Read the document (scanned pages)", self._on_read_document
+        )
+        self._read_button.pack(fill="x", pady=(0, 4))
+        self._read_button.configure(state="disabled")
         self._save_text_button = self._button(
             text_actions, "Save the extracted text…", self._on_save_text
         )
@@ -621,6 +626,7 @@ class DocsDialog:
             self._download_button.configure(state="disabled")
             self._close_button.configure(state="disabled")
             self._save_text_button.configure(state="disabled")
+            self._read_button.configure(state="disabled")
         else:
             self._download_button.configure(state="normal")
             self._sync_document_buttons()
@@ -692,13 +698,60 @@ class DocsDialog:
             if len(document.text) > len(preview):
                 preview += "\n\n… (the rest is available to the model when you ask)"
             lines.append(preview)
-        else:
-            lines.append(
-                "This document has no text layer, so its content is read from the "
-                "page image(s) by the vision model. Ask a question below."
-            )
+        elif not document.vision_pages:
+            lines.append("This document has no readable content.")
         self._add_message("note", "\n\n".join(lines), title="Document")
         self._show_page(0)
+        self._maybe_auto_read(opened)
+
+    def _maybe_auto_read(self, opened: Any) -> None:
+        """Read a document's image pages with the vision model, when it is ready.
+
+        A scanned document has no text layer, so without this the window would show
+        only a page image and a "ask a question" note -- its *contents* would never
+        appear. When the model is installed the pages are transcribed automatically;
+        when it is not, the real next step is stated instead of leaving the user
+        with a blank-looking document.
+        """
+        if not opened.document.vision_pages:
+            return
+        status = self.service.model_status()
+        if not status.available:
+            self._add_message(
+                "note",
+                "This document has no text layer, so its content is read from the page "
+                f"image(s) by the vision model — which is not ready yet. {status.hint or status.summary()}",
+                title="Reading needs the model",
+            )
+            return
+        self._read_document(opened.key)
+
+    def _read_document(self, key: str) -> None:
+        """Transcribe the current document's image pages and show the contents."""
+        if not key:
+            return
+
+        def job() -> Any:
+            return self.service.read(key, progress=lambda message: self._progress.put(message))
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._add_message("note", f"Could not read the document: {error}", title="Problem")
+                return
+            if not result.ok:
+                self._add_message("note", result.message, title="Cannot read")
+                return
+            if not result.text:
+                self._add_message(
+                    "note", result.message or "The model returned no readable text.",
+                    title="No text found",
+                )
+                return
+            self._add_message(
+                "docs", f"{HEADER}\n\n{result.text}", title="Doc's Studio — contents",
+            )
+
+        self._run_background("Reading the document…", job, finish)
 
     def _refresh_documents(self) -> None:
         self._document_list.delete(0, "end")
@@ -713,6 +766,7 @@ class DocsDialog:
         state: Literal["normal", "disabled"] = "normal" if has_document else "disabled"
         self._close_button.configure(state=state)
         self._save_text_button.configure(state=state)
+        self._read_button.configure(state=state)
 
     def _on_select_document(self, _event: tk.Event | None = None) -> None:
         selection = self._document_list.curselection()
@@ -749,6 +803,21 @@ class DocsDialog:
         self._page_label.configure(text="—")
         self._refresh_documents()
         self._set_status("No document is open.")
+
+    def _on_read_document(self) -> None:
+        """Read the current document's scanned pages on demand."""
+        if not self._current_key:
+            return
+        opened = self.service.get(self._current_key)
+        if opened is not None and not opened.document.vision_pages:
+            self._add_message(
+                "note",
+                "This document has a text layer, so its contents are already shown as "
+                "text above — there is nothing extra for the vision model to read.",
+                title="Nothing to read",
+            )
+            return
+        self._read_document(self._current_key)
 
     def _on_save_text(self) -> None:
         if not self._current_key:
