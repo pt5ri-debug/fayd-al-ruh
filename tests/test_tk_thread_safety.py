@@ -80,12 +80,20 @@ def _run(mode: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_a_worker_thread_reaping_a_dead_root_is_the_hazard() -> None:
-    """Without the main-thread reap, the worker thread collects the dead root."""
+    """Without the main-thread reap, the worker thread collects the dead root.
+
+    The hazard shows up differently by version: 3.13 prints a ``RuntimeWarning``
+    naming gh-83274 and finishes, while 3.12 aborts the interpreter outright
+    (``Tcl_AsyncDelete: async handler deleted by the wrong thread``, SIGABRT).
+    Either is proof the dead root was reaped off the main thread.
+    """
     result = _run("noreap")
-    assert "DONE" in result.stdout
-    assert _HAZARD_MARKER in result.stderr, (
+    warned = _HAZARD_MARKER in result.stderr
+    aborted = result.returncode != 0 and "Tcl_AsyncDelete" in result.stderr
+    assert warned or aborted, (
         "expected the worker thread to reap the dead Tk root; if this no longer "
-        "happens the hazard may be fixed upstream and this guard can be relaxed"
+        "happens the hazard may be fixed upstream and this guard can be relaxed. "
+        f"got returncode={result.returncode}, stderr={result.stderr!r}"
     )
 
 
