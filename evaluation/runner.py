@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from core.acceptance_policy import rejection_reason
 from core.action import Action
+from core.analogy import analogy_accuracy
 from core.belief import Belief
 from core.belief_revision import BeliefRevisionEngine
 from core.causal_link import CausalLink
@@ -77,6 +78,8 @@ class EvaluationMetrics:
     acceptance_gate_accuracy: float
     # Curriculum: fraction of the seeded degree the ontology carries
     curriculum_coverage: float
+    # Analogy: held-out judgements of which concept pairs are structurally alike
+    analogy_accuracy: float
     # Aggregate
     overall: float
 
@@ -724,6 +727,10 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # relations) the live ontology actually carries.
     curriculum_coverage_value = curriculum_coverage_score(CognitiveController().ontology)
 
+    # Analogy: held-out judgements of which concept pairs are structurally alike,
+    # including negative controls, so a permissive engine cannot pass.
+    analogy_value = analogy_accuracy(ontology=CognitiveController().ontology)
+
     petroleum_score = mean([
         petroleum_causal,
         petroleum_retrieval,
@@ -757,6 +764,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_generalisation,
         acceptance_gate,
         curriculum_coverage_value,
+        analogy_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -784,6 +792,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         petroleum_generalisation_accuracy=round(petroleum_generalisation, 6),
         acceptance_gate_accuracy=round(acceptance_gate, 6),
         curriculum_coverage=round(curriculum_coverage_value, 6),
+        analogy_accuracy=round(analogy_value, 6),
         overall=round(overall, 6),
     )
 
