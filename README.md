@@ -1680,6 +1680,63 @@ next step (`ollama pull qwen2.5-coder:7b`) instead of failing obscurely. Nothing
 is downloaded behind your back: the model is fetched by `ollama pull`, which you
 run yourself.
 
+## Scene Studio (a local 3D figure and scene studio)
+
+The Scene Studio is the project's own **3D figure and scene studio** — a local,
+DAZ-style workspace for building a scene, posing a human figure, and rendering a
+picture. It is deliberately **fully local and dependency-light**: the figures and
+props are generated in code, the renderer is a CPU software rasteriser, and there
+is no GPU, no model download, and no network call anywhere in the path. The base
+install needs nothing new.
+
+```bash
+python -m cli scene3d status                 # what the studio can do
+python -m cli scene3d figures                # the built-in figure presets
+python -m cli scene3d props                  # the primitive prop catalog
+python -m cli scene3d poses                  # the pose presets
+python -m cli scene3d new --name Demo
+python -m cli scene3d add-figure athletic
+python -m cli scene3d pose-preset wave
+python -m cli scene3d frame
+python -m cli scene3d render --width 800 --height 600
+python -m cli scene3d export-obj out.obj     # geometry in its current pose
+python -m cli scene3d command "add cube box" # the same command box the window has
+python -m cli scene3d demo                   # build and render a whole scene
+```
+
+In the window, the composer's **＋** menu opens the **Scene Studio** page: a left
+sidebar (New scene, Open, Save, Export OBJ, the figure presets, the prop catalog,
+and the pose presets), a viewport that previews the current render, a right column
+with the object list, the bone list, and the pose buttons, and a command box at
+the bottom. The window and the CLI drive the **same** service
+(`gui/scene3d.py` over `core/scene3d.py`), so they share one scene, one renderer,
+and one command vocabulary — the CLI reimplements no scene logic.
+
+How it works, and what is honest about it:
+
+- **Figures have a real skeleton.** `core/scene3d_figures.py` builds a parametric
+  humanoid from explicit parameters (height, build, limb lengths) and gives it a
+  real bone hierarchy (`hips → spine → chest → neck → head`, arms and legs). A
+  pose is a rotation per bone; the mesh is bound to the skeleton once and
+  re-deformed from the pose on every render, so posing a bone really moves the
+  vertices (a rigid bone rotates its vertices about its own head).
+- **Props and primitives are generated in code.** `core/scene3d_props.py` builds
+  a ground plane, a platform, and the standard primitives (cube, sphere, cylinder,
+  cone, plane) with a material palette — nothing is downloaded.
+- **The renderer is a real CPU software rasteriser.** `core/scene3d_render.py` is
+  a z-buffered triangle rasteriser with Blinn-Phong shading, back-face culling,
+  and an optional wireframe mode. It says plainly what it is: a real rasteriser,
+  but **no GPU, no ray tracing, and no commercial render engine**.
+- **The scene is portable.** `core/scene3d_serialize.py` writes a native
+  `.faydscene` (JSON) that keeps the rig, the pose, the materials, the lights, and
+  the camera, so a scene round-trips exactly; `core/scene3d_io.py` reads and writes
+  Wavefront OBJ/MTL, so a mesh can come in or go out.
+- **Everything it makes lives under `data/scene3d/`** (git-ignored), so a saved
+  scene or an imported mesh never dirties the working tree.
+
+The scene engine is dependency-free and headless, so the whole path — build, pose,
+render, save, load, export — is tested on a fresh clone with no GPU and no model.
+
 ## Multimodal perception (optional)
 
 Perception is an optional add-on, not a requirement: the core and the assistant

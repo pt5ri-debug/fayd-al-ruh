@@ -2338,6 +2338,10 @@ class FaydGUI:
             label="Doc's Studio — read any document (incl. scanned)…",
             command=self._open_docs_studio,
         )
+        menu.add_command(
+            label="Scene Studio — build, pose, and render a 3D figure…",
+            command=self._open_scene_studio,
+        )
         menu.add_separator()
         menu.add_command(
             label="Code Studio — edit and merge the project's own code…",
@@ -2547,6 +2551,30 @@ class FaydGUI:
             font=self._font,
             mono=self._mono,
             on_close=lambda: setattr(self, "_docs_studio_dialog", None),
+        )
+
+    def _open_scene_studio(self) -> None:
+        """Open the Scene Studio: build, pose, and render a 3D figure locally.
+
+        The Studio renders with the project's own CPU software rasteriser and
+        builds its figures and props in code, so it needs no GPU, no model
+        download, and no network. It drives the *same* service the CLI's
+        ``scene3d`` command drives, so both see one scene.
+        """
+        from gui.scene3d_dialog import SceneStudioDialog
+
+        existing = getattr(self, "_scene_studio_dialog", None)
+        if existing is not None:
+            existing.window.deiconify()
+            existing.window.lift()
+            return
+        self._scene_studio_dialog = SceneStudioDialog(
+            self.root,
+            self.service.scene3d,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=lambda: setattr(self, "_scene_studio_dialog", None),
         )
 
     def _open_code_studio(self) -> None:
@@ -2773,6 +2801,11 @@ class FaydGUI:
         # Presentation Studio likewise has its own window and service.
         if action.key == "presentation":
             self._open_presentation()
+            return
+        # The Scene Studio has its own window, so the sidebar opens it rather than
+        # running the headless status command.
+        if action.key == "scene-studio":
+            self._open_scene_studio()
             return
         # Ultron and Vision answer in this same chat (the header's model selector),
         # so the sidebar entry switches the mouth rather than opening a window.

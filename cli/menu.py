@@ -345,6 +345,11 @@ def run_docs(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.docs", argv)
 
 
+def run_scene3d(argv: Sequence[str] = ()) -> int:
+    """Build, pose, and render a 3D figure locally (the Scene Studio)."""
+    return _run_module("cli.scene3d", argv)
+
+
 def run_deps(argv: Sequence[str] = ()) -> int:
     """Show or install the optional PDF/OCR features (``python -m cli deps``)."""
     return _run_module("cli.deps", argv)
@@ -472,6 +477,8 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         run_docs,
         ("download", "--approve"),
     ),
+    ("Scene Studio: build, pose, and render a 3D figure locally", run_scene3d, ("status",)),
+    ("Scene Studio: render the built-in figure to a PNG", run_scene3d, ("render",)),
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~4 GB)", run_image, ("download", "--approve")),
     ("Install optional PDF/OCR/image support", run_deps, ()),
@@ -624,6 +631,7 @@ __all__ = [
     "run_import_center",
     "run_presentation",
     "run_docs",
+    "run_scene3d",
     "run_deps",
     "run_demo",
     "run_ml",

@@ -1953,6 +1953,125 @@ Arabic is kept as secondary aliases where useful.
   available (`ask`/`read`/`download`), `4` the document could not be read, `5` an
   unexpected failure. A `status` report succeeds even when the model is missing --
   it *states* the next step.
+- `core/scene3d.py` — the **Scene Studio** scene model: a local, DAZ-style 3D
+  figure-and-scene workspace. `Vec3`/`Mat4` (a full 4x4 transform with
+  compose/invert/transform-point, so a rig can build a world matrix per bone),
+  `Material`, `Transform`, `Camera`
+  (a look-at view matrix + a perspective projection matrix, `frame` to fit a
+  bounding sphere), `Light` (directional/point, `direction_to_light`),
+  `Mesh` (vertices, faces, per-vertex normals, `triangle_count`/`face_count`,
+  `bounds`/`center_and_radius`, `transform`), `Bone`/`Skeleton` (a parented rig;
+  `world_matrices` composes each bone's world transform from its rest matrix and
+  the pose, `segments` gives each bone's head/tail in world space,
+  `compute_skin_weights`/`skin_mesh`/`skin_normals` bind a vertex to its nearest
+  bones),
+  `SceneObject` (a mesh + material + transform + optional skeleton/pose/bindings;
+  `is_figure`, `bind`, `deformed_vertices` skin the mesh from the pose,
+  `world_vertices` applies the object transform on top), and `Scene`
+  (`add_object`/`find_object`/`remove_object`/`object_names`, `visible_objects`,
+  `summary`, `center_and_radius`, `frame_camera`, `width`/`height`/`background`),
+  plus `iter_triangles`/`make_default_scene`.
+  Dependency-free: only `math` and the standard library, so the whole engine runs
+  on a fresh clone with no GPU and no model.
+- `core/scene3d_figures.py` — the **parametric humanoid**. `FigureParameters`
+  (height, build, limb lengths, proportions) + `FIGURE_PRESETS`
+  (`adult`/`athletic`/`slim`/`child`) build a `SceneObject` whose mesh is
+  generated in code and bound to a real bone hierarchy (`hips → spine → chest →
+  neck → head`, `shoulder/upper_arm/forearm/hand.L/R`,
+  `thigh/shin/foot.L/R`); `build_figure`/`build_figure_from_preset`/
+  `build_figure_mesh`/`build_figure_skeleton`/`build_figure_scene`/
+  `figure_preset_names`, and `morph_figure` (rebuild from new parameters, keeping
+  the pose and transform). Because the mesh is skinned, posing a bone really
+  moves its vertices. (The named pose presets themselves live in `gui/scene3d.py`,
+  below, so the service is the one place a pose is applied.)
+- `core/scene3d_props.py` — the **props and primitives** generated in code:
+  `PROP_CATALOG` (a ground plane, a platform, a backdrop) with `build_prop`/
+  `prop_names`/`default_ground`, and `PRIMITIVES` (`cube`/`sphere`/`cylinder`/
+  `cone`/`plane`) with `build_primitive`/`primitive_names`; `MATERIALS` (a
+  material palette) with `material_for`/`material_names`. Nothing is downloaded.
+- `core/scene3d_render.py` — the **CPU software rasteriser**: `Framebuffer`
+  (RGB + z-buffer, `clear`/`set_pixel`/`to_png` through `core.imagegen.encode_png`),
+  `shade_point` (Blinn-Phong with an ambient floor; two-sided so a thin surface is
+  still lit), `SoftwareRenderer` (z-buffered triangle rasterisation, back-face
+  culling, optional wireframe) with `render`/`render_with_stats`, and
+  `render_scene`/`render_scene_png`/`RenderStats`. Honest by construction: it says
+  it is a real rasteriser with **no GPU, no ray tracing, and no commercial render
+  engine** (`HONESTY_LINE`).
+- `core/scene3d_io.py` — **Wavefront OBJ/MTL** I/O: `load_obj`/`load_obj_text`
+  (an OBJ with no `o`/`g` line is one unnamed mesh under the file's name, and the
+  material in force is recorded per group, so a multi-material file does not hand
+  every object the last one), `save_obj` (geometry in its current pose, with an
+  MTL sidecar), `parse_mtl`/`save_mtl`, `LoadReport`, `SceneIOError`, and
+  `mesh_filetypes`/`MESH_SUFFIXES`. Bounded by `MAX_VERTICES`/`MAX_FACES`/
+  `MAX_FILE_BYTES`; it parses bytes only and never executes anything.
+- `core/scene3d_serialize.py` — the native **`.faydscene`** (JSON) format:
+  `scene_to_dict`/`scene_from_dict`, `object_to_dict`/`object_from_dict` (a
+  figure's skeleton and pose round-trip, and the skin is re-bound
+  deterministically), `save_scene`/`load_scene_file`, `scene_filename` (a
+  filesystem-safe name), `SCENE_SUFFIXES`, and `SCENE_FORMAT_VERSION`. Vectors are
+  written at full precision, so a reloaded scene is bit-for-bit the same shape.
+- `gui/scene3d.py` — the Scene Studio **service** (Tk-free), the one engine the
+  window and the CLI share, so both see one scene, one renderer, and one command
+  vocabulary. `SceneStudioService` opens a session (`new_scene`,
+  `open_model`/`open_path`), builds (`add_figure`/`add_custom_figure`/
+  `morph_object`/`add_prop`/`add_primitive`), poses (`bone_names`/`pose_bone`/
+  `clear_pose`/`apply_pose_preset`), frames and orbits (`frame_camera`/
+  `set_camera`/`orbit_camera`), renders (`render` → a real PNG under
+  `renders/` with `RenderReport`/`RenderStats`, `render_to_bytes` for a preview),
+  saves and exports (`save_scene`/`export_obj`/`list_saved_scenes`, plus
+  `save_working`/`load_working` for the CLI's persistent working scene), reports
+  (`object_summaries`/`status`/`mesh_filetypes`), and runs the **command box**
+  (`run_command`). A **bare save/export name is a name, not a location**:
+  `save_scene("Demo")` resolves into the Studio's own scenes folder and
+  `export_obj("out.obj")` into its `library/` folder, each with a safe filename
+  (anything naming a location -- an absolute path, or a path with a directory
+  part -- is honoured as given), so a save or an export can never drop a
+  `.faydscene`/`.obj`/`.mtl` in whatever directory the program happened to be run
+  from -- the regression that put `Cmd.faydscene`/`Kept.faydscene` in the
+  checkout.
+  `SceneCommand`/`parse_command` are the one deterministic
+  parser (`PRIMITIVE_NAMES`, `POSE_PRESETS`, `COMMAND_VERBS`, `command_help`), so
+  a typed "add figure athletic" and the CLI's `command` do the same thing; an
+  unknown figure/prop preset is a typed `SceneStudioError`, and an unknown
+  instruction returns the help text rather than guessing. It creates the
+  missing-folder save target itself and refuses a non-positive render size
+  honestly (`RenderReport.ok is False`, never a crash).
+- `gui/scene3d_dialog.py` — the Scene Studio **window** (Tk, imported lazily),
+  built the way the chat, Code Studio, Presentation Studio, and Doc's Studio
+  windows are built: the same `Theme` tokens, `RoundedBox`, `gui.rich_text`
+  Markdown painting, the shared `gui.chat_composer.ChatComposer`, the three
+  `gui.window_controls` title-bar buttons, and a centred conversation column. A
+  left sidebar holds New scene / Open a model or scene… / Save the scene… /
+  Export OBJ…, the figure presets, the prop catalog, and the pose presets; a
+  viewport previews the current render (a `tk.PhotoImage` scaled through
+  `gui.image_preview`, with a wireframe toggle); a right column lists the objects,
+  the selected figure's bones, and the ± X/Y/Z pose buttons; and the composer at
+  the bottom is the same command box the CLI exposes. Long work (a render, a
+  model load) runs on a worker thread whose result is handed back through a
+  **queue the UI thread drains** (Tk is not thread-safe). The honesty line is in
+  the transcript from the first moment, so the window never overstates what it
+  renders. Reachable from the composer's **＋** menu (**Scene Studio — build,
+  pose, and render a 3D figure…**), whose sidebar action is hidden; the headless
+  twin is `python -m cli scene3d`.
+- `cli/scene3d.py` — the Scene Studio CLI, the headless twin of the window:
+  `status`/`figures`/`props`/`materials`/`primitives`/`poses`/`list`/`help`/
+  `new`/`add-figure`/`add-prop`/`add-primitive`/`pose`/`pose-preset`/
+  `clear-pose`/`frame`/`orbit`/`render`/`demo`/`save`/`export-obj`/`open`/
+  `command` (`python -m cli scene3d …`, wired in `cli/menu.py` as `run_scene3d`
+  and in the menu as *Scene Studio: build, pose, and render a 3D figure locally*
+  plus a second entry to render the built-in figure to a PNG). It drives the
+  *same* `gui.scene3d.SceneStudioService` the window drives, so the CLI and the
+  window share one scene and one renderer -- no scene logic is reimplemented here.
+  The working scene is **stateful across invocations**: each command loads
+  `working.faydscene`, acts, and saves it, so `add-figure` then `pose-preset`
+  then `render` build one scene. `--json` (per subcommand, like `cli/docs.py`)
+  gives machine-readable output, and `demo` builds and renders a whole scene in
+  one call. Exit codes: `0` success, `2` invalid arguments, `3` nothing to pose
+  (no figure), `4` a file could not be read or written, `5` an unexpected
+  failure. `core/paths.py` gains `scene_studio_dir`/`scene_studio_scenes_dir`/
+  `scene_studio_renders_dir`/`scene_studio_library_dir` (all under the
+  git-ignored `data/scene3d`), so a saved scene or an imported mesh never dirties
+  the working tree.
 - `core/document_reader.py` — read text out of a Word file with no third-party
   dependency: a `.docx`/`.docm` is an Office Open XML package (a ZIP holding
   `word/document.xml`), read through **`core/docx_extract.py`** (Stage 2B), which
@@ -2343,6 +2462,32 @@ clone, each optional so the base system still runs without it:
   the one form ``urllib.request`` opens on every platform.
   `tests/test_docs_studio.py` opens the built URI with ``urllib.request`` and pins
   that the authority is empty and a space is percent-encoded.
+
+- Phase 19 — the **Scene Studio**, the project's local 3D figure-and-scene
+  workspace: build a scene, pose a human figure on a real skeleton, and render a
+  picture, all **on this machine** with no GPU, no model download, and no
+  network. `core/scene3d.py` is the dependency-free scene model (`Vec3`/`Mat4`,
+  `Camera`/`Light`, `Mesh`, `Bone`/`Skeleton` with real forward kinematics and
+  skin binding, `SceneObject` that deforms its mesh from the pose, `Scene`);
+  `core/scene3d_figures.py` builds a parametric humanoid (four presets, a real
+  bone hierarchy, six pose presets, and morphing); `core/scene3d_props.py`
+  generates the props, primitives, and material palette in code;
+  `core/scene3d_render.py` is a z-buffered CPU software rasteriser with
+  Blinn-Phong shading and a wireframe mode that says plainly it has **no GPU, no
+  ray tracing, and no commercial render engine**; `core/scene3d_io.py` reads and
+  writes Wavefront OBJ/MTL; and `core/scene3d_serialize.py` writes the native
+  `.faydscene` (JSON) that keeps the rig, pose, materials, lights, and camera.
+  `gui/scene3d.py` is the Tk-free service the window and the CLI share (one
+  scene, one renderer, one deterministic command box); `gui/scene3d_dialog.py` is
+  the window, opened from the composer's **＋** menu, built with the same theme,
+  composer, rich text, window controls, and worker-thread/queue pattern as every
+  other window; and `cli/scene3d.py` is its headless twin with a stateful working
+  scene (`python -m cli scene3d …`). Everything it makes lives under the
+  git-ignored `data/scene3d/`. `tests/test_scene3d.py`,
+  `tests/test_scene3d_service.py`, `tests/test_scene3d_cli.py`, and
+  `tests/test_scene3d_window.py` pin the geometry, the rig and skinning, the
+  renderer, the OBJ/MTL round trip, the native scene round trip, the service, the
+  command parser, the CLI, the ＋-menu wiring, and the real Tk window.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
