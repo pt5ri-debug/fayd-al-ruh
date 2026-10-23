@@ -350,11 +350,13 @@ class ImportCenterDialog:
         self._on_retry(ocr=True)
 
     def _on_install_ocr(self) -> None:
-        """Install the optional OCR packages from within the Import Center.
+        """Install OCR support from within the Import Center.
 
-        A scanned PDF cannot be imported without them, and the project is not on
-        PyPI, so the old "pip install fayd-al-ruh[ocr]" hint could not work here.
-        This runs the bundled requirements file instead and reports the outcome.
+        A scanned PDF cannot be imported without both halves of OCR: the Python
+        packages (pip) and the Tesseract *engine* (an OS package pip cannot
+        install). The old "pip install fayd-al-ruh[ocr]" hint could not work here
+        (the project is not on PyPI). This installs whichever half is missing and
+        reports the outcome.
         """
         if self._busy:
             return
@@ -362,14 +364,45 @@ class ImportCenterDialog:
             self._set_status("OCR support is already installed.")
             self._ocr_install_button.pack_forget()
             return
-        if optional_deps.install_command(optional_deps.FEATURE_OCR) is None:
-            self._set_status(optional_deps.install_hint(optional_deps.FEATURE_OCR), error=True)
+        if optional_deps.missing_imports(optional_deps.FEATURE_OCR):
+            if optional_deps.install_command(optional_deps.FEATURE_OCR) is None:
+                self._set_status(optional_deps.install_hint(optional_deps.FEATURE_OCR), error=True)
+                return
+            self._start("Installing OCR support…", self._install_ocr_job)
             return
-        self._start("Installing OCR support…", self._install_ocr_job)
+        # The packages are present; the Tesseract engine is what is missing.
+        self._start("Installing the Tesseract OCR engine…", self._install_ocr_engine_job)
 
     def _install_ocr_job(self, progress: Any) -> "optional_deps.InstallResult":
+        from core.pdf_ocr import install_ocr_engine
+
         result = optional_deps.install(optional_deps.FEATURE_OCR, progress=progress)
+        if result.ok and not optional_deps.status(optional_deps.FEATURE_OCR).system_ok:
+            # pip succeeded but the engine is still missing; its own result message
+            # would name that step, but the app can offer to run it here.
+            engine = install_ocr_engine()
+            result = optional_deps.InstallResult(
+                key=optional_deps.FEATURE_OCR,
+                ok=engine.ok,
+                command=result.command,
+                returncode=result.returncode,
+                output=result.output,
+                message=f"{result.message} {engine.message}",
+            )
         return result
+
+    def _install_ocr_engine_job(self, progress: Any) -> "optional_deps.InstallResult":
+        from core.pdf_ocr import install_ocr_engine
+
+        engine = install_ocr_engine()
+        return optional_deps.InstallResult(
+            key=optional_deps.FEATURE_OCR,
+            ok=engine.ok,
+            command=engine.command,
+            returncode=engine.returncode,
+            output=engine.output,
+            message=engine.message,
+        )
 
     def _finish_install(self, result: "optional_deps.InstallResult") -> None:
         self._set_status(result.message, error=not result.ok)
