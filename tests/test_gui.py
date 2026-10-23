@@ -1113,7 +1113,9 @@ def _wait(app, root, predicate, tries: int = 120) -> bool:
 def test_window_reads_a_message_aloud_and_picks_a_voice() -> None:
     """The reading controls: a per-message button, a voice picker, honest notes."""
     import tkinter as tk
+    from unittest import mock
 
+    from core import voices as voices_module
     from core.voices import VOICE_CATALOG
     from gui.app import FaydGUI
 
@@ -1122,25 +1124,30 @@ def test_window_reads_a_message_aloud_and_picks_a_voice() -> None:
         app = FaydGUI(root, service=_service(FakeSession()))
         root.update()
 
+        # A fixed source set, so the assertion does not depend on what this machine
+        # has installed: one installed voice plus the whole synthetic catalog.
+        installed = (voices_module.SystemVoice("Microsoft Hoda", "ar-SA", "Female"),)
+        sections = voices_module.voice_sections(system=installed, model=(), catalog=True)
+
         # The settings panel exposes one radio per catalog voice, grouped.
-        app._toggle_settings()
-        root.update()
+        with mock.patch.object(app.service, "voice_sections", lambda: sections):
+            app._toggle_settings()
+            root.update()
 
-        def walk(widget, out):
-            for child in widget.winfo_children():
-                out.append(child)
-                walk(child, out)
+            def walk(widget, out):
+                for child in widget.winfo_children():
+                    out.append(child)
+                    walk(child, out)
 
-        widgets: list = []
-        walk(app._settings_panel, widgets)
-        keys = {voice.key for voice in VOICE_CATALOG}
-        installed_keys = {voice.key for voice in app.service.system_voices()}
-        radios = [
-            w for w in widgets
-            if isinstance(w, tk.Radiobutton) and w.cget("value") in keys | installed_keys
-        ]
-        # One radio per catalog voice, plus one per real installed voice when the
-        # machine reports any (none on a headless CI box).
+            widgets: list = []
+            walk(app._settings_panel, widgets)
+            keys = {voice.key for voice in VOICE_CATALOG}
+            installed_keys = {voice.key for voice in installed}
+            radios = [
+                w for w in widgets
+                if isinstance(w, tk.Radiobutton) and w.cget("value") in keys | installed_keys
+            ]
+        # One radio per catalog voice, plus one per installed voice.
         assert len(radios) == len(VOICE_CATALOG) + len(installed_keys)
 
         # Choosing a voice applies it to the service and persists the key.

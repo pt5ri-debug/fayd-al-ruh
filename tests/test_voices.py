@@ -289,9 +289,14 @@ def test_reader_renders_real_audio_with_a_catalog_voice():
 # ------------------------------------------------------------------ front ends
 
 
-def test_speak_module_lists_the_voices(capsys):
+def test_speak_module_lists_the_voices(monkeypatch, capsys):
     from ai import speak
 
+    # The synthetic catalog is offered only when an engine can really speak it, so
+    # name a system voice to stand in for an installed engine.
+    monkeypatch.setattr(
+        speak, "system_voices", lambda: (voices.SystemVoice("Microsoft Hoda", "ar-SA", "Female"),)
+    )
     assert speak.main(["list"]) == 0
     out = capsys.readouterr().out
     assert "Men" in out and "Women" in out and "Boys" in out and "Girls" in out
