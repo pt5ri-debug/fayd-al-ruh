@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.action import Action
+from core.analogy import Analogy, AnalogyEngine
 from core.belief import Belief
 from core.belief_revision import BeliefRevision, BeliefRevisionEngine
 from core.causal_discovery import CausalDiscovery
@@ -164,6 +165,7 @@ class CognitiveController:
         self.ontology_reasoner = OntologyReasoner()
         self.ontology_retriever = OntologyGuidedRetriever(self.ontology, self.ontology_reasoner)
         self.ontology_learner = OntologyLearner(self.ontology)
+        self.analogy_engine = AnalogyEngine(self.ontology)
         self.semantic_parser = SemanticParser()
         self.meaning_model = MeaningModel()
         self.language_reasoner = LanguageReasoner()
@@ -416,6 +418,34 @@ class CognitiveController:
     def derive_ontology_relations(self) -> tuple[OntologyInference, ...]:
         """Return every relation the seeded ontology entails but does not store."""
         return self.ontology_reasoner.derive(self.ontology)
+
+    def analogize(self, base_key: str, target_key: str) -> Analogy:
+        """Align two seeded disciplines by their relations, never by their names.
+
+        The returned analogy carries its matched relations, the base relations it
+        could *not* map, and the candidate inferences it suggests for the target.
+        Nothing is asserted: an analogy proposes a hypothesis for the target.
+        """
+        return self.analogy_engine.between_disciplines(base_key, target_key)
+
+    def analogies_for(self, target_key: str, limit: int = 5) -> tuple[Analogy, ...]:
+        """Every discipline ranked as a meaningful analogy for ``target_key``."""
+        return self.analogy_engine.rank_for(target_key, limit=limit)
+
+    def analogize_concepts(self, base_label: str, target_label: str, hops: int = 1) -> Analogy:
+        """Align two concepts by their relational neighbourhoods.
+
+        This is the analogy over the project's real knowledge: the two concepts
+        are compared by *how they are embedded in the graph* -- what measures
+        them, what they affect, what they contain -- never by their names. The
+        result reports what mapped, what did not, and the candidate inferences for
+        the target; nothing is asserted.
+        """
+        return self.analogy_engine.between_concepts(base_label, target_label, hops)
+
+    def analogous_concepts(self, label: str, limit: int = 5) -> tuple[Analogy, ...]:
+        """The concepts most analogous to ``label`` by their relational structure."""
+        return self.analogy_engine.neighbours_of(label, limit=limit)
 
     def recall_with_ontology(self, query: str, *, item_types: tuple[str, ...] = ("observation",), limit: int = 5) -> list[MemoryRecall]:
         """Recall memory items that connect to the query through ontology relations.

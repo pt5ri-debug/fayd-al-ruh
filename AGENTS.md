@@ -62,6 +62,30 @@ Arabic is kept as secondary aliases where useful.
     `corpus_sentences`, `corpus_coverage`, `corpus_coverage_score`.
     All three seeds run in `CognitiveController.__init__` and share nodes
     (idempotent), so frame + curriculum + corpus form one graph.
+  - `core/structure_mapping.py` — reasoning by **analogy** (Gentner structure
+    mapping), dependency-free: `StructureEdge`/`Structure` and
+    `StructureMappingEngine.map(base, target)` align two relational structures by
+    **parallel connectivity** (a relation may only match a relation of the same
+    type between the images of its endpoints), one-to-one, never by node name.
+    `StructureMapping` reports matched relations, the base relations it could not
+    map, `candidate_inferences` (suggestions, never assertions), coverage,
+    `systematicity`, and `exact_share`; the search is ordered and state-bounded
+    and tie-breaks toward more aligned nodes. `RELATION_ROLES`/`role_for` add a
+    small relational abstraction so a shape is recognised across the ontology's
+    several hundred relation types (an exact type is preferred; an unclassified
+    relation matches only itself).
+  - `core/analogy.py` — the analogy *domain layer* over that engine:
+    `structure_from_labels`, `neighbourhood_structure` (a concept's relational
+    ego-network — the scale at which the project's own graph is rich enough to
+    compare), `discipline_structure`, and `AnalogyEngine`
+    (`between`/`between_disciplines`/`between_concepts`/`neighbours_of`/`rank_for`).
+    `Analogy.is_meaningful` requires a shared, connected *system* resting on at
+    least one **substantive literal** (non-taxonomic) match, so a role-only or
+    `is_a`-only alignment is reported but never called an analogy. On the real
+    graph `porosity ~ permeability` maps 9 relations (8 literal) at full
+    systematicity. `ANALOGY_JUDGEMENTS`/`analogy_accuracy` are the held-out gate
+    (external, with negative controls), wired into `evaluation` as the
+    `analogy_accuracy` metric. CLI: `python -m cli analogy …`.
 - `ml/` — learning. `ml/petroleum.py` trains the Q-policy + predictive brain on
   the discipline tasks in `core/petroleum_tasks.py`. `ml/release.py` trains every
   layer (base pipeline, petroleum tasks, language model) and writes
@@ -2522,6 +2546,56 @@ clone, each optional so the base system still runs without it:
   `tests/test_scene3d_window.py` pin the geometry, the rig and skinning, the
   renderer, the OBJ/MTL round trip, the native scene round trip, the service, the
   command parser, the CLI, the ＋-menu wiring, and the real Tk window.
+
+- Phase 20 — reasoning by **analogy** (structure mapping): the project can now
+  answer "what is this *like*?" the way Gentner's account says a mind does — by
+  aligning two relational structures, never two word lists. `core/structure_mapping.py`
+  is the dependency-free engine: `StructureEdge`/`Structure` are a named set of
+  nodes joined by typed relations, `StructureMappingEngine.map(base, target)`
+  searches for the best one-to-one correspondence that obeys **parallel
+  connectivity** (a base relation may only be matched by a target relation of the
+  same type between the images of its endpoints), and `StructureMapping` reports
+  the matched relations, the base relations it could *not* map, the
+  `candidate_inferences` it suggests for the target (each a *candidate*, never an
+  assertion), relation/node coverage, `systematicity`, and `exact_share`. The
+  search is ordered (most-constrained node first), bounded by a state budget so a
+  large structure can never hang it, and tie-breaks toward the mapping that aligns
+  more nodes. **Node names are never compared**, which is what makes the result an
+  analogy rather than a lookup. Two honest additions make it work on real
+  knowledge: a small **relational abstraction** (`RELATION_ROLES`/`role_for`) maps
+  the ontology's several hundred near-unique relation types ("drives", "causes",
+  "triggers") onto a dozen roles, so a shape is recognised across vocabularies
+  (an exact type is always preferred when the target offers one, and an
+  unclassified relation still matches only itself); and `systematicity` measures
+  how *connected* the matched system is, because a connected system is what
+  licenses an inference. `core/analogy.py` is the domain layer:
+  `structure_from_labels` builds a structure from any group of concepts,
+  `neighbourhood_structure` builds a concept's relational neighbourhood (the
+  scale at which the project's own graph is rich enough to compare),
+  `discipline_structure` builds a whole seeded discipline, and `AnalogyEngine`
+  exposes `between`/`between_disciplines`/`between_concepts`/`neighbours_of`/
+  `rank_for`. **Honesty by construction**: an `Analogy.is_meaningful` requires a
+  shared *system* (two or more matched relations, connected) resting on at least
+  one **substantive literal** match — a literal match on a non-taxonomic relation
+  — so an alignment built only from role abstractions, or from a shared `is_a`
+  (true of almost any pair), is reported but never called an analogy; and the
+  engine found the honest limit of the seeds (`test_discipline_structures_share_almost_no_relation_types`):
+  the discipline-level seeds share almost no relation types, which is why the
+  usable entry point is the concept neighbourhood. `CognitiveController` gains
+  `analogize`/`analogies_for`/`analogize_concepts`/`analogous_concepts`, so the
+  engine is reachable from the same place as the ontology and its reasoner. The
+  real result on the project's own graph: `porosity ~ permeability` maps 9
+  relations (8 literal) at full systematicity, and ranks `well_log ~ core_sample`
+  — two measuring instruments — as analogous. Wired as the CLI
+  `python -m cli analogy disciplines|between|like|discipline` (the headless twin,
+  `cli/analogy.py`, with `--json`), the menu entry *Reason by analogy: what a
+  concept is structurally like*, and the **evaluation gate**: a held-out
+  `ANALOGY_JUDGEMENTS` catalogue (external to the engine, with **negative
+  controls**) drives `analogy_accuracy`, a new `MetricSpec` and baseline metric,
+  so a regression in analogy is a gate failure. `tests/test_analogy.py` and
+  `tests/test_analogy_cli.py` pin the engine (parallel connectivity, one-to-one,
+  systematicity, the state budget, role abstraction, the candidate inferences, the
+  no-assertion rule), the domain layer, and the CLI.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

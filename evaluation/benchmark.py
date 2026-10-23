@@ -46,6 +46,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("petroleum_generalisation_accuracy", True, label="Petroleum held-out generalisation accuracy"),
     MetricSpec("acceptance_gate_accuracy", True, label="Acceptance gate accuracy (held-out verdicts)"),
     MetricSpec("curriculum_coverage", True, label="Curriculum coverage"),
+    MetricSpec("analogy_accuracy", True, label="Analogy accuracy (held-out judgements)"),
     MetricSpec("overall", True, label="Overall"),
 )
 
