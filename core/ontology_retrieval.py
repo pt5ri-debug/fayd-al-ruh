@@ -12,8 +12,8 @@ share no words, because ``well_log measures reservoir`` is derived by
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from core.ontology import Ontology
 from core.ontology_reasoner import OntologyReasoner
@@ -77,9 +77,7 @@ class OntologyGuidedRetriever:
         the exact link that made an item reachable.
         """
         adjacency = self._edges()
-        best: dict[str, tuple[int, float, tuple[str, str, str] | None]] = {
-            seed: (0, 1.0, None) for seed in seeds
-        }
+        best: dict[str, tuple[int, float, tuple[str, str, str] | None]] = dict.fromkeys(seeds, (0, 1.0, None))
         frontier = list(seeds)
         for hop in range(1, self.max_hops + 1):
             next_frontier: list[str] = []

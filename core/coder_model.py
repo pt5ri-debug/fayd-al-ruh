@@ -25,8 +25,9 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 #: The coding model the Studio uses by default. Small enough to run on a laptop
 #: CPU with a few gigabytes of RAM, and tuned for code rather than prose.

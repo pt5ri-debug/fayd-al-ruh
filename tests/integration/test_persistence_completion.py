@@ -6,10 +6,9 @@ that a corrupt record is rejected rather than partially loaded, and that a
 long-term retention policy prunes aged, weak memory.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from core.belief import Belief
 from core.cognitive_controller import CognitiveController
 from core.evidence_processor import EvidencePolarity
@@ -19,7 +18,6 @@ from core.snapshot import SNAPSHOT_SCHEMA_VERSION
 from core.snapshot_loader import SnapshotLoader
 from core.snapshot_migrations import SnapshotVersionError
 from storage.json_store import JsonStore
-
 
 pytestmark = pytest.mark.integration
 
@@ -41,7 +39,7 @@ def _run_episode(controller: CognitiveController):
 
 def test_snapshot_loads_into_fully_rebuilt_objects(tmp_path):
     controller = CognitiveController()
-    belief, cycle = _run_episode(controller)
+    _belief, _cycle = _run_episode(controller)
 
     store = JsonStore(tmp_path)
     controller.create_snapshot("episode", store)
@@ -66,7 +64,7 @@ def test_snapshot_loads_into_fully_rebuilt_objects(tmp_path):
 
 def test_controller_restore_rebuilds_state_and_provenance(tmp_path):
     controller = CognitiveController()
-    belief, cycle = _run_episode(controller)
+    belief, _cycle = _run_episode(controller)
     store = JsonStore(tmp_path)
     controller.create_snapshot("episode", store)
 
@@ -144,7 +142,7 @@ def test_retention_prunes_long_term_memory():
 
     # Age and weaken a stored item so it falls outside the retention window.
     aged = next(iter(controller.memory._items.values()))
-    aged.created_at = datetime.now(timezone.utc) - timedelta(days=90)
+    aged.created_at = datetime.now(UTC) - timedelta(days=90)
     aged.importance = 0.02
     survivor_id = next(
         item.item_id

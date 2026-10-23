@@ -14,7 +14,7 @@ class CausalChain:
     def __post_init__(self) -> None:
         if not self.links:
             raise ValueError("A causal chain needs at least one link.")
-        if any(left.effect != right.cause for left, right in zip(self.links, self.links[1:])):
+        if any(left.effect != right.cause for left, right in zip(self.links, self.links[1:], strict=False)):
             raise ValueError("Causal chain links must connect in order.")
 
     @property
@@ -34,4 +34,4 @@ class CausalChain:
 
     @property
     def nodes(self) -> tuple[str, ...]:
-        return (self.cause,) + tuple(link.effect for link in self.links)
+        return (self.cause, *tuple(link.effect for link in self.links))

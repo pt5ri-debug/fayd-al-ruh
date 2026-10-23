@@ -634,6 +634,7 @@ def install(
 
 
 __all__ = [
+    "FEATURES",
     "FEATURE_AUDIOCPP",
     "FEATURE_BANNER",
     "FEATURE_DOCS",
@@ -643,7 +644,6 @@ __all__ = [
     "FEATURE_PDF",
     "FEATURE_ULTRON",
     "FEATURE_VISION",
-    "FEATURES",
     "FeatureStatus",
     "InstallResult",
     "OptionalFeature",

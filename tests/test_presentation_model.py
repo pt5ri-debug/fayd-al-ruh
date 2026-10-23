@@ -13,14 +13,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from core import presentation_model as module
 from core.presentation_model import (
     CATALOG,
     DEFAULT_PRESENTATION_MODEL,
     DEFAULT_SPEC_KEY,
-    PresentationModelUnavailable,
     LlamaCppPresentationClient,
+    PresentationModelUnavailable,
     download_model,
     find_model_file,
     model_is_cached,

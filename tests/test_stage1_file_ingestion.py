@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from core.document_reader import DocumentReadError, read_document
 from core.knowledge_base import KnowledgeBaseStore
 from core.text_encoding import EncodingDetectionError
@@ -218,7 +217,7 @@ def test_empty_file_is_reported_not_ingested(tmp_path):
 
 
 def test_missing_file_is_reported_not_fatal(tmp_path):
-    store, pipeline = _pipeline(tmp_path)
+    _store, pipeline = _pipeline(tmp_path)
     report = pipeline.ingest(SourceSpec(str(tmp_path / "nope.txt")))
     assert report.failed == 1
     assert not pipeline.errors.ok
@@ -229,7 +228,7 @@ def test_missing_file_is_reported_not_fatal(tmp_path):
 
 def test_large_text_splits_into_overlapping_chunks(tmp_path):
     source = _write(tmp_path / "big.txt", ("word " * 4000) + "\n")
-    store, pipeline = _pipeline(tmp_path)
+    _store, pipeline = _pipeline(tmp_path)
     report = pipeline.ingest(SourceSpec(str(source)), connector=FileConnector())
     # chunking is exercised with a small window via options on a second run
     small = _pipeline(tmp_path / "small")
@@ -258,7 +257,7 @@ def test_chunk_references_are_stable_across_runs(tmp_path):
 
 def test_metadata_records_path_hash_and_timestamp(tmp_path):
     source = _write(tmp_path / "doc.txt", "metadata target\n")
-    store, pipeline = _pipeline(tmp_path)
+    _store, pipeline = _pipeline(tmp_path)
     pipeline.ingest(SourceSpec(str(source)))
     from ingest.hashing import source_key
 
@@ -364,7 +363,7 @@ def test_resume_from_position_skips_already_done_items(tmp_path):
     root = tmp_path / "docs"
     for index in range(5):
         _write(root / f"f{index}.txt", f"content {index}\n")
-    store, pipeline = _pipeline(tmp_path)
+    _store, pipeline = _pipeline(tmp_path)
     first = pipeline.ingest(SourceSpec(str(root)))
     assert first.records == 5
     # Resuming from item 3 must only process the last two files.
@@ -397,7 +396,7 @@ def test_embedded_instructions_are_stored_as_text_not_executed(tmp_path):
 
 def test_metadata_reflects_changed_content_on_reimport(tmp_path):
     source = _write(tmp_path / "doc.txt", "version one\n")
-    store, pipeline = _pipeline(tmp_path)
+    _store, pipeline = _pipeline(tmp_path)
     pipeline.ingest(SourceSpec(str(source)))
     from ingest.hashing import source_key
 

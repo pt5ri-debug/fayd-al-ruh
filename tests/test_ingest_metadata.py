@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from ingest.interfaces import IngestionJob, JobStateStore, SourceConnector
 from ingest.jobs import JobState, JobStore
 from ingest.metadata import (

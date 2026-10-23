@@ -38,7 +38,7 @@ def test_ingest_stores_chunks_in_the_shared_store(tmp_path):
 
 
 def test_ingest_never_raises_on_a_bad_source(tmp_path):
-    store, pipeline = _pipeline(tmp_path)
+    _store, pipeline = _pipeline(tmp_path)
     report = pipeline.ingest(SourceSpec(str(tmp_path / "missing")))
     assert report.failed == 1
     assert len(pipeline.errors) == 1
@@ -57,7 +57,7 @@ def test_incremental_rerun_skips_unchanged_items(tmp_path):
 
 def test_changed_file_is_re_ingested(tmp_path):
     source = _docs(tmp_path / "docs", **{"a.txt": "one\n"})
-    store, pipeline = _pipeline(tmp_path)
+    _store, pipeline = _pipeline(tmp_path)
     pipeline.ingest(SourceSpec(str(source)))
     (source / "a.txt").write_text("one\nplus a new line\n", encoding="utf-8")
     report = pipeline.ingest(SourceSpec(str(source)))

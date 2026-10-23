@@ -511,7 +511,7 @@ def download_model(
         path = hub.hf_hub_download(
             repo_id=spec.repo, filename=spec.filename, local_dir=str(directory)
         )
-    except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+    except Exception as error:
         hint = (
             " The repo is gated: accept its licence on Hugging Face and sign in "
             "(`huggingface-cli login`) first."
@@ -554,12 +554,12 @@ __all__ = [
     "DEFAULT_TOP_P",
     "DOWNLOAD_TOOL",
     "HEADER",
-    "LlamaCppRunner",
     "MAX_CONTEXT",
     "MAX_TOKENS_CEILING",
     "NAME",
     "REGISTRY_FILENAME",
     "SYSTEM_PROMPT",
+    "LlamaCppRunner",
     "VisionEngine",
     "VisionModelSpec",
     "VisionRunner",

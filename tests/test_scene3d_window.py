@@ -14,7 +14,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from gui.scene3d import SceneStudioService
 
 
@@ -159,7 +158,7 @@ def test_applying_a_pose_preset_changes_the_figure(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_rendering_runs_on_a_worker_and_shows_a_preview(tmp_path: Path) -> None:
-    root, dialog, service = _dialog(tmp_path)
+    root, dialog, _service = _dialog(tmp_path)
     try:
         dialog._on_add_figure("adult")
         dialog._on_frame()

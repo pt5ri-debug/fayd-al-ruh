@@ -20,7 +20,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from core.presentation import (
     STATE_CONTENT_APPROVED,
     STATE_SLIDE_REVIEW,

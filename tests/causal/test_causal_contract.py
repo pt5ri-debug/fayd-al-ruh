@@ -4,5 +4,6 @@ from core.counterfactual_reasoner import CounterfactualReasoner
 
 
 def test_causal_counterfactual_contract():
-    graph = CausalGraph(); graph.add_link(CausalLink("rain", "wet", .9))
+    graph = CausalGraph()
+    graph.add_link(CausalLink("rain", "wet", .9))
     assert CounterfactualReasoner().what_if_not(graph, "rain", "wet").changed

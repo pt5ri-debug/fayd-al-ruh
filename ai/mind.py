@@ -24,7 +24,7 @@ change how Jarvis or the default chat behaves.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -108,7 +108,7 @@ def mind_status(checkpoint: str | Path | None = None) -> dict[str, Any]:
     if path.exists():
         stat = path.stat()
         status["size_bytes"] = stat.st_size
-        status["modified"] = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+        status["modified"] = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()
     manifest = _manifest_info()
     if manifest:
         status.update(manifest)
@@ -253,13 +253,13 @@ class MindAssistant:
 
 
 __all__ = [
+    "MIND_EMPTY",
     "MIND_HEADER",
     "MIND_HELP",
-    "MindAssistant",
-    "MindResult",
-    "MIND_EMPTY",
     "SWITCH_TO_MODEL",
     "SWITCH_TO_SOURCES",
+    "MindAssistant",
+    "MindResult",
     "load_mind_model",
     "mind_status",
     "render_prompt",

@@ -16,7 +16,7 @@ import json
 import os
 import tempfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 #: Job status values.
@@ -49,7 +49,7 @@ class JobState:
             raise ValueError("JobState source cannot be empty.")
 
     def touch(self) -> None:
-        self.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
 
     def as_dict(self) -> dict:
         return asdict(self)

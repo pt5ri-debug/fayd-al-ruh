@@ -25,37 +25,35 @@ import queue
 import re
 import threading
 import time
+import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from tkinter import filedialog, simpledialog
+from tkinter import font as tkfont
 from typing import Any, Literal
 
-import tkinter as tk
-from tkinter import filedialog
-from tkinter import font as tkfont
-from tkinter import simpledialog
-
 from ai import chat as chat_module
-from core import optional_deps
-from core import pdf_ocr
-from core import speech
-from core.paths import data_dir
-from core.ultron import UltronUnavailable
+from companion.companion_agent import CompanionError
+from core import optional_deps, pdf_ocr, speech
 from core.banner import BannerUnavailable
 from core.cloud_model import CloudUnavailable
-from companion.companion_agent import CompanionError
-from core.vision_model import VisionUnavailable
+from core.paths import data_dir
+from core.ultron import UltronUnavailable
 from core.version import __version__
+from core.vision_model import VisionUnavailable
+
+from gui import chat_composer, rich_text
 from gui import markdown as md
-from gui import rich_text
-from gui import chat_composer
 from gui.actions import GuiAction, visible_actions
 from gui.attachments import Attachment, AttachmentNotice
 from gui.chat_composer import (
     ChatComposer,
     CircleButton,
     RoundedBox,
+)
+from gui.chat_composer import (
     Tooltip as _Tooltip,
 )
 from gui.modes import (
@@ -85,7 +83,7 @@ MOUTH_CHOICES: tuple[tuple[str, str], ...] = (
     (chat_module.MOUTH_CLOUD, "Cloud (remote model: ChatGPT, Claude, Gemini)"),
     (chat_module.MOUTH_NATASHA, "Natasha (companion: memory, tone)"),
 )
-MOUTH_LABELS: dict[str, str] = {key: label for key, label in MOUTH_CHOICES}
+MOUTH_LABELS: dict[str, str] = dict(MOUTH_CHOICES)
 
 # ------------------------------------------------------- OpenHands design tokens
 #
@@ -268,13 +266,13 @@ def load_reading_voice() -> str:
     resolved against what the OS or the model reports when it is used, so a voice
     that was uninstalled falls back honestly rather than erroring.
     """
-    from storage.json_store import JsonStore
     from core.voices import (
-        VOICE_CATALOG,
         DEFAULT_VOICE_KEY,
+        VOICE_CATALOG,
         is_model_voice_key,
         is_system_voice_key,
     )
+    from storage.json_store import JsonStore
 
     valid = {voice.key for voice in VOICE_CATALOG}
     try:
@@ -347,7 +345,7 @@ class LineStream(io.TextIOBase):
     written, instead of arriving only after the run ends.
     """
 
-    def __init__(self, lines: "queue.Queue[str]") -> None:
+    def __init__(self, lines: queue.Queue[str]) -> None:
         self._lines = lines
         self._buffer = ""
 
@@ -2697,7 +2695,7 @@ class FaydGUI:
             )
         return install_ocr_engine(languages=DEFAULT_OCR_LANGUAGES)
 
-    def _render_install_result(self, result: "optional_deps.InstallResult") -> None:
+    def _render_install_result(self, result: optional_deps.InstallResult) -> None:
         self._add_bubble("note", result.message)
         if result.ok:
             self._add_bubble(
@@ -2705,7 +2703,7 @@ class FaydGUI:
                 "You can now attach a scanned PDF with “Attach a scanned PDF (OCR)…”.",
             )
 
-    def _render_ocr_install(self, result: "pdf_ocr.OcrInstallResult") -> None:
+    def _render_ocr_install(self, result: pdf_ocr.OcrInstallResult) -> None:
         """Show the outcome of installing the Tesseract engine (a system package)."""
         self._add_bubble("note", result.message)
         if result.ok:
@@ -2714,7 +2712,7 @@ class FaydGUI:
                 "You can now attach a scanned PDF with “Attach a scanned PDF (OCR)…”.",
             )
 
-    def _render_speech_install(self, result: "speech.SpeechInstallResult") -> None:
+    def _render_speech_install(self, result: speech.SpeechInstallResult) -> None:
         """Show the outcome of installing a speech engine (a system package)."""
         self._add_bubble("note", result.message)
         if result.ok:
@@ -3074,11 +3072,11 @@ def main(argv: list[str] | None = None) -> int:
 # re-exported for the dialogs and the tests, which build on the window's own
 # widget vocabulary; they are defined once in :mod:`gui.chat_composer`.
 __all__ = [
-    "CircleButton",
-    "FaydGUI",
     "RADIUS_LARGE",
     "RADIUS_SMALL",
-    "RoundedBox",
     "SEND_BUTTON_SIZE",
+    "CircleButton",
+    "FaydGUI",
+    "RoundedBox",
     "main",
 ]

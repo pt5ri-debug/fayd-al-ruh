@@ -50,12 +50,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from companion.personality import NAME
 from core.coder_model import CoderMessage, CoderUnavailable, OllamaCoderClient
 from core.human_approval import HumanApprovalGate
 from core.optional_deps import FEATURE_NATASHA, pip_install_command
 from core.paths import natasha_models_dir
 from core.permissions import Capability, PermissionPolicy
+
+from companion.personality import NAME
 
 #: The model Natasha speaks through by default, named as an Ollama-style tag so a
 #: status line reads the same whichever runtime answers. A small local Qwen3 model
@@ -519,7 +520,7 @@ class LlamaCppNatashaClient:
             )
         except CoderUnavailable:
             raise
-        except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+        except Exception as error:
             raise CompanionModelUnavailable(
                 f"The in-process companion model failed: {error}"
             ) from error
@@ -768,7 +769,7 @@ def download_model(
         path = huggingface_hub.hf_hub_download(
             repo_id=spec.repo, filename=spec.filename, local_dir=str(directory)
         )
-    except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+    except Exception as error:
         raise CompanionModelUnavailable(f"Could not download {spec.key!r}: {error}") from error
     _write_registry(directory, Path(path).name, spec.key)
     if progress is not None:
@@ -840,9 +841,6 @@ __all__ = [
     "BACKEND_NAMES",
     "BACKEND_OLLAMA",
     "CATALOG",
-    "CommandRunner",
-    "CompanionModelSpec",
-    "CompanionModelUnavailable",
     "DEFAULT_CONTEXT",
     "DEFAULT_GPU_LAYERS",
     "DEFAULT_MODEL",
@@ -854,15 +852,18 @@ __all__ = [
     "MAX_CONTEXT",
     "MAX_TOKENS_CEILING",
     "NAME",
+    "PULL_HINT",
+    "PULL_TOOL",
+    "REGISTRY_FILENAME",
+    "CommandRunner",
+    "CompanionModelSpec",
+    "CompanionModelUnavailable",
+    "LlamaCppNatashaClient",
+    "LlamaCppNatashaRunner",
     "NatashaModelClient",
     "NatashaModelStatus",
     "NatashaRunner",
     "OllamaNatashaClient",
-    "PULL_HINT",
-    "PULL_TOOL",
-    "REGISTRY_FILENAME",
-    "LlamaCppNatashaClient",
-    "LlamaCppNatashaRunner",
     "build_client",
     "download_model",
     "extra_available",

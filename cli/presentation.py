@@ -152,7 +152,7 @@ def _maybe_author(root: Path | None):
         from ai.presentation_author import load_presentation_author
 
         return load_presentation_author(root=root)
-    except Exception:  # noqa: BLE001 - absent extra/weights is a normal state
+    except Exception:
         return None
 
 
@@ -997,7 +997,7 @@ def _run_model_download(service: PresentationService, args: argparse.Namespace) 
             approved=bool(getattr(args, "approve", False)),
             progress=None if getattr(args, "quiet", False) else lambda m: print(m, file=sys.stderr),
         )
-    except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+    except Exception as error:
         print(str(error), file=sys.stderr)
         return 4
     if getattr(args, "as_json", False):

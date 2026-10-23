@@ -28,8 +28,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-
 from core.progress import ProgressCallback
+
 from ml.dataset import Dataset, FeatureHasher
 from ml.models import MLP
 from ml.trainer import Trainer, accuracy
@@ -100,8 +100,8 @@ def _split_edges(
         return relations, []
     rng = np.random.default_rng(seed)
     order = rng.permutation(len(relations))
-    held_count = max(1, int(round(len(relations) * fraction)))
-    held_idx = set(int(index) for index in order[:held_count])
+    held_count = max(1, round(len(relations) * fraction))
+    held_idx = {int(index) for index in order[:held_count]}
     train = [relation for index, relation in enumerate(relations) if index not in held_idx]
     test = [relation for index, relation in enumerate(relations) if index in held_idx]
     return train, test

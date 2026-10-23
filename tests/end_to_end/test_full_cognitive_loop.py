@@ -1,3 +1,4 @@
+import pytest
 from core.action import Action
 from core.belief import Belief
 from core.causal_link import CausalLink
@@ -5,8 +6,6 @@ from core.cognitive_controller import CognitiveController
 from core.environment import Environment
 from core.evidence_processor import EvidencePolarity
 from core.state import State
-import pytest
-
 
 pytestmark = pytest.mark.end_to_end
 

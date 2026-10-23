@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from core import qwen_speech
 from core.qwen_speech import (
     ASR_CATALOG,

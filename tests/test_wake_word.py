@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from core.speech import AudioClip
 from core.wake_word import DEFAULT_WAKE_WORDS, AudioSpeechGate, WakeWordDetector
 

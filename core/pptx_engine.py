@@ -85,7 +85,7 @@ def pptx_available() -> bool:
 def _require_pptx() -> Any:
     """Import python-pptx or raise an actionable :class:`PptxUnavailable`."""
     try:
-        import pptx  # noqa: F401
+        import pptx
     except ImportError as error:  # pragma: no cover - exercised via the guard test
         raise PptxUnavailable(
             "The PowerPoint engine needs the optional `python-pptx` package. "
@@ -913,7 +913,7 @@ def validate_deck(path: str | Path, plan: DeckPlan | None = None) -> DeckValidat
         presentation = pptx.Presentation(str(target))
     except PptxUnavailable:
         raise
-    except Exception as error:  # noqa: BLE001 - reported, never raised
+    except Exception as error:
         return DeckValidation(False, 0, issues=(f"The deck could not be reopened: {error}",), size_bytes=size)
 
     slides = list(presentation.slides)
@@ -971,7 +971,7 @@ def _slide_notes_text(slide: Any) -> str:
     try:
         if slide.has_notes_slide:
             return slide.notes_slide.notes_text_frame.text
-    except Exception:  # noqa: BLE001 - a missing notes part is simply "no notes"
+    except Exception:
         return ""
     return ""
 
@@ -999,10 +999,10 @@ def safe_deck_path(directory: str | Path, filename: str) -> Path:
 
 
 __all__ = [
+    "REQUIREMENTS_FILE",
     "DeckValidation",
     "PptxEngine",
     "PptxUnavailable",
-    "REQUIREMENTS_FILE",
     "RenderReport",
     "pptx_available",
     "safe_deck_path",

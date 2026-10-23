@@ -16,7 +16,6 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-
 from core import docs_model
 from core.docs_model import (
     CATALOG,
@@ -555,6 +554,7 @@ def test_read_failure_names_the_real_reason_not_the_ocr_red_herring(
     """
     pytest.importorskip("pypdf", reason="pypdf (the [pdf] extra) is not installed")
     from core import docs_studio as engine
+
     from tests.pdf_fixtures import image_page, write_pdf
 
     def refuse(*_args, **_kwargs):

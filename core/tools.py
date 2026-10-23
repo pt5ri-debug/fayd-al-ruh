@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import ast
 import operator
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable
 
 from core.human_approval import HumanApprovalGate
 from core.permissions import Capability, PermissionPolicy
@@ -260,7 +260,7 @@ def _calculator(expression: str) -> str:
     return str(int(value)) if value.is_integer() else str(value)
 
 
-def build_sandbox_tools(sandbox: "ToolSandbox") -> tuple[ToolSpec, ...]:
+def build_sandbox_tools(sandbox: ToolSandbox) -> tuple[ToolSpec, ...]:
     """The built-in file/search/calculator tools, bound to a sandbox root."""
 
     def bind(handler: Callable[..., str]) -> Handler:

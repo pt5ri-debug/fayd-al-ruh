@@ -25,15 +25,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-
 from core.presentation import (
     CONTENT_EQUATION,
     CONTENT_IMAGE,
     CONTENT_TABLE,
-    OutlineSection,
     STATE_CONTENT_APPROVED,
     STATE_EXPORTED,
     STATE_SLIDE_REVIEW,
+    OutlineSection,
 )
 from gui.presentation import PresentationService, SlideSpec
 
@@ -41,7 +40,7 @@ try:  # the optional extra; every structural assertion below needs it
     import pptx as _pptx  # noqa: F401
 
     PPTX_AVAILABLE = True
-except Exception:  # noqa: BLE001 - absence is a legitimate, reported state
+except Exception:
     PPTX_AVAILABLE = False
 
 requires_pptx = pytest.mark.skipif(
@@ -540,7 +539,7 @@ def test_content_changed_after_approval_is_outdated_and_refused(tmp_path: Path) 
     state = service.get(project.project_id)
     assert state.state == STATE_SLIDE_REVIEW
     assert state.content_approved is False
-    allowed, reason = service.can_export(project.project_id)
+    allowed, _reason = service.can_export(project.project_id)
     assert not allowed
     with pytest.raises(PresentationError):
         service.export(project.project_id)
@@ -680,7 +679,6 @@ def test_the_real_grounded_assistant_answers_a_technical_question(
 def test_an_image_slide_embeds_a_real_picture(tmp_path: Path) -> None:
     """An image slide carries a real picture shape, and a bad path is flagged."""
     import pptx
-
     from core.imagegen import encode_png
 
     png = tmp_path / "figure.png"

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from core.human_approval import HumanApprovalGate
 from core.permissions import Capability, PermissionPolicy
 from core.tool_agent import ToolAgent, ToolCall, ToolPlan, plan_from_calls

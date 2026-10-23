@@ -22,13 +22,12 @@ never touches it.
 from __future__ import annotations
 
 import threading
+import tkinter as tk
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal
-
-import tkinter as tk
 from tkinter import filedialog, ttk
+from typing import Any, Literal
 
 from gui.sql_import import (
     DATABASE_TYPES,
@@ -307,7 +306,7 @@ class SqlImportDialog:
     def _load_schema(self, path: str) -> None:
         try:
             infos = self.sql.inspect(path)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(redact_secrets(f"Could not read the schema: {error}"), error=True)
             self._clear_schema()
             return
@@ -471,7 +470,7 @@ class SqlImportDialog:
             try:
                 report = job(self._on_progress)
                 self.window.after(0, partial(self._finish, report, None))
-            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            except Exception as error:
                 self.window.after(0, partial(self._finish, None, error))
 
         threading.Thread(target=run, daemon=True).start()
@@ -526,7 +525,7 @@ class SqlImportDialog:
             child.destroy()
         try:
             jobs = self.sql.list_jobs()
-        except Exception:  # noqa: BLE001 - a jobs read must not break the page
+        except Exception:
             jobs = ()
         if not jobs:
             tk.Label(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.episodic_memory import EpisodicMemory, Episode
+from core.episodic_memory import Episode, EpisodicMemory
 from core.memory_associator import MemoryAssociator
 from core.semantic_memory import SemanticMemoryIndex
 

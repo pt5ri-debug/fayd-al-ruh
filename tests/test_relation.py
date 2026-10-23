@@ -1,5 +1,4 @@
 import pytest
-
 from core.relation import Relation
 
 

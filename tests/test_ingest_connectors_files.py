@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from ingest.connectors.files import ALL_SUFFIXES, FileConnector
 from ingest.errors import ConnectorError
 from ingest.records import SourceSpec

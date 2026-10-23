@@ -1,5 +1,6 @@
-import pytest
+import dataclasses
 
+import pytest
 from evaluation.benchmark import (
     METRIC_SPECS,
     MetricSpec,
@@ -273,8 +274,8 @@ def test_acceptance_gate_metric_is_reported():
 def test_gate_metric_falls_when_a_trap_is_accepted(monkeypatch):
     # A permissive policy must move the metric: this is what makes it a real
     # check rather than a restatement of the seeds.
-    import evaluation.runner as runner
     import core.acceptance_policy as policy
+    import evaluation.runner as runner
 
     monkeypatch.setattr(runner, "rejection_reason", lambda **_: None)
     scenario = next(s for s in SCENARIOS if s.id == "gate-discrimination")
@@ -292,8 +293,8 @@ def test_petroleum_generalisation_metric_is_reported():
 
 
 def test_generalisation_uses_the_held_out_disciplines():
-    from ml.petroleum import PETROLEUM_LEARNING_EPISODES, petroleum_generalisation_accuracy
     from core.petroleum_tasks import PETROLEUM_HELD_OUT_TASKS
+    from ml.petroleum import PETROLEUM_LEARNING_EPISODES, petroleum_generalisation_accuracy
 
     assert PETROLEUM_HELD_OUT_TASKS, "the generalisation check needs a held-out set"
     # At the evaluation gate's own budget the held-out disciplines are solved, so
@@ -308,8 +309,8 @@ def test_generalisation_needs_the_full_budget():
     # budget, so a small episode count reads 0.0. This test documents the cliff
     # rather than hiding it; the metric is still a genuine generalisation check
     # (five unseen disciplines), but it moves as a step, not a gradient.
-    from ml.petroleum import petroleum_generalisation_accuracy
     from core.petroleum_tasks import PETROLEUM_HELD_OUT_TASKS
+    from ml.petroleum import petroleum_generalisation_accuracy
 
     assert len(PETROLEUM_HELD_OUT_TASKS) >= 5
     assert petroleum_generalisation_accuracy(episodes=20) == 0.0
@@ -317,7 +318,7 @@ def test_generalisation_needs_the_full_budget():
 
 
 def test_metric_specs_cover_every_metric():
-    assert set(spec.name for spec in METRIC_SPECS) == set(metric_names(EvaluationMetrics))
+    assert {spec.name for spec in METRIC_SPECS} == set(metric_names(EvaluationMetrics))
 
 
 def test_suite_is_deterministic():
@@ -385,5 +386,5 @@ def test_metrics_are_frozen_and_comparable():
     report = run_suite()
     assert isinstance(report, EvaluationReport)
     assert isinstance(report.metrics, EvaluationMetrics)
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         report.metrics.overall = 0.0  # type: ignore[misc]

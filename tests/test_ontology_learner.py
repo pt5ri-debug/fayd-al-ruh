@@ -1,5 +1,4 @@
 import pytest
-
 from core.concept import Concept
 from core.ontology import Ontology
 from core.ontology_learner import OntologyLearner

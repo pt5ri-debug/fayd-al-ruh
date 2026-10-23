@@ -6,19 +6,18 @@ import tempfile
 from pathlib import Path
 
 import pytest
-
 from core.assistant import GroundedAssistant
-from core.documents import build_document_store
-from core.ontology import Ontology
-from core.domain_knowledge import seed_ontology
 from core.curriculum_knowledge import seed_curriculum
+from core.documents import build_document_store
+from core.domain_knowledge import seed_ontology
+from core.ontology import Ontology
 from core.rag import RagRetriever
 from core.speech import (
     AudioClip,
     AudioModel,
     CommandSynthesizer,
-    MicrophoneRecorder,
     MicRecording,
+    MicrophoneRecorder,
     Playback,
     SilentSynthesizer,
     Speaker,

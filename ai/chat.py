@@ -53,20 +53,17 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from ai import mind as mind_module
-from ai import banner_mouth
-from ai import cloud_mouth
-from ai import natasha_mouth
-from ai import ultron_mouth
-from ai import vision_mouth
-from ai.jarvis import build_session
+from companion.companion_agent import CompanionError
 from core.banner import BannerUnavailable
 from core.cloud_model import CloudUnavailable
-from companion.companion_agent import CompanionError
 from core.composition import sources_block
 from core.jarvis import JarvisMode, JarvisTurn
 from core.ultron import UltronUnavailable
 from core.vision_model import VisionUnavailable
+
+from ai import banner_mouth, cloud_mouth, natasha_mouth, ultron_mouth, vision_mouth
+from ai import mind as mind_module
+from ai.jarvis import build_session
 
 INTRO = "Chat with the project's AI. Ask a question, or type 'help' for controls; 'quit' to exit."
 MIND_HINT = (
@@ -157,11 +154,11 @@ class ModelSwitcher:
         *,
         loader,
         max_new_tokens: int = 96,
-        ultron_loader: Callable[[], "ultron_mouth.UltronAssistant"] | None = None,
-        vision_loader: Callable[[], "vision_mouth.VisionAssistant"] | None = None,
-        banner_loader: Callable[[], "banner_mouth.BannerAssistant"] | None = None,
-        cloud_loader: Callable[[], "cloud_mouth.CloudAssistant"] | None = None,
-        natasha_loader: Callable[[], "natasha_mouth.NatashaAssistant"] | None = None,
+        ultron_loader: Callable[[], ultron_mouth.UltronAssistant] | None = None,
+        vision_loader: Callable[[], vision_mouth.VisionAssistant] | None = None,
+        banner_loader: Callable[[], banner_mouth.BannerAssistant] | None = None,
+        cloud_loader: Callable[[], cloud_mouth.CloudAssistant] | None = None,
+        natasha_loader: Callable[[], natasha_mouth.NatashaAssistant] | None = None,
     ) -> None:
         self.mode = mode
         self.grounded = mode.assistant

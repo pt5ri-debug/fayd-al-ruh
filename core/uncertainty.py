@@ -15,7 +15,7 @@ class Uncertainty:
             raise ValueError("Confidence and uncertainty must sum to 1.")
 
     @classmethod
-    def from_confidence(cls, confidence: float) -> "Uncertainty":
+    def from_confidence(cls, confidence: float) -> Uncertainty:
         if not 0.0 <= confidence <= 1.0:
             raise ValueError("Confidence must be between 0 and 1.")
         return cls(round(confidence, 6), round(1.0 - confidence, 6))

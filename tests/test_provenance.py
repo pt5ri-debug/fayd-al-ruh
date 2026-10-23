@@ -1,5 +1,4 @@
 import pytest
-
 from core.belief import Belief
 from core.evidence import Evidence
 from core.observation import Observation

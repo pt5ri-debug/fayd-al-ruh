@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from core.human_approval import HumanApprovalGate
 from core.permissions import Capability, PermissionPolicy
 from core.web_source import (
@@ -184,8 +183,8 @@ def test_contradicting_source_is_never_learned():
 
 def test_denied_search_returns_ungrounded_assessment():
     policy = PermissionPolicy()  # default denies external tools
-    from core.rag import RagRetriever
     from core.documents import build_document_store
+    from core.rag import RagRetriever
 
     retriever = RagRetriever(build_document_store())
     verifier = WebVerifier(retriever, WebSearchService(StaticSearchProvider((_RELATED,)), permissions=policy))

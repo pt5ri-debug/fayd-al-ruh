@@ -471,7 +471,7 @@ def _to_int16(samples: Any, sample_rate: int, *, target_rate: int = 16_000) -> t
         return ()
     if sample_rate != target_rate:
         duration = array.size / sample_rate
-        count = max(1, int(round(duration * target_rate)))
+        count = max(1, round(duration * target_rate))
         source = np.arange(array.size, dtype=np.float32)
         target = np.linspace(0.0, float(array.size - 1), count, dtype=np.float32)
         array = np.interp(target, source, array).astype(np.float32)

@@ -1,10 +1,9 @@
 import pytest
-
+from core.belief import Belief, BeliefStatus
 from core.entity import Entity, EntityType
 from core.evidence import Evidence
-from core.belief import Belief, BeliefStatus
-from core.relation import Relation
 from core.knowledge_graph import KnowledgeGraph
+from core.relation import Relation
 
 
 def create_basic_graph():

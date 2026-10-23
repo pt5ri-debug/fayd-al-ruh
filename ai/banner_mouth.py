@@ -34,7 +34,11 @@ from pathlib import Path
 from core.assistant import AssistantAnswer
 from core.banner import (
     HEADER as BANNER_HEADER,
+)
+from core.banner import (
     NAME as BANNER_NAME,
+)
+from core.banner import (
     BannerEngine,
     BannerUnavailable,
 )

@@ -78,6 +78,6 @@ def test_snapshot_is_immutable():
 
     try:
         snapshot.cycle_count = 10
-        assert False
+        raise AssertionError("the snapshot should be frozen")
     except AttributeError:
         pass

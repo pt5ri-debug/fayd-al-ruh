@@ -639,10 +639,7 @@ class SceneStudioService:
 
     def mesh_filetypes(self) -> list[tuple[str, str]]:
         """The file-dialog filters: OBJ models *and* the Studio's own scenes."""
-        return mesh_filetypes() + [
-            ("Scene Studio scene", "*.faydscene"),
-            ("All files", "*.*"),
-        ]
+        return [*mesh_filetypes(), ("Scene Studio scene", "*.faydscene"), ("All files", "*.*")]
 
     # -- commands ---------------------------------------------------------
 

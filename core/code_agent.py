@@ -309,7 +309,7 @@ class CodingAgent:
             if any(part in SKIP_DIRS for part in relative.parts):
                 continue
             try:
-                self.studio._check_suffix(path)  # noqa: SLF001 - the engine's own rule
+                self.studio._check_suffix(path)
             except StudioError:
                 continue
             matches.append(relative.as_posix())

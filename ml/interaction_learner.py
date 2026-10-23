@@ -13,17 +13,17 @@ proxy for the observed outcome and keep the rest of the learning stack intact.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
-
 from core.action import Action
 from core.interaction_reward import InteractionRewardModel, Outcome
 from core.progress import ProgressCallback
 from core.sandbox_environment import SandboxEnvironment, SandboxTask
 from core.state import State
 from core.state_transition import StateTransition
+
 from ml.dataset import FeatureHasher
 from ml.learner import QLearningAgent, state_tokens
 

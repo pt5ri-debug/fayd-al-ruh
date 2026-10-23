@@ -188,4 +188,4 @@ class DedupLedger:
             connection.close()
 
 
-__all__ = ["DedupLedger", "SCHEMA", "SourceState"]
+__all__ = ["SCHEMA", "DedupLedger", "SourceState"]

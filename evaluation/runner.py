@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from core.acceptance_policy import rejection_reason
 from core.action import Action
 from core.belief import Belief
 from core.belief_revision import BeliefRevisionEngine
 from core.causal_link import CausalLink
 from core.cognitive_controller import CognitiveController
+from core.curriculum_knowledge import curriculum_coverage_score
 from core.evidence import Evidence
 from core.goal import Goal
 from core.observation import Observation
 from core.state import State
+from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
+
 from evaluation.metrics import (
     CalibrationBin,
     brier_summary,
@@ -20,14 +24,11 @@ from evaluation.metrics import (
     mean,
 )
 from evaluation.scenarios import (
-    Domain,
-    Scenario,
     SCENARIOS,
     DecisionActionSpec,
+    Domain,
+    Scenario,
 )
-from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
-from core.curriculum_knowledge import curriculum_coverage_score
-from core.acceptance_policy import rejection_reason
 
 
 @dataclass(frozen=True)

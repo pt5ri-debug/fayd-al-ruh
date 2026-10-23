@@ -14,12 +14,11 @@ import json
 from pathlib import Path
 
 import pytest
-
 from core.coder_llama import (
     CATALOG,
     DEFAULT_SPEC_KEY,
-    LlamaCppCoderClient,
     CoderModelUnavailable,
+    LlamaCppCoderClient,
     coder_backend_status,
     download_model,
     extra_available,

@@ -1,14 +1,13 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from core.memory import CognitiveMemory
 from core.retention_policy import RetentionPolicy, prune
 
 
 def _aged_item(memory: CognitiveMemory, item_id: str, importance: float, age_days: float, access_count: int = 0):
     item = memory.store(item_id, "observation", f"content-{item_id}", importance)
-    item.created_at = datetime.now(timezone.utc) - timedelta(days=age_days)
+    item.created_at = datetime.now(UTC) - timedelta(days=age_days)
     item.access_count = access_count
     return item
 
@@ -53,7 +52,7 @@ def test_protected_item_types_are_never_evicted():
     policy = RetentionPolicy(max_age_days=10, minimum_importance=0.1, protect_item_types=frozenset({"belief_state"}))
     memory = CognitiveMemory()
     item = memory.store("BELIEF-1", "belief_state", {"belief_id": "BL-1"}, 0.01)
-    item.created_at = datetime.now(timezone.utc) - timedelta(days=365)
+    item.created_at = datetime.now(UTC) - timedelta(days=365)
 
     assert policy.expired(item) is False
     assert prune(memory, policy).removed == []
@@ -90,7 +89,7 @@ def test_prune_eviction_order_is_deterministic():
     memory = CognitiveMemory()
     for item_id in ("A", "B", "C"):
         item = memory.store(item_id, "observation", item_id, 0.1)
-        item.created_at = datetime.now(timezone.utc) - timedelta(days=5)
+        item.created_at = datetime.now(UTC) - timedelta(days=5)
 
     first = prune(memory, policy).removed
     assert first == ["A", "B", "C"]

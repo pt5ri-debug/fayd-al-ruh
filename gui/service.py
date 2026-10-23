@@ -11,18 +11,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from ai import banner_mouth, cloud_mouth, ultron_mouth, vision_mouth
 from ai import chat as chat_module
-from ai import banner_mouth
-from ai import cloud_mouth
 from ai import mind as mind_module
-from ai import ultron_mouth
-from ai import vision_mouth
 from ai.jarvis import build_session
-from core.command_router import RouteKind, RoutedCommand
+from core.command_router import RoutedCommand, RouteKind
 from core.jarvis import JarvisMode, JarvisTurn
 from core.paths import data_dir
 from core.reading import TextReader
@@ -36,14 +33,12 @@ from core.speech import (
     microphone_install_hint,
 )
 from core.voices import ModelVoice, SystemVoice, Voice, model_voices, voice_keys, voice_sections
+
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
 from gui.docs_studio import DocsStudioService
-from gui.scene3d import SceneStudioService
-from gui.import_center import ImportReport, KnowledgeImporter
 from gui.image_edit import ImageEditService
 from gui.image_gen import ImageGenerationService
-from gui.presentation import PresentationService
-from gui.sql_import import SqlImportService
+from gui.import_center import ImportReport, KnowledgeImporter
 from gui.modes import (
     AnswerOnlyRouter,
     HistoryItem,
@@ -52,6 +47,9 @@ from gui.modes import (
     resolve_mode,
     save_mode_key,
 )
+from gui.presentation import PresentationService
+from gui.scene3d import SceneStudioService
+from gui.sql_import import SqlImportService
 
 if TYPE_CHECKING:
     from gui.import_center import ProgressCallback
@@ -527,7 +525,7 @@ class ChatService:
                     snippet=snippet,
                 )
             )
-        items.sort(key=lambda item: item.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        items.sort(key=lambda item: item.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
         return tuple(items)
 
     def attach_file(self, path: str | Path, *, ocr: bool = False) -> AttachmentNotice:
@@ -624,7 +622,7 @@ class ChatService:
         *,
         ocr: bool | None = None,
         ocr_languages: str | None = None,
-        progress: "ProgressCallback | None" = None,
+        progress: ProgressCallback | None = None,
     ) -> ImportReport:
         """Import one or many chosen files into the knowledge base.
 
@@ -645,7 +643,7 @@ class ChatService:
         ocr_languages: str | None = None,
         job_id: str | None = None,
         resume: bool = True,
-        progress: "ProgressCallback | None" = None,
+        progress: ProgressCallback | None = None,
     ) -> ImportReport:
         """Import every supported file under ``folder`` (**Import from a folder**)."""
         return self._importer.import_folder(
@@ -664,7 +662,7 @@ class ChatService:
         *,
         ocr: bool | None = None,
         ocr_languages: str | None = None,
-        progress: "ProgressCallback | None" = None,
+        progress: ProgressCallback | None = None,
     ) -> ImportReport:
         """Retry the files that failed in an earlier import run (optionally with OCR)."""
         return self._importer.retry_failed(
@@ -676,7 +674,7 @@ class ChatService:
         return self._importer.list_jobs()
 
     def resume_import_job(
-        self, job_id: str, *, progress: "ProgressCallback | None" = None
+        self, job_id: str, *, progress: ProgressCallback | None = None
     ) -> ImportReport:
         """Resume an interrupted folder import from its last completed file."""
         return self._importer.resume_job(job_id, progress=progress)
@@ -760,7 +758,7 @@ class ChatService:
             from ai.presentation_author import load_presentation_author
 
             self._presentation_author = load_presentation_author(root=self._presentation_model_root)
-        except Exception:  # noqa: BLE001 - absent extra/weights is a normal state
+        except Exception:
             return None
         self._presentation.set_author(self._presentation_author)
         return self._presentation_author
@@ -847,7 +845,7 @@ class ChatService:
         So a menu that lists only some of the sources says *why* the others are
         missing and what the real next step is, instead of silently omitting them.
         """
-        from core.voices import SOURCE_SYSTEM, SOURCE_SYNTHETIC
+        from core.voices import SOURCE_SYNTHETIC, SOURCE_SYSTEM
 
         present = {section.source for section in self.voice_sections()}
         notes: list[str] = []

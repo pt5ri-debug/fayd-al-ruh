@@ -48,9 +48,10 @@ can actually speak it.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 #: The four voice categories, in the order the menus show them.
 CATEGORY_MAN = "man"
@@ -611,17 +612,20 @@ def model_voices(engine: str | None = None) -> tuple[ModelVoice, ...]:
     """
     readers: list[tuple[str, Callable[[], tuple[ModelVoice, ...]]]] = []
 
-    from core.audiocpp_speech import AUDIOCPP_ENGINE_NAME, voice_list as _audiocpp_voices
+    from core.audiocpp_speech import AUDIOCPP_ENGINE_NAME
+    from core.audiocpp_speech import voice_list as _audiocpp_voices
 
     readers.append((AUDIOCPP_ENGINE_NAME, _audiocpp_voices))
     try:
-        from core.piper_speech import PIPER_ENGINE_NAME, voice_list as _piper_voices
+        from core.piper_speech import PIPER_ENGINE_NAME
+        from core.piper_speech import voice_list as _piper_voices
 
         readers.append((PIPER_ENGINE_NAME, _piper_voices))
     except Exception:  # a module that cannot import here simply contributes nothing
         pass
     try:
-        from core.qwen_speech import TTS_ENGINE_NAME, voice_list as _qwen_voices
+        from core.qwen_speech import TTS_ENGINE_NAME
+        from core.qwen_speech import voice_list as _qwen_voices
 
         readers.append((TTS_ENGINE_NAME, _qwen_voices))
     except Exception:
@@ -815,7 +819,6 @@ __all__ = [
     "MIN_SPEED",
     "MIN_WORD_GAP",
     "MODEL_VOICE_PREFIX",
-    "ModelVoice",
     "SOURCE_AUDIOCPP",
     "SOURCE_PIPER",
     "SOURCE_QWEN",
@@ -823,8 +826,9 @@ __all__ = [
     "SOURCE_SYSTEM",
     "SOURCE_TITLES",
     "SYSTEM_VOICE_PREFIX",
-    "SystemVoice",
     "VOICE_CATALOG",
+    "ModelVoice",
+    "SystemVoice",
     "Voice",
     "VoiceSection",
     "default_voice",

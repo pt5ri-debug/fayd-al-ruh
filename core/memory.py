@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Iterable
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
-from core.semantic_memory import SemanticMemoryIndex
 from core.episodic_memory import EpisodicMemory
 from core.memory_associator import MemoryAssociator
 from core.memory_consolidator import MemoryConsolidator
 from core.memory_decay import MemoryDecay
 from core.memory_retriever import MemoryRetriever
 from core.procedural_memory import ProceduralMemory
+from core.semantic_memory import SemanticMemoryIndex
 from core.working_memory import WorkingMemory
 
 
@@ -30,7 +31,7 @@ class MemoryItem:
     importance: float = 0.5
 
     created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
 
     access_count: int = 0

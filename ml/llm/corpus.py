@@ -144,7 +144,7 @@ DEFAULT_MAX_SESSION_CHARS = 2_000_000
 
 def session_sentences(
     *,
-    sources: "Iterable[str] | None" = None,
+    sources: Iterable[str] | None = None,
     include_user: bool = True,
     include_assistant: bool = True,
     max_chars: int = DEFAULT_MAX_SESSION_CHARS,
@@ -223,10 +223,10 @@ def build_corpus(
     kb_repeats: int = 1,
     include_runtime: bool = True,
     include_sessions: bool = False,
-    session_sources: "Iterable[str] | None" = None,
+    session_sources: Iterable[str] | None = None,
     session_repeats: int = 1,
-    exclude: "set[str] | frozenset[str] | None" = None,
-    include: "set[str] | frozenset[str] | None" = None,
+    exclude: set[str] | frozenset[str] | None = None,
+    include: set[str] | frozenset[str] | None = None,
 ) -> str:
     """Return the training text, repeated so the small model can fit it.
 

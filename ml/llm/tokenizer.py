@@ -93,9 +93,9 @@ def load_tokenizer(path):
 
 __all__ = [
     "BOS_ID",
+    "TOKENIZER_KINDS",
     "VOCAB_SIZE",
     "ByteTokenizer",
-    "TOKENIZER_KINDS",
     "load_tokenizer",
     "sample",
     "save_tokenizer",

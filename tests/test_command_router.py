@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from core.command_router import NaturalLanguageRouter, RouteKind
 from core.tools import build_sandbox
 

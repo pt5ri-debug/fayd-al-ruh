@@ -6,10 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-
 from core.progress import ProgressCallback
+
 from ml.dataset import Dataset
-from ml.models import Adam, MLP, SoftmaxClassifier, save_model
+from ml.models import MLP, Adam, SoftmaxClassifier, save_model
 
 Classifier = SoftmaxClassifier | MLP
 
@@ -125,7 +125,7 @@ class Trainer:
                     stopped_early = True
                     break
 
-        for param, best in zip(model.parameters(), best_params):
+        for param, best in zip(model.parameters(), best_params, strict=False):
             param[...] = best
         return TrainingReport(
             epochs=tuple(epochs),

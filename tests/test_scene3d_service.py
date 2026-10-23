@@ -13,7 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from core.scene3d import Vec3
 from core.scene3d_io import SceneIOError
 from gui.scene3d import (
@@ -132,7 +131,7 @@ def test_pose_bone_moves_the_mesh(service: SceneStudioService):
     before = obj.world_vertices()
     service.pose_bone(obj.name, "forearm.L", Vec3(0, 0, -80))
     after = obj.world_vertices()
-    assert any((a - b).length() > 1e-4 for a, b in zip(before, after))
+    assert any((a - b).length() > 1e-4 for a, b in zip(before, after, strict=False))
 
 
 def test_pose_bone_rejects_an_unknown_bone(service: SceneStudioService):
@@ -165,7 +164,7 @@ def test_clear_pose_returns_to_the_rest_shape(service: SceneStudioService):
     rest = obj.world_vertices()
     service.apply_pose_preset(obj.name, "sit")
     service.clear_pose(obj.name)
-    for actual, expected in zip(obj.world_vertices(), rest):
+    for actual, expected in zip(obj.world_vertices(), rest, strict=False):
         assert actual.to_tuple() == pytest.approx(expected.to_tuple())
 
 

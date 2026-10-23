@@ -30,6 +30,10 @@ from companion.companion_agent import (
     ModelStatus,
 )
 from companion.config import CompanionConfig, default_db_path
+from companion.conversation_manager import ConversationManager, SessionInfo
+from companion.emotion_state import DialogueEmotion, DialogueEmotionTracker
+from companion.language import detect_language_of, resolve_reply_language
+from companion.memory_manager import Memory, MemoryManager
 from companion.model import (
     BACKEND_AUTO,
     BACKEND_GGUF,
@@ -53,15 +57,11 @@ from companion.model import (
     spec_names,
     spec_summaries,
 )
-from companion.conversation_manager import ConversationManager, SessionInfo
-from companion.emotion_state import DialogueEmotion, DialogueEmotionTracker
-from companion.language import detect_language_of, resolve_reply_language
-from companion.memory_manager import Memory, MemoryManager
 from companion.personality import (
     LANGUAGE_MODES,
     NAME,
-    PersonalitySettings,
     NatashaPersonality,
+    PersonalitySettings,
     default_personality,
 )
 from companion.polish import PolishResult, polish, polish_report
@@ -73,6 +73,11 @@ __all__ = [
     "BACKEND_GGUF",
     "BACKEND_OLLAMA",
     "CATALOG",
+    "DEFAULT_MODEL",
+    "DEFAULT_OLLAMA_URL",
+    "DEFAULT_SPEC_KEY",
+    "LANGUAGE_MODES",
+    "NAME",
     "CompanionAgent",
     "CompanionConfig",
     "CompanionError",
@@ -80,18 +85,13 @@ __all__ = [
     "CompanionModelUnavailable",
     "CompanionReply",
     "ConversationManager",
-    "DEFAULT_MODEL",
-    "DEFAULT_OLLAMA_URL",
-    "DEFAULT_SPEC_KEY",
     "DialogueEmotion",
     "DialogueEmotionTracker",
-    "LANGUAGE_MODES",
     "LlamaCppNatashaClient",
     "Memory",
     "MemoryManager",
     "ModelCaller",
     "ModelStatus",
-    "NAME",
     "NatashaModelClient",
     "NatashaModelStatus",
     "NatashaPersonality",

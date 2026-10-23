@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from core.text_encoding import (
     CANDIDATE_ENCODINGS,
     EncodingDetectionError,
@@ -13,11 +12,11 @@ from core.text_encoding import (
 
 
 def test_utf8_is_detected():
-    assert detect_encoding("plain ascii".encode("utf-8")) == "utf-8"
+    assert detect_encoding(b"plain ascii") == "utf-8"
 
 
 def test_utf8_arabic_round_trips_without_replacement():
-    raw = "معادلة ضغط الخزان".encode("utf-8")
+    raw = "معادلة ضغط الخزان".encode()
     decoded = decode_bytes(raw)
     assert decoded.encoding == "utf-8"
     assert decoded.text == "معادلة ضغط الخزان"
@@ -70,7 +69,7 @@ def test_empty_input_defaults_to_utf8():
 
 
 def test_truncated_prefix_tolerates_a_partial_final_character():
-    raw = "مرحبا".encode("utf-8")[:-1]  # drop the last byte of the final letter
+    raw = "مرحبا".encode()[:-1]  # drop the last byte of the final letter
     assert detect_encoding(raw, allow_truncated=True) == "utf-8"
     with pytest.raises(EncodingDetectionError):
         detect_encoding(raw)

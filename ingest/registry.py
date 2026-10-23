@@ -91,7 +91,7 @@ def _suffix(uri: str) -> str:
 
 
 def build_default_registry(
-    *, allow_web: bool = False, ocr_engine: "PageOcrEngine | None" = None
+    *, allow_web: bool = False, ocr_engine: PageOcrEngine | None = None
 ) -> ConnectorRegistry:
     """The registry the CLI and pipeline use by default.
 

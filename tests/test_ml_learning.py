@@ -1,9 +1,8 @@
 import numpy as np
-
+from core.sandbox_tasks import task_by_name
 from ml.cognitive_brain import CognitiveBrain
 from ml.dataset import FeatureHasher
 from ml.learner import QLearningAgent, evaluate_policy, train_policy
-from core.sandbox_tasks import task_by_name
 
 
 def _wet_success(state) -> bool:
@@ -20,7 +19,10 @@ def test_q_learning_solves_wet_garden():
 
 def test_q_learning_solves_stack_blocks():
     task = task_by_name("stack-blocks")
-    success = lambda state: "tower_built" in state.facts  # noqa: E731
+
+    def success(state):
+        return "tower_built" in state.facts
+
     agent, report = train_policy(task, success, episodes=200, hasher=FeatureHasher(64))
 
     assert report.success_rate_window == 1.0
@@ -29,7 +31,10 @@ def test_q_learning_solves_stack_blocks():
 
 def test_q_learning_improves_over_random():
     task = task_by_name("stack-blocks")
-    success = lambda state: "tower_built" in state.facts  # noqa: E731
+
+    def success(state):
+        return "tower_built" in state.facts
+
     _agent, report = train_policy(task, success, episodes=200, hasher=FeatureHasher(64))
 
     # The tail of the learning curve (after exploration decays) must beat the
@@ -80,7 +85,10 @@ def test_cognitive_brain_metacognition_tracks_errors():
 def test_cognitive_brain_stays_numerically_stable_over_long_training():
     """Regression: the world model must never diverge, however long it trains."""
     task = task_by_name("light-candle")
-    success = lambda state: "lit_candle" in state.facts  # noqa: E731
+
+    def success(state):
+        return "lit_candle" in state.facts
+
     brain = CognitiveBrain(task, success, seed=0)
 
     report = brain.learn(episodes=1500)

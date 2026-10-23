@@ -26,15 +26,16 @@ from __future__ import annotations
 
 import queue
 import threading
+import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
-
-import tkinter as tk
 from tkinter import filedialog
+from typing import Any
 
 from core.imagegen_diffusion import DEFAULT_EDIT_PRESET, EDIT_PRESETS
 from core.optional_deps import FEATURE_IMAGE, pip_install_command
+
+from gui.chat_composer import ChatComposer
 from gui.image_edit import (
     BACKEND_DETERMINISTIC,
     BACKEND_LEARNED,
@@ -43,7 +44,6 @@ from gui.image_edit import (
     READABLE_SUFFIXES,
     ImageEditService,
 )
-from gui.chat_composer import ChatComposer
 from gui.image_preview import load_scaled
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
@@ -336,10 +336,10 @@ class ImageEditDialog:
 
     def _refresh_backend_note(self) -> None:
         backend = self._backend_var.get()
-        status = dict(
-            (name, (available, note))
+        status = {
+            name: (available, note)
             for name, available, note in self.edit_service.backend_status()
-        )
+        }
         available, note = status.get(backend, (False, "Unknown backend."))
         if backend == BACKEND_LEARNED:
             self._download_button.pack(side="left", padx=(8, 0))
@@ -363,7 +363,7 @@ class ImageEditDialog:
             try:
                 report = self.edit_service.download_model(approved=True)
                 self._results.put(("download", report, None))
-            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            except Exception as error:
                 self._results.put(("download", None, error))
 
         threading.Thread(target=run, daemon=True).start()
@@ -388,7 +388,7 @@ class ImageEditDialog:
     def _load_source(self, path: str) -> None:
         try:
             self._session = self.edit_service.load(path)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(f"Could not open that image: {error}", error=True)
             return
         self._source_label.configure(
@@ -428,7 +428,7 @@ class ImageEditDialog:
             try:
                 report = service.apply(self._session, instruction)
                 self._results.put(("apply", report, None))
-            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            except Exception as error:
                 self._results.put(("apply", None, error))
 
         threading.Thread(target=run, daemon=True).start()
@@ -543,10 +543,10 @@ class ImageEditDialog:
 
 __all__ = [
     "HONESTY_LINE",
-    "ImageEditDialog",
     "INSTRUCTION_HINT",
     "LEARNED_EXAMPLE_INSTRUCTION",
     "PREVIEW_FRACTION",
     "SUBTITLE",
     "TITLE",
+    "ImageEditDialog",
 ]

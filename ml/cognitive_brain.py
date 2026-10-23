@@ -24,12 +24,12 @@ from pathlib import Path
 from typing import cast
 
 import numpy as np
-
 from core.action import Action
 from core.action_policy import ActionPolicy
 from core.progress import ProgressCallback
 from core.sandbox_environment import SandboxEnvironment, SandboxTask
 from core.state import State
+
 from ml.dataset import FeatureHasher, ReplayBuffer, Transition
 from ml.learner import QLearningAgent, state_tokens
 from ml.models import LinearRegressor, load_model, save_model
@@ -130,7 +130,7 @@ class CognitiveBrain:
         # world model (predictive coding must stay stable under outlier errors).
         total_norm = float(np.sqrt(sum(float(np.sum(g * g)) for g in grads)))
         scale = 1.0 if total_norm <= self.max_grad_norm else self.max_grad_norm / (total_norm + 1e-12)
-        for param, grad in zip(self.world_model.parameters(), grads):
+        for param, grad in zip(self.world_model.parameters(), grads, strict=False):
             param -= self.learning_rate * scale * grad
         self._errors.append(error)
         return error
@@ -152,7 +152,7 @@ class CognitiveBrain:
         grads = self.world_model.backward(inputs, targets)
         total_norm = float(np.sqrt(sum(float(np.sum(g * g)) for g in grads)))
         scale = 1.0 if total_norm <= self.max_grad_norm else self.max_grad_norm / (total_norm + 1e-12)
-        for param, grad in zip(self.world_model.parameters(), grads):
+        for param, grad in zip(self.world_model.parameters(), grads, strict=False):
             param -= self.learning_rate * scale * grad
         error = float(np.mean(errors))
         self._errors.append(error)
@@ -269,7 +269,7 @@ class CognitiveBrain:
         return target
 
     @classmethod
-    def load(cls, directory: str | Path, task: SandboxTask, success) -> "CognitiveBrain":
+    def load(cls, directory: str | Path, task: SandboxTask, success) -> CognitiveBrain:
         """Restore a saved brain so learning can continue where it stopped."""
         source = Path(directory)
         metadata = json.loads((source / "brain.json").read_text(encoding="utf-8"))

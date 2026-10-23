@@ -291,7 +291,7 @@ def _model_cache_name(model: str) -> str:
 
 def _snap(value: int, grid: int = BASE_RESOLUTION) -> int:
     """Round ``value`` to the nearest multiple of ``grid`` (at least one grid)."""
-    return max(grid, int(round(value / grid)) * grid)
+    return max(grid, round(value / grid) * grid)
 
 
 def model_is_cached(model: str, *, root: Path | None = None) -> bool:
@@ -371,7 +371,7 @@ def download_model(
         factory = _pipeline_class(diffusers, kind)
         pipeline = factory.from_pretrained(model)
         pipeline.save_pretrained(str(target))
-    except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+    except Exception as error:
         raise DiffusionUnavailable(f"Could not download {model!r}: {error}") from error
     if progress is not None:
         progress(f"Saved {model} to {target}.")

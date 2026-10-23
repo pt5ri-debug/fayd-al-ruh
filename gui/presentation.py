@@ -1808,7 +1808,7 @@ class PresentationService:
             return self._fail_export(project, export_id, target, str(error))
         except OSError as error:
             return self._fail_export(project, export_id, target, str(error))
-        except Exception as error:  # noqa: BLE001 - reported, project preserved
+        except Exception as error:
             return self._fail_export(project, export_id, target, str(error))
 
         if not result.ok:
@@ -1925,19 +1925,19 @@ class PresentationService:
 
 
 __all__ = [
-    "AskCallback",
-    "DiscussResult",
     "EXAMPLE_PROMPT",
     "EXPAND_PROMPT",
     "OUTLINE_PROMPT",
+    "REVISION_PROMPT",
+    "SHORTEN_PROMPT",
+    "SLIDE_PROMPT",
+    "AskCallback",
+    "DiscussResult",
     "PresentationReport",
     "PresentationService",
     "PresentationStatus",
     "ProgressCallback",
     "ProjectValidation",
-    "REVISION_PROMPT",
-    "SHORTEN_PROMPT",
-    "SLIDE_PROMPT",
     "SlideCommandResult",
     "SlideSpec",
     "render_slide_text",

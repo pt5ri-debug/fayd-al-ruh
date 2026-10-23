@@ -1,8 +1,7 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from time import sleep
 
 import pytest
-
 from core.entity import Entity, EntityType
 
 
@@ -37,12 +36,12 @@ def test_entity_timestamps_are_utc_aware():
 
     assert (
         entity.created_at.utcoffset()
-        == timezone.utc.utcoffset(entity.created_at)
+        == UTC.utcoffset(entity.created_at)
     )
 
     assert (
         entity.updated_at.utcoffset()
-        == timezone.utc.utcoffset(entity.updated_at)
+        == UTC.utcoffset(entity.updated_at)
     )
 
 

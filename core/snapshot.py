@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from hashlib import sha256
 
 from core.serializer import Serializer
@@ -17,7 +17,7 @@ class Snapshot:
     payload: dict
     checksum: str
     version: int = SNAPSHOT_SCHEMA_VERSION
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod
     def create(
@@ -26,7 +26,7 @@ class Snapshot:
         payload: dict,
         serializer: Serializer | None = None,
         version: int = SNAPSHOT_SCHEMA_VERSION,
-    ) -> "Snapshot":
+    ) -> Snapshot:
         if not name.strip():
             raise ValueError("Snapshot name cannot be empty.")
         if version < 1:

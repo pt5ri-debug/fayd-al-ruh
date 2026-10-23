@@ -28,7 +28,7 @@ def format_duration(seconds: float) -> str:
     seconds = max(0.0, seconds)
     if seconds < 60:
         return f"{seconds:.0f}s"
-    minutes, remainder = divmod(int(round(seconds)), 60)
+    minutes, remainder = divmod(round(seconds), 60)
     if minutes < 60:
         return f"{minutes}m {remainder:02d}s"
     hours, minutes = divmod(minutes, 60)

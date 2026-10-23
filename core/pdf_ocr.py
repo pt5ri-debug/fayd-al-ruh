@@ -51,6 +51,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from core.optional_deps import FEATURE_OCR, pip_install_command
 from core.pdf_extract import (
     DEFAULT_MAX_CHARS,
     PdfExtractionError,
@@ -58,7 +59,6 @@ from core.pdf_extract import (
     PdfPageStream,
     _is_rtl_hint,
 )
-from core.optional_deps import FEATURE_OCR, pip_install_command
 
 #: The optional Python packages the ``[ocr]`` extra installs (import names).
 OCR_DEPENDENCIES = ("pypdfium2", "pytesseract", "PIL")
@@ -250,7 +250,7 @@ class OcrConfig:
         if self.retries < 0:
             raise ValueError("retries cannot be negative.")
 
-    def with_languages(self, languages: Iterable[str]) -> "OcrConfig":
+    def with_languages(self, languages: Iterable[str]) -> OcrConfig:
         """A copy with a different language set (used after availability check)."""
         from dataclasses import replace
 
@@ -692,7 +692,7 @@ OcrCommandRunner = Callable[[Sequence[str]], tuple[int, str]]
 
 
 def _default_ocr_runner(argv: Sequence[str]) -> tuple[int, str]:
-    completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+    completed = subprocess.run(
         list(argv),
         capture_output=True,
         text=True,

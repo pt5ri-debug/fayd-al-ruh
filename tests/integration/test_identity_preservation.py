@@ -6,14 +6,12 @@ snapshot/restore round trip.
 """
 
 import pytest
-
 from core.belief import Belief
 from core.causal_link import CausalLink
 from core.cognitive_controller import CognitiveController
 from core.evidence_processor import EvidencePolarity
 from core.observation import Observation
 from storage.json_store import JsonStore
-
 
 pytestmark = pytest.mark.integration
 

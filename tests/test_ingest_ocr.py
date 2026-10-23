@@ -14,7 +14,6 @@ import types
 from pathlib import Path
 
 import pytest
-
 from core import document_reader
 from core.document_reader import DocumentReadError, _default_ocr_engine, read_document
 

@@ -32,16 +32,19 @@ Honesty and safety built into the flow:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
+
+from core.coder_model import CoderMessage, CoderUnavailable
 
 from companion.config import CompanionConfig
 from companion.conversation_manager import ConversationManager, SessionInfo
 from companion.database import CompanionDatabase
 from companion.emotion_state import DialogueEmotion, DialogueEmotionTracker
 from companion.language import last_user_text, resolve_reply_language
-from companion.memory_manager import MemoryManager, MemoryCandidate
+from companion.memory_manager import MemoryCandidate, MemoryManager
 from companion.model import (
     NatashaModelClient,
     NatashaModelStatus,
@@ -49,11 +52,10 @@ from companion.model import (
     natasha_model_status,
     strip_thinking,
 )
-from companion.personality import NAME, PersonalitySettings, PersonalityStore, NatashaPersonality
+from companion.personality import NAME, NatashaPersonality, PersonalitySettings, PersonalityStore
 from companion.polish import polish_report
 from companion.prompt_builder import PromptBuilder
 from companion.relationship_manager import EventCandidate, RelationshipEvent, RelationshipManager
-from core.coder_model import CoderMessage, CoderUnavailable
 
 
 class CompanionError(RuntimeError):

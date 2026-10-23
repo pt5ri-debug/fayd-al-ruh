@@ -18,6 +18,8 @@ import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from core.paths import data_dir
+
 from companion.model import (
     BACKEND_AUTO,
     BACKEND_NAMES,
@@ -28,7 +30,6 @@ from companion.model import (
     DEFAULT_THREADS,
     MAX_CONTEXT,
 )
-from core.paths import data_dir
 
 #: Environment overrides, following the project's ``FAYD_*`` convention, so a
 #: user can point Natasha elsewhere without editing code.
@@ -156,7 +157,7 @@ class CompanionConfig:
             raise ValueError("backup_keep cannot be negative.")
 
     @classmethod
-    def from_env(cls, **overrides: object) -> "CompanionConfig":
+    def from_env(cls, **overrides: object) -> CompanionConfig:
         """Build a config from the environment, then apply explicit overrides.
 
         Explicit arguments always win over the environment, which wins over the
@@ -188,7 +189,7 @@ class CompanionConfig:
         env.update({key: value for key, value in overrides.items() if value is not None})
         return cls(**env)  # type: ignore[arg-type]
 
-    def with_overrides(self, **overrides: object) -> "CompanionConfig":
+    def with_overrides(self, **overrides: object) -> CompanionConfig:
         """A copy with ``overrides`` applied (``None`` values are ignored)."""
         return replace(self, **{k: v for k, v in overrides.items() if v is not None})  # type: ignore[arg-type]
 
@@ -204,7 +205,6 @@ class CompanionConfig:
 
 __all__ = [
     "BACKUP_DIRNAME",
-    "CompanionConfig",
     "DEFAULT_DB_FILENAME",
     "DEFAULT_MODEL",
     "DEFAULT_OLLAMA_URL",
@@ -215,6 +215,7 @@ __all__ = [
     "ENV_OLLAMA_URL",
     "ENV_THINK",
     "ENV_TIMEOUT",
+    "CompanionConfig",
     "backup_dir",
     "default_db_path",
 ]

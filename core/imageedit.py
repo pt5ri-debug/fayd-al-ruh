@@ -74,7 +74,7 @@ class Raster:
             raise ImageEditError("Pixel data must be width * height * 3 bytes.")
 
     @classmethod
-    def solid(cls, width: int, height: int, colour: RGB) -> "Raster":
+    def solid(cls, width: int, height: int, colour: RGB) -> Raster:
         """A single-colour bitmap, handy for tests and padding."""
         return cls(width, height, bytearray(bytes(colour) * (width * height)))
 
@@ -82,7 +82,7 @@ class Raster:
     def aspect_ratio(self) -> float:
         return round(self.width / self.height, 4)
 
-    def copy(self) -> "Raster":
+    def copy(self) -> Raster:
         return Raster(self.width, self.height, bytearray(self.data))
 
     def pixel(self, x: int, y: int) -> RGB:
@@ -105,7 +105,7 @@ class Raster:
         )
 
     @classmethod
-    def from_image_buffer(cls, image: Any) -> "Raster":
+    def from_image_buffer(cls, image: Any) -> Raster:
         """Build a raster from a :class:`core.vision.ImageBuffer`."""
         data = bytearray()
         for red, green, blue in image.pixels:

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Optional
 
+from core.belief import Belief
 from core.entity import Entity
 from core.evidence import Evidence
-from core.belief import Belief
 from core.relation import Relation
 
 
@@ -43,7 +42,7 @@ class KnowledgeGraph:
 
         self.entities[entity.id] = entity
 
-    def get_entity(self, entity_id: str) -> Optional[Entity]:
+    def get_entity(self, entity_id: str) -> Entity | None:
         return self.entities.get(entity_id)
 
     def remove_entity(self, entity_id: str) -> None:
@@ -74,7 +73,7 @@ class KnowledgeGraph:
 
         self.evidence[evidence.id] = evidence
 
-    def get_evidence(self, evidence_id: str) -> Optional[Evidence]:
+    def get_evidence(self, evidence_id: str) -> Evidence | None:
         return self.evidence.get(evidence_id)
 
     def remove_evidence(self, evidence_id: str) -> None:
@@ -110,7 +109,7 @@ class KnowledgeGraph:
 
         self.beliefs[belief.id] = belief
 
-    def get_belief(self, belief_id: str) -> Optional[Belief]:
+    def get_belief(self, belief_id: str) -> Belief | None:
         return self.beliefs.get(belief_id)
 
     def remove_belief(self, belief_id: str) -> None:
@@ -159,7 +158,7 @@ class KnowledgeGraph:
 
         self.relations[relation.id] = relation
 
-    def get_relation(self, relation_id: str) -> Optional[Relation]:
+    def get_relation(self, relation_id: str) -> Relation | None:
         return self.relations.get(relation_id)
 
     def remove_relation(self, relation_id: str) -> None:
@@ -172,7 +171,7 @@ class KnowledgeGraph:
     def find_relations(
         self,
         entity_id: str,
-        relation_type: Optional[str] = None,
+        relation_type: str | None = None,
     ) -> list[Relation]:
 
         if entity_id not in self.entities:
@@ -240,7 +239,7 @@ class KnowledgeGraph:
     def get_relation_belief(
         self,
         relation_id: str,
-    ) -> Optional[Belief]:
+    ) -> Belief | None:
 
         relation = self.get_relation(relation_id)
 
@@ -312,7 +311,7 @@ class KnowledgeGraph:
 
         visited = {start_entity_id}
 
-        previous: dict[str, Optional[str]] = {
+        previous: dict[str, str | None] = {
             start_entity_id: None
         }
 
@@ -341,13 +340,13 @@ class KnowledgeGraph:
 
     @staticmethod
     def _reconstruct_path(
-        previous: dict[str, Optional[str]],
+        previous: dict[str, str | None],
         target: str,
     ) -> list[str]:
 
         path = []
 
-        current: Optional[str] = target
+        current: str | None = target
 
         while current is not None:
             path.append(current)

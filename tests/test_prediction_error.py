@@ -1,5 +1,4 @@
 import pytest
-
 from core.prediction import Prediction
 from core.prediction_error import (
     PredictionErrorCalculator,

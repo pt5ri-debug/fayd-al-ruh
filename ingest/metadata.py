@@ -70,7 +70,7 @@ class DocumentMetadata:
         return data
 
     @classmethod
-    def from_primitive(cls, data: Mapping[str, Any]) -> "DocumentMetadata":
+    def from_primitive(cls, data: Mapping[str, Any]) -> DocumentMetadata:
         return cls(
             doc_id=str(data["doc_id"]),
             source_id=str(data.get("source_id", "")),
@@ -98,7 +98,7 @@ class DocumentMetadataStore:
         self._init_schema()
 
     def _init_schema(self) -> None:
-        connection = self._store._connect()  # noqa: SLF001 - reach a reuse-target connection
+        connection = self._store._connect()
         try:
             connection.executescript(SCHEMA)
             connection.commit()
@@ -107,7 +107,7 @@ class DocumentMetadataStore:
 
     def record(self, metadata: DocumentMetadata) -> DocumentMetadata:
         """Add or replace one document's metadata (payload + indexed columns)."""
-        connection = self._store._connect()  # noqa: SLF001
+        connection = self._store._connect()
         try:
             connection.execute(
                 "INSERT INTO documents(doc_id, source_id, uri, text_hash) VALUES(?,?,?,?) "
@@ -129,7 +129,7 @@ class DocumentMetadataStore:
 
     def for_source(self, source_id: str) -> list[DocumentMetadata]:
         """Every document recorded for one registered source, id-ordered."""
-        connection = self._store._connect()  # noqa: SLF001
+        connection = self._store._connect()
         try:
             rows = connection.execute(
                 "SELECT doc_id FROM documents WHERE source_id=? ORDER BY doc_id",
@@ -141,7 +141,7 @@ class DocumentMetadataStore:
         return [item for item in items if item is not None]
 
     def remove(self, doc_id: str) -> bool:
-        connection = self._store._connect()  # noqa: SLF001
+        connection = self._store._connect()
         try:
             row = connection.execute(
                 "SELECT 1 FROM documents WHERE doc_id=?", (doc_id,)
@@ -158,7 +158,7 @@ class DocumentMetadataStore:
         return True
 
     def count(self) -> int:
-        connection = self._store._connect()  # noqa: SLF001
+        connection = self._store._connect()
         try:
             row = connection.execute("SELECT count(*) FROM documents").fetchone()
         finally:
@@ -217,9 +217,9 @@ def metadata_path(store_root: str | Path) -> Path:
 
 
 __all__ = [
+    "SCHEMA",
     "DocumentMetadata",
     "DocumentMetadataStore",
-    "SCHEMA",
     "build_document_metadata",
     "document_hash",
     "document_id",

@@ -288,7 +288,7 @@ def run_free(args: argparse.Namespace) -> int:
 
 def _provider_table(current: str) -> None:
     """Print the catalog with the free-tier and local providers marked."""
-    for key, title, model, summary, local, free in provider_summaries():
+    for key, title, model, _summary, local, free in provider_summaries():
         if local:
             where = "this machine"
         elif free:

@@ -15,9 +15,7 @@ import zlib
 from pathlib import Path
 
 import pytest
-
 from cli.image import main as image_main
-from core.imagegen import ImageRequest, ProceduralImageGenerator
 from core.imageedit import (
     EditOp,
     EditPlan,
@@ -29,6 +27,7 @@ from core.imageedit import (
     decode_image_bytes,
     plan_edits,
 )
+from core.imagegen import ImageRequest, ProceduralImageGenerator
 from gui.image_edit import ImageEditService
 
 
@@ -651,7 +650,7 @@ def test_learned_service_undo_restores_the_previous_raster(tmp_path):
 
 def test_service_backend_status_reports_both_backends(tmp_path):
     service = ImageEditService(root=tmp_path / "images")
-    status = dict((name, available) for name, available, _note in service.backend_status())
+    status = {name: available for name, available, _note in service.backend_status()}
     assert status["deterministic"] is True
     assert "learned" in status  # availability depends on the install
 

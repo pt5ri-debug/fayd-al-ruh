@@ -1,7 +1,7 @@
 from core.cognitive_controller import CognitiveController
 from core.goal import Goal, PlanStep
-from core.planner import Planner
 from core.model_interface import CallableModel, ModelRequest, MultimodalInput
+from core.planner import Planner
 from core.safe_learning import LearningSandbox, SandboxResult
 from core.semantic_memory import SemanticMemoryIndex
 

@@ -23,19 +23,24 @@ not the only one, because a same-size rewrite would evade it.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
-import contextlib
 import sqlite3
 from pathlib import Path
 
 import pytest
-
 from cli import ingest as cli
 from core.knowledge_base import KnowledgeBaseStore
 from core.knowledge_index import KnowledgeTextIndex, build_index
 from core.paths import artifacts_dir, checkpoints_dir
-from ingest.connectors.sqlite import SqliteConnector, SqliteOptions, _quote
+from ingest.connectors.sqlite import (
+    SqliteConnector,
+    SqliteOptionError,
+    SqliteOptions,
+    _quote,
+)
+from ingest.errors import ConnectorError
 from ingest.pipeline import ledger_path
 from ingest.records import SourceSpec
 from ingest.sql_job import (
@@ -45,7 +50,6 @@ from ingest.sql_job import (
     SqlImportRunner,
     sql_jobs_dir,
 )
-
 
 # ---------------------------------------------------------------------------
 # fixtures / helpers
@@ -119,7 +123,7 @@ def test_open_refuses_every_write_statement(tmp_path):
     """Property 1 & 2: the read-only handle rejects INSERT/UPDATE/DELETE/DDL."""
     database = _wells_with_secret(tmp_path / "w.db")
     connector = SqliteConnector()
-    with connector._connect(database.resolve(), SqliteOptions()) as connection:  # noqa: SLF001
+    with connector._connect(database.resolve(), SqliteOptions()) as connection:
         for statement in (
             "DELETE FROM wells",
             "INSERT INTO wells VALUES (4, 'x', 0, 'y')",
@@ -151,7 +155,7 @@ def test_missing_source_is_never_created_by_any_entry_point(tmp_path):
     """Property 1: no code path silently creates the database file."""
     missing = tmp_path / "absent.db"
     spec = SourceSpec(f"sqlite://{missing}")
-    with pytest.raises(Exception):
+    with pytest.raises(ConnectorError):
         list(SqliteConnector().stream(spec))
     SqlImportRunner(tmp_path / "kb").run(spec, job_id="missing")
     assert not missing.exists()
@@ -165,9 +169,9 @@ def test_missing_source_is_never_created_by_any_entry_point(tmp_path):
 def test_quote_doubles_quotes_and_rejects_empty_or_nul():
     assert _quote('a"b') == '"a""b"'
     assert _quote("select") == '"select"'
-    with pytest.raises(Exception):
+    with pytest.raises(SqliteOptionError):
         _quote("")
-    with pytest.raises(Exception):
+    with pytest.raises(SqliteOptionError):
         _quote("bad\x00name")
 
 
@@ -241,7 +245,7 @@ def test_natural_language_never_reaches_sql_execution(tmp_path, monkeypatch):
         def __getattr__(self, name):
             return getattr(self._inner, name)
 
-    real_open = sqlite_mod._open_read_only  # noqa: SLF001
+    real_open = sqlite_mod._open_read_only
     monkeypatch.setattr(
         sqlite_mod,
         "_open_read_only",

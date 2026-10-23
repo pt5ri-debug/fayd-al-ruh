@@ -28,7 +28,7 @@ class ActionSpec:
     cost: float = 1.0
 
     @classmethod
-    def from_action(cls, action: Action) -> "ActionSpec":
+    def from_action(cls, action: Action) -> ActionSpec:
         return cls(
             action.name,
             action.preconditions,
@@ -50,7 +50,7 @@ class ActionSpec:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ActionSpec":
+    def from_dict(cls, data: dict[str, Any]) -> ActionSpec:
         return cls(
             str(data["name"]),
             frozenset(data.get("preconditions", [])),
@@ -76,7 +76,7 @@ class StepRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "StepRecord":
+    def from_dict(cls, data: dict[str, Any]) -> StepRecord:
         return cls(
             int(data["index"]),
             ActionSpec.from_dict(data["action"]),
@@ -111,7 +111,7 @@ class SimulationTrace:
         return json.dumps(self.to_dict(), ensure_ascii=False, sort_keys=True)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SimulationTrace":
+    def from_dict(cls, data: dict[str, Any]) -> SimulationTrace:
         return cls(
             initial_facts=frozenset(data.get("initial_facts", [])),
             steps=tuple(StepRecord.from_dict(step) for step in data.get("steps", [])),
@@ -121,7 +121,7 @@ class SimulationTrace:
         )
 
     @classmethod
-    def from_json(cls, payload: str) -> "SimulationTrace":
+    def from_json(cls, payload: str) -> SimulationTrace:
         return cls.from_dict(json.loads(payload))
 
 

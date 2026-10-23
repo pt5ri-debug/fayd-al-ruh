@@ -46,7 +46,7 @@ class PreferenceRecord:
         }
 
     @classmethod
-    def from_primitive(cls, data: dict[str, object]) -> "PreferenceRecord":
+    def from_primitive(cls, data: dict[str, object]) -> PreferenceRecord:
         return cls(
             user_name=str(data.get("user_name", "")),
             language=str(data.get("language", "en")),
@@ -94,4 +94,4 @@ class UserPreferences:
         return self._record
 
 
-__all__ = ["PreferenceRecord", "SUPPORTED_LANGUAGES", "UserPreferences"]
+__all__ = ["SUPPORTED_LANGUAGES", "PreferenceRecord", "UserPreferences"]

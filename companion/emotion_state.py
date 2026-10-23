@@ -21,8 +21,9 @@ The values are saved per conversation so a resumed session keeps its tone.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, ClassVar, Mapping
+from typing import Any, ClassVar
 
 from companion.database import CompanionDatabase, _utc_now
 
@@ -74,7 +75,7 @@ class DialogueEmotion:
         return {name: float(getattr(self, name)) for name in self.FIELDS}
 
     @classmethod
-    def from_primitive(cls, data: Mapping[str, Any]) -> "DialogueEmotion":
+    def from_primitive(cls, data: Mapping[str, Any]) -> DialogueEmotion:
         base = cls()
         values = base.to_primitive()
         for name in cls.FIELDS:
@@ -86,11 +87,11 @@ class DialogueEmotion:
         return cls(**values)
 
     @classmethod
-    def baseline(cls) -> "DialogueEmotion":
+    def baseline(cls) -> DialogueEmotion:
         """The balanced state the dials drift back toward."""
         return cls()
 
-    def nudged(self, deltas: Mapping[str, float], *, max_step: float = MAX_STEP) -> "DialogueEmotion":
+    def nudged(self, deltas: Mapping[str, float], *, max_step: float = MAX_STEP) -> DialogueEmotion:
         """A copy moved toward ``deltas``, with each dial clamped to ``max_step``."""
         changes: dict[str, float] = {}
         for name in self.FIELDS:
@@ -101,7 +102,7 @@ class DialogueEmotion:
             changes[name] = _clamp(getattr(self, name) + step)
         return replace(self, **changes) if changes else self
 
-    def decayed(self, baseline: "DialogueEmotion" | None = None, *, rate: float = DEFAULT_DECAY) -> "DialogueEmotion":
+    def decayed(self, baseline: DialogueEmotion | None = None, *, rate: float = DEFAULT_DECAY) -> DialogueEmotion:
         """A copy drifted one step toward ``baseline`` (a balanced tone by default)."""
         target = baseline or DialogueEmotion.baseline()
         rate = max(0.0, min(1.0, rate))
@@ -233,7 +234,7 @@ class DialogueEmotionTracker:
 
 __all__ = [
     "DEFAULT_DECAY",
+    "MAX_STEP",
     "DialogueEmotion",
     "DialogueEmotionTracker",
-    "MAX_STEP",
 ]

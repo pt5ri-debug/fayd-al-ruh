@@ -57,8 +57,8 @@ from ingest.connectors.sqlite import SqliteConnector
 from ingest.errors import ConnectorError
 from ingest.records import SourceSpec
 from ingest.sql_job import (
-    DEFAULT_BATCH_SIZE,
     DEFAULT_BATCH_RETRIES,
+    DEFAULT_BATCH_SIZE,
     MAX_BATCH_SIZE,
     SCHEMA_FAIL,
     SCHEMA_FULL_REIMPORT,
@@ -833,7 +833,6 @@ __all__ = [
     "DEFAULT_PREVIEW_ROWS",
     "DONE",
     "FAILED",
-    "Interrupted",
     "MAX_BATCH_SIZE",
     "MAX_PREVIEW_ROWS",
     "RUNNING",
@@ -841,6 +840,7 @@ __all__ = [
     "SCHEMA_FULL_REIMPORT",
     "SUPPORTED_SUFFIXES",
     "ConnectionCheck",
+    "Interrupted",
     "SqlColumn",
     "SqlImportReport",
     "SqlImportService",

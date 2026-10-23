@@ -20,8 +20,8 @@ fictional memory is kept in its own block, never mixed with reality.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Sequence
 
 from companion.conversation_manager import Message
 from companion.emotion_state import DialogueEmotion
@@ -191,12 +191,12 @@ def history_from_messages(messages: Iterable[Message], *, exclude_last: bool = T
 
 
 __all__ = [
-    "BuiltPrompt",
-    "PromptBuilder",
     "SECTION_EMOTION",
     "SECTION_FICTION",
     "SECTION_MEMORIES",
     "SECTION_SETTINGS",
     "SECTION_SUMMARY",
+    "BuiltPrompt",
+    "PromptBuilder",
     "history_from_messages",
 ]

@@ -7,7 +7,6 @@ approval are all in place.
 """
 
 import pytest
-
 from core.action import Action
 from core.permissions import Capability, PermissionPolicy
 from core.progressive_environment import EnvironmentTier, ProgressiveEnvironment

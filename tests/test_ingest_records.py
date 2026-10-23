@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from ingest.errors import ConnectorError
+from ingest.records import records_from_texts
+from ingest.registry import ConnectorRegistry, build_default_registry
 
 from ingest import (
     ConnectorInfo,
@@ -11,9 +14,6 @@ from ingest import (
     SourceRecord,
     SourceSpec,
 )
-from ingest.errors import ConnectorError
-from ingest.records import records_from_texts
-from ingest.registry import ConnectorRegistry, build_default_registry
 
 
 def test_source_spec_requires_a_uri():

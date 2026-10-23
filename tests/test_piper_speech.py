@@ -8,7 +8,6 @@ actually renders audio is skipped when the runtime or a voice is absent.
 from __future__ import annotations
 
 import pytest
-
 from core.piper_speech import (
     ARABIC_VOICE_KEY,
     PIPER_ENGINE_NAME,

@@ -13,9 +13,7 @@ command construction and the result handling are tested as real code paths.
 
 from __future__ import annotations
 
-
 import pytest
-
 from core import optional_deps
 from core.optional_deps import (
     FEATURE_IMAGE,
@@ -32,7 +30,6 @@ from core.optional_deps import (
     requirements_path,
     status,
 )
-
 
 # --- status is honest about the two kinds of missing piece ----------------
 

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from core.paths import checkpoints_dir
 from core.progress import ProgressReporter
+
 from ml.llm.corpus import build_corpus, corpus_units
 from ml.llm.evaluate import document_split, encode_documents
 from ml.llm.generator import LocalGenerator
@@ -30,6 +31,8 @@ from ml.llm.schedule import (
 from ml.llm.state import (
     load_training_state,
     save_training_state,
+)
+from ml.llm.state import (
     state_path as _state_path,
 )
 from ml.llm.tokenizer import (

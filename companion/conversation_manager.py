@@ -282,9 +282,9 @@ class ConversationManager:
 
 
 __all__ = [
+    "ROLES",
     "ConversationManager",
     "ConversationSummary",
     "Message",
-    "ROLES",
     "SessionInfo",
 ]

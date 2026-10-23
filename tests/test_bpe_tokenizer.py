@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from ml.llm.bpe import BOS_ID, BPETokenizer
 from ml.llm.tokenizer import (
     ByteTokenizer,
@@ -30,7 +29,7 @@ def test_bpe_marks_document_start_with_bos():
 
 def test_bpe_compresses_common_arabic_words():
     tokenizer = BPETokenizer.train(_TEXT * 4, vocab_size=400)
-    byte_length = len("reservoir".encode("utf-8"))
+    byte_length = len(b"reservoir")
     bpe_length = len(tokenizer.encode("reservoir", bos=False))
     assert bpe_length < byte_length
 

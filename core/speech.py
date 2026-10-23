@@ -132,13 +132,13 @@ class AudioClip:
         return buffer.tobytes()
 
     @classmethod
-    def silence(cls, duration_seconds: float, *, sample_rate: int = SAMPLE_RATE) -> "AudioClip":
+    def silence(cls, duration_seconds: float, *, sample_rate: int = SAMPLE_RATE) -> AudioClip:
         if duration_seconds < 0:
             raise ValueError("Silence duration cannot be negative.")
         return cls(tuple([0] * int(duration_seconds * sample_rate)), sample_rate)
 
     @classmethod
-    def from_bytes(cls, payload: bytes, *, sample_rate: int = SAMPLE_RATE) -> "AudioClip":
+    def from_bytes(cls, payload: bytes, *, sample_rate: int = SAMPLE_RATE) -> AudioClip:
         import array
 
         samples = array.array("h")
@@ -158,7 +158,7 @@ class AudioClip:
             handle.writeframes(self.to_bytes())
 
     @classmethod
-    def read_wav(cls, path) -> "AudioClip":
+    def read_wav(cls, path) -> AudioClip:
         """Read a WAV file of any common shape, down-mixing it to mono 16-bit.
 
         A speech engine does not always hand back 16-bit mono: the Windows OneCore
@@ -265,7 +265,7 @@ def _macos_language_voice(language: str) -> str | None:
         return _macos_voice_cache[language]
     name: str | None = None
     try:
-        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        completed = subprocess.run(
             ["say", "-v", "?"], capture_output=True, timeout=10, check=False
         )
     except (OSError, subprocess.SubprocessError):
@@ -418,7 +418,7 @@ def _sapi_serves_language(language: str) -> bool:
     """
     code = language.strip().lower().split("-")[0][:2]
     try:
-        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        completed = subprocess.run(
             [
                 _WINDOWS_SHELL,
                 "-NoProfile",
@@ -727,7 +727,7 @@ def windows_onecore_available(*, refresh: bool = False) -> bool:
         "}catch{}"
     )
     try:
-        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        completed = subprocess.run(
             [_WINDOWS_SHELL, "-NoProfile", "-NonInteractive", "-Command", script],
             capture_output=True,
             timeout=30,
@@ -785,7 +785,7 @@ def _parse_voice_lines(output: bytes, *, engine: str = "") -> tuple[WindowsVoice
 def _list_windows_voices(script: str, engine: str) -> tuple[WindowsVoice, ...]:
     """Run one listing ``script`` and parse its voices, or ``()`` on any failure."""
     try:
-        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        completed = subprocess.run(
             [_WINDOWS_SHELL, "-NoProfile", "-NonInteractive", "-Command", script],
             capture_output=True,
             timeout=30,
@@ -939,7 +939,7 @@ def _macos_system_voices() -> tuple[SystemVoice, ...]:
     the locale are all that is needed to list and then select a voice by name.
     """
     try:
-        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        completed = subprocess.run(
             ["say", "-v", "?"], capture_output=True, timeout=10, check=False
         )
     except (OSError, subprocess.SubprocessError):
@@ -988,7 +988,7 @@ def system_voices(*, refresh: bool = False) -> tuple[SystemVoice, ...]:
     return voices
 
 
-TTS_ENGINES: tuple[tuple[str, str, "object", "object"], ...] = (
+TTS_ENGINES: tuple[tuple[str, str, object, object], ...] = (
     ("espeak-ng", "espeak-ng", _espeak_argv, _espeak_voice_options),
     ("espeak", "espeak", _espeak_argv, _espeak_voice_options),
     ("flite", "flite", _flite_argv, _flite_voice_options),
@@ -1155,7 +1155,7 @@ def system_engine_available() -> bool:
 
 def install_speech_engine(
     *,
-    runner: "SpeechCommandRunner | None" = None,
+    runner: SpeechCommandRunner | None = None,
 ) -> SpeechInstallResult:
     """Try to install a real speech engine as a system package. Never raises.
 
@@ -1194,7 +1194,7 @@ def install_speech_engine(
 
 
 def _default_speech_runner(argv: Sequence[str]) -> tuple[int, str]:
-    completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+    completed = subprocess.run(
         list(argv),
         capture_output=True,
         text=True,
@@ -1301,7 +1301,7 @@ class CommandSynthesizer:
                 # every engine here accepts.
                 argv = [argv[0], *options, *argv[1:]]
             try:
-                completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                completed = subprocess.run(
                     argv,
                     capture_output=True,
                     timeout=30,
@@ -1367,7 +1367,7 @@ class _WindowsPowerShellSynthesizer:
                 script,
             ]
             try:
-                completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                completed = subprocess.run(
                     argv,
                     capture_output=True,
                     timeout=_WINDOWS_TTS_TIMEOUT,
@@ -1520,7 +1520,7 @@ class WhisperRecognizer:
                 "False",
             ]
             try:
-                completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                completed = subprocess.run(
                     argv,
                     capture_output=True,
                     timeout=120,
@@ -1688,6 +1688,8 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
             AudioCppSynthesizer,
             AudioCppUnavailable,
             audiocpp_status,
+        )
+        from core.audiocpp_speech import (
             available_synthesizer as audiocpp_ready,
         )
 
@@ -1719,6 +1721,8 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
         from core.piper_speech import (
             PiperSynthesizer,
             PiperUnavailable,
+        )
+        from core.piper_speech import (
             available_synthesizer as piper_ready,
         )
 
@@ -1855,6 +1859,8 @@ def _engine_for_voice(value: object) -> str | None:
         if value.engine == "audio.cpp":
             from core.audiocpp_speech import (
                 AUDIOCPP_ENGINE_NAME,
+            )
+            from core.audiocpp_speech import (
                 available_synthesizer as audiocpp_ready,
             )
 
@@ -1862,13 +1868,15 @@ def _engine_for_voice(value: object) -> str | None:
                 return AUDIOCPP_ENGINE_NAME
             return None
         if value.engine == "piper":
-            from core.piper_speech import PIPER_ENGINE_NAME, available_synthesizer as piper_ready
+            from core.piper_speech import PIPER_ENGINE_NAME
+            from core.piper_speech import available_synthesizer as piper_ready
 
             if piper_ready():
                 return PIPER_ENGINE_NAME
             return None
         if value.engine == "qwen3-tts":
-            from core.qwen_speech import TTS_ENGINE_NAME, available_synthesizer as qwen_ready
+            from core.qwen_speech import TTS_ENGINE_NAME
+            from core.qwen_speech import available_synthesizer as qwen_ready
 
             if qwen_ready():
                 return TTS_ENGINE_NAME
@@ -2072,7 +2080,7 @@ class MicrophoneRecorder:
         else:
             argv = self._argv(recorder, target, self.sample_rate, self.seconds)
         try:
-            process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+            process = subprocess.Popen(
                 argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
         except OSError as error:
@@ -2213,7 +2221,7 @@ class Speaker:
         clip.write_wav(target)
         argv = self._argv(player, target)
         try:
-            process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+            process = subprocess.Popen(
                 argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
         except OSError as error:
@@ -2293,11 +2301,12 @@ class AudioModel:
 __all__ = [
     "SAMPLE_RATE",
     "SPEECH_SYSTEM_PACKAGES",
+    "TTS_ENGINES",
     "AudioClip",
     "AudioModel",
     "CommandSynthesizer",
-    "MicrophoneRecorder",
     "MicRecording",
+    "MicrophoneRecorder",
     "Playback",
     "SelectableVoice",
     "SilentSynthesizer",
@@ -2307,13 +2316,12 @@ __all__ = [
     "SpeechInstallResult",
     "SpeechRecognizer",
     "SpeechSynthesizer",
-    "TTS_ENGINES",
     "TranscriptRecognizer",
     "VoiceAssistant",
     "VoiceTurn",
     "WhisperRecognizer",
-    "WindowsSapiSynthesizer",
     "WindowsOneCoreSynthesizer",
+    "WindowsSapiSynthesizer",
     "discover_recognizer_name",
     "discover_synthesizer_name",
     "install_speech_engine",

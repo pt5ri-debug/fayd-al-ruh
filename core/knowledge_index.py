@@ -134,19 +134,16 @@ class KnowledgeTextIndex:
             magnitudes = [-bm25 for _, bm25 in rows]
             top = max(magnitudes) or 1.0
             wanted = {rowid for rowid, _ in rows}
-            location = {
-                rowid: chunk_id
-                for rowid, chunk_id in connection.execute(
+            location = dict(connection.execute(
                     f"SELECT rowid, chunk_id FROM chunks WHERE rowid IN ({','.join('?' * len(wanted))})",
                     tuple(wanted),
-                )
-            }
+                ))
         finally:
             connection.close()
 
         chunks = (store or self.store).read_chunks(set(location.values()))
         results: list[tuple[float, KnowledgeChunk]] = []
-        for (rowid, _bm25), magnitude in zip(rows, magnitudes):
+        for (rowid, _bm25), magnitude in zip(rows, magnitudes, strict=False):
             chunk = chunks.get(location.get(rowid, ""))
             if chunk is not None:
                 results.append((round(min(1.0, magnitude / top), 6), chunk))

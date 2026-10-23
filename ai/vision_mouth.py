@@ -33,7 +33,11 @@ from core.assistant import AssistantAnswer
 from core.conversation import Conversation, Role
 from core.vision_model import (
     HEADER as VISION_HEADER,
+)
+from core.vision_model import (
     NAME as VISION_NAME,
+)
+from core.vision_model import (
     VisionEngine,
     VisionUnavailable,
 )

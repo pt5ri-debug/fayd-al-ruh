@@ -298,4 +298,4 @@ class OntologyLearner:
         return concept.label if concept is not None else concept_id
 
 
-__all__ = ["OntologyLearner", "OntologyLearning", "OntologyDecay", "OntologyFeedback"]
+__all__ = ["OntologyDecay", "OntologyFeedback", "OntologyLearner", "OntologyLearning"]

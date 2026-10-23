@@ -1,7 +1,6 @@
 """Tests for wiring a learned policy into the core agent loop."""
 
 import pytest
-
 from core.action import Action
 from core.agent import Agent
 from core.belief import Belief

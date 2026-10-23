@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from datetime import timedelta
 
 from core.temporal_event import TemporalEvent
@@ -32,7 +33,7 @@ class TemporalReasoner:
             return None
         durations = [event.duration_seconds for event in matches]
         average_duration = timedelta(seconds=sum(durations) / len(durations))
-        intervals = [(later.start - earlier.start) for earlier, later in zip(matches, matches[1:])]
+        intervals = [(later.start - earlier.start) for earlier, later in itertools.pairwise(matches)]
         average_interval = timedelta(seconds=sum(interval.total_seconds() for interval in intervals) / len(intervals)) if intervals else None
         values = [event.value for event in matches if event.value is not None]
         direction = "stable"

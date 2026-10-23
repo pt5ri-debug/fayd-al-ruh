@@ -13,7 +13,7 @@ class EvidenceTrace:
     sources: tuple[str, ...]
 
     @classmethod
-    def from_evidence(cls, evidence: list[Evidence]) -> "EvidenceTrace":
+    def from_evidence(cls, evidence: list[Evidence]) -> EvidenceTrace:
         return cls(
             tuple(item.id for item in evidence),
             tuple(item.id for item in evidence if item.supports),

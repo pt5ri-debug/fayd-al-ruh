@@ -149,9 +149,35 @@ line-length = 100
 src = ["core", "storage", "tests", "ai", "evaluation", "ml", "cli", "gui", "scripts", "ingest"]
 
 [tool.ruff.lint]
-# Start by blocking correctness errors. Style rules are introduced gradually
-# so the new CI gate can remain green while legacy files are modernised.
-select = ["F"]
+# Correctness (`F`), a broad slice of `pycodestyle`/`pyflakes` errors (`E`),
+# real bugs (`B`), simplifications (`C4`), import order (`I`), modern syntax
+# (`UP`), and Ruff's own rules (`RUF`). The set is deliberately wide: every
+# category below is at zero violations, so the gate blocks a *new* mistake
+# instead of only the original `F` set.
+select = ["E4", "E7", "E9", "F", "W", "I", "UP", "B", "C4", "RUF"]
+
+ignore = [
+    # A 100-column line is the project's convention; enforcing it would rewrap
+    # hundreds of already-clear lines for no correctness gain.
+    "E501",
+    # `str` + `enum.Enum` is a real "string enum" here: the members are stored,
+    # compared, and printed as their values in the JSON store and every CLI
+    # output, so `str(member)` must keep returning the value (e.g. "reservoir").
+    # `StrEnum` changes `str()`/f-string output to the member's *name*, which
+    # would silently alter persisted data and command matching. Not applied.
+    "UP042",
+    # Arabic and typographic punctuation (en/em dashes, Arabic comma, ×, °) are
+    # intentional in this bilingual project, so a "confusable ASCII" warning is
+    # noise rather than a defect.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may assert a deliberately blind exception (e.g. "any failure is fine
+# here") and may use a short throwaway name; the source keeps the strict rules.
+"tests/**" = ["B017", "B011", "E741"]
 
 [tool.mypy]
 python_version = "3.12"

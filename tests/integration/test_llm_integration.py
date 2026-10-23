@@ -8,7 +8,6 @@ are registered through the existing validation layers.
 import json
 
 import pytest
-
 from core.belief import Belief
 from core.cognitive_controller import CognitiveController
 from core.evidence_processor import EvidencePolarity
@@ -16,7 +15,6 @@ from core.model_interface import CallableModel, ModelRequest, MultimodalInput
 from core.observation import Observation
 from core.provenance import ProvenanceStage
 from core.structured_output import MODEL_OUTPUT_SCHEMA, StructuredOutputError
-
 
 pytestmark = pytest.mark.integration
 

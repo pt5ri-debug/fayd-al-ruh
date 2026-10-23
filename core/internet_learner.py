@@ -39,9 +39,9 @@ by a hand-written question list.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
 
 from core.acceptance_policy import (
     MIN_CREDIBILITY,
@@ -216,7 +216,7 @@ class InternetLearner:
         min_credibility: float = MIN_CREDIBILITY,
         per_topic: int = 3,
         persist: Callable[[Document], None] | None = None,
-        cursor: "SearchCursor | None" = None,
+        cursor: SearchCursor | None = None,
         page_size: int = 20,
         prefer_recent: bool = True,
     ) -> None:
@@ -423,7 +423,7 @@ def build_internet_learner(
     trusted_only: bool = True,
     min_credibility: float = 0.6,
     per_topic: int = 3,
-    cursor: "SearchCursor | None" = None,
+    cursor: SearchCursor | None = None,
     page_size: int = 20,
     prefer_recent: bool = True,
 ) -> InternetLearner:

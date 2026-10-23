@@ -7,12 +7,11 @@ available, exactly like ``tests/test_gui.py``.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-
 from core.command_router import NaturalLanguageRouter, RouteKind
 from core.jarvis import JarvisMode, JarvisTurn
 from core.tools import build_sandbox
@@ -102,7 +101,7 @@ def test_answer_only_router_never_plans_a_tool(tmp_path) -> None:
 
 
 def test_history_groups_by_date() -> None:
-    now = datetime(2026, 10, 11, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 11, tzinfo=UTC)
     items = [
         HistoryItem("a", "today", now),
         HistoryItem("b", "yesterday", now - timedelta(days=1)),
@@ -230,7 +229,7 @@ def test_saved_session_summaries_are_newest_first(tmp_path) -> None:
     memory.save(older)
     newer = memory.start("newer")
     newer.add_user("what is permeability?")
-    newer.created_at = datetime.now(timezone.utc)
+    newer.created_at = datetime.now(UTC)
     memory.save(newer)
 
     session = FakeSession()

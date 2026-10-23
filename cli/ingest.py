@@ -338,7 +338,7 @@ def run_add(args: argparse.Namespace) -> int:
     registry = build_default_registry(allow_web=args.allow_web)
     try:
         connector = registry.get(args.connector) if args.connector else registry.resolve(spec)
-    except Exception as error:  # noqa: BLE001 - a resolver error is a user-facing message
+    except Exception as error:
         print(f"error: {error}")
         return 1
     if connector is None:

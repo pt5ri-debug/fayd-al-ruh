@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from ingest.connectors.web import WebConnector, _html_to_text
 from ingest.errors import ConnectorError
 from ingest.records import SourceSpec

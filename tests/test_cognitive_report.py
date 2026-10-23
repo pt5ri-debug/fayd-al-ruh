@@ -88,6 +88,6 @@ def test_report_is_immutable():
 
     try:
         report.overall_score = 0.1
-        assert False
+        raise AssertionError("the report should be frozen")
     except AttributeError:
         pass

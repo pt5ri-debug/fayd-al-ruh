@@ -12,7 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from core.presentation_courses import (
     STRONG_COVERAGE,
     best_course,

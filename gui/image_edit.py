@@ -218,7 +218,7 @@ class ImageEditService:
         guidance: float | None = None,
         image_guidance: float | None = None,
         negative_prompt: str | None = None,
-    ) -> "ImageEditService":
+    ) -> ImageEditService:
         """A service on the same storage root that uses a different backend."""
         return ImageEditService(
             root=self._root,
@@ -513,10 +513,10 @@ __all__ = [
     "BACKEND_DETERMINISTIC",
     "BACKEND_LEARNED",
     "EXAMPLE_INSTRUCTION",
+    "LEARNED_EXAMPLE_INSTRUCTION",
+    "READABLE_SUFFIXES",
     "EditSession",
     "EditStep",
     "ImageEditReport",
     "ImageEditService",
-    "LEARNED_EXAMPLE_INSTRUCTION",
-    "READABLE_SUFFIXES",
 ]

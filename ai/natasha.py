@@ -40,6 +40,7 @@ from collections.abc import Sequence
 
 from companion.companion_agent import CompanionAgent, CompanionError
 from companion.config import CompanionConfig
+from companion.memory_manager import KINDS
 from companion.model import (
     BACKEND_NAMES,
     DEFAULT_SPEC_KEY,
@@ -49,7 +50,6 @@ from companion.model import (
     spec_summaries,
 )
 from companion.personality import NAME
-from companion.memory_manager import KINDS
 
 INTRO = (
     f"{NAME}: a warm, curious companion speaking through a local Qwen3 model. "

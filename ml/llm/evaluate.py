@@ -17,9 +17,9 @@ difference only counts when it exceeds the run-to-run spread.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 
@@ -105,8 +105,8 @@ def document_split(
         raise ValueError("Need at least three documents to split into train/val/test.")
     order = np.random.default_rng(seed).permutation(len(items))
     shuffled = [items[i] for i in order]
-    n_test = max(1, int(round(len(shuffled) * test_fraction)))
-    n_val = max(1, int(round(len(shuffled) * val_fraction)))
+    n_test = max(1, round(len(shuffled) * test_fraction))
+    n_val = max(1, round(len(shuffled) * val_fraction))
     test = tuple(shuffled[:n_test])
     validation = tuple(shuffled[n_test : n_test + n_val])
     train = tuple(shuffled[n_test + n_val :])

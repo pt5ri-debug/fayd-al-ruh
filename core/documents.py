@@ -12,13 +12,15 @@ point back to the exact text it used.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
+
+from storage.json_store import JsonStore
 
 from core.curriculum_knowledge import courses
 from core.domain_knowledge import disciplines
 from core.petroleum_corpus import corpus_documents
-from storage.json_store import JsonStore
 
 _NAMESPACE = "documents"
 
@@ -51,7 +53,7 @@ class Document:
         }
 
     @classmethod
-    def from_primitive(cls, data: dict[str, Any]) -> "Document":
+    def from_primitive(cls, data: dict[str, Any]) -> Document:
         return cls(
             doc_id=str(data["doc_id"]),
             title=str(data["title"]),

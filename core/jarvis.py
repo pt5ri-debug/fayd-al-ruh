@@ -23,13 +23,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from core.command_router import NaturalLanguageRouter, RouteKind
-from core.conversation import Conversation, ConversationMemory
 from core.continuous_learning import ContinuousLearner, Feedback
-from core.jarvis_controls import JarvisControl, ControlIntent, JarvisControls
+from core.conversation import Conversation, ConversationMemory
+from core.jarvis_controls import ControlIntent, JarvisControl, JarvisControls
 from core.speech import AudioClip, Speaker, VoiceAssistant
 from core.tool_agent import AgentRun, ToolAgent
 from core.wake_word import AudioSpeechGate, WakeWordDetector
-
 
 HELP_TEXT = (
     "Conversation controls: say 'stop' to mute my voice, 'speak' to turn it back "

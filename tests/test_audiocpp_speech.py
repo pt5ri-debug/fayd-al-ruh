@@ -12,11 +12,9 @@ import json
 from pathlib import Path
 
 import pytest
-
 from core import audiocpp_speech as a
 from core import speech, voices
 from core.voices import ModelVoice
-
 
 # ----------------------------------------------------------------- helpers
 
@@ -54,7 +52,7 @@ class _StubRunner:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def synthesize(self, text, *, language, reference, reference_text, steps):  # noqa: ANN001
+    def synthesize(self, text, *, language, reference, reference_text, steps):
         self.calls.append(
             {
                 "text": text,
@@ -221,7 +219,7 @@ def test_synthesizer_falls_back_when_the_engine_fails():
     """A failed engine must degrade to real speech, never to silence."""
 
     class _Broken:
-        def synthesize(self, text, **kwargs):  # noqa: ANN003, ANN201
+        def synthesize(self, text, **kwargs):
             raise a.AudioCppUnavailable("boom")
 
     class _Fallback:

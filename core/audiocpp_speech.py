@@ -285,7 +285,7 @@ def install_engine(
         scratch_path = Path(scratch)
         archive = scratch_path / asset
         try:
-            urllib.request.urlretrieve(url, archive)  # noqa: S310 - a fixed release URL
+            urllib.request.urlretrieve(url, archive)
         except OSError as error:
             raise AudioCppUnavailable(
                 f"Could not download the audio.cpp engine from {url} ({error}). "
@@ -454,7 +454,7 @@ def download_model(
     if not target.is_file():
         url = f"https://huggingface.co/{spec.repo}/resolve/main/{spec.filename}"
         try:
-            urllib.request.urlretrieve(url, target)  # noqa: S310 - a fixed model URL
+            urllib.request.urlretrieve(url, target)
         except OSError as error:
             raise AudioCppUnavailable(
                 f"Could not download {spec.filename} from {url} ({error}). "
@@ -505,7 +505,7 @@ def download_speakers(
         if target.is_file():
             continue
         try:
-            urllib.request.urlretrieve(f"{base}/{stem}.wav", target)  # noqa: S310
+            urllib.request.urlretrieve(f"{base}/{stem}.wav", target)
         except OSError as error:
             raise AudioCppUnavailable(
                 f"Could not download the reference voice {stem}.wav ({error})."
@@ -513,7 +513,7 @@ def download_speakers(
     references = directory.parent / "references.json"
     if not references.is_file():
         try:
-            urllib.request.urlretrieve(f"{base}/references.json", references)  # noqa: S310
+            urllib.request.urlretrieve(f"{base}/references.json", references)
         except OSError:
             # The transcripts are an optimisation, not a requirement: a missing file
             # only means the reference text is read from the catalog instead.
@@ -837,14 +837,14 @@ def install_hint() -> str:
 __all__ = [
     "AUDIOCPP_ENGINE_NAME",
     "AUDIOCPP_SAMPLE_RATE",
+    "DEFAULT_INFERENCE_STEPS",
+    "VOICETUT_MODELS",
+    "VOICETUT_SPEAKERS",
     "AudioCppCliRunner",
     "AudioCppRunner",
     "AudioCppStatus",
     "AudioCppSynthesizer",
     "AudioCppUnavailable",
-    "DEFAULT_INFERENCE_STEPS",
-    "VOICETUT_MODELS",
-    "VOICETUT_SPEAKERS",
     "VoiceTutSpec",
     "audiocpp_status",
     "available_synthesizer",

@@ -13,8 +13,8 @@ without an explicit, reviewed opt-in.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from core.action import Action
 from core.audit_log import AuditLog

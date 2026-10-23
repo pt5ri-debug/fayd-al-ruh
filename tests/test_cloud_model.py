@@ -18,7 +18,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-
 from ai import chat as chat_module
 from ai import cloud as cloud_cli
 from ai import cloud_mouth
@@ -330,7 +329,7 @@ def test_engine_answers_once_approved_and_keyed() -> None:
     engine = CloudEngine(client, approved=True)
     assert engine.is_available() is True
     assert engine.reply("hello") == "Cloud reply."
-    messages, kwargs = client.calls[0]
+    messages, _kwargs = client.calls[0]
     assert messages[0].role == "system"
     assert messages[-1] == CloudMessage("user", "hello")
 

@@ -14,9 +14,9 @@ given discipline-shaped tasks, covers the field.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from core.domain_knowledge import discipline_labels
 from core.petroleum_tasks import (
@@ -27,6 +27,7 @@ from core.petroleum_tasks import (
 from core.progress import ProgressReporter
 from core.sandbox_environment import SandboxTask
 from core.state import State
+
 from ml.cognitive_brain import CognitiveBrain
 from ml.dataset import FeatureHasher
 from ml.learner import evaluate_policy, train_policy

@@ -1,11 +1,9 @@
 import pytest
-
 from core.belief import Belief
 from core.causal_link import CausalLink
 from core.cognitive_controller import CognitiveController
 from core.evidence_processor import EvidencePolarity
 from core.observation import Observation
-
 
 pytestmark = pytest.mark.integration
 

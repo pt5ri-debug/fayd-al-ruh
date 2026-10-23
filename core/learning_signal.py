@@ -13,7 +13,7 @@ class LearningSignal:
     direction: int
 
     @classmethod
-    def from_prediction_error(cls, error: PredictionError) -> "LearningSignal":
+    def from_prediction_error(cls, error: PredictionError) -> LearningSignal:
         reward = round(1.0 - error.error, 6)
         direction = 1 if error.actual_result >= error.expected_confidence else -1
         return cls(error.prediction_id, error.error, reward, direction)

@@ -20,16 +20,16 @@ never touches it.
 from __future__ import annotations
 
 import threading
+import tkinter as tk
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any
-
-import tkinter as tk
 from tkinter import filedialog
+from typing import Any
 
 from core.imagegen_diffusion import DEFAULT_PRESET, PRESETS
 from core.optional_deps import FEATURE_IMAGE, pip_install_command
+
 from gui.chat_composer import ChatComposer
 from gui.image_preview import load_scaled
 from gui.typography import resolve
@@ -354,7 +354,7 @@ class ImageGenDialog:
 
     def _refresh_backend_note(self) -> None:
         backend = self._backend_var.get()
-        status = dict((name, (available, note)) for name, available, note in self.image_service.backend_status())
+        status = {name: (available, note) for name, available, note in self.image_service.backend_status()}
         available, note = status.get(backend, (False, "Unknown backend."))
         if backend == "procedural":
             self._download_button.pack_forget()
@@ -383,7 +383,7 @@ class ImageGenDialog:
                     approved=True, preset=self._preset_var.get()
                 )
                 self.window.after(0, partial(self._finish_download, report, None))
-            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            except Exception as error:
                 self.window.after(0, partial(self._finish_download, None, error))
 
         threading.Thread(target=run, daemon=True).start()
@@ -434,7 +434,7 @@ class ImageGenDialog:
                     prompt, width=width, height=height, seed=seed, negative_prompt=negative
                 )
                 self.window.after(0, partial(self._finish, report, None))
-            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            except Exception as error:
                 self.window.after(0, partial(self._finish, None, error))
 
         threading.Thread(target=run, daemon=True).start()
@@ -523,4 +523,4 @@ class ImageGenDialog:
         self.window.destroy()
 
 
-__all__ = ["HONESTY_LINE", "ImageGenDialog", "PREVIEW_FRACTION", "SUBTITLE", "TITLE"]
+__all__ = ["HONESTY_LINE", "PREVIEW_FRACTION", "SUBTITLE", "TITLE", "ImageGenDialog"]

@@ -5,7 +5,6 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-
 from ingest.connectors.sql import SqlConnector, _require_read_only, _safe_identifier
 from ingest.errors import ConnectorError
 from ingest.records import SourceSpec

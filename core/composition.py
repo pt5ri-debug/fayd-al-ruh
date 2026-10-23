@@ -22,8 +22,8 @@ interrupts a sentence. :func:`sources_block` builds that trailing block.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 _WHITESPACE_RE = re.compile(r"\s+")
 # Split on sentence-final punctuation followed by a new sentence. A decimal

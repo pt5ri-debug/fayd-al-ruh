@@ -7,7 +7,7 @@ a matching, non-expired approval exists for the requested tool.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from uuid import uuid4
 
@@ -24,7 +24,7 @@ class ApprovalRequest:
     requested_by: str
     justification: str = ""
     id: str = field(default_factory=lambda: f"APR-{uuid4().hex[:8]}")
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     status: ApprovalStatus = ApprovalStatus.PENDING
     decided_by: str | None = None
     decided_at: datetime | None = None
@@ -38,7 +38,7 @@ class ApprovalRequest:
 
     @property
     def is_expired(self) -> bool:
-        return self.expires_at is not None and datetime.now(timezone.utc) >= self.expires_at
+        return self.expires_at is not None and datetime.now(UTC) >= self.expires_at
 
     def approve(self, approver: str, ttl_seconds: float | None = None) -> None:
         if not approver.strip():
@@ -47,7 +47,7 @@ class ApprovalRequest:
             raise ValueError("The requester cannot approve their own request.")
         self.status = ApprovalStatus.APPROVED
         self.decided_by = approver
-        self.decided_at = datetime.now(timezone.utc)
+        self.decided_at = datetime.now(UTC)
         if ttl_seconds is not None:
             if ttl_seconds <= 0:
                 raise ValueError("Approval TTL must be positive.")
@@ -58,7 +58,7 @@ class ApprovalRequest:
     def reject(self, approver: str) -> None:
         self.status = ApprovalStatus.REJECTED
         self.decided_by = approver
-        self.decided_at = datetime.now(timezone.utc)
+        self.decided_at = datetime.now(UTC)
 
 
 @dataclass(frozen=True)

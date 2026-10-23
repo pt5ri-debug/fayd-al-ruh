@@ -8,7 +8,6 @@ reported: Arabic answers must be *spoken*, not spelled out as symbols.
 from __future__ import annotations
 
 import pytest
-
 from core.arabic_speech import number_to_arabic_words, prepare_for_speech
 
 # ------------------------------------------------------------------- numbers

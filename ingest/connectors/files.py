@@ -62,20 +62,28 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from core.document_reader import (
-    DocumentReadError,
     ENCODING_SAMPLE_BYTES,
+    DocumentReadError,
     read_document,
 )
 from core.docx_extract import (
     DEFAULT_MAX_CHARS as DEFAULT_DOCX_MAX_CHARS,
+)
+from core.docx_extract import (
     DEFAULT_MAX_ENTRIES as DEFAULT_DOCX_MAX_ENTRIES,
+)
+from core.docx_extract import (
     DEFAULT_MAX_PART_BYTES as DEFAULT_DOCX_MAX_PART_BYTES,
+)
+from core.docx_extract import (
     DocxExtractionError,
     DocxReader,
 )
 from core.knowledge_base import DEFAULT_CHUNK_CHARS
 from core.pdf_extract import (
     DEFAULT_MAX_CHARS as DEFAULT_PDF_MAX_CHARS,
+)
+from core.pdf_extract import (
     PDF_EXTRA,
     PdfExtractionError,
     PdfPageStream,
@@ -83,6 +91,8 @@ from core.pdf_extract import (
 )
 from core.pdf_ocr import (
     DEFAULT_DPI as DEFAULT_OCR_DPI,
+)
+from core.pdf_ocr import (
     OCR_EXTRA,
     OcrConfig,
     OcrUnavailableError,
@@ -92,6 +102,7 @@ from core.pdf_ocr import (
     parse_ocr_languages,
 )
 from core.text_encoding import EncodingDetectionError, decode_bytes, detect_encoding
+
 from ingest.errors import ConnectorError
 from ingest.hashing import file_fingerprint, source_key
 from ingest.records import (
@@ -600,7 +611,7 @@ def _iter_csv(path: Path, *, delimiter: str, encoding: str | None) -> Iterator[s
                 continue
             pairs = (
                 f"{column.strip()}: {value.strip()}"
-                for column, value in zip(header, row)
+                for column, value in zip(header, row, strict=False)
                 if value and value.strip()
             )
             line = "; ".join(pairs)
@@ -731,9 +742,9 @@ __all__ = [
     "DEFAULT_MAX_JSON_BYTES",
     "DEFAULT_PDF_MAX_CHARS",
     "DOCX_SUFFIXES",
-    "FileConnector",
     "OCR_EXTRA",
     "PDF_SUFFIXES",
     "READER_SUFFIXES",
     "STREAM_SUFFIXES",
+    "FileConnector",
 ]

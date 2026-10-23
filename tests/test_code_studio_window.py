@@ -11,7 +11,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from core.code_studio import CodeStudio
 from gui.code_studio import CodeStudioService
 

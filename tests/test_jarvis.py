@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from core.assistant import GroundedAssistant
 from core.command_router import NaturalLanguageRouter
 from core.curriculum_knowledge import seed_curriculum
@@ -12,7 +11,7 @@ from core.domain_knowledge import seed_ontology
 from core.jarvis import JarvisMode
 from core.ontology import Ontology
 from core.rag import RagRetriever
-from core.speech import SilentSynthesizer, TranscriptRecognizer, VoiceAssistant, AudioClip
+from core.speech import AudioClip, SilentSynthesizer, TranscriptRecognizer, VoiceAssistant
 from core.tool_agent import ToolAgent
 from core.tools import build_sandbox
 from core.wake_word import AudioSpeechGate, WakeWordDetector

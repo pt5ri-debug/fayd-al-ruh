@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from core.action import Action
 from core.belief import Belief
+from core.belief_revision import BeliefRevision, BeliefRevisionEngine
+from core.causal_discovery import CausalDiscovery
+from core.causal_graph import CausalGraph
+from core.causal_intervention import CausalIntervention, InterventionResult
+from core.causal_link import CausalLink
+from core.causal_reasoner import CausalReasoner
+from core.causal_validator import CausalValidator
+from core.cognitive_context import ContextRegistry
 from core.cognitive_evaluator import (
     CognitiveEvaluation,
     CognitiveEvaluator,
@@ -13,69 +22,60 @@ from core.cognitive_loop import (
 )
 from core.cognitive_report import CognitiveReport
 from core.cognitive_state import CognitiveState
-from core.evidence_processor import EvidencePolarity
-from core.knowledge_graph import KnowledgeGraph
-from core.learning_metrics import LearningMetrics
-from core.memory import CognitiveMemory, MemoryRecall
-from core.observation import Observation
-from core.state_history import StateHistory
 from core.cognitive_trace import CognitiveTrace
-from core.causal_graph import CausalGraph
-from core.causal_link import CausalLink
-from core.causal_reasoner import CausalReasoner
-from core.causal_validator import CausalValidator
-from core.causal_discovery import CausalDiscovery
-from core.causal_intervention import CausalIntervention, InterventionResult
-from core.counterfactual_reasoner import CounterfactualReasoner
-from core.counterfactual import Counterfactual
-from core.reasoning_engine import ReasoningEngine
-from core.curiosity import Curiosity
-from core.question_generator import QuestionGenerator
-from core.learner import Learner, LearningCycle
-from core.prediction_error import PredictionError
-from core.belief_revision import BeliefRevision, BeliefRevisionEngine
+from core.concept import Concept
+from core.conflict_resolver import ConflictResolution, ConflictResolver
 from core.consistency_checker import ConsistencyChecker, ConsistencyReport
-from core.conflict_resolver import ConflictResolver, ConflictResolution
-from core.evaluation_suite import EvaluationSuite, QualityAssessment
-from core.goal import Goal, PlanStep
-from core.planner import Planner
-from core.plan_evaluator import PlanEvaluator, PlanEvaluation
-from core.action import Action
-from core.state import State
-from core.plan import Plan
+from core.counterfactual import Counterfactual
+from core.counterfactual_reasoner import CounterfactualReasoner
+from core.curiosity import Curiosity
+from core.curriculum import CurriculumItem
+from core.curriculum_knowledge import seed_curriculum
 from core.decision_engine import DecisionEngine
 from core.decision_trace import DecisionTrace
+from core.domain_knowledge import domain_summary, seed_ontology
+from core.evaluation_suite import EvaluationSuite, QualityAssessment
+from core.evidence_processor import EvidencePolarity
 from core.experiment import Experiment
 from core.experiment_result import ExperimentResult
 from core.experiment_runner import ExperimentRunner
+from core.explanation import Explanation
+from core.explanation_engine import ExplanationEngine
+from core.goal import Goal, PlanStep
+from core.introspection import BeliefExplanation, Introspection
+from core.knowledge_graph import KnowledgeGraph
+from core.knowledge_store import KnowledgeStore
+from core.language_reasoner import LanguageReasoner
+from core.learner import Learner, LearningCycle
+from core.learning_metrics import LearningMetrics
+from core.llm_reasoner import LLMReasoner, ModelAnalysis
+from core.meaning_model import MeaningModel
+from core.memory import CognitiveMemory, MemoryRecall
+from core.metacognition import Metacognition, MetacognitiveReport
+from core.model_interface import CognitiveModel, ModelRequest, ModelResponse
+from core.observation import Observation
 from core.ontology import Ontology
+from core.ontology_learner import OntologyDecay, OntologyFeedback, OntologyLearner, OntologyLearning
 from core.ontology_reasoner import OntologyInference, OntologyReasoner
 from core.ontology_retrieval import OntologyGuidedRetriever
-from core.ontology_learner import OntologyDecay, OntologyFeedback, OntologyLearner, OntologyLearning
-from core.domain_knowledge import domain_summary, seed_ontology
-from core.curriculum_knowledge import seed_curriculum
-from core.petroleum_corpus import seed_petroleum_corpus
-from core.semantic_parser import SemanticParser
-from core.meaning_model import MeaningModel
-from core.language_reasoner import LanguageReasoner
-from core.concept import Concept
-from core.metacognition import Metacognition, MetacognitiveReport
-from core.introspection import Introspection, BeliefExplanation
-from core.self_learning import SelfLearning, SelfLearningReport
-from core.curriculum import CurriculumItem
-from core.knowledge_store import KnowledgeStore
 from core.persistence import Persistence
-from core.snapshot import Snapshot
-from core.explanation_engine import ExplanationEngine
-from core.explanation import Explanation
-from core.reasoning_trace import ReasoningTrace
-from core.model_interface import CognitiveModel, ModelRequest, ModelResponse
-from core.structured_output import MODEL_OUTPUT_SCHEMA
-from core.llm_reasoner import LLMReasoner, ModelAnalysis
-from core.safe_learning import LearningSandbox
-from core.cognitive_context import ContextRegistry
+from core.petroleum_corpus import seed_petroleum_corpus
+from core.plan import Plan
+from core.plan_evaluator import PlanEvaluation, PlanEvaluator
+from core.planner import Planner
+from core.prediction_error import PredictionError
 from core.provenance import ProvenanceLedger, ProvenanceRecord, ProvenanceStage
+from core.question_generator import QuestionGenerator
+from core.reasoning_engine import ReasoningEngine
+from core.reasoning_trace import ReasoningTrace
 from core.retention_policy import RetentionPolicy
+from core.safe_learning import LearningSandbox
+from core.self_learning import SelfLearning, SelfLearningReport
+from core.semantic_parser import SemanticParser
+from core.snapshot import Snapshot
+from core.state import State
+from core.state_history import StateHistory
+from core.structured_output import MODEL_OUTPUT_SCHEMA
 
 
 @dataclass(frozen=True)

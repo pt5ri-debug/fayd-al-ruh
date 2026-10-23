@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from core.continuous_learning import (
     ContinuousLearner,
     Feedback,
@@ -79,7 +78,7 @@ def test_decay_stale_weakens_and_drops():
     outcome = updater.apply(
         KnowledgeUpdate("Permeability measures how easily fluid flows.", source="x", strength=0.2)
     )
-    later = datetime.now(timezone.utc) + timedelta(days=400)
+    later = datetime.now(UTC) + timedelta(days=400)
     decayed = updater.decay_stale(now=later)
     assert any(item.doc_id == outcome.doc_id for item in decayed)
     assert updater.strength(outcome.doc_id) < 0.2

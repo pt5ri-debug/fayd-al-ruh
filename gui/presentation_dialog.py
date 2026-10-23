@@ -31,12 +31,12 @@ import queue
 import subprocess
 import sys
 import threading
+import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
+from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import font as tkfont
 from typing import Any, Literal
-
-import tkinter as tk
-from tkinter import filedialog, font as tkfont, messagebox, simpledialog, ttk
 
 from core.presentation import (
     CONTENT_TYPES,
@@ -47,6 +47,7 @@ from core.presentation import (
     PresentationError,
     theme_names,
 )
+
 from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
@@ -762,7 +763,7 @@ class PresentationDialog:
             try:
                 result = job()
                 self._results.put((finish, result, None))
-            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            except Exception as error:
                 self._results.put((finish, None, error))
 
         threading.Thread(target=run, daemon=True).start()
@@ -879,7 +880,7 @@ class PresentationDialog:
             return
         try:
             project = self.service.get(self._project_id)
-        except Exception as error:  # noqa: BLE001 - a deleted project must not crash the window
+        except Exception as error:
             self._report_error(error)
             return
         state = STATE_LABELS.get(project.state, project.state)
@@ -976,7 +977,7 @@ class PresentationDialog:
         best = None
         try:
             best = self.service.best_course(project.project_id)
-        except Exception:  # noqa: BLE001 - a status line must never crash the window
+        except Exception:
             best = None
         if best is not None:
             self._course_button.configure(state="normal" if not self._busy else "disabled")
@@ -1002,7 +1003,7 @@ class PresentationDialog:
         if callable(self._model_status):
             try:
                 status = self._model_status()
-            except Exception:  # noqa: BLE001 - a status line must never crash the window
+            except Exception:
                 status = None
         if status is not None and getattr(status, "available", False):
             backend = getattr(status, "backend", "")
@@ -1022,7 +1023,7 @@ class PresentationDialog:
         """Say which render engine an export would actually use, and why."""
         try:
             engine = self.service.resolve_engine(None)
-        except Exception as error:  # noqa: BLE001 - never let a status line crash the window
+        except Exception as error:
             return str(error)
         if engine == "pptx":
             return "Engine: python-pptx — real, editable shapes."
@@ -1045,7 +1046,7 @@ class PresentationDialog:
             return
         try:
             self.service.update_settings(self._project_id, **changes)
-        except Exception as error:  # noqa: BLE001 - report, do not crash the window
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         self._set_status("Deck settings saved.")
@@ -1075,7 +1076,7 @@ class PresentationDialog:
             return
         try:
             project = self.service.new_project(title)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         self._refresh_projects()
@@ -1094,7 +1095,7 @@ class PresentationDialog:
             return
         try:
             current = self.service.get(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         title = simpledialog.askstring(
@@ -1104,7 +1105,7 @@ class PresentationDialog:
             return
         try:
             project = self.service.rename_project(self._project_id, title)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         self._refresh_projects()
@@ -1117,7 +1118,7 @@ class PresentationDialog:
             return
         try:
             clone = self.service.duplicate_project(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         self._refresh_projects()
@@ -1135,7 +1136,7 @@ class PresentationDialog:
             return
         try:
             current = self.service.get(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         confirmed = messagebox.askyesno(
@@ -1148,7 +1149,7 @@ class PresentationDialog:
             return
         try:
             self.service.delete(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         self._project_id = ""
@@ -1202,7 +1203,7 @@ class PresentationDialog:
             return
         try:
             ensure()
-        except Exception:  # noqa: BLE001 - a missing model is a normal state
+        except Exception:
             pass
 
     def draft_outline(self, text: str | None = None) -> None:
@@ -1230,7 +1231,7 @@ class PresentationDialog:
     def _on_review_outline(self) -> None:
         try:
             project = self.service.review_outline(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         self._add_message(
@@ -1244,7 +1245,7 @@ class PresentationDialog:
     def _on_approve_outline(self) -> None:
         try:
             project = self.service.approve_outline(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         self._add_message(
@@ -1297,7 +1298,7 @@ class PresentationDialog:
     def _on_review_slides(self) -> None:
         try:
             project = self.service.review_slides(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         self._add_message(
@@ -1328,7 +1329,7 @@ class PresentationDialog:
             # *by number*, so the message names the slide that needs attention.
             self.service.approve_slides(self._project_id)
             project = self.service.approve_content(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             self._report_error(error)
             return
@@ -1369,7 +1370,7 @@ class PresentationDialog:
             return
         try:
             best = self.service.best_course(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         if best is None:
@@ -1402,7 +1403,7 @@ class PresentationDialog:
         for index, slide_id in enumerate(self._slide_ids):
             try:
                 slide = self.service.get(self._project_id).slide(slide_id)
-            except Exception:  # noqa: BLE001 - a stale list must not crash Tk
+            except Exception:
                 return
             if slide.number == number:
                 self._slide_list.selection_clear(0, "end")
@@ -1427,7 +1428,7 @@ class PresentationDialog:
     def _load_slide(self, slide_id: str) -> None:
         try:
             slide = self.service.get(self._project_id).slide(slide_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         # Loading a slide makes it the editor's target, so a save/revision acts on
@@ -1502,7 +1503,7 @@ class PresentationDialog:
             return
         try:
             slide = self.service.approve_slide(self._project_id, self._selected_slide)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         self._set_status(f"Approved slide {slide.number}.")
@@ -1518,7 +1519,7 @@ class PresentationDialog:
         """
         try:
             project = self.service.approve_slides(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             self._report_error(error)
             return
@@ -1533,7 +1534,7 @@ class PresentationDialog:
             return
         try:
             slide = self.service.unapprove_slide(self._project_id, self._selected_slide)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         self._set_status(f"Withdrew the approval of slide {slide.number}.")
@@ -1546,7 +1547,7 @@ class PresentationDialog:
             project = self.service.get(self._project_id)
             slide = project.slide(self._selected_slide)
             self.service.reorder_slide(self._project_id, self._selected_slide, slide.order + delta)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         self._set_status("Reordered the slide.")
@@ -1556,7 +1557,7 @@ class PresentationDialog:
         """Apply the chosen drafting batch size (validated by the service)."""
         try:
             size = self.service.set_batch_size(int(self._batch_var.get()))
-        except Exception as error:  # noqa: BLE001 - a bad value is shown, not raised
+        except Exception as error:
             self._batch_var.set(str(DEFAULT_SLIDE_BATCH))
             self._set_status(str(error), error=True)
             return
@@ -1569,7 +1570,7 @@ class PresentationDialog:
             return
         try:
             slide = self.service.get(self._project_id).slide(self._selected_slide)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         number = slide.number
@@ -1614,7 +1615,7 @@ class PresentationDialog:
             return
         try:
             self.service.remove_slide(self._project_id, self._selected_slide)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         self._selected_slide = ""
@@ -1627,7 +1628,7 @@ class PresentationDialog:
             return
         try:
             items = self.service.revisions(self._project_id, self._selected_slide)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         if not items:
@@ -1650,7 +1651,7 @@ class PresentationDialog:
             self.service.restore_slide_revision(
                 self._project_id, self._selected_slide, int(choice.strip())
             )
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         self._set_status(f"Restored revision {choice.strip()}; approve it again before exporting.")
@@ -1685,7 +1686,7 @@ class PresentationDialog:
             return
         try:
             result = self.service.validate_project(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         lines = [result.summary()]
@@ -1707,7 +1708,7 @@ class PresentationDialog:
             return
         try:
             deck = self.service.preview(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         lines = [f"**{deck.title}** — {len(deck.slides)} slide(s) will be written.", ""]
@@ -1729,7 +1730,7 @@ class PresentationDialog:
             return
         try:
             project = self.service.get(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         last = next((item for item in reversed(project.exports) if item.ok), None)
@@ -1748,7 +1749,7 @@ class PresentationDialog:
                 subprocess.Popen(["explorer", str(directory)])
             else:
                 subprocess.Popen(["xdg-open", str(directory)])
-        except Exception as error:  # noqa: BLE001 - the path is still shown, so never crash
+        except Exception as error:
             self._set_status(f"Could not open the folder ({error}). It is at {directory}.")
             return
         self._set_status(f"Opened {directory}.")
@@ -1797,4 +1798,4 @@ class PresentationDialog:
         self.window.destroy()
 
 
-__all__ = ["PresentationDialog", "STEPS", "SUBTITLE", "TITLE"]
+__all__ = ["STEPS", "SUBTITLE", "TITLE", "PresentationDialog"]

@@ -24,10 +24,10 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from collections.abc import Iterable
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable
 
 #: The current schema version, stored in ``PRAGMA user_version``. Bump it when a
 #: migration is added; the migration table below maps version -> statement list.
@@ -36,7 +36,7 @@ SCHEMA_VERSION = 1
 
 def _utc_now() -> str:
     """An ISO-8601 UTC timestamp, so ordering is stable and timezone-free."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 _SCHEMA: tuple[str, ...] = (
@@ -232,7 +232,7 @@ class CompanionDatabase:
             return None
         target_dir = directory or self.path.parent / "companion-backups"
         target_dir.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         destination = target_dir / f"{self.path.stem}-{stamp}{self.path.suffix}"
         # Two backups in the same second must not overwrite each other, so a
         # free name is chosen rather than clobbering an earlier copy.
@@ -302,7 +302,7 @@ class CompanionDatabase:
 
 
 __all__ = [
+    "SCHEMA_VERSION",
     "CompanionDatabase",
     "CompanionDatabaseError",
-    "SCHEMA_VERSION",
 ]

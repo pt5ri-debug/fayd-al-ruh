@@ -14,7 +14,6 @@ import zlib
 from pathlib import Path
 
 import pytest
-
 from cli.image import main as image_main
 from core.imagegen import (
     DEFAULT_HEIGHT,
@@ -28,7 +27,6 @@ from core.imagegen import (
     load_image_generator,
 )
 from gui.image_gen import ImageGenerationService, parse_size
-
 
 # ---------------------------------------------------------------------------
 # PNG encoder
@@ -258,8 +256,8 @@ def test_chat_service_exposes_the_image_engine(tmp_path):
 
 
 def test_cli_menu_and_dispatch_include_image():
-    from cli.menu import MENU, visible_menu
     from cli.__main__ import _COMMANDS
+    from cli.menu import MENU, visible_menu
 
     assert any(label == "Generate an image from text" for label, _action, _args in MENU)
     assert any(label == "Generate an image from text" for label, _a, _b in visible_menu())
@@ -318,7 +316,6 @@ def test_realistic_preset_is_the_default_and_carries_a_negative_prompt():
 
 def test_resolve_preset_rejects_an_unknown_name():
     import pytest
-
     from core.imagegen_diffusion import resolve_preset
 
     assert resolve_preset(None).name == "realistic"
@@ -333,7 +330,7 @@ def test_generator_uses_the_preset_and_forwards_the_negative_prompt(tmp_path):
     runner = _FakeRunner()
     generator = DiffusionImageGenerator(root=tmp_path, runner=runner, preset="detailed")
     generator.generate(ImageRequest("a portrait"))
-    model, _prompt, negative, _w, _h, steps, guidance, _seed = runner.calls[0]
+    _model, _prompt, negative, _w, _h, steps, guidance, _seed = runner.calls[0]
     assert steps == 30 and guidance == 7.0
     assert "cartoon" in negative
     # An explicit negative prompt overrides the preset's default.
@@ -355,11 +352,11 @@ def test_preset_names_and_summaries_are_stable():
     from core.imagegen_diffusion import preset_names, preset_summaries
 
     assert preset_names() == ("fast", "realistic", "detailed")
-    summaries = dict((name, model) for name, model, _summary in preset_summaries())
+    summaries = {name: model for name, model, _summary in preset_summaries()}
     assert summaries["realistic"] == "Lykon/dreamshaper-8-lcm"
-    assert "photorealistic" in dict(
-        (name, summary) for name, _model, summary in preset_summaries()
-    )["realistic"].lower()
+    assert "photorealistic" in {
+        name: summary for name, _model, summary in preset_summaries()
+    }["realistic"].lower()
 
 
 def test_the_realistic_preset_installs_an_lcm_scheduler():
@@ -489,7 +486,7 @@ def test_load_image_generator_builds_the_diffusion_backend(tmp_path):
 def test_backend_status_lists_both_backends():
     from core.imagegen import image_backend_status
 
-    status = dict((name, available) for name, available, _note in image_backend_status())
+    status = {name: available for name, available, _note in image_backend_status()}
     assert status["procedural"] is True
     assert "diffusion" in status  # availability depends on the install
 

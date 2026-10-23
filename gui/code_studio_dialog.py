@@ -34,14 +34,14 @@ from __future__ import annotations
 
 import queue
 import threading
-from collections.abc import Callable
-from typing import Any, Literal
-
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import font as tkfont
 from tkinter import ttk
+from typing import Any, Literal
 
 from core.coder_model import PULL_HINT
+
 from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
@@ -659,7 +659,7 @@ class CodeStudioDialog:
             return
         try:
             entries = self.service.list_files(self._current_slug)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_merge_note(f"Could not list files: {error}", error=True)
             return
         self._files = entries
@@ -970,7 +970,7 @@ class CodeStudioDialog:
             try:
                 result = job()
                 self._results.put((finish, result, None))
-            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            except Exception as error:
                 self._results.put((finish, None, error))
 
         threading.Thread(target=run, daemon=True).start()

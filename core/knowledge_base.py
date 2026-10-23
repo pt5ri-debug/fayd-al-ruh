@@ -130,7 +130,7 @@ class KnowledgeChunk:
         )
 
     @classmethod
-    def from_json(cls, line: str) -> "KnowledgeChunk":
+    def from_json(cls, line: str) -> KnowledgeChunk:
         data = json.loads(line)
         return cls(
             chunk_id=str(data["chunk_id"]),
@@ -274,7 +274,7 @@ class WikipediaFetcher:
     ) -> dict[str, Any]:  # pragma: no cover - network
         params = {**params, "format": "json", "maxlag": "5"}
         delay = 1.0
-        for attempt in range(retries):
+        for _attempt in range(retries):
             response = self._session.get(WIKI_API, params=params, timeout=self.timeout)
             if response.status_code in (429, 503):
                 # Wikipedia rate-limits bursts; honour Retry-After, then back off.
@@ -591,7 +591,7 @@ class KnowledgeBaseStore:
         shard_index: int,
         chunks: Iterable[KnowledgeChunk],
         *,
-        record_ids: "set[str] | None" = None,
+        record_ids: set[str] | None = None,
         sync: bool = False,
     ) -> int:
         """Append chunks to a shard; return the number of bytes written.
@@ -717,11 +717,11 @@ __all__ = [
     "DEFAULT_OVERLAP",
     "DEFAULT_SUBCAT_LIMIT",
     "DEFAULT_TARGET_MB",
-    "KnowledgeBaseStore",
-    "KnowledgeChunk",
     "WIKI_API",
     "WIKI_LICENSE",
     "WIKI_USER_AGENT",
+    "KnowledgeBaseStore",
+    "KnowledgeChunk",
     "WikipediaFetcher",
     "build_knowledge_base",
     "chunk_text",

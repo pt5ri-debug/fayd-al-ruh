@@ -31,7 +31,7 @@ class CognitiveReport:
         state: CognitiveState,
         metrics: LearningMetrics,
         evaluation: CognitiveEvaluation,
-    ) -> "CognitiveReport":
+    ) -> CognitiveReport:
 
         return cls(
             cycle_count=state.cycle_count,

@@ -10,7 +10,6 @@ from __future__ import annotations
 import shutil
 
 import pytest
-
 from core import voices
 from core.reading import TextReader
 from core.speech import CommandSynthesizer, SilentSynthesizer, load_synthesizer
@@ -709,7 +708,7 @@ def test_windows_voice_report_names_an_installed_arabic_voice(monkeypatch):
     monkeypatch.setattr(
         speech.shutil, "which", lambda name: "powershell" if name == "powershell" else None
     )
-    listing = "Microsoft Hamed|ar-SA|Male\nMicrosoft Zira|en-US|Female\n".encode()
+    listing = b"Microsoft Hamed|ar-SA|Male\nMicrosoft Zira|en-US|Female\n"
 
     def fake_run(argv, **_kwargs):
         script = argv[-1]
@@ -1175,7 +1174,7 @@ def test_onecore_falls_back_to_sapi_when_its_own_store_is_empty(monkeypatch):
     from core import speech
 
     monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
-    monkeypatch.setattr(speech._WindowsPowerShellSynthesizer, "_language_in_sapi", lambda self, l: True)
+    monkeypatch.setattr(speech._WindowsPowerShellSynthesizer, "_language_in_sapi", lambda self, lang: True)
     monkeypatch.setattr(
         speech._WindowsPowerShellSynthesizer, "_render", lambda self, text, lang: None
     )
@@ -1191,7 +1190,7 @@ def test_onecore_does_not_hand_an_unserved_language_to_sapi(monkeypatch):
 
     monkeypatch.setattr(speech, "windows_speech_available", lambda: True)
     monkeypatch.setattr(
-        speech._WindowsPowerShellSynthesizer, "_language_in_sapi", lambda self, l: False
+        speech._WindowsPowerShellSynthesizer, "_language_in_sapi", lambda self, lang: False
     )
     assert speech.WindowsOneCoreSynthesizer(language="ar")._fallback() is None
 
@@ -1621,7 +1620,7 @@ def test_onecore_script_keeps_the_default_voice_when_no_language_match():
 # ------------------------------------------------------- voice-menu grouping
 
 
-def _model_voice(name: str, language: str, engine: str = "audio.cpp") -> "voices.ModelVoice":
+def _model_voice(name: str, language: str, engine: str = "audio.cpp") -> voices.ModelVoice:
     from pathlib import Path
 
     return voices.ModelVoice(
@@ -1664,7 +1663,7 @@ def test_grouping_accepts_an_explicit_voice_list():
 # --- voices grouped by the source each came from ------------------------------
 
 
-def _fake_system(name: str, language: str) -> "voices.SystemVoice":
+def _fake_system(name: str, language: str) -> voices.SystemVoice:
     return voices.SystemVoice(name=name, engine="windows-onecore", language=language, gender="Female")
 
 
@@ -1754,7 +1753,7 @@ def test_synthetic_section_groups_by_category():
         if s.source == voices.SOURCE_SYNTHETIC
     )
     assert [header for header, _ in section.groups] == ["Men", "Women", "Boys", "Girls"]
-    for header, group in section.groups:
+    for _header, group in section.groups:
         assert all(v.category == group[0].category for v in group)
 
 

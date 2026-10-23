@@ -1,5 +1,3 @@
-from storage.json_store import JsonStore
-
 from core.belief import Belief
 from core.cognitive_context import ContextRegistry
 from core.cognitive_state import CognitiveState
@@ -9,6 +7,7 @@ from core.knowledge_store import KnowledgeStore
 from core.memory import CognitiveMemory
 from core.observation import Observation
 from core.snapshot_loader import SnapshotLoader
+from storage.json_store import JsonStore
 
 
 def _populated_components():
@@ -46,7 +45,7 @@ def test_knowledge_store_round_trips_graph_and_memory(tmp_path):
 
 
 def test_snapshot_loader_rejects_tampered_checksum():
-    graph, memory, state, contexts = _populated_components()
+    _graph, _memory, _state, _contexts = _populated_components()
     record = {
         "name": "episode",
         "payload": {"graph": {}, "memory": {}, "state": {}, "contexts": {}},

@@ -22,9 +22,10 @@ ingestion and training separate.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from core.knowledge_base import (
     DEFAULT_CHUNK_CHARS,
@@ -34,6 +35,7 @@ from core.knowledge_base import (
     KnowledgeChunk,
     chunk_text,
 )
+
 from ingest.dedup import DedupLedger
 from ingest.errors import (
     ConnectorError,
@@ -52,8 +54,8 @@ from ingest.metadata import (
 from ingest.records import (
     Connector,
     ConnectorInfo,
-    IngestItem,
     IngestionReport,
+    IngestItem,
     ItemOutcome,
     SourceRecord,
     SourceSpec,
@@ -80,20 +82,20 @@ class IngestionPipeline:
         store: KnowledgeBaseStore,
         ledger: DedupLedger,
         *,
-        connectors: "dict[str, Connector] | None" = None,
+        connectors: dict[str, Connector] | None = None,
         chunk_chars: int = DEFAULT_CHUNK_CHARS,
         overlap: int = DEFAULT_OVERLAP,
         min_chunk: int = DEFAULT_MIN_CHUNK,
         shard_bytes: int = DEFAULT_SHARD_BYTES,
         progress: ProgressCallback | None = None,
         errors: ErrorLog | None = None,
-        job: "JobState | None" = None,
-        jobs: "JobStore | None" = None,
+        job: JobState | None = None,
+        jobs: JobStore | None = None,
         retries: int = 0,
         metadata: DocumentMetadataStore | None = None,
-        on_item: "Callable[[ItemOutcome], None] | None" = None,
-        on_record: "Callable[[SourceRecord, int], None] | None" = None,
-        should_cancel: "Callable[[], bool] | None" = None,
+        on_item: Callable[[ItemOutcome], None] | None = None,
+        on_record: Callable[[SourceRecord, int], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
         durable: bool = False,
     ) -> None:
         if chunk_chars < 1:
@@ -411,7 +413,7 @@ class IngestionPipeline:
                 license=record.license,
                 category=str(meta.get("category", "")),
                 tags=(str(meta.get("relative", "")),) if meta.get("relative") else (),
-                created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                created_at=datetime.now(UTC).isoformat(timespec="seconds"),
             )
             self.metadata.record(metadata)
         except (OSError, ValueError):
@@ -443,7 +445,7 @@ class IngestionPipeline:
         if not pending:
             return 0, []
         written = self._write(pending)
-        for digest, chunk in zip(digests, pending):
+        for digest, chunk in zip(digests, pending, strict=False):
             self.ledger.record_chunk(digest, source_key=item.source_key, doc_id=chunk.chunk_id)
         return written, [chunk.chunk_id for chunk in pending]
 
@@ -495,7 +497,7 @@ class IngestionPipeline:
 def ingest_source(
     spec: SourceSpec,
     *,
-    store_dir: "str | None" = None,
+    store_dir: str | None = None,
     incremental: bool = True,
     allow_web: bool = False,
     retries: int = 0,
@@ -503,6 +505,7 @@ def ingest_source(
 ) -> tuple[IngestionReport, ErrorLog]:
     """One-shot helper: build the default pipeline and ingest ``spec``."""
     from core.knowledge_base import default_knowledge_base_dir
+
     from ingest.dedup import DedupLedger
     from ingest.registry import build_default_registry
 

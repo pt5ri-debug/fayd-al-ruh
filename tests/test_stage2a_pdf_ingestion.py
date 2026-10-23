@@ -20,7 +20,6 @@ import textwrap
 from pathlib import Path
 
 import pytest
-
 from core.document_reader import DocumentReadError, read_document
 from core.knowledge_base import KnowledgeBaseStore, iter_local_documents
 from core.pdf_extract import (
@@ -34,6 +33,7 @@ from ingest.dedup import DedupLedger
 from ingest.errors import ConnectorError
 from ingest.pipeline import IngestionPipeline, ledger_path
 from ingest.records import SourceSpec
+
 from tests.pdf_fixtures import (
     GARBAGE,
     arabic_page,
@@ -424,7 +424,7 @@ def test_pipeline_dedupes_identical_pdf_pages(tmp_path):
 def test_pipeline_retries_then_records_a_broken_pdf(tmp_path):
     path = tmp_path / "bad.pdf"
     path.write_bytes(GARBAGE)
-    store, pipeline = _pipeline(tmp_path)
+    _store, pipeline = _pipeline(tmp_path)
     pipeline.retries = 2
     report = pipeline.ingest(SourceSpec(str(path)))
 

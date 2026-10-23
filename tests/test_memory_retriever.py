@@ -5,7 +5,9 @@ from core.semantic_memory import SemanticMemoryIndex
 
 
 def test_retriever_uses_semantic_index():
-    episodic = EpisodicMemory(); episodic.store("E1", "rain makes ground wet")
-    index = SemanticMemoryIndex(); index.add("E1", "rain makes ground wet")
+    episodic = EpisodicMemory()
+    episodic.store("E1", "rain makes ground wet")
+    index = SemanticMemoryIndex()
+    index.add("E1", "rain makes ground wet")
     result = MemoryRetriever().retrieve("rain wet", episodic, index, MemoryAssociator())
     assert result[0].id == "E1"

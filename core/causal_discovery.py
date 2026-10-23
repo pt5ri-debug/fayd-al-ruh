@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from collections import Counter
 
 from core.causal_link import CausalLink
@@ -14,7 +15,7 @@ class CausalDiscovery:
     def discover(self, ordered_events: list[str], minimum_occurrences: int = 2) -> list[CausalLink]:
         if minimum_occurrences < 2:
             raise ValueError("Causal discovery needs at least two occurrences.")
-        transitions = Counter(zip(ordered_events, ordered_events[1:]))
+        transitions = Counter(itertools.pairwise(ordered_events))
         total = max(1, sum(transitions.values()))
         return [
             CausalLink(cause, effect, round(count / total, 6), metadata={"status": "candidate", "occurrences": count})

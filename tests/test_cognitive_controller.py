@@ -82,7 +82,7 @@ def test_controller_rejects_unknown_prediction():
             actual_result=0.5,
         )
 
-        assert False
+        raise AssertionError("expected KeyError")
 
     except KeyError:
         pass

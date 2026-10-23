@@ -24,7 +24,7 @@ class CausalReasoner:
             for link in graph.effects_of(node):
                 if link.effect in visited:
                     continue
-                next_links = links + (link,)
+                next_links = (*links, link)
                 if link.effect == effect:
                     candidates.append(CausalChain(next_links))
                 else:

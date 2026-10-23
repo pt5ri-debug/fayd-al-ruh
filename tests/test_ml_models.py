@@ -1,10 +1,9 @@
 import numpy as np
-
 from ml.dataset import Dataset
 from ml.models import (
+    MLP,
     Adam,
     LinearRegressor,
-    MLP,
     SoftmaxClassifier,
     load_model,
     save_model,

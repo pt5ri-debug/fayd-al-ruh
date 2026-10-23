@@ -31,15 +31,15 @@ from __future__ import annotations
 
 import queue
 import threading
+import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
-
-import tkinter as tk
 from tkinter import filedialog, ttk
+from typing import Any, Literal
 
 from core.scene3d import Vec3
 from core.scene3d_io import SceneIOError
+
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
 from gui.image_preview import load_scaled
@@ -590,7 +590,7 @@ class SceneStudioDialog:
             try:
                 result = job()
                 self._results.put((finish, result, None))
-            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            except Exception as error:
                 self._results.put((finish, None, error))
 
         threading.Thread(target=run, daemon=True).start()
@@ -887,11 +887,11 @@ class SceneStudioDialog:
 
 
 __all__ = [
-    "SceneStudioDialog",
     "SUBTITLE",
     "TITLE",
     "VIEWPORT_FRACTION",
     "VIEWPORT_HEIGHT",
     "VIEWPORT_WIDTH",
+    "SceneStudioDialog",
     "command_help",
 ]

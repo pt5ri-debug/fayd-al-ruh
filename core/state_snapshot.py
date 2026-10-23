@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from core.cognitive_state import CognitiveState
 
@@ -27,7 +27,7 @@ class StateSnapshot:
     def capture(
         cls,
         state: CognitiveState,
-    ) -> "StateSnapshot":
+    ) -> StateSnapshot:
 
         beliefs = list(
             state.beliefs.values()
@@ -53,7 +53,7 @@ class StateSnapshot:
         )
 
         return cls(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             cycle_count=state.cycle_count,
             belief_count=state.belief_count,
             pattern_count=state.pattern_count,

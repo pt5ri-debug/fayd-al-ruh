@@ -24,12 +24,11 @@ Storage is the project's existing :class:`storage.sqlite_store.SqliteStore`
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
-from collections.abc import Mapping
 
 from storage.sqlite_store import SqliteStore
 
@@ -89,7 +88,7 @@ class SourceRegistration:
         return data
 
     @classmethod
-    def from_primitive(cls, data: Mapping[str, Any]) -> "SourceRegistration":
+    def from_primitive(cls, data: Mapping[str, Any]) -> SourceRegistration:
         return cls(
             source_id=str(data["source_id"]),
             uri=str(data["uri"]),
@@ -118,7 +117,7 @@ class SourceRegistration:
         bytes_written: int = 0,
         documents: int = 0,
         error: str = "",
-    ) -> "SourceRegistration":
+    ) -> SourceRegistration:
         """A copy updated with the outcome of one run (keeps registration intact)."""
         return SourceRegistration(
             source_id=self.source_id,
@@ -224,7 +223,7 @@ def source_registry_path(store_root: str | Path) -> Path:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 __all__ = [
