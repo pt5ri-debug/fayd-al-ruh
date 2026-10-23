@@ -50,7 +50,10 @@ Arabic is kept as secondary aliases where useful.
   copies any pre-upgrade in-repo data into `data/` on first run. `studio_dir()`
   (`data/studio`) and `studio_workspaces_dir()` (`data/studio/workspaces`) are
   where the Code Studio keeps its git worktrees, git-ignored like the rest of
-  `data/`.
+  `data/`. `docs_models_dir()` (`data/docs`) holds Doc's Studio's Qwen3-VL weights
+  (the language GGUF *and* its `mmproj` projector), and `docs_pages_dir()`
+  (`data/docs/pages`) holds the page images it rasterises from a scanned PDF --
+  a reproducible cache, so both are git-ignored.
   `core/version.py` — the single version string.
 - `core/updater.py` — program updates for a source checkout. `check_for_updates`
   fetches the remote (never touching the working tree) and reports how many
@@ -501,10 +504,10 @@ Arabic is kept as secondary aliases where useful.
   clears its own command on its own `<Destroy>` (while the widget still exists,
   which a frame-level handler cannot promise) and the frame drops the caller's
   handler, exactly like `gui.chat_composer`; a closed window dies at once.
-  Rolled into the **main window** and the eight dialogs (Code Studio, Presentation
+  Rolled into the **main window** and the nine dialogs (Code Studio, Presentation
   Studio and its finalize/course windows, the Import Center, the SQL import
-  screen, and the two image windows), so every window is closed and grown the same
-  way without each one re-implementing the logic.
+  screen, Doc's Studio, and the two image windows), so every window is closed and
+  grown the same way without each one re-implementing the logic.
 - **Every window's title bar** is the `Theme.titlebar` band (a dark grey a step
   above the page base, `#181C25` dark / `#DCE3EE` light) closed by a
   `titlebar_edge` hairline, and carries the three controls above on its right. The
@@ -1216,12 +1219,13 @@ Arabic is kept as secondary aliases where useful.
   gate for a mutating tool); `actions.py` maps the sidebar to `cli.menu.run_*` —
   the **Actions** list mirrors numbered CLI items 6..12 (never repeating the
   window's own controls, which cover items 1..5 — the window, Jarvis, **Ultron**,
-  and the two chat modes). A `GuiAction` carries a `hidden` flag: eight entries
+  and the two chat modes). A `GuiAction` carries a `hidden` flag: ten entries
   stay in `ACTIONS` (so `action_by_key` and the CLI still resolve them) but are
   `hidden=True`, and `visible_actions()` — what the sidebar actually draws —
-  leaves them out. The four *Answer from ...* mouth switches are hidden because
+  leaves them out. The six *Answer from ...* mouth switches are hidden because
   the header's model selector offers them, and the Import Center, Code Studio,
-  Presentation Studio, and image generation are hidden because the composer's ＋
+  Presentation Studio, Doc's Studio, and image generation are hidden because the
+  composer's ＋
   menu already opens them; `options.py` has the argument parser
   (`--mode ai|jarvics`, and the three mouth starts `--mind` / `--ultron` /
   default);
@@ -1305,7 +1309,8 @@ Arabic is kept as secondary aliases where useful.
   that can run on a worker thread, where a Tcl call deadlocks -- which is exactly
   how the Presentation Studio's export hung. `gui/app.py`, `gui/presentation_dialog.py`,
   `gui/presentation_finalize_dialog.py`, `gui/code_studio_dialog.py`,
-  `gui/image_gen_dialog.py`, and `gui/image_edit_dialog.py` all build on it, each
+  `gui/docs_dialog.py`, `gui/image_gen_dialog.py`, and `gui/image_edit_dialog.py`
+  all build on it, each
   keeping its own attributes (`_entry`, `_question`, `_request_var`, …) pointed at
   the panel's widgets so every existing handler and test is untouched.
 - `gui/app.py` — a professional desktop front end styled after the **OpenHands
@@ -1357,7 +1362,8 @@ Arabic is kept as secondary aliases where useful.
   Live training output is queued and rendered at a bounded rate (coalesced into
   one widget update every ~0.15 s, fully drained before the result), so a fast
   training loop never freezes the window. The composer's **＋** menu also opens
-  the **Code Studio** (below).
+  the **Code Studio**, the **Presentation Studio**, **Doc's Studio**, and the
+  image pages (below).
   The window also **reads text aloud**: every message footer carries a
   "🔊 Read aloud" control (`_speak_label`/`_speak_text`), and the sidebar holds the
   reading-voice menus. A dedicated **Voices** dropdown (`_toggle_voices`, right
@@ -1819,6 +1825,102 @@ Arabic is kept as secondary aliases where useful.
   written path, size, and engine in the transcript, with **Open the folder** to
   reveal it. Reachable from the Studio's approve step; there is no separate CLI
   command, because `python -m cli presentation export` is the same gate.
+- `core/docs_model.py` — **Doc's Studio's own vision model**, added the way
+  Ultron's, Vision's, the Code Studio's, and the Presentation Studio's are: a real
+  **GGUF file loaded into this process** with `llama-cpp-python` (no server,
+  nothing sent off the machine), the runtime being the optional `[docs]` extra
+  (`core.optional_deps.FEATURE_DOCS`, `requirements-docs.txt`, `docs = [...]` in
+  `pyproject.toml`), imported lazily so a base install needs neither the extra nor
+  a model file. It is the project's one **vision-language** mouth: the model
+  *sees* a page image as well as reads text, which is what makes a scanned PDF or
+  a photographed page answerable. `DEFAULT_DOCS_MODEL` is **`qwen3-vl-4b`** and
+  `CATALOG` names the fetchable choices (`qwen3-vl-2b` light, `qwen3-vl-4b`
+  default, `qwen3-vl-8b` strong), exposed through
+  `spec_names`/`spec_summaries`/`resolve_spec`. **A vision model is two files**:
+  the language GGUF *and* its multimodal projector (`mmproj-*.gguf`), so every
+  `DocsModelSpec` carries both `filename` and `mmproj_filename`; `find_model_file`
+  prefers the registry's file and otherwise takes the largest `.gguf` **that is not
+  a projector**, and `find_mmproj_file` takes the projector by its `MMPROJ_PREFIX`
+  -- the two halves can never be confused, which is why "the largest .gguf" is not
+  simply handed to the language loader. `model_is_cached` is true only when **both**
+  halves are present, and `docs_model_status` reports each absence separately with
+  its own real next step (no model, a model with no projector, no runtime, or
+  ready). `LlamaCppDocsClient` carries `backend = "in-process"` and
+  `LlamaCppDocsRunner` is the seam a test injects, so the client is exercised with
+  no extra and no weights; `download_model` runs only through the permission +
+  human-approval gates (`approved=True`), like every other model download. The
+  model is a GGUF under `data/docs` (`core.paths.docs_models_dir`, git-ignored).
+  Nothing here executes model output.
+- `core/docs_studio.py` — the Doc's Studio **document engine** (Tk-free,
+  dependency-free at import): it turns *any* supported file into one
+  `LoadedDocument` of `DocumentPage`s and builds the vision messages a question
+  needs. `load_document` dispatches by suffix -- plain text/data (`.txt`, `.md`,
+  `.csv`, `.json`, ...) through `core.document_reader`, Word (`.docx`/`.docm`)
+  through the same reader, a **digital PDF** page by page through
+  `core.pdf_extract`, a **plain image** (`.png`/`.jpg`/...) as a one-page document
+  whose content *is* the picture -- and refuses a legacy `.doc`/`.rtf` with the
+  "save as .docx" hint, and an unknown suffix, rather than guessing.
+  **The scanned-PDF path is the point**: `PdfPageStream` yields every page and
+  only *then* raises "no extractable text" when no page had any, so `_load_pdf`
+  keeps the pages it collected and renders each to an image with
+  `render_page_image` (`pypdfium2`, lazy) -- a wholly scanned report therefore
+  becomes readable instead of failing, and with rendering refused the failure
+  names that next step. A page with a real text layer is never replaced by an
+  image; a page without one is rendered and marked `from_image`, so
+  `LoadedDocument.vision_pages` names exactly the pages the model must *look* at.
+  `select_pages` ranks the pages worth attaching for a question (a page that names
+  the question's words first, a page needing vision ahead of a text-only page at
+  the same score, ties in document order), and `build_vision_messages` puts the
+  extracted text in front of the selected pages' images as OpenAI-style
+  `image_url` parts (a `file://` URI), in document order and bounded by
+  `max_pages`/`max_text_chars`, stating plainly when a page has no text layer.
+  `parse_page_range` reads a plain selection ("7", "1-3", "1 to 3", "2,5,7") so
+  the window and the CLI share one parser. `SUPPORTED_SUFFIXES` /
+  `UNSUPPORTED_SUFFIXES` are the one place the accepted formats are declared.
+- `gui/docs_studio.py` — the Doc's Studio **service** (Tk-free), the one engine
+  the window and the CLI share, so both see one set of open documents and one
+  model. `DocsStudioService` holds the opened documents (`open_document`,
+  `documents`, `get`, `close_document`, `close_all`), asks the vision model
+  (`ask` -> `DocsAnswer` with the pages used and an honest `summary()`), lets the
+  caller supply the project's own assistant for the grounded path
+  (`set_ask`/`ask_assistant`), saves the extracted text (`save_text`), and
+  reports the model honestly (`model_status`, `model_names`, `model_summaries`,
+  `download_model`). An empty model reply becomes the named `DOCS_EMPTY` message
+  rather than a blank answer, and the vision runner is an injectable seam, so the
+  whole service is exercised with no extra and no weights. `picker_filetypes()`
+  is the one file-dialog filter, derived from `SUPPORTED_SUFFIXES`.
+- `gui/docs_dialog.py` — the Doc's Studio **window** (Tk, imported lazily), built
+  the way the chat, Code Studio, and Presentation Studio windows are built: the
+  same `Theme` tokens, `RoundedBox`, `gui.rich_text` Markdown painting, the shared
+  `gui.chat_composer.ChatComposer`, the three `gui.window_controls` title-bar
+  buttons, and a centred conversation column capped at `_COLUMN_MAX`. A left
+  sidebar holds **Open a document…** / **Open a folder…** / **Close this document**
+  / **Save the extracted text**, the open-documents list, the reading-voice-free
+  page controls, and the model note with its real next step; the conversation
+  column shows the transcript and the composer, and a right column previews the
+  current page's image (a `tk.PhotoImage` scaled through `gui.image_preview`, or an
+  honest note when the page has a text layer). Opening a document reads it on a
+  worker thread whose result is handed back through a **queue the UI thread
+  drains** (Tk is not thread-safe), the document's text and its vision pages are
+  reported, and asking a question runs `DocsStudioService.ask` the same way and
+  posts the answer under the honesty header. Long work never blocks the window.
+  Reachable from the composer's **＋** menu (**Doc's Studio — read any document
+  (incl. scanned)…**), whose sidebar action is hidden; the headless twin is
+  `python -m cli docs`.
+- `cli/docs.py` — the Doc's Studio CLI, the headless twin of the window:
+  `status`/`models`/`open`/`text`/`pages`/`ask`/`download` (`python -m cli docs …`,
+  wired in `cli/menu.py` as `run_docs` and in the menu as *Doc's Studio: read any
+  document (incl. scanned) with the local vision model* plus a second entry to
+  download the model). It drives the *same* `gui.docs_studio.DocsStudioService` the
+  window drives, so the CLI and the window share one set of documents, one model,
+  and one download gate -- no document logic is reimplemented here. `--json` gives
+  machine-readable output for `models`/`open`/`ask`/`pages`, `--pages` selects
+  pages with the shared `parse_page_range`, and `--no-render` refuses to rasterise
+  a scanned PDF (so the CLI can say "this needs rendering" without doing it).
+  Exit codes: `0` success, `2` invalid arguments, `3` the vision model is not
+  available (`ask`/`download`), `4` the document could not be read, `5` an
+  unexpected failure. A `status` report succeeds even when the model is missing --
+  it *states* the next step.
 - `core/document_reader.py` — read text out of a Word file with no third-party
   dependency: a `.docx`/`.docm` is an Office Open XML package (a ZIP holding
   `word/document.xml`), read through **`core/docx_extract.py`** (Stage 2B), which
@@ -1890,7 +1992,7 @@ Arabic is kept as secondary aliases where useful.
   (System packages are listed in `OCR_SYSTEM_PACKAGES`; the extra is `[ocr]`.)
 - `core/optional_deps.py` — the **optional-feature installer**, so a user who
   hits "OCR/PDF is not installed" has a next step the app can actually perform.
-  It owns, per feature (`pdf`, `ocr`), the bundled requirements file, the import
+  It owns, per feature (`pdf`, `ocr`, `docs`), the bundled requirements file, the import
   names to check, and the pip command that works from a source checkout
   (`python -m pip install -r requirements-<feature>.txt`) — because the project
   is **not on PyPI**, the old `pip install fayd-al-ruh[ocr]` hint could never
@@ -2159,6 +2261,29 @@ clone, each optional so the base system still runs without it:
   `tests/test_piper_speech.py`, `tests/test_qwen_speech.py`, and `tests/test_gui.py`
   pin the grouping, the union, the source property, the engine routing, the CLI
   listing, and the honest notes.
+- Phase 18 — **Doc's Studio**, the project's vision-language mouth: read *any*
+  document -- including a **scanned** PDF or a photographed page -- and answer
+  questions about it, with a real **Qwen3-VL** GGUF running locally in this process
+  (no server, nothing sent off the machine). `core/docs_model.py` adds the model
+  layer (the `qwen3-vl-2b/4b/8b` catalog, `qwen3-vl-4b` default, and the crucial
+  fact that a vision model is **two** files -- the language GGUF *and* its
+  `mmproj-*.gguf` projector -- so both are resolved, both are required, and the
+  two can never be confused); `core/docs_studio.py` is the document engine
+  (`load_document` for text/Word/PDF/image, the **scanned-PDF** path that keeps the
+  pages `PdfPageStream` yielded before it raised "no extractable text" and renders
+  each with `pypdfium2`, `select_pages`, and `build_vision_messages` with
+  `image_url` parts); `gui/docs_studio.py` is the Tk-free service the window and
+  the CLI share; `gui/docs_dialog.py` is the window, opened from the composer's
+  **＋** menu, built with the same theme, composer, rich text, window controls, and
+  worker-thread/queue pattern as every other window; and `cli/docs.py` is its
+  headless twin (`python -m cli docs status|models|open|text|pages|ask|download`).
+  The runtime is the optional `[docs]` extra, the weights are a one-time
+  human-approved download under `data/docs`, and every answer is labelled as the
+  local vision model's own reading rather than a cited extract.
+  `tests/test_docs_studio.py`, `tests/test_docs_cli.py`, and
+  `tests/test_docs_window.py` pin the catalog, the two-file rule, the projector
+  exclusion, the scanned-PDF render, the page selection, the vision messages, the
+  service, the CLI, the ＋-menu wiring, and the real Tk window.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

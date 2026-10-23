@@ -2335,6 +2335,11 @@ class FaydGUI:
         )
         menu.add_separator()
         menu.add_command(
+            label="Doc's Studio — read any document (incl. scanned)…",
+            command=self._open_docs_studio,
+        )
+        menu.add_separator()
+        menu.add_command(
             label="Code Studio — edit and merge the project's own code…",
             command=self._open_code_studio,
         )
@@ -2517,6 +2522,32 @@ class FaydGUI:
         refresh = getattr(dialog, "refresh", None)
         if callable(refresh):
             refresh(keep_note=True)
+
+    def _open_docs_studio(self) -> None:
+        """Open Doc's Studio: read any document, then ask about it.
+
+        The Studio reads with its *own* local vision model (a Qwen3-VL GGUF loaded
+        in-process), so a scanned PDF or an image can be read as well as a text
+        file. It also borrows *this* window's assistant for the grounded path, so
+        there is no second AI and no second knowledge base.
+        """
+        from gui.docs_dialog import DocsDialog
+
+        existing = getattr(self, "_docs_studio_dialog", None)
+        if existing is not None:
+            existing.window.deiconify()
+            existing.window.lift()
+            return
+        service = self.service.docs
+        service.set_ask(self.service.docs_assistant_answer)
+        self._docs_studio_dialog = DocsDialog(
+            self.root,
+            service,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=lambda: setattr(self, "_docs_studio_dialog", None),
+        )
 
     def _open_code_studio(self) -> None:
         """Open the Code Studio: edit, test, and merge the project's own code.

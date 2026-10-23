@@ -187,6 +187,31 @@ def audiocpp_models_dir() -> Path:
     return data_dir() / "audio.cpp"
 
 
+def docs_models_dir() -> Path:
+    """Where Doc's Studio's in-process vision-language models live.
+
+    Doc's Studio reads documents -- including scanned ones -- with a local
+    **Qwen3-VL** model: a GGUF file plus its ``mmproj`` projector, loaded
+    straight into this process with ``llama-cpp-python``. Like Ultron's and the
+    Presentation Studio's models these are *not* in-project checkpoints, so the
+    folder is git-ignored and a multi-gigabyte model never dirties the working
+    tree or bloats a program update. ``FAYD_DATA_DIR`` moves it with the rest of
+    the data.
+    """
+    return data_dir() / "docs"
+
+
+def docs_pages_dir() -> Path:
+    """Where Doc's Studio keeps the page images it renders for a document.
+
+    A scanned PDF page has no text layer, so the Studio rasterises it to a PNG
+    and hands the *image* to the vision model. The rendered pages are a cache --
+    reproducible from the source document at any time -- so they live under the
+    git-ignored data folder rather than beside the document.
+    """
+    return docs_models_dir() / "pages"
+
+
 def studio_dir() -> Path:
     """Where the Code Studio keeps its own state (git worktrees, run logs).
 
@@ -276,6 +301,8 @@ __all__ = [
     "qwen_speech_models_dir",
     "piper_models_dir",
     "audiocpp_models_dir",
+    "docs_models_dir",
+    "docs_pages_dir",
     "studio_dir",
     "studio_workspaces_dir",
     "bundled_artifacts_dir",

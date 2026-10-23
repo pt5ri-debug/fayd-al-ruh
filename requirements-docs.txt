@@ -1,0 +1,24 @@
+# Optional: Doc's Studio's in-process vision-language model (the [docs] extra).
+#
+# Install with:  python -m pip install -r requirements-docs.txt
+#
+# This pulls ``llama-cpp-python``, which runs a GGUF vision-language model locally
+# inside this process -- no ``ollama serve`` daemon has to sit in the background
+# holding RAM -- and ``huggingface_hub``, used only to fetch the weights. On a
+# machine with no prebuilt wheel, ``llama-cpp-python`` compiles from source and
+# needs a C/C++ compiler.
+#
+# ``pypdfium2`` renders a PDF page to an image in memory (no external poppler),
+# so a scanned page can be handed to the vision model. ``Pillow`` is what
+# pypdfium2 uses to produce that bitmap. Both are the *same* packages the
+# optional [ocr] extra uses, so a machine that already has OCR needs nothing new.
+#
+# The model weights are a *separate* one-time, human-approved download:
+#     python -m cli docs download --approve
+# or drop a `.gguf` file and its `mmproj-*.gguf` into the data/docs folder. The
+# base install needs none of this; the import is lazy and the app reports clearly
+# when it is absent.
+llama-cpp-python>=0.3
+huggingface_hub>=0.23
+pypdfium2>=4.0
+Pillow>=10.0
