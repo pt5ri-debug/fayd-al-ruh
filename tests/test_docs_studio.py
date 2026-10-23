@@ -11,6 +11,8 @@ renderer, ``pypdfium2``) skip honestly rather than pretending.
 from __future__ import annotations
 
 import json
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -37,6 +39,7 @@ from core.docs_studio import (
     LoadedDocument,
     batch_pages,
     build_vision_messages,
+    file_uri,
     load_document,
     parse_page_range,
     select_pages,
@@ -276,6 +279,27 @@ def test_build_vision_messages_carries_text_and_images(tmp_path: Path) -> None:
     assert "image_url" in kinds
     urls = [part["image_url"]["url"] for part in parts if part["type"] == "image_url"]
     assert urls and all(url.startswith("file://") for url in urls)
+    # The URL must be one urllib can actually open on every OS -- the bug was a
+    # Windows drive path landing in the URI authority, so ``urlopen`` looked for
+    # the empty path and failed with WinError 3.
+    assert urllib.request.urlopen(urls[0]).read() == b"\x89PNG"
+
+
+def test_file_uri_keeps_the_path_out_of_the_authority(tmp_path: Path) -> None:
+    image = tmp_path / "page 1.png"  # a space must be percent-encoded
+    image.write_bytes(b"\x89PNG")
+    uri = file_uri(image)
+    split = urllib.parse.urlsplit(uri)
+    assert split.scheme == "file"
+    assert split.netloc == ""  # never the path (the Windows failure)
+    assert split.path.startswith("/") and "page%201.png" in split.path
+    assert urllib.request.urlopen(uri).read() == b"\x89PNG"
+
+
+def test_file_uri_is_the_path_as_uri(tmp_path: Path) -> None:
+    image = tmp_path / "page.png"
+    image.write_bytes(b"x")
+    assert file_uri(image) == image.resolve().as_uri()
 
 
 def test_build_vision_messages_states_when_there_is_no_text_layer() -> None:
