@@ -16,7 +16,6 @@ evidence-aware" property the architecture is built around.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -26,54 +25,39 @@ from core.memory import CognitiveMemory
 from core.ontology import Ontology
 from core.ontology_retrieval import OntologyGuidedRetriever
 from core.semantic_memory import SemanticMemoryIndex, hashed_embedding
+from core.tokenize import content_terms as _query_terms
+from core.tokenize import tokenize as _tokens
 
 _WEIGHT_LEXICAL = 0.7
 _WEIGHT_SEMANTIC = 0.1
 _WEIGHT_ONTOLOGY = 0.2
+# The learned semantic space replaces the hash-based signal *in the same slot* and
+# at the same weight. Raising its weight was tried and reverted: the distributional
+# prior is a real improvement to *ranking* (a paraphrase with no shared word can now
+# be found), but it is a prior about relatedness, not evidence that the corpus
+# actually answers the question. Giving it more weight inflated every in-domain
+# score past the weak-evidence threshold, so the assistant stopped consulting the
+# web for the questions it should -- the calibrated scale is what keeps that gate
+# meaningful, so the signal improves without moving the scale.
 # The bulk corpus is BM25-calibrated, so its scores are rescaled before they are
 # mixed with the internal (coverage-based) scores. Without a real index the bulk
 # retriever's coverage scores are on the same scale as lexical ones and used as is.
 _BULK_FUSION_WEIGHT = 0.6
-_TOKEN_RE = re.compile(r"\w+", flags=re.UNICODE)
-_DIACRITICS_RE = re.compile(r"[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed]")
-_STOPWORDS = frozenset(
-    {
-        # English (primary)
-        "a", "an", "the", "what", "how", "is", "are", "of", "to", "in", "on",
-        "for", "and", "or", "with", "between", "does", "do", "why", "when",
-        "which", "that", "this", "these", "those", "it", "its", "as", "by",
-        "from", "at", "be", "can", "will", "would", "should", "there", "their",
-        "about", "into", "than", "then", "not", "no", "yes", "if", "so", "such",
-        # Arabic (retained so bilingual aliases still normalise cleanly)
-        "ما", "ماذا", "كيف", "هل", "من", "في", "على", "إلى", "عن", "هو", "هي",
-        "التي", "الذي", "و", "أو", "علاقة", "بين", "مع", "ثم", "قد", "لا", "إن",
-        "هذا", "هذه", "ذلك", "تلك", "أي", "كل", "بعض",
-    }
-)
-_ALEF = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ى": "ي", "ة": "ه", "ؤ": "و", "ئ": "ي"})
-_PREFIXES = ("وال", "بال", "فال", "كال", "ال", "و", "ب", "ل", "ك", "ف")
 
 
-def _normalize(token: str) -> str:
-    """Light Arabic normalisation: strip diacritics, unify letters, drop affixes."""
-    value = _DIACRITICS_RE.sub("", token).replace("ـ", "").translate(_ALEF).casefold()
-    changed = True
-    while changed and len(value) > 3:
-        changed = False
-        for prefix in _PREFIXES:
-            if value.startswith(prefix) and len(value) - len(prefix) >= 3:
-                value = value[len(prefix):]
-                changed = True
-                break
-    return value
+def _load_embeddings():
+    """Load the project's learned semantic space, or ``None`` if it cannot be built.
 
+    Lazy and total: a caller that has never trained a space still gets a working
+    retriever (the hashed signal backs it), and a broken cache file degrades to
+    the same fallback rather than failing a query.
+    """
+    try:
+        from core.embeddings import semantic_space
 
-def _tokens(text: str) -> set[str]:
-    return {_normalize(token) for token in _TOKEN_RE.findall(text)}
-
-
-def _query_terms(text: str) -> set[str]:
-    return _tokens(text) - _STOPWORDS
+        return semantic_space()
+    except Exception:  # pragma: no cover - a defensive fallback, never the happy path
+        return None
 
 
 def _coverage(query: set[str], document: set[str]) -> float:
@@ -180,7 +164,14 @@ class BulkCorpusRetriever:
 
 
 class RagRetriever:
-    """Rank documents for a query by fusing lexical, semantic, and ontology scores."""
+    """Rank documents for a query by fusing lexical, semantic, and ontology scores.
+
+    The semantic signal is the project's **learned** distributional space
+    (:mod:`core.embeddings`) when one is available -- so a query about "flow
+    through rock" can reach a passage about permeability even with no shared
+    word -- and the older hashed fingerprint otherwise. The learned space is
+    loaded lazily and cached, so a caller that never needs it never pays for it.
+    """
 
     def __init__(
         self,
@@ -190,6 +181,7 @@ class RagRetriever:
         memory: CognitiveMemory | None = None,
         dimensions: int = 128,
         bulk: BulkCorpusRetriever | None = None,
+        embeddings: bool = True,
     ) -> None:
         self.documents = documents
         self.ontology = ontology
@@ -202,6 +194,30 @@ class RagRetriever:
         self._retriever = (
             OntologyGuidedRetriever(ontology) if ontology is not None else None
         )
+        self._embeddings = _load_embeddings() if embeddings else None
+
+    @property
+    def embeddings_available(self) -> bool:
+        """Whether the learned semantic space is backing this retriever."""
+        return self._embeddings is not None
+
+    def _semantic_scores(self, query: str, texts: dict[str, str]) -> dict[str, float]:
+        """The semantic score of every document: learned cosine, else hashed.
+
+        The learned space places a whole document by the *mean* of its known term
+        vectors, so two passages about the same thing score alike even when they
+        share no word. The hashed index is the fallback and its scores are used
+        unchanged.
+        """
+        if self._embeddings is None:
+            return {
+                match.item_id: max(0.0, match.score)
+                for match in self._index.search(query, limit=max(4, len(texts)))
+            }
+        return {
+            doc_id: max(0.0, self._embeddings.similarity(query, text))
+            for doc_id, text in texts.items()
+        }
 
     def index_document(self, document: Document) -> None:
         # Idempotent: re-indexing a document already in the store refreshes its
@@ -232,10 +248,7 @@ class RagRetriever:
 
         texts = {document.doc_id: f"{document.title} {document.text}" for document in self.documents.documents()}
         query_terms = _query_terms(query)
-        semantic = {
-            match.item_id: max(0.0, match.score)
-            for match in self._index.search(query, limit=max(limit * 4, len(texts)))
-        }
+        semantic = self._semantic_scores(query, texts)
         ontology: dict[str, float] = {}
         if self._retriever is not None:
             ontology = {

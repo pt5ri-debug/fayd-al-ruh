@@ -10,6 +10,7 @@ from core.belief_revision import BeliefRevisionEngine
 from core.causal_link import CausalLink
 from core.cognitive_controller import CognitiveController
 from core.curriculum_knowledge import curriculum_coverage_score
+from core.embeddings import evaluate_held_out
 from core.evidence import Evidence
 from core.goal import Goal
 from core.observation import Observation
@@ -80,6 +81,7 @@ class EvaluationMetrics:
     curriculum_coverage: float
     # Analogy: held-out judgements of which concept pairs are structurally alike
     analogy_accuracy: float
+    semantic_separation: float
     # Aggregate
     overall: float
 
@@ -731,6 +733,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # including negative controls, so a permissive engine cannot pass.
     analogy_value = analogy_accuracy(ontology=CognitiveController().ontology)
 
+    # Semantic space: does the *learned* distributional space place related terms
+    # closer than unrelated ones, on relations removed from its training text? A
+    # memorising space scores near zero here, so the gate cannot be satisfied by
+    # the hash-based signal it replaced.
+    semantic_report = evaluate_held_out()[1]
+    semantic_separation = semantic_report.separation
+
     petroleum_score = mean([
         petroleum_causal,
         petroleum_retrieval,
@@ -765,6 +774,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         acceptance_gate,
         curriculum_coverage_value,
         analogy_value,
+        clamp(semantic_separation),
     ])
 
     metrics = EvaluationMetrics(
@@ -793,6 +803,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         acceptance_gate_accuracy=round(acceptance_gate, 6),
         curriculum_coverage=round(curriculum_coverage_value, 6),
         analogy_accuracy=round(analogy_value, 6),
+        semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )
 

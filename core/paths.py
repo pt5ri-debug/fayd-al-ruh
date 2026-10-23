@@ -74,6 +74,17 @@ def checkpoints_dir() -> Path:
     return data_dir() / "ml" / "llm" / "checkpoints"
 
 
+def semantic_space_path() -> Path:
+    """Where the trained distributional semantic space is cached.
+
+    The space is learned from the project's own corpus (see
+    :mod:`core.embeddings`) and is deterministic, so it is written once under the
+    git-ignored data folder and reloaded on the next run rather than rebuilt.
+    ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "ml" / "semantic_space.json"
+
+
 def models_dir() -> Path:
     """Where optional learned models (e.g. a diffusion checkpoint) are cached.
 

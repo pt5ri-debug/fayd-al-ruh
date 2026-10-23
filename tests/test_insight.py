@@ -129,7 +129,12 @@ def test_format_answer_ends_with_sources_block() -> None:
     answer = insight.ask("What is porosity?", use_model=False)
     text = insight.format_answer(answer)
     assert "Sources:" in text
-    assert text.rstrip().endswith(")")
+    # The block is appended after the answer, so the text ends with the last
+    # citation. Asserting a literal ")" made the test depend on which document
+    # happened to rank last -- a citation whose title has no parenthesis (a
+    # course name) broke it even though the block was correct.
+    assert answer.citations
+    assert text.rstrip().endswith(answer.citations[-1].strip())
 
 
 def test_main_report_prints_both_sections(monkeypatch, capsys, tmp_path) -> None:
