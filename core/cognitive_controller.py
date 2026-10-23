@@ -69,6 +69,12 @@ from core.provenance import ProvenanceLedger, ProvenanceRecord, ProvenanceStage
 from core.question_generator import QuestionGenerator
 from core.reasoning_engine import ReasoningEngine
 from core.reasoning_trace import ReasoningTrace
+from core.relation_extraction import (
+    ChunkSource,
+    RelationExtraction,
+    RelationExtractor,
+    extract_from_store,
+)
 from core.retention_policy import RetentionPolicy
 from core.safe_learning import LearningSandbox
 from core.self_learning import SelfLearning, SelfLearningReport
@@ -167,6 +173,7 @@ class CognitiveController:
         self.ontology_learner = OntologyLearner(self.ontology)
         self.analogy_engine = AnalogyEngine(self.ontology)
         self.semantic_parser = SemanticParser()
+        self.relation_extractor = RelationExtractor(self.ontology, self.ontology_learner)
         self.meaning_model = MeaningModel()
         self.language_reasoner = LanguageReasoner()
         self.metacognition = Metacognition()
@@ -497,6 +504,61 @@ class CognitiveController:
             self.ontology_retriever.invalidate()
         return learning
 
+    def extract_relations(self, text: str) -> RelationExtraction:
+        """Read typed candidate relations out of ``text`` without changing the graph.
+
+        The extractor matches the sentence's own verb phrases onto the ontology's
+        relation types (see :mod:`core.relation_extraction`), so a reader gets
+        *which* concepts are related and *how*, not only that they co-occur. This
+        is a read-only preview: :meth:`learn_extracted_relations` is what writes.
+        """
+        return self.relation_extractor.extract(text)
+
+    def learn_extracted_relations(self, text: str) -> OntologyLearning:
+        """Extract typed relations from ``text`` and fold them into the ontology.
+
+        Each candidate joins the graph through :class:`OntologyLearner`, so it is
+        bounded by the learner's ceiling and can never override a seeded relation,
+        and both endpoints must already be concepts. The retriever cache is
+        invalidated when anything changed, so later recall sees the new links.
+        """
+        learning = self.relation_extractor.apply(text)
+        if learning.changed:
+            self.ontology_retriever.invalidate()
+        return learning
+
+    def learn_extracted_relations_from_store(self, store: ChunkSource, *, limit: int | None = None) -> OntologyLearning:
+        """Read typed relations from a knowledge store and fold them into the graph.
+
+        Streams the store one chunk at a time (see
+        :func:`core.relation_extraction.extract_from_store`), so a large ingested
+        corpus is read without materialising it, and every relation still passes
+        through the learner's ceiling and the known-concept rule.
+        """
+        extraction = extract_from_store(store, self.relation_extractor, limit=limit)
+        added: list[tuple[str, str, str]] = []
+        reinforced: list[tuple[str, str, float]] = []
+        for relation in extraction.relations:
+            learning = self.ontology_learner.observe_relation(
+                relation.source, relation.target, relation.relation_type, relation.confidence
+            )
+            added.extend(learning.added)
+            reinforced.extend(learning.reinforced)
+        if added or reinforced:
+            self.ontology_retriever.invalidate()
+        return OntologyLearning(
+            concepts=tuple(
+                dict.fromkeys(
+                    name
+                    for relation in extraction.relations
+                    for name in (relation.source, relation.target)
+                )
+            ),
+            added=tuple(added),
+            reinforced=tuple(reinforced),
+            skipped=extraction.unmatched,
+        )
+
     def decay_ontology_learning(self, amount: float | None = None) -> OntologyDecay:
         """Weaken learned ontology relations through disuse, dropping any that fade out.
 
@@ -532,7 +594,7 @@ class CognitiveController:
             return None
         source_id, relation_type, target_id = recall.linked_relation
         relation = self.ontology_learner.relation_by_triple(source_id, relation_type, target_id)
-        if relation is None or relation.relation_type != self.ontology_learner.relation_type:
+        if relation is None or not self.ontology_learner.is_learned(relation.id):
             return None
         feedback = self.ontology_learner.apply_feedback(relation.id, useful=useful, amount=amount)
         self.ontology_retriever.invalidate()

@@ -360,6 +360,11 @@ def run_embeddings(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.embeddings", argv)
 
 
+def run_relations(argv: Sequence[str] = ()) -> int:
+    """Read typed relations out of text and fold them into the ontology."""
+    return _run_module("cli.relations", argv)
+
+
 def run_deps(argv: Sequence[str] = ()) -> int:
     """Show or install the optional PDF/OCR features (``python -m cli deps``)."""
     return _run_module("cli.deps", argv)
@@ -491,6 +496,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Scene Studio: render the built-in figure to a PNG", run_scene3d, ("render",)),
     ("Reason by analogy: what a concept is structurally like", run_analogy, ("like", "porosity")),
     ("Semantic space: what a word is used with (learned, local)", run_embeddings, ("status",)),
+    ("Extract typed relations from text (preview, then learn)", run_relations, ("read", "Porosity increases permeability.")),
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~4 GB)", run_image, ("download", "--approve")),
     ("Install optional PDF/OCR/image support", run_deps, ()),
@@ -648,6 +654,7 @@ __all__ = [
     "run_ml",
     "run_petroleum",
     "run_presentation",
+    "run_relations",
     "run_release",
     "run_scene3d",
     "run_selfcheck",

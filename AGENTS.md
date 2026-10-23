@@ -86,6 +86,21 @@ Arabic is kept as secondary aliases where useful.
     systematicity. `ANALOGY_JUDGEMENTS`/`analogy_accuracy` are the held-out gate
     (external, with negative controls), wired into `evaluation` as the
     `analogy_accuracy` metric. CLI: `python -m cli analogy …`.
+- `core/relation_extraction.py` — the typed-relation reader (Phase 22). It
+  matches a sentence's own verb phrase onto the ontology's relation types
+  (`is_a`, `measures`, `causes`, `increases`, `reduces`, `contains`,
+  `depends_on`, `affects`) in both voices, so a text the project has not seeded
+  can teach *how* two concepts relate, not merely that they co-occur. A pattern
+  matcher, not a parser: it refuses rather than guesses (each side must resolve
+  to exactly one known concept; the object's head must be the noun the verb
+  governs and must end its phrase), and every candidate keeps its pattern and
+  sentence. `RelationExtraction`/`ExtractedRelation`/`EXTRACTABLE_RELATIONS`,
+  `merge_extractions`, and `extract_from_store` (streams a
+  `KnowledgeBaseStore` through the duck-typed `ChunkSource`). Writing goes
+  through `OntologyLearner.observe_relation`, so it is bounded by the ceiling and
+  never overrides a seeded relation. `CognitiveController.extract_relations` /
+  `learn_extracted_relations` / `learn_extracted_relations_from_store` are the
+  wiring; CLI: `python -m cli relations read|learn|scan|types`.
 - `ml/` — learning. `ml/petroleum.py` trains the Q-policy + predictive brain on
   the discipline tasks in `core/petroleum_tasks.py`. `ml/release.py` trains every
   layer (base pipeline, petroleum tasks, language model) and writes
@@ -2636,6 +2651,50 @@ clone, each optional so the base system still runs without it:
   `tests/test_embeddings_cli.py` pin the counts, the PPMI, the factorisation, the
   held-out split, the honest tiny-corpus limit, the retriever wiring and its
   fallback, and the CLI.
+
+- Phase 22 — **typed relations read from text**, not just co-occurrence: until
+  now a text the project had not seeded could only teach the graph that two
+  concepts were *associated* (`OntologyLearner.observe` records an untyped
+  `associated_with` link between any pair of known concepts in a sentence), so it
+  could never learn *how* they relate. `core/relation_extraction.py` reads the
+  relation itself: `RelationExtractor` matches a sentence's own verb phrase
+  against a pattern table (`_PATTERNS`) mapping to the ontology's real relation
+  types -- `is_a`, `measures`, `causes`, `increases`, `reduces`, `contains`,
+  `depends_on`, `affects` (`EXTRACTABLE_RELATIONS`) -- in both voices, so "the
+  density log measures porosity" and "porosity is measured by the density log"
+  both read as `density_log --measures--> porosity` (a passive pattern swaps its
+  endpoints, so direction is never lost). **Honest by construction**: it is a
+  pattern matcher, not a parser, and it refuses rather than guesses -- each side
+  must resolve to *exactly one* known concept (an unknown noun, or a side naming
+  two concepts, yields nothing); the object's head is the noun the verb governs,
+  so a concept inside a prepositional phrase ("a blowout **in the reservoir**") is
+  not read as the object; the head must *end* its phrase, so a modifier ("well" in
+  "well control") is not mistaken for the head noun; and every candidate carries
+  the pattern and the sentence that produced it (`ExtractedRelation.pattern` /
+  `.sentence`). `read`/`extract` never touches the graph;
+  `apply`/`learn_extracted_relations` is the writing path and folds each
+  candidate through `OntologyLearner.observe_relation`, so a typed relation is
+  bounded by the learner's ceiling and can never override a seeded one, both
+  endpoints must already be concepts, and an identical typed relation is
+  reinforced rather than duplicated. The learner's explicit-relation guard is now
+  id-based (`_has_explicit` ignores relations the learner itself created), so an
+  untyped association and a typed relation coexist and a typed link can be
+  reinforced by a later sentence. `merge_extractions` de-duplicates identical
+  triples across chunks, and `extract_from_store` streams a whole
+  `core.knowledge_base.KnowledgeBaseStore` one chunk at a time (duck-typed through
+  the `ChunkSource` protocol, so the extractor does not import the store), so an
+  ingested corpus can teach the graph -- `python -m cli relations read|learn|scan|
+  types` (`cli/relations.py`, the headless twin; the menu carries *Extract typed
+  relations from text (preview, then learn)*). `learn`/`scan` preview by default
+  and write only with `--write`. `tests/test_relation_extraction.py` and
+  `tests/test_relations_cli.py` pin the active and passive directions, the
+  refusals, the head-noun rule, the ceiling, the seeded-relation guard, the
+  reinforcement, the merge, the store stream, and the CLI. `EXTRACTION_JUDGEMENTS`
+  is the held-out gate -- hand-written sentences *with negative controls*, scored
+  by `extraction_accuracy` (a judgement counts only when the extractor reads
+  exactly the expected triples, so an over-firing reader fails as surely as one
+  that misses), wired into `evaluation` as the `relation_extraction_accuracy`
+  metric.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
