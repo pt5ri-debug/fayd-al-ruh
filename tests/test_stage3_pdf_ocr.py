@@ -578,6 +578,72 @@ def test_ocr_install_plan_uses_brew_on_macos(monkeypatch):
     assert plan.command == ("brew", "install", "tesseract", "tesseract-lang")
 
 
+def test_ocr_install_plan_fetches_the_requested_language_data(monkeypatch):
+    """The command installs the engine *and* the language data in one run."""
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        pdf_ocr.shutil, "which", lambda name: "/usr/bin/apt-get" if name == "apt-get" else None
+    )
+    plan = pdf_ocr.ocr_install_plan(("ara",))
+    assert plan.command == ("sudo", "apt-get", "install", "-y", "tesseract-ocr", "tesseract-ocr-ara")
+    assert plan.languages == ("ara",)
+    # The default is English + Arabic, so a bare plan already carries Arabic data.
+    default_plan = pdf_ocr.ocr_install_plan()
+    assert "tesseract-ocr-eng" in default_plan.command
+    assert "tesseract-ocr-ara" in default_plan.command
+
+
+def test_ocr_package_names_per_manager_include_the_language_data():
+    from core import pdf_ocr
+
+    assert pdf_ocr.ocr_package_names("debian", ("ara", "eng")) == (
+        "tesseract-ocr",
+        "tesseract-ocr-ara",
+        "tesseract-ocr-eng",
+    )
+    assert pdf_ocr.ocr_package_names("fedora", ("ara",)) == ("tesseract", "tesseract-langpack-ara")
+    assert pdf_ocr.ocr_package_names("arch", ("ara",)) == ("tesseract", "tesseract-data-ara")
+    # macOS bundles every model in one formula; Windows bundles them in the installer.
+    assert pdf_ocr.ocr_package_names("macos", ("ara",)) == ("tesseract", "tesseract-lang")
+    assert pdf_ocr.ocr_package_names("windows", ("ara",)) == ("UB-Mannheim.TesseractOCR",)
+
+
+def test_parse_ocr_languages_accepts_plus_comma_and_sequences():
+    from core import pdf_ocr
+
+    assert pdf_ocr.parse_ocr_languages("ara+eng") == ("ara", "eng")
+    assert pdf_ocr.parse_ocr_languages("ara, eng") == ("ara", "eng")
+    assert pdf_ocr.parse_ocr_languages(["ara", "eng"]) == ("ara", "eng")
+    assert pdf_ocr.parse_ocr_languages("") == ("eng", "ara")  # the install default
+    assert pdf_ocr.parse_ocr_languages("", default=("eng",)) == ("eng",)
+
+
+def test_missing_ocr_languages_reports_when_the_engine_is_absent(monkeypatch):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr, "tesseract_available", lambda: False)
+    assert pdf_ocr.missing_ocr_languages(("ara", "eng")) == ("ara", "eng")
+
+
+def test_missing_ocr_languages_asks_the_engine(monkeypatch):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr, "tesseract_available", lambda: True)
+
+    class _Engine:
+        def __init__(self, **_kwargs):
+            pass
+
+        def available_languages(self):
+            return ("eng",)
+
+    monkeypatch.setattr(pdf_ocr, "TesseractOcrEngine", _Engine)
+    assert pdf_ocr.missing_ocr_languages(("ara", "eng")) == ("ara",)
+    assert pdf_ocr.missing_ocr_languages(("eng",)) == ()
+
+
 def test_install_ocr_engine_runs_the_plan_with_an_injected_runner(monkeypatch):
     from core import pdf_ocr
 
@@ -592,6 +658,7 @@ def test_install_ocr_engine_runs_the_plan_with_an_injected_runner(monkeypatch):
     monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
     monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: state["installed"])
     monkeypatch.setattr(pdf_ocr, "tesseract_available", lambda: state["installed"])
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_languages", lambda codes=None: ())
     seen = []
 
     def runner(argv):
@@ -605,6 +672,7 @@ def test_install_ocr_engine_runs_the_plan_with_an_injected_runner(monkeypatch):
     ]
     assert result.ok is True
     assert result.returncode == 0
+    assert "eng" in result.message and "ara" in result.message
 
 
 def test_install_ocr_engine_reports_a_failed_command(monkeypatch):
@@ -617,6 +685,7 @@ def test_install_ocr_engine_reports_a_failed_command(monkeypatch):
     monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
     monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
     monkeypatch.setattr(pdf_ocr, "tesseract_available", lambda: False)
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_languages", lambda codes=None: ("eng", "ara"))
     result = pdf_ocr.install_ocr_engine(runner=lambda argv: (100, "no permission"))
     assert result.ok is False
     assert result.returncode == 100
@@ -628,10 +697,43 @@ def test_install_ocr_engine_says_so_when_already_installed(monkeypatch):
 
     monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
     monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: True)
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_languages", lambda codes=None: ())
     result = pdf_ocr.install_ocr_engine(runner=lambda argv: (0, ""))
     assert result.ok is True
     assert result.ran is False
     assert "already installed" in result.message
+
+
+def test_install_ocr_engine_fetches_missing_language_data(monkeypatch):
+    """The engine is present but Arabic is not: the same run installs the data."""
+    from core import pdf_ocr
+
+    monkeypatch.setattr(pdf_ocr.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        pdf_ocr.shutil, "which", lambda name: "/usr/bin/apt-get" if name == "apt-get" else None
+    )
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: True)
+    monkeypatch.setattr(pdf_ocr, "tesseract_available", lambda: True)
+    state = {"ara": False}
+    monkeypatch.setattr(
+        pdf_ocr,
+        "missing_ocr_languages",
+        lambda codes=None: () if state["ara"] else ("ara",),
+    )
+    seen = []
+
+    def runner(argv):
+        seen.append(tuple(argv))
+        state["ara"] = True
+        return 0, "ok"
+
+    result = pdf_ocr.install_ocr_engine(runner=runner, languages=("ara", "eng"))
+    assert seen == [
+        ("sudo", "apt-get", "install", "-y", "tesseract-ocr", "tesseract-ocr-ara", "tesseract-ocr-eng")
+    ]
+    assert result.ok is True
+    assert result.languages == ("ara", "eng")
 
 
 def test_install_ocr_engine_asks_for_the_python_packages_first(monkeypatch):

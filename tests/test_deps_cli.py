@@ -228,3 +228,76 @@ def test_deps_report_names_the_engine_step_when_only_the_engine_is_missing(monke
     out = capsys.readouterr().out
     assert code == 1
     assert "run apt" in out
+
+
+def test_deps_install_ocr_fetches_the_requested_languages(monkeypatch, capsys):
+    """`--ocr-languages ara` reaches the engine install as the language data."""
+    from core import pdf_ocr
+
+    monkeypatch.setattr(optional_deps, "is_available", lambda key: False)
+    monkeypatch.setattr(
+        optional_deps,
+        "install",
+        lambda key, *, progress=None: optional_deps.InstallResult(
+            key=key, ok=True, message="OCR support installed."
+        ),
+    )
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
+    seen = {}
+
+    def fake_install(*, runner=None, languages=None):
+        seen["languages"] = pdf_ocr.parse_ocr_languages(languages)
+        return pdf_ocr.OcrInstallResult(ok=True, message="Installed the Tesseract OCR engine.")
+
+    monkeypatch.setattr(pdf_ocr, "install_ocr_engine", fake_install)
+    code = deps_cli.main(["--install", "ocr", "--ocr-languages", "ara+eng"])
+    assert code == 0
+    assert seen["languages"] == ("ara", "eng")
+
+
+def test_deps_install_ocr_defaults_to_english_and_arabic(monkeypatch, capsys):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(optional_deps, "is_available", lambda key: False)
+    monkeypatch.setattr(
+        optional_deps,
+        "install",
+        lambda key, *, progress=None: optional_deps.InstallResult(
+            key=key, ok=True, message="OCR support installed."
+        ),
+    )
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: False)
+    seen = {}
+
+    def fake_install(*, runner=None, languages=None):
+        seen["languages"] = pdf_ocr.parse_ocr_languages(languages)
+        return pdf_ocr.OcrInstallResult(ok=True, message="Installed the Tesseract OCR engine.")
+
+    monkeypatch.setattr(pdf_ocr, "install_ocr_engine", fake_install)
+    assert deps_cli.main(["--install", "ocr"]) == 0
+    assert seen["languages"] == ("eng", "ara")
+
+
+def test_deps_install_ocr_skips_when_engine_and_languages_are_present(monkeypatch, capsys):
+    from core import pdf_ocr
+
+    monkeypatch.setattr(optional_deps, "is_available", lambda key: False)
+    monkeypatch.setattr(
+        optional_deps,
+        "install",
+        lambda key, *, progress=None: optional_deps.InstallResult(
+            key=key, ok=True, message="OCR support installed."
+        ),
+    )
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_python_packages", lambda: ())
+    monkeypatch.setattr(pdf_ocr, "ocr_available", lambda: True)
+    monkeypatch.setattr(pdf_ocr, "missing_ocr_languages", lambda codes=None: ())
+    called = []
+    monkeypatch.setattr(
+        pdf_ocr, "install_ocr_engine", lambda **kwargs: called.append(True) or pdf_ocr.OcrInstallResult(ok=True)
+    )
+    assert deps_cli.main(["--install", "ocr"]) == 0
+    assert called == []
+    assert "already installed" in capsys.readouterr().out.lower()
