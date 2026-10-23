@@ -22,6 +22,14 @@ Arabic is kept as secondary aliases where useful.
   skips silently, so a GUI regression would pass CI unnoticed; the test job
   installs Xvfb and the `package` job builds the wheel and smoke-tests the
   console script, so a packaging break fails the build instead of shipping.
+  Turning the display on exposed a real latent crash: a window test destroys its
+  `tk.Tk()`, and if the garbage collector later reaps that dead interpreter on a
+  *worker thread* (the next window test's background job) Tk refuses to free it
+  off its creating thread -- a hard abort on 3.12 (gh-83274).
+  `tests/conftest.py` reaps a dead root on the main thread right after the test
+  that built it (gated on a `tk.Tk` actually having been constructed, so a
+  headless or non-GUI run pays nothing), and `tests/test_tk_thread_safety.py`
+  pins both the hazard and the remedy.
 - `ruff` selects `E4/E7/E9/F/W/I/UP/B/C4/RUF` (not only `F`), with four
   documented ignores in `pyproject.toml`: `E501` (the 100-column convention),
   `UP042` (`str` + `Enum` is a genuine string enum; `StrEnum` would change
