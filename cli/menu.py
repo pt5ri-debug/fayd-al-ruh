@@ -340,6 +340,11 @@ def run_image(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.image", argv)
 
 
+def run_docs(argv: Sequence[str] = ()) -> int:
+    """Read any document -- including scanned PDFs -- with the local vision model."""
+    return _run_module("cli.docs", argv)
+
+
 def run_deps(argv: Sequence[str] = ()) -> int:
     """Show or install the optional PDF/OCR features (``python -m cli deps``)."""
     return _run_module("cli.deps", argv)
@@ -461,6 +466,12 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Import files and folders (Knowledge Import Center)", run_import_center, ("interactive",)),
     ("Code Studio: edit and merge the project's own code", run_code_studio, ("status",)),
     ("Presentation Studio: build a PowerPoint deck from a discussion", run_presentation, ("list",)),
+    ("Doc's Studio: read any document (incl. scanned) with the local vision model", run_docs, ("status",)),
+    (
+        "Doc's Studio: download the local vision model (~3.4 GB)",
+        run_docs,
+        ("download", "--approve"),
+    ),
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~4 GB)", run_image, ("download", "--approve")),
     ("Install optional PDF/OCR/image support", run_deps, ()),
@@ -612,6 +623,7 @@ __all__ = [
     "run_update",
     "run_import_center",
     "run_presentation",
+    "run_docs",
     "run_deps",
     "run_demo",
     "run_ml",

@@ -119,6 +119,20 @@ qwen-tts = [
 # install needs none of this, and the import is lazy.
 piper = ["piper-tts>=1.2"]
 
+# Doc's Studio is a separate optional extra: its own local vision-language model
+# (Qwen3-VL) loaded in-process through llama-cpp-python, so it can read any
+# document -- including scanned PDFs and images -- with no server and nothing sent
+# off the machine. pypdfium2/Pillow rasterise a scanned page to an image for the
+# model (the same packages the [ocr] extra uses). The weights are a separate
+# one-time, human-approved download. Never required by the base install, and the
+# imports are lazy.
+docs = [
+    "llama-cpp-python>=0.3",
+    "huggingface_hub>=0.23",
+    "pypdfium2>=4.0",
+    "Pillow>=10.0",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

@@ -37,6 +37,7 @@ from core.speech import (
 )
 from core.voices import ModelVoice, SystemVoice, Voice, model_voices, voice_keys, voice_sections
 from gui.attachments import Attachment, AttachmentNotice, attach_document, remove_documents
+from gui.docs_studio import DocsStudioService
 from gui.import_center import ImportReport, KnowledgeImporter
 from gui.image_edit import ImageEditService
 from gui.image_gen import ImageGenerationService
@@ -244,6 +245,13 @@ class ChatService:
         self._presentation_author: Any = None
         self._presentation_author_loaded = False
         self._presentation_model_root: Path | None = None
+        # Doc's Studio: read any document -- including a scanned PDF or an image --
+        # with its own local vision model (a Qwen3-VL GGUF loaded in-process), then
+        # ask about it. It borrows *this* session's assistant for the grounded path
+        # (see ``docs_assistant_answer``), so no second AI is introduced.
+        # ``None`` means the model folder is the default ``data/docs``.
+        self._docs_model_root: Path | None = None
+        self._docs = DocsStudioService(model_root=self._docs_model_root)
         # The text-to-speech reader: it reads the chat's own text aloud with a
         # chosen catalog voice (core/voices.py). It is always available; when no
         # speech engine is installed it reports honestly instead of pretending.
@@ -690,6 +698,23 @@ class ChatService:
     def presentation(self) -> PresentationService:
         """The Presentation Studio engine (the same service the CLI drives)."""
         return self._presentation
+
+    @property
+    def docs(self) -> DocsStudioService:
+        """Doc's Studio engine (the same service the CLI's ``docs`` command drives)."""
+        return self._docs
+
+    def docs_assistant_answer(self, question: str) -> str:
+        """Answer one Doc's Studio question with *this* session's assistant.
+
+        The Studio must never stand up a second AI: for the *grounded* path it
+        borrows the conversation's own loop (``self.mode``), so a document can also
+        be discussed with the same assistant, knowledge base, and citations the chat
+        window uses. Its *own* vision model is a separate, clearly-labelled reading.
+        Speech is suppressed -- the Studio reads text.
+        """
+        turn = self.mode.handle(question, require_wake=False, speak=False)
+        return turn.answer_text or turn.response
 
     def _presentation_ask(self, question: str) -> str:
         """Answer one Presentation Studio question with *this* session's assistant.

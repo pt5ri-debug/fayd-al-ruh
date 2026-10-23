@@ -56,6 +56,7 @@ FEATURE_QWEN_ASR = "qwen-asr"
 FEATURE_QWEN_TTS = "qwen-tts"
 FEATURE_PIPER = "piper"
 FEATURE_AUDIOCPP = "audio.cpp"
+FEATURE_DOCS = "docs"
 
 
 @dataclass(frozen=True)
@@ -279,6 +280,23 @@ FEATURES: dict[str, OptionalFeature] = {
             "run `python -m cli audio download --approve` (~1.3 GB)."
         ),
         system_missing_note="the audio.cpp engine or its model file is not present yet.",
+    ),
+    FEATURE_DOCS: OptionalFeature(
+        key=FEATURE_DOCS,
+        title="Doc's Studio vision model (in-process)",
+        summary=(
+            "Read any document -- including scanned PDFs and images -- with a local "
+            "Qwen3-VL model that runs in this process, with no Ollama server running."
+        ),
+        requirements_file="requirements-docs.txt",
+        import_names=("llama_cpp", "huggingface_hub"),
+        system_note=(
+            "The model weights are a separate one-time, human-approved download: run "
+            "`python -m cli docs download --approve` (~3.4 GB: the Q4 weights plus "
+            "the vision projector), or drop a `.gguf` file and its `mmproj-*.gguf` "
+            "into the data/docs folder."
+        ),
+        system_missing_note="no `.gguf` vision model file is present yet.",
     ),
 }
 
@@ -616,7 +634,9 @@ def install(
 
 
 __all__ = [
+    "FEATURE_AUDIOCPP",
     "FEATURE_BANNER",
+    "FEATURE_DOCS",
     "FEATURE_IMAGE",
     "FEATURE_NATASHA",
     "FEATURE_OCR",
