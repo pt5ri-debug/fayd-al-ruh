@@ -8,7 +8,7 @@ external tool is allowed to run.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -30,7 +30,7 @@ class AuditRecord:
     actor: str = "agent"
     context_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    recorded_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    recorded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     id: str = field(default_factory=lambda: f"AUD-{uuid4().hex[:8]}")
 
     def to_dict(self) -> dict[str, Any]:

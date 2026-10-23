@@ -21,11 +21,11 @@ from __future__ import annotations
 
 import json
 import random
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
-from evaluation.scenarios import PredictionSpec, SCENARIOS
+from evaluation.scenarios import SCENARIOS, PredictionSpec
 
 
 def _clamp(value: float) -> float:
@@ -243,7 +243,7 @@ class InteractionRewardModel:
         return target
 
     @classmethod
-    def load(cls, path: str | Path) -> "InteractionRewardModel":
+    def load(cls, path: str | Path) -> InteractionRewardModel:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         model = cls(num_bins=int(data["num_bins"]), default_reward=float(data["default_reward"]))
         model.outcomes_recorded = int(data["outcomes_recorded"])

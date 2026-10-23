@@ -9,6 +9,7 @@ the two, so ``core`` never imports numpy and the ML stack never learns about
 from __future__ import annotations
 
 from core.action_policy import ActionPolicy
+
 from ml.dataset import FeatureHasher
 from ml.learner import QLearningAgent
 
@@ -45,7 +46,7 @@ class LearnedActionPolicy(ActionPolicy):
     @classmethod
     def from_task(
         cls, task, agent: QLearningAgent, hasher: FeatureHasher | None = None
-    ) -> "LearnedActionPolicy":
+    ) -> LearnedActionPolicy:
         return cls(agent, tuple(spec.name for spec in task.allowed_actions), hasher)
 
 

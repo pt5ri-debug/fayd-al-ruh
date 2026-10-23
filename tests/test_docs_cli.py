@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from cli import docs as docs_cli
 from cli import menu as cli_menu
 from core import optional_deps

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -17,7 +17,7 @@ class CausalLink:
     mechanism: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     id: str = field(default_factory=lambda: f"CL-{uuid4().hex[:8]}")
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     active: bool = True
 
     def __post_init__(self) -> None:

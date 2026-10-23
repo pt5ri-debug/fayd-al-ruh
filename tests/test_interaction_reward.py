@@ -1,7 +1,6 @@
 """Tests for reward learned from observed interaction outcomes."""
 
 import pytest
-
 from core.interaction_reward import (
     InteractionRewardModel,
     Outcome,

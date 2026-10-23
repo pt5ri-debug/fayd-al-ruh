@@ -14,7 +14,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from core.knowledge_base import KnowledgeBaseStore, iter_local_documents
 from core.knowledge_index import KnowledgeTextIndex, build_index
 from core.rag import BulkCorpusRetriever
@@ -33,8 +32,8 @@ from ingest.connectors.sqlite import (
     _render_cell,
     _translate,
 )
-from ingest.pipeline import IngestionPipeline, ingest_source, ledger_path
 from ingest.dedup import DedupLedger
+from ingest.pipeline import IngestionPipeline, ingest_source, ledger_path
 from ingest.records import SourceSpec
 
 
@@ -169,7 +168,7 @@ def test_read_only_connection_refuses_writes(tmp_path):
     connector = SqliteConnector()
     options = SqliteOptions()
     path = database.resolve()
-    with connector._connect(path, options) as connection:  # noqa: SLF001 - asserting the read-only contract
+    with connector._connect(path, options) as connection:
         with pytest.raises(sqlite3.OperationalError):
             connection.execute("DELETE FROM wells")
 
@@ -227,7 +226,7 @@ def test_arabic_and_english_text_is_preserved(tmp_path):
             "INSERT INTO notes VALUES (1, 'ضغط المسام drives oil flow')",
         ],
     )
-    record = list(SqliteConnector().stream(SourceSpec(f"sqlite://{database}")))[0]
+    record = next(iter(SqliteConnector().stream(SourceSpec(f"sqlite://{database}"))))
     assert "ضغط المسام drives oil flow" in record.text
 
 
@@ -240,7 +239,7 @@ def test_null_is_distinct_from_empty_text(tmp_path):
             "INSERT INTO t VALUES (2, '')",
         ],
     )
-    record = list(SqliteConnector().stream(SourceSpec(f"sqlite://{database}")))[0]
+    record = next(iter(SqliteConnector().stream(SourceSpec(f"sqlite://{database}"))))
     assert "note: NULL" in record.text
     assert "note: ''" in record.text
 
@@ -253,7 +252,7 @@ def test_numeric_and_datetime_values_keep_their_representation(tmp_path):
             "INSERT INTO t VALUES (1, 1.5, '2023-01-02T03:04:05', 7)",
         ],
     )
-    record = list(SqliteConnector().stream(SourceSpec(f"sqlite://{database}")))[0]
+    record = next(iter(SqliteConnector().stream(SourceSpec(f"sqlite://{database}"))))
     assert "amount: 1.5" in record.text
     assert "ts: 2023-01-02T03:04:05" in record.text
     assert "n: 7" in record.text
@@ -265,7 +264,7 @@ def test_blob_is_rendered_as_hex_not_decoded(tmp_path):
     connection.execute("INSERT INTO t VALUES (1, ?)", (b"\x00\xff",))
     connection.commit()
     connection.close()
-    record = list(SqliteConnector().stream(SourceSpec(f"sqlite://{database}")))[0]
+    record = next(iter(SqliteConnector().stream(SourceSpec(f"sqlite://{database}"))))
     assert "b: X'00ff'" in record.text
 
 
@@ -346,7 +345,7 @@ def test_excluded_columns_are_not_read_or_rendered(tmp_path):
 def test_include_columns_restricts_the_projection(tmp_path):
     database = _wells(tmp_path / "w.db")
     spec = SourceSpec(f"sqlite://{database}", options={"include_columns": "id, depth"})
-    record = list(SqliteConnector().stream(spec))[0]
+    record = next(iter(SqliteConnector().stream(spec)))
     assert record.metadata["columns"] == ["id", "depth"]
     assert "name" not in record.text
 
@@ -384,7 +383,7 @@ def test_identifiers_with_spaces_and_reserved_words_are_quoted(tmp_path):
     )
     schema = SqliteConnector().inspect(SourceSpec(f"sqlite://{database}"))[0]
     assert schema.name == "select"
-    record = list(SqliteConnector().stream(SourceSpec(f"sqlite://{database}")))[0]
+    record = next(iter(SqliteConnector().stream(SourceSpec(f"sqlite://{database}"))))
     assert "na me: value with space" in record.text
 
 
@@ -503,7 +502,7 @@ def test_import_failure_leaves_the_source_unchanged(tmp_path):
     bad = tmp_path / "bad.db"
     bad.write_text("not a database at all", encoding="utf-8")
     before = _digest(bad)
-    store, pipeline = _pipeline(tmp_path)
+    _store, pipeline = _pipeline(tmp_path)
     report = pipeline.ingest(SourceSpec(f"sqlite://{bad}"))
     assert report.failed == 1
     assert pipeline.errors
@@ -521,7 +520,7 @@ def test_locked_import_reports_failure_without_touching_the_source(tmp_path):
     writer.execute("BEGIN EXCLUSIVE")
     writer.execute("INSERT INTO t VALUES ('y')")
     try:
-        store, pipeline = _pipeline(tmp_path)
+        _store, pipeline = _pipeline(tmp_path)
         report = pipeline.ingest(SourceSpec(f"sqlite://{database}", options={"timeout": "0.3"}))
         assert report.failed == 1
     finally:

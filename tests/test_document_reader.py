@@ -6,7 +6,6 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
 from core.document_reader import (
     DocumentReadError,
     read_document,

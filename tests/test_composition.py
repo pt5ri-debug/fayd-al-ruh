@@ -8,7 +8,6 @@ external service, so its behaviour is pinned here directly.
 from __future__ import annotations
 
 import pytest
-
 from core.composition import (
     Source,
     causal_chain_sentence,

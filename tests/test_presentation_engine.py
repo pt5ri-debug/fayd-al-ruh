@@ -22,15 +22,14 @@ import zlib
 from pathlib import Path
 
 import pytest
-
 from core.presentation import (
+    ASPECT_4_3,
+    ASPECT_16_9,
     CONTENT_BULLETS,
     CONTENT_IMAGE,
     CONTENT_SECTION,
     CONTENT_TABLE,
     CONTENT_TITLE,
-    ASPECT_4_3,
-    ASPECT_16_9,
     Deck,
     PresentationError,
     PresentationSettings,
@@ -314,7 +313,6 @@ def test_speaker_notes_survive_saving_and_reopening(tmp_path: Path) -> None:
 @requires_pptx
 def test_a_16_by_9_deck_and_a_4_by_3_deck_have_the_right_geometry(tmp_path: Path) -> None:
     import pptx
-
     from core.pptx_engine import PptxEngine
 
     wide = PptxEngine().write(prepare_deck(_deck()), tmp_path / "wide.pptx")
@@ -332,7 +330,6 @@ def test_a_16_by_9_deck_and_a_4_by_3_deck_have_the_right_geometry(tmp_path: Path
 @requires_pptx
 def test_an_image_is_embedded_and_a_missing_one_is_skipped(tmp_path: Path) -> None:
     import pptx
-
     from core.pptx_engine import PptxEngine
 
     image = _png(tmp_path / "core.png")
@@ -360,7 +357,6 @@ def test_an_image_is_embedded_and_a_missing_one_is_skipped(tmp_path: Path) -> No
 @requires_pptx
 def test_a_numeric_table_becomes_a_chart(tmp_path: Path) -> None:
     import pptx
-
     from core.pptx_engine import PptxEngine
 
     deck = Deck(
@@ -385,7 +381,6 @@ def test_a_numeric_table_becomes_a_chart(tmp_path: Path) -> None:
 @requires_pptx
 def test_a_non_numeric_chart_slide_falls_back_to_a_table(tmp_path: Path) -> None:
     import pptx
-
     from core.pptx_engine import PptxEngine
 
     deck = Deck(
@@ -410,7 +405,6 @@ def test_a_non_numeric_chart_slide_falls_back_to_a_table(tmp_path: Path) -> None
 @requires_pptx
 def test_arabic_and_mixed_text_round_trip(tmp_path: Path) -> None:
     import pptx
-
     from core.pptx_engine import PptxEngine, validate_deck
 
     deck = Deck(
@@ -439,7 +433,6 @@ def test_arabic_and_mixed_text_round_trip(tmp_path: Path) -> None:
 @requires_pptx
 def test_slide_numbers_and_metadata_are_written(tmp_path: Path) -> None:
     import pptx
-
     from core.pptx_engine import PptxEngine
 
     settings = PresentationSettings(author="A. Author", company="SPE", footer="Fayd al-Ruh")

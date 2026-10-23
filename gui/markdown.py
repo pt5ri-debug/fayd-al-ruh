@@ -354,16 +354,16 @@ def _highlight_words(token: str) -> list[Segment]:
 
 __all__ = [
     "BULLET",
-    "Block",
     "CODE",
     "HEADING",
     "NUMBER",
     "PARAGRAPH",
     "QUOTE",
     "RULE",
+    "TABLE",
+    "Block",
     "Segment",
     "StyledLine",
-    "TABLE",
     "highlight_code",
     "iter_styled_lines",
     "parse_inline",

@@ -10,7 +10,6 @@ from __future__ import annotations
 import tkinter as tk
 
 import pytest
-
 from gui import rich_text
 from gui import typography as ty
 

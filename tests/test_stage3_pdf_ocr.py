@@ -21,7 +21,6 @@ from __future__ import annotations
 import time
 
 import pytest
-
 from core.document_reader import DocumentReadError, read_document
 from core.pdf_extract import pdf_available
 from core.pdf_ocr import (
@@ -41,6 +40,7 @@ from core.pdf_ocr import (
 from ingest.connectors.files import FileConnector
 from ingest.errors import ConnectorError
 from ingest.records import SourceSpec
+
 from tests.pdf_fixtures import image_page, latin_page, write_pdf
 
 pytestmark = pytest.mark.skipif(not pdf_available(), reason="pypdf (the [pdf] extra) is not installed")

@@ -33,6 +33,7 @@ from collections.abc import Callable
 from typing import Any
 
 from core.presentation_courses import CourseDetail, CourseMatch
+
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
 
@@ -243,7 +244,7 @@ class PresentationCourseDialog:
         try:
             detail = self.service.course_detail(self._project_id, self._course_key)
             matches = self.service.course_matches(self._project_id)
-        except Exception as error:  # noqa: BLE001 - a deleted project must not crash Tk
+        except Exception as error:
             self._add_note(f"Could not read the course: {error}", title="Problem")
             return
         self._detail = detail

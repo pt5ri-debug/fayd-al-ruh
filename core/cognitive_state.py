@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from core.belief import Belief
+from core.cognitive_trace import CognitiveTrace
 from core.hypothesis import Hypothesis
 from core.pattern_detector import Pattern
 from core.prediction import Prediction
 from core.prediction_error import PredictionError
-from core.cognitive_trace import CognitiveTrace
 
 
 @dataclass
@@ -85,7 +85,7 @@ class CognitiveState:
         trace: CognitiveTrace,
     ) -> None:
         self.traces[trace.id] = trace
-    
+
 
     @property
     def belief_count(self) -> int:

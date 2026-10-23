@@ -24,7 +24,6 @@ import tracemalloc
 from pathlib import Path
 
 import pytest
-
 from core.knowledge_base import KnowledgeBaseStore
 from gui.import_center import (
     SUPPORTED_SUFFIXES,
@@ -129,7 +128,7 @@ def test_metadata_records_path_hash_and_timestamp(tmp_path: Path) -> None:
     _importer(tmp_path).import_files([source])
 
     store = DocumentMetadataStore(metadata_path(tmp_path / "kb"))
-    doc_ids = store._store.list_keys("documents")  # noqa: SLF001
+    doc_ids = store._store.list_keys("documents")
     assert doc_ids, "expected at least one metadata record"
     meta = store.get(doc_ids[0])
     assert meta is not None
@@ -307,7 +306,7 @@ def test_large_batch_imports_with_bounded_memory(tmp_path: Path) -> None:
     tracemalloc.start()
     try:
         report = importer.import_folder(folder)
-        current, peak = tracemalloc.get_traced_memory()
+        _current, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
 
@@ -392,9 +391,9 @@ def _display_available() -> bool:
 def test_import_center_window_opens_from_the_plus_button(tmp_path: Path) -> None:
     import tkinter as tk
 
-    from tests.test_gui import FakeSession, _service
-
     from gui.app import FaydGUI
+
+    from tests.test_gui import FakeSession, _service
 
     root = tk.Tk()
     try:
@@ -532,7 +531,7 @@ class _FakeOcrEngine:
     def available_languages(self) -> tuple[str, ...]:
         return self._languages
 
-    def recognize_page(self, path, number, *, languages, config):  # noqa: ANN001
+    def recognize_page(self, path, number, *, languages, config):
         self.seen.append(number)
         return f"{self._text} {number}"
 

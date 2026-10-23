@@ -19,6 +19,7 @@ the two are drop-in compatible.
 
 from __future__ import annotations
 
+import itertools
 import json
 from collections import Counter
 from pathlib import Path
@@ -51,7 +52,7 @@ class BPETokenizer:
         *,
         vocab_size: int = 1024,
         min_frequency: int = 2,
-    ) -> "BPETokenizer":
+    ) -> BPETokenizer:
         """Learn byte merges until ``vocab_size`` is reached or no pair repeats."""
         if vocab_size < _BASE_VOCAB:
             raise ValueError(f"vocab_size must be at least {_BASE_VOCAB}.")
@@ -99,7 +100,7 @@ class BPETokenizer:
         )
 
     @classmethod
-    def load(cls, path) -> "BPETokenizer":
+    def load(cls, path) -> BPETokenizer:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         merges = [(int(left), int(right)) for left, right in data["merges"]]
         return cls(merges)
@@ -130,7 +131,7 @@ def _most_frequent_pair(
 ) -> tuple[int, int] | None:
     counts: Counter[tuple[int, int]] = Counter()
     for sequence in sequences:
-        counts.update(zip(sequence, sequence[1:]))
+        counts.update(itertools.pairwise(sequence))
     if not counts:
         return None
     pair, frequency = max(counts.items(), key=lambda item: (item[1], -item[0][0], -item[0][1]))

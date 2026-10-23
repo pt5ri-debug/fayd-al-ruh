@@ -31,14 +31,15 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from core.presentation import (
-    ASPECTS,
-    ASPECT_16_9,
     ASPECT_4_3,
+    ASPECT_16_9,
+    ASPECTS,
     CONTENT_BULLETS,
     CONTENT_EQUATION,
     CONTENT_IMAGE,
@@ -582,7 +583,7 @@ def prepare_slide(
     layout = classify_layout(slide)
     warnings: list[str] = []
     blocks: list[ContentBlock] = []
-    cx, cy = settings.size
+    _cx, _cy = settings.size
     body_cx, body_cy = _body_box(theme, settings.size, below_title=layout not in (LAYOUT_TITLE, LAYOUT_SECTION))
     rtl = settings.rtl
 
@@ -855,23 +856,19 @@ def unique_export_path(directory: str | Path, title: str, *, export_id: str = ""
 
 __all__ = [
     "ASPECTS",
-    "ASPECT_16_9",
     "ASPECT_4_3",
+    "ASPECT_16_9",
     "DEFAULT_ASPECT",
     "DEFAULT_THEME",
-    "DeckPlan",
-    "DeckTheme",
     "EMU_PER_INCH",
     "EMU_PER_POINT",
-    "FitEstimate",
-    "ImageCheck",
     "LAYOUTS",
-    "LAYOUT_LABELS",
     "LAYOUT_BULLETS",
     "LAYOUT_CHART",
     "LAYOUT_CONCLUSION",
     "LAYOUT_EQUATION",
     "LAYOUT_IMAGE",
+    "LAYOUT_LABELS",
     "LAYOUT_OBJECTIVES",
     "LAYOUT_PARAGRAPH",
     "LAYOUT_SECTION",
@@ -879,9 +876,13 @@ __all__ = [
     "LAYOUT_TABLE",
     "LAYOUT_TITLE",
     "LAYOUT_TWO_COLUMN",
-    "PresentationSettings",
     "THEMES",
     "ContentBlock",
+    "DeckPlan",
+    "DeckTheme",
+    "FitEstimate",
+    "ImageCheck",
+    "PresentationSettings",
     "SlidePlan",
     "classify_layout",
     "estimate_fit",

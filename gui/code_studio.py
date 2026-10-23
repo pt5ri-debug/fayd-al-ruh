@@ -27,17 +27,17 @@ from core.code_studio import (
     Workspace,
     default_check_command,
 )
+from core.coder_llama import (
+    BackendStatus,
+    LlamaCppCoderClient,
+    coder_backend_status,
+)
 from core.coder_model import (
     DEFAULT_CODER_MODEL,
     CoderClient,
     CoderStatus,
     CoderUnavailable,
     coder_status,
-)
-from core.coder_llama import (
-    BackendStatus,
-    LlamaCppCoderClient,
-    coder_backend_status,
 )
 
 

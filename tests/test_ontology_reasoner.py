@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from core.concept import Concept
 from core.domain_knowledge import seed_ontology
 from core.ontology import Ontology

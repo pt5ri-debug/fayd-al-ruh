@@ -502,7 +502,7 @@ class LlamaCppDocsClient:
             )
         except DocsModelUnavailable:
             raise
-        except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+        except Exception as error:
             raise DocsModelUnavailable(f"The in-process vision model failed: {error}") from error
 
 
@@ -676,7 +676,7 @@ def download_model(
         mmproj_path = huggingface_hub.hf_hub_download(
             repo_id=spec.repo, filename=spec.mmproj_filename, local_dir=str(directory)
         )
-    except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+    except Exception as error:
         raise DocsModelUnavailable(f"Could not download {spec.key!r}: {error}") from error
     _write_registry(
         directory, Path(model_path).name, Path(mmproj_path).name, spec.key

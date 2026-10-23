@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, fields
-from typing import Iterable
 
 
 def clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:

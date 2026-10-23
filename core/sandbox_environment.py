@@ -8,8 +8,8 @@ still purely symbolic: no external tool is executed here.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from core.action import Action
 from core.state import State

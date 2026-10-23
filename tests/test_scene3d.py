@@ -15,7 +15,6 @@ import zlib
 from pathlib import Path
 
 import pytest
-
 from core.scene3d import (
     Bone,
     Camera,
@@ -70,7 +69,6 @@ from core.scene3d_serialize import (
     scene_from_dict,
     scene_to_dict,
 )
-
 
 # ---------------------------------------------------------------------------
 # math
@@ -279,7 +277,7 @@ def test_a_pose_that_does_not_move_the_bone_leaves_the_vertices_in_place():
     before = figure.world_vertices()
     figure.set_pose("hand.L", vec3(0, 0, 0))
     after = figure.world_vertices()
-    assert all((a - b).length() < 1e-9 for a, b in zip(before, after))
+    assert all((a - b).length() < 1e-9 for a, b in zip(before, after, strict=False))
 
 
 def test_clear_pose_returns_a_figure_to_its_rest_shape():
@@ -287,7 +285,7 @@ def test_clear_pose_returns_a_figure_to_its_rest_shape():
     rest = figure.world_vertices()
     figure.set_pose("forearm.L", vec3(0, 0, -90))
     figure.clear_pose()
-    for actual, expected in zip(figure.world_vertices(), rest):
+    for actual, expected in zip(figure.world_vertices(), rest, strict=False):
         assert actual.to_tuple() == pytest.approx(expected.to_tuple())
 
 
@@ -464,7 +462,7 @@ def test_render_png_decodes_to_the_expected_pixel_count():
 def test_the_figure_covers_a_meaningful_share_of_the_frame():
     scene = build_figure_scene()
     buffer, _ = render_scene(scene, width=320, height=240)
-    background = tuple(int(round(c * 255)) for c in scene.background)
+    background = tuple(round(c * 255) for c in scene.background)
     drawn = sum(
         1
         for y in range(buffer.height)
@@ -485,7 +483,7 @@ def test_wireframe_marks_more_pixels_than_the_solid_render():
     scene = build_figure_scene()
     solid, _ = render_scene(scene, width=200, height=160, wireframe=False)
     wired, _ = render_scene(scene, width=200, height=160, wireframe=True)
-    background = tuple(int(round(c * 255)) for c in scene.background)
+    background = tuple(round(c * 255) for c in scene.background)
     solid_pixels = sum(
         1 for y in range(solid.height) for x in range(solid.width)
         if solid.get_pixel(x, y) != background
@@ -500,7 +498,7 @@ def test_wireframe_marks_more_pixels_than_the_solid_render():
 def test_a_hidden_object_is_not_drawn():
     scene = build_figure_scene()
     scene.objects[0].visible = False
-    buffer, stats = render_scene(scene, width=100, height=80)
+    _buffer, stats = render_scene(scene, width=100, height=80)
     assert stats.objects == 0
     assert stats.triangles_drawn == 0
 
@@ -680,7 +678,7 @@ def test_scene_round_trip_keeps_the_geometry_to_sub_micron_precision():
     restored = scene_from_dict(scene_to_dict(scene))
     delta = max(
         (a - b).length()
-        for a, b in zip(scene.objects[0].world_vertices(), restored.objects[0].world_vertices())
+        for a, b in zip(scene.objects[0].world_vertices(), restored.objects[0].world_vertices(), strict=False)
     )
     assert delta < 1e-5
 

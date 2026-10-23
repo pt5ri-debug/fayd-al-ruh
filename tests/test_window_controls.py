@@ -16,7 +16,6 @@ import tkinter as tk
 from typing import Any
 
 import pytest
-
 from gui.window_controls import (
     _CLOSE_GLYPH,
     _MAXIMIZE_GLYPH,

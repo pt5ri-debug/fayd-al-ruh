@@ -6,7 +6,6 @@ train tiny models on the fly so the suite stays fast.
 
 import numpy as np
 import pytest
-
 from ai.local_model import DEFAULT_CHECKPOINT, LocalLanguageModel
 from core.model_interface import ModelRequest
 from core.structured_output import MODEL_OUTPUT_SCHEMA, parse_structured_output
@@ -48,7 +47,7 @@ def test_gradients_match_numerical_estimates():
     params = model.parameters()
     rng = np.random.default_rng(0)
 
-    for param, grad in zip(params, grads):
+    for param, grad in zip(params, grads, strict=False):
         direction = rng.normal(size=param.shape)
         direction /= np.linalg.norm(direction)
         eps = 1e-5

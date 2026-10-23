@@ -35,9 +35,10 @@ Design rules, matching the rest of the project:
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from core.document_reader import DocumentReadError, DocumentText, read_document
 from core.paths import docs_pages_dir
@@ -645,10 +646,7 @@ def build_vision_messages(
 
 __all__ = [
     "DEFAULT_DPI",
-    "DocsStudioError",
-    "DocumentPage",
     "IMAGE_SUFFIXES",
-    "LoadedDocument",
     "MAX_PAGES_PER_REQUEST",
     "MAX_RENDERED_PAGES",
     "MAX_TEXT_CHARS",
@@ -658,6 +656,9 @@ __all__ = [
     "TRANSCRIBE_QUESTION",
     "UNSUPPORTED_SUFFIXES",
     "WORD_SUFFIXES",
+    "DocsStudioError",
+    "DocumentPage",
+    "LoadedDocument",
     "batch_pages",
     "build_vision_messages",
     "file_uri",

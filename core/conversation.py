@@ -23,10 +23,11 @@ the assistant layer composes it with retrieval and generation.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Iterable
+from typing import Any
 from uuid import uuid4
 
 from storage.json_store import JsonStore
@@ -50,7 +51,7 @@ class Message:
     role: Role
     text: str
     citations: tuple[str, ...] = ()
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     id: str = field(default_factory=lambda: f"MSG-{uuid4().hex[:8]}")
 
     def __post_init__(self) -> None:
@@ -67,7 +68,7 @@ class Message:
         }
 
     @classmethod
-    def from_primitive(cls, data: dict[str, Any]) -> "Message":
+    def from_primitive(cls, data: dict[str, Any]) -> Message:
         return cls(
             role=Role(data["role"]),
             text=str(data["text"]),
@@ -84,7 +85,7 @@ class Conversation:
     title: str = "Conversation"
     max_turns: int = 20
     id: str = field(default_factory=lambda: f"CNV-{uuid4().hex[:8]}")
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     _messages: list[Message] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -221,7 +222,7 @@ class Conversation:
         }
 
     @classmethod
-    def from_primitive(cls, data: dict[str, Any]) -> "Conversation":
+    def from_primitive(cls, data: dict[str, Any]) -> Conversation:
         conversation = cls(
             title=str(data["title"]),
             max_turns=int(data.get("max_turns", 20)),

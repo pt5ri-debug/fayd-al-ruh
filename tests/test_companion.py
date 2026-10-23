@@ -21,7 +21,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from companion.companion_agent import CompanionAgent, CompanionError
 from companion.config import CompanionConfig
 from companion.conversation_manager import ConversationManager
@@ -40,7 +39,8 @@ from companion.personality import (
     default_personality,
 )
 from companion.prompt_builder import PromptBuilder
-from companion.relationship_manager import KIND_FICTION, KIND_FACT as REL_FACT
+from companion.relationship_manager import KIND_FACT as REL_FACT
+from companion.relationship_manager import KIND_FICTION
 from core.coder_model import CoderMessage, CoderUnavailable
 
 
@@ -866,9 +866,8 @@ def test_natasha_mouth_switches_and_answers(monkeypatch) -> None:
 
 
 def test_natasha_mouth_ask_records_the_turn() -> None:
-    from companion.personality import NAME
-
     from ai import natasha_mouth
+    from companion.personality import NAME
 
     config = CompanionConfig(db_path=None, persistent=False)
     agent = CompanionAgent(config, caller=FakeCaller(["أهلاً"]))

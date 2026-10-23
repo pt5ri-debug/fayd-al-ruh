@@ -16,7 +16,6 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
-
 from core.presentation import (
     CONTENT_BULLETS,
     CONTENT_TABLE,
@@ -236,7 +235,7 @@ def test_reordering_changes_the_exported_order_not_the_identity(tmp_path: Path) 
 
     reloaded = service.get(project.project_id)
     assert {slide.slide_id for slide in reloaded.slides} == {s.slide_id for s in slides}
-    assert [slide.slide_id for slide in reloaded.approved_slides][0] == moved.slide_id
+    assert next(slide.slide_id for slide in reloaded.approved_slides) == moved.slide_id
 
 
 def test_removing_a_slide_renumbers_the_rest(tmp_path: Path) -> None:

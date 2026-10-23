@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from ai import mind
 from ai.local_model import LocalLanguageModel
 from ml.llm.tokenizer import ByteTokenizer

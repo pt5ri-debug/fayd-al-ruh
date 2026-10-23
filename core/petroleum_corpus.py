@@ -1706,7 +1706,7 @@ def corpus_coverage_score(ontology: Ontology) -> float:
     return present / expected
 
 
-def corpus_documents() -> list["Document"]:
+def corpus_documents() -> list[Document]:
     """Turn each corpus entry into a citable document."""
     from core.documents import Document
 

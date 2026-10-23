@@ -16,7 +16,7 @@ class KnowledgeState:
     unknown_count: int
 
     @classmethod
-    def capture(cls, state: CognitiveState, required_confidence: float = .8) -> "KnowledgeState":
+    def capture(cls, state: CognitiveState, required_confidence: float = .8) -> KnowledgeState:
         beliefs = list(state.beliefs.values())
         return cls(
             belief_count=len(beliefs),

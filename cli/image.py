@@ -37,9 +37,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from core.imagegen import DEFAULT_HEIGHT, DEFAULT_WIDTH, MAX_DIMENSION, image_backend_status
 from gui.image_edit import ImageEditService
 from gui.image_gen import ImageGenerationService
-from core.imagegen import DEFAULT_HEIGHT, DEFAULT_WIDTH, MAX_DIMENSION, image_backend_status
 
 
 def _add_backend_options(parser: argparse.ArgumentParser) -> None:
@@ -241,7 +241,7 @@ def run_edit(args: argparse.Namespace) -> int:
     )
     try:
         session = service.load(args.source)
-    except Exception as error:  # noqa: BLE001 - reported, never a traceback
+    except Exception as error:
         print(f"error: could not open {args.source}: {error}")
         return 1
     report = service.apply(

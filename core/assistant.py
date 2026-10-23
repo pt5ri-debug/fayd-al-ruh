@@ -210,7 +210,7 @@ class GroundedAssistant:
         request = ModelRequest(
             inputs=(),
             system_instruction=self.system_instruction,
-            context=context + (conversation.render(),),
+            context=(*context, conversation.render()),
         )
         try:
             response = self.model.generate(request)  # type: ignore[union-attr]
@@ -303,7 +303,7 @@ def _extractive_answer(question: str, passages: list[RetrievedPassage]) -> str:
     return grounded_answer(question, sources)
 
 
-def _default_bulk_retriever() -> "BulkCorpusRetriever | None":
+def _default_bulk_retriever() -> BulkCorpusRetriever | None:
     """A streaming retriever over the built knowledge base, or ``None`` if absent."""
     from core.knowledge_base import default_knowledge_base_dir, iter_local_documents
     from core.knowledge_index import KnowledgeTextIndex
@@ -396,9 +396,9 @@ def build_default_assistant(
 
 
 __all__ = [
+    "SYSTEM_INSTRUCTION",
     "AssistantAnswer",
     "GroundedAssistant",
-    "SYSTEM_INSTRUCTION",
     "WebAugmentation",
     "build_default_assistant",
     "bulk_knowledge_available",

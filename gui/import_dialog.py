@@ -23,15 +23,15 @@ CLI never touches it.
 from __future__ import annotations
 
 import threading
+import tkinter as tk
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
+from tkinter import filedialog, ttk
 from typing import Any, Literal
 
-import tkinter as tk
-from tkinter import filedialog, ttk
-
 from core import optional_deps
+
 from gui.import_center import (
     SUPPORTED_SUFFIXES,
     UNSUPPORTED_SUFFIXES,
@@ -285,7 +285,7 @@ class ImportCenterDialog:
         )
         if not paths:
             return
-        self._start("Importing %d file(s)…" % len(paths),
+        self._start(f"Importing {len(paths)} file(s)…",
                     lambda progress: self.service.import_files(
                         paths, ocr=self._ocr_choice(), progress=progress))
 
@@ -373,7 +373,7 @@ class ImportCenterDialog:
         # The packages are present; the Tesseract engine is what is missing.
         self._start("Installing the Tesseract OCR engine…", self._install_ocr_engine_job)
 
-    def _install_ocr_job(self, progress: Any) -> "optional_deps.InstallResult":
+    def _install_ocr_job(self, progress: Any) -> optional_deps.InstallResult:
         from core.pdf_ocr import install_ocr_engine
 
         result = optional_deps.install(optional_deps.FEATURE_OCR, progress=progress)
@@ -391,7 +391,7 @@ class ImportCenterDialog:
             )
         return result
 
-    def _install_ocr_engine_job(self, progress: Any) -> "optional_deps.InstallResult":
+    def _install_ocr_engine_job(self, progress: Any) -> optional_deps.InstallResult:
         from core.pdf_ocr import install_ocr_engine
 
         engine = install_ocr_engine(languages=self._ocr_languages())
@@ -404,7 +404,7 @@ class ImportCenterDialog:
             message=engine.message,
         )
 
-    def _finish_install(self, result: "optional_deps.InstallResult") -> None:
+    def _finish_install(self, result: optional_deps.InstallResult) -> None:
         self._set_status(result.message, error=not result.ok)
         if result.ok and optional_deps.is_available(optional_deps.FEATURE_OCR):
             self._ocr_var.set(True)
@@ -446,7 +446,7 @@ class ImportCenterDialog:
             try:
                 report = job(self._progress_line)
                 self.window.after(0, partial(self._finish, report, None))
-            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            except Exception as error:
                 self.window.after(0, partial(self._finish, None, error))
 
         threading.Thread(target=run, daemon=True).start()
@@ -518,7 +518,7 @@ class ImportCenterDialog:
             child.destroy()
         try:
             jobs = self.service.import_jobs()
-        except Exception:  # noqa: BLE001 - a jobs read must not break the page
+        except Exception:
             jobs = []
         if not jobs:
             tk.Label(

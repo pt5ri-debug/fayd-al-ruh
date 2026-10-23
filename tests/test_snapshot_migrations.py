@@ -1,5 +1,4 @@
 import pytest
-
 from core.snapshot import SNAPSHOT_SCHEMA_VERSION, Snapshot
 from core.snapshot_migrations import (
     SnapshotVersionError,

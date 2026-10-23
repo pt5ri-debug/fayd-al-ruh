@@ -1,5 +1,4 @@
 import pytest
-
 from core.belief import Belief, BeliefStatus
 from core.evidence import Evidence
 
@@ -164,4 +163,4 @@ def test_empty_source_hypothesis_id_is_rejected():
             statement="The ball is moving.",
             confidence=0.85,
             source_hypothesis_id="",
-        )    
+        )

@@ -62,7 +62,7 @@ class Adam:
         if len(grads) != len(self.params):
             raise ValueError("Gradient count does not match parameter count.")
         self.state.t += 1
-        for i, (param, grad) in enumerate(zip(self.params, grads)):
+        for i, (param, grad) in enumerate(zip(self.params, grads, strict=False)):
             g = grad + self.weight_decay * param
             self.state.m[i] = self.beta1 * self.state.m[i] + (1 - self.beta1) * g
             self.state.v[i] = self.beta2 * self.state.v[i] + (1 - self.beta2) * (g * g)

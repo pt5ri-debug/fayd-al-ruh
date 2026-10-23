@@ -24,8 +24,9 @@ clearly asks to keep it.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 from uuid import uuid4
 
 from companion.database import CompanionDatabase, _utc_now
@@ -417,11 +418,11 @@ def _new_id(prefix: str) -> str:
 
 __all__ = [
     "DEFAULT_CONFIDENCE",
+    "KINDS",
     "KIND_COMPANION",
     "KIND_FACT",
     "KIND_PREFERENCE",
     "KIND_SUMMARY",
-    "KINDS",
     "Memory",
     "MemoryCandidate",
     "MemoryManager",

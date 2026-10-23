@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from math import exp
 
 from core.memory import CognitiveMemory, MemoryItem
@@ -38,7 +38,7 @@ class RetentionPolicy:
         item: MemoryItem,
         now: datetime | None = None,
     ) -> float:
-        current = now or datetime.now(timezone.utc)
+        current = now or datetime.now(UTC)
         age_hours = max(0.0, (current - item.created_at).total_seconds() / 3600)
         protection = 1 + item.access_count
         return round(item.importance * exp(-(self.decay_rate * age_hours) / protection), 6)
@@ -46,7 +46,7 @@ class RetentionPolicy:
     def expired(self, item: MemoryItem, now: datetime | None = None) -> bool:
         if item.item_type in self.protect_item_types:
             return False
-        current = now or datetime.now(timezone.utc)
+        current = now or datetime.now(UTC)
         age = current - item.created_at
         if age < timedelta(days=self.max_age_days):
             return False
@@ -62,7 +62,7 @@ class RetentionPolicy:
         First the expired (old and weak) items, then, if ``max_items`` is set,
         the weakest survivors needed to get back under capacity.
         """
-        current = now or datetime.now(timezone.utc)
+        current = now or datetime.now(UTC)
 
         def weakest_first(item: MemoryItem) -> tuple[float, datetime, str]:
             return (

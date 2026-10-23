@@ -25,9 +25,10 @@ needs neither the extra nor a model file. Nothing here executes model output.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 from core.coder_model import (
     DEFAULT_CODER_MODEL,
@@ -377,7 +378,7 @@ class LlamaCppCoderClient:
             )
         except CoderUnavailable:
             raise
-        except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+        except Exception as error:
             raise CoderModelUnavailable(f"The in-process coding model failed: {error}") from error
 
 
@@ -522,7 +523,7 @@ def download_model(
         path = huggingface_hub.hf_hub_download(
             repo_id=spec.repo, filename=spec.filename, local_dir=str(directory)
         )
-    except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+    except Exception as error:
         raise CoderModelUnavailable(f"Could not download {spec.key!r}: {error}") from error
     _write_registry(directory, Path(path).name, spec.key)
     if progress is not None:

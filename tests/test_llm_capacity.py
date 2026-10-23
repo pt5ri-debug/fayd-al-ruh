@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from ml.llm.corpus import build_corpus, corpus_units, procedural_sentences
 from ml.llm.evaluate import (
     aggregate,
@@ -45,7 +44,7 @@ def _grad_check(config: TransformerConfig, seed: int = 0) -> float:
     grads = model.backward(y)
     rng = np.random.default_rng(0)
     worst = 0.0
-    for param, grad in zip(model.parameters(), grads):
+    for param, grad in zip(model.parameters(), grads, strict=False):
         direction = rng.normal(size=param.shape)
         direction /= np.linalg.norm(direction)
         eps = 1e-5

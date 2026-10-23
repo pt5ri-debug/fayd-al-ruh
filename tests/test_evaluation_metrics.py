@@ -1,5 +1,4 @@
 import pytest
-
 from evaluation.metrics import (
     brier_summary,
     calibration_bins,

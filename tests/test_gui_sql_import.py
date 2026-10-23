@@ -21,7 +21,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from core.knowledge_base import KnowledgeBaseStore
 from gui.sql_import import (
     DATABASE_TYPES,
@@ -418,7 +417,7 @@ def test_import_center_opens_the_sql_screen(tmp_path: Path) -> None:
     class _Service:
         sql_import = SqlImportService(store_dir=tmp_path / "kb")
 
-        def import_jobs(self):  # noqa: ANN201 - the dialog only needs an iterable
+        def import_jobs(self):
             return ()
 
     root = tk.Tk()

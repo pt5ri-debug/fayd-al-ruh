@@ -176,4 +176,4 @@ class OntologyReasoner:
         return results
 
 
-__all__ = ["OntologyInference", "OntologyReasoner", "RelationRule", "RULES"]
+__all__ = ["RULES", "OntologyInference", "OntologyReasoner", "RelationRule"]

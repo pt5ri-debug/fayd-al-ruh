@@ -21,13 +21,13 @@ in the same safe, replayable environments the rest of the project already uses.
 from __future__ import annotations
 
 __all__ = [
+    "cognitive_brain",
     "dataset",
+    "interaction_learner",
+    "learner",
+    "llm",
+    "model_based_planner",
     "models",
     "trainer",
-    "learner",
-    "interaction_learner",
     "world_model",
-    "model_based_planner",
-    "llm",
-    "cognitive_brain",
 ]

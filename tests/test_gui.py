@@ -12,7 +12,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-
 from cli import menu as cli_menu
 from core.jarvis import JarvisMode, JarvisTurn
 from gui import actions as gui_actions
@@ -247,7 +246,7 @@ def test_service_marks_control_turns() -> None:
 
 
 def test_service_hints_when_sources_cannot_answer() -> None:
-    from ai.chat import MIND_HINT, _NO_SOURCE_MARKER
+    from ai.chat import _NO_SOURCE_MARKER, MIND_HINT
 
     turn = JarvisTurn(
         heard="q",
@@ -712,7 +711,7 @@ def test_window_theme_toggle_switches_palette_and_persists(tmp_path, monkeypatch
     import tkinter as tk
 
     from gui import app as app_module
-    from gui.app import DARK_THEME, FaydGUI, LIGHT_THEME
+    from gui.app import DARK_THEME, LIGHT_THEME, FaydGUI
 
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
     root = tk.Tk()
@@ -824,8 +823,8 @@ def test_window_attachment_failure_is_reported_not_raised(tmp_path) -> None:
 def test_window_shows_actions_and_saved_chats() -> None:
     import tkinter as tk
 
-    from gui.app import FaydGUI
     from gui.actions import visible_actions
+    from gui.app import FaydGUI
 
     session = FakeSession()
     session.saved_ids = ("CNV-alpha", "CNV-beta")

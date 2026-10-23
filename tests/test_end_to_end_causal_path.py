@@ -1,12 +1,12 @@
-from core.observation import Observation
-from core.memory import CognitiveMemory
-from core.pattern_detector import PatternDetector
+from core.belief import Belief, BeliefStatus
+from core.belief_updater import BeliefUpdater
 from core.hypothesis import Hypothesis
+from core.knowledge_graph import KnowledgeGraph
+from core.memory import CognitiveMemory
+from core.observation import Observation
+from core.pattern_detector import PatternDetector
 from core.prediction import Prediction
 from core.prediction_error import PredictionErrorCalculator
-from core.belief import Belief, BeliefStatus
-from core.knowledge_graph import KnowledgeGraph
-from core.belief_updater import BeliefUpdater
 
 
 def test_end_to_end_causal_path():

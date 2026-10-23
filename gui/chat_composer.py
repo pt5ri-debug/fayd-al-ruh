@@ -23,11 +23,10 @@ and :class:`gui.typography.Typography` it is handed.
 
 from __future__ import annotations
 
+import tkinter as tk
+import weakref
 from collections.abc import Callable
 from typing import Any
-import weakref
-
-import tkinter as tk
 
 from gui.typography import Typography, for_root
 
@@ -62,7 +61,7 @@ def _blend(base: str, other: str, amount: float) -> str:
         other_rgb = tuple(int(other[i:i + 2], 16) for i in (1, 3, 5))
     except ValueError:
         return base
-    mixed = tuple(round(b + (o - b) * amount) for b, o in zip(base_rgb, other_rgb))
+    mixed = tuple(round(b + (o - b) * amount) for b, o in zip(base_rgb, other_rgb, strict=False))
     return "#" + "".join(f"{channel:02X}" for channel in mixed)
 
 

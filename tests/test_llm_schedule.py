@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from ml.llm.__main__ import main, train_and_save
 from ml.llm.corpus import build_corpus, corpus_units
 from ml.llm.schedule import (
@@ -175,7 +174,7 @@ def test_a_resume_reaches_new_material_rather_than_replaying(tmp_path):
     # The two final models trained on different documents, so they must differ.
     assert any(
         not np.allclose(left, right)
-        for left, right in zip(_load_params(twice), _load_params(only_zero))
+        for left, right in zip(_load_params(twice), _load_params(only_zero), strict=False)
     )
 
 

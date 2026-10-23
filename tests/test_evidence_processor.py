@@ -1,8 +1,8 @@
-from core.observation import Observation
 from core.evidence_processor import (
-    EvidenceProcessor,
     EvidencePolarity,
+    EvidenceProcessor,
 )
+from core.observation import Observation
 
 
 def test_supporting_observation():

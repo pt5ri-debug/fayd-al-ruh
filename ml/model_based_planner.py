@@ -16,14 +16,14 @@ ever used to choose and to imagine; it never decides what success means.
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
-
 
 from core.action import Action
 from core.progress import ProgressCallback
 from core.sandbox_environment import SandboxEnvironment, SandboxTask
 from core.state import State
+
 from ml.dataset import FeatureHasher
 from ml.learner import QLearningAgent, state_tokens
 from ml.world_model import SymbolicWorldModel, explore_task
@@ -57,7 +57,7 @@ def plan_with_world_model(
         return PlanResult((), True, 0)
 
     actions = [spec.to_action() for spec in task.allowed_actions]
-    frontier: list[tuple[State, tuple[str, ...]]] = [(start, tuple())]
+    frontier: list[tuple[State, tuple[str, ...]]] = [(start, ())]
     seen = {start.facts}
     expanded = 0
     while frontier:

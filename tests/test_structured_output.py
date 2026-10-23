@@ -1,7 +1,6 @@
 import json
 
 import pytest
-
 from core.structured_output import (
     MODEL_OUTPUT_SCHEMA,
     StructuredOutputError,

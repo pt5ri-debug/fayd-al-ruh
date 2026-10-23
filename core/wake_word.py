@@ -44,7 +44,7 @@ class WakeWordDetector:
     def normalized_phrases(self) -> tuple[str, ...]:
         return tuple(_normalize(phrase) for phrase in self.phrases)
 
-    def detect(self, utterance: str) -> "WakeWordMatch":
+    def detect(self, utterance: str) -> WakeWordMatch:
         """Return the match for ``utterance`` (``woke`` is False when it does not).
 
         Longer phrases win, so "hey jarvis" is consumed whole rather than leaving
@@ -52,7 +52,7 @@ class WakeWordDetector:
         """
         normalized = _normalize(utterance)
         padded = f" {normalized} "
-        ordered = sorted(zip(self.phrases, self.normalized_phrases), key=lambda pair: len(pair[1]), reverse=True)
+        ordered = sorted(zip(self.phrases, self.normalized_phrases, strict=False), key=lambda pair: len(pair[1]), reverse=True)
         for phrase, normalized_phrase in ordered:
             if f" {normalized_phrase} " in padded:
                 remainder = padded.replace(f" {normalized_phrase} ", " ", 1).strip()

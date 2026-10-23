@@ -28,15 +28,16 @@ from __future__ import annotations
 
 import queue
 import threading
+import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
+from tkinter import filedialog, ttk
+from tkinter import font as tkfont
 from typing import Any, Literal
-
-import tkinter as tk
-from tkinter import filedialog, font as tkfont, ttk
 
 from core.docs_model import HEADER
 from core.docs_studio import SUPPORTED_SUFFIXES, DocsStudioError
+
 from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
@@ -587,7 +588,7 @@ class DocsDialog:
             try:
                 result = job()
                 self._results.put((finish, result, None))
-            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            except Exception as error:
                 self._results.put((finish, None, error))
 
         threading.Thread(target=run, daemon=True).start()
@@ -943,4 +944,4 @@ class DocsDialog:
             pass
 
 
-__all__ = ["DocsDialog", "HONESTY_LINE", "PREVIEW_FRACTION", "SUBTITLE", "TITLE"]
+__all__ = ["HONESTY_LINE", "PREVIEW_FRACTION", "SUBTITLE", "TITLE", "DocsDialog"]

@@ -12,7 +12,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from core.updater import (
     UpdateStatus,
     apply_update,

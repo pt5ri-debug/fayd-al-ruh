@@ -29,9 +29,10 @@ import json
 import os
 import shutil
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
-from typing import Sequence
 
 from core.paths import studio_workspaces_dir
 
@@ -125,7 +126,7 @@ class Workspace:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> "Workspace":
+    def from_dict(cls, data: dict[str, object]) -> Workspace:
         passed = data.get("checks_passed")
         return cls(
             slug=str(data["slug"]),
@@ -202,7 +203,7 @@ class MergeResult:
 _SERIAL_KEY = "__next_serial__"
 
 
-def _newest_first(workspace: "Workspace") -> tuple[str, int, str]:
+def _newest_first(workspace: Workspace) -> tuple[str, int, str]:
     """A sort key that orders workspaces newest first, deterministically.
 
     The timestamp has second resolution, so two workspaces made in the same second
@@ -818,9 +819,9 @@ class CodeStudio:
 
 
 def _now_iso() -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _tail(text: str, *, limit: int = 6000) -> str:

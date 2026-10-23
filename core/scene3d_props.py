@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from core.scene3d import Material, Mesh, SceneObject, Transform, Vec3
 
@@ -230,8 +230,8 @@ class PropSpec:
     title: str
     primitive: str
     material: str
-    translation: Vec3 = Vec3()
-    scale: Vec3 = Vec3(1.0, 1.0, 1.0)
+    translation: Vec3 = field(default_factory=Vec3)
+    scale: Vec3 = field(default_factory=lambda: Vec3(1.0, 1.0, 1.0))
     summary: str = ""
 
 

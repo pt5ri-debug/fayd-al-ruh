@@ -302,7 +302,6 @@ class RelationshipManager:
 
 __all__ = [
     "EVENT_KINDS",
-    "EventCandidate",
     "KIND_FACT",
     "KIND_FICTION",
     "KIND_INFERENCE",
@@ -310,6 +309,7 @@ __all__ = [
     "KIND_MILESTONE",
     "KIND_OCCASION",
     "KIND_PREFERENCE",
+    "EventCandidate",
     "RelationshipEvent",
     "RelationshipManager",
     "RelationshipSummary",

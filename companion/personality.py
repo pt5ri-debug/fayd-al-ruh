@@ -20,8 +20,9 @@ knowledge-graph beliefs: nothing here is added to the cognitive core.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Mapping
+from typing import Any
 
 from companion.database import CompanionDatabase
 
@@ -176,14 +177,14 @@ class PersonalitySettings:
         }
 
     @classmethod
-    def from_primitive(cls, data: Mapping[str, Any]) -> "PersonalitySettings":
+    def from_primitive(cls, data: Mapping[str, Any]) -> PersonalitySettings:
         """Rebuild settings, ignoring unknown keys and falling back to defaults."""
         base = cls()
         values = base.to_primitive()
         values.update({key: data[key] for key in values if key in data})
         return cls(**values)
 
-    def with_overrides(self, **overrides: Any) -> "PersonalitySettings":
+    def with_overrides(self, **overrides: Any) -> PersonalitySettings:
         return replace(self, **{k: v for k, v in overrides.items() if v is not None})
 
     # -- presentation -----------------------------------------------------
@@ -430,7 +431,7 @@ class NatashaPersonality:
     def describe(self) -> str:
         return f"{NAME} ({BLURB}) -- {self.settings.describe()}"
 
-    def with_settings(self, settings: PersonalitySettings) -> "NatashaPersonality":
+    def with_settings(self, settings: PersonalitySettings) -> NatashaPersonality:
         return NatashaPersonality(settings=settings)
 
 
@@ -494,9 +495,9 @@ __all__ = [
     "LANGUAGES",
     "LANGUAGE_MODES",
     "NAME",
+    "STYLE_RULES",
     "NatashaPersonality",
     "PersonalitySettings",
     "PersonalityStore",
-    "STYLE_RULES",
     "default_personality",
 ]

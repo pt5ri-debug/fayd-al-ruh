@@ -12,7 +12,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from core.code_agent import AgentError, AgentStep, CodingAgent, parse_action
 from core.code_studio import CodeStudio, StudioError
 from core.coder_model import (

@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from core.coder_model import CoderUnavailable
+from core.paths import presentation_models_dir
 from core.presentation_model import (
     CATALOG,
     DEFAULT_CONTEXT,
@@ -70,7 +71,6 @@ from core.presentation_model import (
     spec_names,
     spec_summaries,
 )
-from core.paths import presentation_models_dir
 
 #: The assistant's name, used in every label and status line.
 NAME = "Banner"
@@ -246,7 +246,7 @@ class BannerEngine:
             )
         except (BannerUnavailable, CoderUnavailable):
             raise
-        except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+        except Exception as error:
             raise BannerUnavailable(f"Banner could not answer: {error}") from error
         return str(result or "").strip()
 
@@ -292,8 +292,8 @@ __all__ = [
     "DEFAULT_MAX_TOKENS",
     "DEFAULT_SPEC_KEY",
     "DEFAULT_TEMPERATURE",
-    "DEFAULT_TOP_P",
     "DEFAULT_THREADS",
+    "DEFAULT_TOP_P",
     "HEADER",
     "MAX_CONTEXT",
     "MAX_TOKENS_CEILING",

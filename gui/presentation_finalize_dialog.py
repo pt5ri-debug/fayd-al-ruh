@@ -29,18 +29,18 @@ import queue
 import subprocess
 import sys
 import threading
+import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
-
-import tkinter as tk
 from tkinter import filedialog, simpledialog, ttk
+from typing import Any, Literal
 
 from core.presentation import (
     CONTENT_TYPES,
     PresentationError,
     theme_names,
 )
+
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
@@ -385,7 +385,7 @@ class PresentationFinalizeDialog:
             try:
                 result = job()
                 self._results.put((finish, result, None))
-            except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+            except Exception as error:
                 self._results.put((finish, None, error))
 
         threading.Thread(target=run, daemon=True).start()
@@ -548,7 +548,7 @@ class PresentationFinalizeDialog:
     def refresh(self, *, keep_note: bool = False) -> None:
         try:
             project = self.service.get(self._project_id)
-        except Exception as error:  # noqa: BLE001 - a deleted project must not crash the window
+        except Exception as error:
             self._report_error(error)
             return
         from core.presentation import STATE_LABELS
@@ -618,7 +618,7 @@ class PresentationFinalizeDialog:
     def _load_slide(self, slide_id: str) -> None:
         try:
             slide = self.service.get(self._project_id).slide(slide_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         self._selected_slide = slide_id
@@ -692,7 +692,7 @@ class PresentationFinalizeDialog:
             return
         try:
             slide = self.service.approve_slide(self._project_id, self._selected_slide)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         self._set_status(f"Approved slide {slide.number}.")
@@ -702,7 +702,7 @@ class PresentationFinalizeDialog:
     def _on_approve_all_slides(self) -> None:
         try:
             project = self.service.approve_slides(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             self._report_error(error)
             return
@@ -717,7 +717,7 @@ class PresentationFinalizeDialog:
             project = self.service.get(self._project_id)
             slide = project.slide(self._selected_slide)
             self.service.reorder_slide(self._project_id, self._selected_slide, slide.order + delta)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         self._set_status("Reordered the slide.")
@@ -729,7 +729,7 @@ class PresentationFinalizeDialog:
             return
         try:
             self.service.remove_slide(self._project_id, self._selected_slide)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         self._selected_slide = ""
@@ -742,14 +742,14 @@ class PresentationFinalizeDialog:
         """Append a blank slide the user then fills in and approves."""
         try:
             spec = _prompt_for_slide(self.window)
-        except Exception as error:  # noqa: BLE001 - a cancelled dialog is not an error
+        except Exception as error:
             self._report_error(error)
             return
         if spec is None:
             return
         try:
             slide = self.service.insert_slide(self._project_id, spec)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         self._set_status(f"Added slide {slide.number}; fill it in and approve it.")
@@ -762,7 +762,7 @@ class PresentationFinalizeDialog:
             return
         try:
             slide = self.service.get(self._project_id).slide(self._selected_slide)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         number = slide.number
@@ -790,7 +790,7 @@ class PresentationFinalizeDialog:
     def _apply_settings(self, **fields: Any) -> None:
         try:
             self.service.update_settings(self._project_id, **fields)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._set_status(str(error), error=True)
             return
         self._set_status("Updated the deck's look.")
@@ -810,7 +810,7 @@ class PresentationFinalizeDialog:
     def _on_validate(self) -> None:
         try:
             result = self.service.validate_project(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         lines = [result.summary()]
@@ -826,7 +826,7 @@ class PresentationFinalizeDialog:
     def _on_preview(self) -> None:
         try:
             deck = self.service.preview(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         lines = [f"**{deck.title}** — {len(deck.slides)} slide(s) will be written.", ""]
@@ -892,7 +892,7 @@ class PresentationFinalizeDialog:
     def _on_open_folder(self) -> None:
         try:
             project = self.service.get(self._project_id)
-        except Exception as error:  # noqa: BLE001 - shown, never crashes Tk
+        except Exception as error:
             self._report_error(error)
             return
         last = next((item for item in reversed(project.exports) if item.ok), None)
@@ -910,7 +910,7 @@ class PresentationFinalizeDialog:
                 subprocess.Popen(["explorer", str(directory)])
             else:
                 subprocess.Popen(["xdg-open", str(directory)])
-        except Exception as error:  # noqa: BLE001 - a missing desktop is not fatal
+        except Exception as error:
             self._set_status(f"Could not open {directory}: {error}", error=True)
 
     # -- lifecycle --------------------------------------------------------
@@ -919,7 +919,7 @@ class PresentationFinalizeDialog:
         self._closed = True
         try:
             self._canvas.unbind_all("<MouseWheel>")
-        except Exception:  # noqa: BLE001 - a torn-down canvas is fine
+        except Exception:
             pass
         if self._on_close is not None:
             self._on_close()
@@ -954,4 +954,4 @@ def _prompt_for_slide(parent: tk.Misc) -> Any:
     )
 
 
-__all__ = ["TITLE", "SUBTITLE", "PresentationFinalizeDialog"]
+__all__ = ["SUBTITLE", "TITLE", "PresentationFinalizeDialog"]

@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from cli import scene3d as cli
 
 

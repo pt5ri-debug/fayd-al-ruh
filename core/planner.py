@@ -23,7 +23,7 @@ class Planner:
             raise ValueError("Maximum depth cannot be negative.")
         if initial_state.satisfies(goal.desired_facts):
             return Plan((), initial_state)
-        queue: deque[tuple[State, tuple[Action, ...]]] = deque([(initial_state, tuple())])
+        queue: deque[tuple[State, tuple[Action, ...]]] = deque([(initial_state, ())])
         seen = {initial_state.facts}
         while queue:
             state, path = queue.popleft()
@@ -35,7 +35,7 @@ class Planner:
                 predicted = self.model.predict(state, action)
                 if predicted.facts in seen:
                     continue
-                next_path = path + (action,)
+                next_path = (*path, action)
                 if predicted.satisfies(goal.desired_facts):
                     return Plan(next_path, predicted)
                 seen.add(predicted.facts)

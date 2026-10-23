@@ -19,7 +19,6 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
 from core.document_reader import DocumentReadError, read_document
 from core.docx_extract import (
     DEFAULT_MAX_PART_BYTES,
@@ -35,6 +34,7 @@ from ingest.hashing import source_key
 from ingest.metadata import DocumentMetadataStore, metadata_path
 from ingest.pipeline import IngestionPipeline, ledger_path
 from ingest.records import SourceSpec
+
 from tests.docx_fixtures import (
     heading,
     latin_and_arabic_docx,
@@ -464,7 +464,7 @@ def test_pipeline_stores_docx_records_as_chunks(tmp_path):
 
 def test_pipeline_records_document_metadata_with_hash_and_timestamp(tmp_path):
     path = write_docx(tmp_path / "report.docx", paragraph("Stable document content."))
-    store, pipeline, meta = _pipeline(tmp_path)
+    _store, pipeline, meta = _pipeline(tmp_path)
     pipeline.ingest(SourceSpec(str(path)))
 
     # The connector keys a source item on its relative path, which is the path
@@ -506,7 +506,7 @@ def test_pipeline_dedupes_identical_docx_content(tmp_path):
 
 def test_pipeline_retries_then_records_a_broken_docx(tmp_path):
     path = write_garbage(tmp_path / "bad.docx")
-    store, pipeline, _ = _pipeline(tmp_path)
+    _store, pipeline, _ = _pipeline(tmp_path)
     pipeline.retries = 2
     report = pipeline.ingest(SourceSpec(str(path)))
 

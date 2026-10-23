@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from ingest.config import (
     ENV_PREFIX,
     IngestConfig,

@@ -45,8 +45,8 @@ from ingest.metadata import (
 from ingest.records import (
     Connector,
     ConnectorInfo,
-    IngestItem,
     IngestionReport,
+    IngestItem,
     ItemOutcome,
     SourceRecord,
     SourceSpec,

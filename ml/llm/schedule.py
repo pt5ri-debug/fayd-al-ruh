@@ -16,9 +16,9 @@ state, like the optimiser state: never committed, and rebuilt fresh when absent.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 
@@ -80,7 +80,7 @@ class ScheduleState:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> "ScheduleState":
+    def from_dict(cls, data: dict[str, object]) -> ScheduleState:
         count = data.get("count")
         seed = data.get("seed", 0)
         consumed = data.get("consumed", [])

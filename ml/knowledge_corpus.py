@@ -66,7 +66,7 @@ _GENERIC = frozenset(
         "natural", "general", "modern", "large", "small", "high", "low", "new",
         "measure", "measurement", "measurements", "value", "values", "rate",
         "pressure", "temperature", "volume", "flow", "force", "density", "mass",
-        "energy", "artificial", "national", "international", "american", "world",
+        "artificial", "national", "international", "american", "world",
         "human", "information", "management", "safety", "quality", "test", "tests",
     }
 )

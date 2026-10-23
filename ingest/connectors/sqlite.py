@@ -245,7 +245,7 @@ class SqliteOptions:
     """Upper bound on rows this read may return (0 = no bound)."""
 
     @classmethod
-    def from_spec(cls, spec: SourceSpec) -> "SqliteOptions":
+    def from_spec(cls, spec: SourceSpec) -> SqliteOptions:
         return cls(
             page=_as_int(spec.option("page", DEFAULT_PAGE), "page", 1, MAX_PAGE),
             row_group=_as_int(
@@ -273,7 +273,7 @@ class SqliteOptions:
             "max_rows": self.max_rows,
         }
 
-    def with_window(self, *, resume_row: int, max_rows: int) -> "SqliteOptions":
+    def with_window(self, *, resume_row: int, max_rows: int) -> SqliteOptions:
         """A copy that reads one bounded window of a table (for a resumable batch)."""
         return SqliteOptions(
             page=self.page,
@@ -286,7 +286,7 @@ class SqliteOptions:
         )
 
     @classmethod
-    def from_metadata(cls, metadata: Mapping[str, Any]) -> "SqliteOptions":
+    def from_metadata(cls, metadata: Mapping[str, Any]) -> SqliteOptions:
         """Rebuild the options (including the column policy) from item metadata.
 
         The exclusion policy must survive from ``plan`` to ``stream_item``, so a
@@ -688,7 +688,7 @@ def _schema_signature(
     declaration = "|".join(
         f"{c.name}:{c.declared_type}:{int(c.hidden)}:{c.primary_key}" for c in columns
     )
-    return hashlib.sha256(f"{create_sql}\x00{declaration}".encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(f"{create_sql}\x00{declaration}".encode()).hexdigest()[:16]
 
 
 def _columns(connection: sqlite3.Connection, table: str) -> tuple[ColumnInfo, ...]:

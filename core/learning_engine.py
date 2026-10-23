@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from core.belief import Belief
 from core.evidence import Evidence
 from core.evidence_evaluator import (
-    EvidenceEvaluator,
     EvaluationResult,
+    EvidenceEvaluator,
 )
 
 

@@ -11,8 +11,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from core.interaction_reward import (
     InteractionRewardModel,
@@ -21,6 +21,7 @@ from core.interaction_reward import (
 from core.progress import ProgressReporter
 from core.sandbox_tasks import HELD_OUT_TASKS, TASKS
 from core.state import State
+
 from ml.cognitive_brain import CognitiveBrain
 from ml.dataset import FeatureHasher, Transition, build_classification_dataset, train_val_split
 from ml.general_learning import train_relation_outcome

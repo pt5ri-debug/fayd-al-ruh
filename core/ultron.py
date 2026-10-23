@@ -509,7 +509,7 @@ def download_model(
         path = hub.hf_hub_download(
             repo_id=spec.repo, filename=spec.filename, local_dir=str(directory)
         )
-    except Exception as error:  # noqa: BLE001 - surfaced as an honest message
+    except Exception as error:
         raise UltronUnavailable(f"Could not download {spec.key!r}: {error}") from error
     _write_registry(directory, Path(path).name, spec.key)
     if progress is not None:
@@ -546,12 +546,12 @@ __all__ = [
     "DEFAULT_TOP_P",
     "DOWNLOAD_TOOL",
     "HEADER",
-    "LlamaCppRunner",
     "MAX_CONTEXT",
     "MAX_TOKENS_CEILING",
     "NAME",
     "REGISTRY_FILENAME",
     "SYSTEM_PROMPT",
+    "LlamaCppRunner",
     "UltronEngine",
     "UltronModelSpec",
     "UltronRunner",

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any
 from uuid import uuid4
 
 
@@ -26,11 +26,11 @@ class Entity:
         default_factory=lambda: f"E-{uuid4().hex[:8]}"
     )
 
-    properties: Dict[str, Any] = field(
+    properties: dict[str, Any] = field(
         default_factory=dict
     )
 
-    relations: List[str] = field(
+    relations: list[str] = field(
         default_factory=list
     )
 
@@ -38,16 +38,16 @@ class Entity:
 
     activation: float = 0.0
 
-    metadata: Dict[str, Any] = field(
+    metadata: dict[str, Any] = field(
         default_factory=dict
     )
 
     created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
 
     updated_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
 
     def __post_init__(self) -> None:
@@ -71,7 +71,7 @@ class Entity:
 
     def touch(self) -> None:
         self.updated_at = datetime.now(
-            timezone.utc
+            UTC
         )
 
     def set_property(
@@ -138,7 +138,7 @@ class Entity:
         self.activation = 0.0
         self.touch()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "type": self.entity_type.value,

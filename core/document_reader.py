@@ -223,7 +223,7 @@ def _read_text_streamed(path: Path, *, encoding: str | None = None) -> DocumentT
     return _assemble(paragraphs, path, "text", truncated=truncated, encoding=chosen)
 
 
-def _auto_ocr_config() -> "OcrConfig | None":
+def _auto_ocr_config() -> OcrConfig | None:
     """An OCR config for scanned pages, or ``None`` when OCR is not installed.
 
     Returns ``None`` (importing nothing heavy) when the optional ``[ocr]`` extra
@@ -249,8 +249,8 @@ def _read_pdf(
     *,
     ocr: OCREngine | None = None,
     allow_ocr: bool = True,
-    ocr_config: "OcrConfig | None" = None,
-    ocr_engine: "PageOcrEngine | None" = None,
+    ocr_config: OcrConfig | None = None,
+    ocr_engine: PageOcrEngine | None = None,
     password: str | None = None,
 ) -> DocumentText:
     """Extract text from a PDF, OCR-ing the low-text (scanned) pages.
@@ -431,8 +431,8 @@ def read_document(
     fold_arabic: bool = False,
     ocr: OCREngine | None = None,
     allow_ocr: bool = True,
-    ocr_config: "OcrConfig | None" = None,
-    ocr_engine: "PageOcrEngine | None" = None,
+    ocr_config: OcrConfig | None = None,
+    ocr_engine: PageOcrEngine | None = None,
     encoding: str | None = None,
     password: str | None = None,
 ) -> DocumentText:
@@ -519,16 +519,16 @@ def _normalized(document: DocumentText, *, fold_arabic: bool) -> DocumentText:
 
 
 __all__ = [
-    "DocumentReadError",
-    "DocumentText",
     "ENCODING_SAMPLE_BYTES",
     "LEGACY_EXTENSIONS",
     "MAX_TEXT_CHARS",
-    "NormalizationError",
-    "OCREngine",
     "OCR_EXTRA",
     "OPTIONAL_EXTENSIONS",
     "STREAM_THRESHOLD_BYTES",
     "SUPPORTED_EXTENSIONS",
+    "DocumentReadError",
+    "DocumentText",
+    "NormalizationError",
+    "OCREngine",
     "read_document",
 ]

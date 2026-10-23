@@ -18,13 +18,11 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-
 from ai import banner as banner_cli
 from ai import banner_mouth
 from ai.chat import MOUTH_BANNER, MOUTH_MODEL, MOUTH_SOURCES, MOUTH_ULTRON, MOUTH_VISION
 from cli import menu as cli_menu
-from core import optional_deps
-from core import presentation_model
+from core import optional_deps, presentation_model
 from core.banner import (
     CATALOG,
     DEFAULT_SPEC_KEY,
@@ -431,7 +429,7 @@ def test_banner_assistant_records_the_turn_and_carries_no_citations() -> None:
     assert HEADER in answer.text
     assert answer.citations == ()
     assert answer.used_model is True
-    assert [message.text for message in conversation.messages][0] == "an outline?"
+    assert next(message.text for message in conversation.messages) == "an outline?"
 
 
 def test_banner_assistant_passes_prior_turns_to_the_model() -> None:

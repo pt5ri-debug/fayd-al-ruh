@@ -47,7 +47,7 @@ class ImageBuffer:
         return header + body
 
     @classmethod
-    def from_ppm(cls, payload: bytes) -> "ImageBuffer":
+    def from_ppm(cls, payload: bytes) -> ImageBuffer:
         # Parse the ASCII header: magic, width, height, maxval, then raw bytes.
         fields: list[bytes] = []
         index = 0
@@ -83,11 +83,11 @@ class ImageBuffer:
         target.write_bytes(self.to_ppm())
 
     @classmethod
-    def read_ppm(cls, path) -> "ImageBuffer":
+    def read_ppm(cls, path) -> ImageBuffer:
         return cls.from_ppm(Path(path).read_bytes())
 
     @classmethod
-    def solid(cls, width: int, height: int, colour: RGB) -> "ImageBuffer":
+    def solid(cls, width: int, height: int, colour: RGB) -> ImageBuffer:
         return cls(width, height, tuple(colour for _ in range(width * height)))
 
 
@@ -226,12 +226,12 @@ class MultimodalAssistant:
 
 
 __all__ = [
+    "RGB",
     "HeuristicVisionEncoder",
     "ImageAnswer",
     "ImageBuffer",
     "ImageFeatures",
     "MultimodalAssistant",
-    "RGB",
     "VisionEncoder",
     "extract_features",
     "load_vision_encoder",

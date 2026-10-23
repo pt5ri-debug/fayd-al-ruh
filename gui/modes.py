@@ -29,10 +29,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from core.command_router import NaturalLanguageRouter, RouteKind, RoutedCommand
+from core.command_router import NaturalLanguageRouter, RoutedCommand, RouteKind
 
 #: The exact labels the task requires, and their one-line descriptions.
 AI_MODE = "AI Mode"
@@ -167,7 +167,7 @@ def group_by_date(
     *Older*. An item with no timestamp lands in *Older* rather than being dropped,
     so a store that lost a date never hides a conversation.
     """
-    reference = now or datetime.now(timezone.utc)
+    reference = now or datetime.now(UTC)
     buckets: dict[str, list[HistoryItem]] = {
         "Today": [],
         "Yesterday": [],
@@ -185,7 +185,7 @@ def _bucket_for(created_at: datetime | None, now: datetime) -> str:
     if created_at is None:
         return "Older"
     if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
+        created_at = created_at.replace(tzinfo=UTC)
     days = (now.date() - created_at.date()).days
     if days <= 0:
         return "Today"
@@ -214,13 +214,13 @@ def search_items(
 
 __all__ = [
     "AI_MODE",
-    "AnswerOnlyRouter",
     "DEFAULT_MODE_KEY",
-    "HistoryItem",
     "JARVICS_MODE",
-    "MODE_KEYS_BY_LABEL",
     "MODES",
     "MODES_BY_KEY",
+    "MODE_KEYS_BY_LABEL",
+    "AnswerOnlyRouter",
+    "HistoryItem",
     "ModeSpec",
     "group_by_date",
     "load_mode_key",

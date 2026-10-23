@@ -318,7 +318,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except DocsStudioError as error:
         print(f"Could not complete the request: {error}")
         return EXIT_DOCUMENT
-    except Exception as error:  # noqa: BLE001 - the last line of defence
+    except Exception as error:
         print(f"Unexpected failure: {error}")
         return EXIT_FAILURE
 

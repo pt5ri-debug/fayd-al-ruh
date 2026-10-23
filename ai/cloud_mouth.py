@@ -39,7 +39,11 @@ from collections.abc import Sequence
 from core.assistant import AssistantAnswer
 from core.cloud_model import (
     HEADER as CLOUD_HEADER,
+)
+from core.cloud_model import (
     NAME as CLOUD_NAME,
+)
+from core.cloud_model import (
     CloudEngine,
     CloudUnavailable,
     selected_model,

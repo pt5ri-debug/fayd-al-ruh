@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -48,7 +48,7 @@ class ProvenanceRecord:
     context_id: str | None = None
     evidence_ids: tuple[str, ...] = ()
     parent_ids: tuple[str, ...] = ()
-    recorded_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    recorded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     id: str = field(default_factory=lambda: f"PV-{uuid4().hex[:8]}")
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -74,7 +74,7 @@ class ProvenanceRecord:
         evidence_ids: tuple[str, ...] | list[str] = (),
         parent_ids: tuple[str, ...] | list[str] = (),
         metadata: dict[str, Any] | None = None,
-    ) -> "ProvenanceRecord":
+    ) -> ProvenanceRecord:
         """Build a record for any object exposing an ``id`` attribute."""
         entity_id = getattr(artifact, "id", None)
         if not isinstance(entity_id, str) or not entity_id.strip():
@@ -116,7 +116,7 @@ class ProvenanceRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ProvenanceRecord":
+    def from_dict(cls, data: dict[str, Any]) -> ProvenanceRecord:
         record = cls(
             entity_id=data["entity_id"],
             stage=ProvenanceStage(data["stage"]),
@@ -191,7 +191,7 @@ class ProvenanceLedger:
         }
 
     @classmethod
-    def restore(cls, data: dict[str, list[dict[str, Any]]]) -> "ProvenanceLedger":
+    def restore(cls, data: dict[str, list[dict[str, Any]]]) -> ProvenanceLedger:
         ledger = cls()
         for records in data.values():
             for item in records:

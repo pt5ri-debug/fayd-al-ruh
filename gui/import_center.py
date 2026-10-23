@@ -207,7 +207,7 @@ class KnowledgeImporter:
         overlap: int | None = None,
         retries: int = 2,
         allow_web: bool = False,
-        ocr_engine: "PageOcrEngine | None" = None,
+        ocr_engine: PageOcrEngine | None = None,
     ) -> None:
         self.store_dir = Path(store_dir) if store_dir is not None else default_knowledge_base_dir()
         self.recursive = recursive
@@ -243,7 +243,7 @@ class KnowledgeImporter:
         progress: ProgressCallback | None,
         job: JobState | None,
         jobs: JobStore | None,
-        on_item: "Callable[[ItemOutcome], None] | None" = None,
+        on_item: Callable[[ItemOutcome], None] | None = None,
     ) -> IngestionPipeline:
         kwargs: dict[str, object] = {
             "progress": progress,
@@ -456,7 +456,7 @@ class KnowledgeImporter:
             spec = SourceSpec(spec.uri, options={**spec.options, "root": root})
         try:
             connector = self._registry.resolve(spec)
-        except Exception as error:  # noqa: BLE001 - resolver errors are user-facing
+        except Exception as error:
             return ImportOutcome(source=spec.uri, ok=False, message=str(error))
         if connector is None:
             return ImportOutcome(source=spec.uri, ok=False, message="No connector can read this source.")
@@ -539,12 +539,12 @@ __all__ = [
     "DONE",
     "FAILED",
     "RUNNING",
+    "SUPPORTED_SUFFIXES",
+    "UNSUPPORTED_SUFFIXES",
     "ImportOutcome",
     "ImportReport",
     "JobState",
     "KnowledgeImporter",
-    "SUPPORTED_SUFFIXES",
-    "UNSUPPORTED_SUFFIXES",
     "default_store_dir",
     "import_root",
     "picker_filetypes",

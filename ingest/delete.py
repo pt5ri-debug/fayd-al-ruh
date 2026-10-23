@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core.knowledge_base import KnowledgeBaseStore
+
 from ingest.dedup import DedupLedger
 
 

@@ -30,8 +30,9 @@ from core.knowledge_base import (
     DEFAULT_OVERLAP,
     default_knowledge_base_dir,
 )
-from ingest.pipeline import DEFAULT_SHARD_BYTES
 from storage.json_store import JsonStore
+
+from ingest.pipeline import DEFAULT_SHARD_BYTES
 
 #: Environment prefix, mirroring ``core.paths.ENV_DATA_DIR`` ("FAYD_DATA_DIR").
 ENV_PREFIX = "FAYD_INGEST_"
@@ -120,7 +121,7 @@ class IngestConfig:
         return {field.name: getattr(self, field.name) for field in fields(self)}
 
     @classmethod
-    def from_primitive(cls, data: Mapping[str, object]) -> "IngestConfig":
+    def from_primitive(cls, data: Mapping[str, object]) -> IngestConfig:
         """Rebuild a config from stored data, ignoring unknown or invalid fields.
 
         A malformed stored value falls back to the built-in default for that

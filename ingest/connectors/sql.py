@@ -271,7 +271,7 @@ def _safe_identifier(name: str) -> str:
 
 
 def _render_row(columns: list[str], row: Any) -> str:
-    pairs = [f"{column}: {value}" for column, value in zip(columns, row) if value is not None]
+    pairs = [f"{column}: {value}" for column, value in zip(columns, row, strict=False) if value is not None]
     return "; ".join(pairs) or " ".join(str(item) for item in row)
 
 

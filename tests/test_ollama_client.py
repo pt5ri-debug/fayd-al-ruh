@@ -1,9 +1,7 @@
 import os
 
 import pytest
-
 from ai.ollama_client import OllamaClient
-
 
 pytestmark = pytest.mark.integration
 

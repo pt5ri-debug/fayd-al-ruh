@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import pytest
-
 from core.assistant import GroundedAssistant
 from core.conversation import Conversation, ConversationMemory, Message, Role
+from core.curriculum_knowledge import seed_curriculum
 from core.documents import Document, DocumentStore, build_document_store, build_knowledge_documents
+from core.domain_knowledge import seed_ontology
 from core.model_interface import ModelResponse
 from core.ontology import Ontology
-from core.domain_knowledge import seed_ontology
-from core.curriculum_knowledge import seed_curriculum
 from core.rag import RagRetriever, RetrievedPassage
 from storage.json_store import JsonStore
-
 
 # --- conversation ---------------------------------------------------------
 

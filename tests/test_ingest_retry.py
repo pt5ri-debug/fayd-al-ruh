@@ -70,7 +70,7 @@ def test_retries_are_bounded_and_the_failure_is_reported(tmp_path):
 
 def test_zero_retries_fails_on_first_attempt(tmp_path):
     connector = _FlakyConnector(fail_times=1)
-    store, pipeline = _pipeline(tmp_path, connector, retries=0)
+    _store, pipeline = _pipeline(tmp_path, connector, retries=0)
 
     report = pipeline.ingest(SourceSpec("mem://one"), connector=connector)
 

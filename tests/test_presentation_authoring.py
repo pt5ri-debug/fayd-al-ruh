@@ -18,7 +18,6 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
 from core.presentation import (
     STATE_SLIDE_REVIEW,
     PresentationError,

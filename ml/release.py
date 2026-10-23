@@ -24,7 +24,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,15 +35,18 @@ from core.curriculum_knowledge import (
     seed_curriculum,
 )
 from core.domain_knowledge import discipline_keys, disciplines, seed_ontology
-from core.petroleum_corpus import corpus_coverage_score, entries as corpus_entries, seed_petroleum_corpus
 from core.ontology import Ontology
 from core.paths import artifacts_dir, checkpoints_dir, default_checkpoint
+from core.petroleum_corpus import corpus_coverage_score, seed_petroleum_corpus
+from core.petroleum_corpus import entries as corpus_entries
 from core.version import __version__
+
 from ml.knowledge_corpus import (
     authored_documents,
     knowledge_sample,
     repository_key,
 )
+from ml.llm.__main__ import train_and_save
 from ml.llm.corpus import (
     build_corpus,
     corpus_sentences,
@@ -54,12 +57,11 @@ from ml.llm.corpus import (
     session_sentences,
     structured_examples,
 )
-from ml.llm.__main__ import train_and_save
 from ml.llm.evaluate import document_split, evaluate_model
-from ml.llm.tokenizer import TOKENIZER_KINDS, load_tokenizer
-from ml.llm.transformer import PRESETS, TransformerConfig, TransformerLM
 from ml.llm.schedule import describe_schedule, schedule_path
 from ml.llm.state import load_step_count, state_path
+from ml.llm.tokenizer import TOKENIZER_KINDS, load_tokenizer
+from ml.llm.transformer import PRESETS, TransformerConfig, TransformerLM
 from ml.petroleum import train_petroleum
 
 RELEASE_MANIFEST_NAME = "release_manifest.json"
@@ -316,7 +318,7 @@ def train_release(
 
     manifest: Manifest = {
         "version": __version__,
-        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "trained_at": datetime.now(UTC).isoformat(),
         "git_revision": _git_revision(),
         "config": {
             "episodes": config.episodes,
@@ -559,7 +561,7 @@ def main(argv: list[str] | None = None) -> int:
         save_dir = args.save_dir or artifacts_dir()
         manifest: Manifest = {
             "version": __version__,
-            "trained_at": datetime.now(timezone.utc).isoformat(),
+            "trained_at": datetime.now(UTC).isoformat(),
             "git_revision": _git_revision(),
             "config": {
                 "episodes": config.episodes,

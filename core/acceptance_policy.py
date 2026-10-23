@@ -111,7 +111,7 @@ _PETROLEUM_CONTEXT = frozenset(
         "saturation", "pressure", "geolog", "geological", "subsurface", "aquifer",
         "seismic", "logging", "production", "crude", "sandstone", "carbonate",
         "shale", "fluid", "mud", "cement", "completion", "caprock", "petrophysics",
-        "geophysics", "wellhead", "wellbore", "payzone", "wireline", "trap",
+        "geophysics", "wellhead", "payzone", "wireline", "trap",
     }
 )
 """A *different* petroleum-context word in a snippet clears the sense check."""

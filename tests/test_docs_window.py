@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from core.docs_model import HEADER
 from gui.docs_studio import DocsStudioService
 

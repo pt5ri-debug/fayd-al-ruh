@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import random
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -73,7 +74,7 @@ class Transition:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Transition":
+    def from_dict(cls, data: dict[str, Any]) -> Transition:
         raw_state = data.get("state_tokens", [])
         raw_next = data.get("next_tokens", [])
         state_tokens = tuple(str(token) for token in raw_state) if isinstance(raw_state, (list, tuple)) else ()
@@ -179,7 +180,7 @@ def train_val_split(
         return dataset, dataset
     generator = np.random.default_rng(seed)
     order = generator.permutation(count)
-    val_size = max(1, int(round(count * val_fraction)))
+    val_size = max(1, round(count * val_fraction))
     val_idx, train_idx = order[:val_size], order[val_size:]
     return (
         Dataset(dataset.features[train_idx], dataset.labels[train_idx]),

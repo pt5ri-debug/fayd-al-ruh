@@ -14,7 +14,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-
 from ai import vision_model as vision_cli
 from ai import vision_mouth
 from ai.chat import MOUTH_MODEL, MOUTH_SOURCES, MOUTH_ULTRON, MOUTH_VISION
@@ -409,7 +408,7 @@ def test_vision_assistant_records_the_turn_and_carries_no_citations() -> None:
     assert HEADER in answer.text
     assert answer.citations == ()
     assert answer.used_model is True
-    assert [message.text for message in conversation.messages][0] == "meaning of life?"
+    assert next(message.text for message in conversation.messages) == "meaning of life?"
 
 
 def test_vision_assistant_passes_prior_turns_to_the_model() -> None:
@@ -515,7 +514,7 @@ def test_run_loop_switches_to_vision_and_back(monkeypatch, capsys) -> None:
     from ai import chat
     from core.jarvis import JarvisTurn
 
-    session, switcher = _switcher()
+    _session, switcher = _switcher()
 
     class _Mode:
         def handle(self, *a, **k):
@@ -663,8 +662,8 @@ def test_window_reports_a_missing_vision_in_the_transcript(tmp_path) -> None:
 def test_window_vision_sidebar_action_switches_the_mouth(tmp_path) -> None:
     import tkinter as tk
 
-    from gui.app import FaydGUI
     from gui.actions import action_by_key
+    from gui.app import FaydGUI
 
     root = tk.Tk()
     try:

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from ml.llm.__main__ import main, train_and_save
 from ml.llm.state import load_step_count, load_training_state, save_training_state, state_path
 from ml.llm.tokenizer import ByteTokenizer
@@ -39,9 +38,9 @@ def test_training_state_round_trips_moments_and_step(tmp_path):
     restored, steps = loaded
     assert steps == 3
     assert restored.state.t == 3
-    for before, after in zip(optimizer.state.m, restored.state.m):
+    for before, after in zip(optimizer.state.m, restored.state.m, strict=False):
         assert np.allclose(before, after)
-    for before, after in zip(optimizer.state.v, restored.state.v):
+    for before, after in zip(optimizer.state.v, restored.state.v, strict=False):
         assert np.allclose(before, after)
 
 
@@ -72,7 +71,7 @@ def test_supplied_optimizer_keeps_its_moments_across_a_resume():
     # not reset them to zero.
     train_language_model(model, _stream(), steps=3, batch_size=4, optimizer=optimizer, start_step=3)
     assert optimizer.state.t == 6
-    assert any(not np.allclose(before, after) for before, after in zip(moments_after_first, optimizer.state.m))
+    assert any(not np.allclose(before, after) for before, after in zip(moments_after_first, optimizer.state.m, strict=False))
 
 
 def test_lr_schedule_spans_the_extended_horizon_when_resuming():

@@ -17,8 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-
 from core.progress import ProgressCallback
+
 from ml.llm.tokenizer import VOCAB_SIZE
 from ml.models import Adam
 
@@ -44,7 +44,7 @@ class TransformerConfig:
             raise ValueError("dropout must be in [0, 1).")
 
     @classmethod
-    def preset(cls, name: str, *, vocab_size: int | None = None) -> "TransformerConfig":
+    def preset(cls, name: str, *, vocab_size: int | None = None) -> TransformerConfig:
         """A named capacity tier, so growth is a deliberate, recorded choice."""
         if name not in PRESETS:
             raise ValueError(f"Unknown preset {name!r}; expected one of {tuple(PRESETS)}.")
@@ -201,12 +201,12 @@ class TransformerLM:
             params.append(self.head)
         return params
 
-    def train(self, mode: bool = True) -> "TransformerLM":
+    def train(self, mode: bool = True) -> TransformerLM:
         """Toggle training mode, which enables dropout when the config sets it."""
         self._training = mode
         return self
 
-    def eval(self) -> "TransformerLM":
+    def eval(self) -> TransformerLM:
         return self.train(False)
 
     # --- forward --------------------------------------------------------
@@ -216,7 +216,10 @@ class TransformerLM:
         head_dim = n_embd // n_head
         qkv = x @ layer.attn_w + layer.attn_b
         q, k, v = np.split(qkv, 3, axis=-1)
-        split = lambda a: a.reshape(batch, seq, n_head, head_dim).transpose(0, 2, 1, 3)
+
+        def split(a):
+            return a.reshape(batch, seq, n_head, head_dim).transpose(0, 2, 1, 3)
+
         q, k, v = split(q), split(k), split(v)
         scores = (q @ k.transpose(0, 1, 3, 2)) / np.sqrt(head_dim)
         mask = np.triu(np.ones((seq, seq), dtype=bool), k=1)
@@ -232,7 +235,7 @@ class TransformerLM:
         idx = np.asarray(idx, dtype=np.int64)
         if idx.ndim == 1:
             idx = idx[None, :]
-        batch, seq = idx.shape
+        _batch, seq = idx.shape
         if seq > self.config.block_size:
             raise ValueError(f"Sequence length {seq} exceeds block_size {self.config.block_size}.")
         cache: dict = {"idx": idx, "seq": seq, "layers": [], "drop_masks": []}
@@ -362,7 +365,10 @@ class TransformerLM:
         scale = 1.0 / np.sqrt(head_dim)
         grad_q = (grad_scores @ k) * scale
         grad_k = (grad_scores.transpose(0, 1, 3, 2) @ q) * scale
-        merge = lambda a: a.transpose(0, 2, 1, 3).reshape(batch, seq, n_embd)
+
+        def merge(a):
+            return a.transpose(0, 2, 1, 3).reshape(batch, seq, n_embd)
+
         grad_qkv = np.concatenate([merge(grad_q), merge(grad_k), merge(grad_v)], axis=-1)
         normed1 = layer_cache["normed1"]
         grads[f"attn_w_{index}"] = normed1.reshape(-1, n_embd).T @ grad_qkv.reshape(-1, grad_qkv.shape[-1])
@@ -417,7 +423,7 @@ class TransformerLM:
         np.savez_compressed(target, **arrays)  # type: ignore[arg-type]
 
     @classmethod
-    def load(cls, path) -> "TransformerLM":
+    def load(cls, path) -> TransformerLM:
         data = np.load(Path(path), allow_pickle=False)
         values = data["config"]
         # ``config`` gained dropout/tie_weights in the release-1 work; older
@@ -522,7 +528,7 @@ def train_language_model(
     val_stream: list[int] | None = None,
     val_every: int = 0,
     val_batches: int = 8,
-    optimizer: "Adam | None" = None,
+    optimizer: Adam | None = None,
     start_step: int = 0,
     progress: ProgressCallback | None = None,
 ) -> TrainReport:

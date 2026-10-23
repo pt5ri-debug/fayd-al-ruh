@@ -32,6 +32,7 @@ from urllib.request import Request, urlopen
 
 from core.acceptance_policy import is_trusted
 from core.web_source import estimate_credibility
+
 from ingest.errors import ConnectorError
 from ingest.hashing import source_key
 from ingest.records import (

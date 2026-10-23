@@ -8,16 +8,16 @@ environments -- no external tool is touched.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
-
 from core.action import Action
 from core.progress import ProgressCallback
 from core.sandbox_environment import SandboxEnvironment, SandboxTask
 from core.state import State
+
 from ml.dataset import FeatureHasher
 
 
@@ -173,7 +173,7 @@ class QLearningAgent:
         return target
 
     @classmethod
-    def load(cls, path: str | Path) -> "QLearningAgent":
+    def load(cls, path: str | Path) -> QLearningAgent:
         data = np.load(Path(path), allow_pickle=False)
         weights = data["W"]
         agent = cls(

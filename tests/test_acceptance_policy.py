@@ -24,13 +24,13 @@ from core.acceptance_policy import (
 
 
 def _reason(**overrides):
-    base = dict(
-        url="https://www.spe.org/x",
-        title="Permeability",
-        topic="Permeability",
-        snippet="Permeability measures how easily fluid flows through reservoir rock.",
-        credibility=0.9,
-    )
+    base = {
+        "url": "https://www.spe.org/x",
+        "title": "Permeability",
+        "topic": "Permeability",
+        "snippet": "Permeability measures how easily fluid flows through reservoir rock.",
+        "credibility": 0.9,
+    }
     base.update(overrides)
     return rejection_reason(**base)
 
@@ -237,11 +237,11 @@ def test_sanitize_statement_keeps_only_whole_sentences():
 
 def test_source_gate_is_reused_by_the_topic_gate():
     # Same refusal, reached through either entry point.
-    kwargs = dict(
-        url="https://randompetroleumblog.com/x",
-        snippet="text",
-        credibility=0.9,
-    )
+    kwargs = {
+        "url": "https://randompetroleumblog.com/x",
+        "snippet": "text",
+        "credibility": 0.9,
+    }
     assert source_rejection_reason(**kwargs) == rejection_reason(
         title="anything", topic="anything", **kwargs
     )

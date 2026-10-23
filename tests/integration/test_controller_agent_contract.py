@@ -1,3 +1,4 @@
+import pytest
 from core.action import Action
 from core.agent import Agent
 from core.belief import Belief
@@ -5,8 +6,6 @@ from core.cognitive_controller import CognitiveController
 from core.environment import Environment
 from core.evidence_processor import EvidencePolarity
 from core.goal import Goal
-import pytest
-
 
 pytestmark = pytest.mark.integration
 

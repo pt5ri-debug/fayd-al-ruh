@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from gui.presentation import PresentationService
 
 
@@ -120,8 +119,8 @@ def test_the_window_saves_as_to_a_chosen_path(tmp_path: Path) -> None:
     """`Save as…` writes the deck to the user's chosen location."""
     import tkinter as tk
 
-    from gui.app import DARK_THEME
     from gui import presentation_dialog as module
+    from gui.app import DARK_THEME
     from gui.presentation_dialog import PresentationDialog
 
     service, project_id = _ready_service(tmp_path)

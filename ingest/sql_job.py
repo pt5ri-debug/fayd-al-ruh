@@ -43,12 +43,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from core.knowledge_base import KnowledgeBaseStore
+
 from ingest.connectors.sqlite import SqliteConnector, TablePlan
 from ingest.dedup import DedupLedger
 from ingest.errors import ConnectorError, IngestCancelled, IngestInterrupted, IngestionError
@@ -143,14 +145,14 @@ class SqlImportJob:
             raise ValueError("SqlImportJob source_uri cannot be empty.")
 
     def touch(self) -> None:
-        self.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
 
     def as_dict(self) -> dict[str, Any]:
         data = asdict(self)
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SqlImportJob":
+    def from_dict(cls, data: dict[str, Any]) -> SqlImportJob:
         raw_tables = data.get("tables", {})
         tables = {
             name: TableProgress(**value) for name, value in raw_tables.items()
@@ -317,7 +319,7 @@ class SqlImportRunner:
             store_dir=str(self.store_dir),
             batch_size=self.batch_size,
             status=RUNNING,
-            created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            created_at=datetime.now(UTC).isoformat(timespec="seconds"),
             options=dict(spec.options),
         )
         self.jobs.save(job)

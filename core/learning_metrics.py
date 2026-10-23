@@ -22,7 +22,7 @@ class LearningMetrics:
         cls,
         state: CognitiveState,
         history: StateHistory,
-    ) -> "LearningMetrics":
+    ) -> LearningMetrics:
 
         predictions = list(
             state.predictions.values()

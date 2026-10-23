@@ -23,7 +23,6 @@ rank above generic blogs), never a claim of truth.
 
 from __future__ import annotations
 
-
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlparse

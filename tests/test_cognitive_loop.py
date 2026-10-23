@@ -1,10 +1,10 @@
 from core.belief import Belief
 from core.cognitive_loop import CognitiveLoop
+from core.cognitive_state import CognitiveState
 from core.evidence_processor import EvidencePolarity
 from core.knowledge_graph import KnowledgeGraph
 from core.memory import CognitiveMemory
 from core.observation import Observation
-from core.cognitive_state import CognitiveState
 
 
 def test_cognitive_loop_detects_pattern():
@@ -291,4 +291,4 @@ def test_prediction_error_is_saved_in_state():
         state.prediction_errors[0]
         .prediction_id
         == prediction.id
-    )    
+    )

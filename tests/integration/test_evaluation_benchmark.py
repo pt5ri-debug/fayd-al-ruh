@@ -3,11 +3,9 @@
 import json
 
 import pytest
-
 from evaluation.baseline import check_against_baseline, load_baseline, save_baseline
 from evaluation.benchmark import compare_metric_dicts, metrics_to_dict
 from evaluation.runner import run_suite
-
 
 pytestmark = pytest.mark.integration
 

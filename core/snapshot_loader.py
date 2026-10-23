@@ -8,8 +8,10 @@ from core.causal_graph import CausalGraph
 from core.causal_link import CausalLink
 from core.cognitive_context import ContextRegistry
 from core.cognitive_state import CognitiveState
+from core.cognitive_trace import CognitiveTrace
 from core.entity import Entity, EntityType
 from core.evidence import Evidence
+from core.hypothesis import Hypothesis
 from core.knowledge_graph import KnowledgeGraph
 from core.memory import CognitiveMemory
 from core.observation import Observation
@@ -20,8 +22,6 @@ from core.provenance import ProvenanceLedger
 from core.relation import Relation
 from core.snapshot import SNAPSHOT_SCHEMA_VERSION, Snapshot
 from core.snapshot_migrations import migrate_payload
-from core.cognitive_trace import CognitiveTrace
-from core.hypothesis import Hypothesis
 
 
 @dataclass(frozen=True)

@@ -8,14 +8,12 @@ attachment hint that replaced the dead-end "pip install fayd-al-ruh[ocr]".
 from __future__ import annotations
 
 import pytest
-
 from cli import deps as deps_cli
 from cli import menu as cli_menu
 from core import optional_deps
 from core.optional_deps import FEATURE_IMAGE, FEATURE_OCR, FEATURE_PDF
 from gui import actions as gui_actions
 from gui.attachments import _ocr_attachment_hint
-
 
 # --- the CLI command -------------------------------------------------------
 

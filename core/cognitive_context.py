@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import uuid4
 
-from core.causal_link import CausalLink
 from core.causal_graph import CausalGraph
+from core.causal_link import CausalLink
 from core.cognitive_state import CognitiveState
 from core.evidence import Evidence
 from core.knowledge_graph import KnowledgeGraph
@@ -111,7 +111,7 @@ class ContextRegistry:
         }
 
     @classmethod
-    def restore(cls, data: dict) -> "ContextRegistry":
+    def restore(cls, data: dict) -> ContextRegistry:
         registry = cls()
         for item in data.get("contexts", {}).values():
             context = CognitiveContext(

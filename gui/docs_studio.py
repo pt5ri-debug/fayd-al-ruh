@@ -393,10 +393,10 @@ def picker_filetypes() -> tuple[tuple[str, str], ...]:
 
 __all__ = [
     "DOCS_EMPTY",
+    "SYSTEM_PROMPT",
     "DocAnswer",
     "DocReading",
     "DocsStudioService",
     "OpenDocument",
-    "SYSTEM_PROMPT",
     "picker_filetypes",
 ]

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from core.action import Action
+from core.action_executor import ActionExecutor
+from core.action_policy import ActionPolicy
 from core.agent_loop import AgentCycle, AgentLoop
 from core.agent_state import AgentState
 from core.belief import Belief
@@ -8,10 +11,7 @@ from core.cognitive_controller import CognitiveController
 from core.environment import Environment
 from core.evidence_processor import EvidencePolarity
 from core.goal import Goal
-from core.action import Action
-from core.action_policy import ActionPolicy
 from core.perception import Perception
-from core.action_executor import ActionExecutor
 
 
 class Agent:

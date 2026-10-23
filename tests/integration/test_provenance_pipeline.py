@@ -7,14 +7,12 @@ survives every hop, including a snapshot/restore round trip.
 """
 
 import pytest
-
 from core.belief import Belief
 from core.cognitive_controller import CognitiveController
 from core.evidence_processor import EvidencePolarity
 from core.observation import Observation
 from core.provenance import ProvenanceStage
 from storage.json_store import JsonStore
-
 
 pytestmark = pytest.mark.integration
 

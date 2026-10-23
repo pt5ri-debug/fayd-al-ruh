@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from ingest.source_registry import (
     DONE,
     LOCAL,

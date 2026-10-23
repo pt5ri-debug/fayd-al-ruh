@@ -10,7 +10,6 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-
 from core.knowledge_base import KnowledgeBaseStore
 from ingest.records import SourceSpec
 from ingest.sql_job import (
@@ -20,6 +19,7 @@ from ingest.sql_job import (
     Interrupted,
     SqlImportJob,
     SqlImportRunner,
+    SqlJobError,
     SqlJobStore,
     TableProgress,
     sql_jobs_dir,
@@ -239,7 +239,7 @@ def test_data_only_change_keeps_signature(tmp_path):
 
 def test_resume_without_a_job_raises(tmp_path):
     db = _make_db(tmp_path / "w.db", rows=2)
-    with pytest.raises(Exception):
+    with pytest.raises(SqlJobError):
         _runner(tmp_path / "kb").resume(_spec(db), "does-not-exist")
 
 

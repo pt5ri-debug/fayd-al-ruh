@@ -30,9 +30,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.acceptance_policy import clean_statement, source_rejection_reason
+from core.human_approval import HumanApprovalGate
 from core.knowledge_update import KnowledgeUpdate, KnowledgeUpdater, UpdateOutcome
 from core.permissions import Capability, PermissionPolicy
-from core.human_approval import HumanApprovalGate
 from core.rag import RetrievedPassage, _query_terms
 from core.web_source import SearchOutcome, WebResult, WebSearchProvider
 
@@ -427,7 +427,11 @@ def approved_gate() -> HumanApprovalGate:
 
 def internet_provider() -> WebSearchProvider:
     """The default keyless internet provider, falling back to an empty static one."""
-    from core.web_source import FallbackSearchProvider, StaticSearchProvider, WikipediaSearchProvider
+    from core.web_source import (
+        FallbackSearchProvider,
+        StaticSearchProvider,
+        WikipediaSearchProvider,
+    )
 
     return FallbackSearchProvider(WikipediaSearchProvider(), StaticSearchProvider())
 

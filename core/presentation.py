@@ -33,10 +33,11 @@ from __future__ import annotations
 import io
 import re
 import zipfile
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 from xml.etree import ElementTree as ET
 
 from core.paths import data_dir
@@ -356,7 +357,7 @@ def resolve_theme(value: str | None) -> DeckTheme:
 
 def theme_names() -> tuple[str, ...]:
     """The available theme names, default first."""
-    return (DEFAULT_THEME,) + tuple(sorted(name for name in THEMES if name != DEFAULT_THEME))
+    return (DEFAULT_THEME, *tuple(sorted(name for name in THEMES if name != DEFAULT_THEME)))
 
 
 @dataclass(frozen=True)
@@ -394,7 +395,7 @@ class PresentationSettings:
         """The ``(cx, cy)`` EMU geometry for this deck's aspect."""
         return ASPECTS[self.aspect]
 
-    def replace(self, **changes: Any) -> "PresentationSettings":
+    def replace(self, **changes: Any) -> PresentationSettings:
         """A copy with ``changes`` applied (validated like a fresh instance)."""
         data = self.to_primitive()
         data.update(changes)
@@ -415,7 +416,7 @@ class PresentationSettings:
         }
 
     @classmethod
-    def from_primitive(cls, data: dict[str, Any] | None) -> "PresentationSettings":
+    def from_primitive(cls, data: dict[str, Any] | None) -> PresentationSettings:
         """Rebuild settings from a stored dict (missing keys take defaults)."""
         if not data:
             return cls()
@@ -444,7 +445,7 @@ _SLUG_RE = re.compile(r"[^\w]+", re.UNICODE)
 
 def _now() -> str:
     """An ISO-8601 UTC timestamp, second resolution (stable for tests)."""
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def slugify(text: str, *, fallback: str = "presentation") -> str:
@@ -515,7 +516,7 @@ class OutlineSection:
         }
 
     @classmethod
-    def from_primitive(cls, data: dict[str, Any]) -> "OutlineSection":
+    def from_primitive(cls, data: dict[str, Any]) -> OutlineSection:
         return cls(
             heading=str(data["heading"]),
             subsections=tuple(str(item) for item in data.get("subsections", ())),
@@ -546,7 +547,7 @@ class OutlineRevision:
         }
 
     @classmethod
-    def from_primitive(cls, data: dict[str, Any]) -> "OutlineRevision":
+    def from_primitive(cls, data: dict[str, Any]) -> OutlineRevision:
         return cls(
             revision=int(data["revision"]),
             sections=tuple(OutlineSection.from_primitive(item) for item in data["sections"]),
@@ -677,7 +678,7 @@ class Slide:
         return data
 
     @classmethod
-    def from_primitive(cls, data: dict[str, Any]) -> "Slide":
+    def from_primitive(cls, data: dict[str, Any]) -> Slide:
         snapshot = data.get("approved_snapshot")
         return cls(
             slide_id=str(data["slide_id"]),
@@ -728,7 +729,7 @@ class SlideRevision:
         }
 
     @classmethod
-    def from_primitive(cls, data: dict[str, Any]) -> "SlideRevision":
+    def from_primitive(cls, data: dict[str, Any]) -> SlideRevision:
         return cls(
             revision=int(data["revision"]),
             slide_id=str(data["slide_id"]),
@@ -763,7 +764,7 @@ class ExportRecord:
         }
 
     @classmethod
-    def from_primitive(cls, data: dict[str, Any]) -> "ExportRecord":
+    def from_primitive(cls, data: dict[str, Any]) -> ExportRecord:
         return cls(
             export_id=str(data["export_id"]),
             path=str(data["path"]),
@@ -987,7 +988,7 @@ class PresentationProject:
         }
 
     @classmethod
-    def from_primitive(cls, data: dict[str, Any]) -> "PresentationProject":
+    def from_primitive(cls, data: dict[str, Any]) -> PresentationProject:
         version = int(data.get("schema_version", 0))
         if version > _SCHEMA_VERSION:
             raise PresentationError(
@@ -1075,8 +1076,8 @@ class PresentationStore:
 
     def delete(self, project_id: str) -> bool:
         """Remove a project. Returns whether a file was removed."""
-        path = self._store.root / self._store._encode(PRESENTATIONS_NAMESPACE)  # noqa: SLF001
-        target = path / f"{self._store._encode(project_id)}.json"  # noqa: SLF001
+        path = self._store.root / self._store._encode(PRESENTATIONS_NAMESPACE)
+        target = path / f"{self._store._encode(project_id)}.json"
         if target.exists():
             target.unlink()
             return True
@@ -1462,7 +1463,7 @@ class Deck:
             raise PresentationError("A deck needs at least one slide.")
 
     @classmethod
-    def from_project(cls, project: PresentationProject, *, approved_only: bool = True) -> "Deck":
+    def from_project(cls, project: PresentationProject, *, approved_only: bool = True) -> Deck:
         """Build a deck from a project's slides (approved ones by default)."""
         slides = project.approved_slides if approved_only else project.ordered_slides()
         return cls(title=project.title, slides=tuple(slides))
@@ -2058,54 +2059,54 @@ __all__ = [
     "CONTENT_SECTION",
     "CONTENT_TABLE",
     "CONTENT_TITLE",
-    "CONTENT_TYPE_LABELS",
     "CONTENT_TYPES",
+    "CONTENT_TYPE_LABELS",
     "DEFAULT_SLIDE_BATCH",
-    "Deck",
     "EDITABLE_FIELDS",
-    "ExportRecord",
     "MAX_SLIDE_BATCH",
-    "OutlineRevision",
-    "OutlineSection",
     "PRESENTATIONS_NAMESPACE",
-    "PresentationError",
-    "PresentationProject",
-    "PresentationStore",
-    "PresentationWriter",
+    "SLIDE_COMMANDS",
     "STATE_CONTENT_APPROVED",
     "STATE_DISCUSSION",
-    "STATE_EXPORT_FAILED",
     "STATE_EXPORTED",
     "STATE_EXPORTING",
+    "STATE_EXPORT_FAILED",
     "STATE_LABELS",
     "STATE_ORDER",
     "STATE_OUTLINE_DRAFT",
     "STATE_OUTLINE_REVIEW",
     "STATE_SLIDE_DRAFTING",
     "STATE_SLIDE_REVIEW",
-    "SLIDE_COMMANDS",
+    "Deck",
+    "ExportRecord",
+    "OutlineRevision",
+    "OutlineSection",
+    "PresentationError",
+    "PresentationProject",
+    "PresentationStore",
+    "PresentationWriter",
     "Slide",
     "SlideCommand",
     "SlideRevision",
     "ValidationResult",
-    "can_transition",
     "bullets_from_text",
-    "default_presentation_dir",
+    "can_transition",
     "content_sentences",
-    "is_scaffolding",
     "dedup_key",
+    "default_presentation_dir",
+    "is_scaffolding",
     "looks_like_prose_outline",
     "outline_from_prose",
     "parse_outline",
     "parse_slide_command",
     "parse_slide_range",
     "presentation_filename",
-    "resolve_batch_size",
-    "slide_topic_key",
-    "strip_scaffolding_lines",
     "require_transition",
+    "resolve_batch_size",
     "resolve_content_type",
+    "slide_topic_key",
     "slugify",
+    "strip_scaffolding_lines",
     "title_from_text",
     "topic_sentence",
     "validate_pptx",

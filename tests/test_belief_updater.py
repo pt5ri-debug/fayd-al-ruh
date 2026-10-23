@@ -1,6 +1,6 @@
 from core.belief import Belief
-from core.prediction_error import PredictionError
 from core.belief_updater import BeliefUpdater
+from core.prediction_error import PredictionError
 
 
 def test_prediction_error_reduces_belief_confidence():

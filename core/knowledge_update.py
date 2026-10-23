@@ -23,9 +23,9 @@ and reversible: the ledger holds the full history of each statement.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Iterable
+from datetime import UTC, datetime, timedelta
 
 from core.documents import DocumentStore
 from core.provenance import ProvenanceLedger, ProvenanceRecord, ProvenanceStage
@@ -43,7 +43,7 @@ class KnowledgeUpdate:
     source: str
     strength: float = 0.5
     topic: str = "learned"
-    recorded_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    recorded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def __post_init__(self) -> None:
         if not self.statement.strip():
@@ -174,7 +174,7 @@ class KnowledgeUpdater:
     # -- maintenance -------------------------------------------------------
     def decay_stale(self, *, now: datetime | None = None) -> list[UpdateOutcome]:
         """Weaken learned statements older than ``max_age``; drop faded ones."""
-        moment = now or datetime.now(timezone.utc)
+        moment = now or datetime.now(UTC)
         outcomes: list[UpdateOutcome] = []
         for document in list(self.store.documents()):
             if not document.doc_id.startswith("learned:"):

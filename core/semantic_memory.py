@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from hashlib import blake2b
 from math import sqrt
-import re
 
 
 def hashed_embedding(text: str, dimensions: int = 128) -> tuple[float, ...]:
@@ -62,7 +62,7 @@ class SemanticMemoryIndex:
         right_norm = sqrt(sum(value * value for value in right))
         if left_norm == 0 or right_norm == 0:
             return 0.0
-        return sum(a * b for a, b in zip(left, right)) / (left_norm * right_norm)
+        return sum(a * b for a, b in zip(left, right, strict=False)) / (left_norm * right_norm)
 
 
 class SemanticMemory:

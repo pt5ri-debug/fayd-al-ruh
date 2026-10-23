@@ -1,5 +1,4 @@
 import pytest
-
 from core.concept import Concept
 from core.ontology import Ontology
 from core.ontology_reasoner import OntologyReasoner
@@ -167,8 +166,8 @@ def test_recall_exposes_linked_relation_and_seed_relation_is_not_credited():
 
 def test_feedback_ignores_direct_and_seeded_recalls():
     from core.cognitive_controller import CognitiveController
-    from core.observation import Observation
     from core.memory import MemoryRecall
+    from core.observation import Observation
 
     controller = CognitiveController()
     controller.memory.store("obs", "observation", Observation("well log reads high.", "study", 0.9))

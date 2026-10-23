@@ -154,7 +154,7 @@ def _hsv_to_rgb(hue: float, saturation: float, value: float) -> RGB:
         4: (t, p, value),
         5: (value, p, q),
     }[index]
-    return tuple(int(round(channel * 255)) for channel in table)  # type: ignore[return-value]
+    return tuple(round(channel * 255) for channel in table)  # type: ignore[return-value]
 
 
 class _Random:
@@ -224,7 +224,7 @@ class ProceduralImageGenerator:
         for y in range(height):
             blend = y / max(1, height - 1)
             row = bytes(
-                int(round(top[c] * (1 - blend) + bottom[c] * blend)) for c in range(3)
+                round(top[c] * (1 - blend) + bottom[c] * blend) for c in range(3)
             ) * width
             canvas.extend(row)
 
@@ -278,7 +278,7 @@ def _blend_circle(
             offset = (y * width + x) * 3
             for channel in range(3):
                 base = canvas[offset + channel]
-                canvas[offset + channel] = int(round(base * (1 - alpha) + colour[channel] * alpha))
+                canvas[offset + channel] = round(base * (1 - alpha) + colour[channel] * alpha)
 
 
 def load_image_generator(name: str = "procedural", **options: Any) -> ImageGenerator:
@@ -322,8 +322,8 @@ def image_backend_status(root: Path | None = None) -> tuple[tuple[str, bool, str
         from core.imagegen_diffusion import (
             DEFAULT_MODEL,
             DEFAULT_PRESET,
-            DiffusionUnavailable,
             DiffusionImageGenerator,
+            DiffusionUnavailable,
             _require_extra,
             preset_names,
         )
@@ -381,19 +381,19 @@ def default_image_dir(root: Path | None = None) -> Path:
 
 def image_filename(prompt: str, seed: int, *, extension: str = "png") -> str:
     """A stable, filesystem-safe file name for a prompt and seed."""
-    digest = hashlib.sha256(f"{prompt.strip().casefold()}:{seed}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{prompt.strip().casefold()}:{seed}".encode()).hexdigest()
     return f"image-{digest[:12]}.{extension}"
 
 
 __all__ = [
     "DEFAULT_HEIGHT",
     "DEFAULT_WIDTH",
+    "MAX_DIMENSION",
+    "RGB",
     "GeneratedImage",
     "ImageGenerator",
     "ImageRequest",
-    "MAX_DIMENSION",
     "ProceduralImageGenerator",
-    "RGB",
     "default_image_dir",
     "encode_png",
     "image_backend_names",

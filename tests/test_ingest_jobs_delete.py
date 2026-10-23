@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from core.knowledge_base import KnowledgeBaseStore
-from ingest.delete import SourceDeleter, delete_source
 from ingest.dedup import DedupLedger
+from ingest.delete import SourceDeleter, delete_source
 from ingest.jobs import DONE, JobState, JobStore
 from ingest.pipeline import IngestionPipeline, ingest_jobs_dir, ledger_path
 from ingest.records import SourceSpec
@@ -118,7 +118,7 @@ def test_delete_reports_when_nothing_recorded(tmp_path):
 
 
 def test_delete_by_key_helper(tmp_path):
-    store, ledger, source = _seed(tmp_path)
+    store, _ledger, source = _seed(tmp_path)
     key = next(item.source_key for item in _items(source / "a.txt"))
     report = delete_source(key, store_dir=store.root, ledger_dir=store.root)
     assert report.removed == 1

@@ -1,5 +1,4 @@
 import pytest
-
 from core.action import Action
 from core.audit_log import AuditLog
 from core.human_approval import HumanApprovalGate

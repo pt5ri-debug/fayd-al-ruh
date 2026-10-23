@@ -24,8 +24,8 @@ rather than clipped, which is stated plainly in the module's contract.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 from core.imagegen import encode_png
 from core.scene3d import (
@@ -85,7 +85,7 @@ class Framebuffer:
     def clear(self, color: tuple[float, float, float]) -> None:
         """Fill the whole image with one colour and reset the depth buffer."""
         pixel = bytes(
-            max(0, min(255, int(round(channel * 255.0)))) for channel in color
+            max(0, min(255, round(channel * 255.0))) for channel in color
         ) * self.width
         row = bytearray()
         for _ in range(self.height):
@@ -144,7 +144,7 @@ class RenderStats:
 
 
 def _clamp_channel(value: float) -> int:
-    return max(0, min(255, int(round(value * 255.0))))
+    return max(0, min(255, round(value * 255.0)))
 
 
 def shade_point(
@@ -264,10 +264,10 @@ class SoftwareRenderer:
             # Screen Y grows downward, so a front face has negative signed area.
             return False
 
-        min_x = max(0, int(math.floor(min(a.x, b.x, c.x))))
-        max_x = min(buffer.width - 1, int(math.ceil(max(a.x, b.x, c.x))))
-        min_y = max(0, int(math.floor(min(a.y, b.y, c.y))))
-        max_y = min(buffer.height - 1, int(math.ceil(max(a.y, b.y, c.y))))
+        min_x = max(0, math.floor(min(a.x, b.x, c.x)))
+        max_x = min(buffer.width - 1, math.ceil(max(a.x, b.x, c.x)))
+        min_y = max(0, math.floor(min(a.y, b.y, c.y)))
+        max_y = min(buffer.height - 1, math.ceil(max(a.y, b.y, c.y)))
         if min_x > max_x or min_y > max_y:
             return False
 
@@ -404,16 +404,16 @@ def _interpolate(a: Vec3, b: Vec3, c: Vec3, w0: float, w1: float, w2: float) -> 
 
 def _clamp_rgb(color: tuple[float, float, float]) -> RGB:
     return (
-        max(0, min(255, int(round(color[0] * 255.0)))),
-        max(0, min(255, int(round(color[1] * 255.0)))),
-        max(0, min(255, int(round(color[2] * 255.0)))),
+        max(0, min(255, round(color[0] * 255.0))),
+        max(0, min(255, round(color[1] * 255.0))),
+        max(0, min(255, round(color[2] * 255.0))),
     )
 
 
 def _draw_line(buffer: Framebuffer, start: _Projected, end: _Projected, color: RGB) -> None:
     """Bresenham line, used for the wireframe overlay."""
-    x0, y0 = int(round(start.x)), int(round(start.y))
-    x1, y1 = int(round(end.x)), int(round(end.y))
+    x0, y0 = round(start.x), round(start.y)
+    x1, y1 = round(end.x), round(end.y)
     dx = abs(x1 - x0)
     dy = -abs(y1 - y0)
     step_x = 1 if x0 < x1 else -1

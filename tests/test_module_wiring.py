@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from core.belief import Belief
 from core.causal_experiment import CausalExperiment
@@ -29,7 +29,7 @@ def test_memory_decay_preserves_frequently_recalled_episode():
     controller.memory.store("EP-1", "observation", "rain", 1.0)
     episode = controller.memory.episodic_memory.episodes["EP-1"]
     episode.access_count = 5
-    episode.created_at = datetime.now(timezone.utc) - timedelta(hours=10)
+    episode.created_at = datetime.now(UTC) - timedelta(hours=10)
 
     [decayed] = controller.apply_memory_decay(rate=0.1)
 
@@ -74,7 +74,7 @@ def test_causal_intervention_estimates_effect_from_experiment():
 
 
 def test_temporal_reasoner_uses_timeline_for_ordering():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     reasoner = TemporalReasoner()
     later = TemporalEvent("sun", now + timedelta(hours=1))
     reasoner.timeline.add(TemporalEvent("rain", now))
