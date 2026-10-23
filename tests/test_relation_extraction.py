@@ -222,6 +222,47 @@ def test_extract_from_store_rejects_a_negative_limit(extractor):
         extract_from_store(_FakeStore([]), extractor, limit=-1)
 
 
+def test_a_relative_clause_is_not_glued_onto_the_object(extractor):
+    extraction = extractor.extract("Porosity increases permeability, which controls flow.")
+    assert [(r.source, r.relation_type, r.target) for r in extraction.relations] == [
+        ("porosity", "increases", "permeability")
+    ]
+
+
+def test_a_trailing_negation_does_not_become_the_object(extractor):
+    extraction = extractor.extract("Porosity increases permeability, not flow.")
+    assert [(r.source, r.relation_type, r.target) for r in extraction.relations] == [
+        ("porosity", "increases", "permeability")
+    ]
+
+
+def test_a_negated_clause_asserts_nothing(extractor):
+    for sentence in (
+        "Porosity does not increase permeability.",
+        "Water saturation never increases permeability.",
+        "The density log cannot measure porosity.",
+    ):
+        assert extractor.extract(sentence).relations == ()
+
+
+def test_an_extra_invented_relation_costs_the_score(extractor):
+    """The gate compares the *set* of triples, so an over-firing reader fails."""
+    from core.relation_extraction import ExtractionJudgement, extraction_accuracy
+
+    # The extractor reads one relation here; a judgement expecting two fails.
+    catalogue = (
+        ExtractionJudgement(
+            "Porosity increases permeability.",
+            ("porosity", "increases", "permeability"),
+        ),
+        ExtractionJudgement(
+            "Porosity increases permeability, not flow.",
+            ("porosity", "increases", "flow"),
+        ),
+    )
+    assert extraction_accuracy(catalogue, extractor=extractor) == 0.5
+
+
 def test_the_controller_learns_from_a_store(controller):
     learning = controller.learn_extracted_relations_from_store(
         _FakeStore(["Wettability affects flow."])

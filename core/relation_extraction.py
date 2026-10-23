@@ -203,7 +203,7 @@ def _sentences(text: str) -> list[str]:
 #: increases permeability, which controls flow" as "porosity increases flow"). A
 #: clause with no pattern simply contributes nothing.
 _CLAUSE_SPLIT_RE = re.compile(
-    r"\s*(?:;|,\s*(?:and|but|while|whereas|which|who|whose|where)\b"
+    r"\s*(?:;|,\s*(?:and|but|while|whereas|which|who|whose|where|not)\b"
     r"|\b(?:and|but|while|whereas|which|who|whose)\b)\s*",
     flags=re.IGNORECASE,
 )
@@ -543,6 +543,15 @@ EXTRACTION_JUDGEMENTS: tuple[ExtractionJudgement, ...] = (
     ExtractionJudgement(
         "Drilling requires drilling fluid.", ("drilling", "depends_on", "drilling_fluid"),
         "a two-word verb phrase and a compound concept",
+    ),
+    ExtractionJudgement(
+        "Porosity increases permeability, not flow.",
+        ("porosity", "increases", "permeability"),
+        "a trailing negation must not become the object",
+    ),
+    ExtractionJudgement(
+        "Porosity does not increase permeability.", None,
+        "a negated clause asserts nothing",
     ),
 )
 
