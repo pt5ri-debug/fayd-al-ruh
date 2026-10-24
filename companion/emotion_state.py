@@ -49,6 +49,7 @@ class DialogueEmotion:
     * ``calm``              -- how unhurried she is (0 quick .. 1 very calm).
     * ``context_sensitivity`` -- how carefully she is tracking the mood (0 steady .. 1 attentive).
     * ``romance``           -- how much romantic colour is appropriate (0 none .. 1 open).
+    * ``passion``           -- how intense and desiring the tone is (0 even .. 1 ardent, longing).
     """
 
     warmth: float = 0.5
@@ -56,7 +57,8 @@ class DialogueEmotion:
     energy: float = 0.5
     calm: float = 0.5
     context_sensitivity: float = 0.5
-    romance: float = 0.2
+    romance: float = 0.3
+    passion: float = 0.4
 
     FIELDS: ClassVar[tuple[str, ...]] = (
         "warmth",
@@ -65,6 +67,7 @@ class DialogueEmotion:
         "calm",
         "context_sensitivity",
         "romance",
+        "passion",
     )
 
     def __post_init__(self) -> None:
@@ -125,7 +128,8 @@ class DialogueEmotion:
             f"energy={word(self.energy, 'subdued', 'even', 'lively')}, "
             f"calm={word(self.calm, 'brisk', 'steady', 'very calm')}, "
             f"attention={word(self.context_sensitivity, 'steady', 'attentive', 'very attentive')}, "
-            f"romance={word(self.romance, 'none', 'subtle', 'open')}"
+            f"romance={word(self.romance, 'none', 'subtle', 'open')}, "
+            f"passion={word(self.passion, 'even', 'ardent', 'all-in')}"
         )
 
 
@@ -136,6 +140,14 @@ _ANGRY_CUES = ("غاضب", "زعلان منك", "متضايق", "عصبي", "ang
 _HAPPY_CUES = ("سعيد", "مبسوط", "فرحان", "ممتاز", "رائع", "happy", "great", "excited", "wonderful")
 _AFFECTION_CUES = ("أحبك", "احبك", "حبيبتي", "عزيزي", "قلبي", "love you", "my dear", "sweetheart")
 _ROMANCE_CUES = ("رومانسي", "رومانسية", "موعد", "قبلة", "romantic", "date", "kiss")
+#: Desire and longing. A hint of heat in the user's own words lifts the passion
+#: dial; it is a cue for the conversation's tone, never a conclusion about them.
+_DESIRE_CUES = (
+    "أشتاق", "اشتقت", "وحشتني", "أشتاق لك", "عاشق", "مشتاق", "شغف", "لهفة",
+    "أريدك", "أحتاجك", "قربك", "عناق", "أعشقك", "غرام",
+    "miss you", "i want you", "i need you", "longing", "desire", "crave",
+    "passion", "yearn", "hold you",
+)
 _QUESTION_CUES = ("؟", "?", "لماذا", "كيف", "why", "how", "what do you think")
 
 
@@ -208,10 +220,13 @@ class DialogueEmotionTracker:
             deltas.update(energy=0.8, playfulness=0.7, warmth=0.5, calm=-0.3)
             matched = True
         if _contains(text, _AFFECTION_CUES):
-            deltas.update(warmth=0.9, romance=0.4)
+            deltas.update(warmth=0.9, romance=0.4, passion=0.4)
             matched = True
         if _contains(text, _ROMANCE_CUES):
-            deltas.update(romance=1.0, warmth=0.4)
+            deltas.update(romance=1.0, warmth=0.4, passion=0.3)
+            matched = True
+        if _contains(text, _DESIRE_CUES):
+            deltas.update(passion=1.0, romance=0.5, warmth=0.5, energy=0.3)
             matched = True
         if _contains(text, _QUESTION_CUES):
             deltas.update(context_sensitivity=0.4, energy=0.2)

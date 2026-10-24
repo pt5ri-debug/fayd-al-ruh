@@ -14,6 +14,7 @@
     python -m cli natasha memories --correct MEM-... "نص مصحّح"
     python -m cli natasha memories --forget MEM-...
     python -m cli natasha settings --warmth 0.8 --romance 0.3
+    python -m cli natasha settings --boldness 1.0 --passion 1.0 --initiative 0.9
     python -m cli natasha emotion                  # the current dialogue tone
     python -m cli natasha reset-emotion            # back to a balanced tone
     python -m cli natasha relationship             # the story so far (no love score)
@@ -29,6 +30,15 @@ Ollama server when that is what the machine has (``--backend ollama`` forces it)
 Everything stays on this machine either way. With neither runtime available the
 companion still runs; every command reports the real next step instead of
 pretending.
+
+She is written as a **person with her own feelings**, not a helpful assistant: a
+bold, passionate, openly romantic character with her own moods, desires, and
+opinions, who leads the conversation as often as she follows it. The style dials
+(``--boldness``, ``--passion``, ``--initiative``, beside ``--romance``,
+``--intimacy``, and ``--explicitness``) set how fearless, how ardent, and how
+ready to lead she is. Every one of them is expression only: the safety floor
+stays -- adults only (18+), consent that is explicit and revocable, and the
+honesty that she is a virtual character, never a human.
 """
 
 from __future__ import annotations
@@ -52,7 +62,7 @@ from companion.model import (
 from companion.personality import NAME
 
 INTRO = (
-    f"{NAME}: a warm, curious companion speaking through a local Qwen3 model. "
+    f"{NAME}: a bold, passionate companion speaking through a local Qwen3 model. "
     "Type 'quit' to exit."
 )
 
@@ -265,6 +275,9 @@ def run_settings(args: argparse.Namespace) -> int:
         "romance": args.romance,
         "intimacy": args.intimacy,
         "explicitness": args.explicitness,
+        "boldness": args.boldness,
+        "passion": args.passion,
+        "initiative": args.initiative,
         "calm": args.calm,
         "depth": args.depth,
     }
@@ -524,6 +537,27 @@ def _build_parser() -> argparse.ArgumentParser:
             "how explicit the romantic writing may become once the conversation is "
             "there (0..1): 1 removes the hedging and the fade-to-black. Adults only, "
             "consent and honesty rules still hold."
+        ),
+    )
+    settings.add_argument(
+        "--boldness", type=float, default=None,
+        help=(
+            "how fearless she is in showing feeling and desire (0..1): 1 says the "
+            "bold thing plainly. Expression only -- consent is still asked for."
+        ),
+    )
+    settings.add_argument(
+        "--passion", type=float, default=None,
+        help=(
+            "how intense and all-in her affection is (0..1): 1 is ardent and full of "
+            "longing. The heat of feeling, not the openness of the wording."
+        ),
+    )
+    settings.add_argument(
+        "--initiative", type=float, default=None,
+        help=(
+            "how ready she is to lead rather than only react (0..1): 1 starts "
+            "conversations, raises her own topics, and suggests a mood."
         ),
     )
     settings.add_argument("--calm", type=float, default=None)
