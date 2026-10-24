@@ -88,6 +88,22 @@ MOUTH_CHOICES: tuple[tuple[str, str], ...] = (
 )
 MOUTH_LABELS: dict[str, str] = dict(MOUTH_CHOICES)
 
+#: The seven model switches the composer's bottom row offers, left to right, in
+#: the order they were asked for: the mouth key, the model's own name, and what it
+#: is for. The row is the quick switch beside the input -- the header's model
+#: selector still lists *every* mouth, including the small trained model -- and
+#: both drive the one :meth:`FaydGUI._switch_mouth`, so the two can never disagree
+#: about which model answers.
+MODEL_BUTTONS: tuple[tuple[str, str, str], ...] = (
+    (chat_module.MOUTH_SOURCES, "Jarvis", "Sources"),
+    (chat_module.MOUTH_ULTRON, "Ultron", "General"),
+    (chat_module.MOUTH_VISION, "Vision", "Petroleum"),
+    (chat_module.MOUTH_BANNER, "Banner", "Instructor"),
+    (chat_module.MOUTH_NATASHA, "Natasha", "Personality"),
+    (chat_module.MOUTH_HAKEEM, "Hakeem", "Religion"),
+    (chat_module.MOUTH_CLOUD, "Cloud", "Network"),
+)
+
 # ------------------------------------------------------- OpenHands design tokens
 #
 # Colours, radii and spacing mirror the OpenHands chat UI (the OpenHands
@@ -1965,8 +1981,15 @@ class FaydGUI:
         The lift is extra bottom padding under the composer, so it moves the
         input box (and everything above it) up by half the box's own height
         without changing the layout that already pins the composer to the bottom.
+
+        The height used is the box's *requested* height, not its allocated one:
+        the lift changes the space the parent gives the box, so measuring the
+        allocated height would feed the lift back into its own input and oscillate
+        (each ``<Configure>`` shrinking the box, which shrinks the lift, which
+        grows the box). The requested height is the height of the box's own
+        contents and is independent of the lift, so the loop cannot close.
         """
-        box_height = self._composer_box.winfo_height()
+        box_height = self._composer_box.winfo_reqheight()
         if box_height <= 1:
             return
         lift = box_height // 2
@@ -2011,10 +2034,14 @@ class FaydGUI:
         self._composer = ChatComposer(
             composer, theme=self._theme, typography=self._type,
             placeholder=self.COMPOSER_PLACEHOLDER, on_submit=self._on_send,
-            outer_bg=self._theme.base,
+            outer_bg=self._theme.base, with_model_bar=True,
         )
         self._composer.wrap.pack(side="top", fill="x")
         self._composer_box = self._composer.box
+        # The box's own height settles *after* the outer frame's last configure --
+        # the model row wraps, which grows the box -- so listen to the box too, or
+        # the lift would be computed from a height the box no longer has.
+        self._composer_box.bind("<Configure>", self._on_composer_configure, add="+")
         self._entry = self._composer.entry
         self._send = self._composer.send_button
 
@@ -2047,8 +2074,33 @@ class FaydGUI:
             tip="The operating mode for this conversation",
         )
 
+        # The model-switch row inside the card, under the input: one chip per
+        # answering model, in the order asked for, so the mouth is one click from
+        # the composer. Each chip drives the *same* ``_switch_mouth`` the header's
+        # selector drives, so the two controls can never disagree, and a chip that
+        # cannot load reports the real next step exactly as the selector does.
+        self._model_bar = self._composer.model_bar()
+        for key, name, hint in MODEL_BUTTONS:
+            self._model_bar.add(
+                key, name=name, hint=hint,
+                command=partial(self._switch_mouth, key),
+                tip=f"Answer with {name} ({hint.lower()})",
+            )
+        self._sync_model_buttons()
+
         self._render_attachment_chips()
         self._composer.focus()
+
+    def _sync_model_buttons(self) -> None:
+        """Accent the chip of the mouth that is actually answering.
+
+        The row is a *view* of the live mouth, never a second source of truth: the
+        header selector and the sidebar actions update it too, because they all
+        end in :meth:`_switch_mouth`.
+        """
+        bar = getattr(self, "_model_bar", None)
+        if bar is not None:
+            bar.set_active(self.service.source)
 
     # ------------------------------------------------------------- behavior
 
@@ -2143,10 +2195,12 @@ class FaydGUI:
         ) as error:
             self._source_var.set(self.service.source)
             self._source_menu_var_reset()
+            self._sync_model_buttons()
             self._add_bubble("note", chat_module.switch_failure_message(want, error))
             return
         self._source_var.set(self.service.source)
         self._source_menu_var_reset()
+        self._sync_model_buttons()
         self._add_bubble("note", chat_module.mouth_switched_message(want))
 
     def _on_enter(self, _event: tk.Event) -> str:
