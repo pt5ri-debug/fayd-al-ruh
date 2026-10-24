@@ -71,6 +71,10 @@ class JarvisTurn:
     answer_text: str = ""
     agent_run: AgentRun | None = None
     citations: tuple[str, ...] = field(default_factory=tuple)
+    relation_facts: tuple[str, ...] = field(default_factory=tuple)
+    """The knowledge graph's typed relations on the question's concepts, as
+    readable lines (``porosity —increases→ permeability``). Rendered after the
+    answer so a reader can tell a stored link from a cited sentence."""
     spoken: AudioClip | None = None
     playback_error: str = ""
     conversation_id: str = ""
@@ -199,6 +203,9 @@ class JarvisMode:
         learned = bool(getattr(answer, "learned", False))
         if used_web or learned:
             response = f"{response}\n\n{_web_note(used_web, learned)}"
+        facts = tuple(
+            fact.describe() for fact in getattr(answer, "relation_facts", ()) or ()
+        )
         return JarvisTurn(
             heard=utterance.strip(),
             response=response,
@@ -206,6 +213,7 @@ class JarvisMode:
             routed="answer",
             answer_text=response,
             citations=answer.citations,
+            relation_facts=facts,
             spoken=self._speak(response, speak),
             conversation_id=conversation.id,
             used_web=used_web,
