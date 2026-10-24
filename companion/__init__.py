@@ -67,6 +67,17 @@ from companion.personality import (
 from companion.polish import PolishResult, polish, polish_report
 from companion.prompt_builder import PromptBuilder
 from companion.relationship_manager import RelationshipEvent, RelationshipManager
+from companion.relationship_memory import (
+    DOMAIN_DIALOGUE_PREF,
+    DOMAIN_FICTION,
+    DOMAIN_USER_FACT,
+    DOMAINS,
+    SLOTS,
+    MemoryEntry,
+    RelationshipMemoryStore,
+)
+from companion.repetition import AntiRepetitionEngine, RepetitionReport
+from companion.traits import NATASHA_PERSONALITY, TraitProfile, default_traits, trait_instructions
 
 __all__ = [
     "BACKEND_AUTO",
@@ -76,8 +87,15 @@ __all__ = [
     "DEFAULT_MODEL",
     "DEFAULT_OLLAMA_URL",
     "DEFAULT_SPEC_KEY",
+    "DOMAINS",
+    "DOMAIN_DIALOGUE_PREF",
+    "DOMAIN_FICTION",
+    "DOMAIN_USER_FACT",
     "LANGUAGE_MODES",
     "NAME",
+    "NATASHA_PERSONALITY",
+    "SLOTS",
+    "AntiRepetitionEngine",
     "CompanionAgent",
     "CompanionConfig",
     "CompanionError",
@@ -89,6 +107,7 @@ __all__ = [
     "DialogueEmotionTracker",
     "LlamaCppNatashaClient",
     "Memory",
+    "MemoryEntry",
     "MemoryManager",
     "ModelCaller",
     "ModelStatus",
@@ -101,10 +120,14 @@ __all__ = [
     "PromptBuilder",
     "RelationshipEvent",
     "RelationshipManager",
+    "RelationshipMemoryStore",
+    "RepetitionReport",
     "SessionInfo",
+    "TraitProfile",
     "build_client",
     "default_db_path",
     "default_personality",
+    "default_traits",
     "detect_language_of",
     "download_model",
     "natasha_model_status",
@@ -116,4 +139,5 @@ __all__ = [
     "resolve_spec",
     "spec_names",
     "spec_summaries",
+    "trait_instructions",
 ]

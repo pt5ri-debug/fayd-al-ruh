@@ -483,6 +483,26 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Cloud (remote model: ChatGPT, Claude, Gemini; needs an API key)", run_cloud, ("status",)),
     ("Cloud: free providers (no card) and how to start", run_cloud, ("free",)),
     ("Natasha (companion: lasting memory, tone, and relationship)", run_natasha, ("status",)),
+    (
+        "Natasha: her standing character traits (the realism settings)",
+        run_natasha,
+        ("traits",),
+    ),
+    (
+        "Natasha: her emotional state (named mood for the moment)",
+        run_natasha,
+        ("mood",),
+    ),
+    (
+        "Natasha: the initiatives she may take (never repeated)",
+        run_natasha,
+        ("initiative",),
+    ),
+    (
+        "Natasha: the structured relationship memory (facts, story, preferences)",
+        run_natasha,
+        ("relationship-memory",),
+    ),
     ("Hakeem (scholar of religion and history: compares the Abrahamic faiths)", run_hakeem, ("status",)),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),

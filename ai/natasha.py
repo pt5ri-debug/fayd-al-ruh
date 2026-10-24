@@ -50,6 +50,7 @@ from collections.abc import Sequence
 
 from companion.companion_agent import CompanionAgent, CompanionError
 from companion.config import CompanionConfig
+from companion.initiative import INITIATIVE_KEYS, INITIATIVE_MEANINGS, INITIATIVES
 from companion.memory_manager import KINDS
 from companion.model import (
     BACKEND_NAMES,
@@ -59,7 +60,10 @@ from companion.model import (
     pull_model,
     spec_summaries,
 )
+from companion.moods import MOOD_KEYS
 from companion.personality import NAME
+from companion.relationship_memory import DOMAINS
+from companion.traits import TRAIT_LABELS, TRAIT_MEANINGS, TRAIT_NAMES
 
 INTRO = (
     f"{NAME}: a bold, passionate companion speaking through a local Qwen3 model. "
@@ -70,6 +74,7 @@ INTRO = (
 _COMMANDS = (
     "chat", "status", "models", "download", "sessions", "remember", "memories",
     "settings", "emotion", "reset-emotion", "relationship", "export", "backup",
+    "traits", "mood", "initiative", "relationship-memory",
 )
 
 
@@ -334,6 +339,142 @@ def run_relationship(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_traits(args: argparse.Namespace) -> int:
+    """Show or change the character's standing traits (the design settings)."""
+    agent = _agent(args)
+    changes = {name: getattr(args, name) for name in TRAIT_NAMES if getattr(args, name, None) is not None}
+    if getattr(args, "reset", False):
+        profile = agent.reset_traits()
+        print(f"Traits reset to the shipped design: {profile.describe()}")
+        return 0
+    if changes:
+        try:
+            profile = agent.update_traits(**changes)
+        except ValueError as error:
+            print(f"Not changed: {error}", file=sys.stderr)
+            return 2
+        print(f"Updated traits: {profile.describe()}")
+        return 0
+    profile = agent.traits()
+    if getattr(args, "as_json", False):
+        print(json.dumps(profile.to_primitive(), ensure_ascii=False, indent=2))
+        return 0
+    print(f"Character traits: {profile.describe()}")
+    print("\nWhat each one controls:")
+    for name in TRAIT_NAMES:
+        value = profile.value(name)
+        print(f"  {name:26} {value:.2f}  ({TRAIT_LABELS[name]}) -- {TRAIT_MEANINGS[name]}")
+    print("\nSet one with: python -m cli natasha traits --romantic-intensity 0.8")
+    print("These are design settings: they shape the tone, and never change the honesty rules.")
+    return 0
+
+
+def run_mood(args: argparse.Namespace) -> int:
+    """Show or set the named emotional state."""
+    agent = _agent(args)
+    if getattr(args, "set", None):
+        try:
+            state = agent.set_mood(args.set)
+        except KeyError as error:
+            print(f"Not set: {error}", file=sys.stderr)
+            return 2
+        print(f"Emotional state set: {state.mood.label} -- {state.mood.style}")
+        return 0
+    if getattr(args, "reset", False):
+        state = agent.reset_mood()
+        print(f"Emotional state reset: {state.mood.label}")
+        return 0
+    state = agent.mood
+    if getattr(args, "as_json", False):
+        print(json.dumps(state.to_primitive(), ensure_ascii=False, indent=2))
+        return 0
+    print(f"Emotional state: {state.mood.label} ({state.reason})")
+    print(f"Style: {state.mood.style}")
+    print("\n(The state is chosen from the conversation, not at random; it shapes the")
+    print(" tone and is never a claim about your feelings.)")
+    print("Choose one with: python -m cli natasha mood --set romantic")
+    print("Available: " + ", ".join(MOOD_KEYS))
+    return 0
+
+
+def run_initiative(args: argparse.Namespace) -> int:
+    """List the initiatives she may take, and which remain unused."""
+    agent = _agent(args)
+    available = set(agent.available_initiatives())
+    if getattr(args, "as_json", False):
+        print(
+            json.dumps(
+                {
+                    "available": sorted(available),
+                    "all": [
+                        {"key": key, **INITIATIVES[key].to_primitive()} for key in INITIATIVE_KEYS
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    print("Initiatives Natasha may take (she never repeats one in a conversation):")
+    for key in INITIATIVE_KEYS:
+        marker = "available" if key in available else "used"
+        print(f"  [{marker:9}] {key:20} {INITIATIVES[key].label}")
+        print(f"              {INITIATIVE_MEANINGS[key]}")
+    print("\n(An initiative is guidance for how she may lead, never a scripted line,")
+    print(" and it is only offered when the moment and your preferences allow it.)")
+    return 0
+
+
+def run_relationship_memory(args: argparse.Namespace) -> int:
+    """Show, add, or forget the structured relationship memory (by domain)."""
+    agent = _agent(args)
+    if getattr(args, "forget", None):
+        if agent.forget_relationship_memory(args.forget):
+            print(f"Forgotten: {args.forget}")
+        else:
+            print(f"No such entry: {args.forget}", file=sys.stderr)
+            return 2
+        return 0
+    if getattr(args, "remember", None):
+        if not args.domain or not args.slot:
+            print("--remember needs --domain and --slot.", file=sys.stderr)
+            return 2
+        try:
+            entry = agent.remember_relationship(
+                args.domain, args.slot, args.remember, approved=args.approve
+            )
+        except ValueError as error:
+            print(f"Not stored: {error}", file=sys.stderr)
+            return 2
+        print(f"Remembered [{entry.domain}/{entry.slot}] {entry.id}: {entry.value}")
+        return 0
+    summary = agent.relationship_memory_summary()
+    entries = agent.relationship_memories(domain=args.domain)
+    if getattr(args, "as_json", False):
+        print(
+            json.dumps(
+                {
+                    "summary": summary.describe(),
+                    "entries": [entry.to_primitive() for entry in entries],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    print(summary.describe())
+    if entries:
+        print("\nSaved entries (each with its own domain):")
+        for entry in entries:
+            print(f"  {entry.id}  [{entry.domain}/{entry.slot}]  {entry.value}")
+    else:
+        print("\n(There is nothing saved yet.)")
+    print("\nDomains kept apart: " + ", ".join(DOMAINS) + ".")
+    print('Add one: python -m cli natasha relationship-memory --remember "سارة" \\')
+    print("         --domain dialogue_pref --slot name --approve")
+    return 0
+
+
 def run_export(args: argparse.Namespace) -> int:
     agent = _agent(args)
     data = agent.export_data()
@@ -575,6 +716,34 @@ def _build_parser() -> argparse.ArgumentParser:
     relationship.add_argument("--no-fiction", dest="no_fiction", action="store_true")
     relationship.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
 
+    traits = sub.add_parser("traits", help="Show or change the standing character traits.")
+    _add_connection_arguments(traits)
+    for name in TRAIT_NAMES:
+        traits.add_argument(f"--{name.replace('_', '-')}", dest=name, type=float, default=None)
+    traits.add_argument("--reset", action="store_true", help="return to the shipped design.")
+    traits.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
+
+    mood = sub.add_parser("mood", help="Show or set the named emotional state.")
+    _add_connection_arguments(mood)
+    mood.add_argument("--set", choices=MOOD_KEYS, default=None, help="force a state by name.")
+    mood.add_argument("--reset", action="store_true", help="return to the default state.")
+    mood.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
+
+    initiative = sub.add_parser("initiative", help="List the initiatives she may take.")
+    _add_connection_arguments(initiative)
+    initiative.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
+
+    rel_mem = sub.add_parser(
+        "relationship-memory", help="Show, add, or forget the structured relationship memory."
+    )
+    _add_connection_arguments(rel_mem)
+    rel_mem.add_argument("--domain", choices=DOMAINS, default=None)
+    rel_mem.add_argument("--slot", default=None)
+    rel_mem.add_argument("--remember", default=None, help="the value to store.")
+    rel_mem.add_argument("--approve", action="store_true", help="the user agreed to keep it.")
+    rel_mem.add_argument("--forget", default=None, help="delete this entry id.")
+    rel_mem.add_argument("--json", dest="as_json", action="store_true", help="print JSON.")
+
     export = sub.add_parser("export", help="Export all of Natasha's data as JSON.")
     _add_connection_arguments(export)
     export.add_argument("--output", default=None, help="write to this file instead of stdout")
@@ -613,6 +782,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "emotion": run_emotion,
         "reset-emotion": run_reset_emotion,
         "relationship": run_relationship,
+        "traits": run_traits,
+        "mood": run_mood,
+        "initiative": run_initiative,
+        "relationship-memory": run_relationship_memory,
         "export": run_export,
         "backup": run_backup,
     }

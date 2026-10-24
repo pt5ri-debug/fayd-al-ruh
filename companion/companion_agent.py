@@ -43,6 +43,7 @@ from companion.config import CompanionConfig
 from companion.conversation_manager import ConversationManager, SessionInfo
 from companion.database import CompanionDatabase
 from companion.emotion_state import DialogueEmotion, DialogueEmotionTracker
+from companion.initiative import InitiativeEngine
 from companion.language import last_user_text, resolve_reply_language
 from companion.memory_manager import MemoryCandidate, MemoryManager
 from companion.model import (
@@ -52,10 +53,19 @@ from companion.model import (
     natasha_model_status,
     strip_thinking,
 )
+from companion.moods import EmotionalStateEngine, MoodState
 from companion.personality import NAME, NatashaPersonality, PersonalitySettings, PersonalityStore
 from companion.polish import polish_report
 from companion.prompt_builder import PromptBuilder
 from companion.relationship_manager import EventCandidate, RelationshipEvent, RelationshipManager
+from companion.relationship_memory import (
+    DOMAIN_FICTION,
+    EntryCandidate,
+    MemoryEntry,
+    RelationshipMemoryStore,
+)
+from companion.repetition import AntiRepetitionEngine, RepetitionReport
+from companion.traits import TraitProfile, TraitStore
 
 
 class CompanionError(RuntimeError):
@@ -83,6 +93,12 @@ class CompanionReply:
     reply_language: str = "ar"
     #: The typographic repairs the linguistic polisher made, for an honest record.
     polish_changes: tuple[str, ...] = ()
+    #: The named emotional state the reply was written in.
+    mood: str | None = None
+    #: The initiative she took this turn (``None`` when she only answered).
+    initiative: str | None = None
+    #: The anti-repetition check of her own reply against what she had said before.
+    repetition: RepetitionReport | None = None
 
     def to_primitive(self) -> dict[str, Any]:
         return {
@@ -95,6 +111,9 @@ class CompanionReply:
             "history_used": self.history_used,
             "reply_language": self.reply_language,
             "polish_changes": list(self.polish_changes),
+            "mood": self.mood,
+            "initiative": self.initiative,
+            "repetition": self.repetition.to_primitive() if self.repetition else None,
         }
 
 
@@ -122,9 +141,17 @@ class CompanionAgent:
         self.conversations = ConversationManager(self._database)
         self.memories = MemoryManager(self._database)
         self.relationships = RelationshipManager(self._database)
+        self.relationship_memory = RelationshipMemoryStore(self._database)
         self.personality_store = PersonalityStore(self._database)
+        self.trait_store = TraitStore(self._database)
         self._emotions = DialogueEmotionTracker(
             self._database, enabled=self.config.emotion_enabled
+        )
+        self._moods = EmotionalStateEngine(enabled=self.config.mood_enabled)
+        self._initiatives = InitiativeEngine(enabled=self.config.initiative_enabled)
+        self._repetition = AntiRepetitionEngine(
+            window=self.config.repetition_window,
+            enabled=self.config.anti_repetition_enabled,
         )
         self._prompt_builder = PromptBuilder(
             budget=self.config.context_chars, history_window=self.config.history_window
@@ -198,11 +225,81 @@ class CompanionAgent:
         self.personality_store.save(updated)
         return updated
 
+    # -- traits -----------------------------------------------------------
+    def traits(self) -> TraitProfile:
+        """The character's standing traits (the design defaults unless overridden)."""
+        return self.trait_store.load()
+
+    def update_traits(self, **changes: Any) -> TraitProfile:
+        """Change a trait and persist it (the shipped design stays the default)."""
+        updated = self.traits().with_overrides(**changes)
+        self.trait_store.save(updated)
+        return updated
+
+    def reset_traits(self) -> TraitProfile:
+        """Drop every trait override, returning to the shipped design."""
+        return self.trait_store.reset()
+
+    # -- mood -------------------------------------------------------------
+    @property
+    def mood(self) -> MoodState:
+        """The named emotional state for the current turn."""
+        return self._moods.state
+
+    def set_mood(self, key: str) -> MoodState:
+        """Force the emotional state by name (an explicit choice, not a detection)."""
+        return self._moods.set_mood(key)
+
+    def reset_mood(self) -> MoodState:
+        """Return the emotional state to the default warm state."""
+        return self._moods.reset()
+
+    # -- initiative -------------------------------------------------------
+    def available_initiatives(self, *, allow_romance: bool = True) -> tuple[str, ...]:
+        """The initiatives she has not used yet in this conversation."""
+        return self._initiatives.available(allow_romance=allow_romance)
+
+    def reset_initiatives(self) -> None:
+        """Clear the record of used initiatives."""
+        self._initiatives.reset()
+
+    # -- relationship memory ----------------------------------------------
+    def remember_relationship(
+        self,
+        domain: str,
+        slot: str,
+        value: str,
+        *,
+        detail: str = "",
+        approved: bool = False,
+    ) -> MemoryEntry:
+        """Store a structured relationship memory (only with the user's approval)."""
+        return self.relationship_memory.remember(
+            domain, slot, value, detail=detail, approved=approved
+        )
+
+    def relationship_memories(
+        self, *, domain: str | None = None, include_inactive: bool = False
+    ) -> list[MemoryEntry]:
+        return self.relationship_memory.entries(domain=domain, include_inactive=include_inactive)
+
+    def forget_relationship_memory(self, entry_id: str) -> bool:
+        return self.relationship_memory.forget(entry_id)
+
+    def relationship_memory_summary(self):
+        return self.relationship_memory.summary()
+
+    def propose_relationship_memories(self, text: str) -> list[EntryCandidate]:
+        return self.relationship_memory.propose(text)
+
     # -- sessions ---------------------------------------------------------
     def new_session(self, title: str = "Conversation", *, session_id: str | None = None) -> SessionInfo:
         """Start a fresh session and make it the active one."""
         info = self.conversations.create_session(title, session_id=session_id)
         self._emotions.load(info.id)
+        self._moods.reset()
+        self._initiatives.reset()
+        self._repetition.reset()
         return info
 
     def resume_session(self, conversation_id: str) -> SessionInfo:
@@ -211,6 +308,16 @@ class CompanionAgent:
         if info is None:
             raise KeyError(f"Unknown session: {conversation_id}")
         self._emotions.load(conversation_id)
+        # Seed the anti-repetition window from her own earlier replies, so a
+        # resumed session does not immediately repeat what she already said.
+        prior = [
+            message.content
+            for message in self.conversations.recent(conversation_id, self.config.history_window)
+            if message.role == "assistant"
+        ]
+        self._repetition.load_replies(prior)
+        self._moods.reset()
+        self._initiatives.reset()
         return info
 
     def list_sessions(self) -> list[SessionInfo]:
@@ -242,8 +349,12 @@ class CompanionAgent:
         if self.conversations.get_session(conversation_id) is None:
             raise KeyError(f"Unknown session: {conversation_id}")
 
-        # Move the simulated tone in response to the user's words (gradual, bounded).
+        # Move the simulated tone in response to the user's words (gradual, bounded),
+        # choose the named emotional state, and record the turn in the rolling
+        # summary that keeps her from repeating herself.
         emotion = self._emotions.observe(question, conversation_id=conversation_id)
+        mood_state = self._moods.observe(question)
+        self._repetition.observe_user(question)
 
         if save_user:
             self.conversations.append(conversation_id, "user", question)
@@ -272,6 +383,30 @@ class CompanionAgent:
         )
         summary = self._latest_summary(conversation_id)
 
+        # The structured relationship memory, across all three domains, so the
+        # prompt can render each in its own block and never mix them.
+        relationship_entries = self.relationship_memory.recall(
+            question, limit=self.config.memory_limit
+        )
+
+        traits = self.traits()
+
+        # The initiative she may take this turn: only when the moment and her own
+        # initiative trait allow it, and never one she has already used.
+        initiative_choice = self._initiatives.choose(
+            mood_key=mood_state.key,
+            allow_romance=mood_state.mood.allows_romance,
+            has_story_memory=bool(
+                self.relationship_memory.slot_values("story_moment", domain=DOMAIN_FICTION)
+            ),
+            initiative_level=traits.conversational_initiative,
+        )
+
+        # The anti-repetition and length guidance, assembled from her own history.
+        style_guidance = self._style_guidance(
+            question=question, traits=traits
+        )
+
         built = self._prompt_builder.build(
             personality=self.personality(),
             question=question,
@@ -282,6 +417,11 @@ class CompanionAgent:
             emotion=emotion,
             emotion_enabled=self.config.emotion_enabled,
             reply_language=reply_language,
+            traits=traits,
+            relationship_entries=relationship_entries,
+            mood=mood_state if self.config.mood_enabled else None,
+            initiative=initiative_choice.instruction if initiative_choice else None,
+            style_guidance=style_guidance,
         )
 
         try:
@@ -299,7 +439,14 @@ class CompanionAgent:
         polish_result = polish_report(reply_text, language=reply_language)
         reply_text = polish_result.text
 
+        # Measure her own reply against what she had already said (an honest
+        # record; the guidance for the *next* turn comes from this window).
+        repetition = self._repetition.check(reply_text)
+
         assistant = self.conversations.append(conversation_id, "assistant", reply_text)
+        self._repetition.observe(reply_text)
+        if initiative_choice is not None:
+            self._initiatives.mark_used(initiative_choice.key)
         self._maybe_summarise(conversation_id)
         return CompanionReply(
             text=reply_text,
@@ -311,7 +458,18 @@ class CompanionAgent:
             history_used=built.history_used,
             reply_language=reply_language,
             polish_changes=polish_result.changes,
+            mood=mood_state.key if self.config.mood_enabled else None,
+            initiative=initiative_choice.key if initiative_choice else None,
+            repetition=repetition if self.config.anti_repetition_enabled else None,
         )
+
+    def _style_guidance(self, *, question: str, traits: TraitProfile) -> str:
+        """The anti-repetition and answer-length guidance for one turn."""
+        if not self.config.anti_repetition_enabled:
+            return ""
+        parts = [self._repetition.guidance(repetitiveness=traits.repetitiveness)]
+        parts.append(self._repetition.length_hint(question))
+        return " ".join(part for part in parts if part)
 
     def _latest_summary(self, conversation_id: str) -> str | None:
         summaries = self.conversations.summaries(conversation_id, limit=self.config.summary_limit)
@@ -412,8 +570,10 @@ class CompanionAgent:
         return {
             "memories": self.memories.export(),
             "relationship_events": self.relationships.export(),
+            "relationship_memory": self.relationship_memory.export(),
             "sessions": [info.__dict__ for info in self.conversations.list_sessions()],
             "settings": self.settings().to_primitive(),
+            "traits": self.traits().to_primitive(),
         }
 
     def close(self) -> None:

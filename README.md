@@ -1088,6 +1088,83 @@ beliefs, or knowledge graph. She is also a **mouth inside the project's own
 chat** (`from natasha`, or the window's model selector) and has a headless twin
 (`python -m cli natasha-chat`).
 
+#### The five realism components
+
+On top of the dials above, five components make her read as a person rather than
+a model with a system prompt. Each is a separate, testable module, each is on by
+default, and each can be switched off in `CompanionConfig`:
+
+1. **Standing character traits** (`companion/traits.py`). Nine *design settings*
+   with the shipped defaults below, rendered by
+   `NatashaPersonality.system_prompt()` as **tone guidance** — never handed to the
+   model as a bare number. They are the character's own disposition, so they are
+   on for the whole conversation (the dials above are what the *user* tunes).
+
+   | Trait | Default |
+   | --- | --- |
+   | `romantic_intensity` | 0.98 |
+   | `emotional_expressiveness` | 0.98 |
+   | `affection` | 0.95 |
+   | `playfulness` | 0.90 |
+   | `spontaneity` | 0.95 |
+   | `conversational_initiative` | 0.90 |
+   | `emotional_sensitivity` | 0.95 |
+   | `formal_tone` | 0.10 |
+   | `repetitiveness` | 0.05 |
+
+2. **A named emotional state engine** (`companion/moods.py`). Seven states —
+   *longing, romantic, playful, tender, passionate, sad, disagreement* — each with
+   a readable style guide. The state is chosen **from the conversation's own
+   context**, never at random, and it is stable (an unrelated message keeps the
+   current state). A support or friction cue always beats a warm one, and the
+   `sad`/`disagreement` states switch romance off, so a hard moment is never
+   answered with flirtation.
+
+3. **A structured relationship memory** (`companion/relationship_memory.py`),
+   with the three domains kept **strictly apart** — `user_fact` (true in reality),
+   `fiction` (something from the story, never recalled as real), and
+   `dialogue_pref` (how the two agreed to talk) — each rendered in its own prompt
+   block so they can never be confused. Named slots cover the fictional name she
+   was given, the way the user likes to be addressed, the romance and playfulness
+   levels, topics, boundaries, and story moments. An entry is stored **only with
+   the user's approval**, and a repeated slot replaces the old value instead of
+   piling up.
+
+4. **A conversational-initiative engine** (`companion/initiative.py`). Six ways to
+   lead — *romantic opener, express longing, deep question, suggest something to
+   imagine, recall a story moment, offer support* — offered only when the moment
+   and the user's preferences allow it, and **never repeated** within a
+   conversation (the engine remembers what it used). A supportive or tense moment
+   gets support, never a romantic opener. An initiative is guidance for how she
+   may lead, never a scripted line, and it never claims an action happened.
+
+5. **An anti-repetition engine** (`companion/repetition.py`). It normalises her
+   own earlier replies (case, whitespace, Arabic diacritics, a trailing stop),
+   finds the n-grams a new draft shares with them (longest first), keeps a
+   **bounded rolling summary** of the conversation, feeds a **rotating variation
+   hint** so the guidance itself does not repeat, and adapts the **answer length**
+   to the question (a bare "صباح الخير" gets a sentence, not a speech). It never
+   rewrites the model's words — it measures repetition and reports it honestly.
+
+```bash
+python -m cli natasha traits                    # the nine design settings
+python -m cli natasha traits --formal-tone 0.9  # tune one (persisted)
+python -m cli natasha traits --reset            # back to the shipped design
+python -m cli natasha mood                      # the current emotional state
+python -m cli natasha mood --set romantic       # force one for this run
+python -m cli natasha initiative                # the ways she may lead
+python -m cli natasha relationship-memory        # facts / story / preferences
+python -m cli natasha relationship-memory --remember "سارة" \
+    --domain dialogue_pref --slot name --approve
+```
+
+Each of the five is also a sidebar/menu entry (see the menu: *Natasha: her
+standing character traits…*, *…her emotional state…*, *…the initiatives she may
+take…*, *…the structured relationship memory…*). The unconditional safety floor
+is unchanged by any of them: every trait instruction and mood style that could be
+misread as licence restates it in its own text, and a relationship memory needs
+the user's approval before it is written.
+
 ### Hakeem: a scholar of religion and history (optional)
 
 Hakeem (Arabic **حكيم**, "the wise one") is a second companion character beside

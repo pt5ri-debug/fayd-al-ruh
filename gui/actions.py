@@ -37,6 +37,7 @@ from cli.menu import (
     run_learn,
     run_llm,
     run_ml,
+    run_natasha,
     run_natasha_chat,
     run_piper_speech,
     run_presentation,
@@ -120,6 +121,30 @@ ACTIONS: tuple[GuiAction, ...] = (
         run_natasha_chat,
         (),
         hidden=True,
+    ),
+    GuiAction(
+        "natasha-traits",
+        "Natasha: her standing character traits (the realism settings)",
+        run_natasha,
+        ("traits",),
+    ),
+    GuiAction(
+        "natasha-mood",
+        "Natasha: her emotional state (named mood for the moment)",
+        run_natasha,
+        ("mood",),
+    ),
+    GuiAction(
+        "natasha-initiative",
+        "Natasha: the initiatives she may take (never repeated)",
+        run_natasha,
+        ("initiative",),
+    ),
+    GuiAction(
+        "natasha-relationship-memory",
+        "Natasha: the structured relationship memory (facts, story, preferences)",
+        run_natasha,
+        ("relationship-memory",),
     ),
     GuiAction(
         "hakeem",
