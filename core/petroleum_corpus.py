@@ -1638,11 +1638,37 @@ def _add_relation(
     ontology.add_relation_once(source.id, target.id, relation_type, confidence)
 
 
+def _seed_glossary_aliases(ontology: Ontology) -> int:
+    """Attach each corpus glossary's Arabic term to the concept it names.
+
+    The corpus already records the Arabic word for a term (``("porosity",
+    "مسامية")``), but the concept carried only the English label, so an Arabic
+    question could never reach it -- the symbolic layer resolved almost none of
+    the corpus's own glossary. Each Arabic term is added as an alias of the
+    concept the English term names, so the ontology and the corpus agree on what
+    a concept is called in either language. Idempotent; returns how many aliases
+    were added (an already-present alias is not counted).
+    """
+    added = 0
+    for entry in _ENTRIES:
+        for term, arabic in entry.glossary:
+            if not arabic.strip():
+                continue
+            for concept in ontology.find_concepts(term):
+                if arabic in concept.aliases:
+                    continue
+                ontology.add_concept_alias(concept.id, arabic)
+                added += 1
+    return added
+
+
 def seed_petroleum_corpus(ontology: Ontology) -> list[Concept]:
     """Plant the corpus concepts and relations, reusing existing nodes.
 
     Idempotent, and shares nodes with the domain frame and the curriculum, so the
-    three seed layers form one graph rather than three disconnected ones.
+    three seed layers form one graph rather than three disconnected ones. The
+    corpus's own Arabic glossary is folded into the concepts as aliases, so the
+    Arabic word for a term reaches the same node as its English label.
     """
     concepts: dict[str, Concept] = {}
     for entry in _ENTRIES:
@@ -1656,6 +1682,7 @@ def seed_petroleum_corpus(ontology: Ontology) -> list[Concept]:
     for entry in _ENTRIES:
         for source, target, relation_type, confidence in entry.facts:
             _add_relation(ontology, concepts[source], concepts[target], relation_type, confidence)
+    _seed_glossary_aliases(ontology)
     return list(concepts.values())
 
 

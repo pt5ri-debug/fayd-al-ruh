@@ -2700,6 +2700,37 @@ clone, each optional so the base system still runs without it:
   that misses), wired into `evaluation` as the `relation_extraction_accuracy`
   metric.
 
+- Phase 23 — **Arabic reaches the concept graph**: the project is Arabic-facing,
+  but the symbolic core was English-only, so the Arabic user could not reach it.
+  Measured before the fix: of the corpus's own ~30 Arabic glossary terms only ~3
+  resolved to a concept, only 18 of 495 concepts carried any Arabic term, and
+  `find_concepts("المسامية")` / `("النفاذية")` returned nothing -- an Arabic
+  sentence taught and matched the graph no better than a random string.
+  `core/tokenize.py` gains the shared normalised *phrase* space
+  (`normalize_phrase`, `token_spans`), so a term and a text are compared as whole
+  normalised tokens rather than by a `casefold` substring test;
+  `core.concept.Concept` stores its terms normalised (and `terms_for(language)`,
+  `is_arabic`) so a concept is looked up the same way in either script; and
+  `core.ontology.Ontology` gains an Arabic-aware, whole-word span matcher
+  (`match_concepts`, `concepts_in`) plus `add_concept_alias`, which adds an alias
+  to a frozen concept *in place* keeping its id, so the graph's relations survive
+  the new name. Matching a term only at a token's start with a bounded inflection
+  (`_token_matches`) keeps "flow" reaching "flowed" without "porosity" matching
+  inside "microporosity". `core/petroleum_corpus.seed_petroleum_corpus` now folds
+  the corpus's own Arabic glossary onto the concepts it names
+  (`_seed_glossary_aliases`), so the ontology and the corpus agree on what a
+  concept is called in either language -- the corpus already recorded
+  `("porosity", "مسامية")`, and the concept simply never carried it. The learner
+  and the ontology-guided retriever read concepts through the same matcher, so all
+  three agree. Result: the same Arabic sentence resolves
+  `المسامية تزيد النفاذية` to `porosity` and `permeability` end to end. Honest by
+  construction: the matcher is deterministic and refuses rather than guesses, and
+  it still does not invent an alias for a term the ontology has no node for
+  ("oil in place", "gamma ray"). `tests/test_arabic_concepts.py` pins the shared
+  normalised space, the article handling, the corpus-glossary seeding, the
+  whole-word and inflection rules, the nested-concept rule, and the learner and
+  retriever wiring.
+
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
 regression monitor each can refuse a change.
