@@ -2800,6 +2800,44 @@ clone, each optional so the base system still runs without it:
   unknown-question honesty, the determinism, the limit, the de-duplication, the
   rendering, and the assistant wiring.
 
+- Phase 26 — **how two concepts are connected, step by step**: the graph could
+  state a direct relation and the reasoner could derive relations that follow from
+  the stored ones, but neither answered the question a reader actually asks --
+  *"how is porosity connected to recovery factor?"* when there is no single edge
+  between them. `core/relation_paths.py` finds the **shortest chain** of typed
+  relations between two concepts and returns it as an ordered list of steps.
+  `RelationStep` (source, relation_type, target, confidence, `forward`) records
+  whether the edge was walked **forward** (source → target, the stored direction)
+  or **backward** (target → source), so `describe()` shows the arrow
+  (``porosity —increases→ permeability`` vs ``permeability ←increases— porosity``)
+  and a reader sees exactly which claims the explanation rests on; `ConnectionPath`
+  carries the endpoints and steps, with `hops`, a `confidence` that is the
+  **product** of its steps' (a longer or weaker chain is honestly less certain than
+  a direct edge, like a derivation), and a `describe()` that prints the header plus
+  each numbered step. `find_connection` is breadth-first over the explicit
+  relations, walking every edge in **both** directions (so a chain that reaches an
+  endpoint through an incoming relation is found too) with a deterministic
+  tie-break (by label then relation type), so the same question always yields the
+  same path. **Read-only and honest by construction**: it never asserts the path
+  back into the graph, never invents an edge, and returns ``None`` for an unknown
+  concept, a non-positive hop bound, or two concepts no chain within the bound
+  connects -- so "I cannot connect these" is a real answer, and
+  `describe_connection` states that absence plainly. `DEFAULT_MAX_HOPS` (3) keeps
+  the search bounded and the chain short enough to read. Wired as
+  `python -m cli relations connect <a> <b> [--max-hops N] [--json]` (the headless
+  twin, with a machine-readable payload carrying `connected`/`hops`/`confidence`
+  and each step's `forward` flag). The gate is `connection_accuracy`: a held-out
+  catalogue of concept pairs (`CONNECTION_JUDGEMENTS`, hand-written with
+  **negative controls** -- an unknown endpoint that must yield no chain) that the
+  search must connect exactly when a chain exists and with the expected number of
+  hops, so a fabricated link fails the gate as surely as a missed one; added to
+  `evaluation/benchmark.py`, `evaluation/runner.py`, and `evaluation/baseline.json`.
+  `tests/test_relation_paths.py` pins the direct chain, the backwards walk, the
+  product confidence, the zero-hop same-concept case, the honest absence, the hop
+  bound, the determinism, and the step rendering; `tests/test_relations_cli.py`
+  pins the `connect` command, its JSON payload, its honest absence, and its hop
+  bound.
+
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
 regression monitor each can refuse a change.

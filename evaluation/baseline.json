@@ -52,6 +52,7 @@
     "calibration_error": 0.132065,
     "causal_chain_accuracy": 1.0,
     "causal_explanation_quality": 1.0,
+    "connection_accuracy": 1.0,
     "contradiction_rate": 1.0,
     "curriculum_coverage": 1.0,
     "decision_explanation_quality": 1.0,

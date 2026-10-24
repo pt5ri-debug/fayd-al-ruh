@@ -78,3 +78,31 @@ def test_learn_write_json_is_machine_readable(capsys):
     assert code == relations_cli.EXIT_OK
     payload = json.loads(capsys.readouterr().out)
     assert ["wettability", "affects", "flow"] in payload["added"]
+
+
+def test_connect_explains_a_direct_relation(capsys):
+    code = relations_cli.main(["connect", "porosity", "permeability"])
+    assert code == relations_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "porosity" in out and "permeability" in out
+    assert "step" in out
+
+
+def test_connect_json_is_machine_readable(capsys):
+    code = relations_cli.main(["connect", "porosity", "permeability", "--json"])
+    assert code == relations_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["connected"] is True
+    assert payload["hops"] >= 1
+    assert payload["steps"]
+
+
+def test_connect_says_plainly_when_there_is_no_chain(capsys):
+    code = relations_cli.main(["connect", "porosity", "zzz-not-a-concept"])
+    assert code == relations_cli.EXIT_OK
+    assert "No chain" in capsys.readouterr().out
+
+
+def test_connect_rejects_a_bad_hop_bound(capsys):
+    code = relations_cli.main(["connect", "porosity", "permeability", "--max-hops", "0"])
+    assert code == relations_cli.EXIT_USAGE

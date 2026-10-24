@@ -179,10 +179,82 @@ def describe_connection(path: ConnectionPath | None, source: str, target: str) -
     return path.describe()
 
 
+class ConnectionJudgement:
+    """One held-out pair of concepts and whether a chain should connect them.
+
+    ``expected_hops`` is the number of steps the shortest chain should take, or
+    ``None`` when **no** chain within the bound may be found -- a negative
+    control, so an over-eager search that fabricates a link is caught, not only
+    one that misses a real connection.
+    """
+
+    __slots__ = ("expected_hops", "note", "source", "target")
+
+    def __init__(
+        self,
+        source: str,
+        target: str,
+        expected_hops: int | None,
+        note: str = "",
+    ) -> None:
+        if not source.strip() or not target.strip():
+            raise ValueError("A connection judgement needs two concepts.")
+        if expected_hops is not None and expected_hops < 0:
+            raise ValueError("Expected hops cannot be negative.")
+        self.source = source
+        self.target = target
+        self.expected_hops = expected_hops
+        self.note = note
+
+
+#: The held-out connection catalogue -- external to the search (written by hand,
+#: with negative controls), so a change that makes the walk over-reach or miss is
+#: a measured regression rather than a silent one.
+CONNECTION_JUDGEMENTS: tuple[ConnectionJudgement, ...] = (
+    ConnectionJudgement("porosity", "permeability", 1, "a direct seeded relation"),
+    ConnectionJudgement("porosity", "porosity", 0, "a concept connects to itself in no steps"),
+    ConnectionJudgement("porosity", "zzz-not-a-concept", None, "an unknown endpoint has no chain"),
+)
+
+
+def connection_accuracy(
+    ontology: Ontology | None = None,
+    judgements: tuple[ConnectionJudgement, ...] = CONNECTION_JUDGEMENTS,
+    *,
+    max_hops: int = DEFAULT_MAX_HOPS,
+) -> float:
+    """The share of held-out judgements the connection search gets right.
+
+    A judgement counts when :func:`find_connection` finds a chain exactly when one
+    is expected and with the expected number of hops -- so a fabricated link fails
+    as surely as a missed one. Returns ``0.0`` for an empty catalogue. ``ontology``
+    is injectable for a test; with none it builds the project's seeded ontology.
+    """
+    catalogue = tuple(judgements)
+    if not catalogue:
+        return 0.0
+    if ontology is None:
+        from core.cognitive_controller import CognitiveController
+
+        ontology = CognitiveController().ontology
+    correct = 0
+    for judgement in catalogue:
+        path = find_connection(ontology, judgement.source, judgement.target, max_hops=max_hops)
+        if judgement.expected_hops is None:
+            if path is None:
+                correct += 1
+        elif path is not None and path.hops == judgement.expected_hops:
+            correct += 1
+    return correct / len(catalogue)
+
+
 __all__ = [
+    "CONNECTION_JUDGEMENTS",
     "DEFAULT_MAX_HOPS",
+    "ConnectionJudgement",
     "ConnectionPath",
     "RelationStep",
+    "connection_accuracy",
     "describe_connection",
     "find_connection",
 ]
