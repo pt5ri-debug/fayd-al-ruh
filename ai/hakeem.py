@@ -77,6 +77,17 @@ def _agent(args: argparse.Namespace) -> HakeemAgent:
         overrides["base_url"] = args.base_url
     if getattr(args, "no_memory", False):
         overrides["persistent"] = False
+    # The speed knobs, shared with the companion: ``think`` is tri-state.
+    if getattr(args, "think", None) is not None:
+        overrides["think"] = args.think
+    if getattr(args, "max_tokens", None) is not None:
+        overrides["max_tokens"] = args.max_tokens
+    if getattr(args, "context", None) is not None:
+        overrides["context"] = args.context
+    if getattr(args, "threads", None) is not None:
+        overrides["threads"] = args.threads
+    if getattr(args, "context_turns", None) is not None:
+        overrides["history_window"] = args.context_turns
     config = HakeemConfig.from_env(**overrides)
     return HakeemAgent(config)
 
@@ -114,6 +125,11 @@ def run_status(args: argparse.Namespace) -> int:
     if status.backend == "ollama":
         print(f"  server : {agent.config.base_url}")
     print(f"  storage: {agent.config.describe().split('; storage: ')[-1]}")
+    print(
+        f"  speed  : hidden reasoning {'on (slower)' if agent.config.think else 'off (fast)'}"
+        f"; max {agent.config.max_tokens} tokens, {agent.config.context}-token window,"
+        f" {agent.config.history_window} turns of context"
+    )
     if not status.available:
         print(f"  next step: {status.hint}")
     return 0 if status.available else 1
@@ -416,6 +432,32 @@ def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
         help="a specific .gguf file to load (the gguf runtime).",
     )
     parser.add_argument("--base-url", default=None, help="the Ollama server URL.")
+    parser.add_argument(
+        "--think", dest="think", action="store_true", default=None,
+        help="allow the model's hidden reasoning trace (slower, deeper answers).",
+    )
+    parser.add_argument(
+        "--no-think", dest="think", action="store_false", default=None,
+        help="answer without the hidden reasoning trace (the default; faster).",
+    )
+    parser.add_argument(
+        "--max-tokens", dest="max_tokens", type=int, default=None,
+        help="cap the reply length in tokens (default 512).",
+    )
+    parser.add_argument(
+        "--context", type=int, default=None,
+        help="context window in tokens (default 4096).",
+    )
+    parser.add_argument(
+        "--threads", type=int, default=None,
+        help="CPU threads for the in-process model (default: let llama.cpp choose).",
+    )
+    parser.add_argument(
+        # Its own dest on purpose: the ``settings`` subcommand already uses
+        # ``--history`` for Hakeem's *style* dial, and the two must not collide.
+        "--context-turns", dest="context_turns", type=int, default=None,
+        help="how many recent turns to send as context (default 8).",
+    )
     parser.add_argument(
         "--no-memory", dest="no_memory", action="store_true",
         help="run without a lasting database (nothing is kept after the run).",

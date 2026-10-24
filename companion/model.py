@@ -113,8 +113,28 @@ MAX_CONTEXT = 32768
 #: A safe ceiling on one reply, so a mistyped run cannot generate forever.
 MAX_TOKENS_CEILING = 4096
 
+#: The default cap on one companion reply. A conversational turn is short, and a
+#: large cap only lets a runaway reply take longer; a few hundred tokens is plenty.
+DEFAULT_MAX_TOKENS = 512
+
+#: The default context window for a companion turn. Deliberately smaller than
+#: :data:`DEFAULT_CONTEXT`: the standing character block is large, and a smaller
+#: window means less to allocate and less to prefill on every turn -- which is what
+#: keeps a reply quick on a CPU.
+DEFAULT_REPLY_CONTEXT = 4096
+
 #: How many threads to use. ``0`` lets llama.cpp pick a sensible count.
 DEFAULT_THREADS = 0
+
+#: The logical batch size for prompt processing in the in-process runtime. llama.cpp
+#: defaults to a small batch, which makes prefill of a long prompt slow on a CPU;
+#: a larger one processes the prompt in fewer, bigger steps.
+DEFAULT_BATCH = 512
+
+#: How long Ollama keeps a model resident between turns. A generous value stops the
+#: model being unloaded while the user is still typing the next message, so the next
+#: reply does not pay the load cost again.
+DEFAULT_KEEP_ALIVE = "30m"
 
 #: Offload to the GPU only when the user asks; the default is CPU-only so Natasha
 #: works on a plain laptop.
@@ -145,13 +165,25 @@ class CompanionModelSpec:
     summary: str
 
 
-#: The download catalog, keyed by name. ``qwen3-4b`` is the default: it reasons
-#: before it answers, so it holds a warm conversation well, and it fits a modest
-#: machine. ``qwen3-8b`` is stronger but heavier; ``qwen2.5-7b`` is a
-#: non-reasoning model, so it answers faster with no hidden reasoning trace. The
-#: GGUF repos are the ones the project already ships for Ultron, Vision, and the
-#: Presentation Studio (Apache-2.0), so a user who fetched one downloads nothing new.
+#: The download catalog, keyed by name. ``qwen3-4b`` is the default: it holds a
+#: warm conversation well and fits a modest machine, and with the hidden reasoning
+#: trace turned off (the default) it answers directly instead of spending minutes
+#: on a chain of thought. ``qwen3-1.7b`` is the fastest choice on a slow CPU;
+#: ``qwen3-8b`` is stronger but heavier; ``qwen2.5-7b`` has no reasoning mode at
+#: all. The GGUF repos are the ones the project already ships for Ultron, Vision,
+#: and the Presentation Studio (Apache-2.0), so a user who fetched one downloads
+#: nothing new.
 CATALOG: dict[str, CompanionModelSpec] = {
+    "qwen3-1.7b": CompanionModelSpec(
+        key="qwen3-1.7b",
+        title="Qwen3 1.7B (fastest)",
+        tag="qwen3:1.7b",
+        repo="Qwen/Qwen3-1.7B-GGUF",
+        filename="Qwen3-1.7B-Q4_K_M.gguf",
+        params="1.7B",
+        approx_size_gb=1.1,
+        summary="The lightest choice: replies in seconds on a CPU. Least capable.",
+    ),
     "qwen3-4b": CompanionModelSpec(
         key="qwen3-4b",
         title="Qwen3 4B (default)",
@@ -160,7 +192,7 @@ CATALOG: dict[str, CompanionModelSpec] = {
         filename="Qwen3-4B-Q4_K_M.gguf",
         params="4B",
         approx_size_gb=2.6,
-        summary="Warm and capable on a modest machine; reasons before it answers.",
+        summary="Warm and capable on a modest machine; answers directly by default.",
     ),
     "qwen3-8b": CompanionModelSpec(
         key="qwen3-8b",
@@ -335,13 +367,57 @@ class NatashaRunner(Protocol):
     def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> str: ...
 
 
+def thinking_kwargs(think: bool | None) -> dict[str, Any]:
+    """The ``create_chat_completion`` kwargs that turn a reasoning model's trace off.
+
+    Qwen3 (and other reasoning models) emit a long hidden chain of thought before
+    the answer. On a CPU that trace is the whole cost of a reply -- it can run to
+    thousands of tokens, which is why a companion turn took minutes. llama.cpp's
+    chat template exposes the switch as ``enable_thinking``; passing it here turns
+    the trace off at the template level, which is more reliable than hoping the
+    model stops on its own. ``None`` sends nothing, so a caller can leave the
+    template's own default alone.
+    """
+    if think is None:
+        return {}
+    return {"chat_template_kwargs": {"enable_thinking": bool(think)}}
+
+
+#: Qwen3's soft switch, honoured by the model's own template even on a build whose
+#: ``enable_thinking`` flag is ignored. Appended to the system turn only.
+NO_THINK_TOKEN = "/no_think"
+
+
+def apply_no_think(messages: list[dict[str, str]], model: str) -> list[dict[str, str]]:
+    """Add Qwen3's ``/no_think`` marker to the system turn when the trace is off.
+
+    ``thinking_kwargs`` is the hard switch; this is the belt-and-braces one for a
+    build whose chat template ignores it. It only ever touches a *system* message
+    (the companion always sends one) and only for a Qwen3 model, so a non-reasoning
+    model and a message list with no system turn are returned untouched.
+    """
+    if "qwen3" not in model.lower():
+        return messages
+    for index, message in enumerate(messages):
+        if message.get("role") == "system" and NO_THINK_TOKEN not in message.get("content", ""):
+            updated = list(messages)
+            updated[index] = {
+                **message,
+                "content": f"{message.get('content', '')} {NO_THINK_TOKEN}",
+            }
+            return updated
+    return messages
+
+
 class LlamaCppNatashaRunner:
     """The default runner: a thin ``llama-cpp-python`` chat wrapper.
 
     ``llama_cpp`` is imported here, lazily, so the module loads without the extra.
     The GGUF's own chat template is used by ``create_chat_completion``, so the
     model's expected prompt format -- Qwen3's included -- is honoured without the
-    project hard-coding one.
+    project hard-coding one. ``think`` is applied to every call: with it off, a
+    reasoning model answers directly instead of spending thousands of tokens on a
+    hidden trace first.
     """
 
     def __init__(
@@ -351,18 +427,32 @@ class LlamaCppNatashaRunner:
         context: int = DEFAULT_CONTEXT,
         gpu_layers: int = DEFAULT_GPU_LAYERS,
         threads: int = DEFAULT_THREADS,
+        think: bool | None = False,
     ) -> None:
         llama_cpp = _require_extra()
+        self.think = think
         self._llama = llama_cpp.Llama(
             model_path=str(model_path),
             n_ctx=context,
             n_gpu_layers=gpu_layers,
             n_threads=threads or None,
+            # A larger logical batch speeds up prompt processing on a CPU; llama.cpp's
+            # own default is small, which is the other half of a slow first reply.
+            # Bounded by the window, because llama.cpp requires ``n_batch <= n_ctx``.
+            n_batch=max(1, min(max(DEFAULT_BATCH, context // 8), context)),
             verbose=False,
         )
 
     def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
-        result = self._llama.create_chat_completion(messages=messages, **kwargs)
+        kwargs = {**thinking_kwargs(self.think), **kwargs}
+        try:
+            result = self._llama.create_chat_completion(messages=messages, **kwargs)
+        except TypeError:
+            # An older llama-cpp-python that does not accept ``chat_template_kwargs``.
+            # The ``/no_think`` marker the client adds is the fallback, so the reply
+            # is still direct rather than a slow reasoning trace.
+            kwargs.pop("chat_template_kwargs", None)
+            result = self._llama.create_chat_completion(messages=messages, **kwargs)
         return _content_of(result)
 
 
@@ -430,7 +520,8 @@ class LlamaCppNatashaClient:
         context: int = DEFAULT_CONTEXT,
         gpu_layers: int = DEFAULT_GPU_LAYERS,
         threads: int = DEFAULT_THREADS,
-        max_tokens: int = 4096,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        think: bool | None = False,
     ) -> None:
         self.model = model
         #: Marks this client for :func:`natasha_model_status`, so the status line
@@ -443,6 +534,9 @@ class LlamaCppNatashaClient:
         self.gpu_layers = gpu_layers
         self.threads = threads
         self.max_tokens = max_tokens
+        #: Whether the model may emit a hidden reasoning trace. Off by default: the
+        #: trace is what makes a reasoning model take minutes to answer.
+        self.think = think
 
     # --- model file -----------------------------------------------------
     def model_path(self) -> Path:
@@ -493,6 +587,7 @@ class LlamaCppNatashaClient:
                 context=self.context,
                 gpu_layers=self.gpu_layers,
                 threads=self.threads,
+                think=self.think,
             )
         return self._runner
 
@@ -512,9 +607,15 @@ class LlamaCppNatashaClient:
         if not messages:
             raise ValueError("At least one message is required.")
         runner = self._load()
+        payload = [message.as_dict() for message in messages]
+        # With the trace off, add Qwen3's own soft marker too: some builds ignore
+        # the template flag, and a trace that fills the whole reply cap would come
+        # back as an empty answer.
+        if self.think is False:
+            payload = apply_no_think(payload, self.model)
         try:
             return runner.chat(
-                [message.as_dict() for message in messages],
+                payload,
                 temperature=temperature,
                 max_tokens=self.max_tokens,
             )
@@ -602,11 +703,12 @@ def build_client(
     root: Path | str | None = None,
     base_url: str = DEFAULT_OLLAMA_URL,
     timeout: float = 600.0,
-    max_tokens: int = 4096,
-    think: bool = True,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    think: bool = False,
     context: int = DEFAULT_CONTEXT,
     gpu_layers: int = DEFAULT_GPU_LAYERS,
     threads: int = DEFAULT_THREADS,
+    keep_alive: str | None = DEFAULT_KEEP_ALIVE,
 ) -> NatashaModelClient:
     """Build the client for the resolved runtime.
 
@@ -624,6 +726,7 @@ def build_client(
             gpu_layers=gpu_layers,
             threads=threads,
             max_tokens=max_tokens,
+            think=think,
         )
     return OllamaNatashaClient(
         model=model,
@@ -631,6 +734,8 @@ def build_client(
         timeout=timeout,
         max_tokens=max_tokens,
         think=think,
+        num_ctx=context,
+        keep_alive=keep_alive,
     )
 
 
@@ -841,10 +946,14 @@ __all__ = [
     "BACKEND_NAMES",
     "BACKEND_OLLAMA",
     "CATALOG",
+    "DEFAULT_BATCH",
     "DEFAULT_CONTEXT",
     "DEFAULT_GPU_LAYERS",
+    "DEFAULT_KEEP_ALIVE",
+    "DEFAULT_MAX_TOKENS",
     "DEFAULT_MODEL",
     "DEFAULT_OLLAMA_URL",
+    "DEFAULT_REPLY_CONTEXT",
     "DEFAULT_SPEC_KEY",
     "DEFAULT_THREADS",
     "DOWNLOAD_HINT",
@@ -852,6 +961,7 @@ __all__ = [
     "MAX_CONTEXT",
     "MAX_TOKENS_CEILING",
     "NAME",
+    "NO_THINK_TOKEN",
     "PULL_HINT",
     "PULL_TOOL",
     "REGISTRY_FILENAME",
@@ -864,6 +974,7 @@ __all__ = [
     "NatashaModelStatus",
     "NatashaRunner",
     "OllamaNatashaClient",
+    "apply_no_think",
     "build_client",
     "download_model",
     "extra_available",
@@ -877,4 +988,5 @@ __all__ = [
     "spec_names",
     "spec_summaries",
     "strip_thinking",
+    "thinking_kwargs",
 ]

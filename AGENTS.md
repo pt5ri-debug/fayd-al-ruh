@@ -462,11 +462,16 @@ Arabic is kept as secondary aliases where useful.
   is honoured. Two governed fetches, one per runtime: `download_model` (the GGUF
   weights, via `huggingface_hub`) and `pull_model` (`ollama pull`), each running
   only through the permission + human-approval gates (`--approve`), like every
-  other model download. `strip_thinking` drops a reasoning model's ` thinking`
-  block — Ollama's `think` setting normally keeps it out of the reply, but not on
-  every build, and in-process there is no such switch — and `CompanionAgent` applies
-  it to every reply, whichever runtime produced it, so the trace never reaches the
-  transcript or the database. The runtime is the optional `[natasha]` extra
+  other model download. The hidden reasoning trace is off by default and there are
+  **two** switches for it: `thinking_kwargs` passes `chat_template_kwargs:
+  {"enable_thinking": false}` to `llama-cpp-python`, and `apply_no_think` appends
+  Qwen3's own `/no_think` marker to the system turn (only for a `qwen3` model), so
+  a build whose template ignores the flag still answers directly. `strip_thinking`
+  drops any ` thinking` block that still slips through — Ollama's `think` setting
+  normally keeps it out of the reply, but not on every build — and `CompanionAgent`
+  applies it to every reply, whichever runtime produced it, so the trace never
+  reaches the transcript or the database. The runtime is the optional `[natasha]`
+  extra
   (`core.optional_deps.FEATURE_NATASHA`, `requirements-natasha.txt`, `natasha = [...]`
   in `pyproject.toml`), imported lazily. `companion.config` re-exports the model
   defaults from it, and `CompanionAgent` builds its client through it, so the
@@ -625,15 +630,18 @@ Arabic is kept as secondary aliases where useful.
   reports honestly whether the model can answer and the real next step.
   `companion/config.py` resolves tunables as explicit arg → `FAYD_NATASHA_*` env
   (`FAYD_NATASHA_MODEL`, `FAYD_NATASHA_OLLAMA_URL`, `FAYD_NATASHA_DB`,
-  `FAYD_NATASHA_TIMEOUT`, `FAYD_NATASHA_THINK`) → default. Its model defaults are
-  sized for a **reasoning model on a CPU**: `max_tokens=4096` and `timeout=600`,
-  because qwen3:4b spends thousands of tokens on its hidden reasoning trace before
-  it answers and a small cap returns an **empty** reply; `think=True` keeps that
-  trace out of the reply the user sees (setting it `False` does not remove the
-  reasoning on every build and can inline it into the answer instead).
-  `OllamaCoderClient` carries the two new **optional** constructor settings
-  (`max_tokens`, `think`, sent as Ollama's `num_predict` and `think`), both unset
-  by default so every existing caller is untouched. Wired **directly below Cloud**
+  `FAYD_NATASHA_TIMEOUT`, `FAYD_NATASHA_THINK`, `FAYD_NATASHA_MAX_TOKENS`,
+  `FAYD_NATASHA_CONTEXT`, `FAYD_NATASHA_THREADS`) → default. Its defaults are
+  sized for a **fast reply on a CPU**, because a hidden reasoning trace is what made
+  a turn take minutes: `think=False` (the trace is off; `--think` restores it),
+  `max_tokens=512`, `context=4096`, `timeout=180`, `history_window=8`,
+  `memory_limit=4`, `summary_limit=2`, `context_chars=12000` (large enough to clear
+  the standing character block, so history is not silently dropped), and
+  `keep_alive="30m"` so the model is not
+  unloaded between turns. `OllamaCoderClient` carries the optional constructor
+  settings (`max_tokens`, `think`, `num_ctx`, `keep_alive`, sent as Ollama's
+  `num_predict`, `think`, `num_ctx`, and `keep_alive`), all unset by default so
+  every existing caller is untouched. Wired **directly below Cloud**
   in the menu (`cli.menu.run_natasha`), CLI (`python -m cli natasha` —
   `chat` default, `status`, `models`, `download --approve`, `remember`,
   `memories`, `settings` (including the `--boldness`/`--passion`/`--initiative`
@@ -713,8 +721,12 @@ Arabic is kept as secondary aliases where useful.
   reply language chosen from the user's own message, and the linguistic polisher's
   changes; `model_status()` reports honestly and names the real next step.
   `hakeem/config.py` resolves every tunable (explicit arg → `FAYD_HAKEEM_*` env →
-  default) with the model defaults the companion's own, and `default_db_path()` is
-  the git-ignored `data/hakeem.db`. Wired **directly below Natasha** in the menu
+  default) with the model defaults the companion's own — including the fast ones
+  (`think=False`, `max_tokens=512`, `context=4096`, `timeout=180`,
+  `history_window=8`, `memory_limit=4`, `summary_limit=2`, `context_chars=12000`,
+  `keep_alive="30m"`),
+  because it is the same model and the same latency problem — and `default_db_path()`
+  is the git-ignored `data/hakeem.db`. Wired **directly below Natasha** in the menu
   (`cli.menu.run_hakeem`), CLI (`python -m cli hakeem` — `chat` default, `status`,
   `models`, `download --approve [--backend ollama]`, `sessions`, `remember`,
   `memories` (`--correct`/`--forget`), `settings` (including the
@@ -3117,6 +3129,37 @@ clone, each optional so the base system still runs without it:
   dials, the language rule, the memory/session/tone behaviour, the exchange's
   honesty guarantees, the shared-model choice, the CLI, the mouth, and the
   menu/GUI wiring.
+
+- Phase 29 — **Natasha and Hakeem reply in seconds, not minutes**: both characters
+  defaulted to the reasoning model `qwen3:4b` with its hidden reasoning trace
+  **on** and a 4096-token cap, so a turn spent thousands of tokens thinking before
+  it said anything — minutes on a CPU, when the user wanted seconds. The defaults
+  are now **speed-first** and the trace is off: `think=False` (so the model answers
+  directly), `max_tokens=512`, `context=4096`, `timeout=180`, `history_window=8`,
+  `memory_limit=4`, `summary_limit=2`, `context_chars=12000`, and `keep_alive="30m"`.
+  Disabling the
+  trace is done at **two** levels so neither a runtime nor a template can defeat it:
+  `companion.model.thinking_kwargs` sends
+  `chat_template_kwargs: {"enable_thinking": false}` to the in-process
+  `llama-cpp-python` runtime (the `LlamaCppNatashaRunner` applies it to every
+  call), and `companion.model.apply_no_think` appends Qwen3's own `/no_think`
+  marker to the system turn — only for a `qwen3` model, only when the trace is off,
+  idempotently, and never to a message list with no system turn — for a build whose
+  template ignores the flag. `core.coder_model.OllamaCoderClient` gains two optional
+  settings, `num_ctx` and `keep_alive` (Ollama's `num_ctx` and `keep_alive`), so the
+  window stays fixed and the model is not unloaded between turns; both are unset by
+  default, so every existing caller is untouched. The in-process runner also raises
+  `n_batch` (bounded by `n_ctx`), because llama.cpp's small default batch is the
+  other half of a slow first reply. `qwen3-1.7b` joins the catalog as the fastest
+  option on a slow CPU. Both CLIs expose the knobs — `--think`/`--no-think`
+  (tri-state: leave the default, restore the deep reasoning, or force the fast
+  path), `--max-tokens`, `--context`, `--threads`, and `--context-turns` — and
+  `status` prints a `speed` line naming which is in force. `--think` (or
+  `FAYD_NATASHA_THINK`/`FAYD_HAKEEM_THINK`) restores the deeper reasoning when a
+  user wants it and can wait. `tests/test_companion.py` and `tests/test_hakeem.py`
+  pin the fast defaults, the two trace switches, the new Ollama settings, and the
+  CLI flags; `strip_thinking` still guards the transcript, so a trace that slips
+  through is never shown.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
