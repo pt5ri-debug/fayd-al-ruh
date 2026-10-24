@@ -14,6 +14,7 @@ from core.embeddings import evaluate_held_out
 from core.evidence import Evidence
 from core.goal import Goal
 from core.observation import Observation
+from core.relation_consistency import consistency_accuracy
 from core.relation_extraction import extraction_accuracy
 from core.relation_paths import connection_accuracy
 from core.relation_polarity import polarity_accuracy
@@ -88,6 +89,7 @@ class EvaluationMetrics:
     relation_extraction_accuracy: float
     polarity_accuracy: float
     connection_accuracy: float
+    consistency_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -758,6 +760,10 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # link fails the gate as surely as one that misses a real connection.
     connection_value = connection_accuracy()
 
+    # Consistency: held-out graphs whose contradiction count must be exact, so
+    # a hidden contradiction and a false positive both fail the gate.
+    consistency_value = consistency_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -803,6 +809,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         extraction_value,
         polarity_value,
         connection_value,
+        consistency_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -834,6 +841,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         relation_extraction_accuracy=round(extraction_value, 6),
         polarity_accuracy=round(polarity_value, 6),
         connection_accuracy=round(connection_value, 6),
+        consistency_accuracy=round(consistency_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

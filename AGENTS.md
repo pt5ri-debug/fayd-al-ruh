@@ -2838,6 +2838,43 @@ clone, each optional so the base system still runs without it:
   pins the `connect` command, its JSON payload, its honest absence, and its hop
   bound.
 
+- Phase 27 — **contradictions are reported, not hidden**: `core.relation_polarity`
+  could tell that ``increases`` opposes ``reduces``, and `find_polarity_conflicts`
+  could find the pairs asserting both -- but a conflict the answer path never
+  mentions is one the user never learns about: the graph holds "A increases B" and
+  "A reduces B" and the reader is shown whichever retrieval happened to reach.
+  `core/relation_consistency.py` turns that scan into an honest, bounded **report**.
+  `RelationConflict` (source, relation_type, target, opposing_type, severity) names
+  both sides with readable labels and `describe()` renders the disagreement
+  (``a —increases→ b vs a —reduces→ b (severity 0.40)``); `relation_conflicts` with
+  no question returns the graph's whole history of disagreement, and with a
+  question keeps only conflicts whose **either** endpoint is a concept the question
+  names (so the answer carries the caveat that matters to it), ordered by severity
+  then labels, so the same question always yields the same report.
+  `describe_relation_conflicts` uses deliberately neutral wording -- "the graph
+  holds both ... and ..." -- because the program does not know which side is right
+  and must not imply it. **Read-only and honest by construction**: it never resolves
+  a conflict, never picks a winner, never edits the graph, and returns ``()` for a
+  consistent graph, no ontology, or a question naming no conflicting concept --
+  choosing between two evidenced claims is the user's call, not the program's.
+  `GroundedAssistant.ask` attaches the conflicts to
+  `AssistantAnswer.relation_conflicts` as **data**, like the facts and citations;
+  `JarvisTurn.relation_conflicts` carries them (read defensively through `getattr`,
+  so every mouth is unaffected), and `ai/chat.format_turn` renders the warning
+  *before* the knowledge-graph block (a caveat belongs above the claims it
+  qualifies), with `turn_payload` exposing them for `--json`. The GUI shows them
+  for free through the same `format_turn`. Wired as
+  `python -m cli relations conflicts [--concept C] [--json]` (read-only). The gate
+  is `consistency_accuracy`: a held-out catalogue of hand-written graphs
+  (`CONSISTENCY_SCENARIOS`) whose contradiction count must be **exact**, including a
+  scenario where an opposite-*direction* claim ("B reduces A") is correctly **not**
+  a contradiction -- so a hidden contradiction and a false positive both fail; added
+  to `evaluation/benchmark.py`, `evaluation/runner.py`, and `evaluation/baseline.json`.
+  `tests/test_relation_consistency.py` pins the detection, the severity, the clean
+  graph, the question scoping, the no-ontology case, the neutral rendering, the
+  assistant wiring, and the gate; `tests/test_relations_cli.py` pins the `conflicts`
+  command, its JSON, and its concept scoping.
+
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
 regression monitor each can refuse a change.

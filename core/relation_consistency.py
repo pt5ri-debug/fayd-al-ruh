@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.ontology import Ontology
-from core.relation_polarity import PolarityConflict, find_polarity_conflicts
+from core.relation_polarity import find_polarity_conflicts
 
 
 @dataclass(frozen=True)
@@ -103,8 +103,92 @@ def describe_relation_conflicts(conflicts: tuple[RelationConflict, ...]) -> str:
     return "\n".join(lines)
 
 
+class ConsistencyScenario:
+    """A hand-written graph and the number of contradictions it should report.
+
+    ``triples`` are ``(source, relation_type, target, confidence)`` edges; the
+    scenario is *external* to the detector, so a change that starts hiding a real
+    contradiction or inventing a false one is a measured regression.
+    """
+
+    __slots__ = ("expected", "note", "triples")
+
+    def __init__(
+        self,
+        triples: tuple[tuple[str, str, str, float], ...],
+        expected: int,
+        note: str = "",
+    ) -> None:
+        if expected < 0:
+            raise ValueError("Expected conflict count cannot be negative.")
+        self.triples = triples
+        self.expected = expected
+        self.note = note
+
+
+#: The held-out consistency catalogue: a planted conflict must be reported, a
+#: consistent graph and an opposite-*direction* claim (a different statement, not
+#: a contradiction) must not.
+CONSISTENCY_SCENARIOS: tuple[ConsistencyScenario, ...] = (
+    ConsistencyScenario(
+        (
+            ("a", "increases", "b", 0.9),
+            ("a", "reduces", "b", 0.4),
+        ),
+        1,
+        "two opposing relations on the same ordered pair",
+    ),
+    ConsistencyScenario(
+        (
+            ("a", "increases", "b", 0.9),
+            ("b", "reduces", "a", 0.9),
+        ),
+        0,
+        "opposite directions are different claims, not a contradiction",
+    ),
+    ConsistencyScenario(
+        (("a", "increases", "b", 0.9),),
+        0,
+        "a single relation is consistent",
+    ),
+)
+
+
+def consistency_accuracy(
+    scenarios: tuple[ConsistencyScenario, ...] = CONSISTENCY_SCENARIOS,
+) -> float:
+    """The share of held-out scenarios whose contradiction count is exactly right.
+
+    A scenario counts only when the number of conflicts the detector reports
+    equals the expected number -- so a hidden contradiction and a false positive
+    both fail. Returns ``0.0`` for an empty catalogue.
+    """
+    catalogue = tuple(scenarios)
+    if not catalogue:
+        return 0.0
+    from core.semantic_relation import SemanticRelation
+
+    correct = 0
+    for scenario in catalogue:
+        ontology = Ontology()
+        ids: dict[str, str] = {}
+        for source, relation_type, target, confidence in scenario.triples:
+            for name in (source, target):
+                if name not in ids:
+                    ids[name] = ontology.add_concept_once(name).id
+            ontology.add_relation(
+                SemanticRelation(ids[source], ids[target], relation_type, confidence)
+            )
+        if len(relation_conflicts(ontology)) == scenario.expected:
+            correct += 1
+    return correct / len(catalogue)
+
+
 __all__ = [
+    "CONSISTENCY_SCENARIOS",
+    "ConsistencyScenario",
     "RelationConflict",
+    "consistency_accuracy",
     "describe_relation_conflicts",
     "relation_conflicts",
 ]
