@@ -2305,7 +2305,14 @@ Arabic is kept as secondary aliases where useful.
   unknown figure/prop preset is a typed `SceneStudioError`, and an unknown
   instruction returns the help text rather than guessing. It creates the
   missing-folder save target itself and refuses a non-positive render size
-  honestly (`RenderReport.ok is False`, never a crash).
+  honestly (`RenderReport.ok is False`, never a crash). A render **publishes its
+  PNG atomically** (`_write_atomic`: a sibling temp file renamed into place), so a
+  concurrent reader -- the window's `_refit_viewport` re-reads the viewport file
+  while a second render writes it -- sees either the old whole image or the new
+  whole one, never a truncated one. A plain `write_bytes` truncates first, which
+  is what made a preview vanish (`load_scaled` returned `None`, `_photo` stayed
+  `None`) and failed a window test intermittently; the atomic swap closes that
+  race and a failed write leaves the previous image intact with no temp litter.
 - `gui/scene3d_dialog.py` — the Scene Studio **window** (Tk, imported lazily),
   built the way the chat, Code Studio, Presentation Studio, and Doc's Studio
   windows are built: the same `Theme` tokens, `RoundedBox`, `gui.rich_text`
