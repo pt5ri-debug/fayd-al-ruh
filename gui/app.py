@@ -44,6 +44,7 @@ from core.paths import data_dir
 from core.ultron import UltronUnavailable
 from core.version import __version__
 from core.vision_model import VisionUnavailable
+from hakeem.hakeem_agent import HakeemError
 
 from gui import chat_composer, rich_text
 from gui import markdown as md
@@ -83,6 +84,7 @@ MOUTH_CHOICES: tuple[tuple[str, str], ...] = (
     (chat_module.MOUTH_BANNER, "Banner (presentation local model)"),
     (chat_module.MOUTH_CLOUD, "Cloud (remote model: ChatGPT, Claude, Gemini)"),
     (chat_module.MOUTH_NATASHA, "Natasha (companion: memory, tone)"),
+    (chat_module.MOUTH_HAKEEM, "Hakeem (scholar of religion and history)"),
 )
 MOUTH_LABELS: dict[str, str] = dict(MOUTH_CHOICES)
 
@@ -2124,6 +2126,8 @@ class FaydGUI:
                 self.service.use_cloud()
             elif want == chat_module.MOUTH_NATASHA:
                 self.service.use_natasha()
+            elif want == chat_module.MOUTH_HAKEEM:
+                self.service.use_hakeem()
             else:
                 self.service.use_sources()
         except (
@@ -2135,6 +2139,7 @@ class FaydGUI:
             BannerUnavailable,
             CloudUnavailable,
             CompanionError,
+            HakeemError,
         ) as error:
             self._source_var.set(self.service.source)
             self._source_menu_var_reset()

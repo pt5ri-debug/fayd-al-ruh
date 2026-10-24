@@ -27,7 +27,7 @@ fayd-al-ruh = "cli.__main__:main"
 # discovery is scoped explicitly: without this, setuptools' flat-layout guessing
 # either refuses the build ("multiple top-level packages") or sweeps in the
 # tests. `scripts/` has no __init__.py and `main.py` is a demo module.
-include = ["ai*", "cli*", "companion*", "core*", "evaluation*", "gui*", "ingest*", "ml*", "storage*"]
+include = ["ai*", "cli*", "companion*", "core*", "evaluation*", "gui*", "hakeem*", "ingest*", "ml*", "storage*"]
 exclude = ["tests*", "data*", "docs*", "knowledge*"]
 
 [tool.setuptools]
@@ -115,6 +115,15 @@ banner = [
 # Never required by the base install -- without it Natasha still runs against an
 # existing Ollama server -- and the imports are lazy.
 natasha = [
+    "llama-cpp-python>=0.3",
+    "huggingface_hub>=0.23",
+]
+# Hakeem, the project's scholar of religion and history, speaks through the *same*
+# model as the companion (`hakeem/model.py` reuses `companion.model`), so this
+# extra pins the same runtime and the same `data/natasha` model folder -- a
+# machine that already has `[natasha]` needs nothing new. It is named for symmetry
+# with the other mouth extras and because a user may install the scholar alone.
+hakeem = [
     "llama-cpp-python>=0.3",
     "huggingface_hub>=0.23",
 ]

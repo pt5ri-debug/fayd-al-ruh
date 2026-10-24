@@ -1,0 +1,26 @@
+# Optional: Hakeem's model (the [hakeem] extra).
+#
+# Install with:  python -m pip install -r requirements-hakeem.txt
+#
+# Hakeem, the project's scholar of religion and history, speaks through the *same*
+# local model as the companion Natasha (see `hakeem/model.py`, which reuses
+# `companion.model`), so this file pins the same runtime and the same
+# `data/natasha` model folder. A machine that already installed
+# `requirements-natasha.txt` (or the Ultron/Vision/Banner/Studios runtime) needs
+# nothing new here -- this file exists so a user who installs the scholar alone
+# has one obvious command.
+#
+# ``llama-cpp-python`` runs a GGUF model locally inside this process -- no
+# ``ollama serve`` daemon has to sit in the background holding RAM -- and
+# ``huggingface_hub`` is used only to fetch the weights. On a machine with no
+# prebuilt wheel, ``llama-cpp-python`` compiles from source and needs a C/C++
+# compiler.
+#
+# The model weights are a *separate* one-time, human-approved download:
+#     python -m cli hakeem download --approve
+# or drop any compatible `.gguf` file into the shared data/natasha folder. The
+# base install needs none of this: the imports are lazy, and without the extra or
+# a model file Hakeem still runs against an existing Ollama server and reports
+# the real next step instead of pretending.
+llama-cpp-python>=0.3
+huggingface_hub>=0.23

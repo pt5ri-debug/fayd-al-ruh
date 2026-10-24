@@ -40,6 +40,7 @@ hiddenimports = (
     + collect_submodules("ml")
     + collect_submodules("evaluation")
     + collect_submodules("ai")
+    + collect_submodules("hakeem")
     + collect_submodules("storage")
     + collect_submodules("gui")
     + collect_submodules("ingest")

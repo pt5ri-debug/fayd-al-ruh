@@ -385,6 +385,15 @@ class ChatService:
         """
         self.switcher.use_natasha()
 
+    def use_hakeem(self) -> None:
+        """Talk with Hakeem, the scholar of religion and history.
+
+        He speaks through the same local model as the companion, so this raises
+        :class:`~hakeem.hakeem_agent.HakeemError` when that model cannot answer,
+        and the caller can report the real next step.
+        """
+        self.switcher.use_hakeem()
+
     def cloud_provider(self) -> str:
         """The provider key the Cloud mouth will use (the saved choice, else the default)."""
         from core.cloud_model import load_provider_key

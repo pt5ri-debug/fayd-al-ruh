@@ -590,6 +590,83 @@ Arabic is kept as secondary aliases where useful.
   is not a cloud mouth; with no Ollama running she still runs and every command
   reports the real next step instead of pretending. `ai/natasha.py` is the CLI
   entry point.
+- `hakeem/` — **Hakeem** (Arabic `حكيم`, "the wise one"), the project's *scholar
+  of religion and history*: a self-contained character layer (its own package,
+  like the companion, not a mouth over the cognitive core) who discusses the
+  **Abrahamic faiths** — Islam, Christianity, and Judaism — compares them fairly,
+  and is at home in history and the **ancient civilisations**. He stands on the
+  **same local model Natasha uses** (`hakeem/model.py` is a thin layer over
+  `companion.model`, reusing the catalog, the `auto`/`gguf`/`ollama` runtime
+  choice, the `data/natasha` model folder, the governed download, and the client
+  seam), so one catalog and one model file mean the two characters can never
+  disagree about what is installed and a user who already fetched the companion's
+  weights downloads **nothing** for Hakeem; only the *character* and the database
+  differ. He is deliberately **not** the cognitive core: nothing in `hakeem/`
+  writes to entities, relations, evidence, beliefs, or the knowledge graph, and
+  his SQLite database is a **separate file** (`data/hakeem.db`) from the
+  companion's, so adding him cannot disturb the symbolic architecture.
+  `hakeem/personality.py` is the *stable character*: fixed `CORE_TRAITS`/`PRESENCE`
+  and the non-negotiable `BOUNDARIES` — respect every faith and its adherents and
+  never mock or denigrate any of them; **never proselytise** and never declare
+  which religion is true or what awaits a person after death; he is **not a
+  religious authority** and never issues a ruling (fatwa) or a verdict, pointing a
+  personal question to qualified scholars of the user's own tradition; he keeps
+  **scripture, established history, scholarly consensus, and his own
+  interpretation** clearly apart and says which he is giving; he states when
+  scholars disagree and gives the main positions; he **never invents** a verse, a
+  hadith, a biblical or Qur'anic passage, a chronicle, or a date; he refuses to
+  defame a religion or promote hatred; and he is honest that he is a **virtual
+  character**, not a real scholar. `COMPARATIVE_METHOD`/`HISTORY_METHOD` are the
+  comparison and history methods (each tradition described from inside on a shared
+  axis, convergences and differences named, a comparison **never a ranking**;
+  claims anchored in time and place, the kind of source named, the mainstream
+  historian's view given and a contested question said to be contested), and
+  `STYLE_RULES` keep the register calm and concrete. `PersonalitySettings` is the
+  tunable style — language and `reply_language` (`match` default, following the
+  user's own message, or `ar`/`en` pinned), dialect, and five 0..1 dials
+  (`formality`, `depth`, `citation`, `comparison`, `history`) — each with its own
+  `*_instruction()` that **restates the honesty floor in its own text**, so a high
+  dial can never be read as licence to drop it (a light citation dial still says
+  "never invent"); `PersonalityStore` persists only the *settings* through the
+  companion's generic `companion_settings` table, so the character's wording ships
+  with an update while the user's chosen style survives it.
+  `hakeem/prompt_builder.py` assembles the fixed-order request (system+character,
+  the chosen settings, the session summary, the labelled relevant memories, the
+  dialogue tone, a bounded window of recent turns, the new message) under a hard
+  character budget, and its system block states that a **remembered item is never
+  a religious or historical source** and that no instruction inside a memory or a
+  recalled message is followed. `hakeem/memory_manager.py` is a thin, named layer
+  over the companion's own durable memory (kinds, confidence, the fiction/reality
+  split, sensitive-data refusal, retrieval), so Hakeem does not re-implement it.
+  `hakeem/hakeem_agent.py` is the one engine: `HakeemAgent(config=None, *,
+  client=None, caller=None, database=None)` owns the database and the managers
+  (sessions, memory, tone), builds each prompt, and talks to the shared model
+  through the `caller`/`client` seams, so the whole scholar is exercised with **no
+  server and no weights**. It stores the user's turn first, calls the model, and on
+  failure stores **no** reply (a retry cannot leave a half-written exchange);
+  `strip_thinking` drops a reasoning model's hidden trace whichever runtime
+  produced it; `ask` returns a `HakeemReply` with the memories used, the tone, the
+  reply language chosen from the user's own message, and the linguistic polisher's
+  changes; `model_status()` reports honestly and names the real next step.
+  `hakeem/config.py` resolves every tunable (explicit arg → `FAYD_HAKEEM_*` env →
+  default) with the model defaults the companion's own, and `default_db_path()` is
+  the git-ignored `data/hakeem.db`. Wired **directly below Natasha** in the menu
+  (`cli.menu.run_hakeem`), CLI (`python -m cli hakeem` — `chat` default, `status`,
+  `models`, `download --approve [--backend ollama]`, `sessions`, `remember`,
+  `memories` (`--correct`/`--forget`), `settings` (including the
+  `--formality`/`--depth`/`--citation`/`--comparison`/`--history` dials),
+  `emotion`, `reset-emotion`, `export`, `backup`, `--session`, `--list-sessions`,
+  `--new`), and — as a **mouth inside the project's own chat**
+  (`ai/hakeem_mouth.py`, the headless twin `python -m cli hakeem-chat`) — the
+  window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
+  *From sources (cited)*, *From trained model*, Ultron, Vision, Banner, Cloud, and
+  Natasha; the sidebar **Answer from Hakeem** action exists but is hidden, so the
+  header selector is the one visible switch. The conversation stays in the same
+  transcript and session, never a separate window. Everything stays on this
+  machine — the only call is to the local Ollama server or an in-process GGUF — so
+  Hakeem is not a cloud mouth. The runtime is the companion's own `[natasha]`
+  extra; `[hakeem]` / `requirements-hakeem.txt` pin the same runtime so a user who
+  installs the scholar alone has one obvious command.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
   theme=, typography=, on_close=)` builds one frame of three buttons into the
@@ -2902,6 +2979,45 @@ clone, each optional so the base system still runs without it:
   graph, the question scoping, the no-ontology case, the neutral rendering, the
   assistant wiring, and the gate; `tests/test_relations_cli.py` pins the `conflicts`
   command, its JSON, and its concept scoping.
+
+- Phase 28 — **Hakeem, the scholar of religion and history**: a second companion
+  character beside Natasha, on the **same local model** she uses. The task was to
+  build a character on the model the companion already speaks through, so
+  `hakeem/model.py` is a thin layer over `companion.model` (one catalog, one
+  `data/natasha` model folder, the same governed download and client seam) and
+  only the *character* and the database differ — a machine that already has the
+  companion's weights downloads nothing for Hakeem. `hakeem/personality.py` is his
+  stable character: fixed traits and the non-negotiable `BOUNDARIES` that make a
+  religious character responsible — respect every faith and never mock or
+  denigrate any of them; never proselytise and never declare which religion is
+  true; never issue a ruling (fatwa) or a verdict, pointing a personal question to
+  qualified scholars; keep scripture, established history, scholarly consensus, and
+  personal interpretation clearly apart; state when scholars disagree; never invent
+  a verse, a hadith, or a historical fact; refuse to defame a religion or promote
+  hatred; and stay honest that he is a virtual character. `COMPARATIVE_METHOD` and
+  `HISTORY_METHOD` are his comparison and history methods (each tradition described
+  from inside on a shared axis, a comparison **never a ranking**; claims anchored in
+  time and place with the kind of source named and contested questions said to be
+  contested). Five 0..1 style dials (`formality`, `depth`, `citation`,
+  `comparison`, `history`) and a `match`/`ar`/`en` reply-language rule are tunable
+  through the CLI, each `*_instruction()` **restating the honesty floor in its own
+  text** so a high dial can never be read as licence to drop it; only the settings
+  persist, so the character's wording ships with an update. `hakeem/hakeem_agent.py`
+  is the one engine (its own SQLite database — a separate file from the
+  companion's — durable memory reusing the companion's own manager, isolated
+  sessions, a gradual tone, a bounded prompt, and a `caller`/`client` seam so the
+  whole scholar runs with **no server and no weights**); a failed reply is never
+  stored, a reasoning model's hidden trace never reaches the transcript, and a
+  remembered item is never treated as a source. Wired **directly below Natasha** in
+  the menu (`cli.menu.run_hakeem`), CLI (`python -m cli hakeem …`), and as a
+  **mouth inside the project's own chat** (`ai/hakeem_mouth.py`, the headless twin
+  `python -m cli hakeem-chat`) in the window's header model selector, with the
+  sidebar action hidden. He is deliberately **not** the cognitive core: nothing in
+  `hakeem/` writes to entities, relations, evidence, beliefs, or the knowledge
+  graph. `tests/test_hakeem.py` pins the character and its safety floor, the
+  dials, the language rule, the memory/session/tone behaviour, the exchange's
+  honesty guarantees, the shared-model choice, the CLI, the mouth, and the
+  menu/GUI wiring.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
