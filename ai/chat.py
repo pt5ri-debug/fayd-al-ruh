@@ -294,6 +294,11 @@ def format_turn(turn: JarvisTurn) -> str:
         return "\n".join(lines) if lines else turn.response
 
     parts = [turn.response]
+    if turn.relation_facts:
+        parts.append(
+            "Knowledge graph on file:\n"
+            + "\n".join(f"  - {fact}" for fact in turn.relation_facts)
+        )
     block = sources_block(turn.citations)
     if block:
         parts.append(block)
@@ -308,6 +313,7 @@ def turn_payload(turn: JarvisTurn) -> dict:
         "intent": turn.intent,
         "response": turn.response,
         "citations": list(turn.citations),
+        "relation_facts": list(turn.relation_facts),
         "used_web": turn.used_web,
         "learned": turn.learned,
         "conversation_id": turn.conversation_id,

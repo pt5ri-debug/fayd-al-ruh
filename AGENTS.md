@@ -2768,6 +2768,38 @@ clone, each optional so the base system still runs without it:
   antonyms, the symmetric refusal, the direction rule, the determinism, the
   canonical order, both upgraded checkers, the graph scan, and the gate.
 
+- Phase 25 — **the graph's own relations reach the answer**: retrieval returned
+  whole *sentences* a document states, but the project also holds a **concept
+  graph** whose edges are typed relations (``porosity increases permeability``,
+  ``density_log measures porosity``) -- including links a text taught through
+  `learn_extracted_relations`. Those links are facts in their own right, and an
+  answer that never states them was quietly less complete than the knowledge on
+  file. `core/relation_facts.py` reads the relations a question's **own concepts**
+  participate in and renders them as a short, deterministic block.
+  `RelationFact` (source, relation_type, target, confidence) reads its type's
+  underscores as spaces for `statement` and keeps the graph's exact type in
+  `describe` (``porosity —increases→ permeability``); `relation_facts` includes a
+  relation when **either** endpoint is a concept the question names (so an
+  *incoming* link -- "the density log measures porosity", asked about porosity --
+  is reachable, not only outgoing ones), de-duplicates by triple, and orders by
+  confidence then labels, so the same question always yields the same block;
+  `describe_relation_facts` names the block as the *knowledge graph* on purpose,
+  so a reader can tell a stored typed link from a cited sentence (different
+  provenance). **Read-only and honest by construction**: it never edits the graph,
+  never invents a relation, states only the edges the ontology actually carries in
+  their declared direction, and returns ``()` (no block) for an unknown concept --
+  a question the graph knows nothing about produces nothing rather than a guess.
+  `GroundedAssistant.ask` attaches the facts to `AssistantAnswer.relation_facts`
+  as **data**, like the citations, so the prose stays the model's or the sources'
+  words; `JarvisTurn.relation_facts` carries them (read defensively through
+  `getattr`, so every mouth -- even one with no ontology -- is unaffected), and
+  `ai/chat.format_turn` renders the block after the answer and before the
+  `Sources:` block, with `turn_payload` exposing them for `--json`. The GUI shows
+  them for free, because it renders through the same `format_turn`.
+  `tests/test_relation_facts.py` pins the lookup, the incoming-relation rule, the
+  unknown-question honesty, the determinism, the limit, the de-duplication, the
+  rendering, and the assistant wiring.
+
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
 regression monitor each can refuse a change.
