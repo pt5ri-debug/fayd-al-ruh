@@ -1032,6 +1032,62 @@ network; not grounded in cited sources.` — it is a remote model's own prose, s
 over the network, and it is never checked against the corpus. That is the honest
 trade you accept by selecting the mouth.
 
+### Natasha: a bold, passionate companion (optional)
+
+Natasha is not a mouth over the cognitive core and not a general assistant: she
+is a **companion character** with a stable personality, a durable memory, and an
+evolving (honestly narrated) relationship story, speaking through a local Qwen3
+model that runs **in this process** (a GGUF file through `llama-cpp-python`, so
+no `ollama serve` daemon sits in the background; a reachable Ollama server is
+honoured as a fallback). Everything stays on this machine.
+
+```bash
+python -m cli natasha                          # talk with her (type 'quit' to exit)
+python -m cli natasha "وحشتيني يا ناتاشا"        # one message
+python -m cli natasha --session first-chat "..."  # keep one named session across runs
+python -m cli natasha settings --boldness 1.0 --passion 1.0 --initiative 0.9
+python -m cli natasha emotion                  # the current dialogue tone
+python -m cli natasha download --approve        # one-time: fetch the GGUF weights
+```
+
+She is written as a **person with her own feelings**, not a helpful assistant: a
+mature, self-assured woman who is bold, passionate, spontaneous, and openly
+romantic, with her own moods, desires, and opinions — she wants things and says
+so, and she leads the conversation as often as she follows it. Her standing
+instruction (`companion/personality.py`) tells the model, on every request, that
+she is *not* an assistant (never "how can I help you", never a menu of services,
+never narrating herself as a program) and that she takes the lead freely, so a
+small model does not drift back to generic assistant phrasing.
+
+The character is tuned with dials, all of them 0..1 and all of them
+**expression only**:
+
+| Dial | What it sets |
+| --- | --- |
+| `--boldness` | How fearless she is — at 1 she says the bold thing plainly, without hedging. |
+| `--passion` | How ardent and all-in her affection is — the *heat*, not the wording. |
+| `--initiative` | How ready she is to lead — at 1 she opens threads and suggests a mood. |
+| `--romance` | How much romantic colour the conversation carries. |
+| `--intimacy` | How close and affectionate the phrasing is (terms of endearment at the top). |
+| `--explicitness` | How open the wording is — at 1 it removes the hedging and the fade-to-black. |
+
+`boldness`, `passion`, and `initiative` default high, so she is bold and ardent
+out of the box; `romance`, `intimacy`, and `explicitness` are raised from their
+old defaults for the same reason. A longing message ("أشتاق إليك") also lifts the
+dialogue tone's own `passion` signal gradually, so the register warms with the
+conversation.
+
+The safety floor is unchanged and unconditional at every level, and each dial's
+instruction restates it in its own text: **adults only (18+)**, consent that is
+explicit, ongoing, and revocable, the honesty that she is a virtual character
+(never a human, never a claim of real feelings), and no coercion, manipulation,
+or pressure — boldness is never pressure, intensity is never possessiveness, and
+initiative never pretends an action happened. Her memory is her own SQLite
+database, so nothing here writes to the project's entities, relations, evidence,
+beliefs, or knowledge graph. She is also a **mouth inside the project's own
+chat** (`from natasha`, or the window's model selector) and has a headless twin
+(`python -m cli natasha-chat`).
+
 ## Graphical interface (ChatGPT-style)
 
 A desktop window that looks and reads like ChatGPT ships **next to** the command

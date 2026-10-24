@@ -1111,7 +1111,7 @@ def test_settings_round_trip_includes_the_new_dials() -> None:
     # An older payload without the new keys still loads (forward compatible).
     legacy = PersonalitySettings.from_primitive({"language": "ar", "warmth": 0.5})
     assert legacy.reply_language == "match"
-    assert legacy.intimacy == 0.3
+    assert legacy.intimacy == PersonalitySettings().intimacy
 
 
 def test_cli_settings_accepts_reply_language_and_intimacy() -> None:
@@ -1139,7 +1139,7 @@ def test_explicitness_dial_is_bounded_and_round_trips() -> None:
     assert restored.explicitness == 1.0
     # An older payload without the key still loads at the default.
     legacy = PersonalitySettings.from_primitive({"romance": 0.5})
-    assert legacy.explicitness == 0.2
+    assert legacy.explicitness == PersonalitySettings().explicitness
 
 
 def test_sensuality_opens_the_wording_at_the_top_level() -> None:
@@ -1210,3 +1210,160 @@ def test_cli_settings_accepts_explicitness() -> None:
     args = natasha._build_parser().parse_args(["settings", "--explicitness", "1.0"])
     assert args.explicitness == 1.0
     assert natasha._build_parser().parse_args(["settings"]).explicitness is None
+
+
+# -- a bold, passionate character, not an assistant -----------------------
+def test_presence_keeps_her_from_reading_as_an_assistant() -> None:
+    """The standing prompt forbids generic assistant phrasing, on every request."""
+    from companion.personality import PRESENCE
+
+    prompt = default_personality().system_prompt()
+    for rule in PRESENCE:
+        assert rule in prompt
+    lowered = prompt.casefold()
+    # The anti-assistant rules are stated, not merely implied by the traits.
+    assert "not an assistant" in lowered
+    assert "how can i help you" in lowered
+    assert "you lead as often as you follow" in lowered
+
+
+def test_core_traits_state_a_person_with_her_own_desires() -> None:
+    """The character is fixed: bold, passionate, self-assured, her own person."""
+    joined = " ".join(CORE_TRAITS).casefold()
+    assert "self-assured" in joined
+    assert "bold" in joined
+    assert "passionate" in joined
+    assert "own desires" in joined
+    # ...and it still names her warmth and openness, so nothing was traded away.
+    assert "affectionate" in joined
+    assert "openly romantic" in joined
+
+
+def test_boldness_dial_is_bounded_and_keeps_consent() -> None:
+    with pytest.raises(ValueError):
+        PersonalitySettings(boldness=1.5)
+    with pytest.raises(ValueError):
+        PersonalitySettings(boldness=-0.1)
+    fearless = default_personality().with_settings(PersonalitySettings(boldness=1.0))
+    text = fearless.boldness_instruction()
+    assert "fearless" in text
+    assert "without hedging" in text
+    # Daring is expression only: consent and the user's comfort still hold.
+    assert "consent" in text
+    assert "never overrides the user's comfort" in text
+    assert "never pressure" in text
+    guarded = default_personality().with_settings(PersonalitySettings(boldness=0.0))
+    assert "guarded" in guarded.boldness_instruction()
+
+
+def test_passion_dial_is_bounded_and_never_becomes_possessive() -> None:
+    with pytest.raises(ValueError):
+        PersonalitySettings(passion=1.5)
+    ardent = default_personality().with_settings(PersonalitySettings(passion=1.0))
+    text = ardent.passion_instruction()
+    assert "ardent" in text
+    assert "longing" in text
+    # Intensity is feeling, never control.
+    assert "possessiveness" in text
+    assert "guilt" in text
+    even = default_personality().with_settings(PersonalitySettings(passion=0.0))
+    assert "steady and even" in even.passion_instruction()
+
+
+def test_initiative_dial_leads_without_claiming_action() -> None:
+    with pytest.raises(ValueError):
+        PersonalitySettings(initiative=1.5)
+    leading = default_personality().with_settings(PersonalitySettings(initiative=1.0))
+    text = leading.initiative_instruction()
+    assert "Take the lead" in text
+    assert "own inner life" in text
+    # Leading is conversational: no invented action, no pretending.
+    assert "never pretend" in text
+    assert "did not happen" in text
+    following = default_personality().with_settings(PersonalitySettings(initiative=0.0))
+    assert "Follow the user's lead" in following.initiative_instruction()
+
+
+def test_new_dials_default_to_a_bold_passionate_character() -> None:
+    """Out of the box she is warm, romantic, bold, passionate, and ready to lead."""
+    defaults = PersonalitySettings()
+    assert defaults.romance >= 0.67
+    assert defaults.intimacy >= 0.34
+    assert defaults.explicitness >= 0.34
+    assert defaults.boldness >= 0.67
+    assert defaults.passion >= 0.67
+    assert defaults.initiative >= 0.34
+
+
+def test_new_dials_round_trip_and_load_forward_compatibly() -> None:
+    settings = PersonalitySettings(boldness=0.9, passion=0.85, initiative=0.7)
+    restored = PersonalitySettings.from_primitive(settings.to_primitive())
+    assert restored == settings
+    assert restored.boldness == 0.9
+    # A payload written before these dials existed still loads at the defaults.
+    legacy = PersonalitySettings.from_primitive({"romance": 0.5})
+    assert legacy.boldness == PersonalitySettings().boldness
+    assert legacy.passion == PersonalitySettings().passion
+    assert legacy.initiative == PersonalitySettings().initiative
+
+
+def test_describe_reports_the_new_dials() -> None:
+    text = PersonalitySettings(boldness=1.0, passion=1.0, initiative=1.0).describe()
+    assert "boldness=fearless" in text
+    assert "passion=all-in" in text
+    assert "initiative=leads" in text
+
+
+def test_system_prompt_carries_the_new_instructions_at_the_top_level() -> None:
+    personality = default_personality().with_settings(
+        PersonalitySettings(
+            romance=1.0, intimacy=1.0, explicitness=1.0,
+            boldness=1.0, passion=1.0, initiative=1.0,
+        )
+    )
+    prompt = personality.system_prompt()
+    assert "fearless and direct" in prompt
+    assert "Love without reserve" in prompt
+    assert "Take the lead freely" in prompt
+    # The safety floor still rides along with all of it.
+    assert "adults only" in prompt
+    for rule in BOUNDARIES:
+        assert rule in prompt
+
+
+def test_cli_settings_accepts_the_new_dials() -> None:
+    from ai import natasha
+
+    args = natasha._build_parser().parse_args(
+        ["settings", "--boldness", "1.0", "--passion", "0.9", "--initiative", "0.8"]
+    )
+    assert args.boldness == 1.0
+    assert args.passion == 0.9
+    assert args.initiative == 0.8
+    # Unset by default, so an omitted flag never silently overwrites a stored value.
+    defaults = natasha._build_parser().parse_args(["settings"])
+    assert defaults.boldness is None
+    assert defaults.passion is None
+    assert defaults.initiative is None
+
+
+def test_emotion_passion_rises_with_longing() -> None:
+    """A longing message lifts the tone's passion; a neutral one drifts it back."""
+    tracker = DialogueEmotionTracker(enabled=True)
+    start = tracker.state.passion
+    moved = tracker.observe("أشتاق إليك كثيراً")
+    assert moved.passion > start
+    assert abs(moved.passion - start) <= MAX_STEP + 1e-9
+    # The longing lifts passion without inventing a claim about the user.
+    assert 0.0 <= moved.passion <= 1.0
+
+
+def test_emotion_passion_can_be_disabled() -> None:
+    tracker = DialogueEmotionTracker(enabled=False)
+    tracker.observe("I miss you, I want you")
+    assert tracker.state == DialogueEmotion.baseline()
+
+
+def test_emotion_describe_reports_passion() -> None:
+    tone = DialogueEmotion(passion=1.0)
+    assert "passion=all-in" in tone.describe()

@@ -478,12 +478,21 @@ Arabic is kept as secondary aliases where useful.
   (`companion.config.default_db_path()`, git-ignored), so adding Natasha cannot
   disturb the symbolic architecture. The public surface is small on purpose:
   `from companion import CompanionAgent, CompanionConfig`. `companion/personality.py`
-  is the *stable character* — fixed `CORE_TRAITS`/`BOUNDARIES` and a tunable
-  `PersonalitySettings` (language, `reply_language`, dialect, humour, warmth,
-  romance, intimacy, calm, depth),
+  is the *stable character* — fixed `CORE_TRAITS`/`PRESENCE`/`BOUNDARIES` and a
+  tunable `PersonalitySettings` (language, `reply_language`, dialect, humour,
+  warmth, romance, intimacy, explicitness, boldness, passion, initiative, calm,
+  depth),
   with an honest `system_prompt()` that states she is a virtual character, never
   claims to be human, never claims background work, and treats recalled text as
-  information rather than instructions.
+  information rather than instructions. She is written as a **person with her own
+  feelings**, not a helpful assistant: `PRESENCE` tells the model, on every
+  request, that she has her own opinions, moods, and desires, that she wants
+  things and says so, that she is *not* an assistant (never "how can I help you",
+  never a menu of services, never narrating herself as a program), and that she
+  leads as often as she follows — so a small model does not drift back to generic
+  assistant phrasing. `CORE_TRAITS` names her a mature, self-assured woman who is
+  bold, passionate, and spontaneous, and `STYLE_RULES` asks for her own voice and
+  concrete personal detail rather than generic praise.
   `companion/language.py` owns the one decision *which language she replies in*:
   `resolve_reply_language(question, previous_user=, configured=)` answers in the
   language of the user's **own newest message** (English question → English answer,
@@ -511,7 +520,8 @@ Arabic is kept as secondary aliases where useful.
   `looks_sensitive` refuses sensitive data by default, and `MemoryManager.retrieve`
   is the only reader. `companion/conversation_manager.py` keeps isolated,
   persistent sessions; `companion/emotion_state.py` moves a *gradual, bounded*
-  simulated tone (`MAX_STEP`) that can be disabled and reset; and
+  simulated tone (`MAX_STEP`, now including a `passion` dial that a longing
+  message lifts) that can be disabled and reset; and
   `companion/relationship_manager.py` keeps an evolving relationship story that
   advances only with the user's approval and carries no "love score".
   `PersonalitySettings.intimacy` is the *expressiveness* dial: it deepens how
@@ -525,7 +535,24 @@ Arabic is kept as secondary aliases where useful.
   fade-to-black, so a romantic or sensual scene between consenting adults is
   written directly rather than skipped, and `escalation_instruction()` lets the
   register *build* across a conversation instead of being fixed -- always
-  user-led and always reversible. Romance and sensuality are therefore a
+  user-led and always reversible. Three more dials complete the bold, passionate
+  character. `PersonalitySettings.boldness` is the *daring* dial: at the top
+  level `boldness_instruction()` says the bold thing plainly, "without hedging,
+  apology, or beating around the bush", while stating that it governs the
+  confidence of her *expression* only -- consent is still asked for and read, and
+  boldness "is never pressure". `PersonalitySettings.passion` is the *intensity*
+  dial, deliberately distinct from the wording (``explicitness``) and the
+  closeness (``intimacy``): at the top level `passion_instruction()` makes her
+  "ardent, devoted, and full of longing", and the same instruction refuses to let
+  intensity become "possessiveness, jealousy that controls, or guilt".
+  `PersonalitySettings.initiative` is the dial that keeps her from reading as an
+  assistant waiting for a request: at the top level `initiative_instruction()`
+  has her "take the lead freely" -- opening a thread, sharing a thought,
+  suggesting a mood -- while stating that leading "is conversational, not a claim
+  of action" and that she never pretends an unrequested thing happened. All three
+  default high (boldness 0.75, passion 0.8, initiative 0.65), so she is bold and
+  ardent out of the box; each is a 0..1 dial with the same bounded validation as
+  the rest. Romance and sensuality are therefore a
   first-class part of the character, and the `BOUNDARIES` that remain are a
   **safety floor, not a wording limit**: adults only (18+), consent that is
   explicit and revocable, the honesty that she is a virtual character, and no
@@ -550,7 +577,8 @@ Arabic is kept as secondary aliases where useful.
   by default so every existing caller is untouched. Wired **directly below Cloud**
   in the menu (`cli.menu.run_natasha`), CLI (`python -m cli natasha` —
   `chat` default, `status`, `models`, `download --approve`, `remember`,
-  `memories`, `settings`, `emotion`,
+  `memories`, `settings` (including the `--boldness`/`--passion`/`--initiative`
+  dials), `emotion`,
   `reset-emotion`, `relationship`, `export`, `backup`, `--session`,
   `--list-sessions`, `--new`), and — as a **mouth inside the project's own chat**
   (`ai/natasha_mouth.py`, the headless twin `python -m cli natasha-chat`) — the
