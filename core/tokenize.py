@@ -68,6 +68,32 @@ def content_terms(text: str) -> set[str]:
     return tokenize(text) - _STOPWORDS
 
 
+def normalize_phrase(text: str) -> str:
+    """Normalise every token of a phrase, keeping the spaces between them.
+
+    This is the comparison form for a *concept term*: ``"well log"`` stays
+    ``"well log"`` and ``"المسامية"`` becomes ``"مساميه"``, so a term and a text
+    are compared in the same normalised space. Used by the ontology lookup and
+    the term matchers, which must agree on what a word is or an Arabic alias
+    would never resolve.
+    """
+    return " ".join(normalize_token(part) for part in _TOKEN_RE.findall(text))
+
+
+def token_spans(text: str) -> list[tuple[int, int, str]]:
+    """Each token's ``(start, end, normalised)`` in ``text``, in order.
+
+    The span matcher needs both *where* a token is and its normalised form, so a
+    multi-word term can be matched across a run of whole tokens. Matching on
+    tokens (not a regex on the raw text) is what makes it work for Arabic, where
+    ``\\b`` misbehaves next to the script's non-word marks.
+    """
+    return [
+        (match.start(), match.end(), normalize_token(match.group()))
+        for match in _TOKEN_RE.finditer(text)
+    ]
+
+
 def token_sequence(text: str) -> list[str]:
     """The normalised tokens of ``text`` in order, for a co-occurrence window."""
     return [normalize_token(token) for token in _TOKEN_RE.findall(text)]
@@ -75,7 +101,9 @@ def token_sequence(text: str) -> list[str]:
 
 __all__ = [
     "content_terms",
+    "normalize_phrase",
     "normalize_token",
     "token_sequence",
+    "token_spans",
     "tokenize",
 ]

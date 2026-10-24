@@ -57,13 +57,12 @@ class OntologyGuidedRetriever:
         self._adjacency: dict[str, list[tuple[str, float, tuple[str, str, str]]]] | None = None
 
     def concepts_in(self, text: str) -> set[str]:
-        """Return the concept IDs whose terms occur in the text."""
-        folded = text.casefold()
-        return {
-            concept.id
-            for concept in self.ontology.concepts.values()
-            if any(term in folded for term in concept.terms)
-        }
+        """Return the concept IDs whose terms occur in the text, whole-word.
+
+        Delegates to :meth:`Ontology.concepts_in`, so the retriever resolves
+        concepts the same Arabic-aware way as the learner and the extractor.
+        """
+        return self.ontology.concepts_in(text)
 
     def invalidate(self) -> None:
         """Drop the cached adjacency after the ontology's relations change."""

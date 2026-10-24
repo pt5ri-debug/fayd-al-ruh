@@ -234,35 +234,13 @@ class RelationExtractor:
     def concepts_in(self, sentence: str) -> list[tuple[int, int, Concept]]:
         """Known concepts in ``sentence``, as ``(start, end, concept)`` spans.
 
-        Matching is on whole words (a concept term must appear as a run of whole
-        tokens), so ``porosity`` does not match inside ``microporosity`` and
-        invent a relation. Where a compound term and a bare one overlap
-        (``water saturation`` vs ``saturation``), the longer, leftmost span wins.
+        Delegates to :meth:`Ontology.match_concepts`: matching is on whole
+        normalised tokens, so ``porosity`` does not match inside
+        ``microporosity`` and an Arabic alias (``المسامية``) matches its stored
+        form. Where a compound term and a bare one overlap (``water saturation``
+        vs ``saturation``), the longer, leftmost span wins.
         """
-        found: list[tuple[int, int, Concept]] = []
-        for concept in self.ontology.concepts.values():
-            for term in concept.terms:
-                term_tokens = [normalize_token(part) for part in re.findall(r"\w+", term)]
-                if not term_tokens:
-                    continue
-                pattern = re.compile(
-                    r"\b" + r"\W+".join(re.escape(part) for part in term_tokens) + r"\b",
-                    flags=re.IGNORECASE,
-                )
-                for match in pattern.finditer(sentence):
-                    found.append((match.start(), match.end(), concept))
-        # Longest span first, then leftmost; drop any span overlapping one kept,
-        # and keep only one span per concept.
-        found.sort(key=lambda item: (item[0], -(item[1] - item[0])))
-        kept: list[tuple[int, int, Concept]] = []
-        for start, end, concept in found:
-            if any(start < other_end and end > other_start for other_start, other_end, _ in kept):
-                continue
-            if any(kept_concept.id == concept.id for _s, _e, kept_concept in kept):
-                continue
-            kept.append((start, end, concept))
-        kept.sort(key=lambda item: item[0])
-        return kept
+        return self.ontology.match_concepts(sentence)
 
     def extract(self, text: str) -> RelationExtraction:
         """Every candidate relation in ``text``, deterministically."""
