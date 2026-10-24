@@ -21,7 +21,6 @@ def _ontology() -> Ontology:
 
 def _chain_ontology() -> Ontology:
     """A tiny hand-built graph, so the search is tested exactly."""
-    from core.concept import Concept
     from core.semantic_relation import SemanticRelation
 
     ontology = Ontology()
