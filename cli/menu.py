@@ -157,6 +157,11 @@ def run_natasha(argv: Sequence[str] = ()) -> int:
     return _run_module("ai.natasha", argv)
 
 
+def run_hakeem(argv: Sequence[str] = ()) -> int:
+    """Run Hakeem: the scholar of religion and history (same model as Natasha)."""
+    return _run_module("ai.hakeem", argv)
+
+
 def run_chat(argv: Sequence[str] = ()) -> int:
     """Talk with the AI in text, like Jarvis without the voice."""
     return _run_module("ai.chat", argv)
@@ -207,6 +212,14 @@ def run_natasha_chat(argv: Sequence[str] = ()) -> int:
     args = list(argv)
     if "--natasha" not in args:
         args.insert(0, "--natasha")
+    return _run_module("ai.chat", args)
+
+
+def run_hakeem_chat(argv: Sequence[str] = ()) -> int:
+    """Talk with the AI in text, answering as Hakeem (the scholar)."""
+    args = list(argv)
+    if "--hakeem" not in args:
+        args.insert(0, "--hakeem")
     return _run_module("ai.chat", args)
 
 
@@ -470,6 +483,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Cloud (remote model: ChatGPT, Claude, Gemini; needs an API key)", run_cloud, ("status",)),
     ("Cloud: free providers (no card) and how to start", run_cloud, ("free",)),
     ("Natasha (companion: lasting memory, tone, and relationship)", run_natasha, ("status",)),
+    ("Hakeem (scholar of religion and history: compares the Abrahamic faiths)", run_hakeem, ("status",)),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
@@ -644,6 +658,8 @@ __all__ = [
     "run_embeddings",
     "run_evaluation",
     "run_gui",
+    "run_hakeem",
+    "run_hakeem_chat",
     "run_import_center",
     "run_insight",
     "run_internet_learner",

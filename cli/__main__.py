@@ -26,15 +26,22 @@ Usage:
     python -m cli natasha status      # which runtime answers, and the next step
     python -m cli natasha models      # list the models she can fetch
     python -m cli natasha download --approve  # one-time: fetch the GGUF weights (~2.6 GB)
+    python -m cli hakeem              # chat with Hakeem, the scholar of religion and history
+    python -m cli hakeem "قارن بين الأديان"  # one message; --session <id> keeps one session
+    python -m cli hakeem status       # which runtime answers, and the next step
+    python -m cli hakeem models       # list the models he can fetch
+    python -m cli hakeem download --approve   # one-time: fetch the shared weights (~2.6 GB)
     python -m cli chat                # chat with the AI in text (Jarvis, no voice)
     python -m cli chat --ultron       # chat answering from Ultron (general local model)
     python -m cli chat --vision       # chat answering from Vision (petroleum local model)
     python -m cli chat --banner       # chat answering from Banner (presentation local model)
     python -m cli chat --cloud        # chat answering from a remote cloud model
+    python -m cli chat --hakeem       # chat answering as Hakeem (scholar of religion and history)
     python -m cli ultron-chat         # the same, from the menu/CLI command
     python -m cli vision-chat         # chat answering from Vision (petroleum local model)
     python -m cli banner-chat         # chat answering from Banner (presentation local model)
     python -m cli cloud-chat          # chat answering from a remote cloud model
+    python -m cli hakeem-chat         # chat answering as Hakeem (scholar of religion and history)
     python -m cli mind-chat           # chat answering from the trained model (no sources)
     python -m cli learn               # continuous learning + regression gate
     python -m cli insight             # what the AI can do and what it has learned
@@ -108,6 +115,8 @@ from cli.menu import (
     run_embeddings,
     run_evaluation,
     run_gui,
+    run_hakeem,
+    run_hakeem_chat,
     run_image,
     run_import_center,
     run_ingest,
@@ -155,6 +164,7 @@ _COMMANDS = {
     "banner": run_banner,
     "cloud": run_cloud,
     "natasha": run_natasha,
+    "hakeem": run_hakeem,
     "chat": run_chat,
     "gui": run_gui,
     "mind-chat": run_mind_chat,
@@ -162,6 +172,7 @@ _COMMANDS = {
     "vision-chat": run_vision_chat,
     "banner-chat": run_banner_chat,
     "cloud-chat": run_cloud_chat,
+    "hakeem-chat": run_hakeem_chat,
     "learn": run_learn,
     "insight": run_insight,
     "internet-learner": run_internet_learner,

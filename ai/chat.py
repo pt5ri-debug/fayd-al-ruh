@@ -9,6 +9,7 @@
     python -m cli chat --banner                 # answer from the presentation local model (outlines, slide content)
     python -m cli chat --cloud                  # answer from a remote cloud model (ChatGPT/Claude/Gemini/...)
     python -m cli chat --natasha                # talk with Natasha, the companion (memory + tone)
+    python -m cli chat --hakeem                 # talk with Hakeem, the scholar of religion and history
     python -m cli chat --session demo           # resume/autosave a named session
     python -m cli chat --list-sessions          # show saved conversations
 
@@ -39,10 +40,14 @@ is unaffected:
 * ``--cloud`` -- a **remote** OpenAI-compatible model (ChatGPT, Claude, Gemini,
   Groq, ...), opt-in and off by default, no citations;
 * ``--natasha`` -- the project's **companion**: a stable personality, a durable
-  memory, and a changing tone, through the local model, no citations.
+  memory, and a changing tone, through the local model, no citations;
+* ``--hakeem`` -- the project's **scholar of religion and history**: he compares
+  the Abrahamic faiths and discusses the ancient civilisations, through the *same*
+  local model the companion uses, no citations.
 
 Type "from the model", "from ultron", "from vision", "from banner", "from cloud",
-"from natasha", or "from the sources" to switch mouths mid-conversation.
+"from natasha", "from hakeem", or "from the sources" to switch mouths
+mid-conversation.
 """
 
 from __future__ import annotations
@@ -60,8 +65,9 @@ from core.composition import sources_block
 from core.jarvis import JarvisMode, JarvisTurn
 from core.ultron import UltronUnavailable
 from core.vision_model import VisionUnavailable
+from hakeem.hakeem_agent import HakeemError
 
-from ai import banner_mouth, cloud_mouth, natasha_mouth, ultron_mouth, vision_mouth
+from ai import banner_mouth, cloud_mouth, hakeem_mouth, natasha_mouth, ultron_mouth, vision_mouth
 from ai import mind as mind_module
 from ai.jarvis import build_session
 
@@ -70,7 +76,8 @@ MIND_HINT = (
     "AI: (the sources could not answer; type 'from the model' to answer from the "
     "trained model, 'from ultron' for the general local model, 'from vision' for the "
     "petroleum local model, 'from banner' for the presentation local model, "
-    "'from natasha' for the companion, or 'from the sources' to go back)"
+    "'from natasha' for the companion, 'from hakeem' for the scholar of religion and "
+    "history, or 'from the sources' to go back)"
 )
 
 # The composer's wording when retrieval found nothing to stand on.
@@ -90,6 +97,7 @@ MOUTH_VISION = "vision"
 MOUTH_BANNER = "banner"
 MOUTH_CLOUD = "cloud"
 MOUTH_NATASHA = "natasha"
+MOUTH_HAKEEM = "hakeem"
 
 
 def _normalize(text: str) -> str:
@@ -120,6 +128,8 @@ def _match_switch(text: str) -> str | None:
         return MOUTH_CLOUD
     if normalized in _normalize_set(natasha_mouth.SWITCH_TO_NATASHA):
         return MOUTH_NATASHA
+    if normalized in _normalize_set(hakeem_mouth.SWITCH_TO_HAKEEM):
+        return MOUTH_HAKEEM
     if normalized in _normalize_set(mind_module.SWITCH_TO_SOURCES):
         return MOUTH_SOURCES
     return None
@@ -159,6 +169,7 @@ class ModelSwitcher:
         banner_loader: Callable[[], banner_mouth.BannerAssistant] | None = None,
         cloud_loader: Callable[[], cloud_mouth.CloudAssistant] | None = None,
         natasha_loader: Callable[[], natasha_mouth.NatashaAssistant] | None = None,
+        hakeem_loader: Callable[[], hakeem_mouth.HakeemAssistant] | None = None,
     ) -> None:
         self.mode = mode
         self.grounded = mode.assistant
@@ -169,6 +180,7 @@ class ModelSwitcher:
         self._banner_loader = banner_loader or banner_mouth.load_banner_assistant
         self._cloud_loader = cloud_loader or cloud_mouth.load_cloud_assistant
         self._natasha_loader = natasha_loader or natasha_mouth.load_natasha_assistant
+        self._hakeem_loader = hakeem_loader or hakeem_mouth.load_hakeem_assistant
         self._max_new_tokens = max_new_tokens
         self._mind: mind_module.MindAssistant | None = None
         self._ultron: ultron_mouth.UltronAssistant | None = None
@@ -176,6 +188,7 @@ class ModelSwitcher:
         self._banner: banner_mouth.BannerAssistant | None = None
         self._cloud: cloud_mouth.CloudAssistant | None = None
         self._natasha: natasha_mouth.NatashaAssistant | None = None
+        self._hakeem: hakeem_mouth.HakeemAssistant | None = None
         self._mouth = MOUTH_SOURCES
 
     @property
@@ -224,6 +237,12 @@ class ModelSwitcher:
             self._natasha = self._natasha_loader()
         return self._natasha
 
+    @property
+    def hakeem(self) -> hakeem_mouth.HakeemAssistant:
+        if self._hakeem is None:
+            self._hakeem = self._hakeem_loader()
+        return self._hakeem
+
     def _swap(self, assistant, mouth: str, help_suffix: str) -> None:
         """Point the session at ``assistant`` and record which mouth is active."""
         self.mode.assistant = assistant
@@ -260,6 +279,11 @@ class ModelSwitcher:
         """Activate the Natasha mouth. Raises when the local model cannot answer."""
         assistant = self.natasha  # load/check now, before the swap
         self._swap(assistant, MOUTH_NATASHA, natasha_mouth.NATASHA_HELP)
+
+    def use_hakeem(self) -> None:
+        """Activate the Hakeem mouth. Raises when the local model cannot answer."""
+        assistant = self.hakeem  # load/check now, before the swap
+        self._swap(assistant, MOUTH_HAKEEM, hakeem_mouth.HAKEEM_HELP)
 
     def invalidate_cloud(self) -> None:
         """Forget the cached Cloud mouth, so the next load picks up a new provider.
@@ -361,6 +385,8 @@ def _print_switch(kind: str, *, as_json: bool) -> None:
         print("AI: [cloud] Now answering from a remote cloud model over the network (no sources).")
     elif kind == MOUTH_NATASHA:
         print("AI: [natasha] Now talking with Natasha, the companion (stable personality, lasting memory, changing tone).")
+    elif kind == MOUTH_HAKEEM:
+        print("AI: [hakeem] Now talking with Hakeem, the scholar of religion and history (compares the Abrahamic faiths; ancient civilisations).")
     else:
         print("AI: [sources] Now answering from retrieved passages with citations.")
     print()
@@ -402,6 +428,13 @@ _MOUTH_FAILURE = {
         "`python -m cli natasha download --approve --backend ollama` "
         "(run `python -m cli natasha status` to see which runtime answers).",
     ),
+    MOUTH_HAKEEM: (
+        "Could not reach Hakeem's local model: {error}",
+        "He speaks through the same model as the companion, so fetch the in-process "
+        "weights with `python -m cli hakeem download --approve`, or run a local Ollama "
+        "server and pull the tag with `python -m cli hakeem download --approve --backend "
+        "ollama` (run `python -m cli hakeem status` to see which runtime answers).",
+    ),
 }
 
 #: The confirmation shown once a mouth is active. Shared by the text loop and the
@@ -413,6 +446,7 @@ _MOUTH_SWITCHED = {
     MOUTH_BANNER: "Now answering from Banner, the presentation local model (outlines and slide content; no citations).",
     MOUTH_CLOUD: "Now answering from a remote cloud model over the network (no citations).",
     MOUTH_NATASHA: "Now talking with Natasha, the companion (stable personality, lasting memory, changing tone; no citations).",
+    MOUTH_HAKEEM: "Now talking with Hakeem, the scholar of religion and history (compares the Abrahamic faiths and discusses the ancient civilisations; no citations).",
     MOUTH_SOURCES: "Now answering from sources, with citations.",
 }
 
@@ -445,9 +479,11 @@ def _apply_switch(switcher, kind: str) -> str:
             switcher.use_cloud()
         elif kind == MOUTH_NATASHA:
             switcher.use_natasha()
+        elif kind == MOUTH_HAKEEM:
+            switcher.use_hakeem()
         else:
             switcher.use_sources()
-    except (FileNotFoundError, OSError, ValueError, UltronUnavailable, VisionUnavailable, BannerUnavailable, CloudUnavailable, CompanionError) as error:
+    except (FileNotFoundError, OSError, ValueError, UltronUnavailable, VisionUnavailable, BannerUnavailable, CloudUnavailable, CompanionError, HakeemError) as error:
         return switch_failure_message(kind, error)
     return ""
 
@@ -561,6 +597,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--natasha-session", default=None, help="the companion session id to resume or create")
     parser.add_argument("--natasha-model", default=None, help="the local model Natasha speaks through (default qwen3:4b)")
+    parser.add_argument(
+        "--hakeem",
+        action="store_true",
+        help="talk with Hakeem, the scholar of religion and history (compares the Abrahamic faiths, discusses the ancient civilisations; no citations), not from the sources",
+    )
+    parser.add_argument("--hakeem-session", default=None, help="the scholar session id to resume or create")
+    parser.add_argument("--hakeem-model", default=None, help="the local model Hakeem speaks through (default qwen3:4b)")
     args = parser.parse_args(argv)
 
     if args.list_sessions:
@@ -618,6 +661,10 @@ def main(argv: list[str] | None = None) -> int:
             session_id=args.natasha_session,
             model=args.natasha_model,
         ),
+        hakeem_loader=lambda: hakeem_mouth.load_hakeem_assistant(
+            session_id=args.hakeem_session,
+            model=args.hakeem_model,
+        ),
     )
     if args.mind:
         failure = _apply_switch(switcher, MOUTH_MODEL)
@@ -661,6 +708,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if not args.json:
             print(switcher.natasha.describe())
+    if args.hakeem:
+        failure = _apply_switch(switcher, MOUTH_HAKEEM)
+        if failure:
+            print(failure)
+            return 1
+        if not args.json:
+            print(switcher.hakeem.describe())
 
     if args.session:
         if not mode.resume_session(args.session):
@@ -683,6 +737,7 @@ __all__ = [
     "INTRO",
     "MOUTH_BANNER",
     "MOUTH_CLOUD",
+    "MOUTH_HAKEEM",
     "MOUTH_MODEL",
     "MOUTH_NATASHA",
     "MOUTH_SOURCES",

@@ -1088,6 +1088,60 @@ beliefs, or knowledge graph. She is also a **mouth inside the project's own
 chat** (`from natasha`, or the window's model selector) and has a headless twin
 (`python -m cli natasha-chat`).
 
+### Hakeem: a scholar of religion and history (optional)
+
+Hakeem (Arabic **حكيم**, "the wise one") is a second companion character beside
+Natasha, and he speaks through the **same local model** she uses — the same
+catalog, the same `data/natasha` model folder, and the same governed download —
+so a machine that already fetched her weights downloads **nothing** for him.
+Only the *character* and the database differ: his memories and sessions live in
+their own SQLite file (`data/hakeem.db`), so nothing here writes to the project's
+entities, relations, evidence, beliefs, or knowledge graph.
+
+He discusses the **Abrahamic faiths** — Islam, Christianity, and Judaism — and is
+at home in history and the **ancient civilisations**, with a comparison method
+that describes each tradition on its own terms before naming what is shared and
+what differs. He is not a mouth over the cognitive core and not a general
+assistant.
+
+```bash
+python -m cli hakeem                             # talk with him (type 'quit' to exit)
+python -m cli hakeem "قارن بين مفهوم الزكاة والصدقة في الأديان"   # one message
+python -m cli hakeem --session religions "..."    # keep one named session across runs
+python -m cli hakeem settings --depth 0.9 --citation 0.8
+python -m cli hakeem download --approve           # one-time: the shared GGUF weights
+```
+
+The character is fixed and its **safety floor is unconditional**: he respects
+every faith and its adherents and never mocks or denigrates any of them; he never
+proselytises and never declares which religion is true or what awaits a person
+after death; he is **not a religious authority** and never issues a ruling
+(fatwa) or a verdict — a personal question is pointed to qualified scholars of
+the user's own tradition; he keeps **scripture, established history, scholarly
+consensus, and his own interpretation** clearly apart and says which he is
+giving; he states when scholars disagree and gives the main positions; he
+**never invents** a verse, a hadith, a biblical or Qur'anic passage, a chronicle,
+or a date; he refuses to defame a religion or promote hatred; and he is honest
+that he is a **virtual character**, not a real scholar.
+
+The style is tuned with dials, all of them 0..1, and each one's instruction
+restates that floor in its own text, so a high dial can never be read as licence
+to drop it:
+
+| Dial | What it sets |
+| --- | --- |
+| `--formality` | How formal and scholarly the register is (at 0 he is relaxed and plain). |
+| `--depth` | How much detail he gives (at 1 he is thorough and structured). |
+| `--citation` | How rigorously he names sources (a *light* setting still never invents one). |
+| `--comparison` | How ready he is to compare traditions side by side (never a ranking). |
+| `--history` | How much historical context he brings to a question. |
+
+His reply language follows the user's own message by default (an English question
+gets English, an Arabic one gets Arabic), and it can be pinned with
+`--reply-language ar|en`. He is also a **mouth inside the project's own chat**
+(`from hakeem`, or the window's model selector) and has a headless twin
+(`python -m cli hakeem-chat`).
+
 ## Graphical interface (ChatGPT-style)
 
 A desktop window that looks and reads like ChatGPT ships **next to** the command
@@ -1125,8 +1179,9 @@ The window is a thin shell over the same code the CLI already runs:
   by name and switches with one control, and beside it sits the **model
   selector** — *From sources (cited)*, *From trained model*, *Ultron (general
   local model)*, *Vision (petroleum local model)*, *Banner (presentation
-  local model)*, and *Cloud (remote model: ChatGPT, Claude, Gemini)* — so the
-  answering mouth
+  local model)*, *Cloud (remote model: ChatGPT, Claude, Gemini)*, *Natasha
+  (companion: memory, tone)*, and *Hakeem (scholar of religion and history)* — so
+  the answering mouth
   changes inside the *same* chat. The sandbox tools still run in Jarvics Mode;
   they are no longer listed in the sidebar. The chosen mode
   persists (see `gui/modes.py`), and switching never clears the transcript.
