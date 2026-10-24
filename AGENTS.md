@@ -1555,6 +1555,21 @@ Arabic is kept as secondary aliases where useful.
   all build on it, each
   keeping its own attributes (`_entry`, `_question`, `_request_var`, …) pointed at
   the panel's widgets so every existing handler and test is untouched.
+  `with_model_bar=True` (the main window) adds the optional **model-switch row**
+  inside the card, between the input and the toolbars, reached through
+  `model_bar()`: a `ModelButtonBar` of `ModelButton` chips, one per answering
+  mouth. A chip is a Canvas-painted rounded rectangle (`_rounded_points`, the same
+  shape `RoundedBox` uses) carrying the model's name and what it is for; a click
+  runs the caller's command, `set_active(key)` paints the live choice with the
+  primary accent and leaves the others plain, and a destroyed chip clears its own
+  `command` for the same cycle/deadlock reason the panel's submit handler is
+  dropped. The row **wraps** onto as many lines as the card's width needs (Tk has
+  no flow layout): `_columns_for` measures the *column* widths `grid` will share,
+  not each row's own sum, because measuring rows independently under-counts a
+  layout whose first column holds a wide chip and whose later rows do not -- which
+  is how a row can still overflow after it has been "wrapped". A compact window
+  therefore wraps rather than cutting a model off the end of the row, because a
+  chip the user cannot reach is a model the user cannot pick.
 - `gui/app.py` — a professional desktop front end styled after the **OpenHands
   chat UI**: the same cool-grey token scale (base `cool-grey-950`, surface
   `cool-grey-925`, raised `cool-grey-900`), the gold primary accent, and
@@ -1606,6 +1621,19 @@ Arabic is kept as secondary aliases where useful.
   training loop never freezes the window. The composer's **＋** menu also opens
   the **Code Studio**, the **Presentation Studio**, **Doc's Studio**, and the
   image pages (below).
+  The composer's card also carries the **model-switch row** (below the input,
+  above the pills), one chip per answering mouth in the order asked for --
+  **Jarvis (Sources)**, **Ultron (General)**, **Vision (Petroleum)**,
+  **Banner (Instructor)**, **Natasha (Personality)**, **Hakeem (Religion)**,
+  **Cloud (Network)** (`MODEL_BUTTONS`) -- built through
+  `ChatComposer.model_bar()`. Each chip runs the *same* `_switch_mouth` the
+  header's model selector runs, so the row and the selector can never disagree,
+  `_sync_model_buttons` accents the live mouth (and re-accents it when a switch
+  is refused, so the row always shows what is really answering), and a chip whose
+  model is missing reports the real next step exactly as the selector does. The
+  row wraps on a narrow window rather than clipping a model out of reach, and the
+  header selector still lists *every* mouth (including the small trained model),
+  so nothing became unreachable.
   The window also **reads text aloud**: every message footer carries a
   "🔊 Read aloud" control (`_speak_label`/`_speak_text`), and the sidebar holds the
   reading-voice menus. A dedicated **Voices** dropdown (`_toggle_voices`, right

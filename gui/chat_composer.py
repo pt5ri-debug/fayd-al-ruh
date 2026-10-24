@@ -26,6 +26,7 @@ from __future__ import annotations
 import tkinter as tk
 import weakref
 from collections.abc import Callable
+from tkinter import font as tkfont
 from typing import Any
 
 from gui.typography import Typography, for_root
@@ -44,6 +45,20 @@ DEFAULT_MAX_LINES = 12
 #: The smallest height (in text lines) the input area keeps, so the panel reads
 #: as a multi-line composer from the first keystroke.
 DEFAULT_MIN_LINES = 2
+
+
+def _rounded_points(x1: int, y1: int, x2: int, y2: int, r: int) -> list[int]:
+    """The point list a ``smooth`` polygon needs to draw a rounded rectangle.
+
+    Shared by :class:`RoundedBox` (the composer card, a user bubble) and
+    :class:`ModelButton` (a model chip), so every rounded surface in the program
+    is drawn from one shape definition.
+    """
+    return [
+        x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
+        x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
+        x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+    ]
 
 
 def _blend(base: str, other: str, amount: float) -> str:
@@ -121,14 +136,9 @@ class RoundedBox(tk.Canvas):
         self.tag_lower(self._shape)
 
     def _rounded(self, x1: int, y1: int, x2: int, y2: int, r: int) -> int:
-        points = [
-            x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
-            x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
-            x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
-        ]
         return self.create_polygon(
-            points, smooth=True, splinesteps=24, tags=("shape",),
-            fill=self._fill, outline=self._outline, width=1,
+            _rounded_points(x1, y1, x2, y2, r), smooth=True, splinesteps=24,
+            tags=("shape",), fill=self._fill, outline=self._outline, width=1,
         )
 
 
@@ -295,6 +305,227 @@ class ModeSelector(tk.Menubutton):
         self.configure(text=f"{self._icon}  {label}  ⌄")
 
 
+class ModelButton(tk.Frame):
+    """One model switch: a rounded chip that behaves like a button.
+
+    The composer's bottom row carries one of these per answering mouth, in the
+    order the project offers them, so a model is chosen from the input panel
+    itself -- exactly like the reference design's row of controls under the chat
+    box. Tk has no styled button, so the chip is a Canvas that paints a rounded
+    rectangle and two labels (the model's name and what it is for) and forwards a
+    click to a command.
+
+    The chip is honest about state: ``set_active`` paints the chosen model with
+    the theme's primary accent, so the row always shows which mouth is answering,
+    and a destroyed chip clears its own ``command`` -- a bound method kept in a
+    Tk widget would hold the whole window in a reference cycle only the cyclic
+    collector could break, and that can run on a worker thread, where a Tcl call
+    deadlocks (see :class:`gui.window_controls.WindowControls`).
+    """
+
+    #: Padding inside the rounded chip, and the radius of its corners.
+    _PAD_X = 10
+    _PAD_Y = 4
+    _CORNER = RADIUS_LARGE
+    _GAP = 6
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        theme: Any,
+        typography: Typography,
+        name: str,
+        hint: str,
+        command: Callable[[], Any],
+        tip: str = "",
+    ) -> None:
+        self.theme = theme
+        self._type = typography
+        self.name = name
+        self.hint = hint
+        self._command: Callable[[], Any] | None = command
+        self._active = False
+        self._hovered = False
+
+        name_font = typography.font("sm", weight="bold")
+        hint_font = typography.font("2xs")
+        name_width = tkfont.Font(font=name_font).measure(name)
+        hint_width = tkfont.Font(font=hint_font).measure(hint)
+        text_width = max(name_width, hint_width)
+        width = text_width + self._PAD_X * 2 + 2
+        height = typography.points("sm") + typography.points("2xs") + self._PAD_Y * 2 + 6
+
+        super().__init__(parent, bg=theme.surface, highlightthickness=0, borderwidth=0)
+        self.canvas = tk.Canvas(
+            self, width=width, height=height, bg=theme.surface,
+            highlightthickness=0, borderwidth=0, takefocus=0, cursor="hand2",
+        )
+        self.canvas.pack()
+        self._shape = self.canvas.create_polygon(
+            _rounded_points(1, 1, width - 1, height - 1, self._CORNER),
+            smooth=True, splinesteps=24, fill=theme.surface_raised,
+            outline=theme.border, width=1,
+        )
+        self._name_item = self.canvas.create_text(
+            width // 2, self._PAD_Y + typography.points("sm") // 2 + 1,
+            text=name, font=name_font,
+        )
+        self._hint_item = self.canvas.create_text(
+            width // 2, height - self._PAD_Y - typography.points("2xs") // 2 - 1,
+            text=hint, font=hint_font,
+        )
+
+        self.canvas.bind("<Button-1>", self._on_click)
+        self.canvas.bind("<Enter>", self._on_enter)
+        self.canvas.bind("<Leave>", self._on_leave)
+        self.canvas.bind("<Destroy>", self._on_destroy, add="+")
+        if tip:
+            Tooltip(self.canvas, tip, theme, typography)
+        self._repaint()
+
+    def _on_destroy(self, event: tk.Event) -> None:
+        if event.widget is self.canvas:
+            self._command = None
+
+    def _on_click(self, _event: tk.Event) -> None:
+        if self._command is not None:
+            self._command()
+
+    def _on_enter(self, _event: tk.Event) -> None:
+        self._hovered = True
+        self._repaint()
+
+    def _on_leave(self, _event: tk.Event) -> None:
+        self._hovered = False
+        self._repaint()
+
+    def set_active(self, active: bool) -> None:
+        """Paint the chip as the chosen model (the primary accent) or a plain one."""
+        self._active = active
+        self._repaint()
+
+    def _repaint(self) -> None:
+        theme = self.theme
+        if self._active:
+            fill, outline = theme.primary, theme.primary
+            name_ink, hint_ink = theme.primary_foreground, theme.primary_foreground
+        else:
+            fill = theme.interactive_active if self._hovered else theme.surface_raised
+            outline = theme.border
+            name_ink, hint_ink = theme.contrast, theme.text_secondary
+        self.canvas.itemconfigure(self._shape, fill=fill, outline=outline)
+        self.canvas.itemconfigure(self._name_item, fill=name_ink)
+        self.canvas.itemconfigure(self._hint_item, fill=hint_ink)
+
+
+class ModelButtonBar:
+    """The row of model switches under the composer's input.
+
+    One chip per answering mouth, laid out left to right in the caller's own
+    order, with the chosen one accented. The bar is presentation only -- it never
+    decides which model is available -- so the caller supplies both the buttons
+    and what each one does, and reports the live choice back through
+    :meth:`set_active`.
+
+    The row **wraps** onto as many lines as the card's width needs (Tk has no
+    flow layout, so the fit is recomputed here on every resize): a compact window
+    must not cut a model off the end of the row, because a chip the user cannot
+    reach is a model the user cannot pick.
+    """
+
+    def __init__(self, parent: tk.Misc, *, theme: Any, typography: Typography) -> None:
+        self.theme = theme
+        self._type = typography
+        self.frame = tk.Frame(parent, bg=theme.surface)
+        self._buttons: dict[str, ModelButton] = {}
+        self._columns = 0
+        self._width = 0
+        self.frame.bind("<Configure>", self._on_configure)
+
+    def add(
+        self,
+        key: str,
+        *,
+        name: str,
+        hint: str,
+        command: Callable[[], Any],
+        tip: str = "",
+    ) -> ModelButton:
+        """Add one chip to the right of the row and return it."""
+        button = ModelButton(
+            self.frame, theme=self.theme, typography=self._type,
+            name=name, hint=hint, command=command, tip=tip,
+        )
+        self._buttons[key] = button
+        self._layout(force=True)
+        return button
+
+    def button(self, key: str) -> ModelButton | None:
+        return self._buttons.get(key)
+
+    def keys(self) -> tuple[str, ...]:
+        return tuple(self._buttons)
+
+    def set_active(self, key: str) -> None:
+        """Accent the chip for ``key`` and leave every other one plain."""
+        for button_key, button in self._buttons.items():
+            button.set_active(button_key == key)
+
+    def pack(self, **kwargs: Any) -> tk.Frame:
+        self.frame.pack(**kwargs)
+        return self.frame
+
+    def _on_configure(self, event: tk.Event) -> None:
+        self._layout(width=event.width)
+
+    def _layout(self, *, width: int | None = None, force: bool = False) -> None:
+        """Grid the chips into as many rows as the current width fits.
+
+        The fit is recomputed only when the width (or the chip set) changed, so a
+        stream of ``<Configure>`` events does not re-grid the row needlessly.
+        """
+        if width is None:
+            width = self.frame.winfo_width()
+        if width <= 1:
+            return  # not realised yet; the next Configure lays it out
+        if not force and width == self._width:
+            return
+        self._width = width
+        columns = self._columns_for(width)
+        if not force and columns == self._columns:
+            return
+        self._columns = columns
+        for index, button in enumerate(self._buttons.values()):
+            row, column = divmod(index, columns)
+            button.grid(
+                row=row, column=column, sticky="w",
+                padx=(0, ModelButton._GAP), pady=(0, ModelButton._GAP),
+            )
+
+    def _columns_for(self, width: int) -> int:
+        """The most chips that fit side by side in ``width`` pixels.
+
+        A ``grid`` column is as wide as its widest cell and every row shares the
+        columns, so the fit is measured against the *column* widths, not each
+        row's own sum -- measuring the rows independently under-counts a layout
+        whose first column holds a wide chip and whose later rows do not, which
+        is how a row can still overflow after it has been "wrapped".
+        """
+        widths = [button.canvas.winfo_reqwidth() for button in self._buttons.values()]
+        if not widths:
+            return 1
+        for columns in range(len(widths), 0, -1):
+            column_widths = [0] * columns
+            for index, chip in enumerate(widths):
+                column = index % columns
+                column_widths[column] = max(column_widths[column], chip)
+            total = sum(column_widths) + ModelButton._GAP * columns
+            if total <= width:
+                return columns
+        return 1
+
+
 def _variable_write_callback(composer: ChatComposer) -> Callable[..., None]:
     """A trace callback that does not keep ``composer`` alive (see ``__init__``)."""
     reference = weakref.ref(composer)
@@ -330,9 +561,11 @@ class ChatComposer:
         variable: tk.StringVar | None = None,
         with_attach: bool = True,
         with_status: bool = True,
+        with_model_bar: bool = False,
     ) -> None:
         self.theme = theme
         self._type = typography
+        self._corner = corner
         # ``on_submit`` is a bound method of the caller, so it is dropped when the
         # panel's window goes away (see :meth:`_on_destroy`): a strong reference kept
         # after that would hold the caller (and its whole widget tree) in a
@@ -435,6 +668,16 @@ class ChatComposer:
         # calls :meth:`add_mic` rather than showing a control that does nothing.
         self.mic_button: tk.Button | None = None
 
+        # The model-switch row is optional too, and lives inside the card, under
+        # the input and above the toolbars, so the answering model is chosen from
+        # the input panel itself (the reference design's row of controls). The
+        # caller fills it through :meth:`model_bar`.
+        self._model_bar: ModelButtonBar | None = None
+        if with_model_bar:
+            self._model_bar = ModelButtonBar(
+                self.inner, theme=theme, typography=typography
+            )
+
         self.send_button = CircleButton(
             self.inner, size=SEND_BUTTON_SIZE, bg=theme.surface,
             fill=theme.primary, ink=theme.primary_foreground,
@@ -446,6 +689,11 @@ class ChatComposer:
         # input's own height comes from its line count (see :meth:`_autosize`),
         # so the card grows with the message rather than the layout stretching.
         self.entry.pack(side="top", fill="x", padx=10, pady=(8, 2))
+        # The model row claims its strip before the toolbars are packed: each
+        # side claims the remaining cavity in packing order, so the strip under
+        # the input is the row's, and the toolbars get the strip below it.
+        if self._model_bar is not None:
+            self._model_bar.pack(side="top", fill="x", padx=10, pady=(2, 0))
         # Rightmost is Send; the dot/mic/actions group sits immediately left of it.
         self.send_button.pack(side="right", padx=(0, 10), pady=(0, 8))
         self.right_tools.pack(side="right", padx=(0, 4), pady=(0, 8))
@@ -457,6 +705,12 @@ class ChatComposer:
         self._update_send_state()
 
     # ------------------------------------------------------------- build API
+
+    def model_bar(self) -> ModelButtonBar:
+        """The row of model switches inside the card (``with_model_bar=True``)."""
+        if self._model_bar is None:
+            raise RuntimeError("this composer was built with with_model_bar=False")
+        return self._model_bar
 
     def add_mic(self, command: Callable[[], Any], tip: str = "Dictate with the microphone") -> tk.Button:
         """Add the microphone control beside Send (call before the panel is shown)."""
