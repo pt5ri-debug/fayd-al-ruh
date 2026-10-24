@@ -255,6 +255,64 @@ def test_wireframe_render_is_a_different_picture(service: SceneStudioService):
     assert Path(solid.path).read_bytes() != Path(wired.path).read_bytes()
 
 
+def test_render_never_writes_the_target_in_place(
+    service: SceneStudioService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A render must publish its PNG atomically, not truncate the target first.
+
+    Two renders can write the same viewport file (adding a figure starts one, and
+    framing the camera starts another), and a resize re-reads that file to refit
+    the preview. A plain ``write_bytes`` truncates the target before writing, so a
+    reader in that window sees a truncated image and the preview vanishes -- the
+    reported flake. The fix writes a sibling temp file and renames it into place,
+    so the target is only ever the whole picture. Pinning "the target is not
+    written in place" is the deterministic form of that guarantee.
+    """
+    service.new_scene("Atomic", with_ground=False)
+    service.add_figure("adult")
+    target = tmp_path / "shot.png"
+
+    def refuse_in_place(self: Path, _data: bytes) -> int:
+        raise AssertionError(f"the render truncated {self} in place")
+
+    monkeypatch.setattr(Path, "write_bytes", refuse_in_place)
+    report = service.render(width=160, height=120, path=str(target))
+    assert report.ok, report.message
+    assert target.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_a_failed_render_write_leaves_the_previous_image_intact(
+    service: SceneStudioService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A render that fails mid-write must not destroy the picture already there.
+
+    The atomic publish is what makes this true: the target is only replaced once
+    the new bytes are complete, so a failure (a full disk, an I/O error) leaves
+    the previous image whole rather than a truncated file, and the temp file is
+    cleaned up so nothing is left behind.
+    """
+    import os as os_module
+
+    service.new_scene("Crash", with_ground=False)
+    service.add_figure("adult")
+    service.frame_camera()
+    target = tmp_path / "kept.png"
+    good = service.render(width=160, height=120, path=str(target))
+    assert good.ok
+    original = target.read_bytes()
+
+    def refuse_replace(_src: str, _dst: str) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os_module, "replace", refuse_replace)
+    failed = service.render(width=160, height=120, path=str(target))
+    assert failed.ok is False
+    assert "Could not write" in failed.message
+    # The previous render is still a whole, readable PNG, and no temp file litters.
+    assert target.read_bytes() == original
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
 # ---------------------------------------------------------------------------
 # files
 # ---------------------------------------------------------------------------

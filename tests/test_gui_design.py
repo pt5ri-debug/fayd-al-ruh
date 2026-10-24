@@ -65,6 +65,29 @@ def _service(tmp_path, *, operating_mode: str | None = None, read_write: bool = 
     )
 
 
+def _chip(bar: Any, key: str) -> Any:
+    """The chip for ``key``, asserted present.
+
+    The row is built from :data:`gui.app.MODEL_BUTTONS`, so a missing chip is a
+    test failure; asserting it here keeps the ``None`` out of every call site.
+    """
+    button = bar.button(key)
+    assert button is not None, key
+    return button
+
+
+def _fake_mouth() -> Any:
+    """A stand-in mouth that answers, so a switch can be exercised with no model."""
+    return SimpleNamespace(
+        name="fake",
+        ask=lambda _question: SimpleNamespace(
+            text="ok", citations=(), used_web=False,
+            relation_facts=(), relation_conflicts=(),
+        ),
+        describe=lambda: "a fake mouth",
+    )
+
+
 # --- modes ----------------------------------------------------------------
 
 
@@ -930,6 +953,82 @@ def test_shared_composer_has_no_attach_button_when_not_supported() -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_model_bar_is_opt_in_and_clickable() -> None:
+    """The model row exists only when asked for, and each chip forwards its click."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    root = tk.Tk()
+    try:
+        plain = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask", on_submit=lambda: None,
+        )
+        plain.wrap.pack(fill="x")
+        root.update()
+        with pytest.raises(RuntimeError):
+            plain.model_bar()
+
+        calls: list[str] = []
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask", on_submit=lambda: None, with_model_bar=True,
+        )
+        composer.wrap.pack(fill="x")
+        bar = composer.model_bar()
+        bar.add("a", name="Alpha", hint="First", command=lambda: calls.append("a"))
+        bar.add("b", name="Beta", hint="Second", command=lambda: calls.append("b"))
+        root.update()
+        assert bar.keys() == ("a", "b")
+        assert bar.button("missing") is None
+        _chip(bar, "b").canvas.event_generate("<Button-1>")
+        root.update()
+        assert calls == ["b"]
+        # Only one chip is accented at a time, and the state is readable back.
+        bar.set_active("a")
+        assert _chip(bar, "a")._active and not _chip(bar, "b")._active
+        bar.set_active("b")
+        assert _chip(bar, "b")._active and not _chip(bar, "a")._active
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_model_chip_releases_its_command_on_destroy() -> None:
+    """A destroyed chip drops the caller's command, so a dead window is not kept alive.
+
+    A Tk widget holds its ``command`` callable for as long as it lives; a bound
+    method of the window would put the window in a cycle only the cyclic collector
+    could break -- and that can run on a worker thread, where a Tcl call deadlocks.
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    root = tk.Tk()
+    try:
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask", on_submit=lambda: None, with_model_bar=True,
+        )
+        composer.wrap.pack(fill="x")
+        bar = composer.model_bar()
+        button = bar.add("a", name="Alpha", hint="First", command=lambda: None)
+        root.update()
+        assert button._command is not None
+        button.canvas.destroy()
+        root.update()
+        assert button._command is None
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_main_window_composer_carries_both_mode_selectors(tmp_path) -> None:
     """The bottom-left toolbar has the Code Studio and Chat Studio pills."""
     import tkinter as tk
@@ -1186,3 +1285,176 @@ def test_composer_hover_blend_derives_from_the_theme_colour() -> None:
     # A non-#rrggbb colour (a name, or #rgb) is returned untouched, never mangled.
     assert _blend("gold", "#FFFFFF", 0.2) == "gold"
     assert _blend("#abc", "#FFFFFF", 0.2) == "#abc"
+
+
+# --- the composer's model-switch row --------------------------------------
+
+
+def test_model_button_catalog_is_the_requested_order() -> None:
+    """The row names the seven mouths in the order asked for, left to right."""
+    from gui.app import MODEL_BUTTONS
+
+    assert MODEL_BUTTONS == (
+        ("sources", "Jarvis", "Sources"),
+        ("ultron", "Ultron", "General"),
+        ("vision", "Vision", "Petroleum"),
+        ("banner", "Banner", "Instructor"),
+        ("natasha", "Natasha", "Personality"),
+        ("hakeem", "Hakeem", "Religion"),
+        ("cloud", "Cloud", "Network"),
+    )
+    # Every chip is a mouth the header selector also offers, so the two controls
+    # can never name different models.
+    from gui.app import MOUTH_LABELS
+
+    for key, _name, _hint in MODEL_BUTTONS:
+        assert key in MOUTH_LABELS, key
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_composer_carries_the_model_row(tmp_path) -> None:
+    """The card's bottom row holds one chip per mouth, inside the composer card."""
+    import tkinter as tk
+
+    from gui.app import MODEL_BUTTONS, FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.geometry("1180x780")
+        for _ in range(8):
+            root.update()
+        bar = app._model_bar
+        assert bar.keys() == tuple(key for key, _n, _h in MODEL_BUTTONS)
+        # Every chip is inside the rounded composer card, under the input and
+        # above the toolbars.
+        entry_y = app._entry.winfo_rooty()
+        toolbar_y = app._composer.left_tools.winfo_rooty()
+        for key, name, hint in MODEL_BUTTONS:
+            button = _chip(bar, key)
+            assert button.canvas.winfo_toplevel() is root
+            assert button.canvas.winfo_ismapped()
+            assert button.name == name and button.hint == hint
+            y = button.canvas.winfo_rooty()
+            assert entry_y < y <= toolbar_y, key
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_model_row_accents_the_answering_mouth(tmp_path) -> None:
+    """The live mouth's chip is accented; the others are not."""
+    import tkinter as tk
+
+    from ai.chat import MOUTH_ULTRON
+    from gui.app import MOUTH_LABELS, FaydGUI
+
+    root = tk.Tk()
+    try:
+        service = _service(tmp_path)
+        service.switcher._ultron_loader = lambda: _fake_mouth()
+        app = FaydGUI(root, service=service)
+        root.update()
+        bar = app._model_bar
+        assert _chip(bar, "sources")._active
+        assert not _chip(bar, "ultron")._active
+
+        app._on_source_menu(MOUTH_LABELS[MOUTH_ULTRON])
+        root.update()
+        assert _chip(bar, "ultron")._active
+        assert not _chip(bar, "sources")._active
+
+        app._on_source_menu(MOUTH_LABELS["sources"])
+        root.update()
+        assert _chip(bar, "sources")._active
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_model_row_click_switches_the_mouth(tmp_path) -> None:
+    """Clicking a chip runs the same switch the header selector does."""
+    import tkinter as tk
+
+    from ai.chat import MOUTH_ULTRON
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        service = _service(tmp_path)
+        service.switcher._ultron_loader = lambda: _fake_mouth()
+        app = FaydGUI(root, service=service)
+        root.update()
+        app._add_bubble("assistant", "keep me across the mouth switch")
+
+        _chip(app._model_bar, "ultron").canvas.event_generate("<Button-1>")
+        root.update()
+        assert service.source == MOUTH_ULTRON
+        assert app._source_var.get() == MOUTH_ULTRON
+        assert _chip(app._model_bar, "ultron")._active
+        # The switch happens in the same chat, never a second window.
+        texts = [entry.text for entry in app._rows]
+        assert any("keep me across the mouth switch" in text for text in texts)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_model_row_keeps_the_mouth_when_a_chip_cannot_load(tmp_path) -> None:
+    """A chip whose model is missing reports the next step and keeps the current mouth."""
+    import tkinter as tk
+
+    from ai.chat import MOUTH_BANNER
+    from core.banner import BannerUnavailable
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        service = _service(tmp_path)
+
+        def unavailable() -> Any:
+            raise BannerUnavailable("no weights")
+
+        service.switcher._banner_loader = unavailable
+        app = FaydGUI(root, service=service)
+        root.update()
+
+        _chip(app._model_bar, MOUTH_BANNER).canvas.event_generate("<Button-1>")
+        root.update()
+        # The mouth did not change, the row still accents the real one, and the
+        # failure is explained rather than swallowed.
+        assert service.source == "sources"
+        assert _chip(app._model_bar, "sources")._active
+        assert not _chip(app._model_bar, MOUTH_BANNER)._active
+        assert "Could not load" in app._rows[-1].text
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_model_row_wraps_so_no_model_is_cut_off(tmp_path) -> None:
+    """A narrow window wraps the row instead of clipping a model out of reach."""
+    import tkinter as tk
+
+    from gui.app import MODEL_BUTTONS, FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        bar = app._model_bar
+        for width in (1180, 900, 700, 520, 420):
+            root.geometry(f"{width}x760")
+            for _ in range(8):
+                root.update()
+            chips = [_chip(bar, key) for key, _n, _h in MODEL_BUTTONS]
+            right_edge = max(
+                chip.canvas.winfo_rootx() + chip.canvas.winfo_width() for chip in chips
+            )
+            assert right_edge <= bar.frame.winfo_rootx() + bar.frame.winfo_width() + 1, width
+            # Every chip is still mapped, so none was dropped to make it fit.
+            for key, chip in zip(
+                (key for key, _n, _h in MODEL_BUTTONS), chips, strict=True
+            ):
+                assert chip.canvas.winfo_ismapped(), (width, key)
+    finally:
+        root.destroy()

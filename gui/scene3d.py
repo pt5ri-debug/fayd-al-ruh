@@ -21,6 +21,8 @@ store, or downloads anything. A missing or malformed file is reported as a
 
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -79,6 +81,31 @@ HONESTY_LINE = (
     "rasteriser with Blinn-Phong shading, but no GPU, no ray tracing, and no "
     "commercial render engine."
 )
+
+
+def _write_atomic(path: Path, payload: bytes) -> None:
+    """Write ``payload`` to ``path`` so a concurrent reader never sees it half-written.
+
+    A plain ``write_bytes`` truncates the file first, so another thread or an idle
+    callback that reads it in that window gets a truncated image -- which is
+    exactly what made a viewport preview vanish: two renders write the same
+    ``_viewport.png``, and a resize re-reads it to refit, so the reader could
+    catch the file between the truncation and the write and ``load_scaled``
+    returned ``None``. Writing to a sibling temp file and renaming it into place
+    makes the swap atomic: a reader sees either the old image or the new one,
+    never a partial one.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(payload)
+        os.replace(temp_name, path)
+    except OSError:
+        Path(temp_name).unlink(missing_ok=True)
+        raise
 
 
 class SceneStudioError(RuntimeError):
@@ -588,10 +615,9 @@ class SceneStudioService:
         except (ValueError, ZeroDivisionError) as error:
             return RenderReport(ok=False, message=f"Could not render the scene: {error}")
         target = Path(path).expanduser() if path else self.renders_dir / self._render_filename()
-        target.parent.mkdir(parents=True, exist_ok=True)
         png = buffer.to_png()
         try:
-            target.write_bytes(png)
+            _write_atomic(target, png)
         except OSError as error:
             return RenderReport(ok=False, message=f"Could not write {target}: {error}")
         if self.session is not None:
