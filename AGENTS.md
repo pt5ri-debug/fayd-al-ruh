@@ -2731,6 +2731,43 @@ clone, each optional so the base system still runs without it:
   whole-word and inflection rules, the nested-concept rule, and the learner and
   retriever wiring.
 
+- Phase 24 — **polarity: knowing which relations are opposites**: the graph could
+  hold a *typed* relation, but nothing knew that ``increases`` is the opposite of
+  ``reduces`` (or ``causes`` of ``prevents``), so two sentences saying the
+  opposite thing about the same pair -- "waterflood increases recovery" and
+  "waterflood reduces recovery" -- looked like two unrelated links rather than a
+  contradiction. `core/relation_polarity.py` is the one declarative place that
+  fact lives: a relation type carries a **polarity** from a fixed vocabulary
+  (``POLARITY``), two types oppose only when they are the two poles of the same
+  *axis* (`OPPOSING_PAIRS`), and a *symmetric* relation (``associated_with``,
+  `SYMMETRIC_RELATIONS`) is on no axis, so it can never be reported as opposing
+  anything. `polarity_of`/`is_symmetric`/`opposes`, `conflicts` (severity = the
+  weaker confidence, the two types reported in canonical order), and
+  `find_polarity_conflicts` (every opposing pair among a relation collection that
+  shares the *same ordered pair* and direction -- so ``A increases B`` does not
+  conflict with ``B reduces A``, a different claim). **Honest by construction**:
+  an unknown relation type has no polarity and opposes nothing, and only an
+  explicitly listed antonymous pair is ever called contradictory. Two existing
+  checkers were upgraded to use it. `core/consistency_checker.py` now also reads
+  the relation a belief asserts out of its ``metadata`` (``relation_type`` +
+  ``source_id``/``target_id``) and calls two beliefs contradictory when they put
+  opposite poles on the same ordered pair -- *direction-aware*, so it never calls
+  "A increases B" and "B reduces A" contradictory (a free-text verb check could
+  not promise that, which is why the earlier statement-level attempt was
+  dropped). `core/contradiction_detector.py` treats two evidence records that
+  assert *antonymous* relations on the same pair as a contradiction even when both
+  set ``supports=True``, and refuses to call two records contradictory merely
+  because one flag is set and the other is not when both carry the *same* relation.
+  `CognitiveController.find_relation_conflicts` scans the graph (never edits it)
+  for opposing typed relations, which is exactly what a text taught through
+  `learn_extracted_relations` can produce. Gated by the evaluation's new
+  `polarity_accuracy` metric over a hand-written held-out `POLARITY_JUDGEMENTS`
+  catalogue **with negative controls** (an unrelated type, a symmetric relation, a
+  type against itself), so an over-firing polarity model fails the gate as surely
+  as one that misses. `tests/test_relation_polarity.py` pins the vocabulary, the
+  antonyms, the symmetric refusal, the direction rule, the determinism, the
+  canonical order, both upgraded checkers, the graph scan, and the gate.
+
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
 regression monitor each can refuse a change.

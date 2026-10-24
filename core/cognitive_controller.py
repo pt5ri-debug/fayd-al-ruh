@@ -75,6 +75,7 @@ from core.relation_extraction import (
     RelationExtractor,
     extract_from_store,
 )
+from core.relation_polarity import PolarityConflict, find_polarity_conflicts
 from core.retention_policy import RetentionPolicy
 from core.safe_learning import LearningSandbox
 from core.self_learning import SelfLearning, SelfLearningReport
@@ -354,6 +355,18 @@ class CognitiveController:
 
     def check_consistency(self) -> ConsistencyReport:
         return self.consistency_checker.check(self.state.beliefs.values())
+
+    def find_relation_conflicts(self) -> list[PolarityConflict]:
+        """Every pair of typed relations in the ontology that assert the opposite.
+
+        A typed relation is directional, so ``porosity --increases--> permeability``
+        and ``porosity --reduces--> permeability`` cannot both be true. This scans
+        the *graph* (not the beliefs) for such pairs, using the declared polarity
+        of the relation types, and returns them as a preview -- it never edits the
+        ontology. The confidence-carrying relations a text taught through
+        :meth:`learn_extracted_relations` are exactly the ones this can catch.
+        """
+        return find_polarity_conflicts(self.ontology.relations.values())
 
     def resolve_conflict(self, conflict_index: int = 0) -> ConflictResolution:
         report = self.check_consistency()
