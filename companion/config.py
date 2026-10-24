@@ -128,6 +128,18 @@ class CompanionConfig:
     #: When false, the dialogue emotion stays neutral and is never persisted.
     emotion_enabled: bool = True
 
+    # -- character layers -------------------------------------------------
+    #: When false, the *named* emotional state engine is off: no mood is chosen and
+    #: no mood block is sent (the continuous tone above still applies).
+    mood_enabled: bool = True
+    #: When false, she never takes an initiative -- she only answers.
+    initiative_enabled: bool = True
+    #: When false, no anti-repetition guidance is sent and repetition is not
+    #: measured. The rolling summary and the length hint are part of this layer.
+    anti_repetition_enabled: bool = True
+    #: How many of her own recent replies the anti-repetition engine compares against.
+    repetition_window: int = 12
+
     def __post_init__(self) -> None:
         if not self.model.strip():
             raise ValueError("A model name is required.")
@@ -155,6 +167,8 @@ class CompanionConfig:
             raise ValueError("context_chars is too small to be useful.")
         if self.backup_keep < 0:
             raise ValueError("backup_keep cannot be negative.")
+        if self.repetition_window < 1:
+            raise ValueError("repetition_window must be at least 1.")
 
     @classmethod
     def from_env(cls, **overrides: object) -> CompanionConfig:

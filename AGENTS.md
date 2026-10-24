@@ -558,6 +558,65 @@ Arabic is kept as secondary aliases where useful.
   explicit and revocable, the honesty that she is a virtual character, and no
   coercion. Each instruction restates that floor in its own text, so a high dial
   can never be read as licence to drop it.
+  **Five components make her read as a person rather than a model with a system
+  prompt.** Each is its own module, each is on by default, each is switchable in
+  `CompanionConfig`, and each is exercised through the `caller`/`client` seams, so
+  the whole layer is tested with no server and no weights.
+  `companion/traits.py` is the **standing character**: `TraitProfile`'s nine
+  fields (`romantic_intensity`, `emotional_expressiveness`, `affection`,
+  `playfulness`, `spontaneity`, `conversational_initiative`,
+  `emotional_sensitivity`, `formal_tone`, `repetitiveness`) carry the shipped
+  design values (`NATASHA_PERSONALITY`), and `trait_instructions` renders each as
+  **tone guidance** — never as a bare number, so the model cannot misread `0.98` —
+  with every instruction that could be taken as licence restating the safety floor
+  ("expression only", consent) in its own text. `TraitStore` persists an override
+  (and `reset()` returns to the shipped design, not a neutral zero), and
+  `NatashaPersonality.system_prompt(traits=...)` renders the block itself, so no
+  caller has to remember to add it. A corrupt saved profile falls back to the
+  design rather than crashing.
+  `companion/moods.py` is the **named emotional state engine**: seven states
+  (`MOODS` — *longing, romantic, playful, tender, passionate, sad, disagreement*),
+  each carrying a readable style guide, and `EmotionalStateEngine.observe`
+  chooses the state **from the conversation's own context**, never at random, with
+  support and friction cues always beating a warm one and `sad`/`disagreement`
+  setting `allows_romance=False`, so a hard moment is never answered with
+  flirtation. The state is *stable* (an unrelated message keeps the current one),
+  can be forced (`set_mood`), disabled, or reset.
+  `companion/relationship_memory.py` is the **structured relationship memory**,
+  with the three domains kept strictly apart (`DOMAINS`: `user_fact` true in
+  reality, `fiction` from the story, `dialogue_pref` how to talk), each rendered
+  in its own prompt block so they can never be confused; named slots cover the
+  fictional name, the form of address, the romance/playfulness levels, topics,
+  boundaries, and story moments. An entry is stored **only with approval**, a
+  repeated slot replaces the old value (the old row is kept, deactivated, so the
+  change is recorded), `fictional` marks a story entry, and a read scoped to a
+  domain can never return another domain's rows.
+  `companion/initiative.py` is the **conversational-initiative engine**: six ways
+  to lead (`INITIATIVES` — romantic opener, express longing, deep question,
+  suggest something to imagine, recall a story moment, offer support), offered
+  only when the moment (`mood_key`) and the user's preferences allow it, and
+  **never repeated** within a conversation (the engine remembers what it used);
+  a supportive or tense moment gets support, never a romantic opener. An
+  initiative is guidance for *how* she may lead, never a scripted line, and it
+  never claims an action happened.
+  `companion/repetition.py` is the **anti-repetition engine**: it normalises her
+  own earlier replies (case, whitespace, Arabic diacritics, a trailing stop),
+  finds the n-grams a new draft shares with them (longest first), keeps a
+  **bounded rolling summary**, feeds a **rotating variation hint** so the guidance
+  itself does not repeat, and adapts the **answer length** to the question. It
+  measures and reports repetition (`RepetitionReport`) rather than rewriting the
+  model's words.
+  `companion/database.py`'s `SCHEMA_VERSION` is now **2**, with a v1→v2 migration
+  adding the `relationship_events`/`relationship_memory` tables (and the
+  `companion_settings` row a trait override lives in); a database from a *newer*
+  build is refused up front rather than read with a schema this build does not
+  understand, and a migration with no path is refused rather than half-applied.
+  `companion/prompt_builder.py` gained the `SECTION_*` labels and the new `build`
+  parameters (`traits`, `mood`, `initiative`, `style_guidance`), and the four new
+  layers render in a documented order — standing character, dialogue settings,
+  conversation summary, then the per-turn mood, initiative, and freshness
+  guidance — with the unconditional honesty rules inside the standing block, so
+  nothing later can quietly override them.
   `companion/companion_agent.py` is the one engine: `CompanionAgent(config=None, *,
   client=None, caller=None)` — the `ModelCaller`/`client` seams let the whole
   companion be exercised with **no server and no weights**. `ask()` stores the
@@ -580,7 +639,12 @@ Arabic is kept as secondary aliases where useful.
   `memories`, `settings` (including the `--boldness`/`--passion`/`--initiative`
   dials), `emotion`,
   `reset-emotion`, `relationship`, `export`, `backup`, `--session`,
-  `--list-sessions`, `--new`), and — as a **mouth inside the project's own chat**
+  `--list-sessions`, `--new`), plus the four realism subcommands — `traits`
+  (`--<trait> <value>`, `--reset`, `--json`), `mood` (`--set`, `--reset`,
+  `--json`), `initiative` (the ways she may lead), and `relationship-memory`
+  (`--remember`/`--domain`/`--slot`/`--approve`/`--forget`/`--json`) — each with
+  its own menu entry beside the Natasha status line, and — as a **mouth inside the
+  project's own chat**
   (`ai/natasha_mouth.py`, the headless twin `python -m cli natasha-chat`) — the
   window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
   *From sources (cited)*, *From trained model*, Ultron, Vision, Banner, and Cloud;

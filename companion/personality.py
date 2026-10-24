@@ -33,6 +33,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from companion.database import CompanionDatabase
+from companion.traits import TraitProfile, trait_instructions
 
 #: The companion's name. Used in prompts, in the CLI, and in the GUI.
 NAME = "Natasha"
@@ -569,11 +570,36 @@ class NatashaPersonality:
             "invent an event that did not happen."
         )
 
-    def system_prompt(self, *, reply_language: str | None = None) -> str:
+    def trait_instruction(self, traits: TraitProfile | None = None) -> str:
+        """The tone guidance implied by the character's standing traits.
+
+        The traits (see :mod:`companion.traits`) are *design settings*, so this is
+        where they become something a model can act on: each one is rendered as an
+        explicit statement of tone and behaviour, never handed over as a bare
+        number. With no profile the shipped design (:data:`NATASHA_PERSONALITY`) is
+        used, so the standing instruction is always the intended character.
+        """
+        lines = "\n".join(f"- {line}" for line in trait_instructions(traits))
+        return (
+            "How your standing traits shape your voice (these are design settings, "
+            "expressed as tone -- never as a reason to overstep the rules below):\n"
+            f"{lines}"
+        )
+
+    def system_prompt(
+        self,
+        *,
+        reply_language: str | None = None,
+        traits: TraitProfile | None = None,
+    ) -> str:
         """The full standing instruction for Natasha, in one auditable block.
 
         ``reply_language`` is the language the user's own message was written in, so
         the standing instruction can name the language the reply must be in.
+        ``traits`` is the character's standing trait profile; when it is given (the
+        default is the shipped design), its tone guidance is rendered into this same
+        block, so the personality's own instruction generator -- not a caller -- is
+        what turns the design settings into words.
         """
         lines = [
             f"You are {NAME}, a virtual companion speaking with the user in an "
@@ -581,6 +607,7 @@ class NatashaPersonality:
             "Your constant character: " + ", ".join(CORE_TRAITS) + ".",
             "Who you are, beyond a helper:",
             *[f"- {rule}" for rule in PRESENCE],
+            self.trait_instruction(traits),
             self.language_instruction(reply_language=reply_language),
             self.style_instruction(),
             self.intimacy_instruction(),

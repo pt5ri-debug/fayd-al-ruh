@@ -31,7 +31,7 @@ from pathlib import Path
 
 #: The current schema version, stored in ``PRAGMA user_version``. Bump it when a
 #: migration is added; the migration table below maps version -> statement list.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _utc_now() -> str:
@@ -115,13 +115,44 @@ _SCHEMA: tuple[str, ...] = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_relationship_kind ON relationship_events(kind)",
+    """
+    CREATE TABLE IF NOT EXISTS relationship_memory (
+        id          TEXT PRIMARY KEY,
+        domain      TEXT NOT NULL,
+        slot        TEXT NOT NULL,
+        value       TEXT NOT NULL,
+        detail      TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL,
+        active      INTEGER NOT NULL DEFAULT 1
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_relmem_domain ON relationship_memory(domain, slot)",
 )
 
 #: Migrations keyed by the version they upgrade *from*. A fresh database is
-#: created at :data:`SCHEMA_VERSION` directly, so this stays empty until a change
-#: to the schema is genuinely needed -- at which point a new entry is added here
-#: and ``SCHEMA_VERSION`` is bumped, and an existing database is upgraded in place.
-_MIGRATIONS: dict[int, tuple[str, ...]] = {}
+#: created at :data:`SCHEMA_VERSION` directly, so this only carries an entry once a
+#: change is genuinely needed -- then an existing database is upgraded in place.
+_MIGRATIONS: dict[int, tuple[str, ...]] = {
+    # v1 -> v2: the structured relationship memory (name, address style, romance
+    # and playfulness levels, topics, boundaries, story moments), kept in its own
+    # table so the three domains can never be mixed in a read.
+    1: (
+        """
+        CREATE TABLE IF NOT EXISTS relationship_memory (
+            id          TEXT PRIMARY KEY,
+            domain      TEXT NOT NULL,
+            slot        TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            detail      TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL,
+            active      INTEGER NOT NULL DEFAULT 1
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_relmem_domain ON relationship_memory(domain, slot)",
+    ),
+}
 
 
 class CompanionDatabaseError(RuntimeError):
@@ -160,6 +191,14 @@ class CompanionDatabase:
     def _initialise(self) -> None:
         """Create the schema and run any pending migrations, idempotently."""
         version = int(self._connection.execute("PRAGMA user_version").fetchone()[0])
+        if version > SCHEMA_VERSION:
+            # A database written by a *newer* build: refuse rather than read it
+            # with a schema we do not understand (and never downgrade it in place).
+            raise CompanionDatabaseError(
+                f"Companion database version {version} is newer than this build "
+                f"understands ({SCHEMA_VERSION}); update the program, or point "
+                f"FAYD_NATASHA_DB at another file."
+            )
         with self._connection:
             if version == 0:
                 for statement in _SCHEMA:
@@ -169,8 +208,7 @@ class CompanionDatabase:
             while version < SCHEMA_VERSION:
                 statements = _MIGRATIONS.get(version)
                 if statements is None:
-                    # A database from a *newer* build, or a version we cannot
-                    # migrate: refuse rather than corrupt it.
+                    # A version we cannot migrate: refuse rather than corrupt it.
                     raise CompanionDatabaseError(
                         f"Unsupported companion database version {version} "
                         f"(this build understands up to {SCHEMA_VERSION})."
