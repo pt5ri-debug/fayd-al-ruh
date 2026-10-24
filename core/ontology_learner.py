@@ -106,13 +106,15 @@ class OntologyLearner:
         self._learned: set[str] = set()
 
     def concepts_in(self, text: str) -> list[Concept]:
-        """Return the known concepts whose terms occur in the text, in label order."""
-        folded = text.casefold()
-        found = [
-            concept
-            for concept in self.ontology.concepts.values()
-            if any(term in folded for term in concept.terms)
-        ]
+        """Return the known concepts whose terms occur in the text, in label order.
+
+        The match is whole-word and Arabic-normalised (through
+        :meth:`Ontology.concepts_in`), so ``المسامية`` reaches ``porosity`` and
+        ``porosity`` does not match inside ``microporosity`` -- a bare
+        ``casefold`` substring test did neither.
+        """
+        ids = self.ontology.concepts_in(text)
+        found = [self.ontology.concepts[concept_id] for concept_id in ids]
         return sorted(found, key=lambda concept: concept.label)
 
     def observe(self, text: str) -> OntologyLearning:

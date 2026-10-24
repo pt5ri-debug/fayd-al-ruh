@@ -2700,6 +2700,181 @@ clone, each optional so the base system still runs without it:
   that misses), wired into `evaluation` as the `relation_extraction_accuracy`
   metric.
 
+- Phase 23 — **Arabic reaches the concept graph**: the project is Arabic-facing,
+  but the symbolic core was English-only, so the Arabic user could not reach it.
+  Measured before the fix: of the corpus's own ~30 Arabic glossary terms only ~3
+  resolved to a concept, only 18 of 495 concepts carried any Arabic term, and
+  `find_concepts("المسامية")` / `("النفاذية")` returned nothing -- an Arabic
+  sentence taught and matched the graph no better than a random string.
+  `core/tokenize.py` gains the shared normalised *phrase* space
+  (`normalize_phrase`, `token_spans`), so a term and a text are compared as whole
+  normalised tokens rather than by a `casefold` substring test;
+  `core.concept.Concept` stores its terms normalised (and `terms_for(language)`,
+  `is_arabic`) so a concept is looked up the same way in either script; and
+  `core.ontology.Ontology` gains an Arabic-aware, whole-word span matcher
+  (`match_concepts`, `concepts_in`) plus `add_concept_alias`, which adds an alias
+  to a frozen concept *in place* keeping its id, so the graph's relations survive
+  the new name. Matching a term only at a token's start with a bounded inflection
+  (`_token_matches`) keeps "flow" reaching "flowed" without "porosity" matching
+  inside "microporosity". `core/petroleum_corpus.seed_petroleum_corpus` now folds
+  the corpus's own Arabic glossary onto the concepts it names
+  (`_seed_glossary_aliases`), so the ontology and the corpus agree on what a
+  concept is called in either language -- the corpus already recorded
+  `("porosity", "مسامية")`, and the concept simply never carried it. The learner
+  and the ontology-guided retriever read concepts through the same matcher, so all
+  three agree. Result: the same Arabic sentence resolves
+  `المسامية تزيد النفاذية` to `porosity` and `permeability` end to end. Honest by
+  construction: the matcher is deterministic and refuses rather than guesses, and
+  it still does not invent an alias for a term the ontology has no node for
+  ("oil in place", "gamma ray"). `tests/test_arabic_concepts.py` pins the shared
+  normalised space, the article handling, the corpus-glossary seeding, the
+  whole-word and inflection rules, the nested-concept rule, and the learner and
+  retriever wiring.
+
+- Phase 24 — **polarity: knowing which relations are opposites**: the graph could
+  hold a *typed* relation, but nothing knew that ``increases`` is the opposite of
+  ``reduces`` (or ``causes`` of ``prevents``), so two sentences saying the
+  opposite thing about the same pair -- "waterflood increases recovery" and
+  "waterflood reduces recovery" -- looked like two unrelated links rather than a
+  contradiction. `core/relation_polarity.py` is the one declarative place that
+  fact lives: a relation type carries a **polarity** from a fixed vocabulary
+  (``POLARITY``), two types oppose only when they are the two poles of the same
+  *axis* (`OPPOSING_PAIRS`), and a *symmetric* relation (``associated_with``,
+  `SYMMETRIC_RELATIONS`) is on no axis, so it can never be reported as opposing
+  anything. `polarity_of`/`is_symmetric`/`opposes`, `conflicts` (severity = the
+  weaker confidence, the two types reported in canonical order), and
+  `find_polarity_conflicts` (every opposing pair among a relation collection that
+  shares the *same ordered pair* and direction -- so ``A increases B`` does not
+  conflict with ``B reduces A``, a different claim). **Honest by construction**:
+  an unknown relation type has no polarity and opposes nothing, and only an
+  explicitly listed antonymous pair is ever called contradictory. Two existing
+  checkers were upgraded to use it. `core/consistency_checker.py` now also reads
+  the relation a belief asserts out of its ``metadata`` (``relation_type`` +
+  ``source_id``/``target_id``) and calls two beliefs contradictory when they put
+  opposite poles on the same ordered pair -- *direction-aware*, so it never calls
+  "A increases B" and "B reduces A" contradictory (a free-text verb check could
+  not promise that, which is why the earlier statement-level attempt was
+  dropped). `core/contradiction_detector.py` treats two evidence records that
+  assert *antonymous* relations on the same pair as a contradiction even when both
+  set ``supports=True``, and refuses to call two records contradictory merely
+  because one flag is set and the other is not when both carry the *same* relation.
+  `CognitiveController.find_relation_conflicts` scans the graph (never edits it)
+  for opposing typed relations, which is exactly what a text taught through
+  `learn_extracted_relations` can produce. Gated by the evaluation's new
+  `polarity_accuracy` metric over a hand-written held-out `POLARITY_JUDGEMENTS`
+  catalogue **with negative controls** (an unrelated type, a symmetric relation, a
+  type against itself), so an over-firing polarity model fails the gate as surely
+  as one that misses. `tests/test_relation_polarity.py` pins the vocabulary, the
+  antonyms, the symmetric refusal, the direction rule, the determinism, the
+  canonical order, both upgraded checkers, the graph scan, and the gate.
+
+- Phase 25 — **the graph's own relations reach the answer**: retrieval returned
+  whole *sentences* a document states, but the project also holds a **concept
+  graph** whose edges are typed relations (``porosity increases permeability``,
+  ``density_log measures porosity``) -- including links a text taught through
+  `learn_extracted_relations`. Those links are facts in their own right, and an
+  answer that never states them was quietly less complete than the knowledge on
+  file. `core/relation_facts.py` reads the relations a question's **own concepts**
+  participate in and renders them as a short, deterministic block.
+  `RelationFact` (source, relation_type, target, confidence) reads its type's
+  underscores as spaces for `statement` and keeps the graph's exact type in
+  `describe` (``porosity —increases→ permeability``); `relation_facts` includes a
+  relation when **either** endpoint is a concept the question names (so an
+  *incoming* link -- "the density log measures porosity", asked about porosity --
+  is reachable, not only outgoing ones), de-duplicates by triple, and orders by
+  confidence then labels, so the same question always yields the same block;
+  `describe_relation_facts` names the block as the *knowledge graph* on purpose,
+  so a reader can tell a stored typed link from a cited sentence (different
+  provenance). **Read-only and honest by construction**: it never edits the graph,
+  never invents a relation, states only the edges the ontology actually carries in
+  their declared direction, and returns ``()` (no block) for an unknown concept --
+  a question the graph knows nothing about produces nothing rather than a guess.
+  `GroundedAssistant.ask` attaches the facts to `AssistantAnswer.relation_facts`
+  as **data**, like the citations, so the prose stays the model's or the sources'
+  words; `JarvisTurn.relation_facts` carries them (read defensively through
+  `getattr`, so every mouth -- even one with no ontology -- is unaffected), and
+  `ai/chat.format_turn` renders the block after the answer and before the
+  `Sources:` block, with `turn_payload` exposing them for `--json`. The GUI shows
+  them for free, because it renders through the same `format_turn`.
+  `tests/test_relation_facts.py` pins the lookup, the incoming-relation rule, the
+  unknown-question honesty, the determinism, the limit, the de-duplication, the
+  rendering, and the assistant wiring.
+
+- Phase 26 — **how two concepts are connected, step by step**: the graph could
+  state a direct relation and the reasoner could derive relations that follow from
+  the stored ones, but neither answered the question a reader actually asks --
+  *"how is porosity connected to recovery factor?"* when there is no single edge
+  between them. `core/relation_paths.py` finds the **shortest chain** of typed
+  relations between two concepts and returns it as an ordered list of steps.
+  `RelationStep` (source, relation_type, target, confidence, `forward`) records
+  whether the edge was walked **forward** (source → target, the stored direction)
+  or **backward** (target → source), so `describe()` shows the arrow
+  (``porosity —increases→ permeability`` vs ``permeability ←increases— porosity``)
+  and a reader sees exactly which claims the explanation rests on; `ConnectionPath`
+  carries the endpoints and steps, with `hops`, a `confidence` that is the
+  **product** of its steps' (a longer or weaker chain is honestly less certain than
+  a direct edge, like a derivation), and a `describe()` that prints the header plus
+  each numbered step. `find_connection` is breadth-first over the explicit
+  relations, walking every edge in **both** directions (so a chain that reaches an
+  endpoint through an incoming relation is found too) with a deterministic
+  tie-break (by label then relation type), so the same question always yields the
+  same path. **Read-only and honest by construction**: it never asserts the path
+  back into the graph, never invents an edge, and returns ``None`` for an unknown
+  concept, a non-positive hop bound, or two concepts no chain within the bound
+  connects -- so "I cannot connect these" is a real answer, and
+  `describe_connection` states that absence plainly. `DEFAULT_MAX_HOPS` (3) keeps
+  the search bounded and the chain short enough to read. Wired as
+  `python -m cli relations connect <a> <b> [--max-hops N] [--json]` (the headless
+  twin, with a machine-readable payload carrying `connected`/`hops`/`confidence`
+  and each step's `forward` flag). The gate is `connection_accuracy`: a held-out
+  catalogue of concept pairs (`CONNECTION_JUDGEMENTS`, hand-written with
+  **negative controls** -- an unknown endpoint that must yield no chain) that the
+  search must connect exactly when a chain exists and with the expected number of
+  hops, so a fabricated link fails the gate as surely as a missed one; added to
+  `evaluation/benchmark.py`, `evaluation/runner.py`, and `evaluation/baseline.json`.
+  `tests/test_relation_paths.py` pins the direct chain, the backwards walk, the
+  product confidence, the zero-hop same-concept case, the honest absence, the hop
+  bound, the determinism, and the step rendering; `tests/test_relations_cli.py`
+  pins the `connect` command, its JSON payload, its honest absence, and its hop
+  bound.
+
+- Phase 27 — **contradictions are reported, not hidden**: `core.relation_polarity`
+  could tell that ``increases`` opposes ``reduces``, and `find_polarity_conflicts`
+  could find the pairs asserting both -- but a conflict the answer path never
+  mentions is one the user never learns about: the graph holds "A increases B" and
+  "A reduces B" and the reader is shown whichever retrieval happened to reach.
+  `core/relation_consistency.py` turns that scan into an honest, bounded **report**.
+  `RelationConflict` (source, relation_type, target, opposing_type, severity) names
+  both sides with readable labels and `describe()` renders the disagreement
+  (``a —increases→ b vs a —reduces→ b (severity 0.40)``); `relation_conflicts` with
+  no question returns the graph's whole history of disagreement, and with a
+  question keeps only conflicts whose **either** endpoint is a concept the question
+  names (so the answer carries the caveat that matters to it), ordered by severity
+  then labels, so the same question always yields the same report.
+  `describe_relation_conflicts` uses deliberately neutral wording -- "the graph
+  holds both ... and ..." -- because the program does not know which side is right
+  and must not imply it. **Read-only and honest by construction**: it never resolves
+  a conflict, never picks a winner, never edits the graph, and returns ``()` for a
+  consistent graph, no ontology, or a question naming no conflicting concept --
+  choosing between two evidenced claims is the user's call, not the program's.
+  `GroundedAssistant.ask` attaches the conflicts to
+  `AssistantAnswer.relation_conflicts` as **data**, like the facts and citations;
+  `JarvisTurn.relation_conflicts` carries them (read defensively through `getattr`,
+  so every mouth is unaffected), and `ai/chat.format_turn` renders the warning
+  *before* the knowledge-graph block (a caveat belongs above the claims it
+  qualifies), with `turn_payload` exposing them for `--json`. The GUI shows them
+  for free through the same `format_turn`. Wired as
+  `python -m cli relations conflicts [--concept C] [--json]` (read-only). The gate
+  is `consistency_accuracy`: a held-out catalogue of hand-written graphs
+  (`CONSISTENCY_SCENARIOS`) whose contradiction count must be **exact**, including a
+  scenario where an opposite-*direction* claim ("B reduces A") is correctly **not**
+  a contradiction -- so a hidden contradiction and a false positive both fail; added
+  to `evaluation/benchmark.py`, `evaluation/runner.py`, and `evaluation/baseline.json`.
+  `tests/test_relation_consistency.py` pins the detection, the severity, the clean
+  graph, the question scoping, the no-ontology case, the neutral rendering, the
+  assistant wiring, and the gate; `tests/test_relations_cli.py` pins the `conflicts`
+  command, its JSON, and its concept scoping.
+
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
 regression monitor each can refuse a change.

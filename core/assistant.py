@@ -28,6 +28,8 @@ from core.conversation import Conversation, ConversationMemory
 from core.documents import Document, DocumentStore
 from core.model_interface import CognitiveModel, ModelRequest
 from core.rag import RagRetriever, RetrievedPassage
+from core.relation_consistency import RelationConflict, relation_conflicts
+from core.relation_facts import RelationFact, relation_facts
 
 if TYPE_CHECKING:
     from core.rag import BulkCorpusRetriever
@@ -73,6 +75,21 @@ class AssistantAnswer:
     learned: bool = False
     learned_doc_id: str | None = None
     web_trust: float = 0.0
+    relation_facts: tuple[RelationFact, ...] = ()
+    """The typed relations the question's own concepts participate in.
+
+    Returned as *data*, like the citations: the answer's prose stays the model's
+    or the sources' words, and the graph's own edges are rendered once at the end
+    by the caller that shows the answer. Empty when the graph holds no relation on
+    the question's concepts, so nothing is ever invented.
+    """
+    relation_conflicts: tuple[RelationConflict, ...] = ()
+    """Contradictory relations the graph holds on the question's own concepts.
+
+    Returned as *data* for the same reason as the facts: an answer that states one
+    side of a disagreement without naming the other is quietly misleading. Empty
+    when the graph is consistent on the question's concepts.
+    """
 
     def __post_init__(self) -> None:
         if not self.text.strip():
@@ -146,6 +163,8 @@ class GroundedAssistant:
         citations = tuple(dict.fromkeys(passage.citation for passage in passages))
         if augmentation is not None:
             citations = tuple(dict.fromkeys(citations + augmentation.citations))
+        facts = relation_facts(getattr(self.retriever, "ontology", None), question)
+        graph_conflicts = relation_conflicts(getattr(self.retriever, "ontology", None), question)
         conversation.add_assistant(text, citations)
         self.memory.save(conversation)
         return AssistantAnswer(
@@ -159,6 +178,8 @@ class GroundedAssistant:
             learned=bool(augmentation and augmentation.learned),
             learned_doc_id=augmentation.learned_doc_id if augmentation else None,
             web_trust=augmentation.trust if augmentation else 0.0,
+            relation_facts=facts,
+            relation_conflicts=graph_conflicts,
         )
 
     def _augment(self, question: str, internal: list[RetrievedPassage]) -> WebAugmentation | None:

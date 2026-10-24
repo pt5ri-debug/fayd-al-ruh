@@ -4,6 +4,8 @@
     python -m cli relations read --file notes.txt
     python -m cli relations learn "The density log measures porosity." --write
     python -m cli relations types                  # what patterns it knows
+    python -m cli relations connect porosity permeability  # how two concepts link
+    python -m cli relations conflicts                # contradictory claims on file
 
 The extractor matches a sentence's own verb phrase onto the ontology's relation
 types, so it reports *which* concepts are related and *how* -- ``porosity
@@ -53,6 +55,16 @@ def _build_parser() -> argparse.ArgumentParser:
     learn.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
     sub.add_parser("types", help="List the relation types the extractor can produce.")
+
+    connect = sub.add_parser("connect", help="Explain how two concepts are connected, step by step.")
+    connect.add_argument("source", help="The first concept (a label, English or Arabic).")
+    connect.add_argument("target", help="The second concept (a label, English or Arabic).")
+    connect.add_argument("--max-hops", type=int, default=None, help="The longest chain to consider.")
+    connect.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+
+    conflicts = sub.add_parser("conflicts", help="Report contradictory relations in the graph (read-only).")
+    conflicts.add_argument("--concept", help="Only report conflicts on this concept's own pairs.")
+    conflicts.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
     scan = sub.add_parser("scan", help="Read relations from the ingested knowledge store.")
     scan.add_argument("--store-dir", help="The knowledge store to read (default: the data folder).")
@@ -153,6 +165,78 @@ def run_types(_args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_connect(args: argparse.Namespace) -> int:
+    """Explain how two concepts are connected, one typed link at a time."""
+    from core.relation_paths import DEFAULT_MAX_HOPS, describe_connection, find_connection
+
+    max_hops = args.max_hops if args.max_hops is not None else DEFAULT_MAX_HOPS
+    if max_hops < 1:
+        print("--max-hops must be at least 1.")
+        return EXIT_USAGE
+    ontology = CognitiveController().ontology
+    path = find_connection(ontology, args.source, args.target, max_hops=max_hops)
+    if args.json:
+        payload = {
+            "source": args.source,
+            "target": args.target,
+            "connected": path is not None,
+            "hops": path.hops if path is not None else None,
+            "confidence": path.confidence if path is not None else None,
+            "steps": (
+                [
+                    {
+                        "source": step.source,
+                        "relation_type": step.relation_type,
+                        "target": step.target,
+                        "confidence": step.confidence,
+                        "forward": step.forward,
+                    }
+                    for step in path.steps
+                ]
+                if path is not None
+                else []
+            ),
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(describe_connection(path, args.source, args.target))
+    return EXIT_OK
+
+
+def run_conflicts(args: argparse.Namespace) -> int:
+    """Report contradictory relations in the graph, without resolving them."""
+    from core.relation_consistency import relation_conflicts
+
+    ontology = CognitiveController().ontology
+    conflicts = relation_conflicts(ontology, args.concept)
+    if args.json:
+        print(json.dumps(
+            {
+                "concept": args.concept,
+                "conflicts": [
+                    {
+                        "source": conflict.source,
+                        "relation_type": conflict.relation_type,
+                        "target": conflict.target,
+                        "opposing_type": conflict.opposing_type,
+                        "severity": conflict.severity,
+                    }
+                    for conflict in conflicts
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ))
+        return EXIT_OK
+    if not conflicts:
+        scope = f" on {args.concept!r}" if args.concept else ""
+        print(f"No contradictory relations found{scope}.")
+        return EXIT_OK
+    for conflict in conflicts:
+        print(f"  {conflict.describe()}")
+    return EXIT_OK
+
+
 def run_scan(args: argparse.Namespace) -> int:
     from core.knowledge_base import KnowledgeBaseStore, default_knowledge_base_dir
     from core.relation_extraction import extract_from_store
@@ -191,6 +275,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "read": run_read,
         "learn": run_learn,
         "types": run_types,
+        "connect": run_connect,
+        "conflicts": run_conflicts,
         "scan": run_scan,
     }
     handler = handlers.get(args.command)

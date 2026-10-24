@@ -78,3 +78,50 @@ def test_learn_write_json_is_machine_readable(capsys):
     assert code == relations_cli.EXIT_OK
     payload = json.loads(capsys.readouterr().out)
     assert ["wettability", "affects", "flow"] in payload["added"]
+
+
+def test_connect_explains_a_direct_relation(capsys):
+    code = relations_cli.main(["connect", "porosity", "permeability"])
+    assert code == relations_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "porosity" in out and "permeability" in out
+    assert "step" in out
+
+
+def test_connect_json_is_machine_readable(capsys):
+    code = relations_cli.main(["connect", "porosity", "permeability", "--json"])
+    assert code == relations_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["connected"] is True
+    assert payload["hops"] >= 1
+    assert payload["steps"]
+
+
+def test_connect_says_plainly_when_there_is_no_chain(capsys):
+    code = relations_cli.main(["connect", "porosity", "zzz-not-a-concept"])
+    assert code == relations_cli.EXIT_OK
+    assert "No chain" in capsys.readouterr().out
+
+
+def test_connect_rejects_a_bad_hop_bound(capsys):
+    code = relations_cli.main(["connect", "porosity", "permeability", "--max-hops", "0"])
+    assert code == relations_cli.EXIT_USAGE
+
+
+def test_conflicts_reports_a_clean_graph(capsys):
+    code = relations_cli.main(["conflicts"])
+    assert code == relations_cli.EXIT_OK
+    assert "No contradictory relations" in capsys.readouterr().out
+
+
+def test_conflicts_json_is_machine_readable(capsys):
+    code = relations_cli.main(["conflicts", "--json"])
+    assert code == relations_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["conflicts"] == []
+
+
+def test_conflicts_scopes_to_a_concept(capsys):
+    code = relations_cli.main(["conflicts", "--concept", "porosity"])
+    assert code == relations_cli.EXIT_OK
+    assert "porosity" in capsys.readouterr().out
