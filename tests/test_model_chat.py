@@ -573,6 +573,89 @@ def test_window_shows_the_identity_the_voice_and_the_model(data_root) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_opens_at_ninety_percent_height_and_keeps_both_scrollbars(data_root) -> None:
+    """The window is shorter than before, and both areas always show a scrollbar.
+
+    The height is 90% of the window's original 720px (648), and the left column
+    and the conversation each carry a scrollbar from the first moment -- they are
+    never a dead end on a short window.
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.model_chat import ModelChatService
+    from gui.model_chat_dialog import DEFAULT_HEIGHT, DEFAULT_WIDTH, ModelChatDialog
+
+    root = tk.Tk()
+    try:
+        service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root)
+        dialog = ModelChatDialog(
+            root, service, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+        )
+        root.update()
+        assert DEFAULT_HEIGHT == int(720 * 0.9)
+        assert DEFAULT_WIDTH == 1180
+        # The scrollbars are mapped as soon as the window is drawn, not only once
+        # the content overflows.
+        assert dialog._sidebar_scrollbar.winfo_ismapped()
+        assert dialog._scrollbar.winfo_ismapped()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_initial_geometry_is_clamped_to_the_work_area(monkeypatch, data_root) -> None:
+    """A small work area wins over the default, so the composer stays reachable."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.model_chat import ModelChatService
+    from gui.model_chat_dialog import ModelChatDialog
+
+    root = tk.Tk()
+    try:
+        service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root)
+        dialog = ModelChatDialog(
+            root, service, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+        )
+        monkeypatch.setattr(
+            "gui.model_chat_dialog.work_area", lambda: (0, 30, 1000, 600)
+        )
+        assert dialog._initial_geometry() == "1000x600"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_maximize_fills_the_work_area_and_restores(data_root) -> None:
+    """The title bar's maximize grows to the usable desktop, then back."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.model_chat import ModelChatService
+    from gui.model_chat_dialog import ModelChatDialog
+
+    root = tk.Tk()
+    try:
+        service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root)
+        dialog = ModelChatDialog(
+            root, service, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+        )
+        root.update()
+        controls = dialog._window_controls
+        controls.maximize()
+        root.update()
+        # Whatever path the window manager took, the window is grown now and the
+        # button offers a restore.
+        assert controls._is_open()
+        controls.restore()
+        root.update()
+        assert not controls._is_open()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_rename_and_logo_change_persist(data_root, tmp_path) -> None:
     import tkinter as tk
 

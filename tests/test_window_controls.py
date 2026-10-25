@@ -41,7 +41,8 @@ class FakeWindow:
 
     ``supports_zoom=False`` makes ``state("zoomed")`` raise :class:`tk.TclError`,
     exactly as an X11 desktop without the ``zoomed`` state does, so the
-    full-screen fallback can be exercised without a particular window manager.
+    work-area / full-screen fallback can be exercised without a particular window
+    manager.
     """
 
     def __init__(self, *, supports_zoom: bool = True) -> None:
@@ -50,6 +51,8 @@ class FakeWindow:
         self.destroyed = 0
         self.states: list[str] = []
         self.fullscreen: dict[str, bool] = {}
+        self.geometry_value = "1180x648+0+0"
+        self.geometries: list[str] = []
 
     def iconify(self) -> None:
         self.iconified += 1
@@ -63,6 +66,13 @@ class FakeWindow:
         if value == "zoomed" and not self.supports_zoom:
             raise tk.TclError("bad state")
         self.states.append(value)
+        return value
+
+    def geometry(self, value: str | None = None) -> str:
+        if value is None:
+            return self.geometry_value
+        self.geometry_value = value
+        self.geometries.append(value)
         return value
 
     def attributes(self, name: str, value: bool | None = None) -> bool:
@@ -93,12 +103,53 @@ def test_maximize_uses_the_zoomed_state_when_supported() -> None:
     assert button.text == _RESTORE_GLYPH
 
 
-def test_maximize_falls_back_to_fullscreen_without_the_zoomed_state() -> None:
-    """The requested fallback: a window manager with no "zoomed" still maximises."""
+def test_maximize_falls_back_to_the_work_area_without_the_zoomed_state(monkeypatch) -> None:
+    """Without "zoomed", the work area is filled rather than the whole screen.
+
+    This is the whole point of the change: a full-screen window would cover the
+    taskbar, so a desktop that reports its work area gets a windowed fill of it.
+    """
+    monkeypatch.setattr(
+        "gui.window_controls.work_area", lambda: (0, 40, 1920, 1040)
+    )
+    controls, window, button = _controls(supports_zoom=False)
+    controls.maximize()
+    assert "-fullscreen" not in window.fullscreen
+    assert window.geometry_value == "1920x1040+0+40"
+    assert button.text == _RESTORE_GLYPH
+
+
+def test_restore_returns_the_geometry_a_work_area_fill_replaced(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "gui.window_controls.work_area", lambda: (0, 40, 1920, 1040)
+    )
+    controls, window, button = _controls(supports_zoom=False)
+    controls.toggle()
+    assert window.geometry_value == "1920x1040+0+40"
+    controls.toggle()
+    assert window.geometry_value == "1180x648+0+0"
+    assert button.text == _MAXIMIZE_GLYPH
+
+
+def test_maximize_falls_back_to_fullscreen_when_no_work_area_is_known(monkeypatch) -> None:
+    """A desktop that reports neither "zoomed" nor a work area still grows."""
+    monkeypatch.setattr("gui.window_controls.work_area", lambda: None)
     controls, window, button = _controls(supports_zoom=False)
     controls.maximize()
     assert window.fullscreen["-fullscreen"] is True
     assert button.text == _RESTORE_GLYPH
+
+
+def test_maximize_prefers_the_native_zoomed_state(monkeypatch) -> None:
+    """When "zoomed" works, the work area is not touched -- the WM already fits it."""
+    called: list[int] = []
+    monkeypatch.setattr(
+        "gui.window_controls.work_area", lambda: called.append(1)
+    )
+    controls, window, _button = _controls(supports_zoom=True)
+    controls.maximize()
+    assert window.states == ["zoomed"]
+    assert called == []
 
 
 def test_toggle_maximizes_then_restores_the_same_way() -> None:
@@ -110,7 +161,8 @@ def test_toggle_maximizes_then_restores_the_same_way() -> None:
     assert button.text == _MAXIMIZE_GLYPH
 
 
-def test_restore_undoes_a_fullscreen_maximize() -> None:
+def test_restore_undoes_a_fullscreen_maximize(monkeypatch) -> None:
+    monkeypatch.setattr("gui.window_controls.work_area", lambda: None)
     controls, window, button = _controls(supports_zoom=False)
     controls.toggle()
     assert window.fullscreen["-fullscreen"] is True
@@ -146,6 +198,45 @@ def test_close_destroys_a_window_that_has_no_handler() -> None:
     controls = WindowControls(window, None, FakeButton())  # type: ignore[arg-type]
     controls.close()
     assert window.destroyed == 1
+
+
+# --- the work area lookup --------------------------------------------------
+
+
+def test_work_area_reads_the_x11_property(monkeypatch) -> None:
+    """`xprop`'s array is parsed into x, y, width, height (per-desktop tail dropped)."""
+    import subprocess
+
+    from gui import window_controls
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = "_NET_WORKAREA(CARDINAL) = 0, 40, 1920, 1040, 0, 40, 1920, 1040\n"
+
+    monkeypatch.setattr(window_controls.sys, "platform", "linux")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeCompleted())
+    assert window_controls.work_area() == (0, 40, 1920, 1040)
+
+
+def test_work_area_returns_none_when_x11_has_no_property(monkeypatch) -> None:
+    import subprocess
+
+    from gui import window_controls
+
+    class FakeCompleted:
+        returncode = 1
+        stdout = '_NET_WORKAREA:  no such atom on any window.\n'
+
+    monkeypatch.setattr(window_controls.sys, "platform", "linux")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeCompleted())
+    assert window_controls.work_area() is None
+
+
+def test_work_area_is_none_on_an_unknown_platform(monkeypatch) -> None:
+    from gui import window_controls
+
+    monkeypatch.setattr(window_controls.sys, "platform", "haiku")
+    assert window_controls.work_area() is None
 
 
 # --- the real installation (needs a display) -------------------------------
