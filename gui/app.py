@@ -44,6 +44,12 @@ from core.paths import data_dir
 from core.ultron import UltronUnavailable
 from core.version import __version__
 from core.vision_model import VisionUnavailable
+from core.voices import (
+    SOURCE_AUDIOCPP,
+    SOURCE_PIPER,
+    SOURCE_QWEN,
+    SOURCE_SYSTEM,
+)
 from hakeem.hakeem_agent import HakeemError
 
 from gui import chat_composer, rich_text
@@ -102,6 +108,19 @@ MODEL_BUTTONS: tuple[tuple[str, str, str], ...] = (
     (chat_module.MOUTH_NATASHA, "Natasha", "Personality"),
     (chat_module.MOUTH_HAKEEM, "Hakeem", "Religion"),
     (chat_module.MOUTH_CLOUD, "Cloud", "Network"),
+)
+
+#: The four **speech-engine** studios, as the composer row's trailing group. They
+#: sit at the far right of the same row as the model buttons and are ordered right
+#: to left in the order asked for: ``(source key, button name, what it is for)``.
+#: Pressing one opens that engine's own studio window, where a document is read
+#: aloud with a voice and a mood that belong to that engine alone. The names are
+#: the engine titles the user asked for.
+VOICE_ENGINE_BUTTONS: tuple[tuple[str, str, str], ...] = (
+    (SOURCE_SYSTEM, "Installed Voices", "Arabic + English"),
+    (SOURCE_AUDIOCPP, "VoiceTut-TTS", "Local Arabic"),
+    (SOURCE_PIPER, "Piper", "Arabic + English"),
+    (SOURCE_QWEN, "Qwen3-TTS", "English"),
 )
 
 # ------------------------------------------------------- OpenHands design tokens
@@ -2092,6 +2111,15 @@ class FaydGUI:
                 command=partial(self._open_model_chat, key),
                 tip=f"Open {name}'s own chat window ({hint.lower()})",
             )
+        # The speech-engine studios are the row's *trailing* group, pinned to the
+        # far right, right to left in the order asked for, with a gap before them so
+        # they never touch the model buttons. Each opens its own studio window.
+        for key, name, hint in VOICE_ENGINE_BUTTONS:
+            self._model_bar.add(
+                key, name=name, hint=hint, trailing=True,
+                command=partial(self._open_voice_studio, key),
+                tip=f"Open the {name} studio ({hint.lower()})",
+            )
         self._sync_model_buttons()
 
         self._render_attachment_chips()
@@ -2501,6 +2529,59 @@ class FaydGUI:
         dialogs = getattr(self, "_model_chat_dialogs", None)
         if dialogs is not None:
             dialogs.pop(mouth, None)
+
+    def _open_voice_studio(self, source: str) -> None:
+        """Open (or focus) the dedicated studio window for one speech engine.
+
+        The composer's trailing row opens this: each speech engine gets its own
+        window where a document is loaded and read aloud, with a voice and a mood
+        exclusive to that engine. One window per engine is kept and reused, so
+        clicking the same button twice raises the window already open.
+        """
+        dialogs = getattr(self, "_voice_studio_dialogs", None)
+        if dialogs is None:
+            dialogs = {}
+            self._voice_studio_dialogs = dialogs
+        existing = dialogs.get(source)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:  # the window was closed out from under us
+                dialogs.pop(source, None)
+
+        from gui.voice_studio_dialog import VoiceStudioDialog
+
+        dialogs[source] = VoiceStudioDialog(
+            self.root,
+            self._voice_studio_service(source),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=partial(self._forget_voice_studio, source),
+        )
+
+    def _voice_studio_service(self, source: str):
+        """The service a dedicated speech-engine studio drives.
+
+        A real :class:`gui.voice_studio.VoiceStudioService` by default (its own
+        reader, its own voice, its own mood). ``voice_studio_service_factory`` may
+        be set to build a lighter one, so a test can open the window without a
+        full speech engine.
+        """
+        factory = getattr(self, "voice_studio_service_factory", None)
+        if factory is not None:
+            return factory(source)
+        from gui.voice_studio import VoiceStudioService
+
+        return VoiceStudioService(source)
+
+    def _forget_voice_studio(self, source: str) -> None:
+        """Drop a closed studio window's reference, so it is not held alive."""
+        dialogs = getattr(self, "_voice_studio_dialogs", None)
+        if dialogs is not None:
+            dialogs.pop(source, None)
 
     def _open_image_gen(self) -> None:
         """Open the text-to-image screen as a separate window."""

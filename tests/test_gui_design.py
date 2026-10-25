@@ -1360,7 +1360,7 @@ def test_window_composer_carries_the_model_row(tmp_path) -> None:
     """The card's bottom row holds one chip per mouth, inside the composer card."""
     import tkinter as tk
 
-    from gui.app import MODEL_BUTTONS, FaydGUI
+    from gui.app import MODEL_BUTTONS, VOICE_ENGINE_BUTTONS, FaydGUI
 
     root = tk.Tk()
     try:
@@ -1369,12 +1369,16 @@ def test_window_composer_carries_the_model_row(tmp_path) -> None:
         for _ in range(8):
             root.update()
         bar = app._model_bar
-        assert bar.keys() == tuple(key for key, _n, _h in MODEL_BUTTONS)
+        # The leading group is the mouths; the trailing group is the speech engines.
+        assert bar.model_keys() == tuple(key for key, _n, _h in MODEL_BUTTONS)
+        assert bar.engine_keys() == tuple(
+            reversed([key for key, _n, _h in VOICE_ENGINE_BUTTONS])
+        )
         # Every chip is inside the rounded composer card, under the input and
         # above the toolbars.
         entry_y = app._entry.winfo_rooty()
         toolbar_y = app._composer.left_tools.winfo_rooty()
-        for key, name, hint in MODEL_BUTTONS:
+        for key, name, hint in (*MODEL_BUTTONS, *VOICE_ENGINE_BUTTONS):
             button = _chip(bar, key)
             assert button.canvas.winfo_toplevel() is root
             assert button.canvas.winfo_ismapped()
@@ -1483,24 +1487,25 @@ def test_window_model_row_wraps_so_no_model_is_cut_off(tmp_path) -> None:
     """A narrow window wraps the row instead of clipping a model out of reach."""
     import tkinter as tk
 
-    from gui.app import MODEL_BUTTONS, FaydGUI
+    from gui.app import MODEL_BUTTONS, VOICE_ENGINE_BUTTONS, FaydGUI
 
     root = tk.Tk()
     try:
         app = FaydGUI(root, service=_service(tmp_path))
         bar = app._model_bar
+        chips_spec = (*MODEL_BUTTONS, *VOICE_ENGINE_BUTTONS)
         for width in (1180, 900, 700, 520, 420):
             root.geometry(f"{width}x760")
             for _ in range(8):
                 root.update()
-            chips = [_chip(bar, key) for key, _n, _h in MODEL_BUTTONS]
+            chips = [_chip(bar, key) for key, _n, _h in chips_spec]
             right_edge = max(
                 chip.canvas.winfo_rootx() + chip.canvas.winfo_width() for chip in chips
             )
             assert right_edge <= bar.frame.winfo_rootx() + bar.frame.winfo_width() + 1, width
             # Every chip is still mapped, so none was dropped to make it fit.
             for key, chip in zip(
-                (key for key, _n, _h in MODEL_BUTTONS), chips, strict=True
+                (key for key, _n, _h in chips_spec), chips, strict=True
             ):
                 assert chip.canvas.winfo_ismapped(), (width, key)
     finally:

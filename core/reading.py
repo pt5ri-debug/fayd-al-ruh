@@ -27,6 +27,7 @@ from core.speech import (
     speech_install_plan,
     windows_voice_report,
 )
+from core.voice_moods import Mood, Prosody, resolve_mood
 from core.voices import (
     ModelVoice,
     SystemVoice,
@@ -49,6 +50,9 @@ class TextReader:
     :class:`~core.voices.SystemVoice` naming a voice the OS really reports, which
     is preferred when it exists; ``language`` pins the spoken language and
     ``None`` lets the engine decide from the text, so Arabic is read as Arabic.
+    ``mood`` is an optional emotional state (a
+    :class:`~core.voice_moods.Mood` or its key) applied to the delivery, so the
+    same voice can read happily, sadly, excitedly, and so on.
     """
 
     def __init__(
@@ -59,12 +63,14 @@ class TextReader:
         language: str | None = None,
         speaker: Speaker | None = None,
         synthesizer: SpeechSynthesizer | None = None,
+        mood: str | Mood | None = None,
     ) -> None:
         self.engine = engine
         self.language = language
         self._speaker = speaker
         self._voice = _as_voice(voice)
         self._synthesizer = synthesizer
+        self._mood: Mood | None = _as_mood(mood)
         if synthesizer is not None:
             self._engine = synthesizer.name
 
@@ -81,6 +87,26 @@ class TextReader:
         self._synthesizer = None  # rebuilt lazily with the new voice
         return self._voice
 
+    # ------------------------------------------------------------------- mood
+
+    @property
+    def mood(self) -> Mood | None:
+        """The emotional state applied to the reading, or ``None`` for the voice's own."""
+        return self._mood
+
+    def set_mood(self, mood: str | Mood | None) -> Mood | None:
+        """Choose the emotional state and rebuild the engine for it."""
+        chosen = _as_mood(mood)
+        self._mood = chosen
+        self._synthesizer = None  # the mood is applied when the engine is rebuilt
+        return chosen
+
+    def _prosody(self) -> Prosody | None:
+        """The prosody the current mood carries, or ``None`` for the neutral one."""
+        if self._mood is None or self._mood.neutral:
+            return None
+        return self._mood.prosody
+
     def system_voices(self) -> tuple[SystemVoice, ...]:
         """The *real* voices installed on this machine (empty when none are known).
 
@@ -95,11 +121,26 @@ class TextReader:
 
     @property
     def synthesizer(self) -> SpeechSynthesizer:
-        """The engine that turns text into audio, built once and cached."""
+        """The engine that turns text into audio, built once and cached.
+
+        A studio names its engine explicitly (``piper``, ``audio.cpp``, ...), and
+        ``load_synthesizer`` raises for a named engine that is not installed rather
+        than silently substituting silence. That is right for a *reading* call, but
+        a studio must still open and report honestly, so the failure is caught here:
+        the reader falls back to the silent engine, :meth:`available` stays False,
+        and :meth:`describe` names the real next step instead of raising.
+        """
         if self._synthesizer is None:
-            self._synthesizer = load_synthesizer(
-                self.engine, voice=self._voice, language=self.language
-            )
+            try:
+                self._synthesizer = load_synthesizer(
+                    self.engine,
+                    voice=self._voice,
+                    language=self.language,
+                    prosody=self._prosody(),
+                )
+            except ValueError as error:
+                self._engine_error = str(error)
+                self._synthesizer = SilentSynthesizer()
             self._engine = self._synthesizer.name
         return self._synthesizer
 
@@ -178,14 +219,34 @@ class TextReader:
                 + speech_install_plan().hint
             )
         played = "played through the speakers" if self.can_play() else "saved but not played (no audio player)"
+        mood = (
+            f" in a {self._mood.label().lower()} mood"
+            if self._mood is not None and not self._mood.neutral
+            else ""
+        )
         line = (
             f"Reading with the {self._voice.category_label()} voice “{self._voice.label()}” "
-            f"through {self.engine_name}; audio is {played}."
+            f"through {self.engine_name}{mood}; audio is {played}."
         )
         note = windows_voice_report()
         if note:
             line = f"{line} {note}"
         return line
+
+
+def _as_mood(value: str | Mood | None) -> Mood | None:
+    """Coerce a mood key or object into a :class:`~core.voice_moods.Mood`.
+
+    ``None`` means "the voice's own reading", which is kept as ``None`` rather than
+    forced to the neutral mood, so a caller can tell "no mood chosen" from "the
+    neutral mood chosen". An unknown key falls back to the neutral mood rather than
+    raising, so a saved mood that left the catalog never breaks a reader.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Mood):
+        return value
+    return resolve_mood(str(value))
 
 
 def _as_voice(value: str | Voice | SystemVoice | ModelVoice | None) -> Voice | SystemVoice | ModelVoice:

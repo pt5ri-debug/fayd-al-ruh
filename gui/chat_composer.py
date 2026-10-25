@@ -423,10 +423,16 @@ class ModelButtonBar:
     """The row of model switches under the composer's input.
 
     One chip per answering mouth, laid out left to right in the caller's own
-    order, with the chosen one accented. The bar is presentation only -- it never
-    decides which model is available -- so the caller supplies both the buttons
-    and what each one does, and reports the live choice back through
-    :meth:`set_active`.
+    order, with the chosen one accented. A second, *trailing* group may be added
+    with :meth:`add`'s ``trailing=True``: those chips are pinned to the **right**
+    edge of the row, ordered right to left in the order they were added, with a
+    gap before them so the two groups never touch. That is how the speech-engine
+    buttons sit beside the model buttons -- the engines on the right, the models on
+    the left, one row.
+
+    The bar is presentation only -- it never decides which model is available -- so
+    the caller supplies both the buttons and what each one does, and reports the
+    live choice back through :meth:`set_active`.
 
     The row **wraps** onto as many lines as the card's width needs (Tk has no
     flow layout, so the fit is recomputed here on every resize): a compact window
@@ -434,11 +440,17 @@ class ModelButtonBar:
     reach is a model the user cannot pick.
     """
 
+    #: The gap (in pixels) between the leading model group and the trailing
+    #: speech-engine group, so the two never read as one run of chips.
+    GROUP_GAP = 32
+
     def __init__(self, parent: tk.Misc, *, theme: Any, typography: Typography) -> None:
         self.theme = theme
         self._type = typography
         self.frame = tk.Frame(parent, bg=theme.surface)
         self._buttons: dict[str, ModelButton] = {}
+        self._trailing: dict[str, ModelButton] = {}
+        self._gap: tk.Frame | None = None
         self._columns = 0
         self._width = 0
         self.frame.bind("<Configure>", self._on_configure)
@@ -451,25 +463,42 @@ class ModelButtonBar:
         hint: str,
         command: Callable[[], Any],
         tip: str = "",
+        trailing: bool = False,
     ) -> ModelButton:
-        """Add one chip to the right of the row and return it."""
+        """Add one chip to the row and return it.
+
+        ``trailing=True`` places it in the right-aligned speech-engine group, where
+        the first one added sits furthest right.
+        """
         button = ModelButton(
             self.frame, theme=self.theme, typography=self._type,
             name=name, hint=hint, command=command, tip=tip,
         )
-        self._buttons[key] = button
+        if trailing:
+            self._trailing[key] = button
+        else:
+            self._buttons[key] = button
         self._layout(force=True)
         return button
 
     def button(self, key: str) -> ModelButton | None:
-        return self._buttons.get(key)
+        return self._buttons.get(key) or self._trailing.get(key)
 
     def keys(self) -> tuple[str, ...]:
+        """Every chip key: the model group first, then the speech-engine group."""
+        return tuple(self._buttons) + tuple(self._trailing)
+
+    def model_keys(self) -> tuple[str, ...]:
+        """The keys of the leading *model* group alone (not the speech engines)."""
         return tuple(self._buttons)
+
+    def engine_keys(self) -> tuple[str, ...]:
+        """The keys of the trailing *speech-engine* group, in right-to-left order."""
+        return tuple(reversed(list(self._trailing)))
 
     def set_active(self, key: str) -> None:
         """Accent the chip for ``key`` and leave every other one plain."""
-        for button_key, button in self._buttons.items():
+        for button_key, button in {**self._buttons, **self._trailing}.items():
             button.set_active(button_key == key)
 
     def pack(self, **kwargs: Any) -> tk.Frame:
@@ -478,6 +507,21 @@ class ModelButtonBar:
 
     def _on_configure(self, event: tk.Event) -> None:
         self._layout(width=event.width)
+
+    def _cells(self) -> list[tk.Widget]:
+        """The grid cells, in order: model chips, an optional gap, engine chips.
+
+        The gap is a real cell (a spacer frame), so it *pushes* the engine group one
+        cell to the right instead of colliding with its first chip -- which is what
+        keeps the two groups from touching.
+        """
+        cells: list[tk.Widget] = list(self._buttons.values())
+        if self._trailing:
+            if self._gap is None:
+                self._gap = tk.Frame(self.frame, bg=self.theme.surface, width=self.GROUP_GAP)
+            cells.append(self._gap)
+        cells.extend(reversed(list(self._trailing.values())))
+        return cells
 
     def _layout(self, *, width: int | None = None, force: bool = False) -> None:
         """Grid the chips into as many rows as the current width fits.
@@ -496,23 +540,27 @@ class ModelButtonBar:
         if not force and columns == self._columns:
             return
         self._columns = columns
-        for index, button in enumerate(self._buttons.values()):
+        for index, cell in enumerate(self._cells()):
             row, column = divmod(index, columns)
-            button.grid(
+            cell.grid(
                 row=row, column=column, sticky="w",
                 padx=(0, ModelButton._GAP), pady=(0, ModelButton._GAP),
             )
+        if self._gap is not None and not self._trailing:
+            self._gap.grid_forget()
 
     def _columns_for(self, width: int) -> int:
-        """The most chips that fit side by side in ``width`` pixels.
+        """The most cells that fit side by side in ``width`` pixels.
 
         A ``grid`` column is as wide as its widest cell and every row shares the
         columns, so the fit is measured against the *column* widths, not each
         row's own sum -- measuring the rows independently under-counts a layout
         whose first column holds a wide chip and whose later rows do not, which
-        is how a row can still overflow after it has been "wrapped".
+        is how a row can still overflow after it has been "wrapped". The speech
+        engine group and its separating gap are cells too, so they are measured
+        here as well.
         """
-        widths = [button.canvas.winfo_reqwidth() for button in self._buttons.values()]
+        widths = [cell.winfo_reqwidth() for cell in self._cells()]
         if not widths:
             return 1
         for columns in range(len(widths), 0, -1):
