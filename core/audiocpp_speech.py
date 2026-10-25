@@ -47,6 +47,7 @@ from core.human_approval import HumanApprovalGate
 from core.paths import audiocpp_models_dir
 from core.permissions import Capability, PermissionPolicy
 from core.speech import AudioClip, SpeechSynthesizer
+from core.voice_moods import Prosody
 from core.voices import ModelVoice, detect_language
 
 #: The engine name the speech factory uses (``--tts audio.cpp``).
@@ -761,12 +762,17 @@ class AudioCppSynthesizer:
         root: Path | str | None = None,
         steps: int = DEFAULT_INFERENCE_STEPS,
         backend: str = "cpu",
+        prosody: Prosody | None = None,
     ) -> None:
         self.voice = voice
         self.language = language or VOICETUT_LANGUAGE
         self.steps = steps
         self._fallback = fallback
         self._root = root
+        # A zero-shot cloning engine reproduces the reference clip's voice, so a mood
+        # has almost nothing to change here; it is carried so the *fallback* (the
+        # system engine) can still read the mood when this engine cannot.
+        self.prosody = prosody
         if runner is not None:
             self._runner: AudioCppRunner = runner
             self._model = Path(model_file) if model_file is not None else Path("model.gguf")

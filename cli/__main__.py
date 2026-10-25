@@ -145,6 +145,7 @@ from cli.menu import (
     run_vision,
     run_vision_chat,
     run_voice,
+    run_voice_studio,
     run_web,
 )
 
@@ -191,6 +192,9 @@ _COMMANDS = {
     "scene": run_scene3d,
     "model-chat": run_model_chat,
     "mouths": run_model_chat,
+    "voice-studio": run_voice_studio,
+    "voice-studios": run_voice_studio,
+    "speech-studio": run_voice_studio,
     "image": run_image,
     "deps": run_deps,
     "demo": run_demo,

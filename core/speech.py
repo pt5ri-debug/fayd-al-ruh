@@ -42,6 +42,7 @@ from typing import Protocol, runtime_checkable
 
 from core.arabic_speech import prepare_for_speech
 from core.model_interface import CognitiveModel, ModelRequest
+from core.voice_moods import Prosody, apply_mood
 from core.voices import (
     ModelVoice,
     SystemVoice,
@@ -345,13 +346,26 @@ def _voice_gender(voice: SelectableVoice | None) -> str | None:
     return "Male" if voice.variant[:1].lower() == "m" else "Female"
 
 
-def _sapi_rate(voice: SelectableVoice | None) -> int:
-    """Map a catalog voice's speed onto SAPI's ``-10..10`` rate (175 wpm is neutral)."""
-    if voice is None:
+def _sapi_rate(voice: SelectableVoice | None, prosody: Prosody | None = None) -> int:
+    """Map a catalog voice's speed onto SAPI's ``-10..10`` rate (175 wpm is neutral).
+
+    A chosen :class:`~core.voice_moods.Prosody` shifts the rate: its ``speed_scale``
+    multiplies the voice's own pace before the mapping, so a mood that hurries or
+    slows the delivery does so on top of the voice the user picked.
+    """
+    if voice is None and prosody is None:
         return 0
     if isinstance(voice, NAMED_VOICE_TYPES):
-        return 0
-    return max(-10, min(10, round((voice.speed - 175) / 20)))
+        # An installed voice keeps its own neutral rate; only a mood may move it.
+        base = 0
+    else:
+        speed = voice.speed if voice is not None else 175
+        if prosody is not None:
+            speed = round(speed * prosody.speed_scale)
+        base = max(-10, min(10, round((speed - 175) / 20)))
+    if prosody is not None:
+        base = max(-10, min(10, base + round((prosody.speed_scale - 1.0) * 10)))
+    return base
 
 
 def _sapi_select_voice(voice: SelectableVoice | None, language: str | None = None) -> str:
@@ -436,7 +450,11 @@ def _sapi_serves_language(language: str) -> bool:
 
 
 def _windows_sapi_script(
-    text_path: Path, target: Path, voice: SelectableVoice | None, language: str | None = None
+    text_path: Path,
+    target: Path,
+    voice: SelectableVoice | None,
+    language: str | None = None,
+    prosody: Prosody | None = None,
 ) -> str:
     """The one-line PowerShell that renders a text file to the WAV file ``target``.
 
@@ -444,13 +462,14 @@ def _windows_sapi_script(
     Arabic is read as Arabic; ``None`` leaves the engine's own choice in place. The
     text is read from ``text_path`` as UTF-8 rather than embedded in the command,
     so a long Arabic answer is neither truncated by the command-line limit nor
-    dependent on how the shell would have encoded it.
+    dependent on how the shell would have encoded it. ``prosody`` (a chosen mood)
+    shifts the rate, the one knob SAPI exposes.
     """
     script = [
         "$ErrorActionPreference='Stop';",
         "Add-Type -AssemblyName System.Speech;",
         "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;",
-        f"$s.Rate={_sapi_rate(voice)};",
+        f"$s.Rate={_sapi_rate(voice, prosody)};",
     ]
     selection = _sapi_select_voice(voice, language)
     if selection:
@@ -475,39 +494,54 @@ def _variant_index(voice: SelectableVoice | None) -> int:
     return max(0, int(digits) - 1) if digits else 0
 
 
-def _onecore_rate(voice: SelectableVoice | None) -> float:
+def _onecore_rate(voice: SelectableVoice | None, prosody: Prosody | None = None) -> float:
     """Map a catalog voice's speed onto a WinRT SSML ``prosody`` rate multiplier.
 
     175 wpm is the neutral reference the SAPI path uses; the multiplier is clamped
     so an extreme catalog entry cannot ask the engine for an unreadable speed. A
-    real installed voice keeps the engine's own neutral rate.
+    real installed voice keeps the engine's own neutral rate, but a chosen
+    :class:`~core.voice_moods.Prosody` moves it -- that is the only way a mood
+    changes an installed voice's pace.
     """
-    if voice is None:
+    if voice is None and prosody is None:
         return 1.0
     if isinstance(voice, NAMED_VOICE_TYPES):
-        return 1.0
-    return max(0.5, min(2.0, round(voice.speed / 175, 2)))
+        base = 1.0
+    else:
+        base = round((voice.speed if voice is not None else 175) / 175, 2)
+    if prosody is not None:
+        base *= prosody.speed_scale
+    return max(0.5, min(2.0, round(base, 2)))
 
 
-def _onecore_pitch(voice: SelectableVoice | None) -> str:
+def _onecore_pitch(voice: SelectableVoice | None, prosody: Prosody | None = None) -> str:
     """Map a catalog voice's pitch onto an SSML ``prosody`` pitch offset.
 
     The WinRT/SAPI engines carry their own sentence intonation, so the melody
     cannot be set directly; what can be set is the voice's register. A catalog
     voice's pitch (0..99, neutral 50) becomes a percentage offset from neutral, so
     the four voices in a category stay clearly distinct instead of all sharing the
-    engine's one default register. An installed voice keeps its own register.
+    engine's one default register. An installed voice keeps its own register, but a
+    chosen :class:`~core.voice_moods.Prosody` shifts it, so a sad or joyful reading
+    still reads as such on an installed voice.
     """
-    if voice is None:
+    if voice is None and prosody is None:
         return "0%"
     if isinstance(voice, NAMED_VOICE_TYPES):
-        return "0%"
-    offset = max(-50, min(50, voice.pitch - 50))
-    return f"{offset:+d}%"
+        offset = 0
+    else:
+        offset = (voice.pitch - 50) if voice is not None else 0
+    if prosody is not None:
+        offset += prosody.pitch_delta
+    return f"{max(-50, min(50, offset)):+d}%"
 
 
 def _windows_onecore_script(
-    text_path: Path, target: Path, voice: SelectableVoice | None, language: str | None
+    text_path: Path,
+    target: Path,
+    voice: SelectableVoice | None,
+    language: str | None,
+    prosody: Prosody | None = None,
 ) -> str:
     """PowerShell that renders ``text_path`` to the WAV ``target`` with a WinRT voice.
 
@@ -536,11 +570,13 @@ def _windows_onecore_script(
     language = language or "en"
     gender = _voice_gender(voice)
     index = _variant_index(voice)
-    rate = _onecore_rate(voice)
-    pitch = _onecore_pitch(voice)
+    rate = _onecore_rate(voice, prosody)
+    pitch = _onecore_pitch(voice, prosody)
     # An installed voice is spoken as plain text (the Voice property is authoritative
-    # and its rate is already neutral); a catalog voice needs SSML for the rate.
-    use_ssml = not isinstance(voice, NAMED_VOICE_TYPES)
+    # and its rate is already neutral); a catalog voice needs SSML for the rate. A
+    # chosen mood also needs SSML on an installed voice, because the rate/pitch it
+    # changes live only in the markup.
+    use_ssml = prosody is not None or not isinstance(voice, NAMED_VOICE_TYPES)
     selection: list[str] = [
         "$voices=@([Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices);",
         "$pick=$null;",
@@ -1259,7 +1295,9 @@ class CommandSynthesizer:
     ``voice`` is an optional :class:`~core.voices.Voice` from the catalog; its
     engine flags are inserted after the executable. ``language`` pins the spoken
     language, and when it is ``None`` the language is taken from the text (Arabic
-    script -> ``ar``, otherwise ``en``), so one voice reads both.
+    script -> ``ar``, otherwise ``en``), so one voice reads both. ``prosody`` (a
+    chosen mood) is folded into the voice before its engine flags are built, so the
+    timbre, pitch, speed, melody, and pauses all carry the mood.
     """
 
     def __init__(
@@ -1271,13 +1309,19 @@ class CommandSynthesizer:
         voice: SelectableVoice | None = None,
         language: str | None = None,
         voice_options=None,
+        prosody: Prosody | None = None,
     ) -> None:
         self.name = name
         self.executable = executable
         self._builder = builder
-        self.voice = voice
         self.language = language
         self._voice_options = voice_options
+        self.prosody = prosody
+        # Fold the mood into a catalog voice *once*, here, so the engine flags
+        # carry it. A named voice (an installed/system or model voice) keeps its own
+        # timbre -- those engines select it by name -- and the mood's other engines
+        # take the prosody directly.
+        self.voice = apply_mood(voice, prosody) if prosody is not None else voice
 
     def _options_for(self, text: str) -> tuple[str, ...]:
         if self.voice is None or self._voice_options is None:
@@ -1331,9 +1375,16 @@ class _WindowsPowerShellSynthesizer:
     name = _WINDOWS_SAPI
     executable = _WINDOWS_SHELL
 
-    def __init__(self, *, voice: SelectableVoice | None = None, language: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        voice: SelectableVoice | None = None,
+        language: str | None = None,
+        prosody: Prosody | None = None,
+    ) -> None:
         self.voice = voice
         self.language = language
+        self.prosody = prosody
 
     def _script(self, text_path: Path, target: Path, language: str) -> str:
         raise NotImplementedError
@@ -1421,7 +1472,7 @@ class WindowsSapiSynthesizer(_WindowsPowerShellSynthesizer):
     name = _WINDOWS_SAPI
 
     def _script(self, text_path: Path, target: Path, language: str) -> str:
-        return _windows_sapi_script(text_path, target, self.voice, language)
+        return _windows_sapi_script(text_path, target, self.voice, language, self.prosody)
 
     def _fallback(self) -> _WindowsPowerShellSynthesizer | None:
         # SAPI cannot see OneCore voices, and this is reached *after* SAPI produced
@@ -1432,7 +1483,9 @@ class WindowsSapiSynthesizer(_WindowsPowerShellSynthesizer):
         # returned silence. The WinRT run fails harmlessly (no audio) if it truly is
         # unavailable.
         if windows_speech_available():
-            return WindowsOneCoreSynthesizer(voice=self.voice, language=self.language)
+            return WindowsOneCoreSynthesizer(
+                voice=self.voice, language=self.language, prosody=self.prosody
+            )
         return None
 
     def _render(self, text: str, language: str) -> AudioClip | None:
@@ -1444,9 +1497,9 @@ class WindowsSapiSynthesizer(_WindowsPowerShellSynthesizer):
         # Add voices -- and only then fall back to SAPI's own output.
         if language and language != "en" and not self._serves_language(language):
             if windows_speech_available():
-                other = WindowsOneCoreSynthesizer(voice=self.voice, language=self.language)._render(
-                    text, language
-                )
+                other = WindowsOneCoreSynthesizer(
+                    voice=self.voice, language=self.language, prosody=self.prosody
+                )._render(text, language)
                 if other is not None and other.samples:
                     return other
         return super()._render(text, language)
@@ -1471,7 +1524,7 @@ class WindowsOneCoreSynthesizer(_WindowsPowerShellSynthesizer):
     name = _WINDOWS_ONE_CORE
 
     def _script(self, text_path: Path, target: Path, language: str) -> str:
-        return _windows_onecore_script(text_path, target, self.voice, language)
+        return _windows_onecore_script(text_path, target, self.voice, language, self.prosody)
 
     def _fallback(self) -> _WindowsPowerShellSynthesizer | None:
         # The mirror of SAPI's fallback: if the WinRT engine cannot be driven after
@@ -1484,7 +1537,9 @@ class WindowsOneCoreSynthesizer(_WindowsPowerShellSynthesizer):
             or self.language == "en"
             or self._language_in_sapi(self.language)
         ):
-            return WindowsSapiSynthesizer(voice=self.voice, language=self.language)
+            return WindowsSapiSynthesizer(
+                voice=self.voice, language=self.language, prosody=self.prosody
+            )
         return None
 
 
@@ -1630,22 +1685,29 @@ def windows_engine_name() -> str:
 
 
 def _windows_engine(
-    *, voice: SelectableVoice | None = None, language: str | None = None
+    *,
+    voice: SelectableVoice | None = None,
+    language: str | None = None,
+    prosody: Prosody | None = None,
 ) -> SpeechSynthesizer:
     """The best Windows built-in engine for ``voice``/``language`` (:func:`windows_engine_name`)."""
     if windows_engine_name() == _WINDOWS_ONE_CORE:
-        return WindowsOneCoreSynthesizer(voice=voice, language=language)
-    return WindowsSapiSynthesizer(voice=voice, language=language)
+        return WindowsOneCoreSynthesizer(voice=voice, language=language, prosody=prosody)
+    return WindowsSapiSynthesizer(voice=voice, language=language, prosody=prosody)
 
 
 def _system_synthesizer(
-    *, voice: SelectableVoice | None = None, language: str | None = None
+    *,
+    voice: SelectableVoice | None = None,
+    language: str | None = None,
+    prosody: Prosody | None = None,
 ) -> SpeechSynthesizer | None:
     """The installed system TTS engine, or ``None`` when there is none.
 
     Used as the Arabic fallback for Qwen3-TTS (which has no Arabic). ``None`` --
     not a silent stand-in -- so the caller can decide, rather than being handed an
-    engine that would produce nothing.
+    engine that would produce nothing. ``prosody`` carries a chosen mood to the
+    fallback too, so a mood is not lost when a language falls back.
     """
     for engine_name, executable, builder, voice_options in TTS_ENGINES:
         if shutil.which(executable):
@@ -1656,9 +1718,10 @@ def _system_synthesizer(
                 voice=voice,
                 language=language,
                 voice_options=voice_options,
+                prosody=prosody,
             )
     if windows_speech_available():
-        return _windows_engine(voice=voice, language=language)
+        return _windows_engine(voice=voice, language=language, prosody=prosody)
     return None
 
 
@@ -1672,7 +1735,11 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
 
     ``voice`` selects a :class:`~core.voices.Voice` from the catalog, by key or
     object; ``language`` pins the spoken language (``None`` lets the engine's text
-    decide, so Arabic is read as Arabic). A voice can only be *applied* by an
+    decide, so Arabic is read as Arabic). ``prosody`` is a chosen
+    :class:`~core.voice_moods.Prosody` (a mood), applied as far as the selected
+    engine really supports -- a formant engine takes pitch, speed, and melody; Piper
+    takes pace and expressiveness; Qwen3-TTS takes the style instruction; the
+    VoiceTut cloning engine takes little. A voice can only be *applied* by an
     engine that supports one -- the silent synthesizer ignores it, and its
     ``name`` stays ``'silent'`` so a caller can tell it apart from real speech.
     """
@@ -1682,6 +1749,7 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
         return SilentSynthesizer()
     voice = _resolve_voice(options.get("voice"))
     language = options.get("language")
+    prosody: Prosody | None = options.get("prosody")
     if name == "audio.cpp":
         from core.audiocpp_speech import (
             AUDIOCPP_ENGINE_NAME,
@@ -1702,7 +1770,7 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
         if fallback is None:
             # A missing engine or model must degrade to real speech, not silence: the
             # system engine reads the text instead, and the synthesizer reports it.
-            fallback = _system_synthesizer(voice=voice, language=language)
+            fallback = _system_synthesizer(voice=voice, language=language, prosody=prosody)
         model_voice = voice if isinstance(voice, ModelVoice) else None
         try:
             return AudioCppSynthesizer(
@@ -1714,6 +1782,7 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
                 fallback=fallback,
                 root=options.get("root"),
                 steps=options.get("steps", 8),
+                prosody=prosody,
             )
         except AudioCppUnavailable as error:
             raise ValueError(str(error)) from error
@@ -1735,7 +1804,7 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
             # Only one of the two languages may have a voice downloaded; a system
             # engine reads the other rather than leaving it silent. Chosen once here
             # so every caller (window, CLI, voice loop) behaves the same.
-            system = _system_synthesizer(voice=voice, language=language)
+            system = _system_synthesizer(voice=voice, language=language, prosody=prosody)
             if system is not None:
                 fallback = system
         try:
@@ -1747,6 +1816,7 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
                 runner=options.get("runner"),
                 fallback=fallback,
                 root=options.get("root"),
+                prosody=prosody,
             )
         except PiperUnavailable as error:
             raise ValueError(str(error)) from error
@@ -1767,7 +1837,7 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
             # Qwen3-TTS does not speak Arabic, so a system engine reads it instead
             # of the model silently mispronouncing it. Chosen once here, so every
             # caller (window, CLI, voice loop) gets the same honest behaviour.
-            system = _system_synthesizer(voice=voice, language=language)
+            system = _system_synthesizer(voice=voice, language=language, prosody=prosody)
             if system is not None:
                 fallback = system
         # A chosen Qwen3-TTS voice names its own built-in speaker, so it is used
@@ -1775,13 +1845,18 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
         speaker = options.get("speaker")
         if speaker is None and isinstance(voice, ModelVoice) and voice.engine == TTS_ENGINE_NAME:
             speaker = voice.name
+        # A chosen mood's style instruction is the one prosody Qwen3-TTS takes; an
+        # explicit ``instruct`` still wins.
+        instruct = options.get("instruct")
+        if instruct is None and prosody is not None and prosody.instruct:
+            instruct = prosody.instruct
         try:
             return QwenTtsSynthesizer(
                 model_dir=options.get("model_dir"),
                 runner=options.get("runner"),
                 speaker=speaker,
                 language=language,
-                instruct=options.get("instruct"),
+                instruct=instruct,
                 fallback=fallback,
                 device=options.get("device", "cpu"),
                 root=options.get("root"),
@@ -1800,8 +1875,8 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
                     "The Windows OneCore speech engine is not available here. "
                     "Use --tts auto or --tts windows-sapi."
                 )
-            return WindowsOneCoreSynthesizer(voice=voice, language=language)
-        return WindowsSapiSynthesizer(voice=voice, language=language)
+            return WindowsOneCoreSynthesizer(voice=voice, language=language, prosody=prosody)
+        return WindowsSapiSynthesizer(voice=voice, language=language, prosody=prosody)
     for engine_name, executable, builder, voice_options in TTS_ENGINES:
         if name == engine_name:
             if shutil.which(executable):
@@ -1812,6 +1887,7 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
                     voice=voice,
                     language=language,
                     voice_options=voice_options,
+                    prosody=prosody,
                 )
             raise ValueError(
                 f"TTS engine {name!r} is not installed. Use --tts auto or --tts silent."

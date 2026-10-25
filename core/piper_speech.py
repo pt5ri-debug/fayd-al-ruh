@@ -41,6 +41,7 @@ from core.optional_deps import FEATURE_PIPER, pip_install_command
 from core.paths import piper_models_dir
 from core.permissions import Capability, PermissionPolicy
 from core.speech import AudioClip, SelectableVoice, SpeechSynthesizer
+from core.voice_moods import Prosody
 from core.voices import (
     CATEGORY_BOY,
     CATEGORY_GIRL,
@@ -252,33 +253,48 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def length_scale(voice: SelectableVoice | None) -> float:
+def length_scale(voice: SelectableVoice | None, prosody: Prosody | None = None) -> float:
     """Piper's ``length_scale`` (higher is slower) from a catalog voice's speed.
 
     175 wpm is Piper's neutral pace, so the catalog's conversational speeds land
-    near 1.0 and the reading stays natural rather than rushed.
+    near 1.0 and the reading stays natural rather than rushed. A chosen mood's
+    ``speed_scale`` is folded in, so an excited or calm reading is really faster or
+    slower.
     """
     if not isinstance(voice, Voice):
-        return 1.0
-    return round(_clamp(175.0 / voice.speed, 0.7, 1.4), 3)
+        base = 1.0
+    else:
+        base = round(_clamp(175.0 / voice.speed, 0.7, 1.4), 3)
+    if prosody is not None:
+        base = round(_clamp(base / prosody.speed_scale, 0.7, 1.4), 3)
+    return base
 
 
-def noise_scale(voice: SelectableVoice | None) -> float:
+def noise_scale(voice: SelectableVoice | None, prosody: Prosody | None = None) -> float:
     """Piper's ``noise_scale`` from a catalog voice's intonation range.
 
     A wider range (a more expressive voice) means a little more variation, which
-    is what makes the delivery sound alive rather than flat.
+    is what makes the delivery sound alive rather than flat. A mood's ``energy``
+    adds to it, so a strong mood is more expressive and a subdued one flatter.
     """
     if not isinstance(voice, Voice):
-        return 0.667
-    return round(_clamp(0.667 * (voice.pitch_range / 62.0), 0.4, 1.2), 3)
+        base = 0.667
+    else:
+        base = 0.667 * (voice.pitch_range / 62.0)
+    if prosody is not None:
+        base *= prosody.energy
+    return round(_clamp(base, 0.4, 1.2), 3)
 
 
-def noise_w_scale(voice: SelectableVoice | None) -> float:
+def noise_w_scale(voice: SelectableVoice | None, prosody: Prosody | None = None) -> float:
     """Piper's ``noise_w_scale`` (phoneme-width variation) from the intonation range."""
     if not isinstance(voice, Voice):
-        return 0.8
-    return round(_clamp(0.8 * (voice.pitch_range / 62.0), 0.5, 1.4), 3)
+        base = 0.8
+    else:
+        base = 0.8 * (voice.pitch_range / 62.0)
+    if prosody is not None:
+        base *= prosody.energy
+    return round(_clamp(base, 0.5, 1.4), 3)
 
 
 def _speaker_id(voice: SelectableVoice | None) -> int | None:
@@ -399,12 +415,14 @@ class PiperSynthesizer:
         runner: PiperRunner | None = None,
         fallback: SpeechSynthesizer | None = None,
         root: Path | str | None = None,
+        prosody: Prosody | None = None,
     ) -> None:
         self.language = language
         self._voice = voice
         self._spec_key = spec_key
         self._root = root
         self._fallback = fallback
+        self._prosody = prosody
         self._runner: PiperRunner | None = None
         self._loaded_key: str | None = None
         self._fixed_model = model_dir is not None or runner is not None
@@ -470,9 +488,9 @@ class PiperSynthesizer:
         samples, sample_rate = self._runner.synthesize(
             text,
             speaker=_speaker_id(self._voice),
-            length_scale=length_scale(self._voice),
-            noise_scale=noise_scale(self._voice),
-            noise_w_scale=noise_w_scale(self._voice),
+            length_scale=length_scale(self._voice, self._prosody),
+            noise_scale=noise_scale(self._voice, self._prosody),
+            noise_w_scale=noise_w_scale(self._voice, self._prosody),
         )
         pcm = _float_to_pcm16(samples, sample_rate)
         if not pcm:

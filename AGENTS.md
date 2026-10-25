@@ -1659,6 +1659,15 @@ Arabic is kept as secondary aliases where useful.
   row wraps on a narrow window rather than clipping a model out of reach, and the
   header selector still lists *every* mouth (including the small trained model),
   so nothing became unreachable.
+  The same row's **trailing group** carries one chip per **speech engine**
+  (`VOICE_ENGINE_BUTTONS`) -- *Installed Voices*, *VoiceTut-TTS*, *Piper*, and
+  *Qwen3-TTS* -- pinned to the far right, ordered right to left, with a gap
+  (`ModelButtonBar.GROUP_GAP`) so they never touch the model buttons. Each opens
+  that engine's own **studio window** (`_open_voice_studio`, one per engine kept
+  and reused), where a document is loaded and read aloud with a voice and a mood
+  exclusive to that engine; `model_bar()` exposes the two groups separately
+  (`model_keys()`/`engine_keys()`), and `_cells` puts a real spacer cell before the
+  trailing chips so the gap survives the wrap.
   The window also **reads text aloud**: every message footer carries a
   "🔊 Read aloud" control (`_speak_label`/`_speak_text`), and the sidebar holds the
   reading-voice menus. A dedicated **Voices** dropdown (`_toggle_voices`, right
@@ -1771,6 +1780,84 @@ Arabic is kept as secondary aliases where useful.
   model -- and no logic is reimplemented. Exit codes: `0` success, `2` invalid
   arguments, `3` the model is not available, `4` the profile or logo could not be
   read or written, `5` an unexpected failure.
+- `core/voice_moods.py` — the **emotional states** a reading voice can be put into,
+  and the *prosody* that produces them. `Mood` names a well-known state (happy,
+  sad, excited, rapturous, in love, angry, calm, tender, serious, surprised,
+  fearful, hopeful, nostalgic, proud, playful, whisper, storytelling, formal,
+  empathetic, and the neutral reading) with an English and Arabic label, an honest
+  description, and a `Prosody`; `Prosody` is the engine-neutral shape of that
+  state (`pitch_delta`, `speed_scale`, `range_delta`, `gap_delta`, `energy`, and
+  an `instruct` style line), each field a *delta* or *multiplier* from the chosen
+  voice's own settings, so a mood layers onto whatever timbre the user picked
+  rather than replacing it. The numbers are bounded (`MIN_*`/`MAX_*`) so no single
+  setting can turn speech into noise, and `Prosody.neutral` says when a state
+  leaves the voice untouched. `mood_keys`/`default_mood`/`find_mood`/`resolve_mood`
+  (a saved key that left the catalog falls back to neutral rather than raising)/
+  `mood_summaries`, and `apply_mood(voice, mood)` folds the numeric part onto a
+  catalog `Voice` (clamped to the catalog's own limits) while leaving a named
+  `SystemVoice`/`ModelVoice` alone (its engine picks it by name and takes the
+  prosody directly). `ENGINE_MOOD_SUPPORT`/`support_note(engine)` is the one place
+  the honest per-engine truth is written down -- a formant engine takes pitch,
+  speed, melody, and pauses; Piper takes pace and expressiveness; Qwen3-TTS takes
+  the style instruction; the VoiceTut cloning engine takes little and says so.
+  Dependency-free and import-safe.
+- `core/voice_studio_profile.py` — **per-engine** speech-studio persistence: the
+  chosen voice, the mood, the name, and the logo of each of the four engine
+  studios, each kept separate from the others. `STUDIO_SOURCES`/`source_names`/
+  `studio_title` name the four (`Installed Voices (Arabic + English)`,
+  `VoiceTut-TTS (Local Arabic)`, `Piper (Arabic + English)`, `Qwen3-TTS (English)`)
+  with the titles the user asked for; `VoiceStudioProfile` is the frozen record
+  (`with_name`/`with_voice`/`with_mood`/`with_logo`, `logo_path`, `to_primitive`),
+  stored one per engine through `storage.json_store.JsonStore` under the
+  `voice_studios` namespace. `load_profile`/`save_profile` (a save is
+  `best_effort`, so a read-only data folder never crashes a window, but the
+  failure is recorded), `set_name`/`set_voice`/`set_mood`, and the logo helpers
+  (`save_logo` copies the picture into the git-ignored `data/characters` as
+  `voice-<source>.<ext>`, so it can never collide with a per-mouth logo, and
+  removes any replaced one; `clear_logo`). `resolve_voice`/`resolve_mood` fall a
+  saved choice that is no longer offered back to the first available voice / the
+  neutral mood, so a stale file can never make a studio unusable. Nothing here
+  loads a model, imports Tk, or touches the cognitive core.
+- `gui/voice_studio.py` — the speech-engine studio **service** (Tk-free), the
+  engine behind `gui/voice_studio_dialog.py`, the sibling of
+  `gui.model_chat.ModelChatService` for the *engines* rather than the mouths.
+  `VoiceStudioService(source, *, reader=, data_root=)` wraps one engine's saved
+  profile and a `TextReader` of its own, so the **reading voice is exclusive** to
+  that studio. Identity (`title`/`name`/`set_name`/`logo_path`/`set_logo`/
+  `clear_logo`), voices (`voices`/`voice_groups`/`catalog_voices`/`voice_keys`/
+  `voice_key`/`set_voice`/`voice_label`, drawn from **only** what that engine
+  really reports here -- the synthetic catalog is offered by the *Installed
+  Voices* studio alone), moods (`moods`/`mood_key`/`set_mood` -- applied at once
+  and persisted -- `mood_label`/`mood_support_note`), reading
+  (`reading_available`/`reading_status`/`load_document`/`document_text`/
+  `read_aloud`/`save_speech`/`close_document`, a long document split into
+  paragraph-sized chunks), and the microphone (`microphone_available`/`asr_status`/
+  `start_recording`/`stop_recording`/`transcribe`). `reader` may be injected, so
+  the whole workflow is exercised headless with no display, no model, and no
+  audio hardware.
+- `gui/voice_studio_dialog.py` — the **studio window** one speech engine opens
+  from the composer's trailing row. Built the way every other window is (the same
+  `Theme` tokens, `RoundedBox`, `gui.rich_text` Markdown, the shared
+  `gui.chat_composer.ChatComposer`, the three `gui.window_controls` title-bar
+  buttons, and a worker-thread/queue the UI thread drains), its **left sidebar**
+  holds, top to bottom, exactly what the user asked for: (1) the engine's **logo
+  and name** (the logo is clickable to upload another picture, with a *Reset to
+  the default badge* action, and the name is editable in place), (2) the **reading
+  voice** as an exclusive list drawn only from that engine's own voices, and (3)
+  the **mood** as a menu of the readable state names, applied the moment it is
+  chosen. Below them the studio holds a **document** (*Open a document…* loads it
+  through the project's own reader, the text appears in the transcript, and
+  **Read aloud** plays it), and the composer carries an optional **microphone**
+  (`add_mic`). `gui/app.py` opens one per engine from the composer's trailing row
+  (`_open_voice_studio`, reusing an already-open window).
+- `cli/voice_studio.py` — the headless twin of that window: `python -m cli
+  voice-studio list|status|voices|moods|voice|mood|logo|name|say` (aliases
+  `voice-studio`, `voice-studios`, `speech-studio`). It drives the *same*
+  `gui.voice_studio.VoiceStudioService`, so the CLI and the window share one voice
+  choice, one mood, and one document reader, and no workflow logic is
+  reimplemented. Exit codes: `0` success, `2` invalid arguments, `3` the engine is
+  not available, `4` the document or the choice was refused, `5` an unexpected
+  failure.
 - `core/coder_model.py` — the coding-model client, the one place the code model
   is named. `DEFAULT_CODER_MODEL = "qwen2.5-coder:7b"` (a local **Ollama** model),
   `CoderMessage` (a validated chat turn), the `CoderClient` protocol
@@ -3322,3 +3409,46 @@ regression monitor each can refuse a change.
   full-screen fallback when no work area is known, the native-zoom preference, and
   the `xprop` parsing; `tests/test_model_chat.py` pins the 90% height, the
   always-visible scrollbars, the work-area clamp, and the window's own maximize.
+
+- Phase 32 — **a studio window per speech engine, with its own voice and mood**:
+  the composer's model row gained a *trailing* group of four **speech-engine**
+  buttons, ordered right to left from the far right edge and separated from the
+  model buttons by a gap -- `Installed Voices (Arabic + English)`, `VoiceTut-TTS
+  (Local Arabic)`, `Piper (Arabic + English)`, and `Qwen3-TTS (English)`. Pressing
+  one opens that engine's own studio window, where a document is loaded and read
+  aloud; the left sidebar holds, top to bottom, (1) the engine's **logo and name**
+  (changeable -- upload any picture, or rename the studio), (2) the **reading
+  voice**, drawn from **only** the voices that engine really reports here, exclusive
+  to that studio and remembered until the user changes it, and (3) the **mood** --
+  an emotional state from a catalog of twenty (happy, sad, excited, rapturous,
+  in love, angry, calm, and the rest), applied to the voice the moment it is
+  chosen and also exclusive. The composer carries a **microphone**. `core/voice_moods.py`
+  is the one declarative place a mood lives: a `Mood` names the state and carries
+  the `Prosody` that produces it (a pitch offset, a speed multiplier, an
+  intonation-range offset, a word-gap offset, an energy multiplier, and a style
+  instruction), each field a *delta* or *multiplier* from the chosen voice's own
+  settings so a mood layers onto the timbre the user picked, bounded so no setting
+  can make speech unreadable. `apply_mood` folds the numeric part onto a catalog
+  `Voice`; the engines read the rest through `load_synthesizer`'s `prosody`
+  option, which `core/speech.py` now threads into **every** synthesizer -- the
+  `espeak-ng` flags (pitch, speed, intonation range, word gap), SAPI's rate,
+  the OneCore SSML rate/pitch/emphasis, Piper's `length_scale`/`noise_scale`/
+  `noise_w_scale`, and Qwen3-TTS's style instruction -- while the VoiceTut cloning
+  engine honestly keeps its reference voice. `ENGINE_MOOD_SUPPORT`/`support_note`
+  is the one place that per-engine truth is written down, and the window shows it.
+  `core/voice_studio_profile.py` persists each engine's name, logo, voice, and
+  mood separately (through `JsonStore`, logos in the git-ignored `data/characters`
+  as `voice-<source>.<ext>`, so they never collide with the per-mouth logos), with
+  honest fallbacks for a store that cannot be read or a choice that left the
+  catalog. `gui/voice_studio.py` is the Tk-free service the window and the CLI
+  share (one voice, one mood, one document reader); `gui/voice_studio_dialog.py`
+  is the window, built with the same theme, composer, rich text, window controls,
+  and worker-thread/queue pattern as every other window; `gui/app.py` opens one per
+  engine (`_open_voice_studio`, reusing an already-open one); and
+  `cli/voice_studio.py` is the headless twin (`python -m cli voice-studio …`)
+  driving the *same* service. `tests/test_voice_moods.py` pins the catalog and the
+  bounded prosody; `tests/test_voice_studio.py` pins the profile store (per-engine
+  isolation, the logo copy and reset, the stale-choice fallback) and the service;
+  `tests/test_voice_studio_cli.py` pins the CLI; `tests/test_voice_studio_window.py`
+  pins the real Tk window and the composer row opening it; and `tests/test_voices.py`
+  pins the prosody reaching each engine's own flags.

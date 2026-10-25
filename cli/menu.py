@@ -368,6 +368,11 @@ def run_model_chat(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.model_chat", argv)
 
 
+def run_voice_studio(argv: Sequence[str] = ()) -> int:
+    """Read a document aloud with a speech engine's own voice and mood."""
+    return _run_module("cli.voice_studio", argv)
+
+
 def run_analogy(argv: Sequence[str] = ()) -> int:
     """Reason by analogy over the project's own concept graph."""
     return _run_module("cli.analogy", argv)
@@ -534,6 +539,16 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Scene Studio: build, pose, and render a 3D figure locally", run_scene3d, ("status",)),
     ("Scene Studio: render the built-in figure to a PNG", run_scene3d, ("render",)),
     ("Model chat windows: each model's own name, logo, voice, and model", run_model_chat, ("mouths",)),
+    (
+        "Speech-engine studios: read a document aloud per engine (voice + mood)",
+        run_voice_studio,
+        ("list",),
+    ),
+    (
+        "Speech-engine studios: the moods a voice can take (happy, sad, excited, …)",
+        run_voice_studio,
+        ("moods",),
+    ),
     ("Reason by analogy: what a concept is structurally like", run_analogy, ("like", "porosity")),
     ("Semantic space: what a word is used with (learned, local)", run_embeddings, ("status",)),
     ("Extract typed relations from text (preview, then learn)", run_relations, ("read", "Porosity increases permeability.")),
@@ -707,6 +722,7 @@ __all__ = [
     "run_vision",
     "run_vision_chat",
     "run_voice",
+    "run_voice_studio",
     "run_web",
     "visible_menu",
 ]

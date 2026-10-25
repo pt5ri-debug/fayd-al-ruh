@@ -148,6 +148,81 @@ def test_voice_labels_and_description_are_honest():
     assert "real child" in english
 
 
+def test_the_espeak_options_carry_a_mood():
+    """A chosen mood reaches espeak-ng's own flags (pitch, speed, melody, gaps)."""
+    from core import speech
+    from core.voice_moods import apply_mood, find_mood
+
+    neutral = speech._espeak_voice_options(find_voice("woman-1"), "en")
+    happy = speech._espeak_voice_options(
+        apply_mood(find_voice("woman-1"), find_mood("happy")), "en"
+    )
+    sad = speech._espeak_voice_options(
+        apply_mood(find_voice("woman-1"), find_mood("sad")), "en"
+    )
+    # The flags differ, and happy reads higher and faster than sad.
+    assert happy != neutral
+    assert happy != sad
+    assert happy[happy.index("-p") + 1] > sad[sad.index("-p") + 1]
+    assert happy[happy.index("-s") + 1] > sad[sad.index("-s") + 1]
+
+
+def test_a_command_synthesizer_folds_the_mood_into_the_voice():
+    from core import speech
+    from core.voice_moods import find_mood
+
+    synth = speech.CommandSynthesizer(
+        "espeak-ng", "espeak-ng", lambda e, t, p: [e, t],
+        voice=find_voice("woman-1"), prosody=find_mood("excited").prosody,
+    )
+    # The mood was folded into the synthesizer's own voice at construction.
+    assert synth.voice.pitch > find_voice("woman-1").pitch
+    assert synth.prosody is not None
+
+
+def test_sapi_rate_moves_with_the_mood():
+    from core import speech
+    from core.voice_moods import find_mood
+
+    base = speech._sapi_rate(find_voice("woman-1"))
+    fast = speech._sapi_rate(find_voice("woman-1"), find_mood("excited").prosody)
+    slow = speech._sapi_rate(find_voice("woman-1"), find_mood("calm").prosody)
+    assert fast > base > slow
+
+
+def test_onecore_rate_and_pitch_move_with_the_mood():
+    from core import speech
+    from core.voice_moods import find_mood
+
+    base_rate = speech._onecore_rate(find_voice("woman-1"))
+    fast_rate = speech._onecore_rate(find_voice("woman-1"), find_mood("excited").prosody)
+    assert fast_rate > base_rate
+    base_pitch = speech._onecore_pitch(find_voice("woman-1"))
+    high_pitch = speech._onecore_pitch(find_voice("woman-1"), find_mood("happy").prosody)
+    assert high_pitch != base_pitch
+
+
+def test_onecore_script_uses_ssml_when_a_mood_is_chosen():
+    """A mood on an *installed* voice still needs SSML, where the rate/pitch live."""
+    from pathlib import Path
+
+    from core import speech
+    from core.voice_moods import find_mood
+    from core.voices import SystemVoice
+
+    installed = SystemVoice("Microsoft Hoda", "ar-SA", "Female")
+    plain = speech._windows_onecore_script(
+        Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), installed, "ar"
+    )
+    with_mood = speech._windows_onecore_script(
+        Path("C:/tmp/t.txt"), Path("C:/tmp/a.wav"), installed, "ar",
+        find_mood("happy").prosody,
+    )
+    # With no mood an installed voice is plain text; with one, SSML carries it.
+    assert "prosody rate=" not in plain
+    assert "prosody rate=" in with_mood
+
+
 def test_voice_summaries_match_the_catalog():
     summaries = voice_summaries()
     assert len(summaries) == len(VOICE_CATALOG)
@@ -260,6 +335,28 @@ def test_reader_set_voice_changes_the_voice_and_raises_on_unknown():
     assert reader.voice.key == "girl-4"
     with pytest.raises(ValueError):
         reader.set_voice("no-such-voice")
+
+
+def test_reader_carries_a_mood_and_reports_it_honestly():
+    reader = TextReader(synthesizer=SilentSynthesizer(), voice="woman-1")
+    assert reader.mood is None  # nothing chosen means the voice's own reading
+    chosen = reader.set_mood("happy")
+    assert chosen is not None and chosen.key == "happy"
+    assert reader.mood is not None and reader.mood.key == "happy"
+    # An unknown key falls back to the neutral mood rather than raising.
+    assert reader.set_mood("nope").key == "neutral"
+
+
+def test_reader_accepts_a_mood_object_and_builds_a_reader_with_one():
+    from core.voice_moods import find_mood
+
+    reader = TextReader(
+        synthesizer=SilentSynthesizer(), voice="woman-1", mood=find_mood("sad")
+    )
+    assert reader.mood is not None and reader.mood.key == "sad"
+    # A silent engine is still honest, and the mood is a reading setting it keeps.
+    assert reader.available() is False
+    assert reader._prosody() is not None
 
 
 def test_reader_speak_does_not_raise_without_an_audio_player(monkeypatch):
