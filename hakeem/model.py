@@ -36,8 +36,11 @@ from companion.model import (
     CATALOG,
     DEFAULT_CONTEXT,
     DEFAULT_GPU_LAYERS,
+    DEFAULT_KEEP_ALIVE,
+    DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_URL,
+    DEFAULT_REPLY_CONTEXT,
     DEFAULT_SPEC_KEY,
     DEFAULT_THREADS,
     MAX_CONTEXT,
@@ -61,6 +64,7 @@ from companion.model import (
     spec_names,
     spec_summaries,
     strip_thinking,
+    thinking_kwargs,
 )
 from companion.personality import NAME as _COMPANION_NAME
 
@@ -183,8 +187,11 @@ __all__ = [
     "CATALOG",
     "DEFAULT_CONTEXT",
     "DEFAULT_GPU_LAYERS",
+    "DEFAULT_KEEP_ALIVE",
+    "DEFAULT_MAX_TOKENS",
     "DEFAULT_MODEL",
     "DEFAULT_OLLAMA_URL",
+    "DEFAULT_REPLY_CONTEXT",
     "DEFAULT_SPEC_KEY",
     "DEFAULT_THREADS",
     "DOWNLOAD_HINT",
@@ -213,4 +220,5 @@ __all__ = [
     "spec_names",
     "spec_summaries",
     "strip_thinking",
+    "thinking_kwargs",
 ]

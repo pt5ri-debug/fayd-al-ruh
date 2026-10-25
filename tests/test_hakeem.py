@@ -396,6 +396,80 @@ def test_an_injected_caller_makes_hakeem_available(agent: HakeemAgent) -> None:
 
 
 # -- the CLI --------------------------------------------------------------
+def test_hakeem_defaults_are_sized_for_a_fast_reply() -> None:
+    """Hakeem shares the model, so he shares the fast defaults too.
+
+    The hidden reasoning trace is off, the reply cap and context are small, and the
+    history is bounded -- the same shape as the companion's, because it is the same
+    model and the same latency problem.
+    """
+    config = HakeemConfig(db_path=None, persistent=False)
+    assert config.think is False
+    assert config.max_tokens <= 1024
+    assert config.context <= 8192
+    assert config.history_window <= 8
+    assert config.memory_limit <= 4
+    # The budget must clear the standing character block, or every recent turn is
+    # dropped and the discussion loses its thread.
+    assert config.context_chars > 10000
+    assert config.timeout <= 300.0
+    assert config.keep_alive
+
+
+def test_hakeem_keeps_the_recent_conversation(
+    config: HakeemConfig, agent: HakeemAgent, caller: FakeCaller
+) -> None:
+    """A smaller prompt must not silently drop the recent turns."""
+    session = agent.new_session()
+    for turn in ("ما هو الصيام؟", "وما حكمه؟", "وما دليله؟"):
+        agent.ask(session.id, turn)
+
+    messages = caller.prompts[-1]
+    roles = [message["role"] for message in messages]
+    assert roles[0] == "system"
+    assert roles.count("user") >= 2
+    contents = " ".join(message["content"] for message in messages)
+    assert "وما حكمه؟" in contents
+
+
+def test_cli_speed_flags_are_honoured(tmp_path: Path, monkeypatch) -> None:
+    """``--think``/``--max-tokens``/``--context-turns`` reach the built config."""
+    from ai import hakeem as hakeem_cli
+
+    monkeypatch.setenv("FAYD_HAKEEM_DB", str(tmp_path / "cli.db"))
+    args = hakeem_cli._build_parser().parse_args(
+        ["chat", "hi", "--think", "--max-tokens", "256", "--context-turns", "4"]
+    )
+    agent = hakeem_cli._agent(args)
+    assert agent.config.think is True
+    assert agent.config.max_tokens == 256
+    assert agent.config.history_window == 4
+    # The default leaves the trace off.
+    default = hakeem_cli._agent(hakeem_cli._build_parser().parse_args(["chat", "hi"]))
+    assert default.config.think is False
+
+
+def test_context_turns_does_not_collide_with_the_history_style_dial(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``--history`` is Hakeem's *style* dial; the window flag is ``--context-turns``.
+
+    Both live on subcommands that share ``_add_connection_arguments``, so a shared
+    ``dest`` would let ``settings --history 0.9`` set ``history_window=0.9`` and
+    crash the prompt builder. The two must stay separate.
+    """
+    from ai import hakeem as hakeem_cli
+
+    monkeypatch.setenv("FAYD_HAKEEM_DB", str(tmp_path / "cli.db"))
+    args = hakeem_cli._build_parser().parse_args(["settings", "--history", "0.9"])
+    # The style dial lands in ``args.history`` and nowhere near the window flag.
+    assert args.history == 0.9
+    assert args.context_turns is None
+    agent = hakeem_cli._agent(args)
+    assert agent.config.history_window == 8
+    assert isinstance(agent.config.history_window, int)
+
+
 def test_cli_status_reports_the_next_step(tmp_path: Path, monkeypatch, capsys) -> None:
     from ai import hakeem as hakeem_cli
 

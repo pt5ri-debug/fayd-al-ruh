@@ -26,10 +26,12 @@ from core.paths import data_dir
 from hakeem.model import (
     BACKEND_AUTO,
     BACKEND_NAMES,
-    DEFAULT_CONTEXT,
     DEFAULT_GPU_LAYERS,
+    DEFAULT_KEEP_ALIVE,
+    DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_URL,
+    DEFAULT_REPLY_CONTEXT,
     DEFAULT_THREADS,
     MAX_CONTEXT,
 )
@@ -43,6 +45,9 @@ ENV_OLLAMA_URL = "FAYD_HAKEEM_OLLAMA_URL"
 ENV_DB = "FAYD_HAKEEM_DB"
 ENV_TIMEOUT = "FAYD_HAKEEM_TIMEOUT"
 ENV_THINK = "FAYD_HAKEEM_THINK"
+ENV_MAX_TOKENS = "FAYD_HAKEEM_MAX_TOKENS"
+ENV_CONTEXT = "FAYD_HAKEEM_CONTEXT"
+ENV_THREADS = "FAYD_HAKEEM_THREADS"
 
 #: Default name of the database file inside the writable data folder. It is a
 #: *separate* file from the companion's, so Hakeem's memories and sessions can
@@ -85,21 +90,33 @@ class HakeemConfig:
     #: companion's ``data/natasha`` folder, since it is the same model.
     model_file: Path | None = None
     base_url: str = DEFAULT_OLLAMA_URL
-    #: Generous by default: a reasoning model on a CPU-only machine can take
-    #: minutes for one turn, so a short timeout reports a false failure.
-    timeout: float = 600.0
+    #: How long to wait for one reply before reporting a failure. Sized for a
+    #: *non-reasoning* turn on a CPU-only machine, which is seconds to a minute --
+    #: not the several minutes a hidden reasoning trace used to take.
+    timeout: float = 180.0
     #: A scholar's answer benefits from a steady, non-random register; a touch
     #: lower than the companion's, but still warm enough to be natural.
     temperature: float = 0.6
-    #: Room for a reasoning model's hidden reasoning trace *and* its reply.
-    max_tokens: int = 4096
-    #: Whether a reasoning model may emit its hidden reasoning trace.
-    think: bool = True
-    #: Context window for the in-process model. Ignored by the Ollama runtime.
-    context: int = DEFAULT_CONTEXT
+    #: Cap on the reply. A scholarly answer is a few paragraphs, so a few hundred
+    #: tokens is plenty; a large cap only makes a runaway answer slow.
+    max_tokens: int = DEFAULT_MAX_TOKENS
+    #: Whether a reasoning model may emit its hidden reasoning trace. **Off by
+    #: default**: the shared qwen3:4b model spends thousands of tokens on that trace
+    #: before it answers, which is the difference between a reply in seconds and one
+    #: in minutes. Turn it on (``--think``) when you want the deeper reasoning and
+    #: can wait. With it off the model answers directly, and any trace a runtime
+    #: still emits is stripped before it reaches the transcript.
+    think: bool = False
+    #: Context window for the model. Kept modest on purpose: the standing character
+    #: block is large, and a big window makes the runtime allocate more and prefill
+    #: more on every turn. A small window with a bounded history keeps a turn fast.
+    context: int = DEFAULT_REPLY_CONTEXT
     #: GPU offload and thread count for the in-process model; both CPU-friendly.
     gpu_layers: int = DEFAULT_GPU_LAYERS
     threads: int = DEFAULT_THREADS
+    #: How long Ollama keeps the model resident between turns (its ``keep_alive``),
+    #: so the next reply does not pay the model-load cost again.
+    keep_alive: str = DEFAULT_KEEP_ALIVE
 
     # -- storage ----------------------------------------------------------
     db_path: Path | None = field(default_factory=default_db_path)
@@ -109,15 +126,20 @@ class HakeemConfig:
     backup_keep: int = 5
 
     # -- context budget ---------------------------------------------------
-    #: How many recent messages form the direct context window.
-    history_window: int = 12
+    #: How many recent messages form the direct context window. Kept small so a
+    #: turn's prompt stays short: prefill of the prompt is a real part of the
+    #: latency on a CPU.
+    history_window: int = 8
     #: At most this many relevant memories are injected per request.
-    memory_limit: int = 6
+    memory_limit: int = 4
     #: A session is summarised once it holds more than this many messages.
     summary_threshold: int = 40
     #: Keep this many most recent summaries per session.
-    summary_limit: int = 3
-    #: Hard character budget for the assembled prompt.
+    summary_limit: int = 2
+    #: Hard character budget for the assembled prompt. It must clear the standing
+    #: character block (about 10,000 characters), or the builder would drop *every*
+    #: recent turn and the conversation would lose its thread; what is left over is
+    #: what the history may use.
     context_chars: int = 12000
 
     # -- tone -------------------------------------------------------------
@@ -175,6 +197,15 @@ class HakeemConfig:
         think = os.environ.get(ENV_THINK)
         if think:
             env["think"] = think.strip().lower() in {"1", "true", "yes", "on"}
+        max_tokens = os.environ.get(ENV_MAX_TOKENS)
+        if max_tokens:
+            env["max_tokens"] = int(max_tokens)
+        context = os.environ.get(ENV_CONTEXT)
+        if context:
+            env["context"] = int(context)
+        threads = os.environ.get(ENV_THREADS)
+        if threads:
+            env["threads"] = int(threads)
         env.update({key: value for key, value in overrides.items() if value is not None})
         return cls(**env)  # type: ignore[arg-type]
 
@@ -198,11 +229,14 @@ __all__ = [
     "DEFAULT_MODEL",
     "DEFAULT_OLLAMA_URL",
     "ENV_BACKEND",
+    "ENV_CONTEXT",
     "ENV_DB",
+    "ENV_MAX_TOKENS",
     "ENV_MODEL",
     "ENV_MODEL_FILE",
     "ENV_OLLAMA_URL",
     "ENV_THINK",
+    "ENV_THREADS",
     "ENV_TIMEOUT",
     "HakeemConfig",
     "backup_dir",

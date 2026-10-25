@@ -172,18 +172,68 @@ def test_sessions_persist_across_agents(config: CompanionConfig) -> None:
 
 
 # -- model connection -----------------------------------------------------
-def test_reasoning_model_defaults_leave_room_for_a_reply() -> None:
-    """qwen3:4b reasons for thousands of tokens, so the cap must be generous.
+def test_defaults_are_sized_for_a_fast_reply() -> None:
+    """The defaults favour a reply in seconds, not the reasoning model's minutes.
 
-    A small cap is spent entirely on the hidden trace and the reply comes back
-    empty, which is what a user would see as "Natasha said nothing"; the default
-    budget and timeout are sized for that reality.
+    qwen3:4b reasons for thousands of tokens before it answers, which is what made
+    a companion turn take minutes. The defaults therefore turn the hidden trace
+    **off** and keep the reply cap, the context window, the timeout, and the
+    history small -- so a turn is a short prompt and a short answer.
     """
     config = CompanionConfig(db_path=None, persistent=False)
     assert config.model == "qwen3:4b"
-    assert config.max_tokens >= 2048
-    assert config.timeout >= 300.0
-    assert config.think is True
+    # The reasoning trace is the whole cost of a slow turn, so it is off by default.
+    assert config.think is False
+    # A conversational answer is short, so a big cap would only allow a slow one.
+    assert config.max_tokens <= 1024
+    # A modest window and a bounded history keep the prompt short to prefill.
+    assert config.context <= 8192
+    assert config.history_window <= 8
+    assert config.memory_limit <= 4
+    # But the budget must still clear the standing character block (about 10,000
+    # characters), or the builder would drop *every* recent turn and the
+    # conversation would lose its thread -- a size regression, not a speed win.
+    assert config.context_chars > 10000
+    # The timeout is sized for a non-reasoning turn, not the old minutes-long one.
+    assert config.timeout <= 300.0
+    assert config.keep_alive
+
+
+def test_a_fast_reply_still_keeps_the_recent_conversation(
+    config: CompanionConfig, agent: CompanionAgent, caller: FakeCaller
+) -> None:
+    """A smaller prompt must not silently drop *every* recent turn.
+
+    The standing character block is about 10,000 characters, so a budget below
+    that leaves nothing for the history and the builder drops all of it -- the
+    conversation would lose its thread while still *looking* like it answered.
+    The budget must clear the system block with room for the recent turns.
+    """
+    session = agent.new_session()
+    for turn in ("مرحبا", "كيف حالك؟", "ما اسمك؟"):
+        agent.ask(session.id, turn)
+
+    messages = caller.prompts[-1]
+    roles = [message["role"] for message in messages]
+    assert roles[0] == "system"
+    # The assistant's own earlier replies and the user's turns are both present.
+    assert roles.count("user") >= 2
+    assert roles.count("assistant") >= 1
+    contents = " ".join(message["content"] for message in messages)
+    assert "كيف حالك؟" in contents
+    # And the whole prompt still fits the configured ceiling.
+    assert sum(len(message["content"]) for message in messages) <= config.context_chars + 200
+
+
+def test_the_hidden_reasoning_trace_can_be_turned_back_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--think`` (or the env) restores the deep reasoning when a user wants it."""
+    from companion.config import ENV_THINK
+
+    assert CompanionConfig(db_path=None, persistent=False, think=True).think is True
+    monkeypatch.setenv(ENV_THINK, "on")
+    assert CompanionConfig.from_env().think is True
 
 
 def test_model_settings_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,6 +297,101 @@ def test_ollama_payload_omits_unset_settings() -> None:
     payload = captured["payload"]
     assert "num_predict" not in payload["options"]  # type: ignore[index]
     assert "think" not in payload  # type: ignore[operator]
+    # Nor is the window or the keep-alive forced on the server.
+    assert "num_ctx" not in payload["options"]  # type: ignore[index]
+    assert "keep_alive" not in payload  # type: ignore[operator]
+
+
+def test_the_ollama_payload_carries_the_window_and_keep_alive() -> None:
+    """A stable window and a resident model are what keep later turns quick."""
+    from core.coder_model import CoderMessage, OllamaCoderClient
+
+    captured: dict[str, object] = {}
+
+    def _post(path: str, payload: dict) -> dict:
+        captured["payload"] = payload
+        return {"message": {"content": "رد"}}
+
+    client = OllamaCoderClient(
+        model="qwen3:4b", think=False, num_ctx=4096, keep_alive="30m"
+    )
+    client._post = _post  # type: ignore[method-assign]
+    client.chat([CoderMessage(role="user", content="مرحبا")])
+    payload = captured["payload"]
+    assert payload["options"]["num_ctx"] == 4096  # type: ignore[index]
+    assert payload["think"] is False  # type: ignore[index]
+    assert payload["keep_alive"] == "30m"  # type: ignore[index]
+
+
+def test_the_configured_client_carries_the_fast_defaults() -> None:
+    """The fast defaults reach the Ollama client, not just the config object."""
+    from core.coder_model import OllamaCoderClient
+
+    agent = CompanionAgent(CompanionConfig(db_path=None, persistent=False))
+    client = agent._active_client()
+    assert isinstance(client, OllamaCoderClient)
+    assert client.think is False
+    assert client.max_tokens == 512
+    assert client.num_ctx == 4096
+    assert client.keep_alive
+
+
+def test_thinking_kwargs_turns_the_qwen3_trace_off() -> None:
+    """The in-process runtime disables the trace at the chat-template level."""
+    from companion.model import thinking_kwargs
+
+    assert thinking_kwargs(False) == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert thinking_kwargs(True) == {"chat_template_kwargs": {"enable_thinking": True}}
+    # ``None`` leaves the template's own default alone.
+    assert thinking_kwargs(None) == {}
+
+
+def test_apply_no_think_touches_only_a_qwen3_system_turn() -> None:
+    """The soft marker is added to the system turn, and only for a Qwen3 model."""
+    from companion.model import apply_no_think
+
+    messages = [{"role": "system", "content": "rules"}, {"role": "user", "content": "hi"}]
+    updated = apply_no_think(messages, "qwen3:4b")
+    assert updated[0]["content"].endswith("/no_think")
+    assert updated[1] == messages[1]
+    # The original list is not mutated in place.
+    assert messages[0]["content"] == "rules"
+    # A non-reasoning model is left exactly as it was.
+    assert apply_no_think(messages, "qwen2.5:7b") == messages
+    # So is a list with no system turn.
+    assert apply_no_think([{"role": "user", "content": "hi"}], "qwen3:4b") == [
+        {"role": "user", "content": "hi"}
+    ]
+    # And it is idempotent: a second pass adds nothing.
+    again = apply_no_think(updated, "qwen3:4b")
+    assert again[0]["content"].count("/no_think") == 1
+
+
+def test_the_in_process_client_adds_the_soft_marker_when_thinking_is_off(
+    tmp_path: Path,
+) -> None:
+    """With the trace off, the in-process call carries Qwen3's own ``/no_think``."""
+    from companion.model import LlamaCppNatashaClient
+
+    runner = FakeRunner("مرحبا!")
+    client = LlamaCppNatashaClient(root=tmp_path, runner=runner, model="qwen3:4b", think=False)
+    client.chat(
+        [CoderMessage(role="system", content="rules"), CoderMessage(role="user", content="hi")]
+    )
+    messages, _ = runner.calls[0]
+    assert messages[0]["content"].endswith("/no_think")
+
+
+def test_the_in_process_client_leaves_the_prompt_alone_when_thinking_is_on(
+    tmp_path: Path,
+) -> None:
+    from companion.model import LlamaCppNatashaClient
+
+    runner = FakeRunner("مرحبا!")
+    client = LlamaCppNatashaClient(root=tmp_path, runner=runner, model="qwen3:4b", think=True)
+    client.chat([CoderMessage(role="system", content="rules")])
+    messages, _ = runner.calls[0]
+    assert messages[0]["content"] == "rules"
 
 
 # -- the model layer ------------------------------------------------------
@@ -902,6 +1047,23 @@ def test_natasha_mouth_unavailable_reports_the_next_step() -> None:
 
 
 # -- the CLI surface (models / download) ----------------------------------
+def test_cli_speed_flags_are_honoured(tmp_path: Path, monkeypatch) -> None:
+    """``--think``/``--max-tokens``/``--context-turns`` reach the built config."""
+    from ai import natasha
+
+    monkeypatch.setenv("FAYD_NATASHA_DB", str(tmp_path / "cli.db"))
+    args = natasha._build_parser().parse_args(
+        ["chat", "hi", "--think", "--max-tokens", "256", "--context-turns", "4"]
+    )
+    agent = natasha._agent(args)
+    assert agent.config.think is True
+    assert agent.config.max_tokens == 256
+    assert agent.config.history_window == 4
+    # The default leaves the hidden trace off, so a turn stays fast.
+    default = natasha._agent(natasha._build_parser().parse_args(["chat", "hi"]))
+    assert default.config.think is False
+
+
 def test_cli_models_lists_the_catalog(capsys) -> None:
     from ai import natasha
 

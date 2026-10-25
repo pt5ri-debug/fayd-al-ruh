@@ -149,6 +149,7 @@ class HakeemAgent:
                 context=config.context,
                 gpu_layers=config.gpu_layers,
                 threads=config.threads,
+                keep_alive=config.keep_alive,
             )
         client = self._client
         assert client is not None

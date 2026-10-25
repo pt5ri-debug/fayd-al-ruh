@@ -121,6 +121,8 @@ class OllamaCoderClient:
         timeout: float = 120.0,
         max_tokens: int | None = None,
         think: bool | None = None,
+        num_ctx: int | None = None,
+        keep_alive: str | None = None,
     ) -> None:
         if not model.strip():
             raise ValueError("A coding model name is required.")
@@ -133,6 +135,15 @@ class OllamaCoderClient:
         #: Toggle for a reasoning model's hidden reasoning trace (Ollama's
         #: ``think``); ``None`` leaves the server's own default.
         self.think = think
+        #: Context window to ask Ollama for (``num_ctx``). Left unset, Ollama picks
+        #: its own default and *reloads* the model whenever a longer prompt needs a
+        #: bigger window -- which is the first-call delay a chat sees. Sending a
+        #: value keeps the window stable across turns.
+        self.num_ctx = num_ctx
+        #: How long Ollama keeps the model resident (``keep_alive``), e.g. ``"30m"``.
+        #: A longer value stops the model being unloaded between turns, so the next
+        #: reply does not pay the load cost again.
+        self.keep_alive = keep_alive
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = json.dumps(payload).encode("utf-8")
@@ -186,6 +197,8 @@ class OllamaCoderClient:
         options: dict[str, Any] = {"temperature": temperature}
         if self.max_tokens is not None:
             options["num_predict"] = self.max_tokens
+        if self.num_ctx is not None:
+            options["num_ctx"] = self.num_ctx
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [message.as_dict() for message in messages],
@@ -194,6 +207,8 @@ class OllamaCoderClient:
         }
         if self.think is not None:
             payload["think"] = self.think
+        if self.keep_alive is not None:
+            payload["keep_alive"] = self.keep_alive
         reply = self._post("/api/chat", payload)
         message = reply.get("message") or {}
         content = str(message.get("content", "")).strip()
