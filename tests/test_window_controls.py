@@ -110,7 +110,7 @@ def test_maximize_falls_back_to_the_work_area_without_the_zoomed_state(monkeypat
     taskbar, so a desktop that reports its work area gets a windowed fill of it.
     """
     monkeypatch.setattr(
-        "gui.window_controls.work_area", lambda _window: (0, 40, 1920, 1040)
+        "gui.window_controls.work_area", lambda: (0, 40, 1920, 1040)
     )
     controls, window, button = _controls(supports_zoom=False)
     controls.maximize()
@@ -121,7 +121,7 @@ def test_maximize_falls_back_to_the_work_area_without_the_zoomed_state(monkeypat
 
 def test_restore_returns_the_geometry_a_work_area_fill_replaced(monkeypatch) -> None:
     monkeypatch.setattr(
-        "gui.window_controls.work_area", lambda _window: (0, 40, 1920, 1040)
+        "gui.window_controls.work_area", lambda: (0, 40, 1920, 1040)
     )
     controls, window, button = _controls(supports_zoom=False)
     controls.toggle()
@@ -133,7 +133,7 @@ def test_restore_returns_the_geometry_a_work_area_fill_replaced(monkeypatch) -> 
 
 def test_maximize_falls_back_to_fullscreen_when_no_work_area_is_known(monkeypatch) -> None:
     """A desktop that reports neither "zoomed" nor a work area still grows."""
-    monkeypatch.setattr("gui.window_controls.work_area", lambda _window: None)
+    monkeypatch.setattr("gui.window_controls.work_area", lambda: None)
     controls, window, button = _controls(supports_zoom=False)
     controls.maximize()
     assert window.fullscreen["-fullscreen"] is True
@@ -144,7 +144,7 @@ def test_maximize_prefers_the_native_zoomed_state(monkeypatch) -> None:
     """When "zoomed" works, the work area is not touched -- the WM already fits it."""
     called: list[int] = []
     monkeypatch.setattr(
-        "gui.window_controls.work_area", lambda _window: called.append(1)
+        "gui.window_controls.work_area", lambda: called.append(1)
     )
     controls, window, _button = _controls(supports_zoom=True)
     controls.maximize()
@@ -162,7 +162,7 @@ def test_toggle_maximizes_then_restores_the_same_way() -> None:
 
 
 def test_restore_undoes_a_fullscreen_maximize(monkeypatch) -> None:
-    monkeypatch.setattr("gui.window_controls.work_area", lambda _window: None)
+    monkeypatch.setattr("gui.window_controls.work_area", lambda: None)
     controls, window, button = _controls(supports_zoom=False)
     controls.toggle()
     assert window.fullscreen["-fullscreen"] is True
@@ -215,7 +215,7 @@ def test_work_area_reads_the_x11_property(monkeypatch) -> None:
 
     monkeypatch.setattr(window_controls.sys, "platform", "linux")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeCompleted())
-    assert window_controls.work_area(None) == (0, 40, 1920, 1040)
+    assert window_controls.work_area() == (0, 40, 1920, 1040)
 
 
 def test_work_area_returns_none_when_x11_has_no_property(monkeypatch) -> None:
@@ -229,14 +229,14 @@ def test_work_area_returns_none_when_x11_has_no_property(monkeypatch) -> None:
 
     monkeypatch.setattr(window_controls.sys, "platform", "linux")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeCompleted())
-    assert window_controls.work_area(None) is None
+    assert window_controls.work_area() is None
 
 
 def test_work_area_is_none_on_an_unknown_platform(monkeypatch) -> None:
     from gui import window_controls
 
     monkeypatch.setattr(window_controls.sys, "platform", "haiku")
-    assert window_controls.work_area(None) is None
+    assert window_controls.work_area() is None
 
 
 # --- the real installation (needs a display) -------------------------------

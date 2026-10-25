@@ -752,7 +752,7 @@ Arabic is kept as secondary aliases where useful.
   `state("zoomed")` where the window manager supports it (the *native* maximize,
   which already fits the work area and remembers the old size); where it does not
   (many X11 desktops) it fills the **work area** by hand rather than going
-  full-screen, so the taskbar is never covered — `work_area(window)` is the one
+  full-screen, so the taskbar is never covered — `work_area()` is the one
   platform lookup (`SystemParametersInfo`'s `rcWork` on Windows, the window
   manager's `_NET_WORKAREA` through `xprop` on X11, `NSScreen.visibleFrame` on
   macOS) and returns `None` where the desktop cannot report it, in which case a
@@ -3312,7 +3312,7 @@ regression monitor each can refuse a change.
   desktop* instead of a full-screen takeover: `gui.window_controls` keeps the
   native `state("zoomed")` where the window manager has it (which already fits the
   work area), and where it does not (many X11 desktops) it fills the work area by
-  hand through the new `work_area(window)` lookup -- Windows' `SystemParametersInfo`
+  hand through the new `work_area()` lookup -- Windows' `SystemParametersInfo`
   work area (`rcWork`, which excludes the taskbar wherever the user put it), X11's
   `_NET_WORKAREA` via `xprop`, and macOS' `NSScreen.visibleFrame` -- falling back
   to a real full-screen window only where the desktop reports none, and remembering

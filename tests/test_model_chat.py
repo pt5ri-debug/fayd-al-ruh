@@ -619,7 +619,7 @@ def test_window_initial_geometry_is_clamped_to_the_work_area(monkeypatch, data_r
             root, service, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
         )
         monkeypatch.setattr(
-            "gui.model_chat_dialog.work_area", lambda _window: (0, 30, 1000, 600)
+            "gui.model_chat_dialog.work_area", lambda: (0, 30, 1000, 600)
         )
         assert dialog._initial_geometry() == "1000x600"
     finally:

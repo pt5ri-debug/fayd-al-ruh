@@ -46,7 +46,7 @@ _BUTTON_HOVER = "hover"
 _CLOSE_HOVER = "close"
 
 
-def work_area(window: tk.Misc) -> tuple[int, int, int, int] | None:
+def work_area() -> tuple[int, int, int, int] | None:
     """The usable desktop rectangle ``(x, y, width, height)``, or ``None``.
 
     "Maximize" means *the whole screen minus the taskbar*, and a plain
@@ -76,13 +76,13 @@ def work_area(window: tk.Misc) -> tuple[int, int, int, int] | None:
     }
     probe = probes.get(sys.platform)
     if probe is not None:
-        return probe(window)
+        return probe()
     if sys.platform.startswith("linux"):
         return _x11_work_area()
     return None
 
 
-def _windows_work_area(window: tk.Misc) -> tuple[int, int, int, int] | None:
+def _windows_work_area() -> tuple[int, int, int, int] | None:
     """The primary monitor's work area, through ``SystemParametersInfoW``."""
     try:
         import ctypes
@@ -116,7 +116,7 @@ def _windows_work_area(window: tk.Misc) -> tuple[int, int, int, int] | None:
     return None
 
 
-def _macos_work_area(window: tk.Misc) -> tuple[int, int, int, int] | None:
+def _macos_work_area() -> tuple[int, int, int, int] | None:
     """The primary screen's ``visibleFrame`` (excludes the menu bar and Dock)."""
     try:
         import subprocess
@@ -275,7 +275,7 @@ class WindowControls:
 
     def _fill_work_area(self) -> bool:
         """Size the window to the work area; return whether it could be learned."""
-        area = work_area(self.window)
+        area = work_area()
         if area is None:
             return False
         x, y, width, height = area

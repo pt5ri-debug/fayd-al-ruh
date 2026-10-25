@@ -130,7 +130,7 @@ class ModelChatDialog:
         """
         width, height = DEFAULT_WIDTH, DEFAULT_HEIGHT
         try:
-            area = work_area(self.window)
+            area = work_area()
             if area is not None:
                 _x, _y, area_width, area_height = area
                 width = min(width, area_width)
