@@ -15,10 +15,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ai import banner_mouth, cloud_mouth, ultron_mouth, vision_mouth
+from ai import banner_mouth, cloud_mouth, hakeem_mouth, natasha_mouth, ultron_mouth, vision_mouth
 from ai import chat as chat_module
 from ai import mind as mind_module
+from ai import mouths as mouths_module
 from ai.jarvis import build_session
+from core import language_models as language_models_module
 from core.command_router import RoutedCommand, RouteKind
 from core.jarvis import JarvisMode, JarvisTurn
 from core.paths import data_dir
@@ -162,6 +164,11 @@ class ChatService:
             no_feedback=no_feedback,
             text_only=True,
         )
+        # A per-mouth language-model override, set from a dedicated model window
+        # (see gui/model_chat.py). An empty map means "every mouth uses the model
+        # it would pick on its own", which is the historical behaviour; a key here
+        # makes that mouth load the chosen model instead.
+        self._mouth_models: dict[str, str] = {}
         self.switcher = chat_module.ModelSwitcher(
             self.mode,
             loader=lambda: mind_module.load_mind_model(
@@ -169,26 +176,46 @@ class ChatService:
                 max_new_tokens=max_new_tokens,
             ),
             max_new_tokens=max_new_tokens,
-            ultron_loader=lambda: ultron_mouth.load_ultron_assistant(
-                ultron_model,
-                max_tokens=ultron_tokens,
-                temperature=ultron_temperature,
+            ultron_loader=lambda: self._load_mouth(
+                chat_module.MOUTH_ULTRON,
+                lambda: ultron_mouth.load_ultron_assistant(
+                    ultron_model,
+                    max_tokens=ultron_tokens,
+                    temperature=ultron_temperature,
+                ),
             ),
-            vision_loader=lambda: vision_mouth.load_vision_assistant(
-                vision_model,
-                max_tokens=vision_tokens,
-                temperature=vision_temperature,
+            vision_loader=lambda: self._load_mouth(
+                chat_module.MOUTH_VISION,
+                lambda: vision_mouth.load_vision_assistant(
+                    vision_model,
+                    max_tokens=vision_tokens,
+                    temperature=vision_temperature,
+                ),
             ),
-            banner_loader=lambda: banner_mouth.load_banner_assistant(
-                banner_model,
-                max_tokens=banner_tokens,
-                temperature=banner_temperature,
+            banner_loader=lambda: self._load_mouth(
+                chat_module.MOUTH_BANNER,
+                lambda: banner_mouth.load_banner_assistant(
+                    banner_model,
+                    max_tokens=banner_tokens,
+                    temperature=banner_temperature,
+                ),
             ),
-            cloud_loader=lambda: cloud_mouth.load_cloud_assistant(
-                cloud_model,
-                provider=cloud_provider,
-                max_tokens=cloud_tokens,
-                temperature=cloud_temperature,
+            cloud_loader=lambda: self._load_mouth(
+                chat_module.MOUTH_CLOUD,
+                lambda: cloud_mouth.load_cloud_assistant(
+                    cloud_model,
+                    provider=cloud_provider,
+                    max_tokens=cloud_tokens,
+                    temperature=cloud_temperature,
+                ),
+            ),
+            natasha_loader=lambda: self._load_mouth(
+                chat_module.MOUTH_NATASHA,
+                lambda: natasha_mouth.load_natasha_assistant(),
+            ),
+            hakeem_loader=lambda: self._load_mouth(
+                chat_module.MOUTH_HAKEEM,
+                lambda: hakeem_mouth.load_hakeem_assistant(),
             ),
         )
         self.session = session
@@ -339,6 +366,66 @@ class ChatService:
     def source(self) -> str:
         """Which mouth currently answers: ``"model"``, ``"ultron"``, ``"vision"``, ``"banner"``, ``"cloud"``, or ``"sources"``."""
         return self.switcher.mouth
+
+    # ------------------------------------------------- per-mouth model choice
+
+    def _load_mouth(self, mouth: str, default_loader):
+        """Build ``mouth``'s assistant, honouring a chosen model when one is set.
+
+        With no override this is exactly the loader the mouth always used, so a
+        chat that never opened a dedicated model window is unchanged. With an
+        override the mouth is built against the chosen model through
+        :func:`ai.mouths.build_mouth`, which resolves the model to its GGUF file
+        (or its cloud provider/model) rather than re-guessing it.
+        """
+        key = self._mouth_models.get(mouth)
+        if not key:
+            return default_loader()
+        return mouths_module.build_mouth(mouth, model_key=key)
+
+    def mouth_model(self, mouth: str) -> str:
+        """The language-model key a mouth is set to use (``""`` means its default)."""
+        return self._mouth_models.get(mouth, "")
+
+    def set_mouth_model(self, mouth: str, key: str) -> None:
+        """Point ``mouth`` at the language model ``key`` and rebuild it if active.
+
+        An empty ``key`` clears the override (back to the mouth's own default).
+        When the mouth is the one currently answering, it is reloaded at once, so
+        the very next question uses the chosen model -- the same "remember it and
+        apply it now" rule the cloud provider picker follows.
+        """
+        if key:
+            self._mouth_models[mouth] = key
+        else:
+            self._mouth_models.pop(mouth, None)
+        if self.switcher.mouth == mouth:
+            self._reload_active_mouth(mouth)
+
+    def _reload_active_mouth(self, mouth: str) -> None:
+        """Rebuild the currently-answering mouth so a new model takes effect."""
+        if mouth == chat_module.MOUTH_MODEL:
+            self.switcher.use_model()
+        elif mouth == chat_module.MOUTH_ULTRON:
+            self.switcher.use_ultron()
+        elif mouth == chat_module.MOUTH_VISION:
+            self.switcher.use_vision()
+        elif mouth == chat_module.MOUTH_BANNER:
+            self.switcher.use_banner()
+        elif mouth == chat_module.MOUTH_CLOUD:
+            self.switcher.use_cloud()
+        elif mouth == chat_module.MOUTH_NATASHA:
+            self.switcher.use_natasha()
+        elif mouth == chat_module.MOUTH_HAKEEM:
+            self.switcher.use_hakeem()
+
+    def mouth_model_choices(self, mouth: str):
+        """The language models this mouth's window offers, with real availability."""
+        return language_models_module.models_for_choice(mouth)
+
+    def describe_mouth_model(self, mouth: str) -> str:
+        """An honest one-line description of the model a mouth will answer with."""
+        return mouths_module.describe_mouth_model(mouth, self._mouth_models.get(mouth, ""))
 
     def use_model(self) -> None:
         """Answer from the trained model. Raises when the checkpoint is missing."""

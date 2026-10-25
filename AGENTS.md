@@ -1638,11 +1638,16 @@ Arabic is kept as secondary aliases where useful.
   **Jarvis (Sources)**, **Ultron (General)**, **Vision (Petroleum)**,
   **Banner (Instructor)**, **Natasha (Personality)**, **Hakeem (Religion)**,
   **Cloud (Network)** (`MODEL_BUTTONS`) -- built through
-  `ChatComposer.model_bar()`. Each chip runs the *same* `_switch_mouth` the
-  header's model selector runs, so the row and the selector can never disagree,
-  `_sync_model_buttons` accents the live mouth (and re-accents it when a switch
-  is refused, so the row always shows what is really answering), and a chip whose
-  model is missing reports the real next step exactly as the selector does. The
+  `ChatComposer.model_bar()`. Each chip opens that model's **own dedicated chat
+  window** (`_open_model_chat`) -- with its logo, its exclusive reading voice, and
+  its language model -- so a user can talk to Ultron in one window and Hakeem in
+  another without the two transcripts sharing a conversation; one window per mouth
+  is kept and reused, so a second click raises the open one. The header's selector
+  still switches *this* conversation's mouth through `_switch_mouth`, so both
+  remain available, and `_sync_model_buttons` accents the live mouth (and
+  re-accents it when a switch is refused, so the row always shows what is really
+  answering). A chip whose model is missing still opens its window, which reports
+  the real next step and lets the user choose or download a model. The
   row wraps on a narrow window rather than clipping a model out of reach, and the
   header selector still lists *every* mouth (including the small trained model),
   so nothing became unreachable.
@@ -1668,6 +1673,91 @@ Arabic is kept as secondary aliases where useful.
   (`_strip_markdown`) so the engine speaks words, not `**`/backticks. Reading runs
   on the worker thread and reports honestly: a missing engine says to install
   espeak-ng, and a silent render is named as such rather than shown as success.
+- `core/language_models.py` — the **one language-model catalog** the whole
+  program reads. Before it, each mouth knew only its *own* models
+  (`core.ultron.CATALOG`, `core.vision_model.CATALOG`, `core.banner`/
+  `core.presentation_model`, `companion.model`, `core.cloud_model`, the trained
+  checkpoint), so no surface could offer "all the project's models" and no two
+  could agree on a default. `all_language_models()` unifies them: a
+  `LanguageModel` carries `key`, `title`, `engine`, `summary`, `available`,
+  `detail`, `path`, `provider`, plus `engines` (every mouth the model belongs to),
+  `catalog_key`, `folders`, `filename`, `identity` (its repo/filename), and
+  `download` (the real fetch command). Entries are **de-duplicated by identity**,
+  so the *same* weights reachable from two engines (`qwen3-4b` is Banner's,
+  Natasha's, and Hakeem's) are one model listing all three, never three entries
+  pointing at one file. `models_for_choice(mouth)` is what a dedicated mouth
+  window offers: every GGUF model the project has for an in-process mouth (they
+  share the one runtime, so any downloaded file can answer in any of them, the
+  mouth's own default listed first), and only its own models for a cloud or the
+  retrieval mouth. `find_language_model`/`resolve_choice`,
+  `default_language_model_key`, `describe_language_models`, and the mouth
+  constants (`MOUTH_SOURCES`/`ULTRON`/`VISION`/`BANNER`/`NATASHA`/`HAKEEM`/
+  `CLOUD`/`MODEL`, `MOUTHS`, `GGUF_MOUTHS`, `ENGINE_LABELS`) round it out.
+  **Honest by construction**: availability is a real file check (`available` is
+  true only when the GGUF is on disk), `detail` always names the real next step
+  when it is not, an unknown mouth or key returns nothing rather than raising, and
+  nothing here loads a model or imports Tk.
+- `core/mouth_profile.py` — the per-mouth **saved settings**: the character's
+  `name`, its `logo`, the reading `voice` exclusive to it, and the language
+  `model` it answers with, one `MouthProfile` per mouth persisted through
+  `JsonStore` under the `mouths` namespace. `load_profile`/`save_profile`,
+  `set_name`/`set_voice`/`set_model`, `save_logo`/`clear_logo`/`logo_filename`
+  (a chosen picture is copied into `data/characters`, named `<mouth>.<ext>`, the
+  old copy removed, an unsupported extension refused with a clear message), and
+  `resolve_voice`/`resolve_model` (a saved voice or model that has left the
+  catalog falls back to the default rather than leaving the menu broken). A
+  corrupt or unreadable profile yields the default, so a window always opens; a
+  copy or save failure is recorded through `core.best_effort.best_effort` rather
+  than swallowed. `core/paths.characters_dir()` is the git-ignored
+  `data/characters` folder it uses. Dependency-free and Tk-free.
+- `ai/mouths.py` — the one place that turns `(mouth, model key) -> a ready
+  assistant`. `build_mouth` resolves the chosen catalog entry to its exact GGUF
+  file (or its cloud provider + model name) and hands *that* to the mouth's own
+  loader, so a model picked from another engine's catalog still reaches the right
+  file; `model_choice`/`describe_mouth_model` expose the resolution.
+  `MODEL_MOUTHS` names the model-backed mouths; a retrieval-only mouth has no
+  model and `build_mouth` refuses it honestly. An unknown key means "the mouth's
+  own default", never a wrong file, so a stale saved choice cannot break a mouth.
+- `gui/model_chat.py` — the per-mouth chat **service** (Tk-free), the engine
+  behind `gui/model_chat_dialog.py`. `ModelChatService(mouth, *, service=,
+  data_root=, reader=)` wraps a `ChatService` (its own session) and the mouth's
+  saved profile, and keeps a `TextReader` of its own so the **reading voice is
+  exclusive** to that mouth -- choosing one here never changes the main window's.
+  It exposes the identity (`name`/`set_name`, `logo_path`/`set_logo`/
+  `clear_logo`), the voice (`voice_key`/`set_voice`/`voice_sections`/
+  `voice_label`/`read_aloud`), the model (`model_choices`/`model_key`/
+  `set_model`/`model_ready`/`model_status`), the conversation
+  (`ask`/`new_conversation`/`save`/`session`), and the microphone
+  (`microphone_available`/`start_recording`/`stop_recording`/`transcribe`).
+  `MOUTH_BLURBS` gives each mouth an honest one-line description. `service` may
+  be injected, so the whole workflow is exercised headless with no display, no
+  model, and no microphone.
+- `gui/model_chat_dialog.py` — the **dedicated chat window** one answering mouth
+  opens from the composer's model row. Built the way every other window is (the
+  same `Theme` tokens, `RoundedBox`, `gui.rich_text` Markdown, the shared
+  `gui.chat_composer.ChatComposer`, and the three `gui.window_controls` title-bar
+  buttons), it has a **left sidebar** holding, top to bottom, (1) the character's
+  **logo** -- clickable to upload another picture, with a *Reset to the default
+  badge* action and an editable **name** -- (2) the **reading voice** as an
+  exclusive radio list grouped by the source each voice came from, and (3) the
+  **language model** as a list of every model the mouth can run, the saved choice
+  pre-selected and each entry labelled with its real availability. The centre is
+  the transcript and the composer, which carries an optional **microphone**
+  (`add_mic`) exactly like the main chat. Long work runs on a worker thread whose
+  result is handed back through a queue the UI thread drains (Tk is not
+  thread-safe). Every control reports the real next step when its engine or model
+  is absent rather than pretending. `gui/app.py` opens one per mouth from the
+  composer's model row (`_open_model_chat`, reusing an already-open window), and
+  `ChatService.set_mouth_model`/`mouth_model` keep the choice in force for the
+  mouth that is answering.
+- `cli/model_chat.py` — the headless twin of that window: `python -m cli
+  model-chat mouths|models|profile|set-model|set-voice|set-name|set-logo|
+  clear-logo|ask` (aliases `model-chat` and `mouths`). It drives the *same*
+  `gui.model_chat.ModelChatService`, so the CLI and the window share one saved
+  profile per mouth -- one name, one logo, one reading voice, and one language
+  model -- and no logic is reimplemented. Exit codes: `0` success, `2` invalid
+  arguments, `3` the model is not available, `4` the profile or logo could not be
+  read or written, `5` an unexpected failure.
 - `core/coder_model.py` — the coding-model client, the one place the code model
   is named. `DEFAULT_CODER_MODEL = "qwen2.5-coder:7b"` (a local **Ollama** model),
   `CoderMessage` (a validated chat turn), the `CoderClient` protocol
@@ -3160,6 +3250,44 @@ clone, each optional so the base system still runs without it:
   pin the fast defaults, the two trace switches, the new Ollama settings, and the
   CLI flags; `strip_thinking` still guards the transcript, so a trace that slips
   through is never shown.
+
+Every phase keeps the four hard gates green and never lets the model widen its own
+authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
+regression monitor each can refuse a change.
+
+- Phase 30 — **a dedicated chat window per answering model**: the composer's
+  model row used to *switch* the single shared conversation's mouth, so talking to
+  Ultron and then to Hakeem meant one transcript and one reading voice for both.
+  Now each of the seven chips opens that model's **own** window, with three
+  controls down its left side that belong to the mouth and survive a restart:
+  its **logo** (clickable to upload any picture, with a reset to the default
+  badge, beside an editable **name**), the **reading voice** exclusive to it
+  (changing it here never changes the main window's), and the **language model**
+  it answers with, chosen from the project's full catalog. `core/language_models.py`
+  is the one **unified catalog**: every GGUF model the project names (Ultron's,
+  Vision's, Banner's, the companion's, the trained checkpoint) and every cloud
+  provider model in one list, **de-duplicated by identity** so the same weights
+  reachable from two engines are one entry carrying all its `engines`, each with
+  its real availability and the real next step. `core/mouth_profile.py` persists
+  one profile per mouth (name, logo, voice, model) through `JsonStore`, copying a
+  chosen logo into the git-ignored `data/characters` and falling back to the
+  default when a saved voice or model has left the catalog. `ai/mouths.py` is the
+  one `(mouth, model key) -> assistant` factory: it resolves the choice to its
+  exact GGUF file (or cloud provider + model) and hands it to the mouth's own
+  loader, so a model picked from another engine's catalog reaches the right file.
+  `gui/model_chat.py` is the Tk-free per-mouth service (its own session, its own
+  `TextReader`, so the voice is exclusive); `gui/model_chat_dialog.py` is the
+  window, built with the same theme, composer (microphone included), rich text,
+  window controls, and worker-thread/queue pattern as every other window;
+  `ChatService.set_mouth_model`/`mouth_model` keep the choice in force for the
+  mouth that is answering and rebuild it at once when it is the live one; and
+  `cli/model_chat.py` is the headless twin (`python -m cli model-chat …`) driving
+  the *same* service. `tests/test_model_chat.py` pins the catalog (the shared
+  GGUF list, the honest availability, the dedup), the profile store (per-mouth
+  isolation, the logo copy and reset, the stale-choice fallback), the factory,
+  the service, the CLI, and the real Tk window; `tests/test_gui_design.py` pins
+  that each chip opens that model's window and leaves the main conversation
+  untouched.
 
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the

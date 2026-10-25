@@ -26,6 +26,7 @@ Two things stay honest:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 from core.assistant import AssistantAnswer
 from core.conversation import Conversation
@@ -159,6 +160,7 @@ def load_hakeem_assistant(
     *,
     session_id: str | None = None,
     model: str | None = None,
+    model_file: str | Path | None = None,
     base_url: str | None = None,
     agent: HakeemAgent | None = None,
 ) -> HakeemAssistant:
@@ -167,7 +169,9 @@ def load_hakeem_assistant(
     Raises :class:`HakeemError` when the local model cannot answer, so the caller
     reports the real next step *before* switching the chat to a mouth that could
     not answer. ``agent`` is the seam a test injects, so the whole mouth is
-    exercised with no server and no model.
+    exercised with no server and no model. ``model_file`` names an explicit GGUF
+    file to load in-process, so a caller that let the user choose one of several
+    downloaded models gets *that* file rather than the folder's largest.
     """
     from hakeem.config import HakeemConfig
 
@@ -175,6 +179,8 @@ def load_hakeem_assistant(
         overrides: dict[str, object] = {}
         if model:
             overrides["model"] = model
+        if model_file:
+            overrides["model_file"] = Path(model_file)
         if base_url:
             overrides["base_url"] = base_url
         agent = HakeemAgent(HakeemConfig.from_env(**overrides))

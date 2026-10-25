@@ -250,6 +250,19 @@ def scene_studio_library_dir() -> Path:
     return scene_studio_dir() / "library"
 
 
+def characters_dir() -> Path:
+    """Where the per-mouth logos live (``data/characters``, git-ignored).
+
+    Each answering mouth -- Jarvis, Ultron, Vision, Banner, Natasha, Hakeem, and
+    Cloud -- has its own dedicated chat window (see :mod:`gui.model_chat`), and
+    each window shows a logo the user may replace with any picture. The copies
+    are kept here, beside the rest of the user's own data, so replacing a logo
+    never dirties the working tree and a program update never overwrites it.
+    ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "characters"
+
+
 def studio_dir() -> Path:
     """Where the Code Studio keeps its own state (git worktrees, run logs).
 
@@ -329,6 +342,7 @@ __all__ = [
     "bundle_root",
     "bundled_artifacts_dir",
     "bundled_checkpoints_dir",
+    "characters_dir",
     "checkpoints_dir",
     "coder_models_dir",
     "data_dir",
