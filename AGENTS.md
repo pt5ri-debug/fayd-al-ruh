@@ -749,19 +749,27 @@ Arabic is kept as secondary aliases where useful.
   title bar and returns a `WindowControls`: minimize (`–`, `iconify()`), maximize
   (`□` / restore `❐`), and close (`✕`, which runs the caller's own `on_close`, or
   destroys the window when it has none). `WindowControls` grows the window with
-  `state("zoomed")` where the window manager supports it and falls back to a real
-  full-screen window where it does not (many X11 desktops), restoring exactly
-  what it did. Each button's `command` is a bound method on the controller, which
+  `state("zoomed")` where the window manager supports it (the *native* maximize,
+  which already fits the work area and remembers the old size); where it does not
+  (many X11 desktops) it fills the **work area** by hand rather than going
+  full-screen, so the taskbar is never covered — `work_area(window)` is the one
+  platform lookup (`SystemParametersInfo`'s `rcWork` on Windows, the window
+  manager's `_NET_WORKAREA` through `xprop` on X11, `NSScreen.visibleFrame` on
+  macOS) and returns `None` where the desktop cannot report it, in which case a
+  real full-screen window is the honest fallback. The pre-fill geometry is kept so
+  restore returns the window exactly, and each button's `command` is a bound
+  method on the controller, which
   holds the window, which owns the buttons — a cycle a destroyed window would only
   leave when the cyclic collector happens to run, and on a worker thread the Tcl
   call that follows deadlocks (this is what hung a deck export). So each button
   clears its own command on its own `<Destroy>` (while the widget still exists,
   which a frame-level handler cannot promise) and the frame drops the caller's
   handler, exactly like `gui.chat_composer`; a closed window dies at once.
-  Rolled into the **main window** and the nine dialogs (Code Studio, Presentation
+  Rolled into the **main window** and the ten dialogs (Code Studio, Presentation
   Studio and its finalize/course windows, the Import Center, the SQL import
-  screen, Doc's Studio, and the two image windows), so every window is closed and
-  grown the same way without each one re-implementing the logic.
+  screen, Doc's Studio, the two image windows, and the per-mouth chat window), so
+  every window is closed and grown the same way without each one re-implementing
+  the logic.
 - **Every window's title bar** is the `Theme.titlebar` band (a dark grey a step
   above the page base, `#181C25` dark / `#DCE3EE` light) closed by a
   `titlebar_edge` hairline, and carries the three controls above on its right. The
@@ -1743,7 +1751,12 @@ Arabic is kept as secondary aliases where useful.
   **language model** as a list of every model the mouth can run, the saved choice
   pre-selected and each entry labelled with its real availability. The centre is
   the transcript and the composer, which carries an optional **microphone**
-  (`add_mic`) exactly like the main chat. Long work runs on a worker thread whose
+  (`add_mic`) exactly like the main chat. The window opens at 90% of its original
+  height (`DEFAULT_HEIGHT`, capped to the work area so the composer stays
+  reachable on a small screen) and both the sidebar and the conversation carry a
+  **scrollbar that is always visible** rather than one that appears only on
+  overflow, so neither column is ever a dead end; the title bar's maximize fills
+  the work area. Long work runs on a worker thread whose
   result is handed back through a queue the UI thread drains (Tk is not
   thread-safe). Every control reports the real next step when its engine or model
   is absent rather than pretending. `gui/app.py` opens one per mouth from the
@@ -3251,10 +3264,6 @@ clone, each optional so the base system still runs without it:
   CLI flags; `strip_thinking` still guards the transcript, so a trace that slips
   through is never shown.
 
-Every phase keeps the four hard gates green and never lets the model widen its own
-authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
-regression monitor each can refuse a change.
-
 - Phase 30 — **a dedicated chat window per answering model**: the composer's
   model row used to *switch* the single shared conversation's mouth, so talking to
   Ultron and then to Hakeem meant one transcript and one reading voice for both.
@@ -3292,3 +3301,24 @@ regression monitor each can refuse a change.
 Every phase keeps the four hard gates green and never lets the model widen its own
 authority: the sandbox, the groundedness gate, the explicit-feedback rule, and the
 regression monitor each can refuse a change.
+
+- Phase 31 — **the per-model windows fit the screen, and maximize leaves the
+  taskbar alone**: three refinements to the windows Phase 30 added. The window
+  opens at **90% of its former height** (`DEFAULT_HEIGHT`, capped to the work area
+  so a small display still shows the composer). Both the left sidebar and the
+  conversation carry a **scrollbar that is always visible** -- not one that
+  appears only once its content overflows -- so neither column is ever a dead end
+  on a short window. And **maximize** now grows the window to the *usable
+  desktop* instead of a full-screen takeover: `gui.window_controls` keeps the
+  native `state("zoomed")` where the window manager has it (which already fits the
+  work area), and where it does not (many X11 desktops) it fills the work area by
+  hand through the new `work_area(window)` lookup -- Windows' `SystemParametersInfo`
+  work area (`rcWork`, which excludes the taskbar wherever the user put it), X11's
+  `_NET_WORKAREA` via `xprop`, and macOS' `NSScreen.visibleFrame` -- falling back
+  to a real full-screen window only where the desktop reports none, and remembering
+  the pre-fill geometry so restore returns the window exactly. A full-screen window
+  used to cover the taskbar, which is not what "maximize" means.
+  `tests/test_window_controls.py` pins the work-area fill, the exact restore, the
+  full-screen fallback when no work area is known, the native-zoom preference, and
+  the `xprop` parsing; `tests/test_model_chat.py` pins the 90% height, the
+  always-visible scrollbars, the work-area clamp, and the window's own maximize.

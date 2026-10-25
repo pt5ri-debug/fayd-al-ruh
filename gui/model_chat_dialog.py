@@ -42,7 +42,7 @@ from gui.chat_composer import ChatComposer
 from gui.image_preview import load_scaled
 from gui.model_chat import ModelChatService, mouth_title
 from gui.typography import resolve
-from gui.window_controls import install_window_controls
+from gui.window_controls import install_window_controls, work_area
 
 #: The transcript reads as a centred column, capped like the chat window's.
 _COLUMN_MAX = 860
@@ -55,6 +55,16 @@ LOGO_SIZE = 84
 
 #: The sidebar is this wide; the conversation column takes the rest.
 SIDEBAR_WIDTH = 300
+
+#: The window's opening size. The height is deliberately 90% of the window's
+#: original 720px, so the seven model windows sit a little shorter on screen; it is
+#: capped to the usable desktop so it still fits a small display, and the user can
+#: grow it to the work area with the title bar's maximize control. The minimum size
+#: is unchanged.
+DEFAULT_WIDTH = 1180
+DEFAULT_HEIGHT = 648
+MIN_WIDTH = 920
+MIN_HEIGHT = 620
 
 
 class ModelChatDialog:
@@ -98,8 +108,8 @@ class ModelChatDialog:
         self.window = tk.Toplevel(parent)
         self.window.title(f"{service.name} — {mouth_title(service.mouth)}")
         self.window.configure(bg=theme.base)
-        self.window.geometry("1180x720")
-        self.window.minsize(920, 620)
+        self.window.geometry(self._initial_geometry())
+        self.window.minsize(MIN_WIDTH, MIN_HEIGHT)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
 
@@ -109,6 +119,28 @@ class ModelChatDialog:
         self._refresh_model_status()
 
     # -- layout -----------------------------------------------------------
+
+    def _initial_geometry(self) -> str:
+        """The window's opening geometry, kept inside the usable desktop.
+
+        The size is :data:`DEFAULT_WIDTH` by :data:`DEFAULT_HEIGHT` (90% of the
+        window's original height), but never taller or wider than the work area --
+        a screen smaller than the default would otherwise open a window that runs
+        off the bottom, where its composer could not be reached.
+        """
+        width, height = DEFAULT_WIDTH, DEFAULT_HEIGHT
+        try:
+            area = work_area(self.window)
+            if area is not None:
+                _x, _y, area_width, area_height = area
+                width = min(width, area_width)
+                height = min(height, area_height)
+            else:
+                width = min(width, self.window.winfo_screenwidth())
+                height = min(height, self.window.winfo_screenheight())
+        except tk.TclError:
+            pass
+        return f"{width}x{height}"
 
     def _build(self) -> None:
         self._build_header()
@@ -171,6 +203,10 @@ class ModelChatDialog:
         canvas = tk.Canvas(shell, bg=theme.surface, highlightthickness=0, width=SIDEBAR_WIDTH)
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar = tk.Scrollbar(shell, command=canvas.yview)
+        # The sidebar scrollbar is always visible (not shown only on overflow), so
+        # the left column reads as one scrollable list and the model/voice options
+        # are never a dead end on a short window.
+        scrollbar.pack(side="right", fill="y")
         canvas.configure(yscrollcommand=scrollbar.set)
         self._sidebar_canvas = canvas
         self._sidebar_scrollbar = scrollbar
@@ -468,6 +504,9 @@ class ModelChatDialog:
         self._canvas = tk.Canvas(container, bg=theme.base, highlightthickness=0)
         self._canvas.pack(side="left", fill="both", expand=True)
         self._scrollbar = tk.Scrollbar(container, command=self._canvas.yview)
+        # The chat scrollbar is always visible, so the conversation always reads as
+        # a scrollable area even before the first message overflows it.
+        self._scrollbar.pack(side="right", fill="y")
         self._canvas.configure(yscrollcommand=self._scrollbar.set)
         self._transcript = tk.Frame(self._canvas, bg=theme.base)
         self._window = self._canvas.create_window((0, 0), window=self._transcript, anchor="nw")
@@ -678,11 +717,14 @@ class ModelChatDialog:
             self._fit_height(widget)
 
     def _toggle_scrollbar(self) -> None:
-        first, last = self._canvas.yview()
-        if first <= 0.0 and last >= 1.0:
-            self._scrollbar.pack_forget()
-        else:
-            self._scrollbar.pack(side="right", fill="y")
+        """Keep the transcript's scroll region honest after the content changes.
+
+        The chat scrollbar is always visible, so this no longer shows or hides it;
+        it only keeps the canvas's scroll region current, which is what lets the
+        thumb reflect the real overflow. It is kept as a named step because every
+        content change already calls it.
+        """
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
 
     def _on_mousewheel(self, event: tk.Event) -> None:
         delta = -1 * (event.delta // 120) if getattr(event, "delta", 0) else (
@@ -837,4 +879,12 @@ class ModelChatDialog:
                 self._on_close()
 
 
-__all__ = ["LOGO_SIZE", "SIDEBAR_WIDTH", "ModelChatDialog"]
+__all__ = [
+    "DEFAULT_HEIGHT",
+    "DEFAULT_WIDTH",
+    "LOGO_SIZE",
+    "MIN_HEIGHT",
+    "MIN_WIDTH",
+    "SIDEBAR_WIDTH",
+    "ModelChatDialog",
+]

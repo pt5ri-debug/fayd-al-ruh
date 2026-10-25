@@ -8,15 +8,19 @@ Windows title bar carries, once, so every window grows the same set instead of
 each one inventing its own:
 
 * **minimize** (``–``) -- shrink the window to the taskbar / dock;
-* **maximize / restore** (``□`` / ``❐``) -- fill the screen, and shrink it back to
-  the size it had before;
+* **maximize / restore** (``□`` / ``❐``) -- grow the window to the *usable desktop*
+  (the whole screen minus the Windows taskbar), and shrink it back to the size it
+  had before;
 * **close** (``✕``) -- the window's one close path.
 
 The buttons are painted with the same theme tokens and type scale the rest of the
 program uses, so a title bar reads as one piece. Maximising is honest about what
 the platform supports: ``state("zoomed")`` where the window manager implements it
-(Windows, some X11 desktops), and a full-screen window otherwise -- exactly the
-fallback the feature was asked for -- so the control never silently does nothing.
+(Windows and macOS, where it already grows to the work area and leaves the taskbar
+visible), and -- where it does not, as on many X11 desktops -- a real windowed
+fill of the work area (see :func:`work_area`) rather than a full-screen takeover
+that would cover the taskbar. So the control always grows the window to fit the
+screen *without* hiding the taskbar, and never silently does nothing.
 
 Tk is imported at module import, so this module is only ever imported by GUI code
 that already depends on Tk; ``cli/`` must never import it.
@@ -24,6 +28,7 @@ that already depends on Tk; ``cli/`` must never import it.
 
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 from collections.abc import Callable
 from typing import Any, Literal
@@ -39,6 +44,134 @@ _CLOSE_GLYPH = "\u2715"  # multiplication x
 #: the one title-bar affordance every desktop user already recognises.
 _BUTTON_HOVER = "hover"
 _CLOSE_HOVER = "close"
+
+
+def work_area(window: tk.Misc) -> tuple[int, int, int, int] | None:
+    """The usable desktop rectangle ``(x, y, width, height)``, or ``None``.
+
+    "Maximize" means *the whole screen minus the taskbar*, and a plain
+    ``winfo_screenheight()`` includes the taskbar's strip, so a window grown to it
+    would sit under the taskbar. The work area is the platform's own answer to
+    "how much of the screen may a maximised window use", and each desktop reports
+    it differently:
+
+    * **Windows** -- the primary display's *work area* (``rcWork``), asked of the
+      system directly through ``SystemParametersInfo``, which already excludes the
+      taskbar on whichever edge the user moved it to;
+    * **X11** -- the ``_NET_WORKAREA`` property the window manager publishes, read
+      through ``xprop``; many desktops (GNOME, KDE, XFCE) set it, and it excludes
+      panels and docks;
+    * **macOS** -- ``NSScreen.visibleFrame``, which excludes the menu bar and the
+      Dock.
+
+    The lookup is best-effort by design: the first answer that yields a sane
+    rectangle wins, and a platform that cannot report one returns ``None`` so the
+    caller falls back to a full-screen window (which is correct everywhere, just
+    less tidy under a taskbar). Every probe is a subprocess or a system call, so a
+    failure is expected rather than exceptional and is swallowed here.
+    """
+    probes = {
+        "win32": _windows_work_area,
+        "darwin": _macos_work_area,
+    }
+    probe = probes.get(sys.platform)
+    if probe is not None:
+        return probe(window)
+    if sys.platform.startswith("linux"):
+        return _x11_work_area()
+    return None
+
+
+def _windows_work_area(window: tk.Misc) -> tuple[int, int, int, int] | None:
+    """The primary monitor's work area, through ``SystemParametersInfoW``."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", wintypes.LONG),
+                ("top", wintypes.LONG),
+                ("right", wintypes.LONG),
+                ("bottom", wintypes.LONG),
+            ]
+
+        rect = RECT()
+        # SPI_GETWORKAREA = 0x0030; the call fills the primary display's work area.
+        # ``windll`` exists only on Windows (which is where this branch runs), so it
+        # is looked up with a default -- that keeps the module importable and the
+        # type checker happy on the other platforms.
+        windll = getattr(ctypes, "windll", None)
+        if windll is None:
+            return None
+        ok = windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0)
+        if not ok:
+            return None
+        width = rect.right - rect.left
+        height = rect.bottom - rect.top
+        if width > 0 and height > 0:
+            return (rect.left, rect.top, width, height)
+    except Exception:
+        pass
+    return None
+
+
+def _macos_work_area(window: tk.Misc) -> tuple[int, int, int, int] | None:
+    """The primary screen's ``visibleFrame`` (excludes the menu bar and Dock)."""
+    try:
+        import subprocess
+
+        script = (
+            'tell application "Finder" to get bounds of window of desktop'
+        )
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+        if result.returncode != 0:
+            return None
+        parts = [int(piece.strip()) for piece in result.stdout.strip().split(",")]
+        if len(parts) != 4:
+            return None
+        left, top, right, bottom = parts
+        width, height = right - left, bottom - top
+        if width > 0 and height > 0:
+            return (left, top, width, height)
+    except Exception:
+        pass
+    return None
+
+
+def _x11_work_area() -> tuple[int, int, int, int] | None:
+    """The window manager's ``_NET_WORKAREA``, read through ``xprop``.
+
+    ``xprop`` prints an array of cardinals; the first four are the x, y, width,
+    and height of the work area (a per-desktop array follows, which the slice
+    drops). A desktop that does not publish the property prints an error and the
+    ``returncode`` guard turns that into ``None``.
+    """
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["xprop", "-root", "-notype", "_NET_WORKAREA"],
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+        if result.returncode != 0 or "=" not in result.stdout:
+            return None
+        numbers = [
+            int(piece)
+            for piece in result.stdout.split("=", 1)[1].replace(",", " ").split()
+            if piece.lstrip("-").isdigit()
+        ]
+        if len(numbers) < 4:
+            return None
+        x, y, width, height = numbers[:4]
+        if width > 0 and height > 0:
+            return (x, y, width, height)
+    except Exception:
+        pass
+    return None
 
 
 class WindowControls:
@@ -66,6 +199,10 @@ class WindowControls:
         self._close = close
         self._fullscreen = False
         self._zoomed = False
+        self._filled = False
+        #: The geometry the window had before a work-area fill, so restore returns
+        #: it exactly (Tk remembers nothing once ``geometry`` is set).
+        self._restore_geometry: str | None = None
         self._bind_destroy()
 
     def _bind_destroy(self) -> None:
@@ -111,21 +248,44 @@ class WindowControls:
             pass
 
     def maximize(self) -> None:
-        """Grow the window: ``state("zoomed")`` where supported, else full-screen."""
+        """Grow the window to the usable desktop, leaving the taskbar visible.
+
+        ``state("zoomed")`` is tried first because it is the *native* maximize --
+        the window manager already sizes it to the work area (taskbar excluded) and
+        remembers the previous size itself. Where it is not implemented (many X11
+        desktops), the work area is filled by hand (see :func:`work_area`) rather
+        than going full-screen: a full-screen window would cover the taskbar, which
+        is not what "maximize" means on any desktop. Only when the work area cannot
+        be learned either does it fall back to a real full-screen window, so the
+        control still grows the window on a desktop that reports neither.
+        """
         if self._is_open():
             return
         try:
             self.window.state("zoomed")
             self._zoomed = True
         except tk.TclError:
-            # The window manager does not implement "zoomed" (many X11 desktops),
-            # so fall back to a real full-screen window -- the requested behaviour.
-            try:
-                self.window.attributes("-fullscreen", True)
-                self._fullscreen = True
-            except tk.TclError:
-                pass
+            if not self._fill_work_area():
+                try:
+                    self.window.attributes("-fullscreen", True)
+                    self._fullscreen = True
+                except tk.TclError:
+                    pass
         self._sync_glyph()
+
+    def _fill_work_area(self) -> bool:
+        """Size the window to the work area; return whether it could be learned."""
+        area = work_area(self.window)
+        if area is None:
+            return False
+        x, y, width, height = area
+        try:
+            self._restore_geometry = self.window.geometry()
+            self.window.geometry(f"{width}x{height}+{x}+{y}")
+            self._filled = True
+        except tk.TclError:
+            return False
+        return True
 
     def restore(self) -> None:
         """Undo :meth:`maximize`, whichever way it grew the window."""
@@ -135,6 +295,14 @@ class WindowControls:
             except tk.TclError:
                 pass
             self._zoomed = False
+        if self._filled:
+            if self._restore_geometry:
+                try:
+                    self.window.geometry(self._restore_geometry)
+                except tk.TclError:
+                    pass
+            self._restore_geometry = None
+            self._filled = False
         if self._fullscreen:
             try:
                 self.window.attributes("-fullscreen", False)
@@ -165,7 +333,7 @@ class WindowControls:
             pass
 
     def _is_open(self) -> bool:
-        return self._zoomed or self._fullscreen
+        return self._zoomed or self._fullscreen or self._filled
 
     def _sync_glyph(self) -> None:
         """Point the button's glyph at what the next press will do."""
