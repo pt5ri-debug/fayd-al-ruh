@@ -20,6 +20,13 @@ path for a scanned file), the text appears in the transcript, and **Read aloud**
 plays it through this engine with the chosen voice and mood. A microphone control
 sits in the composer, so a dictated note can be read back too.
 
+An **Engine setup** block closes the sidebar: it says honestly whether the engine
+and its voices are installed here, and offers the one governed action that fixes
+what is missing (*Install the engine*, a fetch-voice picker, or *Download the
+voices*). This is what makes the studio play its *own* voice rather than fall back
+to the system default: without the engine's voice a local studio has nothing it can
+speak, and the block is how the user gets it.
+
 The window is built the way every other window in the project is built -- the same
 :class:`~gui.app.Theme` tokens, :class:`~gui.chat_composer.RoundedBox`, the shared
 :class:`~gui.chat_composer.ChatComposer`, the shared
@@ -116,6 +123,7 @@ class VoiceStudioDialog:
         self._refresh_voice_status()
         self._refresh_mood_status()
         self._refresh_document_status()
+        self._refresh_setup_status()
 
     # -- layout -----------------------------------------------------------
 
@@ -222,6 +230,7 @@ class VoiceStudioDialog:
         self._build_voice_section(sidebar)
         self._build_mood_section(sidebar)
         self._build_document_section(sidebar)
+        self._build_setup_section(sidebar)
 
     # -- identity (logo + name) ------------------------------------------
 
@@ -327,8 +336,10 @@ class VoiceStudioDialog:
         theme = self.theme
         self._section_label(sidebar, "Reading voice")
         self._voice_var = tk.StringVar(value=self.service.voice_key())
+        self._voice_host = sidebar
         holder = tk.Frame(sidebar, bg=theme.surface)
         holder.pack(fill="x", padx=10)
+        self._voice_holder = holder
 
         groups = self.service.voice_groups()
         for group in groups:
@@ -503,6 +514,127 @@ class VoiceStudioDialog:
             wraplength=SIDEBAR_WIDTH - 40,
         )
         self._document_note.pack(fill="x", padx=14, pady=(4, 12))
+
+    # -- engine setup (install / download) --------------------------------
+
+    def _build_setup_section(self, sidebar: tk.Frame) -> None:
+        """The honest "what is missing here, and how to get it" block.
+
+        This is the block that answers the reported problem directly: a studio whose
+        engine or voices are not installed says so and offers the one governed action
+        that fixes it -- *Install the engine* (a Python extra, the system package, or
+        audio.cpp's binary) or *Download the voices* (the model/voice weights). Both
+        run on the worker thread, and the voices are re-listed when they succeed.
+        """
+        theme = self.theme
+        self._section_label(sidebar, "Engine setup")
+        holder = tk.Frame(sidebar, bg=theme.surface)
+        holder.pack(fill="x", padx=12)
+
+        self._setup_note = tk.Label(
+            holder, text="", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", justify="left",
+            wraplength=SIDEBAR_WIDTH - 40,
+        )
+        self._setup_note.pack(fill="x", pady=(0, 6))
+
+        self._setup_install_button = self._button(
+            holder, "⬇   Install the engine", self._on_install_engine, small=True
+        )
+        self._setup_download_button = self._button(
+            holder, "⬇   Download the voices", self._on_download_voices, small=True
+        )
+        self._setup_voice_var = tk.StringVar(value="")
+        self._setup_voice_menu = tk.Menubutton(
+            holder, text="", bg=theme.surface_raised, fg=theme.foreground,
+            activebackground=theme.interactive_active, activeforeground=theme.contrast,
+            relief="flat", borderwidth=0, highlightthickness=0, anchor="w",
+            font=self._type.font("2xs"), cursor="hand2", padx=8, pady=4,
+        )
+        self._setup_voice_menu.configure(menu=tk.Menu(self._setup_voice_menu, tearoff=0))
+
+    def _refresh_setup_status(self) -> None:
+        """Re-read the engine's state and rebuild the setup controls to match."""
+        status = self.service.setup_status()
+        self._setup_note.configure(text=status.describe())
+        ready = status.ready
+        self._setup_install_button.configure(state="disabled" if ready or not status.can_install_runtime else "normal")
+        self._setup_download_button.configure(state="disabled" if ready or not status.can_download_voices else "normal")
+        # The install button is only packed when it is the action that helps.
+        self._setup_install_button.pack_forget()
+        self._setup_download_button.pack_forget()
+        self._setup_voice_menu.pack_forget()
+        if not ready and status.can_install_runtime:
+            self._setup_install_button.pack(fill="x", pady=(0, 4))
+        if not ready and status.can_download_voices:
+            fetchable = self.service.fetchable_voices()
+            if len(fetchable) > 1:
+                menu = tk.Menu(self._setup_voice_menu, tearoff=0)
+                for key, title in fetchable:
+                    menu.add_command(
+                        label=title, command=partial(self._on_choose_fetch_voice, key)
+                    )
+                self._setup_voice_menu.configure(menu=menu)
+                if not self._setup_voice_var.get() and fetchable:
+                    self._setup_voice_var.set(fetchable[0][0])
+                self._setup_voice_menu.configure(
+                    text=f"▾  {self._fetch_voice_title(self._setup_voice_var.get())}"
+                )
+                self._setup_voice_menu.pack(fill="x", pady=(0, 4))
+            self._setup_download_button.pack(fill="x")
+
+    def _fetch_voice_title(self, key: str) -> str:
+        for candidate, title in self.service.fetchable_voices():
+            if candidate == key:
+                return title
+        return key or "the default voice"
+
+    def _on_choose_fetch_voice(self, key: str) -> None:
+        self._setup_voice_var.set(key)
+        self._setup_voice_menu.configure(text=f"▾  {self._fetch_voice_title(key)}")
+
+    def _on_install_engine(self) -> None:
+        if self._busy:
+            return
+        self._start_work(self.service.install_runtime, self._render_setup)
+
+    def _on_download_voices(self) -> None:
+        if self._busy:
+            return
+        key = self._setup_voice_var.get()
+        self._start_work(partial(self.service.download_voices, key), self._render_setup)
+
+    def _render_setup(self, report: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._add_message("note", f"Setup failed: {error}")
+            return
+        self._add_message("note", report.message)
+        # A successful install/download changes what the studio can offer, so the
+        # voice list and the status are rebuilt from the engine's real state.
+        self._rebuild_voice_section()
+        self._refresh_voice_status()
+        self._refresh_setup_status()
+
+    def _rebuild_voice_section(self) -> None:
+        """Redraw the voice radios after an install, without reopening the window."""
+        try:
+            self._voice_holder.destroy()
+        except (AttributeError, tk.TclError):
+            return
+        holder = tk.Frame(self._voice_host, bg=self.theme.surface)
+        holder.pack(fill="x", padx=10, before=self._voice_note)
+        self._voice_holder = holder
+        for group in self.service.voice_groups():
+            self._voice_group(holder, group.label, indent=4)
+            for voice in group.voices:
+                suffix = f"  ({voice.gender})" if getattr(voice, "gender", "") else ""
+                label = voice.label() if hasattr(voice, "label") else voice.label_en
+                self._voice_radio(holder, f"{label}{suffix}", voice.key, indent=10)
+        for _key, label_en, voices in self.service.catalog_voices():
+            self._voice_group(holder, label_en, indent=4)
+            for voice in voices:
+                self._voice_radio(holder, voice.label_en, voice.key, indent=10)
+        self._voice_var.set(self.service.voice_key())
 
     def _refresh_document_status(self) -> None:
         document = self.service.document

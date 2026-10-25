@@ -140,18 +140,23 @@ hakeem = [
 qwen-asr = [
     "torch>=2.2",
     "qwen-asr",
+    "huggingface_hub>=0.23",
 ]
 qwen-tts = [
     "torch>=2.2",
     "qwen-tts",
+    "huggingface_hub>=0.23",
 ]
 # Piper is a separate optional extra: a real, local neural text-to-speech engine
 # (VITS/ONNX) that sounds like a person rather than the robotic formant synthesis
 # of espeak-ng, and -- unlike Qwen3-TTS -- **speaks Arabic**. It runs entirely on
 # this machine, on the CPU, with nothing sent off it. Each voice is a separate
-# ONNX model (a one-time, human-approved download into `data/piper`); the base
-# install needs none of this, and the import is lazy.
-piper = ["piper-tts>=1.2"]
+# ONNX model (a one-time, human-approved download into `data/piper`, fetched with
+# huggingface_hub); the base install needs none of this, and the import is lazy.
+piper = [
+    "piper-tts>=1.2",
+    "huggingface_hub>=0.23",
+]
 
 # Doc's Studio is a separate optional extra: its own local vision-language model
 # (Qwen3-VL) loaded in-process through llama-cpp-python, so it can read any

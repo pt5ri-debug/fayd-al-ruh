@@ -24,6 +24,9 @@
 # The model weights are a *separate* one-time, human-approved download:
 #     python -m cli qwen-asr download --approve      # ~3.4 GB (1.7B) or ~1.2 GB (0.6B)
 # or drop a model folder into the data/qwen-speech folder. The model is Qwen's
-# own, released under Apache-2.0.
+# own, released under Apache-2.0. ``huggingface_hub`` is what that download uses;
+# without it the download cannot run, so it belongs in this file rather than
+# being discovered at download time.
 torch>=2.2
 qwen-asr
+huggingface_hub>=0.23

@@ -130,6 +130,130 @@ def test_the_four_studios_are_declared_with_the_titles_asked_for() -> None:
     assert "Qwen3-TTS" in profiles.studio_title(SOURCE_QWEN)
 
 
+def test_a_local_studio_starts_on_its_own_engines_voice(monkeypatch, data_root) -> None:
+    """The regression this fixes: a local studio must not start on a catalog voice.
+
+    A local engine cannot speak the synthetic catalog's ``woman-1`` -- audio.cpp has
+    no reference clip to clone, Piper has no matching ONNX file, and Qwen3-TTS has no
+    speaker by that name -- so before this fix every local studio handed its engine
+    an unspeakable key, the engine failed, and the reading fell back to the system
+    engine (the Windows default voice) instead of the voice the studio offered.
+    """
+    piper = ModelVoice(name="ar_JO-kareem-medium", engine=SOURCE_PIPER, title="Kareem")
+    monkeypatch.setattr("gui.voice_studio.system_voices", lambda: ())
+    monkeypatch.setattr("gui.voice_studio.model_voices", lambda engine=None: (piper,))
+    reader = FakeReader()
+    studio = VoiceStudioService(SOURCE_PIPER, reader=reader)
+    assert studio.voice_key() == "model:piper:ar_JO-kareem-medium"
+    # The reader was handed the engine's own voice, not the catalog default.
+    assert reader.voice.key == "model:piper:ar_JO-kareem-medium"
+
+
+def test_each_local_studio_starts_on_its_own_engine(monkeypatch, data_root) -> None:
+    """Each local engine is offered *its* voice, never another engine's."""
+    voices = (
+        ModelVoice(name="Sarah", engine=SOURCE_AUDIOCPP, title="Sarah"),
+        ModelVoice(name="kareem", engine=SOURCE_PIPER, title="Kareem"),
+        ModelVoice(name="Cherry", engine=SOURCE_QWEN, title="Cherry"),
+    )
+    monkeypatch.setattr("gui.voice_studio.system_voices", lambda: ())
+    monkeypatch.setattr("gui.voice_studio.model_voices", lambda engine=None: voices)
+    for source, expected in (
+        (SOURCE_AUDIOCPP, "model:audio.cpp:Sarah"),
+        (SOURCE_PIPER, "model:piper:kareem"),
+        (SOURCE_QWEN, "model:qwen3-tts:Cherry"),
+    ):
+        studio = VoiceStudioService(source, reader=FakeReader())
+        assert studio.voice_key() == expected
+
+
+def test_a_saved_local_voice_is_kept_when_still_offered(monkeypatch, data_root) -> None:
+    piper = ModelVoice(name="ar_JO-kareem-medium", engine=SOURCE_PIPER, title="Kareem")
+    monkeypatch.setattr("gui.voice_studio.system_voices", lambda: ())
+    monkeypatch.setattr("gui.voice_studio.model_voices", lambda engine=None: (piper,))
+    first = VoiceStudioService(SOURCE_PIPER, reader=FakeReader())
+    first.set_voice("model:piper:ar_JO-kareem-medium")
+    # A second open of the same studio keeps the saved voice.
+    again = VoiceStudioService(SOURCE_PIPER, reader=FakeReader())
+    assert again.voice_key() == "model:piper:ar_JO-kareem-medium"
+
+
+def test_the_system_studio_may_still_start_on_the_catalog(monkeypatch, data_root) -> None:
+    """The synthetic catalog is settings for the *system* engine, so it stays its default."""
+    monkeypatch.setattr("gui.voice_studio.system_voices", lambda: ())
+    studio = VoiceStudioService(SOURCE_SYSTEM, reader=FakeReader())
+    assert studio.voice_key() == "woman-1"
+
+
+def test_setup_status_separates_the_engine_from_its_voices(monkeypatch, data_root) -> None:
+    """The two halves are reported apart, each with its own next step."""
+    from core.piper_speech import PiperStatus
+
+    # Runtime present, voice missing: install is *not* offered, download is.
+    monkeypatch.setattr(
+        "core.piper_speech.piper_status",
+        lambda root=None: PiperStatus(True, False, None, "Download a voice with: …"),
+    )
+    studio = VoiceStudioService(SOURCE_PIPER, reader=FakeReader())
+    status = studio.setup_status()
+    assert status.runtime_ok and not status.voices_ok and not status.ready
+    assert not status.can_install_runtime
+    assert status.can_download_voices
+    assert [key for key, _title in studio.fetchable_voices()]
+
+
+def test_setup_status_offers_the_install_when_the_engine_is_absent(
+    monkeypatch, data_root
+) -> None:
+    from core.piper_speech import PiperStatus
+
+    monkeypatch.setattr(
+        "core.piper_speech.piper_status",
+        lambda root=None: PiperStatus(False, False, None, "Install the Piper runtime with: …"),
+    )
+    studio = VoiceStudioService(SOURCE_PIPER, reader=FakeReader())
+    status = studio.setup_status()
+    assert not status.runtime_ok
+    assert status.can_install_runtime
+    # You cannot download a voice for an engine that cannot run it.
+    assert not status.can_download_voices
+    assert studio.fetchable_voices() == ()
+
+
+def test_download_voices_refuses_before_the_engine_is_installed(
+    monkeypatch, data_root
+) -> None:
+    from core.piper_speech import PiperStatus
+
+    monkeypatch.setattr(
+        "core.piper_speech.piper_status",
+        lambda root=None: PiperStatus(False, False, None, "Install the Piper runtime with: …"),
+    )
+    studio = VoiceStudioService(SOURCE_PIPER, reader=FakeReader())
+    report = studio.download_voices("ar_JO-kareem-medium")
+    assert not report.ok
+    assert "install the engine first" in report.message.lower()
+
+
+def test_a_governed_setup_failure_is_reported_not_raised(monkeypatch, data_root) -> None:
+    """A download that fails must be reported, never crash the window."""
+    from core.piper_speech import PiperStatus
+
+    monkeypatch.setattr(
+        "core.piper_speech.piper_status",
+        lambda root=None: PiperStatus(True, False, None, "Download a voice with: …"),
+    )
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("the network is down")
+
+    monkeypatch.setattr("core.piper_speech.download_model", boom)
+    studio = VoiceStudioService(SOURCE_PIPER, reader=FakeReader())
+    report = studio.download_voices("ar_JO-kareem-medium")
+    assert not report.ok
+    assert "network is down" in report.message
+
+
 def test_a_profile_round_trips_through_the_store(data_root) -> None:
     saved = profiles.save_profile(
         profiles.default_profile(SOURCE_PIPER).with_voice("man-1").with_mood("happy")

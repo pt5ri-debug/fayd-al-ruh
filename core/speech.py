@@ -1807,6 +1807,15 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
             system = _system_synthesizer(voice=voice, language=language, prosody=prosody)
             if system is not None:
                 fallback = system
+            else:
+                # With no system engine, a language whose Piper voice was never
+                # downloaded would otherwise crash the reading -- and discovery
+                # picks Piper as soon as *any* voice is cached, so `auto` could
+                # return an engine that fails on the other language. Degrade to
+                # silence instead, exactly as a failing system engine already does,
+                # so `auto` keeps its promise of a usable engine. The low-level
+                # `PiperSynthesizer` still raises when built with no fallback.
+                fallback = SilentSynthesizer()
         try:
             return PiperSynthesizer(
                 voice=voice,

@@ -257,3 +257,38 @@ def test_composer_row_opens_the_studio(data_root, tmp_path) -> None:
         assert app._voice_studio_dialogs[key] is first
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_shows_the_engine_setup_block(data_root) -> None:
+    """The sidebar carries the honest setup line and the action that fixes it.
+
+    On a machine where the engine (or its voices) is absent, the block names the
+    missing half and offers the one governed action -- which is exactly the block
+    that answers "why does this studio read with the default voice?".
+    """
+    import tkinter as tk
+
+    # Force the "runtime present, voice missing" state so the block is deterministic.
+    import core.piper_speech as piper_speech
+    from core.piper_speech import PiperStatus
+    from gui.app import DARK_THEME
+    from gui.voice_studio_dialog import VoiceStudioDialog
+
+    original = piper_speech.piper_status
+    piper_speech.piper_status = lambda root=None: PiperStatus(
+        True, False, None, "Download a voice with: python -m cli piper download --approve"
+    )
+    root = tk.Tk()
+    try:
+        dialog = VoiceStudioDialog(
+            root, _studio(), theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+        )
+        root.update()
+        assert "voice" in dialog._setup_note.cget("text").lower()
+        # The download button is the action that helps here, and it is on screen.
+        assert dialog._setup_download_button.winfo_ismapped()
+        assert not dialog._setup_install_button.winfo_ismapped()
+    finally:
+        piper_speech.piper_status = original
+        root.destroy()

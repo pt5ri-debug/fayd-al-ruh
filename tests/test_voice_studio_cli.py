@@ -160,3 +160,70 @@ def test_cli_say_with_no_engine_reports_the_next_step(data_root, monkeypatch, ca
     assert main(["say", "piper", "--text", "hello"]) == EXIT_ENGINE
     out = capsys.readouterr().out
     assert "cannot read aloud" in out.lower() or "no speech engine" in out.lower()
+
+
+def test_cli_setup_reports_what_is_missing(data_root, capsys) -> None:
+    assert main(["setup", "piper"]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "Piper" in out
+    # A missing half names the real next step (install the engine, or fetch a
+    # voice) rather than a bare "not ready" -- whichever half this machine lacks.
+    assert "install" in out.lower() or "download" in out.lower()
+
+
+def test_cli_setup_as_json(data_root, capsys) -> None:
+    assert main(["setup", "piper", "--json"]) == EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["engine"] == "piper"
+    assert {"ready", "runtime_ok", "voices_ok", "can_install_runtime"} <= set(payload)
+    assert isinstance(payload["fetchable"], list)
+
+
+def test_cli_setup_lists_the_fetchable_voices_once_the_engine_is_ready(
+    data_root, monkeypatch, capsys
+) -> None:
+    from core.piper_speech import PiperStatus
+
+    monkeypatch.setattr(
+        "core.piper_speech.piper_status",
+        lambda root=None: PiperStatus(True, False, None, "Download a voice with: …"),
+    )
+    assert main(["setup", "piper", "--json"]) == EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["can_download_voices"]
+    assert payload["fetchable"] and payload["fetchable"][0]["key"]
+
+
+def test_cli_install_reports_a_governed_failure(data_root, monkeypatch, capsys) -> None:
+    """An install the environment cannot do is reported, not crashed on.
+
+    The real ``optional_deps.install`` runs, with pip replaced by a runner that
+    reports failure -- so the code path under test is the project's own, not a stub.
+    """
+    from core.piper_speech import PiperStatus
+
+    monkeypatch.setattr(
+        "core.piper_speech.piper_status",
+        lambda root=None: PiperStatus(False, False, None, "Install the Piper runtime with: …"),
+    )
+    monkeypatch.setattr(
+        "core.optional_deps._default_runner",
+        lambda argv: (1, "pip failed in this environment"),
+    )
+    assert main(["install", "piper"]) == EXIT_ENGINE
+    out = capsys.readouterr().out
+    assert "piper" in out.lower()
+
+
+def test_cli_download_refuses_before_the_engine_is_installed(
+    data_root, monkeypatch, capsys
+) -> None:
+    from core.piper_speech import PiperStatus
+
+    monkeypatch.setattr(
+        "core.piper_speech.piper_status",
+        lambda root=None: PiperStatus(False, False, None, "Install the Piper runtime with: …"),
+    )
+    assert main(["download", "piper"]) == EXIT_ENGINE
+    out = capsys.readouterr().out
+    assert "install the engine first" in out.lower()

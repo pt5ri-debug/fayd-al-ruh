@@ -153,6 +153,26 @@ def test_missing_voice_without_a_fallback_raises_with_the_next_step(tmp_path):
         synth.synthesize("English with no English voice")
 
 
+def test_factory_degrades_to_silence_when_the_other_language_has_no_voice(
+    tmp_path, monkeypatch
+):
+    """``auto`` must never hand back an engine that crashes on one language.
+
+    Discovery picks Piper as soon as *any* voice is cached, so on a machine with
+    only the Arabic voice and no system engine (no espeak-ng, no ``say``) an English
+    reading would raise ``PiperUnavailable`` instead of reading -- the factory built
+    an engine with no fallback. It now supplies a silent fallback, so the reading
+    degrades honestly rather than failing, exactly as a failing system engine does.
+    The low-level synthesizer still raises when built with no fallback.
+    """
+    (tmp_path / f"{ARABIC_VOICE_KEY}.onnx").write_bytes(b"stub")
+    monkeypatch.setattr("core.piper_speech.available_synthesizer", lambda root=None: True)
+    monkeypatch.setattr("core.speech._system_synthesizer", lambda **_kwargs: None)
+    synth = load_synthesizer(PIPER_ENGINE_NAME, root=tmp_path, voice=find_voice("man-1"))
+    clip = synth.synthesize("This sentence is English.")
+    assert clip.is_silent
+
+
 def test_synthesizer_raises_when_no_voice_is_present(tmp_path):
     # A fresh root has no voice file, so construction reports the real next step.
     with pytest.raises(PiperUnavailable):
