@@ -10,7 +10,9 @@
 # leaving the machine.
 #
 # ``piper-tts`` bundles ONNX Runtime and the espeak-ng phonemization data, so on
-# most systems there are no extra system packages to chase.
+# most systems there are no extra system packages to chase. ``huggingface_hub``
+# is what the one-time voice download uses; without it the download cannot run,
+# so it belongs in this file rather than being discovered at download time.
 #
 # The voice weights are a *separate* one-time, human-approved download:
 #     python -m cli piper download --approve            # the default Arabic voice (~63 MB)
@@ -19,3 +21,4 @@
 # The base install needs none of this: the import is lazy, and the app reports
 # the real next step when the runtime or a voice is absent.
 piper-tts>=1.2
+huggingface_hub>=0.23

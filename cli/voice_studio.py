@@ -2,6 +2,9 @@
 
     python -m cli voice-studio list                     # the four engine studios
     python -m cli voice-studio status piper             # is that engine ready?
+    python -m cli voice-studio setup piper              # what is missing, and the next step
+    python -m cli voice-studio install piper            # install the engine (governed)
+    python -m cli voice-studio download piper           # fetch its voices (governed)
     python -m cli voice-studio voices piper             # only *its* voices
     python -m cli voice-studio moods                    # every emotional state
     python -m cli voice-studio voice piper man-1        # choose (and remember) a voice
@@ -80,6 +83,17 @@ def _build_parser() -> argparse.ArgumentParser:
     say.add_argument("--write-wav", default="", help="Also save the speech to this WAV file.")
     say.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
+    setup = sub.add_parser("setup", help="Report what one engine is missing here.")
+    setup.add_argument("engine", choices=source_names(), help="The engine studio.")
+    setup.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+
+    install = sub.add_parser("install", help="Install one engine's runtime (governed).")
+    install.add_argument("engine", choices=source_names(), help="The engine studio.")
+
+    download = sub.add_parser("download", help="Download one engine's voices (governed).")
+    download.add_argument("engine", choices=source_names(), help="The engine studio.")
+    download.add_argument("--voice", default="", help="Which voice to fetch (see `setup`).")
+
     return parser
 
 
@@ -118,6 +132,51 @@ def run_status(args: argparse.Namespace) -> int:
     print(service.describe())
     print(service.mood_support_note())
     return EXIT_OK
+
+
+def run_setup(args: argparse.Namespace) -> int:
+    """Report exactly what one engine is missing here, and the real next step."""
+    service = _service(args.engine)
+    status = service.setup_status()
+    fetchable = service.fetchable_voices()
+    if args.json:
+        print(json.dumps(
+            {
+                "engine": status.source,
+                "ready": status.ready,
+                "runtime_ok": status.runtime_ok,
+                "voices_ok": status.voices_ok,
+                "can_install_runtime": status.can_install_runtime,
+                "can_download_voices": status.can_download_voices,
+                "hint": status.hint,
+                "fetchable": [{"key": key, "title": title} for key, title in fetchable],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ))
+        return EXIT_OK
+    print(f"{service.title}: {status.describe()}")
+    if fetchable:
+        print("Voices this engine can fetch:")
+        for key, title in fetchable:
+            print(f"    {key:<28} {title}")
+    return EXIT_OK
+
+
+def run_install(args: argparse.Namespace) -> int:
+    """Install one engine's runtime through the project's governed gates."""
+    service = _service(args.engine)
+    report = service.install_runtime()
+    print(report.message)
+    return EXIT_OK if report.ok else EXIT_ENGINE
+
+
+def run_download(args: argparse.Namespace) -> int:
+    """Download one engine's voices through the project's governed gates."""
+    service = _service(args.engine)
+    report = service.download_voices(args.voice)
+    print(report.message)
+    return EXIT_OK if report.ok else EXIT_ENGINE
 
 
 def run_voices(args: argparse.Namespace) -> int:
@@ -240,6 +299,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "list": run_list,
         "moods": run_moods,
         "status": run_status,
+        "setup": run_setup,
+        "install": run_install,
+        "download": run_download,
         "voices": run_voices,
         "voice": run_voice,
         "mood": run_mood,

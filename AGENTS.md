@@ -3452,3 +3452,56 @@ regression monitor each can refuse a change.
   `tests/test_voice_studio_cli.py` pins the CLI; `tests/test_voice_studio_window.py`
   pins the real Tk window and the composer row opening it; and `tests/test_voices.py`
   pins the prosody reaching each engine's own flags.
+
+- Phase 31 — **each engine studio reads with its *own* voice, and can fetch what it
+  is missing**: the four speech-engine studios (system, audio.cpp, Piper,
+  Qwen3-TTS) listed their own voices, but a studio whose voice was never chosen
+  still played the *default* voice instead. The cause was that
+  `gui/voice_studio.py`'s service never applied an engine voice at all on a fresh
+  profile: the reader kept its own default -- the synthetic catalog's `woman-1` --
+  and a *local* engine cannot speak a catalog voice (audio.cpp has no reference
+  clip to clone, Piper has no matching ONNX file, Qwen3-TTS has no speaker by that
+  name), so the engine failed and the reading fell back to the system engine (the
+  Windows default voice) instead of the voice the studio offered.
+  `VoiceStudioService` now calls `_apply_initial_voice()` in `__init__`: the saved
+  voice is honoured while the engine still offers it, otherwise the studio starts
+  on the first **real** voice the engine reports (`voice_keys()`, minus the
+  synthetic catalog), and the system studio -- the one engine the catalog's
+  settings are valid for -- keeps the project's documented
+  `core.voices.default_voice()` rather than an arbitrary catalog entry. A second
+  gap was closed at the same time: a studio could *offer* a voice it had no way to
+  fetch. The service now reports `setup_status()` (a `SetupStatus` separating the
+  **runtime** -- a Python extra or audio.cpp's native binary -- from the
+  **voices**, each with its own real next step and its own `can_install_runtime`/
+  `can_download_voices` flag), `fetchable_voices()` (the voices the engine can
+  actually fetch, empty until its runtime is present), and the two governed
+  actions `install_runtime()` / `download_voices()` (a `SetupReport`, never
+  raised; `approved=True` is the user's click, like every other external action).
+  The window gains an **Engine setup** sidebar block -- an honest status line and
+  the one button that helps (*Install the engine*, a fetch-voice picker, or
+  *Download the voices*) -- run on the worker thread, rebuilding the voice list
+  from the engine's real state when it succeeds. The CLI gains
+  `python -m cli voice-studio setup|install|download` (the headless twins, `--json`
+  for `setup`). Two requirements files and two extras were also incomplete: the
+  Piper and Qwen3-TTS (and Qwen3-ASR) downloads use `huggingface_hub`, which was
+  not listed in `requirements-piper.txt`, `requirements-qwen-tts.txt`,
+  `requirements-qwen-asr.txt`, or the `[piper]`/`[qwen-tts]`/`[qwen-asr]` extras,
+  so the download failed with "needs `huggingface_hub`" *after* the user had
+  installed the engine -- it is now pinned in all of them. Verified end to end on
+  this machine: with the Piper runtime and the Arabic voice installed, the Piper
+  studio starts on `model:piper:ar_JO-kareem-medium` and renders real Arabic
+  speech, instead of falling back to the default voice.
+  `tests/test_voice_studio.py` pins the engine-own default voice (per engine, the
+  saved-voice rule, the system studio's catalog exception, and the two setup
+  halves); `tests/test_voice_studio_cli.py` pins `setup`/`install`/`download`;
+  `tests/test_voice_studio_window.py` pins the setup block in the real window.
+  The same investigation closed a latent bug in `core/speech.py` that this feature
+  made reachable: `discover_synthesizer_name` picks Piper as soon as *any* voice is
+  cached, but `load_synthesizer("piper")` only supplied a fallback when a system
+  engine existed -- so a machine with only the Arabic voice and no espeak-ng/`say`
+  returned an engine that *raised* on an English reading, breaking `auto`'s promise
+  of "always a usable engine" (`test_auto_loader_always_returns_a_usable_engine`).
+  The factory now supplies a `SilentSynthesizer` fallback in that case, so the
+  reading degrades honestly rather than failing -- while the low-level
+  `PiperSynthesizer` still raises when built with no fallback.
+  `tests/test_piper_speech.py` pins the degradation.

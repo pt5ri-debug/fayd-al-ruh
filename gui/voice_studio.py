@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from core import voice_studio_profile as profiles
+from core.best_effort import best_effort
 from core.document_reader import DocumentText, read_document
 from core.reading import TextReader
 from core.voice_moods import Mood, mood_keys, resolve_mood
@@ -40,6 +41,7 @@ from core.voices import (
     SOURCE_QWEN,
     SOURCE_SYSTEM,
     Voice,
+    default_voice,
     find_model_voice,
     find_system_voice,
     find_voice,
@@ -132,9 +134,63 @@ class ReadReport:
         return f"Read {self.characters} characters in {self.chunks} part(s)."
 
 
+@dataclass(frozen=True)
+class SetupStatus:
+    """Exactly what is present and what is missing for one engine's studio.
+
+    Two independent halves, because they fail for different reasons and are fixed
+    differently: the **runtime** (a Python extra or a native binary) and the
+    **voices** (a model file, a reference clip, or the OS's own voices). A studio
+    is ``ready`` only when both are present, and each missing half carries its own
+    real next step in ``hint``.
+    """
+
+    source: str
+    runtime_ok: bool
+    voices_ok: bool
+    hint: str
+    can_install_runtime: bool = False
+    can_download_voices: bool = False
+
+    @property
+    def ready(self) -> bool:
+        """True when this engine can really read text aloud here."""
+        return self.runtime_ok and self.voices_ok
+
+    def describe(self) -> str:
+        """An honest one-line status naming the missing half and the next step."""
+        if self.ready:
+            return "Ready: the engine and at least one voice are installed."
+        missing = []
+        if not self.runtime_ok:
+            missing.append("the engine")
+        if not self.voices_ok:
+            missing.append("its voices")
+        return f"Not ready here: {', and '.join(missing)} missing. {self.hint}"
+
+
+@dataclass
+class SetupReport:
+    """The outcome of an attempted install or download, ready to show the user."""
+
+    ok: bool
+    message: str = ""
+    details: str = ""
+
+
 def _voice_key_of(voice: Any) -> str:
     """The stable key of any voice kind (a catalog, system, or model voice)."""
     return getattr(voice, "key", "")
+
+
+def _is_catalog_key(key: str) -> bool:
+    """True for a synthetic-catalog key (not a ``system:`` or ``model:`` voice).
+
+    The synthetic catalog is a set of *settings* for whichever engine discovery
+    picks, so a local engine cannot be handed one; the prefix test is the same one
+    :func:`core.voices.is_system_voice_key`/:func:`is_model_voice_key` use.
+    """
+    return not (is_system_voice_key(key) or is_model_voice_key(key))
 
 
 def _voice_label(voice: Any) -> str:
@@ -173,9 +229,13 @@ class VoiceStudioService:
         # the voice and mood are exclusive to this studio and never touch the main
         # chat's reader.
         self._reader = reader if reader is not None else TextReader(engine=self.engine)
-        saved_voice = self.profile.voice
-        if saved_voice:
-            self._apply_voice(saved_voice)
+        # Pick the studio's starting voice *before* anything else. Without this the
+        # reader kept its own default -- the synthetic catalog's ``woman-1`` -- and a
+        # local engine cannot speak a catalog voice: audio.cpp has no reference clip
+        # to clone, Piper has no matching ONNX file, and Qwen3-TTS has no speaker
+        # name, so each one failed and fell back to the system engine (the Windows
+        # default voice) instead of the voice the studio offered.
+        self._apply_initial_voice()
         self._reader.set_mood(profiles.resolve_mood(source))
         self.document: LoadedDocument | None = None
         self._last_report: ReadReport | None = None
@@ -301,6 +361,35 @@ class VoiceStudioService:
         except ValueError:
             return None
 
+    def _apply_initial_voice(self) -> None:
+        """Start on the engine's own voice: the saved one, else its first real voice.
+
+        A saved voice is honoured only while the engine still offers it. Otherwise
+        the studio starts on the first voice the engine *really* reports here, so a
+        local engine is handed one of its own voices (with its reference clip, ONNX
+        file, or speaker name) instead of the synthetic catalog default it cannot
+        speak.
+
+        The synthetic catalog is *settings for the system engine*, so it is the one
+        engine those keys are valid for: the system studio keeps the project's own
+        documented default catalog voice (:func:`core.voices.default_voice`) rather
+        than switching to an arbitrary catalog entry, and a studio with no voice at
+        all leaves the reader on its own default (nothing better to choose).
+        """
+        available = self.voice_keys()
+        saved = self.profile.voice
+        if saved and saved in available:
+            self._apply_voice(saved)
+            return
+        real = tuple(key for key in available if not _is_catalog_key(key))
+        if real:
+            self._apply_voice(real[0])
+            return
+        if self.source == SOURCE_SYSTEM:
+            fallback = default_voice().key
+            if fallback in available:
+                self._apply_voice(fallback)
+
     def _apply_voice(self, key: str) -> None:
         """Apply a saved voice, ignoring one that is no longer installed."""
         try:
@@ -343,6 +432,190 @@ class VoiceStudioService:
         from core.voice_moods import support_note
 
         return f"{self.title}: {support_note(self._reader.engine_name)}"
+
+    # ------------------------------------------------------------------ setup
+
+    def setup_status(self) -> SetupStatus:
+        """Report exactly what this engine is missing here, and the real next step.
+
+        The two halves are kept apart on purpose: the runtime (a Python extra, or
+        audio.cpp's native binary) is installed differently from the voices (a model
+        file, a reference clip, or the OS's own installed voices), so a user is
+        never told to "install the engine" when the engine is present and only a
+        voice is missing -- which is exactly the confusion this studio now avoids.
+        """
+        if self.source == SOURCE_SYSTEM:
+            from core.speech import speech_available, speech_install_plan
+
+            voices = bool(system_voices())
+            available = speech_available()
+            hint = "Ready." if available and voices else speech_install_plan().hint
+            return SetupStatus(
+                source=self.source,
+                runtime_ok=available,
+                voices_ok=voices or available,
+                hint=hint,
+                can_install_runtime=not available and speech_install_plan().can_install,
+                can_download_voices=False,
+            )
+        if self.source == SOURCE_PIPER:
+            from core.piper_speech import piper_status
+
+            piper = piper_status()
+            return SetupStatus(
+                source=self.source,
+                runtime_ok=piper.extra_installed,
+                voices_ok=piper.model_cached,
+                hint=piper.hint,
+                can_install_runtime=not piper.extra_installed,
+                can_download_voices=piper.extra_installed and not piper.model_cached,
+            )
+        if self.source == SOURCE_QWEN:
+            from core.qwen_speech import qwen_tts_status
+
+            qwen = qwen_tts_status()
+            return SetupStatus(
+                source=self.source,
+                runtime_ok=qwen.extra_installed,
+                voices_ok=qwen.model_cached,
+                hint=qwen.hint,
+                can_install_runtime=not qwen.extra_installed,
+                can_download_voices=qwen.extra_installed and not qwen.model_cached,
+            )
+        # audio.cpp: the engine is a native binary and the voices are reference clips.
+        from core.audiocpp_speech import audiocpp_status
+
+        audio = audiocpp_status()
+        return SetupStatus(
+            source=self.source,
+            runtime_ok=audio.engine_installed,
+            voices_ok=audio.voices > 0,
+            hint=audio.hint,
+            can_install_runtime=not audio.engine_installed,
+            can_download_voices=audio.engine_installed and audio.voices == 0,
+        )
+
+    def setup_status_text(self) -> str:
+        """A short, human-readable line for the window's setup block."""
+        return self.setup_status().describe()
+
+    def fetchable_voices(self) -> tuple[tuple[str, str], ...]:
+        """The voices this engine can fetch, as ``(key, title)`` rows.
+
+        Empty for the system studio (its voices come from the OS, not a download) and
+        for an engine whose runtime is not installed yet -- you cannot download a
+        voice for an engine that cannot run it. This is what the window's download
+        picker is built from, so it never offers something the engine cannot use.
+        """
+        status = self.setup_status()
+        if not status.runtime_ok:
+            return ()
+        if self.source == SOURCE_PIPER:
+            from core.piper_speech import spec_summaries
+
+            return tuple((row[0], row[1]) for row in spec_summaries())
+        if self.source == SOURCE_QWEN:
+            from core.qwen_speech import tts_spec_summaries
+
+            return tuple((row[0], row[1]) for row in tts_spec_summaries())
+        if self.source == SOURCE_AUDIOCPP:
+            from core.audiocpp_speech import spec_summaries
+
+            return tuple((row[0], row[1]) for row in spec_summaries())
+        return ()
+
+    def install_runtime(self) -> SetupReport:
+        """Install this engine's runtime (a Python extra, or audio.cpp's binary).
+
+        Governed exactly like every other external action in the project: the model
+        and engine downloads run only through the permission and human-approval
+        gates, so this passes ``approved=True`` because the user clicked the button
+        (the explicit approval). Never raises; the failure is reported.
+        """
+        try:
+            if self.source == SOURCE_SYSTEM:
+                from core.speech import install_speech_engine
+
+                speech = install_speech_engine()
+                return SetupReport(ok=speech.ok, message=speech.message)
+            if self.source == SOURCE_PIPER:
+                from core import optional_deps
+
+                piper = optional_deps.install(optional_deps.FEATURE_PIPER)
+                return SetupReport(ok=piper.ok, message=piper.message)
+            if self.source == SOURCE_QWEN:
+                from core import optional_deps
+
+                qwen = optional_deps.install(optional_deps.FEATURE_QWEN_TTS)
+                return SetupReport(ok=qwen.ok, message=qwen.message)
+            from core.audiocpp_speech import install_engine
+
+            path = install_engine(approved=True)
+            return SetupReport(ok=True, message=f"Installed the audio.cpp engine in {path}.")
+        except Exception as error:  # a governed action must report, never crash the window
+            return SetupReport(ok=False, message=f"Could not install the engine: {error}")
+        finally:
+            self.refresh()
+
+    def download_voices(self, voice_key: str = "") -> SetupReport:
+        """Download this engine's model/voice weights (a governed external action).
+
+        ``voice_key`` selects one fetchable voice for Piper/Qwen3-TTS/audio.cpp; an
+        empty key takes the engine's own default. Runs only through the permission
+        and human-approval gates (``approved=True`` is the click), and never raises.
+        """
+        status = self.setup_status()
+        if not status.runtime_ok:
+            return SetupReport(
+                ok=False,
+                message=f"Install the engine first, then its voices. {status.hint}",
+            )
+        try:
+            if self.source == SOURCE_PIPER:
+                from core.piper_speech import download_model as download_piper_voice
+
+                path = download_piper_voice(voice_key or None, approved=True)
+                self.refresh()
+                return SetupReport(ok=True, message=f"Downloaded the Piper voice into {path}.")
+            if self.source == SOURCE_QWEN:
+                from core.qwen_speech import download_model as download_qwen_model
+
+                path = download_qwen_model("tts", voice_key or None, approved=True)
+                self.refresh()
+                return SetupReport(ok=True, message=f"Downloaded the Qwen3-TTS model into {path}.")
+            if self.source == SOURCE_AUDIOCPP:
+                from core.audiocpp_speech import download_model as download_voicetut
+                from core.audiocpp_speech import download_speakers
+
+                model = download_voicetut(voice_key or None, approved=True)
+                download_speakers(approved=True)
+                self.refresh()
+                return SetupReport(
+                    ok=True,
+                    message=f"Downloaded the VoiceTut-TTS model and its voices into {model}.",
+                )
+            return SetupReport(
+                ok=False,
+                message="This studio's voices come from the operating system, not a download.",
+            )
+        except Exception as error:
+            return SetupReport(ok=False, message=f"Could not download the voices: {error}")
+
+    def refresh(self) -> None:
+        """Re-discover the engine and voices after an install, and re-apply the voice.
+
+        A newly installed engine (or a newly downloaded voice) is picked up here, so
+        the studio starts reading with it without reopening the window. The saved
+        voice is kept when it is still offered, and the first real voice is used when
+        it is not -- the same rule the studio opens with. ``TextReader`` re-discovers
+        its engine; an injected reader (the test seam) may not implement that, which
+        is not a failure here -- the voice is still re-applied.
+        """
+        refresh = getattr(self._reader, "refresh", None)
+        if callable(refresh):
+            with best_effort("refresh the reading engine after a setup change"):
+                refresh()
+        self._apply_initial_voice()
 
     # --------------------------------------------------------------- reading
 
@@ -574,6 +847,8 @@ __all__ = [
     "ENGINE_FOR_SOURCE",
     "LoadedDocument",
     "ReadReport",
+    "SetupReport",
+    "SetupStatus",
     "VoiceGroup",
     "VoiceStudioService",
 ]
