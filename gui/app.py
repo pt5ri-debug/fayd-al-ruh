@@ -415,6 +415,11 @@ class FaydGUI:
     #: constant so a caller or a test can name it without a live window.
     COMPOSER_PLACEHOLDER = "What do you want to build?"
 
+    #: An optional override for the service a dedicated model window drives
+    #: (:meth:`_model_chat_service`). A test sets this to build a lighter service
+    #: and open the window without a full session; ``None`` builds the real one.
+    model_chat_service_factory: Callable[[str], Any] | None = None
+
     def __init__(
         self,
         root: tk.Tk,
@@ -2076,15 +2081,16 @@ class FaydGUI:
 
         # The model-switch row inside the card, under the input: one chip per
         # answering model, in the order asked for, so the mouth is one click from
-        # the composer. Each chip drives the *same* ``_switch_mouth`` the header's
-        # selector drives, so the two controls can never disagree, and a chip that
-        # cannot load reports the real next step exactly as the selector does.
+        # the composer. Clicking a chip opens that model's *own* chat window
+        # (``_open_model_chat``), with its logo, its exclusive reading voice, and
+        # its language model; the header's selector still switches *this*
+        # conversation's mouth, so both remain available.
         self._model_bar = self._composer.model_bar()
         for key, name, hint in MODEL_BUTTONS:
             self._model_bar.add(
                 key, name=name, hint=hint,
-                command=partial(self._switch_mouth, key),
-                tip=f"Answer with {name} ({hint.lower()})",
+                command=partial(self._open_model_chat, key),
+                tip=f"Open {name}'s own chat window ({hint.lower()})",
             )
         self._sync_model_buttons()
 
@@ -2442,6 +2448,59 @@ class FaydGUI:
             mono=self._mono,
             on_close=lambda: setattr(self, "_sql_import_dialog", None),
         )
+
+    def _open_model_chat(self, mouth: str) -> None:
+        """Open (or focus) the dedicated chat window for one answering model.
+
+        The composer's model row opens this: each model gets its own conversation,
+        with its logo, its exclusive reading voice, and its language model. One
+        window per model is kept and reused, so clicking the same chip twice
+        raises the window already open rather than starting a second one.
+        """
+        dialogs = getattr(self, "_model_chat_dialogs", None)
+        if dialogs is None:
+            dialogs = {}
+            self._model_chat_dialogs = dialogs
+        existing = dialogs.get(mouth)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:  # the window was closed out from under us
+                dialogs.pop(mouth, None)
+
+        from gui.model_chat_dialog import ModelChatDialog
+
+        dialogs[mouth] = ModelChatDialog(
+            self.root,
+            self._model_chat_service(mouth),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=partial(self._forget_model_chat, mouth),
+        )
+
+    def _model_chat_service(self, mouth: str):
+        """The service a dedicated model window drives.
+
+        A real :class:`gui.model_chat.ModelChatService` by default (its own
+        session, its own voice, its own model). ``model_chat_service_factory`` may
+        be set to build a lighter one, so a test can open the window without a
+        full session.
+        """
+        factory = getattr(self, "model_chat_service_factory", None)
+        if factory is not None:
+            return factory(mouth)
+        from gui.model_chat import ModelChatService
+
+        return ModelChatService(mouth, data_root=data_dir())
+
+    def _forget_model_chat(self, mouth: str) -> None:
+        """Drop a closed model window's reference, so it is not held alive."""
+        dialogs = getattr(self, "_model_chat_dialogs", None)
+        if dialogs is not None:
+            dialogs.pop(mouth, None)
 
     def _open_image_gen(self) -> None:
         """Open the text-to-image screen as a separate window."""

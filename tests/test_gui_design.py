@@ -88,6 +88,50 @@ def _fake_mouth() -> Any:
     )
 
 
+def _fake_model_chat_service(mouth: str) -> Any:
+    """A stand-in per-model chat service, so its window opens with no session.
+
+    It carries the same small surface the window reads -- name, logo, voice,
+    model list, and an ``ask`` -- so the dedicated window can be opened and
+    driven in a test without building a real conversation.
+    """
+    from core.mouth_profile import DEFAULT_NAMES
+
+    name = DEFAULT_NAMES.get(mouth, mouth)
+    return SimpleNamespace(
+        mouth=mouth,
+        name=name,
+        session=None,
+        blurb=lambda: "a fake model mouth",
+        logo_path=lambda: None,
+        set_name=lambda value: name,
+        set_logo=lambda source: None,
+        clear_logo=lambda: None,
+        voice_key=lambda: "man-1",
+        set_voice=lambda key: key,
+        voice_sections=lambda: (),
+        voice_label=lambda key: key,
+        reading_available=lambda: False,
+        read_aloud=lambda text: SimpleNamespace(silent=True),
+        save_speech=lambda text, path: path,
+        model_choices=lambda: (),
+        model_key=lambda: "",
+        set_model=lambda key: key,
+        model_ready=lambda: False,
+        model_status=lambda: "a fake model",
+        describe=lambda: "a fake model",
+        ask=lambda message: SimpleNamespace(text="ok", hint=""),
+        new_conversation=lambda: "CNV-fake",
+        save=lambda: "saved",
+        microphone_available=lambda: False,
+        asr_status=lambda: "no microphone",
+        recognizer_name=lambda: "transcript",
+        start_recording=lambda: None,
+        stop_recording=lambda: None,
+        transcribe=lambda recording: "",
+    )
+
+
 # --- modes ----------------------------------------------------------------
 
 
@@ -1372,8 +1416,8 @@ def test_window_model_row_accents_the_answering_mouth(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
-def test_window_model_row_click_switches_the_mouth(tmp_path) -> None:
-    """Clicking a chip runs the same switch the header selector does."""
+def test_window_model_row_click_opens_that_models_own_chat(tmp_path) -> None:
+    """Clicking a chip opens the dedicated window for that model."""
     import tkinter as tk
 
     from ai.chat import MOUTH_ULTRON
@@ -1381,52 +1425,55 @@ def test_window_model_row_click_switches_the_mouth(tmp_path) -> None:
 
     root = tk.Tk()
     try:
-        service = _service(tmp_path)
-        service.switcher._ultron_loader = lambda: _fake_mouth()
-        app = FaydGUI(root, service=service)
+        app = FaydGUI(root, service=_service(tmp_path))
+        app.model_chat_service_factory = lambda mouth: _fake_model_chat_service(mouth)
         root.update()
-        app._add_bubble("assistant", "keep me across the mouth switch")
+        app._add_bubble("assistant", "keep me in the main transcript")
 
-        _chip(app._model_bar, "ultron").canvas.event_generate("<Button-1>")
+        _chip(app._model_bar, MOUTH_ULTRON).canvas.event_generate("<Button-1>")
         root.update()
-        assert service.source == MOUTH_ULTRON
-        assert app._source_var.get() == MOUTH_ULTRON
-        assert _chip(app._model_bar, "ultron")._active
-        # The switch happens in the same chat, never a second window.
-        texts = [entry.text for entry in app._rows]
-        assert any("keep me across the mouth switch" in text for text in texts)
+        # A dedicated window for that model is open, in the same appearance.
+        dialog = app._model_chat_dialogs[MOUTH_ULTRON]
+        assert dialog.window.winfo_toplevel() is not root
+        assert dialog.service.mouth == MOUTH_ULTRON
+        # The main conversation is untouched: its mouth did not change and its
+        # transcript is intact.
+        assert app.service.source == "sources"
+        assert any("keep me in the main transcript" in row.text for row in app._rows)
+        # Clicking the same chip again raises the window rather than opening a
+        # second one for the same model.
+        _chip(app._model_bar, MOUTH_ULTRON).canvas.event_generate("<Button-1>")
+        root.update()
+        assert app._model_chat_dialogs[MOUTH_ULTRON] is dialog
     finally:
         root.destroy()
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
-def test_window_model_row_keeps_the_mouth_when_a_chip_cannot_load(tmp_path) -> None:
-    """A chip whose model is missing reports the next step and keeps the current mouth."""
+def test_window_model_row_chip_opens_a_window_even_when_its_model_is_absent(tmp_path) -> None:
+    """A chip still opens its own window when the model is not installed.
+
+    The dedicated window is where the user chooses and downloads a model, so it
+    must open even when nothing is present yet -- it reports the real next step
+    instead of refusing to appear.
+    """
     import tkinter as tk
 
     from ai.chat import MOUTH_BANNER
-    from core.banner import BannerUnavailable
     from gui.app import FaydGUI
 
     root = tk.Tk()
     try:
-        service = _service(tmp_path)
-
-        def unavailable() -> Any:
-            raise BannerUnavailable("no weights")
-
-        service.switcher._banner_loader = unavailable
-        app = FaydGUI(root, service=service)
+        app = FaydGUI(root, service=_service(tmp_path))
+        app.model_chat_service_factory = lambda mouth: _fake_model_chat_service(mouth)
         root.update()
 
         _chip(app._model_bar, MOUTH_BANNER).canvas.event_generate("<Button-1>")
         root.update()
-        # The mouth did not change, the row still accents the real one, and the
-        # failure is explained rather than swallowed.
-        assert service.source == "sources"
+        assert MOUTH_BANNER in app._model_chat_dialogs
+        # The main conversation's mouth never changed.
+        assert app.service.source == "sources"
         assert _chip(app._model_bar, "sources")._active
-        assert not _chip(app._model_bar, MOUTH_BANNER)._active
-        assert "Could not load" in app._rows[-1].text
     finally:
         root.destroy()
 
