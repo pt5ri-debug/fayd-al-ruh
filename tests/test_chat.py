@@ -380,6 +380,38 @@ def test_switcher_loads_the_model_lazily(tmp_path) -> None:
     assert calls == [1]  # loaded once, reused
 
 
+def test_invalidate_mouth_forces_a_reload_with_the_new_model(tmp_path) -> None:
+    """A model switch must rebuild the mouth, not hand back the cached one."""
+    mode = _mode(tmp_path)
+    models: list[str] = []
+
+    def _loader():
+        model = _FakeMindModel(f"answer {len(models)}")
+        models.append(model)
+        return model
+
+    switcher = chat.ModelSwitcher(mode, loader=_loader)
+    switcher.use_model()
+    first = switcher.mind
+    switcher.use_model()
+    assert switcher.mind is first  # cached until invalidated
+
+    switcher.invalidate_mouth(chat.MOUTH_MODEL)
+    switcher.use_model()
+    assert switcher.mind is not first  # a fresh model is built
+    assert len(models) == 2
+
+
+def test_invalidate_mouth_leaves_the_other_mouths_alone(tmp_path) -> None:
+    mode = _mode(tmp_path)
+    switcher = chat.ModelSwitcher(mode, loader=lambda: _FakeMindModel("x"))
+    switcher.use_model()
+    mind = switcher.mind
+    switcher.invalidate_mouth(chat.MOUTH_ULTRON)  # a different mouth
+    switcher.use_model()
+    assert switcher.mind is mind
+
+
 def test_run_loop_switches_mouths_between_turns(tmp_path, monkeypatch, capsys) -> None:
     mode, switcher = _switcher_mode(tmp_path, continuation="model words.")
     answers = iter(["from the model", "what is porosity?", "from the sources", "what is porosity?", "quit"])

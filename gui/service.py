@@ -391,14 +391,18 @@ class ChatService:
         """Point ``mouth`` at the language model ``key`` and rebuild it if active.
 
         An empty ``key`` clears the override (back to the mouth's own default).
-        When the mouth is the one currently answering, it is reloaded at once, so
-        the very next question uses the chosen model -- the same "remember it and
-        apply it now" rule the cloud provider picker follows.
+        The mouth's cached assistant is dropped first, because it is cached after
+        its first load -- without that the reload would keep answering from the
+        model it was first built with rather than the newly chosen one. When the
+        mouth is the one currently answering, it is reloaded at once, so the very
+        next question uses the chosen model -- the same "remember it and apply it
+        now" rule the cloud provider picker follows.
         """
         if key:
             self._mouth_models[mouth] = key
         else:
             self._mouth_models.pop(mouth, None)
+        self.switcher.invalidate_mouth(mouth)
         if self.switcher.mouth == mouth:
             self._reload_active_mouth(mouth)
 
@@ -422,6 +426,39 @@ class ChatService:
     def mouth_model_choices(self, mouth: str):
         """The language models this mouth's window offers, with real availability."""
         return language_models_module.models_for_choice(mouth)
+
+    def mouth_is_active(self, mouth: str) -> bool:
+        """True when ``mouth`` is the one currently answering in this session."""
+        return self.switcher.mouth == mouth
+
+    def activate_mouth(self, mouth: str) -> str:
+        """Make ``mouth`` the answering mouth of *this* session and return its key.
+
+        A dedicated model window uses this so that switching the model there really
+        changes what answers *there*: the window owns its own session, so making its
+        mouth active leaves the main window's conversation untouched. Raises the
+        mouth's own availability error when it cannot answer, exactly as the main
+        window's switch does, so the caller reports the real next step.
+        """
+        if mouth == chat_module.MOUTH_SOURCES:
+            self.use_sources()
+        elif mouth == chat_module.MOUTH_MODEL:
+            self.use_model()
+        elif mouth == chat_module.MOUTH_ULTRON:
+            self.use_ultron()
+        elif mouth == chat_module.MOUTH_VISION:
+            self.use_vision()
+        elif mouth == chat_module.MOUTH_BANNER:
+            self.use_banner()
+        elif mouth == chat_module.MOUTH_CLOUD:
+            self.use_cloud()
+        elif mouth == chat_module.MOUTH_NATASHA:
+            self.use_natasha()
+        elif mouth == chat_module.MOUTH_HAKEEM:
+            self.use_hakeem()
+        else:
+            raise ValueError(f"Unknown mouth {mouth!r}.")
+        return self.switcher.mouth
 
     def describe_mouth_model(self, mouth: str) -> str:
         """An honest one-line description of the model a mouth will answer with."""

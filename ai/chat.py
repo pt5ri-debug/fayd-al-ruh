@@ -293,6 +293,30 @@ class ModelSwitcher:
         """
         self._cloud = None
 
+    def invalidate_mouth(self, mouth: str) -> None:
+        """Forget a cached mouth, so the next load rebuilds it.
+
+        Called when the user points a mouth at a *different* language model (see
+        ``gui.service.ChatService.set_mouth_model``): the assistant is cached after
+        its first load, so without dropping it the reload would hand back the model
+        it was first built with rather than the newly chosen one. Only the named
+        mouth is dropped, so the others keep their loaded model.
+        """
+        if mouth == MOUTH_MODEL:
+            self._mind = None
+        elif mouth == MOUTH_ULTRON:
+            self._ultron = None
+        elif mouth == MOUTH_VISION:
+            self._vision = None
+        elif mouth == MOUTH_BANNER:
+            self._banner = None
+        elif mouth == MOUTH_CLOUD:
+            self._cloud = None
+        elif mouth == MOUTH_NATASHA:
+            self._natasha = None
+        elif mouth == MOUTH_HAKEEM:
+            self._hakeem = None
+
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations again."""
         self.mode.assistant = self.grounded

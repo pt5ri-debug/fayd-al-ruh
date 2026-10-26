@@ -146,6 +146,14 @@ class LanguageModel:
     #: The identity of the weights (repo + file), which is how two engines naming
     #: the same model are recognised as one.
     identity: str = ""
+    #: The governed command that fetches this model's weights, empty when there is
+    #: nothing to fetch (a file the user added, the trained checkpoint, a cloud
+    #: model). The window and the CLI show it, and the download action runs the
+    #: same engine's own gated fetch rather than a re-implementation.
+    download_command: str = ""
+    #: True when the user added this model by hand (see :mod:`core.custom_models`),
+    #: so a window can offer to forget it again rather than only list it.
+    custom: bool = False
 
     def label(self) -> str:
         """The title plus an honest marker when the model is not present here."""
@@ -220,6 +228,7 @@ def _register(
                 f"download it with `{spec.download}`, "
                 f"or drop its .gguf file into {spec.folder}."
             ),
+            download_command=spec.download,
             catalog_key=spec.key,
             folders=(spec.folder,),
             filename=spec.filename,
@@ -430,6 +439,48 @@ def _build_gguf() -> tuple[LanguageModel, ...]:
     return tuple(models)
 
 
+def _custom_models() -> tuple[LanguageModel, ...]:
+    """The GGUF files the user added by hand (see :mod:`core.custom_models`).
+
+    Each is a real file the user pointed a window at, so it is offered to every
+    GGUF mouth -- they share the one in-process runtime -- and its availability is
+    the file's own presence, checked on every read. Nothing is copied: the entry
+    references the file where the user keeps it.
+    """
+    from core import custom_models
+
+    models: list[LanguageModel] = []
+    try:
+        entries = custom_models.list_models()
+    except Exception:
+        return ()
+    for entry in entries:
+        present = entry.available()
+        models.append(
+            LanguageModel(
+                key=entry.key,
+                title=entry.title,
+                engine=MOUTH_ULTRON,
+                engines=GGUF_MOUTHS,
+                summary="A GGUF model you added from this machine.",
+                available=present,
+                detail=(
+                    "ready."
+                    if present
+                    else f"the file {entry.path} is not there any more; "
+                    "add it again from the window."
+                ),
+                path=entry.path if present else None,
+                catalog_key=entry.key,
+                folders=(entry.path.parent,),
+                filename=entry.path.name,
+                identity=f"custom:{entry.path}",
+                custom=True,
+            )
+        )
+    return tuple(models)
+
+
 def _all() -> tuple[LanguageModel, ...]:
     """Every language model the project knows, freshly resolved.
 
@@ -444,6 +495,10 @@ def _all() -> tuple[LanguageModel, ...]:
         models.extend(_build_gguf())
     except Exception:
         pass  # a broken optional catalog must not make the whole picker unusable
+    try:
+        models.extend(_custom_models())
+    except Exception:
+        pass  # a corrupt custom-model registry must not break the picker either
     models.append(_trained_model())
     models.append(_retrieval_model())
     try:
@@ -615,6 +670,63 @@ def describe_language_models(mouth: str) -> str:
     return "\n".join(lines)
 
 
+def can_download(model: LanguageModel | None) -> bool:
+    """True when ``model`` has weights the project knows how to fetch here.
+
+    A catalog model has a governed download; a model the user added, the trained
+    checkpoint, a cloud model, and the retrieval mouth have nothing to fetch, so a
+    window offers no download button for them.
+    """
+    if model is None or model.custom or not model.download_command:
+        return False
+    return model.engine in {MOUTH_ULTRON, MOUTH_VISION, MOUTH_BANNER, MOUTH_NATASHA, MOUTH_HAKEEM}
+
+
+def download_model(
+    mouth: str,
+    key: str,
+    *,
+    approved: bool = False,
+    progress: Any = None,
+) -> Path:
+    """Fetch a chosen model's weights through the owning engine's own gate.
+
+    This is the one place a window's *Download* button and the CLI's
+    ``download-model`` command turn a catalog key into a real, human-approved
+    fetch: it dispatches to the engine that names the model (Ultron's, Vision's,
+    Banner's, or the companion's shared folder) so the download obeys that
+    engine's permission and approval gates, and no second download path is
+    written. Raises the engine's own availability error on any failure, and
+    :class:`ValueError` when the model has nothing to fetch.
+    """
+    model = find_language_model(mouth, key)
+    if model is None:
+        found = find_language_model_anywhere(key)
+        model = found[1] if found is not None else None
+    if model is None:
+        raise ValueError(f"{key!r} is not a model this build knows.")
+    if not can_download(model):
+        raise ValueError(f"{model.title!r} has nothing to download.")
+    catalog_key = model.catalog_key or key
+    if model.engine == MOUTH_ULTRON:
+        from core.ultron import download_model as fetch
+
+        return fetch(catalog_key, approved=approved, progress=progress)
+    if model.engine == MOUTH_VISION:
+        from core.vision_model import download_model as fetch
+
+        return fetch(catalog_key, approved=approved, progress=progress)
+    if model.engine == MOUTH_BANNER:
+        from core.presentation_model import download_model as fetch
+
+        return fetch(catalog_key, approved=approved, progress=progress)
+    if model.engine in (MOUTH_NATASHA, MOUTH_HAKEEM):
+        from companion.model import download_model as fetch
+
+        return fetch(catalog_key, approved=approved, progress=progress)
+    raise ValueError(f"{model.title!r} has nothing to download.")
+
+
 __all__ = [
     "ENGINE_LABELS",
     "GGUF_MOUTHS",
@@ -632,8 +744,10 @@ __all__ = [
     "TRAINED_KEY",
     "LanguageModel",
     "all_language_models",
+    "can_download",
     "default_language_model_key",
     "describe_language_models",
+    "download_model",
     "find_language_model",
     "find_language_model_anywhere",
     "language_models",
