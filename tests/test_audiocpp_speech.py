@@ -161,7 +161,164 @@ def test_a_hand_dropped_gguf_is_still_found(tmp_path):
     assert a.find_model_file(None, root) == loose
 
 
+# ------------------------------------------------------- the user's own voices
+
+
+def _wav(path: Path, *, silent: bool = False) -> Path:
+    """Write a real, decodable WAV (audible, or all-zero when ``silent``)."""
+    samples = (0, 0, 0, 0) if silent else (1000, -1000, 2000, -2000)
+    speech.AudioClip(samples, sample_rate=24_000).write_wav(path)
+    return path
+
+
+def test_import_voice_copies_a_wav_and_registers_it(tmp_path):
+    """An imported clip becomes a voice the engine can clone, listed by name."""
+    root = tmp_path / "data"
+    _fake_install(root)
+    clip = _wav(tmp_path / "my_clip.wav")
+    voice = a.import_voice(clip, name="My voice", root=root)
+    assert voice.name == "My voice"
+    assert (a.voices_dir(root) / voice.clip).is_file()
+    # It shows in the model's voice list beside the built-in speakers.
+    names = [v.name for v in a.voice_list(root)]
+    assert "My voice" in names and "Ahmed" in names
+    assert tuple(v.name for v in a.load_imported_voices(root)) == ("My voice",)
+
+
+def test_import_voice_refuses_an_onnx_with_the_piper_next_step(tmp_path):
+    root = tmp_path / "data"
+    _fake_install(root)
+    onnx = tmp_path / "voice.onnx"
+    onnx.write_bytes(b"ONNX")
+    with pytest.raises(ValueError, match="Piper"):
+        a.import_voice(onnx, root=root)
+
+
+def test_import_voice_refuses_a_missing_file_and_a_bad_format(tmp_path):
+    root = tmp_path / "data"
+    _fake_install(root)
+    with pytest.raises(ValueError, match="no file"):
+        a.import_voice(tmp_path / "nope.wav", root=root)
+    text = tmp_path / "notes.txt"
+    text.write_text("hello")
+    with pytest.raises(ValueError, match="audio clip"):
+        a.import_voice(text, root=root)
+
+
+def test_import_voice_refuses_a_clip_that_decodes_to_silence(tmp_path):
+    root = tmp_path / "data"
+    _fake_install(root)
+    quiet = _wav(tmp_path / "quiet.wav", silent=True)
+    with pytest.raises(ValueError, match="silence"):
+        a.import_voice(quiet, root=root)
+    # A refused clip leaves nothing behind in the registry.
+    assert a.load_imported_voices(root) == ()
+
+
+def test_import_voice_refuses_a_non_wav_with_no_converter(tmp_path, monkeypatch):
+    """A non-WAV clip with no ffmpeg/sox names the real next step, never a decode error."""
+    import shutil
+
+    root = tmp_path / "data"
+    _fake_install(root)
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    clip = tmp_path / "voice.mp3"
+    clip.write_bytes(b"ID3")
+    with pytest.raises(ValueError, match="ffmpeg"):
+        a.import_voice(clip, root=root)
+
+
+def test_import_voice_converts_a_non_wav_when_a_converter_exists(tmp_path, monkeypatch):
+    """With ffmpeg present, another format is converted and then stored as a WAV."""
+    import shutil
+    import subprocess
+
+    root = tmp_path / "data"
+    _fake_install(root)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name == "ffmpeg" else None)
+
+    def _fake_run(argv, **_kwargs):
+        # The converter's job is to leave a real WAV at the target path.
+        _wav(Path(argv[-1]))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    clip = tmp_path / "voice.mp3"
+    clip.write_bytes(b"ID3")
+    voice = a.import_voice(clip, name="Converted", root=root)
+    stored = a.voices_dir(root) / voice.clip
+    assert stored.is_file() and stored.suffix == ".wav"
+
+
+def test_clone_voice_takes_the_microphone_s_clip_directly(tmp_path):
+    """The window hands the recorder's own AudioClip in, with no file round trip."""
+    root = tmp_path / "data"
+    _fake_install(root)
+    clip = speech.AudioClip((1000, -1000, 2000, -2000), sample_rate=24_000)
+    voice = a.clone_voice(clip, root=root)
+    assert voice.name == "My voice"
+    stored = a.voices_dir(root) / voice.clip
+    assert stored.is_file()
+    assert not speech.AudioClip.read_wav(stored).is_silent
+    # A silent recording is refused, exactly like a silent file.
+    with pytest.raises(ValueError, match="silence"):
+        a.clone_voice(speech.AudioClip((0, 0, 0, 0)), name="Quiet", root=root)
+
+
+def test_clone_voice_defaults_the_name_and_replaces_a_repeat(tmp_path):
+    """Cloning twice under the same name keeps one row, not two."""
+    root = tmp_path / "data"
+    _fake_install(root)
+    first = a.clone_voice(_wav(tmp_path / "a.wav"), root=root)
+    assert first.name == "My voice"
+    again = a.clone_voice(_wav(tmp_path / "b.wav"), root=root)
+    assert again.name == "My voice"
+    assert tuple(v.name for v in a.load_imported_voices(root)) == ("My voice",)
+
+
+def test_remove_imported_voice_drops_the_row_and_its_clip(tmp_path):
+    root = tmp_path / "data"
+    _fake_install(root)
+    voice = a.import_voice(_wav(tmp_path / "clip.wav"), name="Gone", root=root)
+    stored = a.voices_dir(root) / voice.clip
+    assert stored.is_file()
+    assert a.remove_imported_voice("Gone", root=root) is True
+    assert not stored.exists()
+    assert a.load_imported_voices(root) == ()
+    # Removing it again is a no-op that reports so.
+    assert a.remove_imported_voice("Gone", root=root) is False
+
+
+def test_a_voice_whose_clip_vanished_is_dropped_from_the_list(tmp_path):
+    """The menu never offers a voice whose reference clip is gone."""
+    root = tmp_path / "data"
+    _fake_install(root)
+    voice = a.import_voice(_wav(tmp_path / "clip.wav"), name="Temp", root=root)
+    (a.voices_dir(root) / voice.clip).unlink()
+    assert a.load_imported_voices(root) == ()
+    assert "Temp" not in [v.name for v in a.voice_list(root)]
+
+
+def test_a_corrupt_import_registry_is_tolerated(tmp_path):
+    """A stale or unreadable registry yields no voices rather than raising."""
+    root = tmp_path / "data"
+    _fake_install(root)
+    a.imported_voices_path(root).write_text("{not json", encoding="utf-8")
+    assert a.load_imported_voices(root) == ()
+
+
 # -------------------------------------------------------------------- gates
+
+
+def test_normalize_language_maps_the_project_codes_onto_the_engine_s_ids():
+    """The engine rejects a bare ``ar``; the project's two-letter code becomes ``arz``."""
+    assert a.normalize_language("ar") == "arz"
+    assert a.normalize_language("arz") == "arz"
+    assert a.normalize_language("en") == "en"
+    # Empty or unknown falls back to the model's own language, never an id it refuses.
+    assert a.normalize_language("") == a.VOICETUT_LANGUAGE
+    assert a.normalize_language("fr") == a.VOICETUT_LANGUAGE
+    assert a.normalize_language(None) == a.VOICETUT_LANGUAGE
 
 
 def test_downloads_and_install_are_denied_by_default(tmp_path):
@@ -328,6 +485,50 @@ def test_cli_say_rejects_an_unknown_voice(capsys):
 
     assert cli_audio.main(["say", "hello", "--voice", "model:audio.cpp:Nobody"]) == 3
     assert "voices" in capsys.readouterr().out
+
+
+def test_cli_import_clone_and_remove_round_trip(tmp_path, monkeypatch, capsys):
+    """The CLI is the headless twin of the window's clone/import buttons."""
+    from cli import audio as cli_audio
+
+    root = tmp_path / "data"
+    _fake_install(root)
+    # Route the CLI's own calls at the temp root (the window uses the same helpers).
+    monkeypatch.setattr(cli_audio, "import_voice", lambda path, **kw: a.import_voice(path, root=root, **kw))
+    monkeypatch.setattr(cli_audio, "clone_voice", lambda path, **kw: a.clone_voice(path, root=root, **kw))
+    monkeypatch.setattr(cli_audio, "load_imported_voices", lambda: a.load_imported_voices(root))
+    monkeypatch.setattr(cli_audio, "remove_imported_voice", lambda name: a.remove_imported_voice(name, root=root))
+
+    clip = _wav(tmp_path / "clip.wav")
+    assert cli_audio.main(["import", str(clip), "--name", "Studio"]) == 0
+    assert "Studio" in capsys.readouterr().out
+    assert cli_audio.main(["clone", str(clip)]) == 0
+    assert "My voice" in capsys.readouterr().out
+    assert cli_audio.main(["my-voices"]) == 0
+    listed = capsys.readouterr().out
+    assert "Studio" in listed and "My voice" in listed
+    assert cli_audio.main(["remove-voice", "Studio"]) == 0
+    assert cli_audio.main(["remove-voice", "Studio"]) == 3
+
+
+def test_cli_import_reports_a_bad_clip(tmp_path, monkeypatch, capsys):
+    from cli import audio as cli_audio
+
+    root = tmp_path / "data"
+    _fake_install(root)
+    monkeypatch.setattr(cli_audio, "import_voice", lambda path, **kw: a.import_voice(path, root=root, **kw))
+    onnx = tmp_path / "v.onnx"
+    onnx.write_bytes(b"ONNX")
+    assert cli_audio.main(["import", str(onnx)]) == 2
+    assert "Piper" in capsys.readouterr().out
+
+
+def test_cli_my_voices_is_empty_before_anything_is_added(tmp_path, monkeypatch, capsys):
+    from cli import audio as cli_audio
+
+    monkeypatch.setattr(cli_audio, "load_imported_voices", lambda: ())
+    assert cli_audio.main(["my-voices"]) == 0
+    assert "No voices" in capsys.readouterr().out
 
 
 # ------------------------------------------------------------- honest deps

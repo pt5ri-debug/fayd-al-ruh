@@ -619,7 +619,7 @@ def test_window_initial_geometry_is_clamped_to_the_work_area(monkeypatch, data_r
             root, service, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
         )
         monkeypatch.setattr(
-            "gui.model_chat_dialog.work_area", lambda: (0, 30, 1000, 600)
+            "gui.window_controls.work_area", lambda: (0, 30, 1000, 600)
         )
         assert dialog._initial_geometry() == "1000x600"
     finally:
@@ -757,6 +757,110 @@ def test_window_closes_cleanly_and_calls_back(data_root) -> None:
         root.update()
         assert closed == [True]
     finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_message_has_a_read_aloud_toggle(data_root) -> None:
+    """Every message carries the shared footer: Copy and a Read aloud / Stop toggle.
+
+    The footer is the main window's own (``gui.message_footer``), so a per-model
+    window reads exactly like the chat window: the control starts on ``Read aloud``,
+    switches to ``Stop`` while that message is the one being spoken, and a second
+    click stops the reading and returns it to ``Read aloud``.
+    """
+    import threading
+    import tkinter as tk
+    from types import SimpleNamespace
+
+    from gui.app import DARK_THEME
+    from gui.message_footer import READ_LABEL, STOP_LABEL
+    from gui.model_chat import ModelChatService
+    from gui.model_chat_dialog import ModelChatDialog
+
+    # The reader blocks in `play` until told to stop, so the reading stays in
+    # progress long enough to observe the Stop state and to stop it.
+    gate = threading.Event()
+    stopped: list[bool] = []
+    spoken: list[str] = []
+
+    class _Voice:
+        key = "woman-1"
+        engine = "fake"
+
+        def label(self) -> str:
+            return self.key
+
+        def category_label(self) -> str:
+            return "Women"
+
+    class _Playback:
+        def wait(self) -> None:
+            gate.wait(2)
+
+        def stop(self) -> None:
+            stopped.append(True)
+            gate.set()
+
+    class _Reader:
+        """A reader with the small surface the window needs, no engine at all."""
+
+        voice = _Voice()
+        mood = None
+
+        def available(self) -> bool:
+            return True
+
+        def set_voice(self, key: str) -> _Voice:
+            self.voice = _Voice()
+            self.voice.key = key
+            return self.voice
+
+        def render(self, text: str):
+            spoken.append(text)
+            return SimpleNamespace(silent=False, duration_seconds=0.0)
+
+        def speak(self, text: str):
+            spoken.append(text)
+            return SimpleNamespace(silent=False, duration_seconds=0.0)
+
+        def play(self, clip):
+            return _Playback()
+
+        def refresh(self) -> None:
+            return None
+
+    root = tk.Tk()
+    try:
+        service = ModelChatService(
+            catalog.MOUTH_ULTRON, data_root=data_root, reader=_Reader()  # type: ignore[arg-type]
+        )
+        dialog = ModelChatDialog(
+            root, service, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+        )
+        root.update()
+        dialog._add_message("assistant", "porosity is the fraction of pore space")
+        root.update()
+        assert dialog._footers, "the message must carry a footer"
+        footer = dialog._footers[-1]
+        assert footer.speaker is not None
+        assert str(footer.speaker.cget("text")) == READ_LABEL
+        # Start the reading: the control turns into Stop at once.
+        dialog._toggle_footer_reading(footer)
+        assert str(footer.speaker.cget("text")) == STOP_LABEL
+        # Let the worker reach `play`, so the reading is genuinely in progress.
+        for _ in range(300):
+            root.update()
+            time.sleep(0.01)
+            if spoken:
+                break
+        assert spoken, "the message should have been read aloud"
+        # A second click stops it, and the control returns to Read aloud.
+        dialog._toggle_footer_reading(footer)
+        assert stopped, "the reading in progress should have been stopped"
+        assert str(footer.speaker.cget("text")) == READ_LABEL
+    finally:
+        gate.set()
         root.destroy()
 
 

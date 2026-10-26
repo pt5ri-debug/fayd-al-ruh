@@ -35,20 +35,20 @@ from tkinter import filedialog
 from tkinter import font as tkfont
 from typing import Any
 
+from core.reading import clip_is_silent
+
 from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
 from gui.image_preview import load_scaled
+from gui.message_footer import MessageFooter, strip_markdown
 from gui.model_chat import ModelChatService, mouth_title
 from gui.typography import resolve
-from gui.window_controls import install_window_controls, work_area
+from gui.window_controls import fit_geometry, install_window_controls
 
 #: The transcript reads as a centred column, capped like the chat window's.
 _COLUMN_MAX = 860
-
-#: A message taller than this scrolls inside its own card.
-_MAX_BUBBLE_LINES = 40
 
 #: The logo badge's side length, in pixels (the sidebar's identity block).
 LOGO_SIZE = 84
@@ -95,6 +95,9 @@ class ModelChatDialog:
         self._recording: Any = None
         self._pump_after: str | None = None
         self._rows: list[tuple[str, str, tk.Frame, tk.Text, RoundedBox | None]] = []
+        # The footers under the messages, so the one reading aloud shows "Stop".
+        self._footers: list[MessageFooter] = []
+        self._playing_footer: MessageFooter | None = None
 
         # Worker threads hand results back through a queue the UI thread drains on
         # its own clock: calling `after` from a worker thread races with the main
@@ -121,26 +124,8 @@ class ModelChatDialog:
     # -- layout -----------------------------------------------------------
 
     def _initial_geometry(self) -> str:
-        """The window's opening geometry, kept inside the usable desktop.
-
-        The size is :data:`DEFAULT_WIDTH` by :data:`DEFAULT_HEIGHT` (90% of the
-        window's original height), but never taller or wider than the work area --
-        a screen smaller than the default would otherwise open a window that runs
-        off the bottom, where its composer could not be reached.
-        """
-        width, height = DEFAULT_WIDTH, DEFAULT_HEIGHT
-        try:
-            area = work_area()
-            if area is not None:
-                _x, _y, area_width, area_height = area
-                width = min(width, area_width)
-                height = min(height, area_height)
-            else:
-                width = min(width, self.window.winfo_screenwidth())
-                height = min(height, self.window.winfo_screenheight())
-        except tk.TclError:
-            pass
-        return f"{width}x{height}"
+        """The opening geometry, kept inside the usable desktop (screen minus taskbar)."""
+        return fit_geometry(self.window, DEFAULT_WIDTH, DEFAULT_HEIGHT, min_height=MIN_HEIGHT)
 
     def _build(self) -> None:
         self._build_header()
@@ -418,7 +403,7 @@ class ModelChatDialog:
         if error is not None:
             self._add_message("note", f"Could not read aloud: {error}")
             return
-        if clip is None or getattr(clip, "silent", False):
+        if clip_is_silent(clip):
             self._add_message(
                 "note", "The engine produced no audio; install a speech engine to hear it."
             )
@@ -639,8 +624,52 @@ class ModelChatDialog:
         for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             widget.bind(wheel, self._on_bubble_wheel, add="+")
         self._fit_height(widget)
+        # Every message carries the same footer the main window draws -- Copy and a
+        # Read aloud / Stop toggle -- so a per-model window reads like the chat window.
+        footer = MessageFooter(
+            row, text=strip_markdown(text), widget=widget, theme=theme,
+            typography=self._type, on_toggle=self._toggle_footer_reading,
+        )
+        self._footers.append(footer)
         self._scroll_to_bottom()
         return widget
+
+    def _toggle_footer_reading(self, footer: MessageFooter) -> None:
+        """Read one message aloud, or stop the reading that footer started."""
+        if self._playing_footer is not None and self._playing_footer is not footer:
+            self.service.stop_reading()
+            self._playing_footer.set_playing(False)
+            self._playing_footer = None
+        if footer.playing:
+            self.service.stop_reading()
+            footer.set_playing(False)
+            self._playing_footer = None
+            return
+        if not self.service.reading_available():
+            self._add_message(
+                "note",
+                "No speech engine is installed here, so nothing can be read aloud yet.",
+            )
+            return
+        if self._busy:
+            return
+        self._playing_footer = footer
+        footer.set_playing(True)
+        self._start_work(
+            partial(self.service.start_reading, footer.text),
+            self._render_footer_reading,
+        )
+
+    def _render_footer_reading(self, clip: Any, error: Exception | None) -> None:
+        if self._playing_footer is not None:
+            self._playing_footer.set_playing(False)
+            self._playing_footer = None
+        if error is not None:
+            self._add_message("note", f"Could not read aloud: {error}")
+        elif clip_is_silent(clip):
+            self._add_message(
+                "note", "The engine produced no audio; install a speech engine to hear it."
+            )
 
     def _avatar(self, parent: tk.Misc) -> None:
         """A small round badge: the saved logo when there is one, else an initial."""
@@ -667,10 +696,16 @@ class ModelChatDialog:
         rich_text.insert_markdown(widget, text, theme=self.theme, typography=self._type)
 
     def _fit_height(self, widget: tk.Text) -> None:
+        """Size a message's card to its whole content, so nothing is clipped.
+
+        The card grows to hold every displayed line (the transcript scrolls when
+        the conversation is longer than the window), so a long answer is fully
+        readable in its own message rather than hidden behind an inner scrollbar.
+        """
         widget.update_idletasks()
         measured = widget.count("1.0", "end", "displaylines")
         lines = int(measured[0]) if measured else 1
-        widget.configure(height=min(max(lines, 1), _MAX_BUBBLE_LINES))
+        widget.configure(height=max(lines, 1))
 
     @staticmethod
     def _make_read_only(widget: tk.Text) -> None:
@@ -872,6 +907,17 @@ class ModelChatDialog:
             except Exception:
                 pass
             self._recording = None
+        # End a reading in progress and drop every footer's bound command, so the
+        # destroyed window is not held by a cycle only the cyclic collector could
+        # break (which can run on a worker thread and deadlock on a Tcl call).
+        try:
+            self.service.stop_reading()
+        except Exception:
+            pass
+        for footer in self._footers:
+            footer.clear_commands()
+        self._footers.clear()
+        self._playing_footer = None
         try:
             self.window.destroy()
         finally:
