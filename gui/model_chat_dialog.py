@@ -427,6 +427,26 @@ class ModelChatDialog:
         self._model_keys: list[str] = []
         self._populate_models()
 
+        actions = tk.Frame(sidebar, bg=theme.surface)
+        actions.pack(fill="x", padx=12, pady=(6, 0))
+        self._add_model_button = self._button(
+            actions, "＋  Add a language model…", self._on_add_model, small=True
+        )
+        self._add_model_button.pack(fill="x", pady=(0, 4))
+        self._download_model_button = self._button(
+            actions, "⇩  Download the chosen model", self._on_download_model, small=True
+        )
+        self._download_model_button.pack(fill="x", pady=(0, 4))
+        self._remove_model_button = self._button(
+            actions, "✕  Forget this model", self._on_remove_model, small=True
+        )
+        self._remove_model_button.pack(fill="x")
+        # The retrieval mouth (Jarvis, from the sources) has no language model to
+        # add or forget, so those two actions are removed rather than shown dead.
+        if not self._can_add_model():
+            self._add_model_button.pack_forget()
+            self._remove_model_button.pack_forget()
+
         self._model_note = tk.Label(
             sidebar, text="", bg=theme.surface, fg=theme.text_dim,
             font=self._type.font("2xs"), anchor="w", justify="left",
@@ -446,6 +466,35 @@ class ModelChatDialog:
                 self._model_list.selection_clear(0, "end")
                 self._model_list.selection_set(index)
                 self._model_list.see(index)
+        self._refresh_model_buttons()
+
+    def _refresh_model_buttons(self) -> None:
+        """Enable each model action only when it applies to the chosen model."""
+        key = self.service.model_key()
+        try:
+            self._download_model_button.configure(
+                state="normal" if self._can_download(key) else "disabled"
+            )
+            self._remove_model_button.configure(
+                state="normal" if self._can_remove(key) else "disabled"
+            )
+        except (AttributeError, tk.TclError):
+            pass
+
+    def _can_download(self, key: str) -> bool:
+        """True when the service can fetch the chosen model's weights."""
+        check = getattr(self.service, "can_download", None)
+        return bool(check(key)) if callable(check) else False
+
+    def _can_remove(self, key: str) -> bool:
+        """True when the chosen model is one the user added here."""
+        check = getattr(self.service, "can_remove", None)
+        return bool(check(key)) if callable(check) else False
+
+    def _can_add_model(self) -> bool:
+        """True when this mouth runs a language model a file can be added to."""
+        check = getattr(self.service, "can_add_model", None)
+        return bool(check()) if callable(check) else True
 
     def _on_model_select(self, _event: tk.Event) -> None:
         selection = self._model_list.curselection()
@@ -465,15 +514,84 @@ class ModelChatDialog:
             self._add_message("note", f"Could not switch model: {error}")
             return
         self._refresh_model_status()
-        self._add_message("note", f"{self.service.name} will answer with {key}.")
+        self._refresh_model_buttons()
+        self._add_message("note", f"{self.service.name} will answer with {self._model_label(key)}.")
+
+    def _model_label(self, key: str) -> str:
+        """A readable title for a model key, from what this window offers."""
+        for model in self.service.model_choices():
+            if model.key == key:
+                return model.title
+        return key
+
+    def _on_add_model(self) -> None:
+        """Add a GGUF file on this machine and start using it in this window."""
+        path = filedialog.askopenfilename(
+            parent=self.window,
+            title=f"Choose a GGUF model for {self.service.name}",
+            filetypes=[("GGUF models", "*.gguf"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            key = self.service.add_model(path)
+        except (ValueError, OSError) as error:
+            self._add_message("note", f"Could not add the model: {error}")
+            return
+        self._populate_models()
+        self._refresh_model_status()
+        self._add_message(
+            "note",
+            f"Added {self._model_label(key)} and made it active here. "
+            "Ask a question to use it.",
+        )
+
+    def _on_remove_model(self) -> None:
+        """Forget the chosen model when the user added it here."""
+        key = self.service.model_key()
+        if not self._can_remove(key):
+            self._add_message(
+                "note", "Only a model you added here can be forgotten; pick another one instead."
+            )
+            return
+        title = self._model_label(key)
+        self.service.remove_model(key)
+        self._populate_models()
+        self._refresh_model_status()
+        self._add_message("note", f"Forgot {title}.")
+
+    def _on_download_model(self) -> None:
+        """Fetch the chosen model's weights, on a worker thread, with approval."""
+        if self._busy:
+            return
+        key = self.service.model_key()
+        if not self._can_download(key):
+            self._add_message("note", "The chosen model has nothing to download.")
+            return
+        title = self._model_label(key)
+        command = getattr(self.service, "download_command", lambda _key: "")(key)
+        hint = f" (or run `{command}`)" if command else ""
+        self._add_message("note", f"Downloading {title}… this can take a while{hint}.")
+        self._start_work(lambda: self.service.download_model(key, approved=True), self._render_download)
+
+    def _render_download(self, path: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._add_message("note", f"Could not download the model: {error}")
+            return
+        self._populate_models()
+        self._refresh_model_status()
+        self._add_message("note", f"Model ready at {path}. Ask a question to use it.")
 
     def _refresh_model_status(self) -> None:
         status = self.service.model_status()
-        self._model_note.configure(text=status)
+        status_fn = getattr(self.service, "activation_status", None)
+        activation = status_fn() if callable(status_fn) else ""
+        self._model_note.configure(text=f"{status}\n{activation}".strip())
         if not self.service.model_ready():
             self._model_note.configure(fg=self.theme.text_dim)
         else:
             self._model_note.configure(fg=self.theme.text_secondary)
+        self._refresh_model_buttons()
 
     # -- conversation -----------------------------------------------------
 

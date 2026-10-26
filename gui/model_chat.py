@@ -25,11 +25,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ai import mouths as mouths_module
+from companion.companion_agent import CompanionError
+from core import custom_models
 from core import language_models as catalog
 from core import mouth_profile as profiles
+from core.banner import BannerUnavailable
 from core.best_effort import best_effort
+from core.cloud_model import CloudUnavailable
 from core.paths import data_dir
 from core.reading import TextReader, clip_is_silent, split_for_speech
+from core.ultron import UltronUnavailable
+from core.vision_model import VisionUnavailable
 from core.voices import (
     ModelVoice,
     SystemVoice,
@@ -40,8 +47,24 @@ from core.voices import (
     is_model_voice_key,
     is_system_voice_key,
 )
+from hakeem.hakeem_agent import HakeemError
 
 from gui.service import ChatReply, ChatService
+
+#: The errors activating a mouth can raise. Each carries the real next step
+#: (install the runtime, set a key, download the weights), so a dedicated window
+#: that cannot bring its mouth up reports it instead of failing to open.
+_ACTIVATION_ERRORS = (
+    FileNotFoundError,
+    OSError,
+    ValueError,
+    UltronUnavailable,
+    VisionUnavailable,
+    BannerUnavailable,
+    CloudUnavailable,
+    CompanionError,
+    HakeemError,
+)
 
 #: A short, honest line per mouth explaining what it is, shown in its window.
 MOUTH_BLURBS: dict[str, str] = {
@@ -125,6 +148,52 @@ class ModelChatService:
         # lightweight stand-in service (a test's) still works.
         if self.profile.model and hasattr(self.service, "set_mouth_model"):
             self.service.set_mouth_model(mouth, self.profile.model)
+        # The mouth the window is for must be the one answering *here*, so a
+        # question asked in this window is answered by this model rather than by
+        # the grounded default. Best-effort: a mouth that cannot load (its runtime
+        # or weights are missing) reports the real next step in ``activation_status``
+        # instead of failing to open the window.
+        self._activation_error: str = ""
+        self._activate()
+
+    # ------------------------------------------------------------- activation
+
+    def _activate(self) -> None:
+        """Make this window's mouth the one answering its own session.
+
+        The dedicated window owns its own conversation, so making its mouth active
+        never touches the main window's mouth. A failure is recorded, not raised:
+        the window still opens and reports the real next step, so the user can add
+        or download a model from it.
+        """
+        activate = getattr(self.service, "activate_mouth", None)
+        if activate is None:
+            return
+        try:
+            activate(self.mouth)
+            self._activation_error = ""
+        except _ACTIVATION_ERRORS as error:
+            self._activation_error = str(error)
+        except Exception as error:  # a stand-in service may raise anything
+            self._activation_error = str(error)
+
+    def active(self) -> bool:
+        """True when this window's mouth is the one answering its session."""
+        check = getattr(self.service, "mouth_is_active", None)
+        if check is None:
+            return True
+        try:
+            return bool(check(self.mouth))
+        except Exception:
+            return True
+
+    def activation_status(self) -> str:
+        """An honest line about whether this mouth is answering here, and the next step."""
+        if self.active():
+            return f"{self.name} is answering here."
+        if self._activation_error:
+            return f"{self.name} cannot answer yet: {self._activation_error}"
+        return f"{self.name} is not answering here yet."
 
     # --------------------------------------------------------------- identity
 
@@ -276,16 +345,101 @@ class ModelChatService:
     def set_model(self, key: str) -> str:
         """Point this mouth at ``key``, persist it, and return the stored key.
 
-        The mouth is rebuilt at once when it is the one answering, so the next
-        question uses the chosen model. A model that is not offered here is still
-        accepted (the user may know a file the catalog does not name yet), but a
-        *known* one that is not downloaded is reported by :meth:`model_ready`.
+        The mouth is rebuilt at once (through :meth:`service.set_mouth_model`) when
+        it is the one answering, and this window re-activates it so the next
+        question uses the chosen model and it is the active one here. A model that
+        is not offered here is still accepted (the user may know a file the catalog
+        does not name yet), but a *known* one that is not downloaded is reported by
+        :meth:`model_ready`. The choice is saved first and the load is best-effort,
+        so choosing a model whose runtime or weights are missing still remembers it
+        and reports the real next step rather than losing the choice.
         """
+        self.profile = profiles.set_model(self.mouth, key)
         setter = getattr(self.service, "set_mouth_model", None)
         if setter is not None:
-            setter(self.mouth, key)
-        self.profile = profiles.set_model(self.mouth, key)
+            try:
+                setter(self.mouth, key)
+            except _ACTIVATION_ERRORS:
+                pass  # saved; ``activation_status`` reports why it cannot answer yet
+            except Exception:
+                pass
+        self._activate()
         return key
+
+    def add_model(self, path: str | Path, *, title: str = "") -> str:
+        """Add a GGUF file on this machine as a selectable model and use it here.
+
+        The file is remembered in the custom-model registry (see
+        :mod:`core.custom_models`) under a ``custom:`` key, offered to this window's
+        picker, and immediately made this window's active model, so it is ready to
+        chat with at once. Raises :class:`ValueError` for a missing or non-GGUF
+        file, so the window reports a bad choice rather than storing it.
+        """
+        if not self.can_add_model():
+            raise ValueError(
+                f"{self.name} answers from cited passages and has no language model "
+                "to add."
+            )
+        entry = custom_models.add_model(path, title=title)
+        self.set_model(entry.key)
+        return entry.key
+
+    def can_add_model(self) -> bool:
+        """True when this mouth runs a language model that a file can be added to.
+
+        The retrieval mouth (Jarvis, from the sources) has no language model at
+        all, so its window offers no *Add a language model…* action rather than a
+        button that would store a choice nothing uses.
+        """
+        return self.mouth in mouths_module.MODEL_MOUTHS
+
+    def remove_model(self, key: str) -> bool:
+        """Forget a model the user added here; ``True`` when one was removed.
+
+        Only a ``custom:`` entry can be removed -- a catalog model is forgotten by
+        pointing the window at another one. When the removed model was the active
+        choice, the window falls back to the mouth's own default so the next
+        question still answers.
+        """
+        if not custom_models.is_custom_key(key):
+            return False
+        removed = custom_models.remove_model(key)
+        if removed and self.model_key() == key:
+            self.set_model("")
+        return removed
+
+    def can_remove(self, key: str) -> bool:
+        """True when ``key`` is a model the user added here (so it can be forgotten)."""
+        return custom_models.is_custom_key(key)
+
+    def can_download(self, key: str | None = None) -> bool:
+        """True when the chosen (or named) model has weights this build can fetch."""
+        choice = self._choice(key)
+        return catalog.can_download(choice)
+
+    def download_command(self, key: str | None = None) -> str:
+        """The governed command that fetches the chosen model, or ``""``."""
+        choice = self._choice(key)
+        return choice.download_command if choice is not None else ""
+
+    def download_model(self, key: str | None = None, *, approved: bool = True) -> Path:
+        """Fetch the chosen model's weights through the owning engine's own gate.
+
+        ``approved=True`` is the user's explicit click, exactly like every other
+        model download in the project: the fetch still runs through the engine's
+        permission and human-approval gates (see :func:`core.language_models.download_model`),
+        so nothing is fetched that the user did not ask for. Raises the engine's own
+        availability error, or :class:`ValueError` when there is nothing to fetch.
+        """
+        chosen = key or self.model_key() or catalog.default_language_model_key(self.mouth) or ""
+        return catalog.download_model(self.mouth, chosen, approved=approved)
+
+    def _choice(self, key: str | None = None):
+        """The catalog entry for ``key`` (or the chosen model), or ``None``."""
+        wanted = key if key is not None else self.model_key()
+        if not wanted:
+            wanted = catalog.default_language_model_key(self.mouth) or ""
+        return catalog.resolve_choice(self.mouth, wanted) if wanted else None
 
     def model_ready(self) -> bool:
         """True when the chosen model (or the mouth's default) could answer now."""

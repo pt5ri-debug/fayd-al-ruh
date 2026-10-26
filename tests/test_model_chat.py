@@ -450,6 +450,246 @@ def test_chat_service_accepts_an_injected_service(data_root) -> None:
     assert service.ask("hello") == "echo:hello"
 
 
+# --- the custom-model registry ----------------------------------------------
+
+
+def test_custom_registry_adds_a_gguf_and_offers_it_to_the_mouth(data_root, tmp_path) -> None:
+    """A GGUF the user points a window at becomes a selectable model there."""
+    from core import custom_models
+
+    gguf = tmp_path / "My-Model.gguf"
+    gguf.write_bytes(b"GGUF")
+    entry = custom_models.add_model(gguf, title="My Model")
+    assert entry.key == "custom:my-model"
+    assert entry.available()
+    assert entry.path == gguf.resolve()
+    # It is offered to the GGUF mouths, marked as the user's own, with a real path.
+    offered = catalog.find_language_model(catalog.MOUTH_ULTRON, entry.key)
+    assert offered is not None and offered.custom and offered.available
+    assert catalog.resolve_model_path(catalog.MOUTH_ULTRON, entry.key) == gguf.resolve()
+
+
+def test_custom_registry_refuses_a_missing_or_non_gguf_file(data_root, tmp_path) -> None:
+    """A bad choice is reported rather than stored."""
+    from core import custom_models
+
+    with pytest.raises(ValueError):
+        custom_models.add_model(tmp_path / "absent.gguf")
+    text = tmp_path / "notes.txt"
+    text.write_text("not a model")
+    with pytest.raises(ValueError):
+        custom_models.add_model(text)
+
+
+def test_custom_registry_persists_and_removes(data_root, tmp_path) -> None:
+    """A remembered model survives a re-read, and can be forgotten."""
+    from core import custom_models
+
+    gguf = tmp_path / "Persist.gguf"
+    gguf.write_bytes(b"GGUF")
+    entry = custom_models.add_model(gguf)
+    assert [m.key for m in custom_models.list_models()] == [entry.key]
+    assert custom_models.remove_model(entry.key)
+    assert custom_models.list_models() == ()
+    assert not custom_models.remove_model(entry.key)
+
+
+def test_custom_registry_reports_a_file_that_left(data_root, tmp_path) -> None:
+    """A model whose file is gone is offered but reported as not available."""
+    from core import custom_models
+
+    gguf = tmp_path / "Gone.gguf"
+    gguf.write_bytes(b"GGUF")
+    entry = custom_models.add_model(gguf)
+    gguf.unlink()
+    offered = catalog.find_language_model(catalog.MOUTH_ULTRON, entry.key)
+    assert offered is not None and not offered.available
+    assert "not there any more" in offered.detail
+
+
+def test_custom_registry_tolerates_a_corrupt_store(data_root) -> None:
+    """A corrupt registry reads as empty rather than crashing a window."""
+    from core import custom_models
+
+    (data_root / custom_models.NAMESPACE).mkdir(parents=True, exist_ok=True)
+    (data_root / custom_models.NAMESPACE / "registry.json").write_text("{ not json", encoding="utf-8")
+    assert custom_models.list_models() == ()
+
+
+def test_a_catalog_model_has_a_download_and_a_custom_one_does_not(data_root, tmp_path) -> None:
+    """Only a catalog model the project knows how to fetch can be downloaded."""
+    from core import custom_models
+
+    known = catalog.find_language_model(catalog.MOUTH_ULTRON, "qwen2.5-7b")
+    assert known is not None and catalog.can_download(known)
+    assert "ultron download" in known.download_command
+
+    gguf = tmp_path / "Mine.gguf"
+    gguf.write_bytes(b"GGUF")
+    entry = custom_models.add_model(gguf)
+    mine = catalog.find_language_model(catalog.MOUTH_ULTRON, entry.key)
+    assert mine is not None and not catalog.can_download(mine)
+
+
+def test_download_model_dispatches_to_the_owning_engine(monkeypatch, data_root) -> None:
+    """A chosen model's fetch runs through the engine that names it."""
+    seen: dict[str, Any] = {}
+
+    def fake_fetch(key, *, approved=False, progress=None):
+        seen["key"] = key
+        seen["approved"] = approved
+        return Path("/tmp/model.gguf")
+
+    monkeypatch.setattr("core.ultron.download_model", fake_fetch)
+    path = catalog.download_model(catalog.MOUTH_ULTRON, "qwen2.5-7b", approved=True)
+    assert path == Path("/tmp/model.gguf")
+    assert seen == {"key": "qwen2.5-7b", "approved": True}
+
+
+def test_download_model_refuses_a_model_with_nothing_to_fetch(data_root, tmp_path) -> None:
+    from core import custom_models
+
+    gguf = tmp_path / "Mine.gguf"
+    gguf.write_bytes(b"GGUF")
+    entry = custom_models.add_model(gguf)
+    with pytest.raises(ValueError):
+        catalog.download_model(catalog.MOUTH_ULTRON, entry.key, approved=True)
+
+
+# --- the service activates its mouth and manages models ---------------------
+
+
+def test_service_activates_its_mouth_on_open(data_root) -> None:
+    """Opening the window makes this mouth the one answering its own session."""
+    from gui.model_chat import ModelChatService
+
+    calls: list[str] = []
+
+    class _Inner:
+        def __init__(self) -> None:
+            self.mouth = ""
+
+        def ask(self, message: str) -> str:
+            return f"echo:{message}"
+
+        def activate_mouth(self, mouth: str) -> str:
+            calls.append(mouth)
+            self.mouth = mouth
+            return mouth
+
+        def mouth_is_active(self, mouth: str) -> bool:
+            return self.mouth == mouth
+
+    inner = _Inner()
+    service = ModelChatService(catalog.MOUTH_ULTRON, service=inner, data_root=data_root)  # type: ignore[arg-type]
+    assert calls == [catalog.MOUTH_ULTRON]
+    assert service.active()
+    assert "answering here" in service.activation_status()
+    # The window's own session answers with this mouth; a *separate* ChatService
+    # (the main window's) is untouched by that.
+    from gui.service import ChatService
+
+    assert ChatService(data_root=data_root).switcher.mouth == catalog.MOUTH_SOURCES
+
+
+def test_service_activation_reports_the_real_next_step(data_root) -> None:
+    """A mouth that cannot load still opens, and says what to do about it."""
+    from gui.model_chat import ModelChatService
+
+    # No model file and no runtime here, so Vision cannot come up: the window
+    # records the real next step rather than failing to open.
+    service = ModelChatService(catalog.MOUTH_VISION, data_root=data_root)
+    assert not service.active()
+    assert "cannot answer yet" in service.activation_status()
+    # A separate ChatService is untouched by the failed activation.
+    from gui.service import ChatService
+
+    assert ChatService(data_root=data_root).switcher.mouth == catalog.MOUTH_SOURCES
+
+
+def test_service_add_model_makes_it_active(data_root, tmp_path) -> None:
+    """Adding a GGUF file uses it here at once."""
+    from gui.model_chat import ModelChatService
+
+    service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root)
+    gguf = tmp_path / "Mine.gguf"
+    gguf.write_bytes(b"GGUF")
+    key = service.add_model(gguf, title="Mine")
+    assert key == "custom:mine"
+    assert service.model_key() == key
+    assert any(model.key == key and model.custom for model in service.model_choices())
+    assert service.can_remove(key)
+    assert not service.can_download(key)
+
+
+def test_service_remove_model_falls_back_to_the_default(data_root, tmp_path) -> None:
+    from gui.model_chat import ModelChatService
+
+    service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root)
+    gguf = tmp_path / "Mine.gguf"
+    gguf.write_bytes(b"GGUF")
+    key = service.add_model(gguf)
+    assert service.remove_model(key)
+    assert service.model_key() == ""
+
+
+def test_service_refuses_to_remove_a_catalog_model(data_root) -> None:
+    from gui.model_chat import ModelChatService
+
+    service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root)
+    assert not service.can_remove("qwen2.5-7b")
+    assert not service.remove_model("qwen2.5-7b")
+
+
+def test_service_offers_no_add_for_the_retrieval_mouth(data_root, tmp_path) -> None:
+    """The sources mouth has no language model, so it refuses to add one."""
+    from gui.model_chat import ModelChatService
+
+    service = ModelChatService(catalog.MOUTH_SOURCES, data_root=data_root)
+    assert not service.can_add_model()
+    gguf = tmp_path / "Mine.gguf"
+    gguf.write_bytes(b"GGUF")
+    with pytest.raises(ValueError):
+        service.add_model(gguf)
+
+
+def test_service_offers_add_for_a_model_mouth(data_root) -> None:
+    from gui.model_chat import ModelChatService
+
+    assert ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root).can_add_model()
+
+
+def test_service_reports_the_download_for_the_chosen_model(data_root) -> None:
+    from gui.model_chat import ModelChatService
+
+    service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root)
+    assert service.can_download()
+    assert "ultron download" in service.download_command()
+
+
+def test_service_saves_a_model_choice_even_when_it_cannot_load_yet(data_root) -> None:
+    """Choosing a model whose runtime is missing is remembered, not lost."""
+    from gui.model_chat import ModelChatService
+
+    service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root)
+    # No runtime here, so activation cannot succeed, but the choice must persist.
+    assert service.set_model("qwen2.5-3b") == "qwen2.5-3b"
+    assert profiles.load_profile("ultron").model == "qwen2.5-3b"
+    assert ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root).model_key() == "qwen2.5-3b"
+
+
+def test_set_mouth_model_drops_the_cached_assistant(data_root) -> None:
+    """A model switch must rebuild the mouth, not reuse the cached assistant."""
+    from gui.service import ChatService
+
+    service = ChatService(data_root=data_root)
+    dropped: list[str] = []
+    service.switcher.invalidate_mouth = dropped.append  # type: ignore[assignment]
+    service.set_mouth_model(catalog.MOUTH_ULTRON, "qwen2.5-3b")
+    assert dropped == [catalog.MOUTH_ULTRON]
+    assert service.mouth_model(catalog.MOUTH_ULTRON) == "qwen2.5-3b"
+
+
 # --- the CLI ----------------------------------------------------------------
 
 
@@ -537,6 +777,72 @@ def test_cli_rejects_an_unknown_mouth(data_root, capsys) -> None:
     code, out = _cli(["profile", "not-a-mouth"], capsys)
     assert code == 2
     assert "Unknown model" in out
+
+
+def test_cli_adds_a_model_from_a_file(data_root, tmp_path, capsys) -> None:
+    """A GGUF file is added, made active, and remembered."""
+    from core import custom_models
+
+    gguf = tmp_path / "My-Model.gguf"
+    gguf.write_bytes(b"GGUF")
+    code, out = _cli(["add-model", "ultron", str(gguf), "--title", "My Model"], capsys)
+    assert code == 0
+    assert "custom:my-model" in out
+    entry = custom_models.find_model("custom:my-model")
+    assert entry is not None and entry.title == "My Model"
+    assert profiles.load_profile("ultron").model == "custom:my-model"
+
+
+def test_cli_reports_a_bad_model_file(data_root, tmp_path, capsys) -> None:
+    code, out = _cli(["add-model", "ultron", str(tmp_path / "absent.gguf")], capsys)
+    assert code == 2
+    assert out.strip()
+
+
+def test_cli_removes_an_added_model(data_root, tmp_path, capsys) -> None:
+    from core import custom_models
+
+    gguf = tmp_path / "Mine.gguf"
+    gguf.write_bytes(b"GGUF")
+    _cli(["add-model", "ultron", str(gguf)], capsys)
+    code, out = _cli(["remove-model", "ultron", "custom:mine"], capsys)
+    assert code == 0
+    assert "Forgot" in out
+    assert custom_models.list_models() == ()
+
+
+def test_cli_refuses_to_remove_a_catalog_model(data_root, capsys) -> None:
+    code, out = _cli(["remove-model", "ultron", "qwen2.5-7b"], capsys)
+    assert code == 2
+    assert "added" in out
+
+
+def test_cli_download_requires_approval(data_root, capsys) -> None:
+    """A download is an external action, so it needs the explicit approval."""
+    code, out = _cli(["download-model", "ultron", "qwen2.5-7b"], capsys)
+    assert code == 2
+    assert "--approve" in out
+
+
+def test_cli_download_refuses_a_model_with_nothing_to_fetch(data_root, tmp_path, capsys) -> None:
+    gguf = tmp_path / "Mine.gguf"
+    gguf.write_bytes(b"GGUF")
+    _cli(["add-model", "ultron", str(gguf)], capsys)
+    code, out = _cli(["download-model", "ultron", "custom:mine", "--approve"], capsys)
+    assert code == 2
+    assert out.strip()
+
+
+def test_cli_download_fetches_through_the_engine(monkeypatch, data_root, capsys) -> None:
+    def fake_fetch(key, *, approved=False, progress=None):
+        assert key == "qwen2.5-7b"
+        assert approved is True
+        return Path("/tmp/model.gguf")
+
+    monkeypatch.setattr("core.ultron.download_model", fake_fetch)
+    code, out = _cli(["download-model", "ultron", "qwen2.5-7b", "--approve"], capsys)
+    assert code == 0
+    assert "Model ready" in out
 
 
 # --- the window -------------------------------------------------------------
@@ -732,6 +1038,74 @@ def test_window_voice_choice_is_remembered(data_root) -> None:
         root.update()
         assert profiles.load_profile("natasha").voice == "woman-2"
         assert service.voice_key() == "woman-2"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_offers_add_download_and_forget_for_the_model(data_root, tmp_path) -> None:
+    """The window carries the add-a-model, download, and forget controls.
+
+    The three controls are wired to the service: *Download* and *Forget* are enabled
+    only when they apply to the chosen model, and adding a GGUF file uses it here.
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.model_chat import ModelChatService
+    from gui.model_chat_dialog import ModelChatDialog
+
+    root = tk.Tk()
+    try:
+        service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root)
+        dialog = ModelChatDialog(
+            root, service, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+        )
+        root.update()
+        # The three controls exist, and Download is live for a catalog model.
+        assert dialog._add_model_button.winfo_ismapped()
+        assert dialog._download_model_button.winfo_ismapped()
+        assert dialog._remove_model_button.winfo_ismapped()
+        assert str(dialog._download_model_button.cget("state")) == "normal"
+        assert str(dialog._remove_model_button.cget("state")) == "disabled"
+
+        # Adding a GGUF file makes it the active model and enables Forget.
+        gguf = tmp_path / "Mine.gguf"
+        gguf.write_bytes(b"GGUF")
+        key = service.add_model(gguf, title="Mine")
+        dialog._populate_models()
+        root.update()
+        assert key in dialog._model_keys
+        assert str(dialog._remove_model_button.cget("state")) == "normal"
+        assert str(dialog._download_model_button.cget("state")) == "disabled"
+
+        # Forgetting it falls back to the mouth's default.
+        dialog._on_remove_model()
+        root.update()
+        assert key not in dialog._model_keys
+        assert service.model_key() == ""
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_reports_its_activation(data_root) -> None:
+    """The model note says whether this window's mouth is the one answering."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.model_chat import ModelChatService
+    from gui.model_chat_dialog import ModelChatDialog
+
+    root = tk.Tk()
+    try:
+        service = ModelChatService(catalog.MOUTH_VISION, data_root=data_root)
+        dialog = ModelChatDialog(
+            root, service, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+        )
+        root.update()
+        note = dialog._model_note.cget("text")
+        assert "cannot answer yet" in note
     finally:
         root.destroy()
 

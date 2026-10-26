@@ -4,6 +4,9 @@
     python -m cli model-chat models ultron          # every model Ultron's window offers
     python -m cli model-chat profile natasha        # her saved name, logo, voice, model
     python -m cli model-chat set-model ultron qwen2.5-3b
+    python -m cli model-chat add-model ultron ~/models/My-Model.gguf --title "My Model"
+    python -m cli model-chat remove-model ultron custom:my-model
+    python -m cli model-chat download-model ultron qwen2.5-3b --approve
     python -m cli model-chat set-voice natasha woman-2
     python -m cli model-chat set-name hakeem "الحكيم"
     python -m cli model-chat set-logo vision logo.png
@@ -67,6 +70,31 @@ def _build_parser() -> argparse.ArgumentParser:
     set_model = sub.add_parser("set-model", help="Choose the language model a window uses.")
     set_model.add_argument("mouth", help="The model's name.")
     set_model.add_argument("model", help="The catalog key to use (empty clears the choice).")
+
+    add_model = sub.add_parser(
+        "add-model", help="Add a GGUF file on this machine as a selectable model."
+    )
+    add_model.add_argument("mouth", help="The model's name.")
+    add_model.add_argument("path", help="The .gguf file to add.")
+    add_model.add_argument("--title", default="", help="A readable name (defaults to the file name).")
+    add_model.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+
+    remove_model = sub.add_parser(
+        "remove-model", help="Forget a model you added from this machine."
+    )
+    remove_model.add_argument("mouth", help="The model's name.")
+    remove_model.add_argument("model", help="The custom: key to forget.")
+
+    download_model = sub.add_parser(
+        "download-model", help="Fetch the chosen (or named) model's weights (governed)."
+    )
+    download_model.add_argument("mouth", help="The model's name.")
+    download_model.add_argument(
+        "model", nargs="?", default="", help="The catalog key to fetch (defaults to the choice)."
+    )
+    download_model.add_argument(
+        "--approve", action="store_true", help="Record the human approval the gate requires."
+    )
 
     set_voice = sub.add_parser("set-voice", help="Choose the reading voice for a window.")
     set_voice.add_argument("mouth", help="The model's name.")
@@ -185,6 +213,59 @@ def run_set_model(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_add_model(args: argparse.Namespace) -> int:
+    service = _service(args.mouth)
+    key = service.add_model(args.path, title=args.title)
+    if args.json:
+        import json
+
+        print(json.dumps({"mouth": service.mouth, "key": key}, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(
+        f"Added {key!r} for {service.name} and made it active. "
+        f"Ask with `python -m cli model-chat ask {service.mouth} \"...\"`."
+    )
+    return EXIT_OK
+
+
+def run_remove_model(args: argparse.Namespace) -> int:
+    service = _service(args.mouth)
+    if not service.can_remove(args.model):
+        print(f"{args.model!r} is not a model you added; only custom: models can be forgotten.")
+        return EXIT_USAGE
+    if not service.remove_model(args.model):
+        print(f"There is no added model named {args.model!r}.")
+        return EXIT_USAGE
+    print(f"Forgot {args.model!r}.")
+    return EXIT_OK
+
+
+def run_download_model(args: argparse.Namespace) -> int:
+    service = _service(args.mouth)
+    key = args.model.strip() or service.model_key()
+    if not key:
+        key = catalog.default_language_model_key(service.mouth) or ""
+    if not service.can_download(key):
+        print(
+            f"{key or 'the chosen model'!r} has nothing this build can download. "
+            "A model you added, the trained checkpoint, and a cloud model are not fetched here."
+        )
+        return EXIT_USAGE
+    if not args.approve:
+        print(
+            "Downloading is an external action and needs the human approval the gate "
+            "requires. Re-run with `--approve`."
+        )
+        return EXIT_USAGE
+    try:
+        path = service.download_model(key, approved=True)
+    except Exception as error:
+        print(f"Could not download {key!r}: {error}")
+        return EXIT_MODEL
+    print(f"Model ready at {path}.")
+    return EXIT_OK
+
+
 def run_set_voice(args: argparse.Namespace) -> int:
     service = _service(args.mouth)
     try:
@@ -258,6 +339,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "models": run_models,
         "profile": run_profile,
         "set-model": run_set_model,
+        "add-model": run_add_model,
+        "remove-model": run_remove_model,
+        "download-model": run_download_model,
         "set-voice": run_set_voice,
         "set-name": run_set_name,
         "set-logo": run_set_logo,

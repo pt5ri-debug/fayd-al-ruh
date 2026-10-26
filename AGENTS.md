@@ -1727,15 +1727,22 @@ Arabic is kept as secondary aliases where useful.
   could agree on a default. `all_language_models()` unifies them: a
   `LanguageModel` carries `key`, `title`, `engine`, `summary`, `available`,
   `detail`, `path`, `provider`, plus `engines` (every mouth the model belongs to),
-  `catalog_key`, `folders`, `filename`, `identity` (its repo/filename), and
-  `download` (the real fetch command). Entries are **de-duplicated by identity**,
+  `catalog_key`, `folders`, `filename`, `identity` (its repo/filename),
+  `download` (the real fetch command), and `custom` (a model the user added
+  themselves, see `core/custom_models.py`). Entries are **de-duplicated by
+  identity**,
   so the *same* weights reachable from two engines (`qwen3-4b` is Banner's,
   Natasha's, and Hakeem's) are one model listing all three, never three entries
   pointing at one file. `models_for_choice(mouth)` is what a dedicated mouth
   window offers: every GGUF model the project has for an in-process mouth (they
   share the one runtime, so any downloaded file can answer in any of them, the
-  mouth's own default listed first), and only its own models for a cloud or the
-  retrieval mouth. `find_language_model`/`resolve_choice`,
+  mouth's own default listed first, the user's own `custom:` entries included),
+  and only its own models for a cloud or the
+  retrieval mouth. `can_download(model)` says whether the chosen model has a
+  fetch (a catalog model does; a `custom:` one does not) and
+  `download_model(mouth, key, approved=, progress=)` is the one dispatcher that
+  runs it through the **owning engine's** own approval gate.
+  `find_language_model`/`resolve_choice`,
   `default_language_model_key`, `describe_language_models`, and the mouth
   constants (`MOUTH_SOURCES`/`ULTRON`/`VISION`/`BANNER`/`NATASHA`/`HAKEEM`/
   `CLOUD`/`MODEL`, `MOUTHS`, `GGUF_MOUTHS`, `ENGINE_LABELS`) round it out.
@@ -1743,6 +1750,16 @@ Arabic is kept as secondary aliases where useful.
   true only when the GGUF is on disk), `detail` always names the real next step
   when it is not, an unknown mouth or key returns nothing rather than raising, and
   nothing here loads a model or imports Tk.
+- `core/custom_models.py` — the **hand-added language models**: a small `JsonStore`
+  registry of GGUF files the user pointed a per-model window at, so a model the
+  project does not ship can still answer. `CustomModel` (key `custom:<slug>`,
+  title, `path`), `add_model(path, title=)` (validates a real `.gguf` file, keeps
+  the file **in place** -- a multi-gigabyte GGUF is referenced, never copied --
+  and refuses a missing/non-GGUF path with a `ValueError` rather than storing it),
+  `remove_model`/`list_models`/`find_model`, and `is_custom_key`. A file the user
+  later moves is reported unavailable, because the real path is checked on every
+  read; a corrupt registry reads as empty so a window always opens. Dependency-free
+  and Tk-free; `core/language_models` merges these entries into its catalog.
 - `core/mouth_profile.py` — the per-mouth **saved settings**: the character's
   `name`, its `logo`, the reading `voice` exclusive to it, and the language
   `model` it answers with, one `MouthProfile` per mouth persisted through
@@ -1772,7 +1789,10 @@ Arabic is kept as secondary aliases where useful.
   It exposes the identity (`name`/`set_name`, `logo_path`/`set_logo`/
   `clear_logo`), the voice (`voice_key`/`set_voice`/`voice_sections`/
   `voice_label`/`read_aloud`), the model (`model_choices`/`model_key`/
-  `set_model`/`model_ready`/`model_status`), the conversation
+  `set_model`/`model_ready`/`model_status`/`add_model`/`remove_model`/
+  `can_remove`/`can_download`/`download_command`/`download_model`), the mouth's
+  activation (`active`/`activation_status`, applied on open so this window's
+  session really answers with this mouth), the conversation
   (`ask`/`new_conversation`/`save`/`session`), and the microphone
   (`microphone_available`/`start_recording`/`stop_recording`/`transcribe`).
   `MOUTH_BLURBS` gives each mouth an honest one-line description. `service` may
@@ -1787,7 +1807,11 @@ Arabic is kept as secondary aliases where useful.
   badge* action and an editable **name** -- (2) the **reading voice** as an
   exclusive radio list grouped by the source each voice came from, and (3) the
   **language model** as a list of every model the mouth can run, the saved choice
-  pre-selected and each entry labelled with its real availability. The centre is
+  pre-selected and each entry labelled with its real availability, beside three
+  controls: *Add a language model…* (a GGUF file picker that adds and activates the
+  chosen file at once), *Download the chosen model* (live only when the chosen
+  model has something to fetch, run on the worker thread with approval), and
+  *Forget this model* (live only for a `custom:` entry the user added). The centre is
   the transcript and the composer, which carries an optional **microphone**
   (`add_mic`) exactly like the main chat. Every message's footer carries the same
   **Copy** and **Read aloud / Stop** controls the main window draws (through
@@ -1808,8 +1832,12 @@ Arabic is kept as secondary aliases where useful.
   `ChatService.set_mouth_model`/`mouth_model` keep the choice in force for the
   mouth that is answering.
 - `cli/model_chat.py` — the headless twin of that window: `python -m cli
-  model-chat mouths|models|profile|set-model|set-voice|set-name|set-logo|
-  clear-logo|ask` (aliases `model-chat` and `mouths`). It drives the *same*
+  model-chat mouths|models|profile|set-model|add-model|remove-model|
+  download-model|set-voice|set-name|set-logo|
+  clear-logo|ask` (aliases `model-chat` and `mouths`). `add-model <mouth> <file>`
+  adds a GGUF file and makes it active, `remove-model` forgets a `custom:` entry,
+  and `download-model <mouth> <key> --approve` fetches a catalog model through its
+  owning engine's own approval gate. It drives the *same*
   `gui.model_chat.ModelChatService`, so the CLI and the window share one saved
   profile per mouth -- one name, one logo, one reading voice, and one language
   model -- and no logic is reimplemented. Exit codes: `0` success, `2` invalid
@@ -3540,3 +3568,57 @@ regression monitor each can refuse a change.
   reading degrades honestly rather than failing -- while the low-level
   `PiperSynthesizer` still raises when built with no fallback.
   `tests/test_piper_speech.py` pins the degradation.
+
+- Phase 33 — **the per-model windows switch models and add their own**: the seven
+  dedicated windows (one per answering mouth) listed the project's language models
+  but a *switch* there did not really take effect, and a GGUF file the catalog did
+  not name could not be offered at all. Two things changed. First, a window's
+  mouth is now the one answering *its own* session: `gui.model_chat.ModelChatService`
+  calls `ChatService.activate_mouth(mouth)` on open (a new method beside
+  `mouth_model`/`set_mouth_model`, which returns the now-active mouth key and
+  raises the mouth's own availability error), so choosing a model there and asking
+  a question really uses it -- while the main window's `ChatService` (a separate
+  instance, its own session) is untouched. The window reports honestly whether it
+  is active (`ModelChatService.active()`/`activation_status()`, drawn into the
+  model note); a mouth that cannot load still opens and names the real next step.
+  The switch is made to *stick*: `ai.chat.ModelSwitcher` caches each mouth's
+  assistant after its first load, so `set_mouth_model` now drops the named mouth
+  through a new `ModelSwitcher.invalidate_mouth(mouth)` before reloading it --
+  otherwise the reload would hand back the model the mouth was first built with
+  (only that mouth is dropped, so the others keep their loaded model). The choice
+  is saved *before* the load, so pointing a window at a model whose runtime or
+  weights are missing remembers it and reports the next step rather than losing it.
+  Second, a window can **add a language model** the user points it at:
+  `core/custom_models.py` is a small `JsonStore` registry (`NAMESPACE`,
+  `CUSTOM_PREFIX` `custom:`, `CustomModel`, `add_model`/`remove_model`/
+  `list_models`/`find_model`/`is_custom_key`) that remembers a `.gguf` file
+  **in place** (a multi-gigabyte GGUF is referenced, not copied; a file the user
+  later moves is reported unavailable, its real path checked on every read; a bad
+  choice raises `ValueError` rather than being stored; a corrupt store reads as
+  empty). `core.language_models` merges those entries into the catalog as ordinary
+  `LanguageModel`s (a new `custom` flag and a `download_command` field; offered to
+  every GGUF mouth, since they share the one runtime), and gains
+  `can_download(model)`/`download_model(mouth, key, approved=, progress=)` -- the
+  one dispatcher that fetches a chosen model through the **owning engine's** own
+  permission + human-approval gate (Ultron's, Vision's, Banner's, or the
+  companion's shared folder), so no second download path is written.
+  `ModelChatService` gains `add_model` (adds and activates it at once),
+  `remove_model`/`can_remove` (forget a `custom:` entry, falling back to the
+  mouth's default when it was active), and `can_download`/`download_command`/
+  `download_model`; the window's Language-model block gains three controls
+  (*Add a language model…* -- a GGUF file picker; *Download the chosen model*,
+  enabled only when the chosen model has something to fetch and run on the worker
+  thread with approval; *Forget this model*, enabled only for a `custom:` entry),
+  and the CLI gains `add-model`/`remove-model`/`download-model` (the headless
+  twins, `download-model` needing `--approve`). The retrieval mouth (Jarvis, from
+  the sources) has no language model at all, so its window offers **no** *Add a
+  language model…* or *Forget this model* action (`ModelChatService.can_add_model()`
+  is false there, and the dialog drops the two buttons rather than showing them
+  dead). `tests/test_model_chat.py` pins the
+  registry (add/refuse/persist/remove/the file that left/a corrupt store), the
+  catalog merge and the download dispatch, the service's activation and
+  add/remove/download, the switch that drops the cached mouth, the retrieval
+  mouth's honest refusal, the CLI commands, and the window's controls;
+  `tests/test_chat.py` pins `ModelSwitcher.invalidate_mouth` (a switch rebuilds
+  the mouth instead of reusing the cached assistant, and only the named mouth is
+  dropped).
