@@ -271,4 +271,71 @@ def _as_voice(value: str | Voice | SystemVoice | ModelVoice | None) -> Voice | S
     return find_voice(key)
 
 
-__all__ = ["TextReader"]
+def clip_is_silent(clip: object) -> bool:
+    """True when a rendered clip carries no audio at all.
+
+    A real :class:`~core.speech.AudioClip` exposes ``is_silent``; a caller's own
+    test double may expose ``silent``. Both are honoured, because reading only one
+    of the two names silently reported "spoke" for a clip that was in fact empty --
+    the exact "engine produced no audio" case the windows mean to name.
+    """
+    if clip is None:
+        return True
+    value = getattr(clip, "is_silent", None)
+    if value is None:
+        value = getattr(clip, "silent", None)
+    return bool(value)
+
+
+def split_for_speech(text: str, *, max_chars: int = 600) -> tuple[str, ...]:
+    """Split ``text`` into paragraph-sized chunks a synthesizer can read in turn.
+
+    A paragraph longer than ``max_chars`` is split on sentence boundaries, so no
+    single call is enormous; the chunks keep their order, so the reading is the
+    text's own sequence. Shared by every window that reads aloud, so a document,
+    a message, and a chat reply are all broken into speech the same way.
+    """
+    chunks: list[str] = []
+    for paragraph in text.split("\n"):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        if len(paragraph) <= max_chars:
+            chunks.append(paragraph)
+            continue
+        piece = ""
+        for sentence in _sentences(paragraph):
+            if piece and len(piece) + len(sentence) + 1 > max_chars:
+                chunks.append(piece)
+                piece = sentence
+            else:
+                piece = f"{piece} {sentence}".strip()
+        if piece:
+            chunks.extend(_hard_split(piece, max_chars))
+    return tuple(chunks)
+
+
+def _hard_split(text: str, max_chars: int) -> tuple[str, ...]:
+    """Break a chunk that is still too long (no sentence marks) into pieces."""
+    if len(text) <= max_chars:
+        return (text,)
+    return tuple(
+        text[index : index + max_chars] for index in range(0, len(text), max_chars)
+    )
+
+
+def _sentences(paragraph: str) -> tuple[str, ...]:
+    """Split a paragraph into sentences on the common enders, keeping the marks."""
+    sentences: list[str] = []
+    current = ""
+    for character in paragraph:
+        current += character
+        if character in ".!?؟。":
+            sentences.append(current.strip())
+            current = ""
+    if current.strip():
+        sentences.append(current.strip())
+    return tuple(sentences)
+
+
+__all__ = ["TextReader", "clip_is_silent", "split_for_speech"]

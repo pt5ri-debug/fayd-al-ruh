@@ -756,7 +756,13 @@ Arabic is kept as secondary aliases where useful.
   platform lookup (`SystemParametersInfo`'s `rcWork` on Windows, the window
   manager's `_NET_WORKAREA` through `xprop` on X11, `NSScreen.visibleFrame` on
   macOS) and returns `None` where the desktop cannot report it, in which case a
-  real full-screen window is the honest fallback. The pre-fill geometry is kept so
+  real full-screen window is the honest fallback. `fit_geometry(window, width,
+  height, *, min_height=0)` is the shared **opening** size rule beside it: it
+  returns the `"WxH"` geometry string a window should open at, clamped to the
+  work area (or the screen when the desktop cannot report one), so a window never
+  opens taller or wider than the usable desktop and its controls stay reachable on
+  a small screen; `min_height` lifts a too-short request but is itself capped to
+  what fits. The pre-fill geometry is kept so
   restore returns the window exactly, and each button's `command` is a bound
   method on the controller, which
   holds the window, which owns the buttons — a cycle a destroyed window would only
@@ -1123,12 +1129,35 @@ Arabic is kept as secondary aliases where useful.
   **explicitly** instead -- picking one of its voices in the reading-voice menu (or
   naming one on the CLI) routes the reading to it through
   `core.speech._engine_for_voice` -- so a user who wants it gets it and a user who
-  does not is unaffected. CLI:
-  `python -m cli audio status|models|voices|install-engine --approve|download
+  does not is unaffected.
+  **The user's own voice** is the second half of the cloning model: `ImportedVoice`
+  (`<data>/audio.cpp/imported_voices.json`, git-ignored) records a reference clip the
+  user recorded or imported, `import_voice` copies it in (`_to_wav` converts a
+  non-WAV with `ffmpeg`/`sox`, and a missing converter is a `ValueError` naming that
+  next step, not an engine fault; an `.onnx` is refused with the "use the Piper
+  studio" hint because VoiceTut clones from a clip and cannot load one), and
+  `clone_voice` is the thin "my own voice" wrapper over it -- both also accept the
+  microphone's live `AudioClip`, so the window's *Clone my voice* recording reaches
+  the registry with no file round trip. `imported_voice_models` turns them into
+  `ModelVoice`s (each keyed `model:audio.cpp:<name>`, so a cloned voice is picked
+  and routed exactly like a built-in speaker), `load_imported_voices` drops a row
+  whose clip is gone and tolerates a corrupt registry, and `remove_imported_voice`
+  deletes the row and its clip. **The engine's own language id is not the
+  project's**: VoiceTut was trained with Egyptian Arabic (`arz`) and the engine
+  *rejects* a bare `ar`, so `normalize_language` maps the project's two-letter code
+  onto the id the engine accepts (`ar` → `arz`, `en` → `en`, anything else → the
+  model's `arz`) -- the fix for a reading that failed with "unsupported OmniVoice
+  language" instead of speaking. CLI:
+  `python -m cli audio status|models|voices|my-voices|import <clip>|clone
+  <recording>|remove-voice <name>|install-engine --approve|download
   [--speakers] --approve|say "<text>" --voice model:audio.cpp:Sarah --write-wav f`
   (`cli/audio.py`, the headless twin of the window's voice menu), mirrored as the
-  GUI sidebar's three *audio.cpp* actions (status, voices, download) and a
-  *VoiceTut-TTS (Local Arabic)* section in the reading-voice picker.
+  GUI sidebar's *audio.cpp* actions (status, voices, download) and a
+  *VoiceTut-TTS (Local Arabic)* section in the reading-voice picker; the VoiceTut
+  **studio window** (`gui/voice_studio_dialog.py`) adds a *My voice (clone)* block
+  -- *Clone my voice (record)* and *Import a voice file…*, plus a remove menu --
+  that only this engine's studio builds, because `VoiceStudioService.can_import_voices()`
+  is true only for the zero-shot cloning engine (see below).
 - `core/voices.py`'s **model voices**: a `ModelVoice` is a voice that lives inside a
   local model rather than in the synthetic catalog or the OS. It carries the
   engine's exact `name` (the speaker's own name, never translated), the `engine`
@@ -1760,7 +1789,13 @@ Arabic is kept as secondary aliases where useful.
   **language model** as a list of every model the mouth can run, the saved choice
   pre-selected and each entry labelled with its real availability. The centre is
   the transcript and the composer, which carries an optional **microphone**
-  (`add_mic`) exactly like the main chat. The window opens at 90% of its original
+  (`add_mic`) exactly like the main chat. Every message's footer carries the same
+  **Copy** and **Read aloud / Stop** controls the main window draws (through
+  `gui.message_footer.MessageFooter`), so a per-mouth window reads a message aloud
+  in its own exclusive voice and a second click stops it
+  (`ModelChatService.start_reading`/`stop_reading`, chunked by
+  `core.reading.split_for_speech` so the reading ends at the next sentence
+  boundary and the sound stops at once). The window opens at 90% of its original
   height (`DEFAULT_HEIGHT`, capped to the work area so the composer stays
   reachable on a small screen) and both the sidebar and the conversation carry a
   **scrollbar that is always visible** rather than one that appears only on

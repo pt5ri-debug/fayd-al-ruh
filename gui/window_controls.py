@@ -393,6 +393,38 @@ def install_window_controls(
     return controller
 
 
+def fit_geometry(
+    window: tk.Misc, width: int, height: int, *, min_height: int = 0
+) -> str:
+    """A ``"WxH"`` opening geometry that never exceeds the usable desktop.
+
+    A window taller than the screen -- minus the taskbar -- would run off the
+    bottom, where its composer or its buttons could not be reached, and a window
+    wider than the screen would run off the side. Every dialog opens through this,
+    so a small screen opens the same window shrunk to fit instead of a window that
+    is partly off-screen: the requested size is clamped to :func:`work_area` (the
+    platform's own "screen minus taskbar" rectangle) where the window manager
+    reports one, and to the screen otherwise.
+
+    ``min_height`` raises the result to a floor (a window must stay usable), but is
+    itself capped at the available height, so a very short screen still fits.
+    """
+    area = work_area()
+    if area is not None:
+        _x, _y, area_width, area_height = area
+    else:
+        try:
+            area_width = window.winfo_screenwidth()
+            area_height = window.winfo_screenheight()
+        except tk.TclError:
+            return f"{width}x{height}"
+    width = min(width, area_width)
+    height = min(height, area_height)
+    if min_height:
+        height = max(height, min(min_height, area_height))
+    return f"{width}x{height}"
+
+
 def _control_button(
     parent: tk.Misc, text: str, theme: Any, font: Any, *, hover: str = _BUTTON_HOVER
 ) -> tk.Button:
@@ -418,4 +450,4 @@ def _control_button(
     )
 
 
-__all__ = ["WindowControls", "install_window_controls"]
+__all__ = ["WindowControls", "fit_geometry", "install_window_controls", "work_area"]

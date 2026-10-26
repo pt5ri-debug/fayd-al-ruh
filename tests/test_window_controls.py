@@ -239,6 +239,49 @@ def test_work_area_is_none_on_an_unknown_platform(monkeypatch) -> None:
     assert window_controls.work_area() is None
 
 
+# --- fit_geometry: the opening size never exceeds the usable desktop -------
+
+
+def test_fit_geometry_clamps_to_the_work_area(monkeypatch) -> None:
+    """A small work area wins over the requested size, so nothing runs off-screen."""
+    from gui import window_controls
+
+    monkeypatch.setattr(window_controls, "work_area", lambda: (0, 30, 1000, 600))
+    assert window_controls.fit_geometry(object(), 1180, 700) == "1000x600"  # type: ignore[arg-type]
+
+
+def test_fit_geometry_keeps_a_size_that_already_fits(monkeypatch) -> None:
+    from gui import window_controls
+
+    monkeypatch.setattr(window_controls, "work_area", lambda: (0, 0, 1920, 1080))
+    assert window_controls.fit_geometry(object(), 1180, 700) == "1180x700"  # type: ignore[arg-type]
+
+
+def test_fit_geometry_raises_to_a_floor_but_never_past_the_screen(monkeypatch) -> None:
+    """``min_height`` lifts a too-short request, but is itself capped to fit."""
+    from gui import window_controls
+
+    monkeypatch.setattr(window_controls, "work_area", lambda: (0, 0, 1920, 1080))
+    assert window_controls.fit_geometry(object(), 1180, 500, min_height=620) == "1180x620"  # type: ignore[arg-type]
+    monkeypatch.setattr(window_controls, "work_area", lambda: (0, 0, 1920, 560))
+    assert window_controls.fit_geometry(object(), 1180, 500, min_height=620) == "1180x560"  # type: ignore[arg-type]
+
+
+def test_fit_geometry_falls_back_to_the_screen_without_a_work_area(monkeypatch) -> None:
+    """With no work-area rectangle, the screen size is the bound (a small screen shrinks)."""
+    from gui import window_controls
+
+    class FakeWindow:
+        def winfo_screenwidth(self) -> int:
+            return 1024
+
+        def winfo_screenheight(self) -> int:
+            return 768
+
+    monkeypatch.setattr(window_controls, "work_area", lambda: None)
+    assert window_controls.fit_geometry(FakeWindow(), 1180, 900) == "1024x768"  # type: ignore[arg-type]
+
+
 # --- the real installation (needs a display) -------------------------------
 
 

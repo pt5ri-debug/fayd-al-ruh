@@ -27,8 +27,9 @@ from typing import Any
 
 from core import language_models as catalog
 from core import mouth_profile as profiles
+from core.best_effort import best_effort
 from core.paths import data_dir
-from core.reading import TextReader
+from core.reading import TextReader, clip_is_silent, split_for_speech
 from core.voices import (
     ModelVoice,
     SystemVoice,
@@ -115,6 +116,10 @@ class ModelChatService:
         if saved_voice:
             self._apply_voice(saved_voice)
         self._recording: Any = None
+        # The reading in progress, so a second click can stop it (the toggle the
+        # user asked for): the text being read and the clip playing right now.
+        self._reading_text: str = ""
+        self._playback: Any = None
         # Apply the saved model choice before the mouth answers, so the first
         # question already uses the model the user picked. Guarded so a caller's
         # lightweight stand-in service (a test's) still works.
@@ -195,6 +200,56 @@ class ModelChatService:
     def read_aloud(self, text: str):
         """Read ``text`` aloud with this mouth's own voice and return the clip."""
         return self._reader.speak(text)
+
+    # -------------------------------------------------- stoppable reading
+
+    def reading(self) -> bool:
+        """True while a reading is in progress (so the control shows ``Stop``)."""
+        return self._reading_text != ""
+
+    def start_reading(self, text: str):
+        """Read ``text`` aloud, blocking, so a second click can stop it.
+
+        The window runs this on a worker thread: each sentence-sized chunk is
+        rendered and played, and the loop checks after every chunk whether
+        :meth:`stop_reading` was called, so the reading ends at the next boundary
+        and the sound stops at once. Returns the clip that was spoken (the first
+        chunk) so the caller keeps the old return shape.
+        """
+        body = (text or "").strip()
+        if not body:
+            raise ValueError("There is nothing to read.")
+        chunks = split_for_speech(body)
+        self._reading_text = body
+        first: Any = None
+        try:
+            for chunk in chunks:
+                if not self.reading():
+                    break
+                clip = self._reader.render(chunk)
+                if first is None:
+                    first = clip
+                if clip_is_silent(clip):
+                    break
+                self._playback = self._reader.play(clip)
+                if self._playback is not None:
+                    self._playback.wait()
+                self._playback = None
+            return first
+        finally:
+            self._reading_text = ""
+            self._playback = None
+
+    def stop_reading(self) -> bool:
+        """Ask the reading in progress to stop; ``True`` when one was running."""
+        if not self.reading():
+            return False
+        self._reading_text = ""
+        playback = self._playback
+        if playback is not None:
+            with best_effort("stop the clip that is playing"):
+                playback.stop()
+        return True
 
     def save_speech(self, text: str, path: str | Path) -> Path:
         """Render ``text`` to a WAV file with this mouth's voice."""

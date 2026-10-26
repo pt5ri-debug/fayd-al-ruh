@@ -17,6 +17,7 @@ from __future__ import annotations
 import struct
 import zlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 from core import voice_studio_profile as profiles
@@ -97,12 +98,33 @@ class FakeReader:
     def speak(self, text):
         self.spoken.append(text)
         if not self._available:
-            return AudioClip(b"", sample_rate=16000, silent=True)
-        return AudioClip(b"\x00\x00" * 8, sample_rate=16000)
+            return AudioClip.silence(0.1, sample_rate=16000)
+        return AudioClip(tuple([1000] * 8), sample_rate=16000)
+
+    def render(self, text):
+        """Render a chunk (the stoppable path plays each chunk in turn)."""
+        self.spoken.append(text)
+        if not self._available:
+            return AudioClip.silence(0.1, sample_rate=16000)
+        return AudioClip(tuple([1000] * 8), sample_rate=16000)
+
+    def play(self, clip):
+        """Play a rendered chunk; a recording reader returns an instant playback."""
+        return _FakePlayback()
 
     def save(self, text, path):
         Path(path).write_bytes(b"RIFF")
         return Path(path)
+
+
+class _FakePlayback:
+    """A playback that finishes at once, so a reading test does not block."""
+
+    def wait(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
 
 
 class _FakeVoice:
@@ -420,6 +442,95 @@ def test_a_long_document_is_split_into_chunks(data_root, tmp_path) -> None:
     assert all(len(chunk) <= 200 for chunk in chunks)
 
 
+def test_the_shared_split_helper_is_the_one_the_studio_uses() -> None:
+    """The studio's splitter is the shared one, so every window chunks alike."""
+    from core.reading import split_for_speech
+    from gui.voice_studio import _split_for_speech
+
+    text = "First one. Second one.\n\nThird one."
+    assert _split_for_speech(text) == split_for_speech(text)
+
+
+def test_clip_is_silent_reads_a_real_clip_and_a_caller_double() -> None:
+    """The shared check sees silence whether the clip says ``is_silent`` or ``silent``.
+
+    A real :class:`~core.speech.AudioClip` exposes ``is_silent``; the windows used
+    to read only ``silent``, which a real clip does not have, so an empty render was
+    reported as spoken. Both names, and a missing clip, are honoured here.
+    """
+    from types import SimpleNamespace
+
+    from core.reading import clip_is_silent
+    from core.speech import AudioClip
+
+    assert clip_is_silent(AudioClip(tuple([1000] * 8), sample_rate=16000)) is False
+    assert clip_is_silent(AudioClip.silence(0.1, sample_rate=16000)) is True
+    # A caller's own double may name the flag ``silent`` instead.
+    assert clip_is_silent(SimpleNamespace(silent=True)) is True
+    assert clip_is_silent(SimpleNamespace(silent=False)) is False
+    assert clip_is_silent(None) is True
+
+
+def test_start_reading_plays_each_chunk_and_can_be_stopped(data_root, tmp_path) -> None:
+    """The stoppable path plays the document and reports a stop honestly."""
+    doc = tmp_path / "report.txt"
+    doc.write_text("Porosity increases permeability. The reservoir is tight.\n")
+    reader = FakeReader()
+    studio = VoiceStudioService(SOURCE_PIPER, reader=reader)
+    studio.load_document(doc)
+    report = studio.start_reading()
+    assert report.ok
+    assert report.chunks >= 1
+    assert reader.spoken
+    # With nothing running, a stop is a no-op that reports so.
+    assert studio.stop_reading() is False
+
+
+def test_stop_reading_ends_a_reading_in_progress(data_root, tmp_path) -> None:
+    """A stop asked for mid-read ends the reading and is reported as stopped."""
+    import threading
+
+    doc = tmp_path / "report.txt"
+    doc.write_text(" ".join(f"Sentence {index}." for index in range(60)))
+
+    class _BlockingReader(FakeReader):
+        def __init__(self) -> None:
+            super().__init__()
+            self.gate = threading.Event()
+            self.playing = False
+
+        def play(self, clip):
+            self.playing = True
+            outer = self
+
+            class _Blocking:
+                def wait(self) -> None:
+                    outer.gate.wait(2)
+
+                def stop(self) -> None:
+                    outer.gate.set()
+
+            return _Blocking()
+
+    reader = _BlockingReader()
+    studio = VoiceStudioService(SOURCE_PIPER, reader=reader)
+    studio.load_document(doc)
+    result: list[Any] = []
+    worker = threading.Thread(target=lambda: result.append(studio.start_reading()))
+    worker.start()
+    # Wait until the reading is genuinely in progress, then stop it.
+    for _ in range(400):
+        if studio.reading():
+            break
+        threading.Event().wait(0.005)
+    assert studio.reading()
+    assert studio.stop_reading() is True
+    worker.join(timeout=3)
+    assert result and result[0].ok
+    assert "stopped" in result[0].message.lower()
+    assert not studio.reading()
+
+
 def test_a_paragraph_with_no_sentence_marks_is_still_bounded() -> None:
     from gui.voice_studio import _split_for_speech
 
@@ -448,3 +559,58 @@ def test_describe_names_the_voice_and_the_mood(data_root) -> None:
 def test_an_unknown_engine_is_refused(data_root) -> None:
     with pytest.raises(ValueError):
         VoiceStudioService("not-an-engine")
+
+
+def test_only_the_cloning_engine_offers_the_import_capability(data_root) -> None:
+    """VoiceTut clones from a clip, so only its studio reports the capability."""
+    assert VoiceStudioService(SOURCE_AUDIOCPP, reader=FakeReader()).can_import_voices() is True
+    for source in (SOURCE_PIPER, SOURCE_QWEN, SOURCE_SYSTEM):
+        assert VoiceStudioService(source, reader=FakeReader()).can_import_voices() is False
+    # A non-cloning studio reports no imported voices even if some are registered.
+    assert VoiceStudioService(SOURCE_PIPER, reader=FakeReader()).imported_voice_names() == ()
+
+
+def test_the_studio_clones_and_removes_the_user_s_own_voice(data_root, monkeypatch, tmp_path) -> None:
+    """The service is the one path the window and the CLI share for a new voice."""
+    from core import audiocpp_speech as a
+
+    monkeypatch.setattr(a, "voices_dir", lambda root=None: data_root / "audio.cpp" / "voices")
+    monkeypatch.setattr(a, "imported_voices_path", lambda root=None: data_root / "audio.cpp" / "imported_voices.json")
+    monkeypatch.setattr(a, "load_imported_voices", lambda root=None: _imported(data_root))
+    monkeypatch.setattr(a, "_save_imported_voices", lambda voices, root=None: _save(data_root, voices))
+
+    studio = VoiceStudioService(SOURCE_AUDIOCPP, reader=FakeReader())
+    assert studio.imported_voice_names() == ()
+    clip = AudioClip((1000, -1000, 2000, -2000), sample_rate=24_000)
+    voice = studio.clone_voice(clip)
+    assert voice.name == "My voice"
+    assert studio.imported_voice_names() == ("My voice",)
+    assert studio.remove_voice("My voice") is True
+    assert studio.imported_voice_names() == ()
+    # Removing a voice that is not there reports so rather than raising.
+    assert studio.remove_voice("Nope") is False
+
+
+def _imported(root: Path):
+    """Read the imported-voice registry the test's fake folder holds."""
+    import json
+
+    from core.audiocpp_speech import ImportedVoice
+
+    path = root / "audio.cpp" / "imported_voices.json"
+    if not path.is_file():
+        return ()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return tuple(
+        ImportedVoice.from_primitive(row) for row in data.get("voices", [])
+    )
+
+
+def _save(root: Path, voices) -> None:
+    import json
+
+    path = root / "audio.cpp" / "imported_voices.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"voices": [v.to_primitive() for v in voices]}), encoding="utf-8"
+    )

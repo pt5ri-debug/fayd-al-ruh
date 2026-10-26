@@ -260,6 +260,48 @@ def test_composer_row_opens_the_studio(data_root, tmp_path) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_shows_the_voice_cloning_buttons_for_voicetut(data_root) -> None:
+    """The VoiceTut studio carries the clone/import capability; the others do not.
+
+    VoiceTut is a zero-shot cloning model, so *only* its studio offers the "clone
+    my voice (record)" and "import a voice file" buttons -- a Piper or Qwen studio
+    hides them rather than showing an action its engine cannot do.
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.voice_studio_dialog import VoiceStudioDialog
+
+    root = tk.Tk()
+    try:
+        voicetut = _studio("audio.cpp")
+        dialog = VoiceStudioDialog(
+            root, voicetut, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+        )
+        root.update()
+        assert dialog._clone_button.winfo_ismapped()
+        assert dialog._import_button.winfo_ismapped()
+        # The remove menu starts disabled: nothing has been imported yet.
+        assert str(dialog._remove_menu.cget("state")) == "disabled"
+        dialog._close()
+    finally:
+        root.destroy()
+
+    root = tk.Tk()
+    try:
+        piper = _studio("piper")
+        dialog = VoiceStudioDialog(
+            root, piper, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+        )
+        root.update()
+        # A non-cloning engine has no such section at all.
+        assert not hasattr(dialog, "_clone_button")
+        dialog._close()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_shows_the_engine_setup_block(data_root) -> None:
     """The sidebar carries the honest setup line and the action that fixes it.
 

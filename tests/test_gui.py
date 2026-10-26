@@ -91,8 +91,12 @@ def test_service_groups_reading_voices_by_source() -> None:
         assert section.title
 
 
-def test_service_notes_name_each_source_that_contributed_nothing(monkeypatch) -> None:
+def test_service_notes_name_each_source_that_contributed_nothing(tmp_path, monkeypatch) -> None:
     """A missing source is explained, not silently dropped from the menu."""
+    # Isolate the data directory: a developer machine that really has the VoiceTut
+    # engine installed would otherwise report that source as present, so the test
+    # would depend on the machine rather than on the code.
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
     service = _service(FakeSession())
     # No voices at all from any source: every source is explained.
     monkeypatch.setattr(service, "voice_sections", lambda: ())
@@ -738,11 +742,15 @@ def test_window_theme_toggle_switches_palette_and_persists(tmp_path, monkeypatch
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
-def test_window_sidebar_has_a_scrollbar_shown_only_on_overflow() -> None:
+def test_window_sidebar_has_a_scrollbar_shown_only_on_overflow(tmp_path, monkeypatch) -> None:
     import tkinter as tk
 
     from gui.app import FaydGUI
 
+    # Isolate the data directory, so the sidebar's length depends on the code and
+    # not on whether this machine happens to have extra voices installed (a real
+    # VoiceTut install adds a long voice list that would keep the panel overflowing).
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
     root = tk.Tk()
     try:
         app = FaydGUI(root, service=_service(FakeSession()))

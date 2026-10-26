@@ -22,7 +22,6 @@ from __future__ import annotations
 import contextlib
 import io
 import queue
-import re
 import threading
 import time
 import tkinter as tk
@@ -355,18 +354,13 @@ def _strip_markdown(text: str) -> str:
     """Turn rendered Markdown back into plain prose, so a reader speaks words.
 
     A speech engine should not read ``**``, backticks, or a list bullet aloud, so
-    the markers are removed while the words and the code are kept.
+    the markers are removed while the words and the code are kept. The rule lives
+    in :func:`gui.message_footer.strip_markdown` so every window that reads aloud
+    strips the same way; this name is kept for the main window's own callers.
     """
-    text = re.sub(r"```[^\n]*\n?", "", text)          # fenced code markers
-    text = re.sub(r"`([^`]*)`", r"\1", text)          # inline code
-    text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.MULTILINE)  # headings
-    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)       # bullets
-    text = re.sub(r"^\s*\d+[.)]\s+", "", text, flags=re.MULTILINE)     # ordered lists
-    text = re.sub(r"^\s*>\s?", "", text, flags=re.MULTILINE)           # block quotes
-    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)               # links -> label
-    text = re.sub(r"(\*\*|__|\*|_|~~)", "", text)                      # emphasis
-    text = re.sub(r"^\s*[-*_]{3,}\s*$", "", text, flags=re.MULTILINE)  # rules
-    return text
+    from gui.message_footer import strip_markdown
+
+    return strip_markdown(text)
 
 
 class LineStream(io.TextIOBase):

@@ -67,6 +67,30 @@ VOICETUT_FAMILY = "omnivoice"
 #: it is what the model card insists on, so it is the default here.
 VOICETUT_LANGUAGE = "arz"
 
+#: The language ids the audio.cpp OmniVoice family accepts. Anything else is
+#: mapped onto one of these before the engine sees it: the engine rejects a bare
+#: ``ar`` with "unsupported OmniVoice language", so a caller that passes the
+#: project's own two-letter code must still be spoken rather than fail.
+AUDIOCPP_LANGUAGES: tuple[str, ...] = ("ar", "arz", "en")
+
+
+def normalize_language(language: str | None) -> str:
+    """The audio.cpp language id for a project language code.
+
+    The project speaks in two-letter codes (``ar``/``en``), but VoiceTut was
+    trained with the Egyptian-Arabic id ``arz`` and the engine *rejects* a bare
+    ``ar``. So an Arabic hint becomes ``arz`` -- the model's own language -- and an
+    English hint stays ``en``; anything else falls back to the model's ``arz``
+    default rather than an id the engine would refuse.
+    """
+    code = (language or "").strip().lower()
+    if not code:
+        return VOICETUT_LANGUAGE
+    if code in AUDIOCPP_LANGUAGES:
+        return "arz" if code == "ar" else code
+    return VOICETUT_LANGUAGE
+
+
 #: The rate VoiceTut renders at.
 AUDIOCPP_SAMPLE_RATE = 24_000
 
@@ -118,6 +142,20 @@ VOICETUT_MODELS: tuple[VoiceTutSpec, ...] = (
 
 #: The upstream repo that carries the built-in studio reference speakers.
 SPEAKERS_REPO = "mohammedaly22/VoiceTut-TTS"
+
+#: The file the user's own imported/cloned voices are registered in, beside the
+#: reference clips (``<data>/audio.cpp/imported_voices.json``).
+IMPORTED_VOICES_FILE = "imported_voices.json"
+
+#: The audio formats an imported voice may arrive in. A ``.wav`` is read directly;
+#: another format is converted with ``ffmpeg`` or ``sox`` when one is installed, and
+#: refused honestly when none is -- audio.cpp itself clones from a WAV reference.
+VOICE_CLIP_SUFFIXES: tuple[str, ...] = (".wav", ".mp3", ".m4a", ".flac", ".ogg", ".opus", ".aac")
+
+#: What the import picker offers, including the ``.onnx`` the user asked to accept
+#: (an ONNX voice belongs to the *Piper* studio; VoiceTut clones from a clip, so an
+#: ONNX file is reported with that next step rather than stored as a dead asset).
+IMPORT_PICKER_SUFFIXES: tuple[str, ...] = (*VOICE_CLIP_SUFFIXES, ".onnx")
 
 #: The built-in studio speakers, exactly as the upstream ``references.json`` names
 #: them (``speaker_name`` -> file stem + gender). Kept as declarative data so the
@@ -576,7 +614,280 @@ def voice_list(root: Path | str | None = None) -> tuple[ModelVoice, ...]:
                 reference_text=texts.get(stem, ""),
             )
         )
+    voices.extend(imported_voice_models(root))
     return tuple(voices)
+
+
+# --------------------------------------------------- the user's own voices
+
+
+@dataclass(frozen=True)
+class ImportedVoice:
+    """A voice the user added to VoiceTut: a reference clip the engine clones.
+
+    VoiceTut is a *zero-shot cloning* model: it speaks in the voice of a short
+    reference clip. So a user's own voice is a clip (recorded here, or imported
+    from a file) plus, optionally, its transcript -- exactly the shape the model's
+    built-in speakers take. The clip is copied into the model's own voices folder
+    and registered here, so it survives a restart and shows in the menu beside the
+    built-in speakers.
+    """
+
+    name: str
+    clip: str
+    transcript: str = ""
+    source: str = ""
+
+    def to_primitive(self) -> dict[str, str]:
+        return {
+            "name": self.name,
+            "clip": self.clip,
+            "transcript": self.transcript,
+            "source": self.source,
+        }
+
+    @classmethod
+    def from_primitive(cls, data: object) -> ImportedVoice | None:
+        """Read one registry row, or ``None`` when it is not usable."""
+        if not isinstance(data, dict):
+            return None
+        name = str(data.get("name") or "").strip()
+        clip = str(data.get("clip") or "").strip()
+        if not name or not clip:
+            return None
+        return cls(
+            name=name,
+            clip=clip,
+            transcript=str(data.get("transcript") or "").strip(),
+            source=str(data.get("source") or "").strip(),
+        )
+
+
+def imported_voices_path(root: Path | str | None = None) -> Path:
+    """The registry file holding the user's imported/cloned voices."""
+    return _models_root(root) / IMPORTED_VOICES_FILE
+
+
+def load_imported_voices(root: Path | str | None = None) -> tuple[ImportedVoice, ...]:
+    """Every voice the user added, in the order they were added.
+
+    A missing or unreadable registry yields ``()`` rather than raising, so a stale
+    file can never make a menu unusable; a row whose clip has been deleted is
+    dropped, so the menu never offers a voice that cannot be spoken.
+    """
+    path = imported_voices_path(root)
+    if not path.is_file():
+        return ()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    rows = data.get("voices") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        return ()
+    directory = voices_dir(root)
+    voices: list[ImportedVoice] = []
+    for row in rows:
+        voice = ImportedVoice.from_primitive(row)
+        if voice is None:
+            continue
+        if not (directory / voice.clip).is_file():
+            continue
+        voices.append(voice)
+    return tuple(voices)
+
+
+def _save_imported_voices(
+    voices: list[ImportedVoice], root: Path | str | None = None
+) -> None:
+    """Write the registry (best-effort: a read-only data folder must not crash)."""
+    from core.best_effort import best_effort
+
+    path = imported_voices_path(root)
+    payload = {"voices": [voice.to_primitive() for voice in voices]}
+    with best_effort("save the imported VoiceTut voices"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _to_wav(source: Path, target: Path) -> None:
+    """Ensure ``source`` is a WAV at ``target``, converting with ffmpeg/sox if needed.
+
+    A WAV is copied as-is. Any other audio format needs a converter; ``ffmpeg`` is
+    preferred and ``sox`` is the fallback, and neither being installed is reported
+    as the real next step rather than a decode error. A failure here is a
+    :class:`ValueError` -- a bad *choice* of clip -- so the CLI and the window
+    report it as such instead of as an engine fault.
+    """
+    import shutil as _shutil
+    import subprocess
+
+    if source.suffix.lower() == ".wav":
+        _shutil.copyfile(source, target)
+        return
+    converters = (
+        ("ffmpeg", ["ffmpeg", "-y", "-i", str(source), str(target)]),
+        ("sox", ["sox", str(source), str(target)]),
+    )
+    for executable, argv in converters:
+        if _shutil.which(executable):
+            completed = subprocess.run(argv, capture_output=True, text=True, check=False)
+            if completed.returncode == 0 and target.is_file():
+                return
+            raise ValueError(
+                f"{executable} could not convert {source.name} to WAV: "
+                f"{(completed.stderr or '').strip().splitlines()[-1:] or 'no output'}"
+            )
+    raise ValueError(
+        f"{source.name} is not a WAV and no converter is installed. Install ffmpeg "
+        "(or sox), or save the clip as a .wav first."
+    )
+
+
+def import_voice(
+    source: Path | str | AudioClip,
+    *,
+    name: str = "",
+    transcript: str = "",
+    root: Path | str | None = None,
+) -> ImportedVoice:
+    """Copy an audio file (or a recorded clip) in as a new VoiceTut voice.
+
+    Accepts any common audio format (a WAV directly; another format through
+    ``ffmpeg``/``sox``), and also a live :class:`~core.speech.AudioClip` -- the
+    microphone's own output -- so the window's *Clone my voice* recording reaches
+    the same registry without a round trip through a file. An ``.onnx`` file -- the
+    user asked to accept one -- is refused with the honest next step: an ONNX voice
+    belongs to the *Piper* studio, because VoiceTut clones from a reference clip and
+    cannot load one. Raises :class:`ValueError` for a missing file, an unusable
+    format, or audio that does not decode, so a bad choice is reported rather than
+    stored.
+    """
+    if isinstance(source, AudioClip):
+        if source.is_silent:
+            raise ValueError("The recording decoded to silence; record an audible clip.")
+        return _register_clip(source, name=name or "My voice", transcript=transcript, root=root)
+
+    path = Path(source).expanduser()
+    if not path.is_file():
+        raise ValueError(f"There is no file at {path}.")
+    suffix = path.suffix.lower()
+    if suffix == ".onnx":
+        raise ValueError(
+            "VoiceTut clones a voice from an audio clip, so an .onnx voice cannot be "
+            "loaded here. Use the Piper studio for an .onnx voice, or import a "
+            "recording (.wav, .mp3, .m4a, .flac, .ogg)."
+        )
+    if suffix not in VOICE_CLIP_SUFFIXES:
+        raise ValueError(
+            "Choose an audio clip ("
+            + ", ".join(VOICE_CLIP_SUFFIXES)
+            + f"); got {suffix or 'no extension'}."
+        )
+
+    label = (name or path.stem).strip() or path.stem
+    target = voices_dir(root) / f"user-{_voice_slug(label)}.wav"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _to_wav(path, target)
+    # Prove the clip really decodes, so a corrupt file is refused now rather than
+    # failing on the first read.
+    try:
+        clip = AudioClip.read_wav(target)
+    except (OSError, ValueError) as error:
+        _unlink_quietly(target)
+        raise ValueError(f"{path.name} is not usable audio: {error}") from error
+    if clip.is_silent:
+        _unlink_quietly(target)
+        raise ValueError(f"{path.name} decoded to silence; choose an audible clip.")
+    return _register_clip(clip, name=label, transcript=transcript, root=root, source=str(path))
+
+
+def _register_clip(
+    clip: AudioClip,
+    *,
+    name: str,
+    transcript: str = "",
+    root: Path | str | None = None,
+    source: str = "",
+) -> ImportedVoice:
+    """Write ``clip`` into the voices folder and register it under ``name``."""
+    directory = voices_dir(root)
+    directory.mkdir(parents=True, exist_ok=True)
+    label = (name or "My voice").strip() or "My voice"
+    target = directory / f"user-{_voice_slug(label)}.wav"
+    clip.write_wav(target)
+    existing = [v for v in load_imported_voices(root) if v.name.lower() != label.lower()]
+    voice = ImportedVoice(name=label, clip=target.name, transcript=transcript.strip(), source=source)
+    existing.append(voice)
+    _save_imported_voices(existing, root)
+    return voice
+
+
+def _voice_slug(label: str) -> str:
+    """A filesystem-safe slug for an imported voice's clip filename."""
+    slug = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in label.strip().lower())
+    slug = "-".join(part for part in slug.split("-") if part)
+    return slug or "voice"
+
+
+def clone_voice(
+    recording: Path | str | AudioClip,
+    *,
+    name: str = "",
+    transcript: str = "",
+    root: Path | str | None = None,
+) -> ImportedVoice:
+    """Register a recording of the user's own voice as a VoiceTut voice.
+
+    This is the "merge my voice into the model" step the user asked for, done the
+    way a zero-shot cloning model actually works: the recording becomes a reference
+    clip, and every later read is spoken in that voice. Accepts a file path or the
+    microphone's own :class:`~core.speech.AudioClip`. Thin wrapper over
+    :func:`import_voice` so the window and the CLI share one path.
+    """
+    return import_voice(recording, name=name or "My voice", transcript=transcript, root=root)
+
+
+def remove_imported_voice(name: str, root: Path | str | None = None) -> bool:
+    """Remove an imported voice (and its clip); ``True`` when one was removed."""
+    wanted = name.strip().lower()
+    kept: list[ImportedVoice] = []
+    removed = False
+    for voice in load_imported_voices(root):
+        if voice.name.lower() == wanted:
+            removed = True
+            _unlink_quietly(voices_dir(root) / voice.clip)
+            continue
+        kept.append(voice)
+    if removed:
+        _save_imported_voices(kept, root)
+    return removed
+
+
+def imported_voice_models(root: Path | str | None = None) -> tuple[ModelVoice, ...]:
+    """The user's own voices as :class:`~core.voices.ModelVoice` objects."""
+    directory = voices_dir(root)
+    return tuple(
+        ModelVoice(
+            name=voice.name,
+            engine=AUDIOCPP_ENGINE_NAME,
+            language=VOICETUT_LANGUAGE,
+            gender="",
+            model="VoiceTut-TTS",
+            reference=directory / voice.clip,
+            reference_text=voice.transcript,
+            title=voice.name,
+        )
+        for voice in load_imported_voices(root)
+    )
+
+
+def _unlink_quietly(path: Path) -> None:
+    """Remove ``path`` if it is there, ignoring an ``OSError``."""
+    import contextlib
+
+    with contextlib.suppress(OSError):
+        path.unlink()
 
 
 # ------------------------------------------------------------- availability
@@ -765,7 +1076,9 @@ class AudioCppSynthesizer:
         prosody: Prosody | None = None,
     ) -> None:
         self.voice = voice
-        self.language = language or VOICETUT_LANGUAGE
+        # The engine only accepts the model's own language ids (``arz``/``en``), and
+        # rejects a bare ``ar``; the project's two-letter codes are mapped here once.
+        self.language = normalize_language(language)
         self.steps = steps
         self._fallback = fallback
         self._root = root
@@ -844,16 +1157,21 @@ __all__ = [
     "AUDIOCPP_ENGINE_NAME",
     "AUDIOCPP_SAMPLE_RATE",
     "DEFAULT_INFERENCE_STEPS",
+    "IMPORTED_VOICES_FILE",
+    "IMPORT_PICKER_SUFFIXES",
     "VOICETUT_MODELS",
     "VOICETUT_SPEAKERS",
+    "VOICE_CLIP_SUFFIXES",
     "AudioCppCliRunner",
     "AudioCppRunner",
     "AudioCppStatus",
     "AudioCppSynthesizer",
     "AudioCppUnavailable",
+    "ImportedVoice",
     "VoiceTutSpec",
     "audiocpp_status",
     "available_synthesizer",
+    "clone_voice",
     "download_model",
     "download_speakers",
     "engine_dir",
@@ -861,9 +1179,14 @@ __all__ = [
     "extra_installed",
     "find_cli",
     "find_model_file",
+    "import_voice",
+    "imported_voice_models",
+    "imported_voices_path",
     "install_engine",
     "install_hint",
+    "load_imported_voices",
     "model_is_cached",
+    "remove_imported_voice",
     "resolve_spec",
     "spec_names",
     "spec_summaries",

@@ -49,19 +49,19 @@ from tkinter import filedialog
 from tkinter import font as tkfont
 from typing import Any
 
+from core.reading import clip_is_silent
+
 from gui import rich_text
 from gui.app import RoundedBox
 from gui.chat_composer import ChatComposer
 from gui.image_preview import load_scaled
+from gui.message_footer import MessageFooter, strip_markdown
 from gui.typography import resolve
 from gui.voice_studio import DOCUMENT_SUFFIXES, VoiceStudioService
-from gui.window_controls import install_window_controls, work_area
+from gui.window_controls import fit_geometry, install_window_controls
 
 #: The transcript reads as a centred column, capped like the chat window's.
 _COLUMN_MAX = 860
-
-#: A message taller than this scrolls inside its own card.
-_MAX_BUBBLE_LINES = 40
 
 #: The logo badge's side length, in pixels (the sidebar's identity block).
 LOGO_SIZE = 84
@@ -101,8 +101,13 @@ class VoiceStudioDialog:
         self._logo_photo: tk.PhotoImage | None = None
         self._avatar_photos: dict[tk.Canvas, tk.PhotoImage] = {}
         self._recording: Any = None
+        self._clone_recording: Any = None
         self._pump_after: str | None = None
         self._rows: list[tuple[str, str, tk.Frame, tk.Text, RoundedBox | None]] = []
+        # The footers under the messages, so the one reading aloud is painted as
+        # "Stop" and every other as "Read aloud" (one reading at a time).
+        self._footers: list[MessageFooter] = []
+        self._playing_footer: MessageFooter | None = None
 
         self._results: queue.Queue[
             tuple[Callable[[Any, Exception | None], None], Any, Exception | None]
@@ -128,20 +133,8 @@ class VoiceStudioDialog:
     # -- layout -----------------------------------------------------------
 
     def _initial_geometry(self) -> str:
-        """The opening geometry, kept inside the usable desktop."""
-        width, height = DEFAULT_WIDTH, DEFAULT_HEIGHT
-        try:
-            area = work_area()
-            if area is not None:
-                _x, _y, area_width, area_height = area
-                width = min(width, area_width)
-                height = min(height, area_height)
-            else:
-                width = min(width, self.window.winfo_screenwidth())
-                height = min(height, self.window.winfo_screenheight())
-        except tk.TclError:
-            pass
-        return f"{width}x{height}"
+        """The opening geometry, kept inside the usable desktop (screen minus taskbar)."""
+        return fit_geometry(self.window, DEFAULT_WIDTH, DEFAULT_HEIGHT, min_height=MIN_HEIGHT)
 
     def _build(self) -> None:
         self._build_header()
@@ -228,6 +221,7 @@ class VoiceStudioDialog:
 
         self._build_identity(sidebar)
         self._build_voice_section(sidebar)
+        self._build_own_voice_section(sidebar)
         self._build_mood_section(sidebar)
         self._build_document_section(sidebar)
         self._build_setup_section(sidebar)
@@ -427,12 +421,183 @@ class VoiceStudioDialog:
         if error is not None:
             self._add_message("note", f"Could not read aloud: {error}")
             return
-        if clip is None or getattr(clip, "silent", False):
+        if clip_is_silent(clip):
             self._add_message(
                 "note", "The engine produced no audio; install a speech engine to hear it."
             )
             return
         self._add_message("note", "Played the sample reading.")
+
+    # -- the user's own voice (VoiceTut clones from a clip) ---------------
+
+    def _build_own_voice_section(self, sidebar: tk.Frame) -> None:
+        """VoiceTut's own capability: speak *your* voice, from a clip.
+
+        VoiceTut is a zero-shot cloning model, so it can read documents in the
+        user's own voice once a short recording is given to it -- the "merge my
+        voice into the model" the user asked for, done the way the model works.
+        Two buttons: record a clip with the microphone, or import an audio file.
+        A third removes an imported voice. The section is built only for the
+        engine that can clone (see :meth:`VoiceStudioService.can_import_voices`).
+        """
+        if not self.service.can_import_voices():
+            return
+        theme = self.theme
+        self._section_label(sidebar, "My voice (clone)")
+        actions = tk.Frame(sidebar, bg=theme.surface)
+        actions.pack(fill="x", padx=12)
+
+        self._clone_button = self._button(
+            actions, "🎙   Clone my voice (record)", self._on_clone_voice, small=True
+        )
+        self._clone_button.pack(fill="x", pady=(0, 4))
+        self._import_button = self._button(
+            actions, "＋   Import a voice file…", self._on_import_voice, small=True
+        )
+        self._import_button.pack(fill="x", pady=(0, 4))
+
+        # Removing an imported voice: a menubutton of the ones the user added, so
+        # the list is always what is really registered here.
+        self._remove_menu = tk.Menubutton(
+            actions, text="✕   Remove an imported voice", bg=theme.surface_raised,
+            fg=theme.foreground, activebackground=theme.interactive_active,
+            activeforeground=theme.contrast, relief="flat", borderwidth=0,
+            highlightthickness=0, anchor="w", font=self._type.font("2xs", weight="bold"),
+            cursor="hand2", padx=10, pady=4,
+        )
+        self._remove_menu.pack(fill="x")
+
+        self._own_voice_note = tk.Label(
+            sidebar, text="", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", justify="left",
+            wraplength=SIDEBAR_WIDTH - 40,
+        )
+        self._own_voice_note.pack(fill="x", padx=14, pady=(4, 2))
+        self._refresh_own_voice()
+
+    def _refresh_own_voice(self) -> None:
+        """Rebuild the remove menu and the note from the real imported voices."""
+        if not hasattr(self, "_own_voice_note"):
+            return
+        names = self.service.imported_voice_names()
+        menu = tk.Menu(
+            self._remove_menu, tearoff=0, bg=self.theme.surface_raised,
+            fg=self.theme.foreground, activebackground=self.theme.interactive_active,
+            activeforeground=self.theme.contrast, font=self._type.font("xs"),
+        )
+        if names:
+            for name in names:
+                menu.add_command(
+                    label=name, command=partial(self._on_remove_voice, name)
+                )
+            self._remove_menu.configure(state="normal")
+        else:
+            menu.add_command(label="(no imported voice yet)", state="disabled")
+            self._remove_menu.configure(state="disabled")
+        self._remove_menu.configure(menu=menu)
+        if names:
+            self._own_voice_note.configure(
+                text="Imported voices: " + ", ".join(names)
+                + ". Each is a reference clip this engine clones, and it is read with "
+                "when you pick it in the voice list above."
+            )
+        else:
+            self._own_voice_note.configure(
+                text="Record a short clip or import an audio file (.wav, .mp3, .m4a, "
+                ".flac, .ogg) and this engine reads documents in that voice. (An .onnx "
+                "voice belongs to the Piper studio, not this one.)"
+            )
+
+    def _on_clone_voice(self) -> None:
+        """Record the user's voice, or stop the recording and register it.
+
+        A toggle like the microphone: the first click starts recording, the second
+        stops it and registers the clip as a new voice of this engine.
+        """
+        if getattr(self, "_clone_recording", None) is not None:
+            self._stop_clone_recording()
+            return
+        if self._busy:
+            return
+        try:
+            recording = self.service.start_recording()
+        except (OSError, RuntimeError, ValueError) as error:
+            self._add_message("note", f"The microphone is unavailable: {error}")
+            return
+        self._clone_recording = recording
+        self._composer.set_mic_recording(True)
+        self._add_message(
+            "note",
+            "Recording your voice… click “Clone my voice” again (or the microphone) "
+            "to stop; the clip becomes a voice this engine can read with.",
+        )
+
+    def _stop_clone_recording(self) -> None:
+        """Finish the clone recording and register it."""
+        recording = getattr(self, "_clone_recording", None)
+        self._clone_recording = None
+        self._composer.set_mic_recording(False)
+        if recording is None:
+            return
+        self._start_work(
+            lambda: self.service.clone_voice(recording.result(), name="My voice"),
+            self._render_own_voice,
+        )
+
+    def _on_import_voice(self) -> None:
+        """Import an audio file as a new voice of this engine."""
+        if self._busy:
+            return
+        from core.audiocpp_speech import IMPORT_PICKER_SUFFIXES
+
+        pattern = " ".join(f"*{suffix}" for suffix in IMPORT_PICKER_SUFFIXES)
+        path = filedialog.askopenfilename(
+            parent=self.window,
+            title=f"Choose an audio clip for {self.service.name} to clone",
+            filetypes=[
+                ("Audio clips", pattern),
+                ("WAV audio", "*.wav"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        self._start_work(
+            partial(self.service.import_voice, path),
+            self._render_own_voice,
+        )
+
+    def _on_remove_voice(self, name: str) -> None:
+        if self._busy:
+            return
+        self._start_work(
+            partial(self.service.remove_voice, name),
+            self._render_own_voice_removed,
+        )
+
+    def _render_own_voice(self, voice: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._add_message("note", f"Could not add the voice: {error}")
+            return
+        self._rebuild_voice_section()
+        self._refresh_voice_status()
+        self._refresh_own_voice()
+        self._add_message(
+            "note",
+            f"Added “{voice.name}” as a voice of {self.service.name}; it is selected now.",
+        )
+
+    def _render_own_voice_removed(self, removed: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._add_message("note", f"Could not remove the voice: {error}")
+            return
+        self._rebuild_voice_section()
+        self._refresh_voice_status()
+        self._refresh_own_voice()
+        self._add_message(
+            "note",
+            "Removed the voice." if removed else "That voice was not found.",
+        )
 
     # -- mood -------------------------------------------------------------
 
@@ -674,14 +839,37 @@ class VoiceStudioDialog:
             self._add_message("document", text)
 
     def _on_read_aloud(self) -> None:
-        if self._busy:
+        """Read the document aloud, or stop a reading already in progress.
+
+        This is the toggle the user asked for: the button reads while idle and
+        stops while a reading runs, alternating with every click. Stopping is
+        immediate (the clip playing is ended and the worker's loop breaks at the
+        next chunk), so a second click never has to wait for the document to end.
+        """
+        if self.service.reading():
+            self.service.stop_reading()
+            self._set_reading_button(False)
             return
         if self.service.document is None:
             self._add_message("note", "Open a document first, then read it aloud.")
             return
-        self._start_work(self.service.read_aloud, self._render_reading)
+        if self._busy:
+            return
+        self._set_reading_button(True)
+        self._start_work(self.service.start_reading, self._render_reading)
+
+    def _set_reading_button(self, reading: bool) -> None:
+        """Paint the read button as ``▶ Read`` (idle) or ``⏹ Stop`` (reading)."""
+        with _suppress_tcl():
+            self._read_button.configure(
+                text="⏹   Stop reading" if reading else "▶   Read the document aloud"
+            )
 
     def _render_reading(self, report: Any, error: Exception | None) -> None:
+        self._set_reading_button(False)
+        if self._playing_footer is not None:
+            self._playing_footer.set_playing(False)
+            self._playing_footer = None
         if error is not None:
             self._add_message("note", f"Could not read the document: {error}")
             return
@@ -836,8 +1024,50 @@ class VoiceStudioDialog:
         for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             widget.bind(wheel, self._on_bubble_wheel, add="+")
         self._fit_height(widget)
+        # Every message carries the same footer the main window draws -- Copy and a
+        # Read aloud / Stop toggle -- so a studio reads exactly like the chat window.
+        footer = MessageFooter(
+            row, text=strip_markdown(text), widget=widget, theme=theme,
+            typography=self._type, on_toggle=self._toggle_footer_reading,
+        )
+        self._footers.append(footer)
         self._scroll_to_bottom()
         return widget
+
+    def _toggle_footer_reading(self, footer: MessageFooter) -> None:
+        """Read one message aloud, or stop the reading that footer started.
+
+        One reading runs at a time: starting a new one stops the previous, and the
+        footer of the message being read is the only one painted ``⏹ Stop``.
+        """
+        if self._playing_footer is not None and self._playing_footer is not footer:
+            self.service.stop_reading()
+            self._playing_footer.set_playing(False)
+            self._playing_footer = None
+        # A document read in progress is one reading too; end it before starting
+        # another, so only ever one thing speaks.
+        if self.service.reading():
+            self.service.stop_reading()
+            self._set_reading_button(False)
+        if footer.playing:
+            self.service.stop_reading()
+            footer.set_playing(False)
+            self._playing_footer = None
+            return
+        if not self.service.reading_available():
+            self._add_message(
+                "note",
+                "No speech engine is installed here, so nothing can be read aloud yet.",
+            )
+            return
+        if self._busy:
+            return
+        self._playing_footer = footer
+        footer.set_playing(True)
+        self._start_work(
+            partial(self.service.start_reading, footer.text),
+            self._render_reading,
+        )
 
     def _avatar(self, parent: tk.Misc) -> None:
         """A small round badge: the saved logo when there is one, else an initial."""
@@ -859,10 +1089,16 @@ class VoiceStudioDialog:
         badge.pack(side="left")
 
     def _fit_height(self, widget: tk.Text) -> None:
+        """Size a message's card to its whole content, so nothing is clipped.
+
+        The card grows to hold every displayed line (the transcript scrolls when
+        the conversation is longer than the window), so a long answer is fully
+        readable in its own message rather than hidden behind an inner scrollbar.
+        """
         widget.update_idletasks()
         measured = widget.count("1.0", "end", "displaylines")
         lines = int(measured[0]) if measured else 1
-        widget.configure(height=min(max(lines, 1), _MAX_BUBBLE_LINES))
+        widget.configure(height=max(lines, 1))
 
     @staticmethod
     def _make_read_only(widget: tk.Text) -> None:
@@ -938,6 +1174,11 @@ class VoiceStudioDialog:
 
     def _toggle_mic(self) -> None:
         if self._busy:
+            return
+        # A clone recording and a dictation recording share the one microphone, so
+        # the microphone button finishes whichever is running.
+        if self._clone_recording is not None:
+            self._stop_clone_recording()
             return
         if self._recording is not None:
             self._stop_mic()
@@ -1034,11 +1275,35 @@ class VoiceStudioDialog:
             except Exception:
                 pass
             self._recording = None
+        if self._clone_recording is not None:
+            try:
+                self.service.stop_recording()
+            except Exception:
+                pass
+            self._clone_recording = None
+        # End a reading in progress and drop every footer's bound command, so the
+        # destroyed window is not held by a cycle only the cyclic collector could
+        # break (which can run on a worker thread and deadlock on a Tcl call).
+        try:
+            self.service.stop_reading()
+        except Exception:
+            pass
+        for footer in self._footers:
+            footer.clear_commands()
+        self._footers.clear()
+        self._playing_footer = None
         try:
             self.window.destroy()
         finally:
             if self._on_close is not None:
                 self._on_close()
+
+
+def _suppress_tcl():
+    """A context manager that swallows a Tk error (a destroyed widget's call)."""
+    import contextlib
+
+    return contextlib.suppress(tk.TclError)
 
 
 __all__ = [

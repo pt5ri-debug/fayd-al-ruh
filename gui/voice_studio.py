@@ -33,7 +33,7 @@ from typing import Any
 from core import voice_studio_profile as profiles
 from core.best_effort import best_effort
 from core.document_reader import DocumentText, read_document
-from core.reading import TextReader
+from core.reading import TextReader, clip_is_silent, split_for_speech
 from core.voice_moods import Mood, mood_keys, resolve_mood
 from core.voices import (
     SOURCE_AUDIOCPP,
@@ -240,6 +240,11 @@ class VoiceStudioService:
         self.document: LoadedDocument | None = None
         self._last_report: ReadReport | None = None
         self._recording: Any = None
+        # The reading in progress, so a second click can stop it (the toggle the
+        # user asked for): the chunk index reached and the clip playing right now.
+        self._playback: Any = None
+        self._reading_text: str = ""
+        self._reading_index: int = 0
 
     # --------------------------------------------------------------- identity
 
@@ -349,6 +354,74 @@ class VoiceStudioService:
         if voice is None:
             return key
         return f"{voice.category_label()} “{_voice_label(voice)}”"
+
+    # ------------------------------------------------- the user's own voices
+
+    def can_import_voices(self) -> bool:
+        """True for the VoiceTut studio, which can clone a voice from a clip.
+
+        Only a *zero-shot cloning* engine can take the user's own voice: it speaks
+        from a reference clip, so importing one (or recording one) is meaningful.
+        Piper needs an ONNX model and Qwen3-TTS has a fixed speaker set, so neither
+        offers this -- the buttons are hidden rather than shown and refused.
+        """
+        return self.source == SOURCE_AUDIOCPP
+
+    def import_voice(
+        self, path: str | Path | Any, *, name: str = "", transcript: str = ""
+    ) -> Any:
+        """Import an audio file (or a recorded clip) as a new voice of this engine.
+
+        Delegates to :func:`core.audiocpp_speech.import_voice`, so the window, the
+        CLI, and the registry agree. Raises :class:`ValueError` for a file the
+        engine cannot clone from (an ``.onnx`` voice, a bad format, silence), so the
+        window reports the real reason instead of adding a dead voice.
+        """
+        from core.audiocpp_speech import import_voice as _import
+
+        voice = _import(path, name=name, transcript=transcript)
+        self.refresh()
+        self._select_voice_if_offered(voice.name)
+        return voice
+
+    def clone_voice(
+        self, recording: str | Path | Any, *, name: str = "", transcript: str = ""
+    ) -> Any:
+        """Register a recording of the user's own voice, then select it.
+
+        ``recording`` is a file path or the microphone's own
+        :class:`~core.speech.AudioClip` (what :meth:`start_recording` yields).
+        """
+        from core.audiocpp_speech import clone_voice as _clone
+
+        voice = _clone(recording, name=name, transcript=transcript)
+        self.refresh()
+        self._select_voice_if_offered(voice.name)
+        return voice
+
+    def remove_voice(self, name: str) -> bool:
+        """Remove an imported voice (and its clip); ``True`` when one was removed."""
+        from core.audiocpp_speech import remove_imported_voice
+
+        removed = remove_imported_voice(name)
+        if removed:
+            self.refresh()
+        return removed
+
+    def imported_voice_names(self) -> tuple[str, ...]:
+        """The names of the voices the user added here, in registry order."""
+        if not self.can_import_voices():
+            return ()
+        from core.audiocpp_speech import load_imported_voices
+
+        return tuple(voice.name for voice in load_imported_voices())
+
+    def _select_voice_if_offered(self, name: str) -> None:
+        """Select a freshly added voice by its model key, when the studio offers it."""
+        key = f"model:{self.engine}:{name}"
+        if key in self.voice_keys():
+            with best_effort("select the voice that was just added"):
+                self.set_voice(key)
 
     @staticmethod
     def _resolve_voice(key: str) -> Any:
@@ -687,7 +760,7 @@ class VoiceStudioService:
         seconds = 0.0
         for chunk in chunks:
             clip = self._reader.speak(chunk)
-            if getattr(clip, "silent", False):
+            if clip_is_silent(clip):
                 report = ReadReport(
                     ok=False,
                     chunks=read,
@@ -711,6 +784,101 @@ class VoiceStudioService:
     def last_report(self) -> ReadReport | None:
         """The most recent read's outcome, or ``None`` when nothing was read yet."""
         return self._last_report
+
+    # ---------------------------------------------------- stoppable reading
+
+    def reading(self) -> bool:
+        """True while a reading is in progress (so the button shows ``Stop``)."""
+        return self._reading_text != ""
+
+    def start_reading(self, text: str | None = None) -> ReadReport:
+        """Read the loaded document aloud, blocking, so a click can stop it.
+
+        This is the toggle's ``start`` half: it reads the whole body chunk by chunk
+        and *plays* each chunk in the background, then waits for it, checking after
+        every chunk whether :meth:`stop_reading` was called (the window runs this on
+        a worker thread, so the UI stays live). A stop ends the reading at once and
+        is reported honestly as stopped rather than finished.
+
+        Unlike :meth:`read_aloud` -- which renders and speaks each chunk and is kept
+        for the CLI and the tests -- this path is the one the window's toggle uses,
+        because only it can be interrupted between chunks.
+        """
+        body = (text if text is not None else (self.document.text if self.document else "")).strip()
+        if not body:
+            report = ReadReport(ok=False, message="There is no document to read.")
+            self._last_report = report
+            return report
+        if not self.reading_available():
+            report = ReadReport(
+                ok=False,
+                message="No speech engine is installed here, so nothing can be read aloud.",
+            )
+            self._last_report = report
+            return report
+
+        chunks = _split_for_speech(body)
+        self._reading_text = body
+        self._reading_index = 0
+        read = 0
+        seconds = 0.0
+        try:
+            for chunk in chunks:
+                if not self.reading():
+                    break
+                try:
+                    clip = self._reader.render(chunk)
+                except Exception as error:  # a governed read reports, never crashes
+                    report = ReadReport(
+                        ok=False, chunks=read, characters=sum(len(c) for c in chunks[:read]),
+                        seconds=seconds, message=f"The engine could not read the document: {error}",
+                    )
+                    self._last_report = report
+                    return report
+                if clip_is_silent(clip):
+                    report = ReadReport(
+                        ok=False, chunks=read, characters=sum(len(c) for c in chunks[:read]),
+                        seconds=seconds,
+                        message="The engine produced no audio; install a speech engine to hear it.",
+                    )
+                    self._last_report = report
+                    return report
+                self._reading_index = read
+                self._playback = self._reader.play(clip)
+                if self._playback is not None:
+                    self._playback.wait()
+                self._playback = None
+                read += 1
+                seconds += float(getattr(clip, "duration_seconds", 0.0) or 0.0)
+            # `reading()` is still true only when the loop ran to the end: a stop
+            # clears the flag, so this is "completed", not "stopped".
+            completed = self.reading()
+            report = ReadReport(
+                ok=True, chunks=read, characters=len(body), seconds=seconds,
+                message="" if completed else "Reading stopped.",
+            )
+            self._last_report = report
+            return report
+        finally:
+            self._reading_text = ""
+            self._reading_index = 0
+            self._playback = None
+
+    def stop_reading(self) -> bool:
+        """Ask the reading in progress to stop; ``True`` when one was running.
+
+        The stop takes effect at the next chunk boundary and, because the playing
+        clip is stopped here, the sound ends at once. The window calls this on the
+        UI thread while the worker thread is inside :meth:`start_reading`.
+        """
+        if not self.reading():
+            return False
+        self._reading_text = ""
+        playback = self._playback
+        if playback is not None:
+            with best_effort("stop the clip that is playing"):
+                playback.stop()
+        return True
 
     def save_speech(self, path: str | Path, text: str | None = None) -> Path:
         """Render the loaded document (or ``text``) to a WAV file."""
@@ -792,53 +960,12 @@ def _discover_recognizer_name() -> str:
 
 
 def _split_for_speech(text: str, *, max_chars: int = 600) -> tuple[str, ...]:
-    """Split ``text`` into paragraph-sized chunks a synthesizer can read in turn.
+    """Split text into speech chunks (the shared :func:`core.reading.split_for_speech`).
 
-    A paragraph longer than ``max_chars`` is split on sentence boundaries, so no
-    single call is enormous; the chunks keep their order, so the reading is the
-    document's own sequence.
+    Kept as a thin alias so the studio and the tests share one implementation with
+    every other window that reads aloud.
     """
-    chunks: list[str] = []
-    for paragraph in text.split("\n"):
-        paragraph = paragraph.strip()
-        if not paragraph:
-            continue
-        if len(paragraph) <= max_chars:
-            chunks.append(paragraph)
-            continue
-        piece = ""
-        for sentence in _sentences(paragraph):
-            if piece and len(piece) + len(sentence) + 1 > max_chars:
-                chunks.append(piece)
-                piece = sentence
-            else:
-                piece = f"{piece} {sentence}".strip()
-        if piece:
-            chunks.extend(_hard_split(piece, max_chars))
-    return tuple(chunks)
-
-
-def _hard_split(text: str, max_chars: int) -> tuple[str, ...]:
-    """Break a chunk that is still too long (no sentence marks) into pieces."""
-    if len(text) <= max_chars:
-        return (text,)
-    return tuple(
-        text[index : index + max_chars] for index in range(0, len(text), max_chars)
-    )
-
-
-def _sentences(paragraph: str) -> tuple[str, ...]:
-    """Split a paragraph into sentences on the common enders, keeping the marks."""
-    sentences: list[str] = []
-    current = ""
-    for character in paragraph:
-        current += character
-        if character in ".!?؟。":
-            sentences.append(current.strip())
-            current = ""
-    if current.strip():
-        sentences.append(current.strip())
-    return tuple(sentences)
+    return split_for_speech(text, max_chars=max_chars)
 
 
 __all__ = [

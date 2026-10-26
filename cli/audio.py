@@ -6,6 +6,10 @@
     python -m cli audio download --approve           # fetch the model (~1.3 GB)
     python -m cli audio download --speakers --approve
     python -m cli audio voices                       # the model's own voices
+    python -m cli audio my-voices                    # the voices you imported/cloned
+    python -m cli audio import <clip>                # add your own reference clip
+    python -m cli audio clone <recording>            # clone your voice from a clip
+    python -m cli audio remove-voice <name>          # forget an imported voice
     python -m cli audio say "إزاي حالك النهارده؟" --voice model:audio.cpp:Sarah
     python -m cli audio say "hello" --write-wav out.wav
 
@@ -28,9 +32,13 @@ from core.audiocpp_speech import (
     AUDIOCPP_ENGINE_NAME,
     AudioCppUnavailable,
     audiocpp_status,
+    clone_voice,
     download_model,
     download_speakers,
+    import_voice,
     install_engine,
+    load_imported_voices,
+    remove_imported_voice,
     spec_names,
     spec_summaries,
     voice_list,
@@ -71,6 +79,53 @@ def _voices() -> int:
     for voice in voices:
         gender = f", {voice.gender}" if voice.gender else ""
         print(f"  {voice.key:<32} {voice.name} [{voice.language}{gender}]")
+    return 0
+
+
+def _import_voice(path: Path, name: str, transcript: str) -> int:
+    """Register an audio clip as one of the user's own voices."""
+    try:
+        voice = import_voice(path, name=name, transcript=transcript)
+    except (ValueError, OSError) as error:
+        print(str(error))
+        return 2
+    print(f"Imported “{voice.name}” as a voice of {AUDIOCPP_ENGINE_NAME}.")
+    print(f"  key: model:{AUDIOCPP_ENGINE_NAME}:{voice.name}")
+    return 0
+
+
+def _clone_voice(path: Path, name: str, transcript: str) -> int:
+    """Register a recording of the user's own voice as a VoiceTut voice."""
+    try:
+        voice = clone_voice(path, name=name, transcript=transcript)
+    except (ValueError, OSError) as error:
+        print(str(error))
+        return 2
+    print(f"Cloned your voice as “{voice.name}”.")
+    print(f"  key: model:{AUDIOCPP_ENGINE_NAME}:{voice.name}")
+    return 0
+
+
+def _remove_voice(name: str) -> int:
+    if remove_imported_voice(name):
+        print(f"Removed the voice “{name}”.")
+        return 0
+    print(f"No imported voice named “{name}” was found.")
+    return 3
+
+
+def _my_voices() -> int:
+    voices = load_imported_voices()
+    if not voices:
+        print("No voices have been imported or cloned yet.")
+        print(
+            "  Add one with `python -m cli audio import <clip>` or "
+            "`python -m cli audio clone <recording>`."
+        )
+        return 0
+    print(f"Your own VoiceTut-TTS voices ({len(voices)}):")
+    for voice in voices:
+        print(f"  {voice.name:<24} {voice.clip}")
     return 0
 
 
@@ -152,6 +207,21 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("models", help="list the fetchable packages")
     sub.add_parser("voices", help="list the model's own voices")
 
+    sub.add_parser("my-voices", help="list the voices you imported or cloned")
+
+    import_cmd = sub.add_parser("import", help="register an audio clip as your own voice")
+    import_cmd.add_argument("clip", type=Path, help="an audio file (.wav, .mp3, .m4a, .flac, .ogg)")
+    import_cmd.add_argument("--name", default="", help="the voice's name (default: the file's name)")
+    import_cmd.add_argument("--transcript", default="", help="what the clip says, when known")
+
+    clone = sub.add_parser("clone", help="register a recording of your own voice")
+    clone.add_argument("recording", type=Path, help="a recording of your voice")
+    clone.add_argument("--name", default="", help="the voice's name (default: “My voice”)")
+    clone.add_argument("--transcript", default="", help="what the recording says, when known")
+
+    remove = sub.add_parser("remove-voice", help="remove one of your imported voices")
+    remove.add_argument("name", help="the voice's name")
+
     install = sub.add_parser("install-engine", help="fetch a prebuilt engine (needs --approve)")
     install.add_argument("--approve", action="store_true", help="grant human approval")
 
@@ -177,6 +247,14 @@ def main(argv: list[str] | None = None) -> int:
         return _models()
     if args.command == "voices":
         return _voices()
+    if args.command == "my-voices":
+        return _my_voices()
+    if args.command == "import":
+        return _import_voice(args.clip, args.name, args.transcript)
+    if args.command == "clone":
+        return _clone_voice(args.recording, args.name, args.transcript)
+    if args.command == "remove-voice":
+        return _remove_voice(args.name)
     if args.command == "install-engine":
         return _install(args.approve)
     if args.command == "download":
