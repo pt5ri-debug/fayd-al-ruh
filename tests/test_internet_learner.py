@@ -504,13 +504,14 @@ def test_wikipedia_provider_pages_and_carries_timestamps(monkeypatch):
                 }
             }
 
-    def _fake_get(url, params=None, headers=None, timeout=None):
-        captured["params"] = params
-        return _Response()
+    class _Session:
+        def get(self, url, params=None, headers=None, timeout=None):
+            captured["params"] = params
+            return _Response()
 
-    import requests
+    from core import web_source
 
-    monkeypatch.setattr(requests, "get", _fake_get)
+    monkeypatch.setattr(web_source, "_session", lambda: _Session())
     results = WikipediaSearchProvider().search("mud engineering", limit=5, offset=5, fresh=True)
 
     params = captured["params"]

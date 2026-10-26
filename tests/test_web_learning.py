@@ -208,3 +208,24 @@ def test_learned_document_is_persisted(tmp_path):
     reopened = build_document_store(store=JsonStore(tmp_path / "documents"))
     reopened.load_all()
     assert reopened.get(answer.learned_doc_id) is not None
+
+
+# --- transport -----------------------------------------------------------
+
+
+def test_http_providers_share_one_pooled_session():
+    """A search reuses one keep-alive session instead of a fresh TLS handshake.
+
+    The measured cost of a connect + TLS handshake dominated a governed query; the
+    providers now go through one pooled ``requests.Session``. The session is built
+    lazily and shared, so many calls reuse the same connections.
+    """
+    from core import web_source
+
+    web_source._HTTP_SESSION = None
+    first = web_source._session()
+    assert web_source._session() is first, "the session is built once and reused"
+    # The adapters are mounted for both schemes, so a plain-http endpoint is pooled too.
+    assert "https://" in first.adapters
+    assert "http://" in first.adapters
+    web_source._HTTP_SESSION = None

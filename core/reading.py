@@ -64,12 +64,20 @@ class TextReader:
         speaker: Speaker | None = None,
         synthesizer: SpeechSynthesizer | None = None,
         mood: str | Mood | None = None,
+        server: bool | None = None,
     ) -> None:
         self.engine = engine
         self.language = language
         self._speaker = speaker
         self._voice = _as_voice(voice)
         self._synthesizer = synthesizer
+        # ``None`` means "auto": use the audio.cpp resident server when that engine
+        # answers and the build ships the server binary. A per-call process reloads
+        # the 1.35 GB model every time, so the server is the real speed fix; it is
+        # the *engine* that is reached explicitly (see ``discover_synthesizer_name``),
+        # not the server, which only ever makes the same engine faster. ``False``
+        # remains an explicit opt-out.
+        self._server = server
         self._mood: Mood | None = _as_mood(mood)
         if synthesizer is not None:
             self._engine = synthesizer.name
@@ -137,6 +145,7 @@ class TextReader:
                     voice=self._voice,
                     language=self.language,
                     prosody=self._prosody(),
+                    use_server=self._server,
                 )
             except ValueError as error:
                 self._engine_error = str(error)

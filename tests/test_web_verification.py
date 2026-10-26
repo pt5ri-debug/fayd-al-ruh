@@ -127,9 +127,13 @@ def test_http_provider_parses_json_results(monkeypatch):
         def json(self):
             return payload
 
-    import requests
+    class _Session:
+        def get(self, *a, **k):
+            return _Response()
 
-    monkeypatch.setattr(requests, "get", lambda *a, **k: _Response())
+    from core import web_source
+
+    monkeypatch.setattr(web_source, "_session", lambda: _Session())
     results = HttpSearchProvider("https://api.example.com/search").search("oil")
 
     assert len(results) == 1
@@ -250,16 +254,17 @@ def test_wikipedia_provider_parses_search_results(monkeypatch):
         def json(self):
             return payload
 
-    import requests
-
     captured: dict[str, object] = {}
 
-    def _fake_get(url, **kwargs):
-        captured["url"] = url
-        captured.update(kwargs)
-        return _Response()
+    class _Session:
+        def get(self, url, **kwargs):
+            captured["url"] = url
+            captured.update(kwargs)
+            return _Response()
 
-    monkeypatch.setattr(requests, "get", _fake_get)
+    from core import web_source
+
+    monkeypatch.setattr(web_source, "_session", lambda: _Session())
     from core.web_source import WikipediaSearchProvider
 
     results = WikipediaSearchProvider().search("gas kick", limit=2)

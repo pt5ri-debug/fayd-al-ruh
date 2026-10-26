@@ -13,6 +13,19 @@ from core.tokenize import normalize_phrase, token_spans
 #: without the false positive.
 _INFLECTIONS = ("s", "es", "ed", "d", "ing")
 
+#: How many characters of a term's first token the reverse index keys on.
+#: :func:`_token_matches` lets a token carry one short inflectional ending after the
+#: term, and the longest ending is three letters ("ing"), so a token's first four
+#: characters always equal its term's first four. Keying on that prefix therefore
+#: cannot lose a match, while a term shorter than four letters only matches exactly.
+_INDEX_PREFIX = 4
+
+#: How many distinct texts :meth:`Ontology.concepts_in` remembers. A retrieval asks
+#: about the same document text once per query, so remembering the answer turns a
+#: repeated whole-graph scan into one lookup; the bound keeps a long session from
+#: growing without limit.
+_TEXT_CACHE_SIZE = 512
+
 
 def _token_matches(token: str, term_token: str) -> bool:
     """Whether a normalised ``token`` names the normalised ``term_token``.
@@ -30,14 +43,93 @@ def _token_matches(token: str, term_token: str) -> bool:
 
 class Ontology:
     """A small concept graph, separate from instance/entity knowledge."""
+
     def __init__(self) -> None:
         self.concepts: dict[str, Concept] = {}
         self.relations: dict[str, SemanticRelation] = {}
+        # Reverse indexes over the concepts' normalised terms. They are what make a
+        # lookup proportional to the *text* being matched rather than to the size of
+        # the graph: before them every concept's every term was re-normalised and
+        # re-scanned on each call, which cost ~30 s per retrieval query on the real
+        # 495-concept graph. Built lazily and dropped whenever a concept changes.
+        self._exact_index: dict[str, list[Concept]] | None = None
+        self._prefix_index: dict[str, list[tuple[str, list[Concept]]]] | None = None
+        self._text_cache: dict[str, frozenset[str]] = {}
+
+    # ------------------------------------------------------------- indexes
+
+    def _invalidate(self) -> None:
+        """Drop the derived indexes after a bulk change the incremental path cannot serve."""
+        self._exact_index = None
+        self._prefix_index = None
+        self._text_cache.clear()
+
+    def _ensure_index(self) -> None:
+        if self._exact_index is not None:
+            return
+        exact: dict[str, list[Concept]] = {}
+        prefix: dict[str, list[tuple[str, list[Concept]]]] = {}
+        # The term's own words are grouped first, so a term that several concepts
+        # share is stored once and each concept is appended to it.
+        by_term: dict[str, list[Concept]] = {}
+        for concept in self.concepts.values():
+            for term in concept.normalized_terms:
+                if term:
+                    by_term.setdefault(term, []).append(concept)
+        for term, concepts in by_term.items():
+            exact.setdefault(term, []).extend(concepts)
+            head = term.split(" ", 1)[0]
+            if head:
+                prefix.setdefault(head[:_INDEX_PREFIX], []).append((term, concepts))
+        self._exact_index = exact
+        self._prefix_index = prefix
+
+    def _index_concept(self, concept: Concept) -> None:
+        """Add one concept to the reverse indexes without rebuilding them.
+
+        Seeding adds concepts one at a time and asks about each one, so a full
+        rebuild per addition was quadratic -- it accounted for most of the seed
+        time. An entry for the same concept id is *replaced* rather than appended,
+        which is what makes :meth:`add_concept_alias` (a concept re-created with a
+        wider term set) refresh in place instead of going stale.
+        """
+        if self._exact_index is None or self._prefix_index is None:
+            return  # nothing built yet; the next _ensure_index will include it
+        exact = self._exact_index
+        prefix = self._prefix_index
+        for term in concept.normalized_terms:
+            if not term:
+                continue
+            bucket = exact.setdefault(term, [])
+            for index, existing in enumerate(bucket):
+                if existing.id == concept.id:
+                    bucket[index] = concept
+                    break
+            else:
+                bucket.append(concept)
+            head = term.split(" ", 1)[0]
+            if not head:
+                continue
+            entries = prefix.setdefault(head[:_INDEX_PREFIX], [])
+            for stored_term, stored in entries:
+                if stored_term != term:
+                    continue
+                for index, existing in enumerate(stored):
+                    if existing.id == concept.id:
+                        stored[index] = concept
+                        break
+                else:
+                    stored.append(concept)
+                break
+            else:
+                entries.append((term, [concept]))
 
     def add_concept(self, concept: Concept) -> None:
         if concept.id in self.concepts:
             raise ValueError(f"Concept '{concept.id}' already exists.")
         self.concepts[concept.id] = concept
+        self._index_concept(concept)
+        self._text_cache.clear()
 
     def add_concept_once(self, label: str, aliases: frozenset[str] = frozenset()) -> Concept:
         """Add a concept, regenerating its id on the rare random-id collision.
@@ -96,16 +188,47 @@ class Ontology:
         del self.relations[relation_id]
 
     def find_concepts(self, term: str) -> list[Concept]:
+        """Every concept whose label or alias names ``term``.
+
+        An exact term match is tried first; a miss falls back to the normalised
+        space (``core.tokenize``), so ``المسامية`` (with the definite article)
+        reaches a stored ``مسامية`` alias. Both lookups are index hits, so this no
+        longer scans the whole graph.
+        """
         token = term.casefold().strip()
-        exact = [concept for concept in self.concepts.values() if token in concept.terms]
+        self._ensure_index()
+        exact = self._exact_index.get(token) if self._exact_index else None
         if exact:
-            return exact
+            return list(exact)
         normalized = normalize_phrase(term)
-        return [
-            concept
-            for concept in self.concepts.values()
-            if normalized and normalized in concept.normalized_terms
-        ]
+        if not normalized:
+            return []
+        found = self._exact_index.get(normalized) if self._exact_index else None
+        return list(found) if found else []
+
+    def _candidate_terms(self, tokens: list[str]) -> list[tuple[str, list[Concept]]]:
+        """The indexed ``(term, concepts)`` pairs a text's tokens could match.
+
+        Only a term whose head is a prefix of one of the text's tokens can match
+        (:func:`_token_matches` requires the token to *start* with the term), so the
+        candidates are gathered by looking each token up in the reverse index --
+        which is what makes the cost proportional to the text rather than to the
+        graph. A term shorter than :data:`_INDEX_PREFIX` letters indexes under its
+        whole self, so slicing the token by the same width still reaches it.
+        """
+        self._ensure_index()
+        assert self._prefix_index is not None
+        prefix_index = self._prefix_index
+        seen: set[str] = set()
+        candidates: list[tuple[str, list[Concept]]] = []
+        for token in set(tokens):
+            if not token:
+                continue
+            for term, concepts in prefix_index.get(token[:_INDEX_PREFIX], ()):
+                if term not in seen:
+                    seen.add(term)
+                    candidates.append((term, concepts))
+        return candidates
 
     def match_concepts(self, text: str) -> list[tuple[int, int, Concept]]:
         """Known concepts in ``text`` as ``(start, end, concept)`` spans.
@@ -118,22 +241,28 @@ class Ontology:
         (``water saturation`` vs ``saturation``) the longer, leftmost span wins,
         and only one span per concept is kept, so an ambiguous sentence resolves
         to the most specific reading.
+
+        Only the terms a token could actually match are considered (the reverse
+        index), so the cost is proportional to the text, not to the graph.
         """
         spans = token_spans(text)
         tokens = [normalized for _start, _end, normalized in spans]
         found: list[tuple[int, int, Concept]] = []
-        for concept in self.concepts.values():
-            for term in concept.normalized_terms:
-                term_tokens = term.split()
-                if not term_tokens:
+        for term, concepts in self._candidate_terms(tokens):
+            term_tokens = term.split()
+            width = len(term_tokens)
+            if not width or width > len(tokens):
+                continue
+            for index in range(len(tokens) - width + 1):
+                if not all(
+                    _token_matches(tokens[index + offset], term_tokens[offset])
+                    for offset in range(width)
+                ):
                     continue
-                width = len(term_tokens)
-                for index in range(len(tokens) - width + 1):
-                    if not all(
-                        _token_matches(tokens[index + offset], term_tokens[offset]) for offset in range(width)
-                    ):
-                        continue
-                    found.append((spans[index][0], spans[index + width - 1][1], concept))
+                start = spans[index][0]
+                end = spans[index + width - 1][1]
+                for concept in concepts:
+                    found.append((start, end, concept))
         found.sort(key=lambda item: (item[0], -(item[1] - item[0])))
         kept: list[tuple[int, int, Concept]] = []
         for start, end, concept in found:
@@ -153,21 +282,32 @@ class Ontology:
         the learner and the ontology-guided retriever keep every concept a text
         actually names. :meth:`match_concepts` is the de-overlapped sibling the
         relation extractor needs, where an endpoint must be a single span.
+
+        The answer for a given text is remembered (bounded by
+        :data:`_TEXT_CACHE_SIZE`): a retrieval asks about the same document text
+        once per query, and without the cache each query re-scanned the graph for
+        every document.
         """
+        cached = self._text_cache.get(text)
+        if cached is not None:
+            return set(cached)
         tokens = [normalized for _start, _end, normalized in token_spans(text)]
         ids: set[str] = set()
-        for concept in self.concepts.values():
-            for term in concept.normalized_terms:
-                term_tokens = term.split()
-                width = len(term_tokens)
-                if not width or width > len(tokens):
-                    continue
-                if any(
-                    all(_token_matches(tokens[index + offset], term_tokens[offset]) for offset in range(width))
-                    for index in range(len(tokens) - width + 1)
+        for term, concepts in self._candidate_terms(tokens):
+            term_tokens = term.split()
+            width = len(term_tokens)
+            if not width or width > len(tokens):
+                continue
+            for index in range(len(tokens) - width + 1):
+                if all(
+                    _token_matches(tokens[index + offset], term_tokens[offset])
+                    for offset in range(width)
                 ):
-                    ids.add(concept.id)
+                    ids.update(concept.id for concept in concepts)
                     break
+        if len(self._text_cache) >= _TEXT_CACHE_SIZE:
+            self._text_cache.clear()
+        self._text_cache[text] = frozenset(ids)
         return ids
 
     def add_concept_alias(self, concept_id: str, alias: str) -> Concept:
@@ -186,6 +326,8 @@ class Ontology:
             return concept
         updated = Concept(concept.label, concept.aliases | {value}, concept.id)
         self.concepts[concept_id] = updated
+        self._index_concept(updated)
+        self._text_cache.clear()
         return updated
 
     def outgoing(self, concept_id: str, relation_type: str | None = None) -> list[SemanticRelation]:

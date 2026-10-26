@@ -32,6 +32,7 @@ from typing import Any
 
 from core import reading
 from core import voice_studio_profile as profiles
+from core.audiocpp_speech import AUDIOCPP_ENGINE_NAME
 from core.best_effort import best_effort
 from core.document_reader import DocumentText, read_document
 from core.reading import TextReader, clip_is_silent, split_for_speech
@@ -228,8 +229,17 @@ class VoiceStudioService:
         self.profile = profiles.load_profile(source)
         # The studio's own reader, built with the engine and the saved voice/mood, so
         # the voice and mood are exclusive to this studio and never touch the main
-        # chat's reader.
-        self._reader = reader if reader is not None else TextReader(engine=self.engine)
+        # chat's reader. The audio.cpp studio reads through the engine's **resident
+        # server** when the build ships one, because a document is read paragraph by
+        # paragraph and every separate process would reload the whole GGUF each time.
+        self._reader = (
+            reader
+            if reader is not None
+            else TextReader(
+                engine=self.engine,
+                server=self.engine == AUDIOCPP_ENGINE_NAME,
+            )
+        )
         # Pick the studio's starting voice *before* anything else. Without this the
         # reader kept its own default -- the synthetic catalog's ``woman-1`` -- and a
         # local engine cannot speak a catalog voice: audio.cpp has no reference clip
@@ -381,6 +391,7 @@ class VoiceStudioService:
         from core.audiocpp_speech import import_voice as _import
 
         voice = _import(path, name=name, transcript=transcript)
+        self._ensure_transcript(voice.name, self._clip_path(voice.clip), transcript)
         self.refresh()
         self._select_voice_if_offered(voice.name)
         return voice
@@ -391,14 +402,41 @@ class VoiceStudioService:
         """Register a recording of the user's own voice, then select it.
 
         ``recording`` is a file path or the microphone's own
-        :class:`~core.speech.AudioClip` (what :meth:`start_recording` yields).
+        :class:`~core.speech.AudioClip` (what :meth:`start_recording` yields). When
+        no transcript was given, the speech-to-text engine's own reading of the clip
+        is used, because a cloning voice needs to know what the clip says -- a voice
+        recorded without one is registered but cannot be spoken.
         """
         from core.audiocpp_speech import clone_voice as _clone
 
-        voice = _clone(recording, name=name, transcript=transcript)
+        label = name or "My voice"
+        voice = _clone(recording, name=label, transcript=transcript)
+        self._ensure_transcript(label, recording, transcript)
         self.refresh()
         self._select_voice_if_offered(voice.name)
         return voice
+
+    def _clip_path(self, clip: str) -> Path:
+        """The full path of an imported voice's reference clip."""
+        from core.audiocpp_speech import voices_dir
+
+        return voices_dir() / clip
+
+    def _ensure_transcript(self, name: str, clip: Any, transcript: str) -> None:
+        """Transcribe ``clip`` when the voice has no transcript, so it can be spoken.
+
+        Best-effort on purpose: a machine with no speech-to-text engine still gets
+        the voice, and the studio says which next step fills the transcript in.
+        """
+        if transcript.strip():
+            return
+        if not self._recognizer_available():
+            return
+        with best_effort("transcribe a cloned voice so the engine can speak it"):
+            from core.audiocpp_speech import set_imported_voice_transcript
+
+            text = self.transcribe(clip)
+            set_imported_voice_transcript(name, text)
 
     def remove_voice(self, name: str) -> bool:
         """Remove an imported voice (and its clip); ``True`` when one was removed."""

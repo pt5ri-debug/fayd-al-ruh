@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import cached_property
 from uuid import uuid4
 
 from core.tokenize import normalize_phrase
@@ -26,11 +27,11 @@ class Concept:
         if not self.label.strip():
             raise ValueError("Concept label cannot be empty.")
 
-    @property
+    @cached_property
     def terms(self) -> frozenset[str]:
         return frozenset({self.label.casefold(), *(alias.casefold() for alias in self.aliases)})
 
-    @property
+    @cached_property
     def normalized_terms(self) -> frozenset[str]:
         """The terms in the shared normalised space (``core.tokenize``).
 
@@ -38,6 +39,10 @@ class Concept:
         definite article) matches a stored ``مسامية`` alias, and an English term
         matches across case. Without it the Arabic half of every alias is dead,
         because a bare ``casefold`` never strips the article.
+
+        Cached: a concept is frozen, so its terms cannot change, and the
+        normalisation of every term was being recomputed on each of the hundreds
+        of lookups a single retrieval makes.
         """
         return frozenset(normalize_phrase(term) for term in self.terms)
 

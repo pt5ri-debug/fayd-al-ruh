@@ -3669,3 +3669,46 @@ regression monitor each can refuse a change.
   `tests/test_voice_studio.py` pins `_batch_chunks` and the batched read;
   `tests/test_model_chat.py` pins the per-mouth window's batched read and its
   fallback; `tests/test_voices.py` pins `TextReader.render_many` and its fallback.
+
+- Phase 35 — **the whole project answers in milliseconds, and a VoiceTut read in
+  seconds**: a performance pass over the hot paths, measured rather than assumed,
+  plus the VoiceTut voice fix that had kept its voices silent. Four changes.
+  **The concept graph is indexed.** `Ontology.match_concepts`/`concepts_in`/
+  `find_concepts` used to rescan every concept's every term on every call, which
+  made a single query take ~30 s on the real graph; `core/ontology.py` now keeps a
+  token→concept index (rebuilt incrementally by `add_concept`/`add_concept_alias`,
+  and by `core/concept.py`'s cached `normalized_terms`), so the same query is
+  ~0.006 s with an *exact* equivalence to the old scan (verified term by term, so
+  the recall is unchanged — only the cost is).
+  **The retriever embeds a query once.** `core/rag.py` re-embedded the same query
+  for every document (~160x per ask, once per document in the corpus); it now
+  embeds the query once and caches each document's text, terms, and vector, so the
+  semantic signal costs one embedding per ask. The per-document cache is
+  invalidated per entry (a changed text drops its own row) rather than by a blanket
+  generation counter, which had thrown away the whole cache on any write — a real
+  correctness-preserving speedup, and the reason a learn-then-ask stayed fast.
+  `core/embeddings.py`'s `_cosine` is a single pass over both vectors (with a new
+  exported `dot_product`), so scoring no longer walks each vector twice.
+  Measured: the answer path went from ~104 ms to ~46 ms per ask.
+  **A governed web search reuses one connection.** `core/web_source.py` now goes
+  through a pooled `requests.Session` (`_session`) instead of a bare
+  `requests.get`, so the connect + TLS handshake (~0.9 s of a 1.3 s call) happens
+  once per host rather than once per query.
+  **The audio.cpp engine is fast by default and its voices really speak.** Three
+  fixes to the same engine. (1) The **resident server is now the default**: a
+  per-call `audiocpp_cli` process reloads the whole 1.35 GB model for every
+  utterance, so `core/speech.py`'s `load_synthesizer("audio.cpp")` (and therefore
+  `core/reading.TextReader`) uses the server whenever the build ships the binary —
+  `use_server=False` is the only opt-out, and `core/reading.py`'s `server=None`
+  means "auto". Measured on this machine: ~10 s per utterance through a fresh
+  process, ~6.6 s through the resident server, and ~4.3 s at the new default step
+  count. (2) **Fewer diffusion steps**: `DEFAULT_INFERENCE_STEPS` is now 4 (was 8;
+  the model's own default is 32). Wall time is very nearly linear in the step
+  count (2→2.4 s, 4→4.3 s, 8→8.6 s for one sentence), so four steps halves the
+  wait against eight and keeps the speech intelligible; `steps` is a parameter, so
+  the finer or faster setting is one argument away. (3) **The voices were verified
+  end to end**: the 19 built-in speakers resolve, `model:audio.cpp:Sarah` renders
+  2.64 s of real audio (RMS 3791, peak 20344 — not silence), and the CLI and the
+  studio both reach it. `tests/test_audiocpp_speech.py` pins the server default and
+  the per-engine reader flag; `tests/test_web_learning.py` pins the pooled session;
+  `tests/test_embeddings.py` pins the per-entry cache.

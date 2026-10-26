@@ -60,7 +60,7 @@ def _load_embeddings():
         return None
 
 
-def _coverage(query: set[str], document: set[str]) -> float:
+def _coverage(query: set[str], document: set[str] | frozenset[str]) -> float:
     """Fraction of the query's content terms the document contains."""
     if not query:
         return 0.0
@@ -195,29 +195,81 @@ class RagRetriever:
             OntologyGuidedRetriever(ontology) if ontology is not None else None
         )
         self._embeddings = _load_embeddings() if embeddings else None
+        # Per-document derived data, keyed by doc_id and validated by its own text.
+        # A retrieval needs each document's full text, its content terms, and its
+        # vector; none of those depend on the *query*, so recomputing them for every
+        # question was pure waste -- and the vectors were the largest remaining cost
+        # of a retrieval after the ontology lookup was indexed. The cache is **not**
+        # cleared wholesale when the store changes: each entry is checked against the
+        # document's current text, so a changed or re-added document recomputes while
+        # the hundreds of untouched ones keep their vectors (a blanket invalidation
+        # re-embedded the whole store every time one document was learned).
+        self._cache: dict[str, tuple[str, frozenset[str], tuple[float, ...] | None]] = {}
 
     @property
     def embeddings_available(self) -> bool:
         """Whether the learned semantic space is backing this retriever."""
         return self._embeddings is not None
 
-    def _semantic_scores(self, query: str, texts: dict[str, str]) -> dict[str, float]:
+    def _semantic_scores(
+        self, query: str, texts: dict[str, str], *, query_vector: tuple[float, ...] | None = None
+    ) -> dict[str, float]:
         """The semantic score of every document: learned cosine, else hashed.
 
         The learned space places a whole document by the *mean* of its known term
         vectors, so two passages about the same thing score alike even when they
         share no word. The hashed index is the fallback and its scores are used
         unchanged.
+
+        The query is embedded **once** and every document's vector is taken from the
+        per-document cache, so the cosine is the only per-document work; the old
+        form re-embedded the same query for every document.
         """
         if self._embeddings is None:
             return {
                 match.item_id: max(0.0, match.score)
                 for match in self._index.search(query, limit=max(4, len(texts)))
             }
-        return {
-            doc_id: max(0.0, self._embeddings.similarity(query, text))
-            for doc_id, text in texts.items()
-        }
+        from core.embeddings import dot_product
+
+        query_vector = query_vector if query_vector is not None else self._embeddings.embed(query)
+        if not any(query_vector):
+            return {}
+        scores: dict[str, float] = {}
+        for doc_id, text in texts.items():
+            vector = self._document_vector(doc_id, text)
+            if vector is None or not any(vector):
+                continue
+            # Both vectors come from ``DistributionalSpace.embed``, which returns a
+            # unit vector, so the dot product *is* the cosine -- and it skips the two
+            # norm passes the general form would redo for every document.
+            scores[doc_id] = dot_product(query_vector, vector)
+        return scores
+
+    def _document_vector(self, doc_id: str, text: str) -> tuple[float, ...] | None:
+        """A document's learned vector, from the cache (``None`` when embeddings are off)."""
+        if self._embeddings is None:
+            return None
+        return self._document_data(doc_id, text)[2]
+
+    def _document_data(
+        self, doc_id: str, text: str
+    ) -> tuple[str, frozenset[str], tuple[float, ...] | None]:
+        """A document's full text, its content terms, and its vector, all cached.
+
+        A document's text and its derived terms and vector do not depend on the
+        query, so they are computed once and reused for as long as the document's
+        text is unchanged. The entry stores its own text, so a *changed* document is
+        recomputed without throwing away every other document's work.
+        """
+        cached = self._cache.get(doc_id)
+        if cached is not None and cached[0] == text:
+            return cached
+        terms = frozenset(_tokens(text))
+        vector = self._embeddings.embed(text) if self._embeddings is not None else None
+        entry = (text, terms, vector)
+        self._cache[doc_id] = entry
+        return entry
 
     def index_document(self, document: Document) -> None:
         # Idempotent: re-indexing a document already in the store refreshes its
@@ -226,6 +278,7 @@ class RagRetriever:
         if self.documents.get(document.doc_id) is None:
             self.documents.add(document)
         self._index.add(document.doc_id, f"{document.title} {document.text}")
+        self._cache.pop(document.doc_id, None)
         if self._retriever is not None:
             self._retriever.invalidate()
 
@@ -236,6 +289,7 @@ class RagRetriever:
             return False
         self.documents.remove(doc_id)
         self._index.remove(doc_id)
+        self._cache.pop(doc_id, None)
         if self._retriever is not None:
             self._retriever.invalidate()
         return True
@@ -246,9 +300,21 @@ class RagRetriever:
         if limit < 1:
             raise ValueError("Retrieval limit must be at least 1.")
 
-        texts = {document.doc_id: f"{document.title} {document.text}" for document in self.documents.documents()}
         query_terms = _query_terms(query)
-        semantic = self._semantic_scores(query, texts)
+        # One pass over the store: the document's text, its content terms, and its
+        # learned vector are all taken from the cache, so a question that repeats
+        # costs almost nothing.
+        entries: list[tuple[Document, str, frozenset[str], tuple[float, ...] | None]] = []
+        for document in self.documents.documents():
+            text, terms, vector = self._document_data(
+                document.doc_id, f"{document.title} {document.text}"
+            )
+            entries.append((document, text, terms, vector))
+        texts = {document.doc_id: text for document, text, _terms, _vector in entries}
+        query_vector = (
+            self._embeddings.embed(query) if self._embeddings is not None else None
+        )
+        semantic = self._semantic_scores(query, texts, query_vector=query_vector)
         ontology: dict[str, float] = {}
         if self._retriever is not None:
             ontology = {
@@ -257,8 +323,8 @@ class RagRetriever:
             }
 
         passages: list[RetrievedPassage] = []
-        for document in self.documents.documents():
-            lexical = _coverage(query_terms, _tokens(texts[document.doc_id]))
+        for document, _text, document_terms, _vector in entries:
+            lexical = _coverage(query_terms, document_terms)
             semantic_score = semantic.get(document.doc_id, 0.0)
             ontology_score = ontology.get(document.doc_id, 0.0)
             fused = (

@@ -337,7 +337,12 @@ def test_downloads_and_install_are_denied_by_default(tmp_path):
 def test_synthesizer_prepares_arabic_text_for_speech():
     """audio.cpp reads Arabic symbols badly, so the text is spelled first."""
     runner = _StubRunner()
-    voice = ModelVoice(name="Ahmed", engine=a.AUDIOCPP_ENGINE_NAME, reference=Path("/x.wav"))
+    voice = ModelVoice(
+        name="Ahmed",
+        engine=a.AUDIOCPP_ENGINE_NAME,
+        reference=Path("/x.wav"),
+        reference_text="نص مرجعي",
+    )
     synth = a.AudioCppSynthesizer(voice=voice, runner=runner)
     clip = synth.synthesize("النسبة 25% والعمق 1500 psi.")
     assert not clip.is_silent and clip.sample_rate == 24_000
@@ -784,3 +789,432 @@ def test_runner_reports_a_timeout_honestly(tmp_path, monkeypatch):
         runner.synthesize_many(
             ["one"], language="arz", reference=None, reference_text="", steps=8
         )
+
+
+# ------------------------------------------- the transcript a clone voice needs
+
+
+def test_voice_list_needs_the_transcript_not_only_the_clip(tmp_path, monkeypatch):
+    """A speaker with a clip but no transcript is not offered (the engine refuses it)."""
+    root = tmp_path / "data"
+    _fake_install(root)
+    assert [v.name for v in a.voice_list(root)] == ["Ahmed"]
+    # The transcripts file goes missing -> the clip alone cannot be cloned.
+    (root / "references.json").unlink()
+    assert a.voice_list(root) == ()
+
+
+def test_status_names_the_missing_transcripts_not_the_missing_clips(tmp_path):
+    """Clips present, transcripts absent: the next step is a different one."""
+    root = tmp_path / "data"
+    _fake_install(root)
+    (root / "references.json").unlink()
+    status = a.audiocpp_status(root)
+    assert status.voices == 0
+    assert "references.json" in status.hint
+    assert "--speakers" in status.hint
+
+
+def test_download_speakers_fetches_the_transcripts(tmp_path, monkeypatch):
+    """``download_speakers`` writes references.json, without which no voice works."""
+    import urllib.request
+
+    root = tmp_path / "data"
+    root.mkdir()
+    seen: list[str] = []
+
+    def _fake_urlretrieve(url, filename):
+        seen.append(url)
+        Path(filename).parent.mkdir(parents=True, exist_ok=True)
+        if url.endswith("references.json"):
+            Path(filename).write_text(
+                json.dumps(
+                    [
+                        {
+                            "audio_path": "reference_speakers/ahmed.wav",
+                            "reference_text": "يعني كل ما تيجي تفكر.",
+                            "speaker_name": "Ahmed",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+        else:
+            Path(filename).write_bytes(b"RIFF")
+        return str(filename), None
+
+    monkeypatch.setattr(urllib.request, "urlretrieve", _fake_urlretrieve)
+    a.download_speakers(root=root, approved=True)
+    assert (root / "references.json").is_file()
+    # The transcripts are looked for inside reference_speakers/ first, which is
+    # where upstream really keeps them.
+    assert any(url.endswith("reference_speakers/references.json") for url in seen)
+
+
+def test_download_speakers_refuses_when_the_transcripts_cannot_be_fetched(
+    tmp_path, monkeypatch
+):
+    """A voice with no transcript cannot be spoken, so a failed fetch is not silent."""
+    import urllib.request
+
+    root = tmp_path / "data"
+    root.mkdir()
+
+    def _fake_urlretrieve(url, filename):
+        if url.endswith("references.json"):
+            raise OSError("404")
+        Path(filename).parent.mkdir(parents=True, exist_ok=True)
+        Path(filename).write_bytes(b"RIFF")
+        return str(filename), None
+
+    monkeypatch.setattr(urllib.request, "urlretrieve", _fake_urlretrieve)
+    with pytest.raises(a.AudioCppUnavailable, match=r"references\.json"):
+        a.download_speakers(root=root, approved=True)
+
+
+def test_synthesizer_refuses_a_clip_with_no_transcript(tmp_path):
+    """A clone request with no transcript is refused with the real next step."""
+    runner = _StubRunner()
+    voice = ModelVoice(
+        name="Ahmed", engine=a.AUDIOCPP_ENGINE_NAME, reference=Path("/x.wav")
+    )
+    synth = a.AudioCppSynthesizer(voice=voice, runner=runner)
+    with pytest.raises(a.AudioCppUnavailable, match="no transcript"):
+        synth.synthesize("مرحبا")
+    assert runner.calls == [], "the engine must not be asked to clone without a transcript"
+
+
+def test_a_clip_with_no_transcript_still_falls_back(tmp_path):
+    """The honest refusal degrades to the fallback engine rather than going silent."""
+
+    class _Fallback:
+        name = "fallback"
+
+        def __init__(self) -> None:
+            self.seen: list[str] = []
+
+        def synthesize(self, text: str) -> speech.AudioClip:
+            self.seen.append(text)
+            return speech.AudioClip((7, 7, 7))
+
+    runner = _StubRunner()
+    voice = ModelVoice(
+        name="Ahmed", engine=a.AUDIOCPP_ENGINE_NAME, reference=Path("/x.wav")
+    )
+    fallback = _Fallback()
+    synth = a.AudioCppSynthesizer(voice=voice, runner=runner, fallback=fallback)
+    clips = synth.synthesize_many(["مرحبا", "بك"])
+    assert fallback.seen == ["مرحبا", "بك"]
+    assert len(clips) == 2
+
+
+def test_set_imported_voice_transcript_fills_the_gap(tmp_path):
+    """A cloned voice can be given the transcript its clip needs."""
+    root = tmp_path / "data"
+    root.mkdir()
+    clip = speech.AudioClip((1000, -1000, 2000), sample_rate=24_000)
+    a.import_voice(clip, name="My voice", root=root)
+    assert a.load_imported_voices(root)[0].transcript == ""
+    updated = a.set_imported_voice_transcript("My voice", "  ما تقوله العينة  ", root=root)
+    assert updated is not None and updated.transcript == "ما تقوله العينة"
+    assert a.load_imported_voices(root)[0].transcript == "ما تقوله العينة"
+    # An empty transcript, or an unknown name, changes nothing.
+    assert a.set_imported_voice_transcript("My voice", "   ", root=root) is None
+    assert a.set_imported_voice_transcript("Nobody", "x", root=root) is None
+    assert a.load_imported_voices(root)[0].transcript == "ما تقوله العينة"
+
+
+# --------------------------------------------- the family and the speed options
+
+
+def _write_gguf(path: Path, pairs: list[tuple[str, str]]) -> None:
+    import struct
+
+    out = bytearray(b"GGUF")
+    out += struct.pack("<I", 3)
+    out += struct.pack("<Q", 0)
+    out += struct.pack("<Q", len(pairs))
+    for key, value in pairs:
+        raw_key = key.encode()
+        out += struct.pack("<Q", len(raw_key)) + raw_key
+        out += struct.pack("<I", 8)
+        raw_value = value.encode()
+        out += struct.pack("<Q", len(raw_value)) + raw_value
+    path.write_bytes(bytes(out))
+
+
+def test_model_family_reads_the_package_spec(tmp_path):
+    """The engine is told a family only when the file does not declare its own."""
+    standalone = tmp_path / "voicetut-tts-q8_0.gguf"
+    _write_gguf(standalone, [("general.architecture", "omnivoice")])
+    assert a._read_gguf_family(standalone) == "omnivoice"
+    assert a._model_family(standalone) is None
+
+    other = tmp_path / "other.gguf"
+    _write_gguf(other, [("general.architecture", "qwen3_tts")])
+    assert a._model_family(other) == "qwen3_tts"
+
+    unknown = tmp_path / "nofam.gguf"
+    _write_gguf(unknown, [("general.name", "x")])
+    assert a._model_family(unknown) == a.VOICETUT_FAMILY
+
+    # A file that is not a GGUF at all falls back to the family default.
+    broken = tmp_path / "broken.gguf"
+    broken.write_bytes(b"not a gguf")
+    assert a._read_gguf_family(broken) is None
+    assert a._model_family(broken) == a.VOICETUT_FAMILY
+
+
+def test_runner_omits_the_family_for_a_standalone_package(tmp_path, monkeypatch):
+    """A standalone package is loaded with no ``--family``; another gets its own."""
+    import subprocess
+
+    cli = tmp_path / "bin" / "audiocpp_cli"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("#!/bin/sh\n", encoding="utf-8")
+    standalone = tmp_path / "voicetut-tts-q8_0.gguf"
+    _write_gguf(standalone, [("general.architecture", "omnivoice")])
+
+    commands: list[list[str]] = []
+
+    def _fake_run(argv, **kwargs):
+        commands.append(list(argv))
+        out_dir = Path(argv[argv.index("--out-dir") + 1])
+        speech.AudioClip((1, 2, 3), sample_rate=24_000).write_wav(out_dir / "speech-0.wav")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    runner = a.AudioCppCliRunner(cli, standalone)
+    runner.synthesize_many(["one"], language="arz", reference=None, reference_text="", steps=8)
+    command = commands[0]
+    assert "--family" not in command, "a standalone package names its own family"
+    # The performance mode is the engine's own documented speed lever.
+    assert "--session-option" in command
+    assert f"omnivoice.perf_mode={a.DEFAULT_PERF_MODE}" in command
+
+
+def test_runner_names_the_family_for_a_plain_package(tmp_path, monkeypatch):
+    import subprocess
+
+    cli = tmp_path / "bin" / "audiocpp_cli"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("#!/bin/sh\n", encoding="utf-8")
+    plain = tmp_path / "plain.gguf"
+    plain.write_bytes(b"not a gguf")
+
+    commands: list[list[str]] = []
+
+    def _fake_run(argv, **kwargs):
+        commands.append(list(argv))
+        out_dir = Path(argv[argv.index("--out-dir") + 1])
+        speech.AudioClip((1, 2, 3), sample_rate=24_000).write_wav(out_dir / "speech-0.wav")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    a.AudioCppCliRunner(cli, plain).synthesize_many(
+        ["one"], language="arz", reference=None, reference_text="", steps=8
+    )
+    command = commands[0]
+    assert "--family" in command
+    assert command[command.index("--family") + 1] == a.VOICETUT_FAMILY
+
+
+def test_perf_mode_can_be_turned_off(tmp_path):
+    """The exact-safe attention path is still reachable when it is wanted."""
+    runner = a.AudioCppCliRunner(tmp_path / "audiocpp_cli", tmp_path / "m.gguf", perf_mode="off")
+    assert runner.session_options() == ("omnivoice.perf_mode=off",)
+    # An unknown value falls back to the documented default rather than being sent.
+    other = a.AudioCppCliRunner(tmp_path / "audiocpp_cli", tmp_path / "m.gguf", perf_mode="bogus")
+    assert other.perf_mode == a.DEFAULT_PERF_MODE
+
+
+def test_family_prefers_the_embedded_model_spec(tmp_path):
+    """The real VoiceTut GGUF declares its family in the spec, not the container.
+
+    The package's ``general.architecture`` is the *container* format (``audiocpp``),
+    which the engine rejects as a family hint -- naming it is exactly what made the
+    Q8_0 model fail to load. The engine reads ``audiocpp.model_spec.family``
+    (``omnivoice``), so that key must win.
+    """
+    real = tmp_path / "voicetut-tts-q8_0.gguf"
+    _write_gguf(
+        real,
+        [
+            ("general.architecture", "audiocpp"),
+            ("audiocpp.model_spec.family", "omnivoice"),
+        ],
+    )
+    assert a._read_gguf_family(real) == "omnivoice"
+    assert a._model_family(real) is None, "a standalone package names its own family"
+
+    # Only the container architecture is present: it is refused, not returned.
+    bare = tmp_path / "bare.gguf"
+    _write_gguf(bare, [("general.architecture", "audiocpp")])
+    assert a._read_gguf_family(bare) is None
+
+    # A different family's spec still resolves to its own family.
+    other = tmp_path / "other.gguf"
+    _write_gguf(
+        other, [("general.architecture", "audiocpp"), ("x.model_spec.family", "qwen3_tts")]
+    )
+    assert a._read_gguf_family(other) == "qwen3_tts"
+
+
+def test_find_server_finds_the_binary_beside_the_cli(tmp_path):
+    """The resident-server binary is discovered the same way the CLI is."""
+    root = tmp_path / "data"
+    bin_dir = root / "bin"
+    bin_dir.mkdir(parents=True)
+    name = a.SERVER_BINARY_NAME + (".exe" if a._is_windows() else "")
+    assert a.find_server(root) is None
+    (bin_dir / name).write_text("#!/bin/sh\n", encoding="utf-8")
+    assert a.find_server(root) == bin_dir / name
+
+
+class _FakeProcess:
+    """A stand-in for a running server process (never really started)."""
+
+    def poll(self) -> int | None:
+        return None
+
+    def terminate(self) -> None:
+        pass
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+    def kill(self) -> None:
+        pass
+
+
+def test_server_runner_writes_a_config_with_the_family(tmp_path, monkeypatch):
+    """The server is started with the model preloaded and a family the engine accepts."""
+    import subprocess
+
+    server = tmp_path / "audiocpp_server"
+    server.write_text("#!/bin/sh\n", encoding="utf-8")
+    model = tmp_path / "voicetut-tts-q8_0.gguf"
+    _write_gguf(
+        model, [("general.architecture", "audiocpp"), ("audiocpp.model_spec.family", "omnivoice")]
+    )
+
+    runner = a.AudioCppServerRunner(server, model, threads=2)
+    captured: dict[str, object] = {}
+
+    def _fake_popen(argv, **kwargs):
+        captured["argv"] = list(argv)
+        captured["config"] = json.loads(
+            Path(argv[argv.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        return _FakeProcess()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    # The pre-start health check must miss (so the server is really launched), then
+    # the readiness poll must succeed once the process is up.
+    states = iter([False, True])
+    monkeypatch.setattr(runner, "is_running", lambda: next(states, True))
+    runner.start()
+    argv = captured["argv"]
+    assert argv[0] == str(server)
+    config = captured["config"]
+    assert config["max_loaded_models"] == 1
+    assert config["models"][0]["path"] == str(model)
+    assert config["models"][0]["family"] == "omnivoice"
+
+
+def test_server_runner_posts_and_returns_clips(tmp_path, monkeypatch):
+    """A batch is posted as OpenAI-compatible speech requests and returned in order."""
+    import urllib.request
+
+    server = tmp_path / "audiocpp_server"
+    server.write_text("#!/bin/sh\n", encoding="utf-8")
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"GGUF")
+
+    runner = a.AudioCppServerRunner(server, model, threads=2)
+    monkeypatch.setattr(runner, "start", lambda: None)
+    payloads: list[dict] = []
+    target = tmp_path / "clip.wav"
+    speech.AudioClip((1, 2, 3), sample_rate=24_000).write_wav(target)
+    wav_bytes = target.read_bytes()
+
+    class _Response:
+        status = 200
+
+        def read(self) -> bytes:
+            return wav_bytes
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _fake_urlopen(request, timeout=None):
+        payloads.append(json.loads(request.data.decode("utf-8")))
+        return _Response()
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    paths = runner.synthesize_many(
+        ["one", "two"],
+        language="arz",
+        reference=tmp_path / "sarah.wav",
+        reference_text="نص",
+        steps=4,
+    )
+    assert len(paths) == 2
+    assert all(Path(p).read_bytes() for p in paths)
+    assert [p["input"] for p in payloads] == ["one", "two"]
+    assert payloads[0]["num_inference_steps"] == 4
+    assert payloads[0]["language"] == "arz"
+    assert payloads[0]["voice_ref"].endswith("sarah.wav")
+    assert payloads[0]["reference_text"] == "نص"
+    assert payloads[0]["model"] == "voicetut"
+
+
+def test_synthesizer_uses_the_server_when_asked(tmp_path):
+    """``use_server`` routes a real install through the resident-server runner."""
+    root = _fake_install(tmp_path / "data")
+    server_name = a.SERVER_BINARY_NAME + (".exe" if a._is_windows() else "")
+    (root / "bin" / server_name).write_text("#!/bin/sh\n", encoding="utf-8")
+    synth = a.AudioCppSynthesizer(root=root, use_server=True)
+    assert isinstance(synth._runner, a.AudioCppServerRunner)
+    # The single-process path stays the default.
+    plain = a.AudioCppSynthesizer(root=root)
+    assert isinstance(plain._runner, a.AudioCppCliRunner)
+
+
+
+def test_load_synthesizer_defaults_to_the_resident_server(tmp_path):
+    """The fast path is the default, not an opt-in a caller must remember.
+
+    A per-call ``audiocpp_cli`` process reloads the whole 1.35 GB model for every
+    utterance; the resident server keeps it loaded. The factory therefore uses the
+    server when the build ships it, and only an explicit ``use_server=False``
+    selects the single-process engine.
+    """
+    root = _fake_install(tmp_path / "data")
+    (root / "bin" / ("audiocpp_server.exe" if a._is_windows() else "audiocpp_server")).write_text(
+        "#!/bin/sh\n", encoding="utf-8"
+    )
+    from core.speech import load_synthesizer
+
+    auto = load_synthesizer("audio.cpp", root=root)
+    assert isinstance(auto, a.AudioCppSynthesizer)
+    assert isinstance(auto._runner, a.AudioCppServerRunner)
+    opt_out = load_synthesizer("audio.cpp", root=root, use_server=False)
+    assert isinstance(opt_out._runner, a.AudioCppCliRunner)
+
+
+def test_reader_uses_the_server_only_for_the_audiocpp_engine(tmp_path):
+    """The reader's ``server`` flag is per-engine: only audio.cpp keeps a daemon."""
+    from core.reading import TextReader
+
+    root = _fake_install(tmp_path / "data")
+    (root / "bin" / ("audiocpp_server.exe" if a._is_windows() else "audiocpp_server")).write_text(
+        "#!/bin/sh\n", encoding="utf-8"
+    )
+    reader = TextReader(engine="audio.cpp", server=True)
+    assert isinstance(reader.synthesizer, a.AudioCppSynthesizer)
+    assert isinstance(reader.synthesizer._runner, a.AudioCppServerRunner)
+    reader.synthesizer.stop()

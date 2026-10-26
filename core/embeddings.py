@@ -156,14 +156,49 @@ def _normalize_vector(vector: Sequence[float]) -> tuple[float, ...]:
 
 
 def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
-    left_norm = math.sqrt(sum(float(value) * float(value) for value in left))
-    right_norm = math.sqrt(sum(float(value) * float(value) for value in right))
-    if left_norm == 0.0 or right_norm == 0.0:
+    # One pass over the pair: the dot product and both norms are accumulated
+    # together, so a 128-dimension pair costs one loop instead of three generator
+    # passes over the same numbers (a retrieval scores every document, so this was
+    # the largest pure-Python cost left on the answer path).
+    dot = 0.0
+    left_square = 0.0
+    right_square = 0.0
+    for a, b in zip(left, right, strict=False):
+        a = float(a)
+        b = float(b)
+        dot += a * b
+        left_square += a * a
+        right_square += b * b
+    if left_square == 0.0 or right_square == 0.0:
         return 0.0
-    raw = sum(float(a) * float(b) for a, b in zip(left, right, strict=False)) / (left_norm * right_norm)
+    raw = dot / math.sqrt(left_square * right_square)
     # Clamp: floating point can push a self-similarity a hair past 1.0, and the
     # callers treat the score as a probability-like weight.
     return max(0.0, min(1.0, float(raw)))
+
+
+def dot_product(left: Sequence[float], right: Sequence[float]) -> float:
+    """The dot product of two vectors the caller knows are already unit length.
+
+    :meth:`DistributionalSpace.embed` returns a *normalised* vector, so a retriever
+    that scores its own embedded query against its own embedded documents can skip
+    the two norm computations the general :func:`cosine_similarity` performs. The
+    result is clamped to the same ``[0, 1]`` band, so the fused score is unchanged.
+    """
+    total = 0.0
+    for a, b in zip(left, right, strict=False):
+        total += float(a) * float(b)
+    return max(0.0, min(1.0, total))
+
+
+def cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
+    """The same cosine as :func:`_cosine`, exposed for a caller that already has vectors.
+
+    A retriever that embeds a query once and every document once can then score the
+    pairs itself, instead of re-embedding the query for every document -- which is
+    what made one retrieval cost 160 identical embeddings.
+    """
+    return _cosine(left, right)
 
 
 def cooccurrence_counts(
@@ -611,6 +646,8 @@ __all__ = [
     "SemanticSpace",
     "build_semantic_space",
     "cooccurrence_counts",
+    "cosine_similarity",
+    "dot_product",
     "evaluate_semantic_space",
     "load_semantic_space",
     "reset_semantic_cache",

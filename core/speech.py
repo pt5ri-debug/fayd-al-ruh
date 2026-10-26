@@ -1753,6 +1753,8 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
     if name == "audio.cpp":
         from core.audiocpp_speech import (
             AUDIOCPP_ENGINE_NAME,
+            DEFAULT_INFERENCE_STEPS,
+            DEFAULT_PERF_MODE,
             AudioCppSynthesizer,
             AudioCppUnavailable,
             audiocpp_status,
@@ -1772,6 +1774,13 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
             # system engine reads the text instead, and the synthesizer reports it.
             fallback = _system_synthesizer(voice=voice, language=language, prosody=prosody)
         model_voice = voice if isinstance(voice, ModelVoice) else None
+        # The resident server is the default: a per-call process reloads the whole
+        # 1.35 GB model every time, which is what made a read slow. ``None`` (or an
+        # absent key) means "auto -- use it when the build ships the binary"; an
+        # explicit ``False`` is the only opt-out, and the engine falls back to the
+        # single-process path when the binary is missing either way.
+        server_option = options.get("use_server")
+        use_server = True if server_option is None else bool(server_option)
         try:
             return AudioCppSynthesizer(
                 voice=model_voice,
@@ -1781,9 +1790,11 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
                 runner=options.get("runner"),
                 fallback=fallback,
                 root=options.get("root"),
-                steps=options.get("steps", 8),
+                steps=options.get("steps", DEFAULT_INFERENCE_STEPS),
                 threads=options.get("threads"),
                 prosody=prosody,
+                perf_mode=options.get("perf_mode", DEFAULT_PERF_MODE),
+                use_server=use_server,
             )
         except AudioCppUnavailable as error:
             raise ValueError(str(error)) from error

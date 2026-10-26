@@ -95,8 +95,13 @@ def normalize_language(language: str | None) -> str:
 AUDIOCPP_SAMPLE_RATE = 24_000
 
 #: The diffusion steps to use per request. The model's own default is 32, which is
-#: slow on a CPU; 8 measured ~1/3 the wall time for the same intelligible speech.
-DEFAULT_INFERENCE_STEPS = 8
+#: slow on a CPU. Measured on this machine (a resident server, so load is out of
+#: the picture): 2 steps -> 2.4 s, 4 steps -> 4.3 s, 8 steps -> 8.6 s for the same
+#: short sentence, i.e. wall time is very nearly linear in the step count. Four
+#: steps halves the wait against eight and keeps the speech intelligible, so it is
+#: the default; ``steps`` is a parameter, so a caller who wants the finer detail of
+#: eight (or the very fast two) can ask for it.
+DEFAULT_INFERENCE_STEPS = 4
 
 #: The GGUF magic every real model file starts with. A truncated download or a
 #: renamed non-model file does not carry it, so it is checked before a file is
@@ -108,6 +113,16 @@ GGUF_MAGIC = b"GGUF"
 #: default is 4, which leaves most of a modern machine idle and makes a CPU read
 #: far slower than it needs to be; the cap keeps a big machine from oversubscribing.
 DEFAULT_MAX_THREADS = 8
+
+#: The generator performance mode the engine runs with. ``flash_attention`` is the
+#: engine's own documented performance path (its default, ``off``, is the
+#: "exact-safe" one), and it is the single biggest lever on CPU read speed. It is
+#: named here rather than left implicit so a caller can ask for ``off`` when the
+#: exact-safe numerics matter more than the speed.
+DEFAULT_PERF_MODE = "flash_attention"
+
+#: The ``--session-option`` values the performance mode may be set to.
+PERF_MODES: tuple[str, ...] = ("off", "flash_attention")
 
 
 def _default_threads() -> int:
@@ -151,7 +166,9 @@ class VoiceTutSpec:
 
 #: The two standalone GGUF packages VoiceTut-TTS ships. Both are self-contained:
 #: the generator, the OmniVoice audio tokenizer, the tokenizer, and the audio.cpp
-#: model spec are all in the one file, so one file is all that is needed.
+#: model spec are all in the one file, so one file is all that is needed. Whether
+#: the engine also needs a ``--family`` is decided from the file itself
+#: (:func:`_model_family`), so a hand-built package works without a code change.
 VOICETUT_MODELS: tuple[VoiceTutSpec, ...] = (
     VoiceTutSpec(
         key="voicetut-q8_0",
@@ -240,6 +257,23 @@ def find_cli(root: Path | str | None = None) -> Path | None:
     if local.is_file():
         return local
     found = shutil.which("audiocpp_cli")
+    return Path(found) if found else None
+
+
+def find_server(root: Path | str | None = None) -> Path | None:
+    """The ``audiocpp_server`` executable, or ``None`` when this build lacks it.
+
+    The server is the *speed* path: it keeps the model resident, so a document is
+    read without re-loading the weights for every paragraph. A build that ships only
+    the CLI still works through the single-process path, so a missing server is not
+    an error -- it is simply the slower, honest fallback.
+    """
+    local = engine_dir(root) / (
+        f"{SERVER_BINARY_NAME}.exe" if _is_windows() else SERVER_BINARY_NAME
+    )
+    if local.is_file():
+        return local
+    found = shutil.which(SERVER_BINARY_NAME)
     return Path(found) if found else None
 
 
@@ -444,6 +478,136 @@ def spec_summaries() -> tuple[tuple[str, str, str, int, str], ...]:
     )
 
 
+def _read_gguf_family(path: Path) -> str | None:
+    """The model family a GGUF file declares, or ``None`` when it declares none.
+
+    A standalone package (the ones VoiceTut ships) embeds its own package spec, so
+    the engine can load it with no ``--family``. A GGUF that names no family -- or
+    that cannot be read -- needs the family spelled out instead, and getting that
+    wrong is exactly what makes the engine fail to load the model at all. Only the
+    header is read: the metadata key/value block, never the tensor data.
+    """
+    import struct
+
+    try:
+        with Path(path).open("rb") as handle:
+            header = handle.read(24)
+            if len(header) < 24 or header[:4] != GGUF_MAGIC:
+                return None
+            version = struct.unpack_from("<I", header, 4)[0]
+            if version < 2:
+                return None
+            tensor_count, metadata_count = struct.unpack_from("<QQ", header, 8)
+            if tensor_count > 1_000_000 or metadata_count > 100_000:
+                return None
+            return _scan_gguf_family(handle, metadata_count)
+    except (OSError, ValueError, struct.error):
+        return None
+
+
+def _scan_gguf_family(handle: Any, metadata_count: int) -> str | None:
+    """Walk the GGUF metadata block for the model family the engine must be told.
+
+    A ``*.model_spec.family`` key wins over everything: that is the value the engine
+    itself reads from the embedded spec, and the real VoiceTut packages carry it
+    (``audiocpp.model_spec.family = omnivoice``) while ``general.architecture`` says
+    the *container* format (``audiocpp``), which the engine rejects as a family hint
+    -- naming that one is exactly what made loading fail. A ``family`` key is the
+    next best; ``general.architecture`` is used only when it names a known model
+    family and not the generic ``audiocpp`` container. Stops quietly at the first
+    entry it cannot decode, so an unexpected file yields ``None`` rather than an
+    exception.
+    """
+    import struct
+
+    def read_string() -> str:
+        raw = handle.read(8)
+        if len(raw) < 8:
+            raise ValueError("truncated GGUF string length")
+        length = struct.unpack("<Q", raw)[0]
+        if length > 1 << 20:
+            raise ValueError("implausible GGUF string length")
+        return handle.read(length).decode("utf-8", errors="replace")
+
+    def skip_value(value_type: int) -> None:
+        sizes = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
+        if value_type in sizes:
+            handle.read(sizes[value_type])
+            return
+        if value_type == 8:  # string
+            read_string()
+            return
+        if value_type == 9:  # array
+            header = handle.read(12)
+            if len(header) < 12:
+                raise ValueError("truncated GGUF array")
+            element_type, count = struct.unpack("<IQ", header)
+            for _ in range(count):
+                skip_value(element_type)
+            return
+        raise ValueError("unknown GGUF value type")
+
+    spec_family: str | None = None
+    plain_family: str | None = None
+    architecture: str | None = None
+    for _ in range(metadata_count):
+        try:
+            key = read_string()
+            raw = handle.read(4)
+            if len(raw) < 4:
+                break
+            value_type = struct.unpack("<I", raw)[0]
+            if value_type != 8:
+                skip_value(value_type)
+                continue
+            value = read_string().strip()
+            lowered = key.lower()
+            if not value:
+                continue
+            if lowered.endswith("model_spec.family") or lowered.endswith(".spec.family"):
+                spec_family = spec_family or value
+            elif "family" in lowered:
+                plain_family = plain_family or value
+            elif "architecture" in lowered:
+                architecture = architecture or value
+        except (ValueError, OSError):
+            break
+    if spec_family is not None:
+        return spec_family
+    if plain_family is not None:
+        return plain_family
+    if architecture is not None and architecture.lower() not in _CONTAINER_ARCHITECTURES:
+        return architecture
+    return None
+
+
+#: ``general.architecture`` values that name audio.cpp's *container* format rather
+#: than a model family: the engine rejects them as a family hint, so they are never
+#: returned as one (the embedded ``*.model_spec.family`` is the real answer).
+_CONTAINER_ARCHITECTURES: frozenset[str] = frozenset({"audiocpp"})
+
+
+def _model_family(path: Path) -> str | None:
+    """The ``--family`` a model file needs, or ``None`` when it needs none.
+
+    A standalone package -- the ones VoiceTut ships -- embeds its own package spec
+    (``audiocpp.model_spec.family = omnivoice``), so naming a family is redundant; the
+    file is left to describe itself. A file that declares some *other* family is
+    loaded through that family, and a file that declares no family at all keeps the
+    VoiceTut default, so a hand-built package behaves as it did before the file could
+    be inspected.
+    """
+    declared = _read_gguf_family(path)
+    if declared is None:
+        return VOICETUT_FAMILY
+    lowered = declared.lower()
+    if "omnivoice" in lowered or "voicetut" in lowered:
+        return None
+    if lowered in _CONTAINER_ARCHITECTURES:
+        return None
+    return declared
+
+
 def find_model_file(key: str | None = None, root: Path | str | None = None) -> Path | None:
     """The GGUF file for a VoiceTut package, or the first installed one.
 
@@ -568,9 +732,18 @@ def download_speakers(
 ) -> Path:
     """Download VoiceTut's built-in reference speakers (one short clip each).
 
-    A zero-shot cloning model needs a reference clip *and* its transcript to speak a
-    named voice, so this fetches the upstream studio speakers -- a few hundred KB
-    each -- plus ``references.json``. Governed exactly like the model download.
+    A zero-shot cloning model needs a reference clip **and its transcript** to speak
+    a named voice: audio.cpp's OmniVoice prompt builder refuses a clone request with
+    no ``reference_text`` ("native voice clone currently requires reference_text when
+    reference audio is provided"). So this fetches the upstream studio speakers -- a
+    few hundred KB each -- plus the ``references.json`` that carries their
+    transcripts, and a missing transcript file is a hard error rather than a silent
+    skip: without it every built-in voice is listed but cannot be spoken, which is
+    exactly the "the voices do not work" report this fixes.
+
+    The transcripts live *inside* ``reference_speakers/`` upstream (not at the repo
+    root), so that is the URL used. A previously downloaded copy in the model folder
+    is still honoured, so a machine that fetched it by hand is not asked again.
     """
     if approved:
         permissions = permissions or PermissionPolicy(
@@ -604,15 +777,42 @@ def download_speakers(
             raise AudioCppUnavailable(
                 f"Could not download the reference voice {stem}.wav ({error})."
             ) from error
-    references = directory.parent / "references.json"
-    if not references.is_file():
-        try:
-            urllib.request.urlretrieve(f"{base}/references.json", references)
-        except OSError:
-            # The transcripts are an optimisation, not a requirement: a missing file
-            # only means the reference text is read from the catalog instead.
-            pass
+    _download_reference_texts(root)
     return directory
+
+
+def _download_reference_texts(root: Path | str | None = None) -> Path:
+    """Fetch ``references.json`` -- the transcripts a cloning voice needs.
+
+    Tries the location upstream really uses (``reference_speakers/references.json``)
+    and then the repo root, and refuses honestly when neither answers: a voice with a
+    clip but no transcript cannot be spoken by the engine, so a missing file must be
+    reported rather than quietly skipped. A copy already in the model folder counts,
+    so a hand-placed file is never overwritten.
+    """
+    target = _models_root(root) / "references.json"
+    if target.is_file() and _reference_texts(root):
+        return target
+    candidates = (
+        f"https://huggingface.co/{SPEAKERS_REPO}/resolve/main/reference_speakers/references.json",
+        f"https://huggingface.co/{SPEAKERS_REPO}/resolve/main/references.json",
+    )
+    last_error: Exception | None = None
+    for url in candidates:
+        try:
+            urllib.request.urlretrieve(url, target)
+        except OSError as error:
+            last_error = error
+            continue
+        if _reference_texts(root):
+            return target
+        _unlink_quietly(target)
+    raise AudioCppUnavailable(
+        "Could not download references.json, the transcripts the built-in voices need "
+        f"({last_error}). Without it a cloning voice cannot be spoken; fetch "
+        f"{candidates[0]} by hand and drop it into {_models_root(root)}."
+    )
+
 
 
 def voices_dir(root: Path | str | None = None) -> Path:
@@ -644,10 +844,12 @@ def _reference_texts(root: Path | str | None) -> dict[str, str]:
 def voice_list(root: Path | str | None = None) -> tuple[ModelVoice, ...]:
     """VoiceTut's built-in speakers as :class:`~core.voices.ModelVoice` objects.
 
-    Returns ``()`` unless the model is installed *and* a reference clip is present,
-    because a cloning engine cannot speak a named voice without one -- offering a
-    voice that would fail is exactly the dishonesty this project avoids. Each voice
-    carries its reference clip and transcript, which the engine needs to clone it.
+    Returns ``()`` unless the model is installed *and* a reference clip **with its
+    transcript** is present, because a cloning engine cannot speak a named voice
+    without both: audio.cpp's OmniVoice builder refuses a clone request that has a
+    reference clip but no ``reference_text``. Offering a voice the engine would
+    refuse is exactly the dishonesty this project avoids -- and was the "the voices
+    do not work" report, because a speaker was listed from its clip alone.
     """
     if find_model_file(None, root) is None:
         return ()
@@ -658,6 +860,10 @@ def voice_list(root: Path | str | None = None) -> tuple[ModelVoice, ...]:
         clip = directory / f"{stem}.wav"
         if not clip.is_file():
             continue
+        transcript = texts.get(stem, "")
+        if not transcript:
+            # A clip with no transcript cannot be cloned, so it is not offered.
+            continue
         voices.append(
             ModelVoice(
                 name=name,
@@ -666,7 +872,7 @@ def voice_list(root: Path | str | None = None) -> tuple[ModelVoice, ...]:
                 gender=gender,
                 model="VoiceTut-TTS",
                 reference=clip,
-                reference_text=texts.get(stem, ""),
+                reference_text=transcript,
             )
         )
     voices.extend(imported_voice_models(root))
@@ -903,6 +1109,36 @@ def clone_voice(
     return import_voice(recording, name=name or "My voice", transcript=transcript, root=root)
 
 
+def set_imported_voice_transcript(
+    name: str, transcript: str, root: Path | str | None = None
+) -> ImportedVoice | None:
+    """Give an imported voice the transcript of its clip, and return it.
+
+    A zero-shot cloning voice needs the clip **and** what the clip says; a voice
+    recorded or imported without a transcript is registered but cannot be spoken,
+    so this is the one call the studio and the CLI use to fill the gap -- normally
+    with the speech-to-text engine's own reading of the clip. An empty transcript,
+    or a name that is not registered, changes nothing and returns ``None``.
+    """
+    value = transcript.strip()
+    if not value:
+        return None
+    wanted = name.strip().lower()
+    voices = list(load_imported_voices(root))
+    for index, voice in enumerate(voices):
+        if voice.name.lower() != wanted:
+            continue
+        if voice.transcript == value:
+            return voice
+        updated = ImportedVoice(
+            name=voice.name, clip=voice.clip, transcript=value, source=voice.source
+        )
+        voices[index] = updated
+        _save_imported_voices(voices, root)
+        return updated
+    return None
+
+
 def remove_imported_voice(name: str, root: Path | str | None = None) -> bool:
     """Remove an imported voice (and its clip); ``True`` when one was removed."""
     wanted = name.strip().lower()
@@ -937,10 +1173,12 @@ def imported_voice_models(root: Path | str | None = None) -> tuple[ModelVoice, .
     )
 
 
-def _unlink_quietly(path: Path) -> None:
+def _unlink_quietly(path: Path | None) -> None:
     """Remove ``path`` if it is there, ignoring an ``OSError``."""
     import contextlib
 
+    if path is None:
+        return
     with contextlib.suppress(OSError):
         path.unlink()
 
@@ -1003,10 +1241,21 @@ def audiocpp_status(root: Path | str | None = None) -> AudioCppStatus:
         else:
             hint = "Download the model with: python -m cli audio download --approve"
     elif voices == 0:
-        hint = (
-            "Download the built-in voices with: "
-            "python -m cli audio download --speakers --approve"
-        )
+        # Distinguish "no voices at all" from "clips are there but their transcripts
+        # are not": a cloning voice needs both, so the second case has a different
+        # next step (re-fetch the speakers, which brings references.json).
+        clips = list(voices_dir(root).glob("*.wav")) if voices_dir(root).is_dir() else []
+        if clips:
+            hint = (
+                "The reference clips are present but their transcripts "
+                "(references.json) are not, and a cloning voice needs both. "
+                "Re-download them with: python -m cli audio download --speakers --approve"
+            )
+        else:
+            hint = (
+                "Download the built-in voices with: "
+                "python -m cli audio download --speakers --approve"
+            )
     else:
         hint = "VoiceTut-TTS over audio.cpp is ready."
     return AudioCppStatus(cli is not None, cli, model is not None, model, voices, hint)
@@ -1035,6 +1284,46 @@ def extra_installed() -> bool:
 
 
 # ------------------------------------------------------------------- engine
+
+
+#: The port the local audio.cpp server is started on when the project runs one
+#: itself. Chosen away from the common 8080 so it does not collide with a server
+#: the user already runs.
+DEFAULT_SERVER_PORT = 8199
+
+#: The engine binary that serves an OpenAI-compatible API with the model kept
+#: resident. It ships beside ``audiocpp_cli`` in the same release.
+SERVER_BINARY_NAME = "audiocpp_server"
+
+#: The OpenAI-compatible path the resident server speaks on.
+SERVER_SPEECH_PATH = "/v1/audio/speech"
+
+#: The resident servers this process started, so they can be stopped when it exits.
+#: A server the *user* was already running is deliberately not in here.
+_STARTED_SERVERS: list[Any] = []
+
+
+def _register_server(runner: Any) -> None:
+    """Remember a server this process started, and reap it at interpreter exit."""
+    import atexit
+
+    if runner in _STARTED_SERVERS:
+        return
+    _STARTED_SERVERS.append(runner)
+    if len(_STARTED_SERVERS) == 1:
+        atexit.register(_stop_started_servers)
+
+
+def _stop_started_servers() -> None:
+    """Terminate every server this process started (idempotent)."""
+    while _STARTED_SERVERS:
+        runner = _STARTED_SERVERS.pop()
+        try:
+            runner.stop()
+        except Exception:
+            # Exit cleanup must never raise: a stuck process has already been killed
+            # by ``stop`` itself, and anything left is the OS's to reap.
+            pass
 
 
 class AudioCppRunner(Protocol):
@@ -1077,12 +1366,20 @@ class AudioCppCliRunner:
         backend: str = "cpu",
         timeout: int = 900,
         threads: int | None = None,
+        family: str | None = None,
+        perf_mode: str = DEFAULT_PERF_MODE,
     ) -> None:
         self.cli = Path(cli)
         self.model = Path(model)
         self.backend = backend
         self.timeout = timeout
         self.threads = threads if threads is not None else _default_threads()
+        self.perf_mode = perf_mode if perf_mode in PERF_MODES else DEFAULT_PERF_MODE
+        # A standalone GGUF carries its own package spec, so no ``--family`` is
+        # named for it; a package that does not is loaded through the family
+        # implementation, and naming the wrong one (or none) is what leaves the
+        # engine unable to load the model.
+        self.family = family if family is not None else _model_family(self.model)
 
     def synthesize(
         self,
@@ -1100,6 +1397,17 @@ class AudioCppCliRunner:
             reference_text=reference_text,
             steps=steps,
         )[0]
+
+    def session_options(self) -> tuple[str, ...]:
+        """The engine ``--session-option`` values this engine should run with.
+
+        The generator's performance attention path is the engine's own documented
+        speed lever (its default keeps the "exact-safe" one), so it is turned on
+        here; the weight storage types are left at the package's own precision,
+        because the recommended Q8_0 GGUF is already quantized and re-quantizing
+        SafeTensors at load time is a documented quality risk on some paths.
+        """
+        return (f"omnivoice.perf_mode={self.perf_mode}",)
 
     def synthesize_many(
         self,
@@ -1145,8 +1453,6 @@ class AudioCppCliRunner:
                 str(self.cli),
                 "--task",
                 "tts",
-                "--family",
-                VOICETUT_FAMILY,
                 "--model",
                 str(self.model),
                 "--backend",
@@ -1158,6 +1464,10 @@ class AudioCppCliRunner:
                 "--out-dir",
                 str(out_dir),
             ]
+            if self.family:
+                command[3:3] = ["--family", self.family]
+            for option in self.session_options():
+                command.extend(["--session-option", option])
             try:
                 completed = subprocess.run(
                     command,
@@ -1202,6 +1512,212 @@ class AudioCppCliRunner:
                 shutil.copyfile(produced, keep)
                 kept.append(keep)
             return kept
+class AudioCppServerRunner:
+    """An :class:`AudioCppRunner` that keeps the model resident in a local server.
+
+    Every ``audiocpp_cli`` process reloads the whole GGUF before it can speak, and a
+    document is read paragraph by paragraph, so a read spends real time re-loading
+    1.35 GB of weights. audio.cpp ships ``audiocpp_server``, which loads a model
+    **once** and answers OpenAI-compatible ``POST /v1/audio/speech`` requests from
+    memory -- the same lever the ``--request-sequence`` batching pulls, but across
+    the whole session rather than one batch.
+
+    The server is started lazily on first use and left running with
+    ``--max-loaded-models 1`` so the weights stay warm; the object is safe to reuse
+    for a whole read (and a whole session). It is **opt-in** -- the CLI's default
+    runner is unchanged -- so a machine that never asked for it starts no daemon.
+    The server only listens on the loopback address, so nothing leaves the machine.
+    """
+
+    def __init__(
+        self,
+        server: Path | str,
+        model: Path | str,
+        *,
+        backend: str = "cpu",
+        timeout: int = 900,
+        threads: int | None = None,
+        family: str | None = None,
+        perf_mode: str = DEFAULT_PERF_MODE,
+        host: str = "127.0.0.1",
+        port: int = DEFAULT_SERVER_PORT,
+        model_id: str = "voicetut",
+    ) -> None:
+        self.server = Path(server)
+        self.model = Path(model)
+        self.backend = backend
+        self.timeout = timeout
+        self.threads = threads if threads is not None else _default_threads()
+        self.perf_mode = perf_mode if perf_mode in PERF_MODES else DEFAULT_PERF_MODE
+        self.family = family if family is not None else _model_family(self.model)
+        self.host = host
+        self.port = port
+        self.model_id = model_id
+        self._process: Any = None
+        self._config: Path | None = None
+
+    # ------------------------------------------------------------ lifecycle
+
+    def base_url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+    def is_running(self) -> bool:
+        """Whether a server answers ``/health`` on this port right now."""
+        import urllib.request
+
+        try:
+            with urllib.request.urlopen(f"{self.base_url()}/health", timeout=3) as response:
+                return response.status == 200
+        except (OSError, ValueError):
+            return False
+
+    def start(self) -> None:
+        """Start the server with this model preloaded, unless one is already up."""
+        import subprocess
+        import tempfile
+
+        if self.is_running():
+            return
+        config = {
+            "host": self.host,
+            "port": self.port,
+            "backend": self.backend,
+            "threads": self.threads,
+            "max_loaded_models": 1,
+            "models": [
+                {
+                    "id": self.model_id,
+                    "path": str(self.model),
+                    # The server config requires a family key even for a standalone
+                    # package that resolves its own spec, so the VoiceTut family is the
+                    # default here (the engine then reads the embedded spec anyway).
+                    "family": self.family or VOICETUT_FAMILY,
+                }
+            ],
+        }
+        handle = tempfile.NamedTemporaryFile(
+            "w", prefix="audiocpp-server-", suffix=".json", delete=False, encoding="utf-8"
+        )
+        try:
+            json.dump(config, handle, ensure_ascii=False)
+            handle.close()
+            self._config = Path(handle.name)
+            self._process = subprocess.Popen(
+                [str(self.server), "--config", str(self._config)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                cwd=str(self.server.parent),
+                env=_engine_env(self.server.parent),
+            )
+        except (OSError, ValueError) as error:
+            _unlink_quietly(self._config)
+            self._config = None
+            raise AudioCppUnavailable(
+                f"Could not start the audio.cpp server ({error})."
+            ) from error
+        # Loading 1.35 GB of weights takes a few seconds; poll until it answers.
+        import time
+
+        deadline = time.monotonic() + min(self.timeout, 180)
+        while time.monotonic() < deadline:
+            if self.is_running():
+                _register_server(self)
+                return
+            if self._process.poll() is not None:
+                raise AudioCppUnavailable(
+                    "The audio.cpp server exited while loading the model. Use the "
+                    "single-process engine instead (python -m cli audio say ...)."
+                )
+            time.sleep(0.5)
+        self.stop()
+        raise AudioCppUnavailable("The audio.cpp server did not become ready in time.")
+
+    def stop(self) -> None:
+        """Stop a server this runner started; leave one the user was already running."""
+        import subprocess
+
+        process = self._process
+        self._process = None
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except (OSError, subprocess.SubprocessError):
+                process.kill()
+        if self._config is not None:
+            _unlink_quietly(self._config)
+            self._config = None
+
+    # -------------------------------------------------------------- rendering
+
+    def synthesize(
+        self,
+        text: str,
+        *,
+        language: str,
+        reference: Path | None,
+        reference_text: str,
+        steps: int,
+    ) -> Path:
+        return self.synthesize_many(
+            [text],
+            language=language,
+            reference=reference,
+            reference_text=reference_text,
+            steps=steps,
+        )[0]
+
+    def synthesize_many(
+        self,
+        texts: list[str],
+        *,
+        language: str,
+        reference: Path | None,
+        reference_text: str,
+        steps: int,
+    ) -> list[Path]:
+        """Render each text through the resident server, in order."""
+        import urllib.error
+        import urllib.request
+
+        if not texts:
+            return []
+        self.start()
+        kept: list[Path] = []
+        for text in texts:
+            payload: dict[str, Any] = {
+                "model": self.model_id,
+                "input": text,
+                "language": language,
+                "response_format": "wav",
+                "num_inference_steps": steps,
+            }
+            if reference is not None:
+                payload["voice_ref"] = str(reference)
+                if reference_text:
+                    payload["reference_text"] = reference_text
+            request = urllib.request.Request(
+                f"{self.base_url()}{SERVER_SPEECH_PATH}",
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    audio = response.read()
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode("utf-8", errors="replace").strip()
+                raise AudioCppUnavailable(
+                    f"audio.cpp server refused the request ({error.code}): {detail[:200]}"
+                ) from error
+            except (OSError, ValueError) as error:
+                raise AudioCppUnavailable(
+                    f"The audio.cpp server could not be reached ({error})."
+                ) from error
+            target = Path(tempfile.mkstemp(prefix="audiocpp-", suffix=".wav")[1])
+            target.write_bytes(audio)
+            kept.append(target)
+        return kept
 
 
 class AudioCppSynthesizer:
@@ -1229,6 +1745,8 @@ class AudioCppSynthesizer:
         backend: str = "cpu",
         threads: int | None = None,
         prosody: Prosody | None = None,
+        perf_mode: str = DEFAULT_PERF_MODE,
+        use_server: bool = False,
     ) -> None:
         self.voice = voice
         # The engine only accepts the model's own language ids (``arz``/``en``), and
@@ -1237,6 +1755,7 @@ class AudioCppSynthesizer:
         self.steps = steps
         self._fallback = fallback
         self._root = root
+        self._server_runner: AudioCppServerRunner | None = None
         # A zero-shot cloning engine reproduces the reference clip's voice, so a mood
         # has almost nothing to change here; it is carried so the *fallback* (the
         # system engine) can still read the mood when this engine cannot.
@@ -1252,7 +1771,29 @@ class AudioCppSynthesizer:
         if model is None:
             raise AudioCppUnavailable("No VoiceTut-TTS model is present. " + audiocpp_status(root).hint)
         self._model = model
-        self._runner = AudioCppCliRunner(cli, model, backend=backend, threads=threads)
+        # The resident server keeps the weights loaded across a whole read, which is
+        # the real fix for a slow read (a per-paragraph process reloads 1.35 GB each
+        # time). It is used when the build ships the server binary and the caller
+        # asked for it; otherwise the single-process engine is the honest fallback.
+        server = find_server(root) if use_server else None
+        if server is not None:
+            self._server_runner = AudioCppServerRunner(
+                server, model, backend=backend, threads=threads, perf_mode=perf_mode
+            )
+            self._runner = self._server_runner
+            return
+        self._runner = AudioCppCliRunner(
+            cli, model, backend=backend, threads=threads, perf_mode=perf_mode
+        )
+
+    def stop(self) -> None:
+        """Stop a resident server this synthesizer started, releasing the model.
+
+        A no-op when the single-process engine is in use or the server was already
+        running for someone else, so it is always safe to call when a read ends.
+        """
+        if self._server_runner is not None:
+            self._server_runner.stop()
 
     def _reference(self) -> tuple[Path | None, str]:
         voice = self.voice
@@ -1280,6 +1821,15 @@ class AudioCppSynthesizer:
         prepared = [prepare_for_speech(text, language=detect_language(text)) for text in bodies]
         reference, reference_text = self._reference()
         try:
+            if reference is not None and not reference_text.strip():
+                # A clone request with a clip but no transcript is refused by the
+                # engine ("requires reference_text when reference audio is provided").
+                # Raised inside the try so a supplied fallback still reads the text.
+                raise AudioCppUnavailable(
+                    f"The voice {getattr(self.voice, 'name', '')!r} has a reference clip but "
+                    "no transcript, which a cloning voice needs. Re-download the built-in "
+                    "voices with: python -m cli audio download --speakers --approve"
+                )
             paths = self._render_paths(prepared, reference, reference_text)
         except AudioCppUnavailable:
             if self._fallback is not None:
@@ -1351,6 +1901,7 @@ __all__ = [
     "AUDIOCPP_SAMPLE_RATE",
     "DEFAULT_INFERENCE_STEPS",
     "DEFAULT_MAX_THREADS",
+    "DEFAULT_SERVER_PORT",
     "GGUF_MAGIC",
     "IMPORTED_VOICES_FILE",
     "IMPORT_PICKER_SUFFIXES",
@@ -1359,6 +1910,7 @@ __all__ = [
     "VOICE_CLIP_SUFFIXES",
     "AudioCppCliRunner",
     "AudioCppRunner",
+    "AudioCppServerRunner",
     "AudioCppStatus",
     "AudioCppSynthesizer",
     "AudioCppUnavailable",
@@ -1374,6 +1926,7 @@ __all__ = [
     "extra_installed",
     "find_cli",
     "find_model_file",
+    "find_server",
     "import_voice",
     "imported_voice_models",
     "imported_voices_path",

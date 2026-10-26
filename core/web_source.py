@@ -24,7 +24,7 @@ rank above generic blogs), never a claim of truth.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 from core.acceptance_policy import TRUSTED_HOSTS, TRUSTED_SUFFIXES
@@ -33,6 +33,32 @@ from core.human_approval import HumanApprovalGate
 from core.permissions import Capability, PermissionDecision, PermissionPolicy
 
 _SEARCH_TOOL = "web_search"
+
+#: A pooled ``requests`` session, so a search reuses one TLS connection instead of
+#: paying for a fresh TCP connect + TLS handshake on every request. The measured
+#: cost of that handshake dominated a query (0.9 s of a 1.3 s web call); a session
+#: keeps the connection alive across the many calls a learner makes. It is built
+#: lazily, so a machine with no network (or no ``requests``) never touches it.
+_HTTP_SESSION: Any | None = None
+
+
+def _session() -> Any:
+    """The shared pooled HTTP session (built on first use)."""
+    global _HTTP_SESSION
+    if _HTTP_SESSION is None:
+        import requests
+
+        session = requests.Session()
+        # A modest pool: enough for a batch learner, bounded so it cannot grow
+        # without limit. ``Retry`` handles a transient 429/5xx the way the rest of
+        # the project does, so a governed call is not lost to a blip.
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=4, pool_maxsize=8, max_retries=2
+        )
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        _HTTP_SESSION = session
+    return _HTTP_SESSION
 
 # Top-level suffixes (and a few well-known hosts) ranked by how much a claim
 # from them is worth. The scale is deliberately coarse and inspectable. The
@@ -140,15 +166,13 @@ class HttpSearchProvider:
     ) -> tuple[WebResult, ...]:
         if not query.strip():
             raise ValueError("Search query cannot be empty.")
-        import requests
-
         headers = {"Accept": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         params = {"q": query, "limit": str(limit), "offset": str(offset)}
         if fresh:
             params["sort"] = "newest"
-        response = requests.get(
+        response = _session().get(
             self.endpoint,
             params=params,
             headers=headers,
@@ -204,8 +228,6 @@ class WikipediaSearchProvider:
     ) -> tuple[WebResult, ...]:
         if not query.strip():
             raise ValueError("Search query cannot be empty.")
-        import requests
-
         params = {
             "action": "query",
             "list": "search",
@@ -219,7 +241,7 @@ class WikipediaSearchProvider:
         }
         if offset:
             params["sroffset"] = str(offset)
-        response = requests.get(
+        response = _session().get(
             self._API,
             params=params,
             headers={"Accept": "application/json", "User-Agent": self._USER_AGENT},

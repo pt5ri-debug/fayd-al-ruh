@@ -167,6 +167,7 @@ def _say(
     voice_key: str | None,
     write_wav: Path | None,
     steps: int,
+    server: bool = False,
 ) -> int:
     voice = None
     if voice_key:
@@ -178,7 +179,9 @@ def _say(
             )
             return 3
     try:
-        synthesizer = load_synthesizer(AUDIOCPP_ENGINE_NAME, voice=voice, steps=steps)
+        synthesizer = load_synthesizer(
+            AUDIOCPP_ENGINE_NAME, voice=voice, steps=steps, use_server=server
+        )
     except ValueError as error:
         print(str(error))
         return 3
@@ -187,6 +190,12 @@ def _say(
     except (ValueError, AudioCppUnavailable) as error:
         print(str(error))
         return 3
+    finally:
+        # Release a resident server this call started, so a one-off `say` leaves no
+        # daemon behind; a server the user was already running is left untouched.
+        stop = getattr(synthesizer, "stop", None)
+        if callable(stop):
+            stop()
     code = detect_language(text)
     print(f"Language: {'Arabic' if code == 'ar' else 'English'}")
     print(f"Audio duration: {clip.duration_seconds:.2f} s")
@@ -235,6 +244,11 @@ def _build_parser() -> argparse.ArgumentParser:
     say.add_argument("--voice", help="a model voice key (model:audio.cpp:Sarah, ...)")
     say.add_argument("--steps", type=int, default=8, help="diffusion steps (default 8)")
     say.add_argument("--write-wav", type=Path, help="also write the audio to this WAV file")
+    say.add_argument(
+        "--server",
+        action="store_true",
+        help="keep the model resident in a local server (faster for long text)",
+    )
     return parser
 
 
@@ -262,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--speakers and a package key cannot be combined")
         return _download(args.spec, args.approve, args.speakers)
     if args.command == "say":
-        return _say(args.text, args.voice, args.write_wav, args.steps)
+        return _say(args.text, args.voice, args.write_wav, args.steps, args.server)
     parser.error(f"unknown command {args.command!r}")
     return 2
 

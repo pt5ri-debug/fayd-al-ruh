@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from core.documents import Document, DocumentStore
@@ -273,3 +274,127 @@ def test_rag_retriever_falls_back_when_embeddings_are_refused():
 def test_dimensions_default_is_a_positive_int():
     assert isinstance(DEFAULT_DIMENSIONS, int)
     assert DEFAULT_DIMENSIONS > 0
+
+
+class _CountingSpace:
+    """A pass-through wrapper that records every text embedded through it."""
+
+    def __init__(self, space: Any, seen: list[str]) -> None:
+        self._space = space
+        self._seen = seen
+
+    def embed(self, text: str):
+        self._seen.append(text)
+        return self._space.embed(text)
+
+    def __getattr__(self, name: str):
+        return getattr(self._space, name)
+
+
+# ------------------------------------------- the retriever's per-document cache
+
+
+def test_retrieval_embeds_the_query_once_not_once_per_document(tmp_path, monkeypatch):
+    """A retrieval must embed the query a single time, not once per document.
+
+    It used to call ``similarity(query, text)`` per document, re-embedding the same
+    query 160 times a question; the query is now embedded once and each document's
+    vector comes from the per-document cache.
+    """
+    reset_semantic_cache()
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    store = DocumentStore()
+    for index in range(20):
+        store.add(
+            Document(doc_id=f"d{index}", title=f"Doc {index}", text=_CORPUS[index % len(_CORPUS)], source="t")
+        )
+    retriever = RagRetriever(store)
+    assert retriever.embeddings_available
+    seen: list[str] = []
+    retriever._embeddings = _CountingSpace(retriever._embeddings, seen)
+    query = "how easily fluid moves through the pore space"
+    retriever.retrieve(query, limit=3)
+    assert seen.count(query) == 1, f"the query was embedded {seen.count(query)} times"
+
+
+def test_the_document_cache_is_reused_between_questions(tmp_path, monkeypatch):
+    """The second question re-uses the cached document vectors (no re-embedding)."""
+    reset_semantic_cache()
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    store = DocumentStore()
+    for index in range(5):
+        store.add(Document(doc_id=f"d{index}", title=f"Doc {index}", text=_CORPUS[index], source="t"))
+    retriever = RagRetriever(store)
+    retriever.retrieve("porosity", limit=2)  # fills the cache
+    embedded: list[str] = []
+    retriever._embeddings = _CountingSpace(retriever._embeddings, embedded)
+    retriever.retrieve("permeability", limit=2)
+    # Only the new query is embedded; the five documents come from the cache.
+    assert embedded == ["permeability"], embedded
+
+
+def test_indexing_a_document_refreshes_its_cached_data(tmp_path, monkeypatch):
+    """A changed document is re-derived rather than served stale."""
+    reset_semantic_cache()
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    store = DocumentStore()
+    store.add(Document(doc_id="d1", title="Rock", text=_CORPUS[0], source="t"))
+    retriever = RagRetriever(store)
+    retriever.retrieve("porosity", limit=1)
+    retriever.index_document(Document(doc_id="d1", title="Rock", text="cementing and casing design", source="t"))
+    terms = retriever._document_data("d1", "Rock cementing and casing design")[1]
+    assert "cementing" in terms and "porosity" not in terms
+
+
+def test_indexing_one_document_keeps_the_other_cached_vectors(tmp_path, monkeypatch):
+    """Learning one document no longer re-embeds the whole store.
+
+    The cache used to be dropped wholesale whenever the store changed, so adding a
+    single learned statement re-embedded every document on the next question. Each
+    entry now validates against its own text, so only the changed document is
+    re-derived.
+    """
+    reset_semantic_cache()
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    store = DocumentStore()
+    for index in range(5):
+        store.add(Document(doc_id=f"d{index}", title=f"Doc {index}", text=_CORPUS[index], source="t"))
+    retriever = RagRetriever(store)
+    retriever.retrieve("porosity", limit=2)  # fills the cache
+    embedded: list[str] = []
+    retriever._embeddings = _CountingSpace(retriever._embeddings, embedded)
+    retriever.index_document(
+        Document(doc_id="learned", title="Learned", text="a newly learned statement", source="t")
+    )
+    retriever.retrieve("permeability", limit=2)
+    # Only the new query and the *new* document are embedded; d0..d4 stay cached.
+    assert embedded.count("permeability") == 1, embedded
+    assert not any(text.startswith("Doc ") for text in embedded), embedded
+
+
+def test_cosine_similarity_is_exposed_and_matches_similarity():
+    from core.embeddings import cosine_similarity
+
+    left = (1.0, 0.0)
+    right = (1.0, 0.0)
+    assert cosine_similarity(left, right) == 1.0
+    assert cosine_similarity(left, (0.0, 1.0)) == 0.0
+    assert cosine_similarity((0.0, 0.0), right) == 0.0
+
+
+def test_dot_product_matches_the_cosine_for_unit_vectors():
+    """The single-pass dot product agrees with the general cosine on unit vectors."""
+    import random
+
+    from core.embeddings import _cosine, dot_product
+
+    random.seed(7)
+    for _ in range(50):
+        left = [random.random() - 0.5 for _ in range(128)]
+        right = [random.random() - 0.5 for _ in range(128)]
+        # Normalise both, exactly as ``DistributionalSpace.embed`` does.
+        left_norm = sum(value * value for value in left) ** 0.5
+        right_norm = sum(value * value for value in right) ** 0.5
+        unit_left = tuple(value / left_norm for value in left)
+        unit_right = tuple(value / right_norm for value in right)
+        assert abs(dot_product(unit_left, unit_right) - _cosine(unit_left, unit_right)) < 1e-12
