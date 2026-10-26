@@ -398,6 +398,79 @@ def test_chat_service_renames_and_reports_it(data_root) -> None:
     assert ModelChatService(catalog.MOUTH_HAKEEM, data_root=data_root).name == "الحكيم"
 
 
+def test_chat_service_batches_a_reading_into_few_engine_calls(data_root) -> None:
+    """A long message is read in batches, so a local engine loads its model once.
+
+    This is the hang fix for a per-mouth window: audio.cpp reloads its 1.35 GB model
+    per process, so a paragraph-per-call read looked frozen. The service renders a
+    whole batch through the reader's batched path.
+    """
+
+    class _Reader:
+        def __init__(self) -> None:
+            self.batches: list[list[str]] = []
+            self.voice = None
+            self.mood = None
+
+        def available(self) -> bool:
+            return True
+
+        def render(self, text: str):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(silent=False, duration_seconds=0.0)
+
+        def render_many(self, texts):
+            from types import SimpleNamespace
+
+            self.batches.append(list(texts))
+            return [SimpleNamespace(silent=False, duration_seconds=0.0) for _ in texts]
+
+        def play(self, clip):
+            return None
+
+    from gui.model_chat import ModelChatService
+
+    reader = _Reader()
+    service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root, reader=reader)  # type: ignore[arg-type]
+    text = "\n".join(f"Paragraph number {index}." for index in range(30))
+    service.start_reading(text)
+    assert reader.batches, "the batched path should have been used"
+    assert len(reader.batches) < 30, "far fewer calls than paragraphs"
+    from core.reading import BATCH_MAX_CHUNKS
+
+    assert all(len(batch) <= BATCH_MAX_CHUNKS for batch in reader.batches)
+
+
+def test_chat_service_reading_falls_back_without_batching(data_root) -> None:
+    """A reader that only offers ``render`` is still read chunk by chunk."""
+
+    class _Reader:
+        def __init__(self) -> None:
+            self.spoken: list[str] = []
+            self.voice = None
+            self.mood = None
+
+        def available(self) -> bool:
+            return True
+
+        def render(self, text: str):
+            from types import SimpleNamespace
+
+            self.spoken.append(text)
+            return SimpleNamespace(silent=False, duration_seconds=0.0)
+
+        def play(self, clip):
+            return None
+
+    from gui.model_chat import ModelChatService
+
+    reader = _Reader()
+    service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root, reader=reader)  # type: ignore[arg-type]
+    service.start_reading("First one. Second one.")
+    assert reader.spoken
+
+
 def test_chat_service_sets_and_clears_the_logo(data_root, tmp_path) -> None:
     from gui.model_chat import ModelChatService
 

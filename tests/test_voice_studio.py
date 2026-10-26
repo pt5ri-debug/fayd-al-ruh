@@ -74,6 +74,7 @@ class FakeReader:
 
     def __init__(self, *, available: bool = True) -> None:
         self.spoken: list[str] = []
+        self.batches: list[list[str]] = []
         self.engine_name = "fake-engine" if available else "silent"
         self._available = available
         self.voice = _FakeVoice()
@@ -107,6 +108,11 @@ class FakeReader:
         if not self._available:
             return AudioClip.silence(0.1, sample_rate=16000)
         return AudioClip(tuple([1000] * 8), sample_rate=16000)
+
+    def render_many(self, texts):
+        """Render a whole batch in one call, so a batching engine loads once."""
+        self.batches.append(list(texts))
+        return [self.render(text) for text in texts]
 
     def play(self, clip):
         """Play a rendered chunk; a recording reader returns an instant playback."""
@@ -537,6 +543,64 @@ def test_a_paragraph_with_no_sentence_marks_is_still_bounded() -> None:
     chunks = _split_for_speech("a" * 1300, max_chars=600)
     assert all(len(chunk) <= 600 for chunk in chunks)
     assert "".join(chunks) == "a" * 1300
+
+
+def test_the_studio_batches_chunks_into_few_engine_calls(data_root, tmp_path) -> None:
+    """A document is rendered in batches, not one engine call per paragraph.
+
+    This is the hang fix: a local engine (audio.cpp) reloads its 1.35 GB model per
+    process, so a paragraph-per-call read spent its time loading weights. The studio
+    sends a whole batch at once through the reader's batched path.
+    """
+    doc = tmp_path / "long.txt"
+    doc.write_text("\n".join(f"Paragraph number {index}." for index in range(30)))
+    reader = FakeReader()
+    studio = VoiceStudioService(SOURCE_PIPER, reader=reader)
+    studio.load_document(doc)
+    report = studio.read_aloud()
+    assert report.ok
+    assert len(reader.batches) >= 1
+    # Every chunk was rendered, and no batch exceeded the cap.
+    assert sum(len(batch) for batch in reader.batches) == report.chunks
+    from gui.voice_studio import BATCH_MAX_CHUNKS
+
+    assert all(len(batch) <= BATCH_MAX_CHUNKS for batch in reader.batches)
+    # Far fewer calls than chunks, which is the whole point.
+    assert len(reader.batches) < report.chunks
+
+
+def test_batch_chunks_keeps_order_and_bounds() -> None:
+    from gui.voice_studio import BATCH_MAX_CHARS, BATCH_MAX_CHUNKS, _batch_chunks
+
+    chunks = tuple(f"chunk-{index}-{'x' * 100}" for index in range(20))
+    batches = _batch_chunks(chunks)
+    assert [chunk for batch in batches for chunk in batch] == list(chunks)
+    assert all(len(batch) <= BATCH_MAX_CHUNKS for batch in batches)
+    assert all(sum(len(chunk) for chunk in batch) <= BATCH_MAX_CHARS + 200 for batch in batches)
+    # A single oversized chunk becomes a batch of its own, never dropped.
+    assert _batch_chunks(("z" * 9000,)) == (("z" * 9000,),)
+    assert _batch_chunks(()) == ()
+
+
+def test_render_group_uses_the_batched_path_when_available(data_root) -> None:
+    reader = FakeReader()
+    studio = VoiceStudioService(SOURCE_PIPER, reader=reader)
+    clips = studio._render_group(("one", "two", "three"))
+    assert len(clips) == 3
+    assert reader.batches == [["one", "two", "three"]]
+
+
+def test_render_group_falls_back_for_a_reader_without_batching(data_root) -> None:
+    """A reader double that only offers ``render`` is still read chunk by chunk."""
+
+    class _NoBatch(FakeReader):
+        render_many = None  # type: ignore[assignment]  # a reader with no batched path
+
+    reader = _NoBatch()
+    studio = VoiceStudioService(SOURCE_PIPER, reader=reader)
+    clips = studio._render_group(("one", "two"))
+    assert len(clips) == 2
+    assert reader.spoken == ["one", "two"]
 
 
 def test_identity_rename_and_logo_persist(data_root, tmp_path) -> None:

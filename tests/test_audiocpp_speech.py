@@ -9,6 +9,7 @@ engine skips when it is absent.
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -585,3 +586,201 @@ def test_real_engine_renders_arabic_audio():
     assert clip.duration_seconds > 0.2
     assert not clip.is_silent
     assert clip.sample_rate == a.AUDIOCPP_SAMPLE_RATE
+
+
+def test_real_engine_renders_a_batch_in_one_model_load():
+    """A batch is one engine invocation, not one per text (the hang fix)."""
+    status = a.audiocpp_status()
+    if not status.available or status.voices == 0:
+        pytest.skip("the audio.cpp engine, model, and voices are not all installed")
+    voice = a.voice_list()[0]
+    synth = a.AudioCppSynthesizer(voice=voice)
+    clips = synth.synthesize_many(["السلام عليكم", "إزاي حالك النهارده؟"])
+    assert len(clips) == 2
+    assert all(not clip.is_silent for clip in clips)
+
+
+# ------------------------------------------------------------- batching
+
+
+def test_find_model_file_skips_a_corrupt_gguf(tmp_path):
+    """A truncated/renamed file is not handed to the engine (it would hang loading it)."""
+    root = tmp_path / "data"
+    _fake_install(root)
+    model = root / "models" / "VoiceTut-TTS-GGUF" / "voicetut-tts-q8_0.gguf"
+    model.write_bytes(b"not a gguf at all")
+    assert a.find_model_file(None, root) is None
+    assert not a.model_is_cached(None, root)
+
+
+def test_status_names_a_corrupt_model_and_the_next_step(tmp_path):
+    root = tmp_path / "data"
+    _fake_install(root)
+    (root / "models" / "VoiceTut-TTS-GGUF" / "voicetut-tts-q8_0.gguf").write_bytes(b"junk")
+    status = a.audiocpp_status(root)
+    assert not status.model_cached
+    assert "not a usable GGUF" in status.hint
+    assert "download" in status.hint
+
+
+def test_is_valid_gguf_reads_the_magic(tmp_path):
+    good = tmp_path / "good.gguf"
+    good.write_bytes(b"GGUF" + b"\x00" * 16)
+    bad = tmp_path / "bad.gguf"
+    bad.write_bytes(b"NOPE")
+    assert a.is_valid_gguf(good) is True
+    assert a.is_valid_gguf(bad) is False
+    assert a.is_valid_gguf(tmp_path / "missing.gguf") is False
+
+
+def test_download_refetches_a_truncated_file(tmp_path, monkeypatch):
+    """A partial file already on disk is replaced, not trusted."""
+    import urllib.request
+
+    root = tmp_path / "data"
+    directory = root / "VoiceTut-TTS-GGUF"
+    directory.mkdir(parents=True)
+    target = directory / "voicetut-tts-q8_0.gguf"
+    target.write_bytes(b"partial")  # an interrupted earlier download
+
+    def _fake_urlretrieve(url, filename):
+        Path(filename).write_bytes(b"GGUF" + b"\x00" * 8)
+        return str(filename), None
+
+    monkeypatch.setattr(urllib.request, "urlretrieve", _fake_urlretrieve)
+    a.download_model("voicetut-q8_0", root=root, approved=True)
+    assert target.read_bytes().startswith(b"GGUF")
+
+
+def test_synthesizer_batches_through_one_runner_call():
+    """The synthesizer asks a batch-capable runner once for the whole batch."""
+
+    class _BatchRunner:
+        def __init__(self) -> None:
+            self.calls: list[list[str]] = []
+
+        def synthesize(self, text, *, language, reference, reference_text, steps):
+            raise AssertionError("a batch-capable runner must be used via synthesize_many")
+
+        def synthesize_many(self, texts, *, language, reference, reference_text, steps):
+            self.calls.append(list(texts))
+            paths = []
+            for index in range(len(texts)):
+                path = Path(tempfile.mkdtemp(prefix="batch-")) / f"{index}.wav"
+                speech.AudioClip((1000, -1000, 2000, -2000), sample_rate=24_000).write_wav(path)
+                paths.append(path)
+            return paths
+
+    runner = _BatchRunner()
+    synth = a.AudioCppSynthesizer(runner=runner)
+    clips = synth.synthesize_many(["one", "two", "three"])
+    assert len(clips) == 3
+    assert runner.calls == [["one", "two", "three"]], "one call for the whole batch"
+
+
+def test_synthesizer_falls_back_when_a_batch_engine_fails():
+    class _Broken:
+        def synthesize_many(self, texts, **kwargs):
+            raise a.AudioCppUnavailable("boom")
+
+    class _Fallback:
+        name = "fallback"
+
+        def __init__(self) -> None:
+            self.seen: list[str] = []
+
+        def synthesize(self, text: str) -> speech.AudioClip:
+            self.seen.append(text)
+            return speech.AudioClip((7, 7, 7))
+
+    fallback = _Fallback()
+    synth = a.AudioCppSynthesizer(runner=_Broken(), fallback=fallback)
+    clips = synth.synthesize_many(["مرحبا", "أهلا"])
+    assert len(clips) == 2
+    assert fallback.seen == ["مرحبا", "أهلا"]
+
+
+def test_default_runner_threads_is_bounded(monkeypatch):
+    import os
+
+    monkeypatch.setattr(os, "cpu_count", lambda: 32)
+    assert a._default_threads() == a.DEFAULT_MAX_THREADS
+    monkeypatch.setattr(os, "cpu_count", lambda: 2)
+    assert a._default_threads() == 2
+
+
+def test_runner_sends_threads_and_matches_outputs_by_id(tmp_path, monkeypatch):
+    """The runner asks for more threads and reads each output back by its id."""
+    import subprocess
+
+    cli = tmp_path / "bin" / "audiocpp_cli"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("#!/bin/sh\n", encoding="utf-8")
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"GGUF")
+    seen: dict[str, list[str]] = {}
+
+    def _fake_run(argv, **_kwargs):
+        seen["argv"] = list(argv)
+        out_dir = Path(argv[argv.index("--out-dir") + 1])
+        for index in range(2):
+            speech.AudioClip((1000, -1000), sample_rate=24_000).write_wav(out_dir / f"speech-{index}.wav")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    runner = a.AudioCppCliRunner(cli, model, threads=6)
+    paths = runner.synthesize_many(
+        ["one", "two"], language="arz", reference=None, reference_text="", steps=8
+    )
+    assert len(paths) == 2 and all(Path(p).is_file() for p in paths)
+    assert seen["argv"][seen["argv"].index("--threads") + 1] == "6"
+    assert seen["argv"][seen["argv"].index("--request-sequence") + 1].endswith("request.json")
+
+
+def test_runner_falls_back_to_the_engine_s_own_output_names(tmp_path, monkeypatch):
+    """An engine that ignores the ids still yields the clips in order (10+ too)."""
+    import subprocess
+
+    cli = tmp_path / "bin" / "audiocpp_cli"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("#!/bin/sh\n", encoding="utf-8")
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"GGUF")
+
+    def _fake_run(argv, **_kwargs):
+        out_dir = Path(argv[argv.index("--out-dir") + 1])
+        # The engine wrote its own names, and lexically speech-10 sorts before
+        # speech-2 -- the batch must still come back in request order.
+        for name in ("speech-10", "speech-2", "speech-0"):
+            speech.AudioClip((1000, -1000), sample_rate=24_000).write_wav(out_dir / f"{name}.wav")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    runner = a.AudioCppCliRunner(cli, model)
+    paths = runner.synthesize_many(
+        ["zero", "two", "ten"], language="arz", reference=None, reference_text="", steps=8
+    )
+    assert len(paths) == 3
+    # The natural sort keeps request order even though "speech-10" sorts before
+    # "speech-2" as a plain string, so the batch comes back zero, two, ten.
+    assert all(Path(p).is_file() for p in paths)
+
+
+def test_runner_reports_a_timeout_honestly(tmp_path, monkeypatch):
+    import subprocess
+
+    cli = tmp_path / "bin" / "audiocpp_cli"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("#!/bin/sh\n", encoding="utf-8")
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"GGUF")
+
+    def _fake_run(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout", 1))
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    runner = a.AudioCppCliRunner(cli, model, timeout=1)
+    with pytest.raises(a.AudioCppUnavailable, match="did not finish"):
+        runner.synthesize_many(
+            ["one"], language="arz", reference=None, reference_text="", steps=8
+        )

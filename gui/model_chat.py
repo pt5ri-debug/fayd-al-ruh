@@ -34,7 +34,7 @@ from core.banner import BannerUnavailable
 from core.best_effort import best_effort
 from core.cloud_model import CloudUnavailable
 from core.paths import data_dir
-from core.reading import TextReader, clip_is_silent, split_for_speech
+from core.reading import TextReader, batch_chunks, clip_is_silent, split_for_speech
 from core.ultron import UltronUnavailable
 from core.vision_model import VisionUnavailable
 from core.voices import (
@@ -279,11 +279,14 @@ class ModelChatService:
     def start_reading(self, text: str):
         """Read ``text`` aloud, blocking, so a second click can stop it.
 
-        The window runs this on a worker thread: each sentence-sized chunk is
-        rendered and played, and the loop checks after every chunk whether
-        :meth:`stop_reading` was called, so the reading ends at the next boundary
-        and the sound stops at once. Returns the clip that was spoken (the first
-        chunk) so the caller keeps the old return shape.
+        The window runs this on a worker thread: the text is split into
+        sentence-sized chunks, grouped into batches, and each batch is rendered in
+        **one** engine call -- a local engine (audio.cpp) loads its 1.35 GB model per
+        call, so a paragraph-per-call read spent its time loading weights and looked
+        frozen. The loop checks after every clip whether :meth:`stop_reading` was
+        called, so the reading ends at the next boundary and the sound stops at once.
+        Returns the clip that was spoken (the first one) so the caller keeps the old
+        return shape.
         """
         body = (text or "").strip()
         if not body:
@@ -292,22 +295,36 @@ class ModelChatService:
         self._reading_text = body
         first: Any = None
         try:
-            for chunk in chunks:
+            for group in batch_chunks(chunks):
                 if not self.reading():
                     break
-                clip = self._reader.render(chunk)
-                if first is None:
-                    first = clip
-                if clip_is_silent(clip):
-                    break
-                self._playback = self._reader.play(clip)
-                if self._playback is not None:
-                    self._playback.wait()
-                self._playback = None
+                clips = self._render_group(group)
+                for clip in clips:
+                    if not self.reading():
+                        break
+                    if first is None:
+                        first = clip
+                    if clip_is_silent(clip):
+                        return first
+                    self._playback = self._reader.play(clip)
+                    if self._playback is not None:
+                        self._playback.wait()
+                    self._playback = None
             return first
         finally:
             self._reading_text = ""
             self._playback = None
+
+    def _render_group(self, group: tuple[str, ...]) -> list[Any]:
+        """Render a batch, loading a local engine's model **once** for the batch.
+
+        ``render_many`` is the batched path; a reader double that only offers
+        ``render`` is called chunk by chunk, so the test seam stays small.
+        """
+        many = getattr(self._reader, "render_many", None)
+        if callable(many):
+            return list(many(list(group)))
+        return [self._reader.render(chunk) for chunk in group]
 
     def stop_reading(self) -> bool:
         """Ask the reading in progress to stop; ``True`` when one was running."""

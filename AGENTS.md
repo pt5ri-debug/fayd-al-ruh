@@ -3622,3 +3622,50 @@ regression monitor each can refuse a change.
   `tests/test_chat.py` pins `ModelSwitcher.invalidate_mouth` (a switch rebuilds
   the mouth instead of reusing the cached assistant, and only the named mouth is
   dropped).
+
+- Phase 34 — **a VoiceTut read no longer reloads the model per paragraph**: after a
+  user replaced the `voicetut-tts-q8_0` file (the *correct* 1.35 GB Q8_0 package;
+  the earlier 606 MB copy was partial) the voices appeared to hang. The file was
+  right and the catalog's size was right — the hang was the reader's shape. A
+  document is split into paragraph chunks and every chunk was a **separate**
+  `audiocpp_cli` process, so each one reloaded the whole GGUF (1.35 GB) before it
+  could speak; a long document spent nearly all its time loading weights, which
+  reads as frozen. audio.cpp's own `--request-sequence` exists to "run multiple
+  JSON requests through one long-lived offline model session", so the reader now
+  batches: `AudioCppCliRunner.synthesize_many` sends a whole batch as one sequence
+  and matches each output back by its request id (falling back to the files the
+  engine produced if it ignores the ids), `AudioCppSynthesizer.synthesize_many`
+  prepares each chunk for speech and returns the clips in order (falling back to
+  the system engine for the batch, as before), and `core.reading.TextReader.render_many`
+  is the one batched entry point beside `render` (an engine without
+  `synthesize_many` is simply called once per text, so nothing else changes).
+  `gui.voice_studio`'s `read_aloud`/`start_reading` group the chunks with
+  `_batch_chunks` (bounded by `BATCH_MAX_CHARS`/`BATCH_MAX_CHUNKS`) and render each
+  batch through `_render_group`, so a document is read with a handful of model
+  loads instead of one per paragraph — and a stop still takes effect at the next
+  clip, because a batch is only a *render* unit, never a playback unit.
+  Three further hardenings came out of the same investigation. **A file that is not
+  really a GGUF is refused instead of handed to the engine**: `is_valid_gguf` reads
+  the `GGUF` magic, `find_model_file` skips a file that fails it (so a truncated
+  download or a renamed file can no longer leave a read hanging with no error),
+  `download_model` re-fetches a partial file already on disk and refuses a
+  still-broken download with the real next step, and `audiocpp_status` names the
+  unusable file (`The model file X is not a usable GGUF ...`) rather than reporting
+  a bare "no model". **The engine gets more of the machine**: the runner passes
+  `--threads` (`_default_threads`, bounded by `DEFAULT_MAX_THREADS`), because
+  audio.cpp's own default uses few cores and that is the other half of a slow first
+  reply, and a timeout now says so plainly instead of surfacing as a bare hang. The
+  batching lives in **one** place -- `core.reading.batch_chunks` (bounded by
+  `BATCH_MAX_CHARS`/`BATCH_MAX_CHUNKS`) -- so both the engine studio
+  (`gui/voice_studio.py`) and the **seven per-mouth chat windows**
+  (`gui/model_chat.py`'s `start_reading`) batch a reading identically, and a batch
+  the engine names by id is matched back by id while one that ignores the ids is
+  ordered by its trailing **number** (`_clip_sort_key`, so `speech-2` precedes
+  `speech-10`) rather than lexically.
+  `tests/test_audiocpp_speech.py` pins the GGUF magic check, the skip of a corrupt
+  file, the corrupt-model status, the re-fetch of a truncated download, the batch
+  that is one runner call, the batch fallback, the bounded thread count, the
+  `--threads` argument, the id fallback's number order, and the honest timeout;
+  `tests/test_voice_studio.py` pins `_batch_chunks` and the batched read;
+  `tests/test_model_chat.py` pins the per-mouth window's batched read and its
+  fallback; `tests/test_voices.py` pins `TextReader.render_many` and its fallback.
