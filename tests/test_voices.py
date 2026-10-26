@@ -329,6 +329,39 @@ def test_reader_with_a_silent_engine_says_so_and_still_renders():
     assert clip.is_silent
 
 
+def test_render_many_uses_the_batched_engine_when_it_offers_one():
+    """A batch-capable synthesizer renders the whole batch in one call."""
+
+    class _Batch:
+        name = "batch"
+
+        def __init__(self) -> None:
+            from core.speech import AudioClip
+
+            self._clip = AudioClip
+            self.calls: list[list[str]] = []
+
+        def synthesize(self, text: str):
+            raise AssertionError("the batched path must be used")
+
+        def synthesize_many(self, texts: list[str]) -> list:
+            self.calls.append(list(texts))
+            return [self._clip((1, 2, 3)) for _ in texts]
+
+    synth = _Batch()
+    reader = TextReader(synthesizer=synth)
+    clips = reader.render_many(["a", "b"])
+    assert len(clips) == 2
+    assert synth.calls == [["a", "b"]]
+
+
+def test_render_many_falls_back_to_one_render_per_text():
+    """An engine without the batched path is simply called once per text."""
+    reader = TextReader(synthesizer=SilentSynthesizer(), voice="woman-1")
+    clips = reader.render_many(["one", "two", "three"])
+    assert len(clips) == 3
+
+
 def test_reader_set_voice_changes_the_voice_and_raises_on_unknown():
     reader = TextReader(synthesizer=SilentSynthesizer(), voice="man-1")
     assert reader.set_voice("girl-4").key == "girl-4"

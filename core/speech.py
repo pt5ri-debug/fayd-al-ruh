@@ -1782,6 +1782,7 @@ def load_synthesizer(name: str = "silent", **options) -> SpeechSynthesizer:
                 fallback=fallback,
                 root=options.get("root"),
                 steps=options.get("steps", 8),
+                threads=options.get("threads"),
                 prosody=prosody,
             )
         except AudioCppUnavailable as error:

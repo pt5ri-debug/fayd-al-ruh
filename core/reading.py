@@ -180,6 +180,20 @@ class TextReader:
         """Synthesize ``text`` and return the clip without playing it."""
         return self.synthesizer.synthesize(text)
 
+    def render_many(self, texts: list[str]) -> list[AudioClip]:
+        """Synthesize several texts and return their clips in order.
+
+        A local engine that loads a model per call (audio.cpp) implements
+        ``synthesize_many``, so a whole document is rendered in **one** model load
+        instead of one per chunk -- the difference between a document being read and
+        a document looking frozen. An engine that does not implement it is simply
+        called once per text, so the result is the same either way.
+        """
+        batch = getattr(self.synthesizer, "synthesize_many", None)
+        if callable(batch):
+            return list(batch(texts))
+        return [self.render(text) for text in texts]
+
     def speak(self, text: str) -> AudioClip:
         """Read ``text`` aloud and return the clip that was spoken.
 
@@ -338,4 +352,45 @@ def _sentences(paragraph: str) -> tuple[str, ...]:
     return tuple(sentences)
 
 
-__all__ = ["TextReader", "clip_is_silent", "split_for_speech"]
+#: How many characters of chunk text one engine call may carry. A local engine that
+#: loads its model per call (audio.cpp) is sent a whole batch at once, so the model
+#: loads once for the batch instead of once per chunk; the cap keeps a single request
+#: from growing unboundedly large.
+BATCH_MAX_CHARS = 4000
+
+#: How many chunks one engine call may carry, beside :data:`BATCH_MAX_CHARS`.
+BATCH_MAX_CHUNKS = 12
+
+
+def batch_chunks(chunks: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    """Group speech chunks into engine-call batches (a whole document, few loads).
+
+    Each batch keeps the chunks' order and stays under :data:`BATCH_MAX_CHARS` /
+    :data:`BATCH_MAX_CHUNKS`, so a long document is read with a handful of model
+    loads rather than one per paragraph. A single chunk larger than the cap is a
+    batch of its own, so nothing is ever dropped. Shared by every window that reads
+    aloud, so they batch alike.
+    """
+    batches: list[tuple[str, ...]] = []
+    current: list[str] = []
+    size = 0
+    for chunk in chunks:
+        if current and (size + len(chunk) > BATCH_MAX_CHARS or len(current) >= BATCH_MAX_CHUNKS):
+            batches.append(tuple(current))
+            current = []
+            size = 0
+        current.append(chunk)
+        size += len(chunk)
+    if current:
+        batches.append(tuple(current))
+    return tuple(batches)
+
+
+__all__ = [
+    "BATCH_MAX_CHARS",
+    "BATCH_MAX_CHUNKS",
+    "TextReader",
+    "batch_chunks",
+    "clip_is_silent",
+    "split_for_speech",
+]

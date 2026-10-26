@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core import reading
 from core import voice_studio_profile as profiles
 from core.best_effort import best_effort
 from core.document_reader import DocumentText, read_document
@@ -758,20 +759,32 @@ class VoiceStudioService:
         chunks = _split_for_speech(body)
         read = 0
         seconds = 0.0
-        for chunk in chunks:
-            clip = self._reader.speak(chunk)
-            if clip_is_silent(clip):
+        for group in _batch_chunks(chunks):
+            try:
+                clips = self._render_group(group)
+            except Exception as error:  # a governed read reports, never crashes
                 report = ReadReport(
-                    ok=False,
-                    chunks=read,
-                    characters=sum(len(c) for c in chunks[:read]),
-                    seconds=seconds,
-                    message="The engine produced no audio; install a speech engine to hear it.",
+                    ok=False, chunks=read, characters=sum(len(c) for c in chunks[:read]),
+                    seconds=seconds, message=f"The engine could not read the document: {error}",
                 )
                 self._last_report = report
                 return report
-            read += 1
-            seconds += float(getattr(clip, "duration_seconds", 0.0) or 0.0)
+            for clip in clips:
+                if clip_is_silent(clip):
+                    report = ReadReport(
+                        ok=False,
+                        chunks=read,
+                        characters=sum(len(c) for c in chunks[:read]),
+                        seconds=seconds,
+                        message="The engine produced no audio; install a speech engine to hear it.",
+                    )
+                    self._last_report = report
+                    return report
+                playback = self._reader.play(clip)
+                if playback is not None:
+                    playback.wait()
+                read += 1
+                seconds += float(getattr(clip, "duration_seconds", 0.0) or 0.0)
         report = ReadReport(
             ok=True,
             chunks=len(chunks),
@@ -823,11 +836,11 @@ class VoiceStudioService:
         read = 0
         seconds = 0.0
         try:
-            for chunk in chunks:
+            for group in _batch_chunks(chunks):
                 if not self.reading():
                     break
                 try:
-                    clip = self._reader.render(chunk)
+                    clips = self._render_group(group)
                 except Exception as error:  # a governed read reports, never crashes
                     report = ReadReport(
                         ok=False, chunks=read, characters=sum(len(c) for c in chunks[:read]),
@@ -835,21 +848,24 @@ class VoiceStudioService:
                     )
                     self._last_report = report
                     return report
-                if clip_is_silent(clip):
-                    report = ReadReport(
-                        ok=False, chunks=read, characters=sum(len(c) for c in chunks[:read]),
-                        seconds=seconds,
-                        message="The engine produced no audio; install a speech engine to hear it.",
-                    )
-                    self._last_report = report
-                    return report
-                self._reading_index = read
-                self._playback = self._reader.play(clip)
-                if self._playback is not None:
-                    self._playback.wait()
-                self._playback = None
-                read += 1
-                seconds += float(getattr(clip, "duration_seconds", 0.0) or 0.0)
+                for clip in clips:
+                    if not self.reading():
+                        break
+                    if clip_is_silent(clip):
+                        report = ReadReport(
+                            ok=False, chunks=read, characters=sum(len(c) for c in chunks[:read]),
+                            seconds=seconds,
+                            message="The engine produced no audio; install a speech engine to hear it.",
+                        )
+                        self._last_report = report
+                        return report
+                    self._reading_index = read
+                    self._playback = self._reader.play(clip)
+                    if self._playback is not None:
+                        self._playback.wait()
+                    self._playback = None
+                    read += 1
+                    seconds += float(getattr(clip, "duration_seconds", 0.0) or 0.0)
             # `reading()` is still true only when the loop ran to the end: a stop
             # clears the flag, so this is "completed", not "stopped".
             completed = self.reading()
@@ -863,6 +879,18 @@ class VoiceStudioService:
             self._reading_text = ""
             self._reading_index = 0
             self._playback = None
+
+    def _render_group(self, group: tuple[str, ...]) -> list[Any]:
+        """Render a batch of chunks, loading a local engine's model **once**.
+
+        ``render_many`` is the batched path (audio.cpp loads its 1.35 GB GGUF once
+        for the whole batch); a reader double that only offers ``render`` is called
+        chunk by chunk, so the test seam stays small and the result is identical.
+        """
+        many = getattr(self._reader, "render_many", None)
+        if callable(many):
+            return list(many(list(group)))
+        return [self._reader.render(chunk) for chunk in group]
 
     def stop_reading(self) -> bool:
         """Ask the reading in progress to stop; ``True`` when one was running.
@@ -966,6 +994,22 @@ def _split_for_speech(text: str, *, max_chars: int = 600) -> tuple[str, ...]:
     every other window that reads aloud.
     """
     return split_for_speech(text, max_chars=max_chars)
+
+
+#: How many characters of chunk text one engine call may carry (the shared cap).
+BATCH_MAX_CHARS = reading.BATCH_MAX_CHARS
+
+#: How many chunks one engine call may carry (the shared cap).
+BATCH_MAX_CHUNKS = reading.BATCH_MAX_CHUNKS
+
+
+def _batch_chunks(chunks: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    """Group speech chunks into engine-call batches (the shared :func:`core.reading.batch_chunks`).
+
+    Kept as a thin alias so the studio and the tests share one implementation with
+    every other window that reads aloud.
+    """
+    return reading.batch_chunks(chunks)
 
 
 __all__ = [

@@ -98,6 +98,39 @@ AUDIOCPP_SAMPLE_RATE = 24_000
 #: slow on a CPU; 8 measured ~1/3 the wall time for the same intelligible speech.
 DEFAULT_INFERENCE_STEPS = 8
 
+#: The GGUF magic every real model file starts with. A truncated download or a
+#: renamed non-model file does not carry it, so it is checked before a file is
+#: handed to the engine -- otherwise the engine is left to load a bad file, which
+#: is exactly the "it hangs and never answers" failure this guards against.
+GGUF_MAGIC = b"GGUF"
+
+#: How many backend threads the engine may use on the CPU path. The engine's own
+#: default is 4, which leaves most of a modern machine idle and makes a CPU read
+#: far slower than it needs to be; the cap keeps a big machine from oversubscribing.
+DEFAULT_MAX_THREADS = 8
+
+
+def _default_threads() -> int:
+    """The engine's worker-thread count: the machine's cores, capped."""
+    import os
+
+    return max(1, min(os.cpu_count() or 4, DEFAULT_MAX_THREADS))
+
+
+def is_valid_gguf(path: Path | str) -> bool:
+    """True when ``path`` really is a GGUF model file (not truncated or a stray file).
+
+    Only the 4-byte magic is checked -- cheap, and it needs no model load -- but it
+    is enough to refuse a partial download or a renamed file *before* the engine
+    tries to load it, so the caller reports the real next step instead of hanging.
+    """
+    try:
+        with Path(path).open("rb") as handle:
+            return handle.read(len(GGUF_MAGIC)) == GGUF_MAGIC
+    except OSError:
+        return False
+
+
 #: Where a prebuilt audio.cpp release lives. The binaries are per-platform, so a
 #: user who cannot fetch one is told to build it instead.
 RELEASE_BASE = "https://github.com/0xShug0/audio.cpp/releases/download/v0.9.2-drama3-base-small"
@@ -416,21 +449,26 @@ def find_model_file(key: str | None = None, root: Path | str | None = None) -> P
 
     Prefers the file the registry names (``model.json``, written by
     :func:`download_model`); a ``.gguf`` the user dropped in by hand is still found,
-    so the engine never pretends nothing is installed.
+    so the engine never pretends nothing is installed. A file that is not really a
+    GGUF (a truncated download, or a renamed file) is skipped rather than handed to
+    the engine, because loading one is what leaves a read hanging with no error.
     """
     base = _models_root(root)
     if key:
-        return _locate(base, resolve_spec(key).filename)
+        return _locate_valid(base, resolve_spec(key).filename)
     registered = _read_registry(root).get("model")
     if registered:
         try:
-            found = _locate(base, resolve_spec(registered).filename)
+            found = _locate_valid(base, resolve_spec(registered).filename)
         except ValueError:
             found = None
         if found is not None:
             return found
     hits = sorted(base.rglob("*.gguf")) if base.is_dir() else []
-    return hits[0] if hits else None
+    for hit in hits:
+        if is_valid_gguf(hit):
+            return hit
+    return None
 
 
 def _locate(base: Path, filename: str) -> Path | None:
@@ -439,6 +477,12 @@ def _locate(base: Path, filename: str) -> Path | None:
         return direct
     hits = sorted(base.rglob(filename)) if base.is_dir() else []
     return hits[0] if hits else None
+
+
+def _locate_valid(base: Path, filename: str) -> Path | None:
+    """Like :func:`_locate`, but only when the file is a real GGUF."""
+    found = _locate(base, filename)
+    return found if found is not None and is_valid_gguf(found) else None
 
 
 def model_is_cached(key: str | None = None, root: Path | str | None = None) -> bool:
@@ -490,6 +534,10 @@ def download_model(
     directory = _models_root(root) / "VoiceTut-TTS-GGUF"
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / spec.filename
+    # A partial file left by an interrupted download must be fetched again rather
+    # than trusted: an incomplete GGUF is what leaves the engine loading forever.
+    if target.is_file() and not is_valid_gguf(target):
+        _unlink_quietly(target)
     if not target.is_file():
         url = f"https://huggingface.co/{spec.repo}/resolve/main/{spec.filename}"
         try:
@@ -500,6 +548,13 @@ def download_model(
                 "You can fetch it by hand and drop it into "
                 f"{directory} instead."
             ) from error
+        if not is_valid_gguf(target):
+            _unlink_quietly(target)
+            raise AudioCppUnavailable(
+                f"{spec.filename} downloaded but is not a usable GGUF file (the download "
+                "was interrupted). Try again, or fetch it by hand and drop it into "
+                f"{directory}."
+            )
     _write_registry(root, spec.key)
     return directory
 
@@ -890,6 +945,21 @@ def _unlink_quietly(path: Path) -> None:
         path.unlink()
 
 
+def _clip_sort_key(path: Path) -> tuple[int, str]:
+    """Order engine output clips by their trailing number, not lexically.
+
+    ``speech-2.wav`` must come before ``speech-10.wav``: a plain string sort would
+    put ``10`` first, so a batch of ten or more chunks would be spoken out of order.
+    """
+    stem = path.stem
+    digits = ""
+    for character in reversed(stem):
+        if not character.isdigit():
+            break
+        digits = character + digits
+    return (int(digits) if digits else 0, stem)
+
+
 # ------------------------------------------------------------- availability
 
 
@@ -921,7 +991,17 @@ def audiocpp_status(root: Path | str | None = None) -> AudioCppStatus:
             "or build audio.cpp and put `audiocpp_cli` on your PATH."
         )
     elif model is None:
-        hint = "Download the model with: python -m cli audio download --approve"
+        # Distinguish "nothing there" from "a file is there but unusable": a partial
+        # GGUF that the engine cannot load is what made a read look frozen.
+        broken = _first_gguf_file(root)
+        if broken is not None:
+            hint = (
+                f"The model file {broken.name} is not a usable GGUF (an interrupted "
+                "download, or the wrong file). Remove it and re-download with: "
+                "python -m cli audio download --approve"
+            )
+        else:
+            hint = "Download the model with: python -m cli audio download --approve"
     elif voices == 0:
         hint = (
             "Download the built-in voices with: "
@@ -930,6 +1010,13 @@ def audiocpp_status(root: Path | str | None = None) -> AudioCppStatus:
     else:
         hint = "VoiceTut-TTS over audio.cpp is ready."
     return AudioCppStatus(cli is not None, cli, model is not None, model, voices, hint)
+
+
+def _first_gguf_file(root: Path | str | None = None) -> Path | None:
+    """Any ``.gguf`` on disk, valid or not (so a corrupt one can be named)."""
+    base = _models_root(root)
+    hits = sorted(base.rglob("*.gguf")) if base.is_dir() else []
+    return hits[0] if hits else None
 
 
 def available_synthesizer(root: Path | str | None = None) -> bool:
@@ -965,20 +1052,37 @@ class AudioCppRunner(Protocol):
 
 
 class AudioCppCliRunner:
-    """An :class:`AudioCppRunner` that drives the real ``audiocpp_cli`` binary.
+    """An :class:`AudioCppCliRunner` that drives the real ``audiocpp_cli`` binary.
 
     The text is written to a JSON request file rather than passed on the command
     line: a long Arabic answer would otherwise hit the platform's argument-length
     limit, and the JSON route also keeps the reference transcript and the language id
-    off the command line. One request per call, so a second call cannot inherit the
-    first one's state.
+    off the command line.
+
+    **One invocation per batch, not per chunk.** audio.cpp's own ``--request-sequence``
+    is built to "run multiple JSON requests through one long-lived offline model
+    session", and that is the difference between a document being read and a document
+    looking frozen: every separate process reloads the whole GGUF (1.35 GB for the
+    recommended Q8_0 package) before it can speak, so a paragraph-per-process read
+    spent all its time loading weights. :meth:`synthesize_many` therefore sends a
+    whole batch of chunks as one sequence and returns the clips in order, so the model
+    is loaded once for the batch.
     """
 
-    def __init__(self, cli: Path | str, model: Path | str, *, backend: str = "cpu", timeout: int = 900) -> None:
+    def __init__(
+        self,
+        cli: Path | str,
+        model: Path | str,
+        *,
+        backend: str = "cpu",
+        timeout: int = 900,
+        threads: int | None = None,
+    ) -> None:
         self.cli = Path(cli)
         self.model = Path(model)
         self.backend = backend
         self.timeout = timeout
+        self.threads = threads if threads is not None else _default_threads()
 
     def synthesize(
         self,
@@ -989,23 +1093,51 @@ class AudioCppCliRunner:
         reference_text: str,
         steps: int,
     ) -> Path:
+        return self.synthesize_many(
+            [text],
+            language=language,
+            reference=reference,
+            reference_text=reference_text,
+            steps=steps,
+        )[0]
+
+    def synthesize_many(
+        self,
+        texts: list[str],
+        *,
+        language: str,
+        reference: Path | None,
+        reference_text: str,
+        steps: int,
+    ) -> list[Path]:
+        """Render several texts in **one** engine session, returning their WAV paths.
+
+        The texts keep their order (each is a numbered request, and the outputs are
+        matched back by id), so a batch is spoken as the sequence the caller sent.
+        An empty list is answered without launching the engine at all.
+        """
         import subprocess
 
-        request: dict[str, Any] = {
-            "id": "speech",
-            "text": text,
-            "language": language,
-            "options": {"num_inference_steps": steps},
-        }
-        if reference is not None:
-            request["voice_ref"] = str(reference)
-            if reference_text:
-                request["reference_text"] = reference_text
+        if not texts:
+            return []
+        requests: list[dict[str, Any]] = []
+        for index, text in enumerate(texts):
+            request: dict[str, Any] = {
+                "id": f"speech-{index}",
+                "text": text,
+                "language": language,
+                "options": {"num_inference_steps": steps},
+            }
+            if reference is not None:
+                request["voice_ref"] = str(reference)
+                if reference_text:
+                    request["reference_text"] = reference_text
+            requests.append(request)
         with tempfile.TemporaryDirectory(prefix="audiocpp-run-") as scratch:
             scratch_path = Path(scratch)
             sequence = scratch_path / "request.json"
             sequence.write_text(
-                json.dumps({"requests": [request]}, ensure_ascii=False), encoding="utf-8"
+                json.dumps({"requests": requests}, ensure_ascii=False), encoding="utf-8"
             )
             out_dir = scratch_path / "out"
             out_dir.mkdir()
@@ -1019,6 +1151,8 @@ class AudioCppCliRunner:
                 str(self.model),
                 "--backend",
                 self.backend,
+                "--threads",
+                str(self.threads),
                 "--request-sequence",
                 str(sequence),
                 "--out-dir",
@@ -1034,20 +1168,40 @@ class AudioCppCliRunner:
                     cwd=str(self.cli.parent),
                     env=_engine_env(self.cli.parent),
                 )
+            except subprocess.TimeoutExpired as error:
+                raise AudioCppUnavailable(
+                    f"audio.cpp did not finish within {self.timeout}s. A first read loads "
+                    "the whole model, so give it longer, use a smaller package "
+                    "(voicetut-f16 is larger; the Q8_0 one is smaller), or free some "
+                    "memory."
+                ) from error
             except (OSError, subprocess.SubprocessError) as error:
                 raise AudioCppUnavailable(f"audio.cpp could not run ({error}).") from error
             if completed.returncode != 0:
                 detail = (completed.stderr or completed.stdout or "").strip().splitlines()
                 tail = detail[-1] if detail else "no output"
                 raise AudioCppUnavailable(f"audio.cpp failed (exit {completed.returncode}): {tail}")
-            produced = sorted(out_dir.glob("*.wav"))
-            if not produced:
-                raise AudioCppUnavailable("audio.cpp produced no audio file.")
-            # The clip must outlive the temporary folder, so move it beside the
-            # model rather than returning a path that is about to be deleted.
-            keep = Path(tempfile.mkstemp(prefix="audiocpp-", suffix=".wav")[1])
-            shutil.copyfile(produced[0], keep)
-            return keep
+            kept: list[Path] = []
+            for index in range(len(texts)):
+                produced = out_dir / f"speech-{index}.wav"
+                if not produced.is_file():
+                    # An engine that ignores the ids still writes the clips; fall back
+                    # to the files it did produce rather than losing the whole batch.
+                    # Sorted by their trailing number, not lexically, so a batch of 10+
+                    # chunks keeps its order (speech-2 before speech-10).
+                    fallback = sorted(out_dir.glob("*.wav"), key=_clip_sort_key)
+                    if index < len(fallback):
+                        produced = fallback[index]
+                if not produced.is_file():
+                    raise AudioCppUnavailable(
+                        f"audio.cpp produced no audio file for request {index}."
+                    )
+                # The clip must outlive the temporary folder, so move it beside the
+                # model rather than returning a path that is about to be deleted.
+                keep = Path(tempfile.mkstemp(prefix="audiocpp-", suffix=".wav")[1])
+                shutil.copyfile(produced, keep)
+                kept.append(keep)
+            return kept
 
 
 class AudioCppSynthesizer:
@@ -1073,6 +1227,7 @@ class AudioCppSynthesizer:
         root: Path | str | None = None,
         steps: int = DEFAULT_INFERENCE_STEPS,
         backend: str = "cpu",
+        threads: int | None = None,
         prosody: Prosody | None = None,
     ) -> None:
         self.voice = voice
@@ -1097,7 +1252,7 @@ class AudioCppSynthesizer:
         if model is None:
             raise AudioCppUnavailable("No VoiceTut-TTS model is present. " + audiocpp_status(root).hint)
         self._model = model
-        self._runner = AudioCppCliRunner(cli, model, backend=backend)
+        self._runner = AudioCppCliRunner(cli, model, backend=backend, threads=threads)
 
     def _reference(self) -> tuple[Path | None, str]:
         voice = self.voice
@@ -1108,33 +1263,71 @@ class AudioCppSynthesizer:
     def synthesize(self, text: str) -> AudioClip:
         if not text.strip():
             raise ValueError("Cannot synthesize empty text.")
-        code = detect_language(text)
-        # audio.cpp passes text through as-is and reads Arabic symbols badly, so the
-        # numbers and units are spelled as words before the engine sees them.
-        prepared = prepare_for_speech(text, language=code)
+        return self.synthesize_many([text])[0]
+
+    def synthesize_many(self, texts: list[str]) -> list[AudioClip]:
+        """Render several texts, loading the model **once** for the whole batch.
+
+        A document is read paragraph by paragraph, and each separate engine process
+        reloads the whole GGUF before it can speak -- which is why a long document
+        looked frozen. Sending the whole batch as one ``--request-sequence`` keeps a
+        single model load. Each text is prepared for speech on its own (so Arabic
+        numbers and units are spelled per chunk), and the clips come back in order.
+        """
+        bodies = [text for text in texts if text.strip()]
+        if not bodies:
+            raise ValueError("Cannot synthesize empty text.")
+        prepared = [prepare_for_speech(text, language=detect_language(text)) for text in bodies]
         reference, reference_text = self._reference()
         try:
-            path = self._runner.synthesize(
+            paths = self._render_paths(prepared, reference, reference_text)
+        except AudioCppUnavailable:
+            if self._fallback is not None:
+                return [self._fallback.synthesize(text) for text in bodies]
+            raise
+        clips: list[AudioClip] = []
+        for path in paths:
+            clip = AudioClip.read_wav(path)
+            try:
+                Path(path).unlink()
+            except OSError:
+                pass
+            clips.append(clip)
+        if any(not clip.samples for clip in clips):
+            if self._fallback is not None:
+                return [self._fallback.synthesize(text) for text in bodies]
+            raise ValueError("audio.cpp produced no audio.")
+        return clips
+
+    def _render_paths(
+        self, prepared: list[str], reference: Path | None, reference_text: str
+    ) -> list[Path]:
+        """Drive the runner for a batch, batching when it supports it.
+
+        The default runner renders a whole batch in one engine session
+        (:meth:`AudioCppCliRunner.synthesize_many`); a custom runner that only
+        implements the single-text seam is called once per text, so the injection
+        point stays small.
+        """
+        batch = getattr(self._runner, "synthesize_many", None)
+        if callable(batch):
+            return batch(
                 prepared,
                 language=self.language,
                 reference=reference,
                 reference_text=reference_text,
                 steps=self.steps,
             )
-        except AudioCppUnavailable:
-            if self._fallback is not None:
-                return self._fallback.synthesize(text)
-            raise
-        clip = AudioClip.read_wav(path)
-        try:
-            Path(path).unlink()
-        except OSError:
-            pass
-        if not clip.samples:
-            if self._fallback is not None:
-                return self._fallback.synthesize(text)
-            raise ValueError("audio.cpp produced no audio.")
-        return clip
+        return [
+            self._runner.synthesize(
+                text,
+                language=self.language,
+                reference=reference,
+                reference_text=reference_text,
+                steps=self.steps,
+            )
+            for text in prepared
+        ]
 
 
 # ------------------------------------------------------------------ gates
@@ -1157,6 +1350,8 @@ __all__ = [
     "AUDIOCPP_ENGINE_NAME",
     "AUDIOCPP_SAMPLE_RATE",
     "DEFAULT_INFERENCE_STEPS",
+    "DEFAULT_MAX_THREADS",
+    "GGUF_MAGIC",
     "IMPORTED_VOICES_FILE",
     "IMPORT_PICKER_SUFFIXES",
     "VOICETUT_MODELS",
@@ -1184,6 +1379,7 @@ __all__ = [
     "imported_voices_path",
     "install_engine",
     "install_hint",
+    "is_valid_gguf",
     "load_imported_voices",
     "model_is_cached",
     "remove_imported_voice",
