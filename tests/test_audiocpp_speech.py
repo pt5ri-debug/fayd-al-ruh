@@ -1214,7 +1214,7 @@ def test_reader_uses_the_server_only_for_the_audiocpp_engine(tmp_path):
     (root / "bin" / ("audiocpp_server.exe" if a._is_windows() else "audiocpp_server")).write_text(
         "#!/bin/sh\n", encoding="utf-8"
     )
-    reader = TextReader(engine="audio.cpp", server=True)
+    reader = TextReader(engine="audio.cpp", server=True, root=root)
     assert isinstance(reader.synthesizer, a.AudioCppSynthesizer)
     assert isinstance(reader.synthesizer._runner, a.AudioCppServerRunner)
     reader.synthesizer.stop()

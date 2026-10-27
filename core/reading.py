@@ -65,6 +65,7 @@ class TextReader:
         synthesizer: SpeechSynthesizer | None = None,
         mood: str | Mood | None = None,
         server: bool | None = None,
+        root: Path | None = None,
     ) -> None:
         self.engine = engine
         self.language = language
@@ -78,6 +79,10 @@ class TextReader:
         # not the server, which only ever makes the same engine faster. ``False``
         # remains an explicit opt-out.
         self._server = server
+        # The engine's install folder, for a caller that keeps its weights somewhere
+        # other than the default data directory (a test's fake install, a studio's
+        # own copy). ``None`` lets each engine resolve its own default.
+        self._root = root
         self._mood: Mood | None = _as_mood(mood)
         if synthesizer is not None:
             self._engine = synthesizer.name
@@ -146,6 +151,7 @@ class TextReader:
                     language=self.language,
                     prosody=self._prosody(),
                     use_server=self._server,
+                    root=self._root,
                 )
             except ValueError as error:
                 self._engine_error = str(error)
