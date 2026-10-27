@@ -53,6 +53,7 @@
     "causal_chain_accuracy": 1.0,
     "causal_explanation_quality": 1.0,
     "connection_accuracy": 1.0,
+    "connection_reasoning_accuracy": 1.0,
     "consistency_accuracy": 1.0,
     "contradiction_rate": 1.0,
     "curriculum_coverage": 1.0,

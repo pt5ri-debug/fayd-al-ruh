@@ -3739,6 +3739,42 @@ regression monitor each can refuse a change.
   the finer or faster setting is one argument away. (3) **The voices were verified
   end to end**: the 19 built-in speakers resolve, `model:audio.cpp:Sarah` renders
   2.64 s of real audio (RMS 3791, peak 20344 — not silence), and the CLI and the
-  studio both reach it. `tests/test_audiocpp_speech.py` pins the server default and
+  studio both reach it.   `tests/test_audiocpp_speech.py` pins the server default and
   the per-engine reader flag; `tests/test_web_learning.py` pins the pooled session;
   `tests/test_embeddings.py` pins the per-entry cache.
+
+- Phase 36 — **the graph's multi-hop connections reach the answer path**:
+  `core/relation_connections.py` answers the question a reader actually asks when
+  two of a question's concepts have no single edge between them -- *how are they
+  connected?* `core.relation_paths.find_connection` already walked the explicit
+  relations breadth-first and returned the shortest typed chain, but that reasoning
+  was reachable only from the `relations connect` CLI, never from an answer, so a
+  multi-hop conclusion the program could draw never reached a reader.
+  `concept_connections(ontology, question, ...)` finds the shortest chain between
+  **each pair of concepts the question itself names** (via
+  `Ontology.match_concepts`, de-duplicated by first mention), orders them by
+  confidence then fewer hops then label (deterministic), bounds the block
+  (`DEFAULT_CONNECTION_LIMIT`), and returns `()` when the question names fewer than
+  two concepts or no chain within the hop bound connects them -- "not connected
+  here" is a real answer, never a fabricated chain. Each `ConceptConnection`
+  carries its hops, its confidence (the product of the steps', like a derivation),
+  and each step rendered with the direction it was walked, so a step walked against
+  the stored edge is visible; `describe_concept_connections` renders a block
+  **labelled as walked, not stored**, so a reader can tell a multi-hop conclusion
+  from a single written edge (and from an inference, Phase 28). It is read-only: it
+  never asserts a path back into the graph and never invents an edge.
+  `AssistantAnswer.connections` and `JarvisTurn.connections` carry the lines as
+  *data*, `ai/chat.format_turn` renders them under the label, and `turn_payload`
+  exposes them for `--json`. Wired as `python -m cli relations connections
+  "<question>" [--limit N] [--max-hops N] [--json]` (read-only). The gate is
+  `connection_reasoning_accuracy`: a held-out catalogue of hand-written pairs
+  (`CONNECTION_JUDGEMENTS`) the answer-path walk must connect exactly when a chain
+  exists **and** with the expected number of hops -- including negative controls (an
+  unknown endpoint) -- so a walk that fabricates a chain or returns a wrong-length
+  one fails as surely as one that misses a real connection; added to
+  `evaluation/benchmark.py`, `evaluation/runner.py`, and `evaluation/baseline.json`.
+  `tests/test_relation_connections.py` pins the pairs, the steps, the backward walk,
+  the single-concept/unknown/no-chain empty cases, the determinism, the limits, the
+  ordering, the labelled block, the negative controls, the gate, and the
+  assistant/Jarvis/format wiring; `tests/test_relations_cli.py` pins the
+  `connections` command, its JSON, its empty case, and its argument validation.

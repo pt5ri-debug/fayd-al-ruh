@@ -82,6 +82,11 @@ class JarvisTurn:
     """Relations the graph *entails* on the question's concepts, as readable lines
     with the steps they rest on. Rendered under a label that says they are derived,
     never stored, so a reader can tell an inference from a written claim."""
+    connections: tuple[str, ...] = field(default_factory=tuple)
+    """Chains of typed relations connecting the concepts the question names, as
+    readable lines with each step's direction. Rendered under a label that says the
+    chain was walked, never stored, so a reader can tell a multi-hop conclusion from
+    a single written edge."""
     spoken: AudioClip | None = None
     playback_error: str = ""
     conversation_id: str = ""
@@ -219,6 +224,9 @@ class JarvisMode:
         inferences = tuple(
             item.explain() for item in getattr(answer, "inferred", ()) or ()
         )
+        connections = tuple(
+            item.describe() for item in getattr(answer, "connections", ()) or ()
+        )
         return JarvisTurn(
             heard=utterance.strip(),
             response=response,
@@ -229,6 +237,7 @@ class JarvisMode:
             relation_facts=facts,
             relation_conflicts=conflicts,
             inferred=inferences,
+            connections=connections,
             spoken=self._speak(response, speak),
             conversation_id=conversation.id,
             used_web=used_web,
