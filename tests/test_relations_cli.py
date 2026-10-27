@@ -164,3 +164,39 @@ def test_infer_rejects_a_bad_limit(capsys):
     assert relations_cli.main(
         ["infer", "porosity", "--min-confidence", "2"]
     ) == relations_cli.EXIT_USAGE
+
+
+# --- connections: how the concepts a question names are linked -------------
+
+
+def test_connections_prints_a_chain(capsys):
+    code = relations_cli.main(["connections", "how do casing and perforating relate?"])
+    assert code == relations_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "walked, not stored" in out
+    assert "step(s)" in out
+
+
+def test_connections_json_is_machine_readable(capsys):
+    code = relations_cli.main(["connections", "casing perforating completion", "--json"])
+    assert code == relations_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["connections"]
+    first = payload["connections"][0]
+    assert {"source", "target", "hops", "confidence", "steps"} <= set(first)
+    assert first["steps"]
+
+
+def test_connections_says_nothing_for_one_concept(capsys):
+    code = relations_cli.main(["connections", "what is porosity?"])
+    assert code == relations_cli.EXIT_OK
+    assert "connects no two concepts" in capsys.readouterr().out
+
+
+def test_connections_needs_a_question(capsys):
+    assert relations_cli.main(["connections"]) == relations_cli.EXIT_NOTHING
+
+
+def test_connections_rejects_a_bad_bound(capsys):
+    assert relations_cli.main(["connections", "casing perforating", "--limit", "0"]) == relations_cli.EXIT_USAGE
+    assert relations_cli.main(["connections", "casing perforating", "--max-hops", "0"]) == relations_cli.EXIT_USAGE

@@ -358,6 +358,11 @@ def format_turn(turn: JarvisTurn) -> str:
             "Inferred from the knowledge graph (derived, not stored):\n"
             + "\n".join(f"  - {item}" for item in turn.inferred)
         )
+    if turn.connections:
+        parts.append(
+            "How the graph connects the concepts in the question (walked, not stored):\n"
+            + "\n".join(f"  - {item}" for item in turn.connections)
+        )
     block = sources_block(turn.citations)
     if block:
         parts.append(block)
@@ -375,6 +380,7 @@ def turn_payload(turn: JarvisTurn) -> dict:
         "relation_facts": list(turn.relation_facts),
         "relation_conflicts": list(turn.relation_conflicts),
         "inferred": list(turn.inferred),
+        "connections": list(turn.connections),
         "used_web": turn.used_web,
         "learned": turn.learned,
         "conversation_id": turn.conversation_id,

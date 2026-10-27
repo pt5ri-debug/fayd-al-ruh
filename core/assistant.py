@@ -28,6 +28,7 @@ from core.conversation import Conversation, ConversationMemory
 from core.documents import Document, DocumentStore
 from core.model_interface import CognitiveModel, ModelRequest
 from core.rag import RagRetriever, RetrievedPassage
+from core.relation_connections import ConceptConnection, concept_connections
 from core.relation_consistency import RelationConflict, relation_conflicts
 from core.relation_facts import RelationFact, relation_facts
 from core.relation_inference import InferredRelation, inferred_relations
@@ -100,6 +101,16 @@ class AssistantAnswer:
     a block that is labelled as an inference, so a reader can always tell a claim
     someone wrote from one the program derived. Empty when the rules derive nothing
     on the question's concepts, so nothing is ever invented.
+    """
+    connections: tuple[ConceptConnection, ...] = ()
+    """Chains of typed relations connecting the concepts the question itself names.
+
+    When a question names two concepts with no single edge between them, the graph
+    can still say *how* they are connected (``core.relation_paths`` walks the
+    explicit relations breadth-first). Returned as *data* and rendered under a label
+    that says the chain was walked, not stored, so a reader can tell a multi-hop
+    conclusion from a single written edge. Empty when the question names fewer than
+    two concepts or no chain within the hop bound connects them.
     """
 
     def __post_init__(self) -> None:
@@ -177,6 +188,7 @@ class GroundedAssistant:
         facts = relation_facts(getattr(self.retriever, "ontology", None), question)
         graph_conflicts = relation_conflicts(getattr(self.retriever, "ontology", None), question)
         graph_inferences = inferred_relations(getattr(self.retriever, "ontology", None), question)
+        graph_connections = concept_connections(getattr(self.retriever, "ontology", None), question)
         conversation.add_assistant(text, citations)
         self.memory.save(conversation)
         return AssistantAnswer(
@@ -193,6 +205,7 @@ class GroundedAssistant:
             relation_facts=facts,
             relation_conflicts=graph_conflicts,
             inferred=graph_inferences,
+            connections=graph_connections,
         )
 
     def _augment(self, question: str, internal: list[RetrievedPassage]) -> WebAugmentation | None:

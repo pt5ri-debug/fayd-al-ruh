@@ -7,6 +7,7 @@
     python -m cli relations connect porosity permeability  # how two concepts link
     python -m cli relations conflicts                # contradictory claims on file
     python -m cli relations infer "what does a well penetrate?"  # what the graph entails
+    python -m cli relations connections "how do casing and perforating link?"  # walked chains
 
 The extractor matches a sentence's own verb phrase onto the ontology's relation
 types, so it reports *which* concepts are related and *how* -- ``porosity
@@ -72,6 +73,15 @@ def _build_parser() -> argparse.ArgumentParser:
     infer.add_argument("--limit", type=int, default=None, help="State at most this many derivations.")
     infer.add_argument("--min-confidence", type=float, default=None, help="Drop weaker derivations.")
     infer.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+
+    connections = sub.add_parser(
+        "connections",
+        help="Show how the concepts a question names are connected (read-only).",
+    )
+    connections.add_argument("question", nargs="?", help="The question naming two or more concepts.")
+    connections.add_argument("--limit", type=int, default=None, help="State at most this many chains.")
+    connections.add_argument("--max-hops", type=int, default=None, help="The longest chain to consider.")
+    connections.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
     scan = sub.add_parser("scan", help="Read relations from the ingested knowledge store.")
     scan.add_argument("--store-dir", help="The knowledge store to read (default: the data folder).")
@@ -296,6 +306,55 @@ def run_infer(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_connections(args: argparse.Namespace) -> int:
+    """Show how the concepts a question names are connected, chain by chain."""
+    from core.relation_connections import (
+        DEFAULT_CONNECTION_LIMIT,
+        concept_connections,
+        describe_concept_connections,
+    )
+    from core.relation_paths import DEFAULT_MAX_HOPS
+
+    question = args.question or ""
+    if not question.strip():
+        print("Nothing to reason about: pass a question naming two or more concepts.")
+        return EXIT_NOTHING
+    limit = args.limit if args.limit is not None else DEFAULT_CONNECTION_LIMIT
+    max_hops = args.max_hops if args.max_hops is not None else DEFAULT_MAX_HOPS
+    if limit < 1:
+        print("--limit must be at least 1.")
+        return EXIT_USAGE
+    if max_hops < 1:
+        print("--max-hops must be at least 1.")
+        return EXIT_USAGE
+    ontology = CognitiveController().ontology
+    connections = concept_connections(ontology, question, limit=limit, max_hops=max_hops)
+    if args.json:
+        print(json.dumps(
+            {
+                "question": question,
+                "connections": [
+                    {
+                        "source": item.source,
+                        "target": item.target,
+                        "hops": item.hops,
+                        "confidence": item.confidence,
+                        "steps": list(item.steps),
+                    }
+                    for item in connections
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ))
+        return EXIT_OK
+    if not connections:
+        print(f"The graph connects no two concepts in {question!r} within the hop bound.")
+        return EXIT_OK
+    print(describe_concept_connections(connections))
+    return EXIT_OK
+
+
 def run_scan(args: argparse.Namespace) -> int:
     from core.knowledge_base import KnowledgeBaseStore, default_knowledge_base_dir
     from core.relation_extraction import extract_from_store
@@ -337,6 +396,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "connect": run_connect,
         "conflicts": run_conflicts,
         "infer": run_infer,
+        "connections": run_connections,
         "scan": run_scan,
     }
     handler = handlers.get(args.command)

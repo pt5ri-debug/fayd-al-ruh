@@ -14,6 +14,7 @@ from core.embeddings import evaluate_held_out
 from core.evidence import Evidence
 from core.goal import Goal
 from core.observation import Observation
+from core.relation_connections import connection_reasoning_accuracy
 from core.relation_consistency import consistency_accuracy
 from core.relation_extraction import extraction_accuracy
 from core.relation_inference import inference_accuracy
@@ -92,6 +93,7 @@ class EvaluationMetrics:
     connection_accuracy: float
     consistency_accuracy: float
     inference_accuracy: float
+    connection_reasoning_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -773,6 +775,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # actually reaching the answer path.
     inference_value = inference_accuracy()
 
+    # Connection reasoning: held-out pairs the *answer-path* walk must connect
+    # exactly when a chain exists and with the expected number of hops -- with
+    # negative controls (an unknown endpoint), so a walk that fabricates a chain
+    # fails the gate as surely as one that misses a real connection. This is the
+    # metric for the multi-hop reasoning layer reaching the answer path.
+    connection_reasoning_value = connection_reasoning_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -853,6 +862,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         connection_accuracy=round(connection_value, 6),
         consistency_accuracy=round(consistency_value, 6),
         inference_accuracy=round(inference_value, 6),
+        connection_reasoning_accuracy=round(connection_reasoning_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )
