@@ -793,6 +793,23 @@ Arabic is kept as secondary aliases where useful.
   section labels, centres the answer on the question, collapses repeats, and reads
   an ontology identifier the model echoed ("pore_pressure") as the phrase it names
   — without rewriting the model's words — and is used by `ai/mind.py`.
+- `core/relation_connections.py` / `core/causal_paths.py` — the two answer-path
+  reasoning bridges. `core.relation_connections` surfaces the **multi-hop
+  connection** between two concepts a question names with no single edge between
+  them (`concept_connections` walks the explicit relations with
+  `core.relation_paths`, carries each step's direction, and labels the block as
+  walked, not stored); `core.causal_paths` surfaces the **directed causal chain**
+  the graph states (`CAUSAL_RELATION_TYPES` is a closed set so an association such
+  as `measures` can never be read as a cause, `causal_graph_from_ontology` builds a
+  `CausalGraph` from the ontology's causal edges, and `causal_explanations` walks
+  the strongest forward-only chain, rendering it with the project's own
+  `CausalExplainer`). Both are **read-only** — neither adds an edge — and both
+  reach an answer as *data* (`AssistantAnswer.connections`/`causal_paths`,
+  `JarvisTurn.connections`/`causal_paths`, rendered by `ai/chat.format_turn`), with
+  a held-out gate (`connection_reasoning_accuracy`, `causal_reasoning_accuracy`)
+  whose catalogues carry **negative controls**. `docs/REASONING_ASSESSMENT.md`
+  records which of the reasoning layer's 69 modules reach an answer and which do
+  not.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
@@ -3778,3 +3795,65 @@ regression monitor each can refuse a change.
   ordering, the labelled block, the negative controls, the gate, and the
   assistant/Jarvis/format wiring; `tests/test_relations_cli.py` pins the
   `connections` command, its JSON, its empty case, and its argument validation.
+
+- Phase 37 — **the graph's causal chains reach the answer path**: the project
+  carried a whole causal layer -- `CausalGraph`, `CausalLink`, `CausalChain`,
+  `CausalReasoner`, `CausalExplainer`, `core.counterfactual` -- but it was reachable
+  only from the `CognitiveController` and the evaluation scenarios: `CausalGraph`
+  is empty by default and nothing in the answer path ever consulted it, so a reader
+  asking *"why does waterflood increase production?"* got prose, never the
+  mechanism the graph can walk. The seeded ontology, however, already states **117
+  directed causal edges** (``causes``, ``drives``, ``controls``, ``reduces``,
+  ``increases``, ``prevents``, ``influences``, ``affects``, ``determines``,
+  ``governs``, ``creates``, ``produces``, ``enables``, ``improves``,
+  ``maintains``, ``protects``) that no answer used.
+  `core/causal_paths.py` reads those edges as a causal graph and walks the
+  **strongest directed chain** from one concept the question names to another,
+  rendering it with the project's own `CausalExplainer` wording.
+  `CAUSAL_RELATION_TYPES` is a **closed set** so an associative relation
+  (`measures`, `contains`, `is_a`) can never be read as a cause -- the single most
+  important honesty rule here; `causal_graph_from_ontology` builds the
+  `CausalGraph` from those edges only, carrying each relation's confidence and its
+  own word for the mechanism. `causal_explanations(ontology, question, ...)` finds
+  the strongest chain between **each ordered pair of concepts the question names**,
+  in the direction the question's word order implies *and* the reverse (the same
+  graph question asked two ways), keeping only chains that run **forward** through
+  the causal edges -- so unlike the general relation walk (`core.relation_connections`)
+  it **never reverses an edge**: "A causes B" does not license "B causes A". Results
+  are ordered by confidence (strongest first), then fewer hops, then cause/effect,
+  so the same question always yields the same block; it returns ``()`` when the
+  question names fewer than two concepts or no causal chain connects them, so "the
+  graph states no causal path here" is a real answer. `describe_causal_explanations`
+  renders a block **labelled as directed (cause → effect)**, so a reader can tell a
+  causal path the graph states from a general relation chain or a stored single
+  edge. It is **read-only**: it never adds a link to the `CausalGraph`, never
+  invents a causal edge.
+  This phase also **fixed a pre-existing display bug** the wiring surfaced for the
+  first time: `CausalExplainer.explain_chain` passed `chain.nodes` (which already
+  spans the cause and the effect) into `causal_chain_sentence`, which prints the
+  cause and the effect around its ``nodes`` argument, so both endpoints were
+  repeated (``a → a → b → c → c``); it now passes only the intermediate concepts.
+  `AssistantAnswer.causal_paths` and `JarvisTurn.causal_paths` carry the lines as
+  *data*, `ai/chat.format_turn` renders them under the label (so the GUI shows them
+  for free, because it renders through `format_turn`), and `turn_payload` exposes
+  them for `--json`. Wired as `python -m cli relations causal "<question>"
+  [--limit N] [--max-depth N] [--json]` (read-only). The gate is
+  `causal_reasoning_accuracy`: a held-out catalogue of hand-written pairs
+  (`CAUSAL_JUDGEMENTS`) the answer-path walk must connect exactly when a directed
+  causal chain exists **and** with the expected number of links -- including
+  **negative controls** (an associative-only pair such as porosity / permeability
+  measures, which must yield no cause) -- so a walk that reads an association as
+  causation fails as surely as one that misses a real mechanism; added to
+  `evaluation/benchmark.py`, `evaluation/runner.py`, and `evaluation/baseline.json`
+  (which also gained the missing `connection_reasoning_accuracy` term in `overall`).
+  `docs/REASONING_ASSESSMENT.md` is the written assessment this phase answers: the
+  reasoning layer's 69 modules, only 5 of which reached an answer before Phases
+  28/36/37, and the ordered list of the remaining gaps (uncertainty in answer
+  confidence, the groundedness gate, a user-visible reasoning trace, planning/
+  decision/belief/temporal reach, cross-session state, and connected-path metrics).
+  `tests/test_causal_paths.py` pins the closed causal set, the graph build, the
+  single edge, the multi-hop chain, the no-reverse rule, the single-concept/unknown/
+  no-chain empty cases, the determinism, the limits, the ordering, the product
+  confidence, the labelled block, the endpoint-duplication fix, the negative
+  controls, the gate, and the assistant/Jarvis/format wiring; `tests/test_relations_cli.py`
+  pins the `causal` command, its JSON, its empty case, and its argument validation.

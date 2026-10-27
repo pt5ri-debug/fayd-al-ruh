@@ -87,6 +87,11 @@ class JarvisTurn:
     readable lines with each step's direction. Rendered under a label that says the
     chain was walked, never stored, so a reader can tell a multi-hop conclusion from
     a single written edge."""
+    causal_paths: tuple[str, ...] = field(default_factory=tuple)
+    """Directed causal chains the graph states between the question's concepts, as
+    readable lines with the path and the mechanism. Rendered under a label that says
+    the path is directed (cause → effect), so an association is never read as a
+    cause."""
     spoken: AudioClip | None = None
     playback_error: str = ""
     conversation_id: str = ""
@@ -227,6 +232,9 @@ class JarvisMode:
         connections = tuple(
             item.describe() for item in getattr(answer, "connections", ()) or ()
         )
+        causal = tuple(
+            item.describe() for item in getattr(answer, "causal_paths", ()) or ()
+        )
         return JarvisTurn(
             heard=utterance.strip(),
             response=response,
@@ -238,6 +246,7 @@ class JarvisMode:
             relation_conflicts=conflicts,
             inferred=inferences,
             connections=connections,
+            causal_paths=causal,
             spoken=self._speak(response, speak),
             conversation_id=conversation.id,
             used_web=used_web,

@@ -8,6 +8,7 @@ from core.analogy import analogy_accuracy
 from core.belief import Belief
 from core.belief_revision import BeliefRevisionEngine
 from core.causal_link import CausalLink
+from core.causal_paths import causal_reasoning_accuracy
 from core.cognitive_controller import CognitiveController
 from core.curriculum_knowledge import curriculum_coverage_score
 from core.embeddings import evaluate_held_out
@@ -94,6 +95,7 @@ class EvaluationMetrics:
     consistency_accuracy: float
     inference_accuracy: float
     connection_reasoning_accuracy: float
+    causal_reasoning_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -782,6 +784,14 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # metric for the multi-hop reasoning layer reaching the answer path.
     connection_reasoning_value = connection_reasoning_accuracy()
 
+    # Causal reasoning: held-out causal pairs the *answer-path* walk must connect
+    # exactly when a directed causal chain exists and with the expected number of
+    # links -- with negative controls (an associative-only pair that must yield no
+    # cause), so a walk that reads an association as causation fails the gate as
+    # surely as one that misses a real mechanism. This is the metric for the causal
+    # layer reaching the answer path.
+    causal_reasoning_value = causal_reasoning_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -829,6 +839,8 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         connection_value,
         consistency_value,
         inference_value,
+        connection_reasoning_value,
+        causal_reasoning_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -863,6 +875,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         consistency_accuracy=round(consistency_value, 6),
         inference_accuracy=round(inference_value, 6),
         connection_reasoning_accuracy=round(connection_reasoning_value, 6),
+        causal_reasoning_accuracy=round(causal_reasoning_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

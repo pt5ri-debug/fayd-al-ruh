@@ -83,6 +83,15 @@ def _build_parser() -> argparse.ArgumentParser:
     connections.add_argument("--max-hops", type=int, default=None, help="The longest chain to consider.")
     connections.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
+    causal = sub.add_parser(
+        "causal",
+        help="Show the directed causal paths the graph states between a question's concepts.",
+    )
+    causal.add_argument("question", nargs="?", help="The question naming two or more concepts.")
+    causal.add_argument("--limit", type=int, default=None, help="State at most this many paths.")
+    causal.add_argument("--max-depth", type=int, default=None, help="The longest causal chain to walk.")
+    causal.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+
     scan = sub.add_parser("scan", help="Read relations from the ingested knowledge store.")
     scan.add_argument("--store-dir", help="The knowledge store to read (default: the data folder).")
     scan.add_argument("--limit", type=int, default=None, help="Read at most this many chunks.")
@@ -355,6 +364,59 @@ def run_connections(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_causal(args: argparse.Namespace) -> int:
+    """Show the directed causal paths the graph states between a question's concepts."""
+    from core.causal_paths import (
+        DEFAULT_CAUSAL_LIMIT,
+        DEFAULT_MAX_DEPTH,
+        causal_explanations,
+        describe_causal_explanations,
+    )
+
+    question = args.question or ""
+    if not question.strip():
+        print("Nothing to reason about: pass a question naming two or more concepts.")
+        return EXIT_NOTHING
+    limit = args.limit if args.limit is not None else DEFAULT_CAUSAL_LIMIT
+    max_depth = args.max_depth if args.max_depth is not None else DEFAULT_MAX_DEPTH
+    if limit < 1:
+        print("--limit must be at least 1.")
+        return EXIT_USAGE
+    if max_depth < 1:
+        print("--max-depth must be at least 1.")
+        return EXIT_USAGE
+    ontology = CognitiveController().ontology
+    explanations = causal_explanations(
+        ontology, question, limit=limit, max_depth=max_depth
+    )
+    if args.json:
+        print(json.dumps(
+            {
+                "question": question,
+                "causal_paths": [
+                    {
+                        "cause": item.cause,
+                        "effect": item.effect,
+                        "hops": item.hops,
+                        "confidence": item.confidence,
+                        "nodes": list(item.nodes),
+                        "mechanisms": list(item.mechanisms),
+                        "sentence": item.sentence,
+                    }
+                    for item in explanations
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ))
+        return EXIT_OK
+    if not explanations:
+        print(f"The graph states no causal path between the concepts in {question!r}.")
+        return EXIT_OK
+    print(describe_causal_explanations(explanations))
+    return EXIT_OK
+
+
 def run_scan(args: argparse.Namespace) -> int:
     from core.knowledge_base import KnowledgeBaseStore, default_knowledge_base_dir
     from core.relation_extraction import extract_from_store
@@ -397,6 +459,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "conflicts": run_conflicts,
         "infer": run_infer,
         "connections": run_connections,
+        "causal": run_causal,
         "scan": run_scan,
     }
     handler = handlers.get(args.command)

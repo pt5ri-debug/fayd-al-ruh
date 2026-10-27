@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from core.causal_paths import CausalExplanation, causal_explanations
 from core.conversation import Conversation, ConversationMemory
 from core.documents import Document, DocumentStore
 from core.model_interface import CognitiveModel, ModelRequest
@@ -112,6 +113,18 @@ class AssistantAnswer:
     conclusion from a single written edge. Empty when the question names fewer than
     two concepts or no chain within the hop bound connects them.
     """
+    causal_paths: tuple[CausalExplanation, ...] = ()
+    """Directed causal chains the graph states between the concepts the question names.
+
+    The project's whole causal layer (`CausalGraph`/`CausalReasoner`/
+    `CausalExplainer`) was reachable only from the controller and the evaluation
+    scenarios; this is the first time a causal mechanism reaches an answer. Only
+    the ontology's **directed causal** edges are read, and the walk never reverses
+    one, so an association is never reported as a cause. Returned as *data* and
+    rendered under a label that says the path is directed (cause → effect). Empty
+    when the question names fewer than two concepts or no causal chain connects
+    them.
+    """
 
     def __post_init__(self) -> None:
         if not self.text.strip():
@@ -189,6 +202,7 @@ class GroundedAssistant:
         graph_conflicts = relation_conflicts(getattr(self.retriever, "ontology", None), question)
         graph_inferences = inferred_relations(getattr(self.retriever, "ontology", None), question)
         graph_connections = concept_connections(getattr(self.retriever, "ontology", None), question)
+        graph_causal = causal_explanations(getattr(self.retriever, "ontology", None), question)
         conversation.add_assistant(text, citations)
         self.memory.save(conversation)
         return AssistantAnswer(
@@ -206,6 +220,7 @@ class GroundedAssistant:
             relation_conflicts=graph_conflicts,
             inferred=graph_inferences,
             connections=graph_connections,
+            causal_paths=graph_causal,
         )
 
     def _augment(self, question: str, internal: list[RetrievedPassage]) -> WebAugmentation | None:

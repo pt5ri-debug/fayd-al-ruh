@@ -200,3 +200,39 @@ def test_connections_needs_a_question(capsys):
 def test_connections_rejects_a_bad_bound(capsys):
     assert relations_cli.main(["connections", "casing perforating", "--limit", "0"]) == relations_cli.EXIT_USAGE
     assert relations_cli.main(["connections", "casing perforating", "--max-hops", "0"]) == relations_cli.EXIT_USAGE
+
+
+# --- causal: the directed causal paths the graph states --------------------
+
+
+def test_causal_prints_a_chain(capsys):
+    code = relations_cli.main(["causal", "why does waterflood increase production?"])
+    assert code == relations_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "directed, cause" in out
+    assert "waterflood" in out and "production" in out
+
+
+def test_causal_json_is_machine_readable(capsys):
+    code = relations_cli.main(["causal", "why does waterflood increase production?", "--json"])
+    assert code == relations_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["causal_paths"]
+    first = payload["causal_paths"][0]
+    assert {"cause", "effect", "hops", "confidence", "nodes", "mechanisms", "sentence"} <= set(first)
+    assert first["nodes"]
+
+
+def test_causal_says_nothing_for_one_concept(capsys):
+    code = relations_cli.main(["causal", "what is porosity?"])
+    assert code == relations_cli.EXIT_OK
+    assert "no causal path" in capsys.readouterr().out
+
+
+def test_causal_needs_a_question(capsys):
+    assert relations_cli.main(["causal"]) == relations_cli.EXIT_NOTHING
+
+
+def test_causal_rejects_bad_bounds(capsys):
+    assert relations_cli.main(["causal", "porosity permeability", "--limit", "0"]) == relations_cli.EXIT_USAGE
+    assert relations_cli.main(["causal", "porosity permeability", "--max-depth", "0"]) == relations_cli.EXIT_USAGE
