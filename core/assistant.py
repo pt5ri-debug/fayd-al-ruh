@@ -30,6 +30,7 @@ from core.model_interface import CognitiveModel, ModelRequest
 from core.rag import RagRetriever, RetrievedPassage
 from core.relation_consistency import RelationConflict, relation_conflicts
 from core.relation_facts import RelationFact, relation_facts
+from core.relation_inference import InferredRelation, inferred_relations
 
 if TYPE_CHECKING:
     from core.rag import BulkCorpusRetriever
@@ -89,6 +90,16 @@ class AssistantAnswer:
     Returned as *data* for the same reason as the facts: an answer that states one
     side of a disagreement without naming the other is quietly misleading. Empty
     when the graph is consistent on the question's concepts.
+    """
+    inferred: tuple[InferredRelation, ...] = ()
+    """Relations the graph *entails* on the question's own concepts.
+
+    The graph's own reasoning (``core.ontology_reasoner``) is surfaced here for the
+    first time: these are conclusions the program derived from stored edges through
+    transparent rules, never stored themselves. Returned as *data* and rendered as
+    a block that is labelled as an inference, so a reader can always tell a claim
+    someone wrote from one the program derived. Empty when the rules derive nothing
+    on the question's concepts, so nothing is ever invented.
     """
 
     def __post_init__(self) -> None:
@@ -165,6 +176,7 @@ class GroundedAssistant:
             citations = tuple(dict.fromkeys(citations + augmentation.citations))
         facts = relation_facts(getattr(self.retriever, "ontology", None), question)
         graph_conflicts = relation_conflicts(getattr(self.retriever, "ontology", None), question)
+        graph_inferences = inferred_relations(getattr(self.retriever, "ontology", None), question)
         conversation.add_assistant(text, citations)
         self.memory.save(conversation)
         return AssistantAnswer(
@@ -180,6 +192,7 @@ class GroundedAssistant:
             web_trust=augmentation.trust if augmentation else 0.0,
             relation_facts=facts,
             relation_conflicts=graph_conflicts,
+            inferred=graph_inferences,
         )
 
     def _augment(self, question: str, internal: list[RetrievedPassage]) -> WebAugmentation | None:
