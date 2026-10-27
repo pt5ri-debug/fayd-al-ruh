@@ -125,3 +125,42 @@ def test_conflicts_scopes_to_a_concept(capsys):
     code = relations_cli.main(["conflicts", "--concept", "porosity"])
     assert code == relations_cli.EXIT_OK
     assert "porosity" in capsys.readouterr().out
+
+
+# --- infer: what the graph entails ----------------------------------------
+
+
+def test_infer_prints_a_derivation(capsys):
+    code = relations_cli.main(["infer", "What does a well penetrate?"])
+    assert code == relations_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "Inferred from the knowledge graph" in out
+    assert "penetrates" in out
+
+
+def test_infer_json_is_machine_readable(capsys):
+    code = relations_cli.main(["infer", "What does a well penetrate?", "--json"])
+    assert code == relations_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["inferred"]
+    first = payload["inferred"][0]
+    assert {"source", "relation_type", "target", "confidence", "steps"} <= set(first)
+    assert first["steps"]
+
+
+def test_infer_says_nothing_for_an_unknown_question(capsys):
+    code = relations_cli.main(["infer", "zzz-not-a-concept"])
+    assert code == relations_cli.EXIT_OK
+    assert "entails nothing" in capsys.readouterr().out
+
+
+def test_infer_needs_a_question(capsys):
+    code = relations_cli.main(["infer"])
+    assert code == relations_cli.EXIT_NOTHING
+
+
+def test_infer_rejects_a_bad_limit(capsys):
+    assert relations_cli.main(["infer", "porosity", "--limit", "0"]) == relations_cli.EXIT_USAGE
+    assert relations_cli.main(
+        ["infer", "porosity", "--min-confidence", "2"]
+    ) == relations_cli.EXIT_USAGE

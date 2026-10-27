@@ -6,6 +6,7 @@
     python -m cli relations types                  # what patterns it knows
     python -m cli relations connect porosity permeability  # how two concepts link
     python -m cli relations conflicts                # contradictory claims on file
+    python -m cli relations infer "what does a well penetrate?"  # what the graph entails
 
 The extractor matches a sentence's own verb phrase onto the ontology's relation
 types, so it reports *which* concepts are related and *how* -- ``porosity
@@ -65,6 +66,12 @@ def _build_parser() -> argparse.ArgumentParser:
     conflicts = sub.add_parser("conflicts", help="Report contradictory relations in the graph (read-only).")
     conflicts.add_argument("--concept", help="Only report conflicts on this concept's own pairs.")
     conflicts.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+
+    infer = sub.add_parser("infer", help="Show what the graph *entails* about a question (read-only).")
+    infer.add_argument("question", nargs="?", help="The question or concept to reason about.")
+    infer.add_argument("--limit", type=int, default=None, help="State at most this many derivations.")
+    infer.add_argument("--min-confidence", type=float, default=None, help="Drop weaker derivations.")
+    infer.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
     scan = sub.add_parser("scan", help="Read relations from the ingested knowledge store.")
     scan.add_argument("--store-dir", help="The knowledge store to read (default: the data folder).")
@@ -237,6 +244,58 @@ def run_conflicts(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_infer(args: argparse.Namespace) -> int:
+    """Show what the graph *entails* about a question, without storing anything."""
+    from core.relation_inference import (
+        DEFAULT_INFERENCE_LIMIT,
+        DEFAULT_MIN_CONFIDENCE,
+        inferred_relations,
+    )
+
+    question = args.question or ""
+    if not question.strip():
+        print("Nothing to reason about: pass a question or a concept.")
+        return EXIT_NOTHING
+    limit = args.limit if args.limit is not None else DEFAULT_INFERENCE_LIMIT
+    min_confidence = args.min_confidence if args.min_confidence is not None else DEFAULT_MIN_CONFIDENCE
+    if limit < 1:
+        print("--limit must be at least 1.")
+        return EXIT_USAGE
+    if not 0.0 <= min_confidence <= 1.0:
+        print("--min-confidence must be between 0 and 1.")
+        return EXIT_USAGE
+    ontology = CognitiveController().ontology
+    inferences = inferred_relations(
+        ontology, question, limit=limit, min_confidence=min_confidence
+    )
+    if args.json:
+        print(json.dumps(
+            {
+                "question": question,
+                "inferred": [
+                    {
+                        "source": item.source,
+                        "relation_type": item.relation_type,
+                        "target": item.target,
+                        "confidence": item.confidence,
+                        "steps": list(item.steps),
+                    }
+                    for item in inferences
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ))
+        return EXIT_OK
+    if not inferences:
+        print(f"The graph entails nothing on {question!r}.")
+        return EXIT_OK
+    print("Inferred from the knowledge graph (derived, not stored):")
+    for item in inferences:
+        print(f"  - {item.explain()}  (confidence {item.confidence:.2f})")
+    return EXIT_OK
+
+
 def run_scan(args: argparse.Namespace) -> int:
     from core.knowledge_base import KnowledgeBaseStore, default_knowledge_base_dir
     from core.relation_extraction import extract_from_store
@@ -277,6 +336,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "types": run_types,
         "connect": run_connect,
         "conflicts": run_conflicts,
+        "infer": run_infer,
         "scan": run_scan,
     }
     handler = handlers.get(args.command)

@@ -78,6 +78,10 @@ class JarvisTurn:
     relation_conflicts: tuple[str, ...] = field(default_factory=tuple)
     """Contradictory claims the graph holds on the question's concepts, as
     readable lines. Rendered as an honest warning, never resolved for the user."""
+    inferred: tuple[str, ...] = field(default_factory=tuple)
+    """Relations the graph *entails* on the question's concepts, as readable lines
+    with the steps they rest on. Rendered under a label that says they are derived,
+    never stored, so a reader can tell an inference from a written claim."""
     spoken: AudioClip | None = None
     playback_error: str = ""
     conversation_id: str = ""
@@ -212,6 +216,9 @@ class JarvisMode:
         conflicts = tuple(
             conflict.describe() for conflict in getattr(answer, "relation_conflicts", ()) or ()
         )
+        inferences = tuple(
+            item.explain() for item in getattr(answer, "inferred", ()) or ()
+        )
         return JarvisTurn(
             heard=utterance.strip(),
             response=response,
@@ -221,6 +228,7 @@ class JarvisMode:
             citations=answer.citations,
             relation_facts=facts,
             relation_conflicts=conflicts,
+            inferred=inferences,
             spoken=self._speak(response, speak),
             conversation_id=conversation.id,
             used_web=used_web,

@@ -3343,6 +3343,36 @@ clone, each optional so the base system still runs without it:
   graph, the question scoping, the no-ontology case, the neutral rendering, the
   assistant wiring, and the gate; `tests/test_relations_cli.py` pins the `conflicts`
   command, its JSON, and its concept scoping.
+- Phase 28 — the reasoning layer **reaches the answer path**: `core/relation_inference.py`
+  surfaces the relations the graph *entails* -- the conclusions `core.ontology_reasoner`
+  derives from stored edges through its transparent rules -- as evidence for an
+  answer, for the first time. Until now `OntologyReasoner`/`ReasoningEngine` were
+  reachable only from the controller, so a derivation the program drew never reached
+  a reader. `InferredRelation` carries the derived triple, its propagated confidence,
+  and the **steps** it rests on (`explain()` renders "well —penetrates→ formation
+  (from well —penetrates→ reservoir reservoir —contained_in→ formation)"), and
+  `describe_inferred_relations` renders a block **labelled as an inference** -- a
+  reader must always be able to tell a claim someone wrote from one the program
+  derived. `inferred_relations(ontology, question, ...)` scopes the derivations to
+  the concepts the question names (either endpoint), is bounded
+  (`DEFAULT_INFERENCE_LIMIT`), drops weak derivations (`DEFAULT_MIN_CONFIDENCE`),
+  de-duplicates by triple, and orders deterministically; it never re-labels a
+  **stored** relation as an inference, never asserts a derivation back into the
+  graph, and returns `()` when nothing is entailed -- so nothing is invented.
+  `AssistantAnswer.inferred` and `JarvisTurn.inferred` carry the lines as *data*,
+  `ai/chat.format_turn` renders them under the inference label, and `turn_payload`
+  exposes them for `--json`. Wired as `python -m cli relations infer "<question>"
+  [--limit N] [--min-confidence F] [--json]` (read-only). The gate is
+  `inference_accuracy`: a held-out catalogue of hand-written entailments
+  (`INFERENCE_JUDGEMENTS`) the reasoner must derive exactly when one exists --
+  including negative controls (an unrelated pair, an unknown endpoint) -- so a rule
+  that over-reaches fails as surely as one that misses; added to
+  `evaluation/benchmark.py`, `evaluation/runner.py`, and `evaluation/baseline.json`.
+  `tests/test_relation_inference.py` pins the derivations, the steps, the
+  determinism, the limits, the confidence floor, the never-relabel rule, the
+  labelled block, the negative controls, the gate, and the assistant/Jarvis/format
+  wiring; `tests/test_relations_cli.py` pins the `infer` command, its JSON, its
+  empty case, and its argument validation.
 
 - Phase 28 — **Hakeem, the scholar of religion and history**: a second companion
   character beside Natasha, on the **same local model** she uses. The task was to

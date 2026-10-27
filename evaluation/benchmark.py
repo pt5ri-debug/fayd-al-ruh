@@ -51,6 +51,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("polarity_accuracy", True, label="Relation polarity accuracy (held-out opposing pairs)"),
     MetricSpec("connection_accuracy", True, label="Connection explanation accuracy (held-out concept pairs)"),
     MetricSpec("consistency_accuracy", True, label="Contradiction detection accuracy (held-out graphs)"),
+    MetricSpec("inference_accuracy", True, label="Graph inference accuracy (held-out entailments)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )

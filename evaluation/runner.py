@@ -16,6 +16,7 @@ from core.goal import Goal
 from core.observation import Observation
 from core.relation_consistency import consistency_accuracy
 from core.relation_extraction import extraction_accuracy
+from core.relation_inference import inference_accuracy
 from core.relation_paths import connection_accuracy
 from core.relation_polarity import polarity_accuracy
 from core.state import State
@@ -90,6 +91,7 @@ class EvaluationMetrics:
     polarity_accuracy: float
     connection_accuracy: float
     consistency_accuracy: float
+    inference_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -764,6 +766,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # a hidden contradiction and a false positive both fail the gate.
     consistency_value = consistency_accuracy()
 
+    # Graph inference: held-out entailments the reasoner must derive exactly when
+    # one exists -- with negative controls (an unrelated pair, an unknown
+    # endpoint), so a rule that over-reaches fails the gate as surely as one that
+    # misses a real derivation. This is the metric for the reasoning layer
+    # actually reaching the answer path.
+    inference_value = inference_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -810,6 +819,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         polarity_value,
         connection_value,
         consistency_value,
+        inference_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -842,6 +852,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         polarity_accuracy=round(polarity_value, 6),
         connection_accuracy=round(connection_value, 6),
         consistency_accuracy=round(consistency_value, 6),
+        inference_accuracy=round(inference_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )
