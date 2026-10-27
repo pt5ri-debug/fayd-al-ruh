@@ -13,10 +13,14 @@ from core.counterfactual import Counterfactual
 class CausalExplainer:
     def explain_chain(self, chain: CausalChain) -> str:
         mechanisms = [link.mechanism for link in chain.links if link.mechanism]
+        # `chain.nodes` already spans the cause and the effect, and
+        # `causal_chain_sentence` prints the cause and the effect around its
+        # ``nodes`` argument -- so only the *intermediate* concepts are passed, or
+        # both endpoints would be repeated ("a → a → b → c → c").
         return causal_chain_sentence(
             chain.cause,
             chain.effect,
-            chain.nodes,
+            chain.nodes[1:-1],
             chain.confidence,
             mechanisms,
         )

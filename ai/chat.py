@@ -363,6 +363,11 @@ def format_turn(turn: JarvisTurn) -> str:
             "How the graph connects the concepts in the question (walked, not stored):\n"
             + "\n".join(f"  - {item}" for item in turn.connections)
         )
+    if turn.causal_paths:
+        parts.append(
+            "Causal paths the graph states (directed, cause → effect):\n"
+            + "\n".join(f"  - {item}" for item in turn.causal_paths)
+        )
     block = sources_block(turn.citations)
     if block:
         parts.append(block)
@@ -381,6 +386,7 @@ def turn_payload(turn: JarvisTurn) -> dict:
         "relation_conflicts": list(turn.relation_conflicts),
         "inferred": list(turn.inferred),
         "connections": list(turn.connections),
+        "causal_paths": list(turn.causal_paths),
         "used_web": turn.used_web,
         "learned": turn.learned,
         "conversation_id": turn.conversation_id,
