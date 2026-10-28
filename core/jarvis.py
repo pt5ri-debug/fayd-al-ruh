@@ -61,6 +61,30 @@ def _web_note(used_web: bool, learned: bool) -> str:
     return "Note: I recorded a new fact in my own knowledge."
 
 
+def _belief_lines(belief: object) -> tuple[str, ...]:
+    """The evidence-weighed belief as readable lines, or ``()`` when there is none.
+
+    Takes the answer's own ``AnswerBelief`` (``core.answer_belief``) through
+    ``getattr`` so the turn carries only what the answer actually produced -- a
+    question that asks no verdict yields no lines rather than a guessed belief.
+    """
+    if belief is None:
+        return ()
+    statement = getattr(belief, "statement", "")
+    confidence = getattr(belief, "confidence", None)
+    status = getattr(belief, "status", "")
+    if not statement or confidence is None:
+        return ()
+    lines = [f"{statement} — confidence {confidence:.2f} ({status})"]
+    lines.extend(
+        f"supports: {line}" for line in getattr(belief, "supporting", ()) or ()
+    )
+    lines.extend(
+        f"contradicts: {line}" for line in getattr(belief, "contradicting", ()) or ()
+    )
+    return tuple(lines)
+
+
 @dataclass
 class JarvisTurn:
     """The full record of one Jarvis exchange."""
@@ -103,6 +127,11 @@ class JarvisTurn:
     do, as readable lines (``acid_stimulation (increases, confidence 0.70)``).
     Empty when the question asks nothing to do, so a definitional question carries
     no recommendation rather than a guessed one."""
+    belief: tuple[str, ...] = field(default_factory=tuple)
+    """The evidence-weighed belief the graph supports for a question that asks
+    *whether a claim holds*, as readable lines (the claim, its confidence and
+    status, and the edges it rests on). Empty when the question asks no verdict, so
+    a definitional question carries no belief rather than a guessed one."""
     confidence: float = 0.0
     """The answer's confidence: the retrieved evidence weighed with the graph's own
     reasoning and its contradictions (``core.answer_confidence``). ``0.0`` when the
@@ -278,6 +307,7 @@ class JarvisMode:
                 getattr(getattr(answer, "decision", None), "options", ()) or ()
             )
         )
+        belief = _belief_lines(getattr(answer, "belief", None))
         report = getattr(answer, "confidence_report", None)
         confidence_note = report.describe() if report is not None else ""
         trace = getattr(answer, "reasoning", None)
@@ -297,6 +327,7 @@ class JarvisMode:
             causal_paths=causal,
             plan=plan,
             decision=decision,
+            belief=belief,
             confidence=float(getattr(answer, "confidence", 0.0) or 0.0),
             confidence_note=confidence_note,
             reasoning_trace=reasoning_trace,

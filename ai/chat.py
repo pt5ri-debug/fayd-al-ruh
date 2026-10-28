@@ -378,6 +378,11 @@ def format_turn(turn: JarvisTurn) -> str:
             "The options the graph states (ranked by the decision engine):\n"
             + "\n".join(f"  - {item}" for item in turn.decision)
         )
+    if turn.belief:
+        parts.append(
+            "The evidence-weighed belief the graph supports:\n"
+            + "\n".join(f"  - {item}" for item in turn.belief)
+        )
     if turn.confidence_note:
         parts.append(f"Confidence in this answer (evidence weighed with the graph): {turn.confidence_note}")
     if turn.reasoning_trace:
@@ -403,6 +408,7 @@ def turn_payload(turn: JarvisTurn) -> dict:
         "causal_paths": list(turn.causal_paths),
         "plan": list(turn.plan),
         "decision": list(turn.decision),
+        "belief": list(turn.belief),
         "confidence": turn.confidence,
         "confidence_note": turn.confidence_note,
         "reasoning_trace": turn.reasoning_trace,
