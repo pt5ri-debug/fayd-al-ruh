@@ -504,6 +504,10 @@ class JarvisMode:
             )
         except ValueError as error:
             return f"Could not record that feedback: {error}"
+        # Also read a *typed* relation out of the confirmed/corrected statement and
+        # carry it across sessions (Gap 8), so a relation taught here is in the
+        # graph the next time the program starts.
+        self._learn_relation(statement)
         self._record_exchange(utterance, statement)
         outcome = step.update
         if outcome is not None and outcome.action in {"added", "reinforced"}:
@@ -534,6 +538,22 @@ class JarvisMode:
         conversation.add_assistant(statement)
         self._refresh_knowledge()
         self.memory.save(conversation)
+
+    def _learn_relation(self, statement: str) -> None:
+        """Read a typed relation out of a confirmed/corrected statement, best-effort.
+
+        Delegates to the assistant's own ``learn_from_text`` (so the same
+        extractor, learner ceiling, and carry store are used everywhere); a custom
+        assistant without that method is left alone, exactly like
+        ``_refresh_knowledge``.
+        """
+        learn = getattr(self.assistant, "learn_from_text", None)
+        if not callable(learn):
+            return
+        try:
+            learn(statement)
+        except (ValueError, KeyError):
+            return
 
     def _refresh_knowledge(self) -> None:
         """Rebuild the assistant's retrieval index from its document store.

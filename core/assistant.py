@@ -35,6 +35,7 @@ from core.causal_paths import CausalExplanation, causal_explanations
 from core.conversation import Conversation, ConversationMemory
 from core.documents import Document, DocumentStore
 from core.grounding import check_grounding
+from core.knowledge_carry import CarryReport, LearnedRelation
 from core.model_interface import CognitiveModel, ModelRequest
 from core.rag import RagRetriever, RetrievedPassage
 from core.reasoning_report import ReasoningReport, reasoning_report
@@ -44,6 +45,8 @@ from core.relation_facts import RelationFact, relation_facts
 from core.relation_inference import InferredRelation, inferred_relations
 
 if TYPE_CHECKING:
+    from core.knowledge_carry import LearnedKnowledgeStore
+    from core.ontology_learner import OntologyLearner, OntologyLearning
     from core.rag import BulkCorpusRetriever
 
 SYSTEM_INSTRUCTION = (
@@ -254,6 +257,7 @@ class GroundedAssistant:
         web_enabled: bool = False,
         weak_evidence: float = _WEAK_EVIDENCE,
         on_learn=None,
+        learned: LearnedKnowledgeStore | None = None,
     ) -> None:
         if not 0.0 <= weak_evidence <= 1.0:
             raise ValueError("weak_evidence must be between 0 and 1.")
@@ -265,6 +269,12 @@ class GroundedAssistant:
         self.web_enabled = web_enabled and web is not None
         self.weak_evidence = weak_evidence
         self._on_learn = on_learn
+        # The learned-knowledge carry (Gap 8): a store the answer path writes the
+        # graph's *learned* relations to and reads them back from, so knowledge
+        # gained in one session reaches the next. Optional and inert by default,
+        # so a read-only session is untouched.
+        self.learned = learned
+        self._learner: OntologyLearner | None = None
 
     def ask(
         self,
@@ -394,6 +404,104 @@ class GroundedAssistant:
             temporal=graph_temporal,
             analogy=graph_analogy,
         )
+
+    def remember_relation(
+        self,
+        source: str,
+        relation_type: str,
+        target: str,
+        confidence: float = 0.5,
+    ) -> LearnedRelation:
+        """Teach the graph one typed relation and persist it for the next session.
+
+        This is the write half of the carry (Gap 8): the relation joins the
+        ontology through the project's own ``OntologyLearner`` (so it is bounded by
+        the learner's ceiling and can never override a seed), the retrieval cache is
+        dropped so the very next answer can use it, and -- when a carry store is
+        configured -- the learned set is captured so it survives the process.
+
+        The learner is created lazily and cached, so repeated calls accumulate into
+        one learner and the capture reflects every relation learned this session.
+        """
+        from core.ontology_learner import OntologyLearner
+
+        ontology = getattr(self.retriever, "ontology", None)
+        if ontology is None:
+            raise ValueError("This assistant has no ontology to teach.")
+        if self._learner is None:
+            self._learner = OntologyLearner(ontology)
+        learning = self._learner.observe_relation(source, target, relation_type, confidence)
+        if learning.changed:
+            invalidate = getattr(self.retriever, "invalidate", None)
+            if callable(invalidate):
+                invalidate()
+        record = LearnedRelation(
+            source=source,
+            relation_type=relation_type,
+            target=target,
+            confidence=confidence,
+        )
+        if self.learned is not None:
+            self.learned.capture(ontology, self._learner)
+        return record
+
+    def recall_learned(self) -> CarryReport:
+        """Replay every carried learned relation into this session's ontology.
+
+        The read half of the carry: called once at startup (see
+        ``build_default_assistant``) so a relation learned in an earlier session is
+        in the graph before the first question. Idempotent, so calling it again
+        adds nothing, and it never invents a concept. Returns ``None``-safe report;
+        with no store configured it is an empty report.
+        """
+        if self.learned is None:
+            return CarryReport(restored=(), already_present=0, skipped=())
+        from core.ontology_learner import OntologyLearner
+
+        ontology = getattr(self.retriever, "ontology", None)
+        if ontology is None:
+            return CarryReport(restored=(), already_present=0, skipped=())
+        if self._learner is None:
+            self._learner = OntologyLearner(ontology)
+        report = self.learned.restore(ontology, self._learner)
+        if report.changed:
+            invalidate = getattr(self.retriever, "invalidate", None)
+            if callable(invalidate):
+                invalidate()
+        return report
+
+    def learn_from_text(self, text: str) -> OntologyLearning:
+        """Read typed relations out of a sentence and carry them across sessions.
+
+        The feedback path's bridge (Gap 8): a confirmed or corrected statement is
+        read by the project's own ``RelationExtractor``, which maps the sentence's
+        verb phrase onto one of the ontology's real relation types, and every
+        candidate joins the graph through the learner -- bounded by its ceiling and
+        restricted to concepts the ontology already knows. The learned set is then
+        captured to the carry store, so a relation taught in this session is in the
+        graph the next time.
+
+        Returns the ``OntologyLearning`` (what was added or reinforced); an empty
+        learning means the sentence carried no typed relation the ontology could
+        read, which is an honest "nothing learned" rather than an error.
+        """
+        from core.ontology_learner import OntologyLearner, OntologyLearning
+        from core.relation_extraction import RelationExtractor
+
+        ontology = getattr(self.retriever, "ontology", None)
+        if ontology is None or not text.strip():
+            return OntologyLearning(concepts=(), added=(), skipped=0)
+        if self._learner is None:
+            self._learner = OntologyLearner(ontology)
+        extractor = RelationExtractor(ontology, self._learner)
+        learning = extractor.apply(text)
+        if learning.changed:
+            invalidate = getattr(self.retriever, "invalidate", None)
+            if callable(invalidate):
+                invalidate()
+            if self.learned is not None:
+                self.learned.capture(ontology, self._learner)
+        return learning
 
     def _augment(self, question: str, internal: list[RetrievedPassage]) -> WebAugmentation | None:
         """Search the web for a weak question, compare, and learn if trusted."""
@@ -579,6 +687,7 @@ def build_default_assistant(
     web_threshold: float = _WEAK_EVIDENCE,
     on_learn=None,
     bulk: bool = False,
+    learned: LearnedKnowledgeStore | None = None,
 ) -> GroundedAssistant:
     """Assemble the assistant over the project's own knowledge corpus.
 
@@ -592,6 +701,12 @@ def build_default_assistant(
     index has been built (``python -m cli knowledge build-index``) queries are
     served from it in milliseconds; otherwise they fall back to a streaming scan,
     and the store is never loaded whole either way.
+
+    Pass ``learned`` (a :class:`core.knowledge_carry.LearnedKnowledgeStore`) to
+    carry the graph's *learned* relations across sessions: the store is replayed
+    into the fresh ontology before the first question, so knowledge gained in an
+    earlier session is already in the graph (Gap 8). With no store the assistant
+    is exactly as before -- a read-only session never touches disk.
     """
     from core.curriculum_knowledge import seed_curriculum
     from core.documents import build_document_store
@@ -622,7 +737,7 @@ def build_default_assistant(
             retriever=retriever,
         )
 
-    return GroundedAssistant(
+    assistant = GroundedAssistant(
         retriever,
         model=model,
         memory=memory,
@@ -630,7 +745,13 @@ def build_default_assistant(
         web_enabled=web_enabled,
         weak_evidence=web_threshold,
         on_learn=on_learn,
+        learned=learned,
     )
+    if learned is not None:
+        # Replay the previous session's learned relations before the first
+        # question, so the graph is whole from the start.
+        assistant.recall_learned()
+    return assistant
 
 
 __all__ = [

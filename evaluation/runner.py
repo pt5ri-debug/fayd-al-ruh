@@ -22,6 +22,7 @@ from core.embeddings import evaluate_held_out
 from core.evidence import Evidence
 from core.goal import Goal
 from core.grounding import grounding_accuracy
+from core.knowledge_carry import knowledge_carry_accuracy
 from core.observation import Observation
 from core.reasoning_report import reasoning_trace_accuracy
 from core.relation_connections import connection_reasoning_accuracy
@@ -114,6 +115,7 @@ class EvaluationMetrics:
     lead_accuracy: float
     temporal_accuracy: float
     analogy_answer_accuracy: float
+    knowledge_carry_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -891,6 +893,14 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # verdict about a different claim.
     analogy_answer_value = analogy_answer_accuracy()
 
+    # Knowledge carry: held-out expectations about *what survives a session* --
+    # with negative controls (a curated seed is never captured as learned, a
+    # record naming an unknown concept is skipped rather than invented, and a
+    # second restore is a no-op). This is the metric for Gap 8: the graph's
+    # *learned* relations now survive a session boundary instead of being rebuilt
+    # from the seeds every time.
+    carry_value = knowledge_carry_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -949,6 +959,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         lead_value,
         temporal_value,
         analogy_answer_value,
+        carry_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -993,6 +1004,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         lead_accuracy=round(lead_value, 6),
         temporal_accuracy=round(temporal_value, 6),
         analogy_answer_accuracy=round(analogy_answer_value, 6),
+        knowledge_carry_accuracy=round(carry_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

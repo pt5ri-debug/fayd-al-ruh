@@ -107,6 +107,15 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--write", action="store_true", help="Fold the relations into the graph.")
     scan.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
+    carry = sub.add_parser(
+        "carry",
+        help="Carry the graph's learned relations across sessions (Gap 8).",
+    )
+    carry.add_argument("text", nargs="?", help="A statement to teach and carry.")
+    carry.add_argument("--file", help="Read the statement from a file instead.")
+    carry.add_argument("--show", action="store_true", help="Show the carried relations and exit.")
+    carry.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+
     return parser
 
 
@@ -564,6 +573,64 @@ def run_scan(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_carry(args: argparse.Namespace) -> int:
+    """Teach a statement and carry the learned relations across sessions.
+
+    The headless twin of the answer path's own carry: it opens the durable
+    ``LearnedKnowledgeStore`` under the data directory, replays whatever a previous
+    session left there into a fresh seeded graph, optionally reads one more
+    statement into it, and reports what the graph now carries. ``--show`` prints
+    the carried relations without teaching anything.
+    """
+    from core.knowledge_carry import LearnedKnowledgeStore, capture_learned
+    from core.ontology_learner import OntologyLearner
+    from core.paths import data_dir
+    from storage.json_store import JsonStore
+
+    controller = CognitiveController()
+    ontology = controller.ontology
+    learner = OntologyLearner(ontology)
+    store = LearnedKnowledgeStore(JsonStore(data_dir() / "learned-knowledge"))
+
+    restored = store.restore(ontology, learner)
+    taught = None
+    if not args.show:
+        text = _text_from(args)
+        if text is None:
+            return EXIT_NOTHING
+        extractor = controller.relation_extractor
+        extractor.learner = learner
+        taught = extractor.apply(text)
+
+    captured = capture_learned(ontology, learner)
+    store.save(captured)
+    if args.json:
+        print(json.dumps(
+            {
+                "restored": [record.describe() for record in restored.restored],
+                "skipped": [record.describe() for record in restored.skipped],
+                "taught": [list(item) for item in taught.added] if taught else [],
+                "carried": [record.to_primitive() for record in captured],
+            },
+            ensure_ascii=False, indent=2,
+        ))
+        return EXIT_OK
+
+    print(restored.describe())
+    if taught is not None:
+        if taught.changed:
+            for source, relation_type, target in taught.added:
+                print(f"  learned: {source} --{relation_type}--> {target}")
+            for source, target, confidence in taught.reinforced:
+                print(f"  reinforced: {source} -> {target} (confidence {confidence:.2f})")
+        else:
+            print("  (the statement carried no typed relation the graph could read)")
+    print(f"Carried {len(captured)} learned relation(s) for the next session:")
+    for record in captured:
+        print(f"  {record.describe()}")
+    return EXIT_OK
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else sys.argv[1:])
     handlers = {
@@ -577,6 +644,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "causal": run_causal,
         "why": run_why,
         "scan": run_scan,
+        "carry": run_carry,
     }
     handler = handlers.get(args.command)
     if handler is None:
