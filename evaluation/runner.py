@@ -6,6 +6,7 @@ from core.acceptance_policy import rejection_reason
 from core.action import Action
 from core.analogy import analogy_accuracy
 from core.answer_analogy import analogy_answer_accuracy
+from core.answer_audit import answer_path_accuracy
 from core.answer_belief import belief_accuracy
 from core.answer_confidence import answer_confidence_accuracy
 from core.answer_decision import decision_recommendation_accuracy
@@ -116,6 +117,8 @@ class EvaluationMetrics:
     temporal_accuracy: float
     analogy_answer_accuracy: float
     knowledge_carry_accuracy: float
+    # Answer path: the *connected* path, not the isolated layer (Gap 9)
+    answer_path_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -901,6 +904,17 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # from the seeds every time.
     carry_value = knowledge_carry_accuracy()
 
+    # Answer path: held-out expectations about the *connected* answer path, not
+    # the isolated layer -- with negative controls (a definitional, unrelated, or
+    # vague question must carry no reasoning layer at all). Each expectation runs
+    # the real assistant's own ``ask`` and checks what the answer *object* carries
+    # (the plan, recommendation, verdict, comparison, timeline, lead, trace, and
+    # the graph's facts/inferences/connections/causal paths), and, where a layer
+    # is meant to reach the body, that it is in the text the reader sees. This is
+    # the metric for Gap 9: the evaluation measures the connected path, so a layer
+    # that stops reaching the answer fails even while its isolated bridge passes.
+    path_value = answer_path_accuracy(answer_for=_lead_answer_for())
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -960,6 +974,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         temporal_value,
         analogy_answer_value,
         carry_value,
+        path_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1005,6 +1020,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         temporal_accuracy=round(temporal_value, 6),
         analogy_answer_accuracy=round(analogy_answer_value, 6),
         knowledge_carry_accuracy=round(carry_value, 6),
+        answer_path_accuracy=round(path_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

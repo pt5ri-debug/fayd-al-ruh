@@ -4491,3 +4491,61 @@ regression monitor each can refuse a change.
   `tests/test_knowledge_carry.py` pins the record, the seed exclusion, the
   round-trip, the idempotence, the unknown-concept skip, the durable store, the
   assistant wiring, and the gate with its negative controls.
+
+- `core/answer_audit.py` — **the evaluation measures the *connected* answer path,
+  not the isolated layer** (Gap 9). Phases 37-47 bridged every reasoning layer to
+  the answer (causality, uncertainty, the groundedness gate, the trace, planning,
+  decision, belief, temporal, analogy, and the knowledge carry) and gave each
+  bridge its own held-out metric — but those metrics mostly exercise the bridge
+  **in isolation** (they call `answer_plan`/`answer_decision`/`answer_belief`/...
+  directly, or hand the assistant a single question), so a layer that stops
+  reaching the *answer object* the user actually receives could still pass. This
+  module is the honest answer: it asks the **real assistant** its own questions
+  and checks what the answer *object* carries. `answer_layers(answer)` reads the
+  optional objects (plan/decision/belief/analogy/temporal/lead/reasoning/
+  confidence) and the non-empty tuples (facts/inferred/connections/causal) straight
+  off the answer — never guessing, so a layer the bridge produced but the answer
+  dropped is simply absent. `AuditExpectation` names the layers a question's answer
+  **must** carry (`required`), the layers it must **not** (`forbidden`, the
+  negative controls), whether the lead must open the **body** (`body`, not only the
+  object), and whether the check must hand the assistant a short probe conversation
+  (`timeline`, because a timeline needs at least two turns to order).
+  `AUDIT_EXPECTATIONS` is the held-out catalogue: a procedural question must carry
+  the plan and the procedure lead, a decisional one the recommendation, an
+  evaluative one the verdict, an analogical one the comparison, a temporal one the
+  timeline, a connected one the walked connections, a definitional one the graph's
+  stored facts — each positive also requiring the trace — while a definitional,
+  unrelated, or vague question must carry **no** reasoning layer. `audit_answer`
+  runs the real `ask`, reads the layers off the object, checks the two sets, and
+  (when asked) that the lead opens the body; a missing answer or a raised error is
+  a failure, not a skip. `answer_path_accuracy(expectations, answer_for)` is the
+  share of expectations the connected path satisfies; with no `answer_for` the path
+  is not measured, so the honest answer is `0.0` rather than a faked pass. It is
+  **proven to discriminate**: dropping the lead fails the path (`0.0`), leaking a
+  layer into a negative control fails it (`0.9`), and no path scores `0.0` — three
+  regressions an isolated-layer metric would have passed. Wired into the evaluation
+  as the metric `answer_path_accuracy` (`evaluation/benchmark.py`/`runner.py`/
+  `baseline.json`, entering `overall`, 0.984516 → 0.984911).
+  `tests/test_answer_audit.py` pins the catalogue, the layer reading, the negative
+  controls, the body check, the discrimination, and the honest `0.0`.
+
+- Phase 48 — **the evaluation measures the connected answer path, not the isolated
+  layer** (Gap 9): Phases 37-47 bridged every reasoning layer to the answer and gave
+  each bridge a held-out metric, but those metrics mostly exercised the bridge *in
+  isolation*, so a layer that stopped reaching the answer the user actually receives
+  could still pass. `core/answer_audit.py` closes that: `answer_layers` reads the
+  layers off the **answer object** the real `ask` returned, `AuditExpectation` names
+  the layers a question's answer must and must not carry (with the lead required to
+  open the **body**, and a probe conversation for the timeline), `AUDIT_EXPECTATIONS`
+  is the held-out catalogue with negative controls (a definitional, unrelated, or
+  vague question must carry no reasoning layer), `audit_answer` runs the real path,
+  and `answer_path_accuracy` is the share it satisfies — `0.0` when no path is
+  exercised rather than a faked pass. It is **proven to discriminate**: dropping the
+  lead scores `0.0`, leaking a layer into a negative control `0.9`, and no path
+  `0.0`. Wired into `evaluation/benchmark.py`/`runner.py`/`baseline.json` as the
+  metric `answer_path_accuracy` (entering `overall`, 0.984516 → 0.984911), with
+  `tests/test_answer_audit.py` pinning the catalogue, the layer reading, the
+  negative controls, the body check, the discrimination, and the honest `0.0`. This
+  completes the nine gaps of `docs/REASONING_ASSESSMENT.md`; the next step is to
+  **widen** the held-out catalogue (parallel Arabic questions, broader negative
+  controls, multi-step path metrics) rather than close another gap.
