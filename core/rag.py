@@ -294,6 +294,16 @@ class RagRetriever:
             self._retriever.invalidate()
         return True
 
+    def invalidate(self) -> None:
+        """Drop cached ontology-guided rankings after the graph changed.
+
+        Called when the ontology gains a learned relation outside this retriever
+        (e.g. a relation replayed from a previous session by
+        :mod:`core.knowledge_carry`), so the next query sees the new link.
+        """
+        if self._retriever is not None:
+            self._retriever.invalidate()
+
     def retrieve(self, query: str, *, limit: int = 4) -> list[RetrievedPassage]:
         if not query.strip():
             raise ValueError("Retrieval query cannot be empty.")

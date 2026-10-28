@@ -1471,6 +1471,40 @@ Arabic is kept as secondary aliases where useful.
   with provenance and decay (`KnowledgeUpdater`). `core/continuous_learning.py` —
   `ContinuousLearner` (explicit feedback only) + `RegressionMonitor` for baseline
   comparisons. CLI: `python -m ai.learn_demo` / `python -m cli learn`.
+- `core/knowledge_carry.py` — **learned graph knowledge survives a session
+  boundary** (Gap 8). The persistence layer (`KnowledgeStore`/`Snapshot`/
+  `Persistence`/`JsonStore`) existed but was never wired to the answer path, so the
+  graph an answer *read* was rebuilt from the seeds every start and every relation
+  the architecture **learned** (from a confirmed sentence, an ingested document)
+  was thrown away when the process ended. This is the bridge: `LearnedRelation`
+  keys a relation by its two concepts' **labels** (never an internal `CON-…` id,
+  which is regenerated each run); `capture_learned(ontology, learner)` returns the
+  graph's *learned* relations **and only those** — a relation counts as learned
+  only when the learner created it (`is_learned`), so a curated seed is never
+  captured (it is in every session already and restoring it could not change an
+  answer); `restore_learned(ontology, learner, records)` replays records through
+  the **same** `OntologyLearner`, so each replayed link stays bounded by the
+  learner's ceiling and refuses to touch a seeded relation — a record naming an
+  unknown concept is **reported skipped, never invented**, a record whose pair
+  already exists is counted present (never duplicated), and a second restore is a
+  no-op. `LearnedKnowledgeStore` is the durable wrapper over the `Persistence`
+  protocol (one versioned document under `CARRY_NAMESPACE`/`CARRY_KEY`), with
+  `capture`/`restore`/`save`/`load`; an unreadable record is dropped rather than
+  crashing the session. **Nothing runs on its own** — capture and restore are
+  explicit calls, so a read-only session is untouched. `CarryReport` reports what
+  one restore did. Wired into the answer path: `GroundedAssistant` gains
+  `remember_relation()` (writes a relation, drops the retrieval cache, captures the
+  learned set), `recall_learned()` (replays the previous session's learned
+  relations before the first question) and `learn_from_text()` (reads a sentence
+  with the real `RelationExtractor` and captures the result); `build_default_assistant(learned=…)`
+  recalls at build time; `JarvisMode`'s feedback path feeds a confirmed/corrected
+  statement to `learn_from_text`; and `ai/jarvis.build_session` opens the durable
+  store under `data/learned-knowledge` (`_learned_store()`, falling back to no
+  carry on a read-only data directory). CLI:
+  `python -m cli relations carry "<statement>" [--show] [--json]`. Measured by the
+  held-out `knowledge_carry_accuracy` metric (with negative controls: a seed is
+  never captured, an unknown concept is skipped, a second restore does not
+  duplicate).
 - `core/web_source.py` — governed web search: `WebSearchProvider` contract with a
   keyless `WikipediaSearchProvider` (real internet, used by default), an offline
   `StaticSearchProvider`, an `HttpSearchProvider`, and a `FallbackSearchProvider`
@@ -4418,3 +4452,42 @@ regression monitor each can refuse a change.
   `tests/test_answer_analogy.py` pins the cue gate, the comparison, the honest
   non-analogy verdict, the unmapped report, the lead, the body/trace/turn wiring,
   the belief suppression, and the gate with its negative controls.
+
+- Phase 47 — **learned graph knowledge survives a session boundary** (Gap 8): the
+  project carried a whole persistence layer (`KnowledgeStore`, `Snapshot`,
+  `Persistence`, `JsonStore`) but it was never wired to the answer path -- the graph
+  an answer *read* was rebuilt from the seeds on every process start, so a typed
+  relation the architecture **learned** (from a confirmed sentence, an ingested
+  document) was gone the next time. `core/knowledge_carry.py` is the bridge:
+  `LearnedRelation` keys a relation by its two concepts' **labels** (never an
+  internal `CON-…` id, which is regenerated every run, so a record written by one
+  run resolves in another); `capture_learned(ontology, learner)` returns the graph's
+  *learned* relations **and only those** (a relation counts as learned only when the
+  learner created it, so a curated seed is never captured -- it is in every session
+  already and restoring it could not change an answer); `restore_learned(ontology,
+  learner, records)` replays records through the **same** `OntologyLearner`, so each
+  replayed link stays bounded by the learner's ceiling and refuses to touch a seeded
+  relation -- a record naming an unknown concept is **reported skipped, never
+  invented**, a record whose pair already exists is counted present (never
+  duplicated), and a second restore is a no-op. `LearnedKnowledgeStore` is the
+  durable wrapper over the `Persistence` protocol (one versioned document under
+  `CARRY_NAMESPACE`/`CARRY_KEY`), and an unreadable record is dropped rather than
+  crashing the session. **Nothing runs on its own**: capture and restore are explicit
+  calls, so a read-only session is untouched. Wired into the answer path:
+  `GroundedAssistant` gains `remember_relation()` (writes a relation, drops the
+  retrieval cache, captures the learned set), `recall_learned()` (replays the
+  previous session's learned relations before the first question) and
+  `learn_from_text()` (reads a sentence with the real `RelationExtractor` and
+  captures the result); `build_default_assistant(learned=…)` recalls at build time;
+  `JarvisMode`'s feedback path feeds a confirmed/corrected statement to
+  `learn_from_text`; and `ai/jarvis.build_session` opens the durable store under
+  `data/learned-knowledge` (`_learned_store()`, falling back to no carry on a
+  read-only data directory), so a CLI/GUI session really accumulates. The held-out
+  gate `knowledge_carry_accuracy` (`CARRY_JUDGEMENTS`) checks it with **negative
+  controls** -- a curated seed is never captured as learned, a record naming an
+  unknown concept is skipped, and a second restore does not duplicate -- and is a
+  metric in `evaluation/benchmark.py` (overall 0.984071 → 0.984516). CLI:
+  `python -m cli relations carry "<statement>" [--show] [--json]`.
+  `tests/test_knowledge_carry.py` pins the record, the seed exclusion, the
+  round-trip, the idempotence, the unknown-concept skip, the durable store, the
+  assistant wiring, and the gate with its negative controls.

@@ -35,6 +35,7 @@ from core.conversation import ConversationMemory
 from core.documents import build_document_store
 from core.jarvis import HELP_TEXT, TEXT_HELP_TEXT, JarvisMode, JarvisTurn
 from core.jarvis_controls import JarvisControls
+from core.knowledge_carry import LearnedKnowledgeStore
 from core.knowledge_update import KnowledgeUpdater
 from core.paths import data_dir
 from core.preferences import UserPreferences
@@ -79,6 +80,21 @@ def _documents():
         return build_document_store()
 
 
+def _learned_store():
+    """A durable carry for the graph's *learned* relations, or ``None``.
+
+    The relation half of the persistence: a typed relation the architecture learns
+    (from a confirmed statement, an ingested document) is written here and replayed
+    into the next session's ontology, so the graph accumulates across sessions
+    (Gap 8). On a read-only data directory it falls back to no carry at all, and
+    the session behaves exactly as before.
+    """
+    try:
+        return LearnedKnowledgeStore(JsonStore(data_dir() / "learned-knowledge"))
+    except (OSError, ValueError):
+        return None
+
+
 def build_session(
     *,
     root: Path | None = None,
@@ -108,6 +124,7 @@ def build_session(
         web_threshold=web_threshold if web_threshold is not None else _WEAK_EVIDENCE,
         on_learn=documents.save,
         bulk=bulk_knowledge_available(),
+        learned=_learned_store(),
     )
     learner = ContinuousLearner(KnowledgeUpdater(documents))
     router = NaturalLanguageRouter(sandbox)
