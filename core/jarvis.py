@@ -94,6 +94,10 @@ class JarvisTurn:
     readable lines with the path and the mechanism. Rendered under a label that says
     the path is directed (cause → effect), so an association is never read as a
     cause."""
+    plan: tuple[str, ...] = field(default_factory=tuple)
+    """The ordered procedure the corpus states for a question that asks *how*, as
+    readable numbered steps. Empty when the question asks no procedure, so a
+    definitional question carries no plan rather than a guessed one."""
     confidence: float = 0.0
     """The answer's confidence: the retrieved evidence weighed with the graph's own
     reasoning and its contradictions (``core.answer_confidence``). ``0.0`` when the
@@ -257,6 +261,12 @@ class JarvisMode:
         causal = tuple(
             item.describe() for item in getattr(answer, "causal_paths", ()) or ()
         )
+        plan = tuple(
+            f"{index}. {step}"
+            for index, step in enumerate(
+                getattr(getattr(answer, "plan", None), "steps", ()) or (), start=1
+            )
+        )
         report = getattr(answer, "confidence_report", None)
         confidence_note = report.describe() if report is not None else ""
         trace = getattr(answer, "reasoning", None)
@@ -274,6 +284,7 @@ class JarvisMode:
             inferred=inferences,
             connections=connections,
             causal_paths=causal,
+            plan=plan,
             confidence=float(getattr(answer, "confidence", 0.0) or 0.0),
             confidence_note=confidence_note,
             reasoning_trace=reasoning_trace,

@@ -368,6 +368,11 @@ def format_turn(turn: JarvisTurn) -> str:
             "Causal paths the graph states (directed, cause → effect):\n"
             + "\n".join(f"  - {item}" for item in turn.causal_paths)
         )
+    if turn.plan:
+        parts.append(
+            "The procedure the sources state (ordered by the planner):\n"
+            + "\n".join(f"  {item}" for item in turn.plan)
+        )
     if turn.confidence_note:
         parts.append(f"Confidence in this answer (evidence weighed with the graph): {turn.confidence_note}")
     if turn.reasoning_trace:
@@ -391,6 +396,7 @@ def turn_payload(turn: JarvisTurn) -> dict:
         "inferred": list(turn.inferred),
         "connections": list(turn.connections),
         "causal_paths": list(turn.causal_paths),
+        "plan": list(turn.plan),
         "confidence": turn.confidence,
         "confidence_note": turn.confidence_note,
         "reasoning_trace": turn.reasoning_trace,
