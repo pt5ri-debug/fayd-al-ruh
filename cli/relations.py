@@ -465,6 +465,17 @@ def run_why(args: argparse.Namespace) -> int:
                 if answer.decision is not None
                 else None
             ),
+            "belief": (
+                {
+                    "statement": answer.belief.statement,
+                    "confidence": answer.belief.confidence,
+                    "status": answer.belief.status,
+                    "supporting": list(answer.belief.supporting),
+                    "contradicting": list(answer.belief.contradicting),
+                }
+                if answer.belief is not None
+                else None
+            ),
             "reasoning": (
                 {
                     "steps": [

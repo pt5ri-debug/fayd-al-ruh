@@ -9,9 +9,11 @@ is Gap 6 of ``docs/REASONING_ASSESSMENT.md``.
 
 This module assembles that account. :func:`reasoning_report` reads the *data* an
 :class:`~core.assistant.AssistantAnswer` already carries -- the retrieved evidence,
-the graph's stored relations, the relations it entails, the chains it walks, the
-causal paths it states, the contradictions it holds, and the confidence breakdown --
-and renders them as one ordered, labelled, auditable list of steps.
+the graph's stored relations, the procedure the planner ordered, the recommendation
+the decision engine ranked, the belief the graph supports, the relations it entails,
+the chains it walks, the causal paths it states, the contradictions it holds, and the
+confidence breakdown -- and renders them as one ordered, labelled, auditable list of
+steps.
 
 It is **read-only** and **honest by construction**: every step names the source it
 came from (the evidence, the graph, or a derivation), it never adds a fact the
@@ -25,6 +27,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
+from core.answer_belief import AnswerBelief
 from core.answer_confidence import AnswerConfidence
 from core.answer_decision import AnswerDecision
 from core.answer_plan import AnswerPlan
@@ -40,6 +43,7 @@ SOURCE_EVIDENCE = "Retrieved evidence"
 SOURCE_STORED = "Stored in the knowledge graph"
 SOURCE_PLAN = "The procedure the corpus states (ordered by the planner)"
 SOURCE_DECISION = "The options the graph states (ranked by the decision engine)"
+SOURCE_BELIEF = "The evidence-weighed belief the graph supports"
 SOURCE_INFERRED = "Entailed by the graph (derived, not stored)"
 SOURCE_CONNECTIONS = "Walked connections (multi-hop, not stored)"
 SOURCE_CAUSAL = "Directed causal paths the graph states"
@@ -53,6 +57,7 @@ STEP_ORDER: tuple[str, ...] = (
     SOURCE_STORED,
     SOURCE_PLAN,
     SOURCE_DECISION,
+    SOURCE_BELIEF,
     SOURCE_INFERRED,
     SOURCE_CONNECTIONS,
     SOURCE_CAUSAL,
@@ -146,6 +151,17 @@ def _decision_lines(decision: AnswerDecision | None) -> tuple[str, ...]:
     )
 
 
+def _belief_lines(belief: AnswerBelief | None) -> tuple[str, ...]:
+    if belief is None:
+        return ()
+    lines = [
+        f"{belief.statement} — confidence {belief.confidence:.2f} ({belief.status})"
+    ]
+    lines.extend(f"supports: {line}" for line in belief.supporting)
+    lines.extend(f"contradicts: {line}" for line in belief.contradicting)
+    return tuple(lines)
+
+
 def reasoning_report(
     question: str,
     *,
@@ -153,6 +169,7 @@ def reasoning_report(
     relation_facts: Iterable[RelationFact] = (),
     plan: AnswerPlan | None = None,
     decision: AnswerDecision | None = None,
+    belief: AnswerBelief | None = None,
     inferred: Iterable[InferredRelation] = (),
     connections: Iterable[ConceptConnection] = (),
     causal_paths: Iterable[CausalExplanation] = (),
@@ -173,6 +190,9 @@ def reasoning_report(
         ),
         ReasoningStep(
             SOURCE_DECISION, _decision_lines(decision), derived=True
+        ),
+        ReasoningStep(
+            SOURCE_BELIEF, _belief_lines(belief), derived=True
         ),
         ReasoningStep(
             SOURCE_INFERRED, tuple(item.describe() for item in inferred), derived=True
@@ -248,6 +268,13 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
         "the graph's options ranked by the decision engine are a derivation",
     ),
     TraceJudgement(
+        "one belief",
+        (SOURCE_BELIEF,),
+        0,
+        1,
+        "the graph's edges weighed by the belief engine are a derivation",
+    ),
+    TraceJudgement(
         "one walked connection",
         (SOURCE_CONNECTIONS,),
         0,
@@ -271,6 +298,7 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
             SOURCE_STORED,
             SOURCE_PLAN,
             SOURCE_DECISION,
+            SOURCE_BELIEF,
             SOURCE_INFERRED,
             SOURCE_CONNECTIONS,
             SOURCE_CAUSAL,
@@ -278,8 +306,8 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
             SOURCE_CONFIDENCE,
         ),
         4,
-        5,
-        "every step filled, four stored and five derived",
+        6,
+        "every step filled, four stored and six derived",
     ),
 )
 
@@ -290,6 +318,7 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
     facts: tuple[RelationFact, ...] = ()
     plan: AnswerPlan | None = None
     decision: AnswerDecision | None = None
+    belief: AnswerBelief | None = None
     inferred: tuple[InferredRelation, ...] = ()
     connections: tuple[ConceptConnection, ...] = ()
     causal: tuple[CausalExplanation, ...] = ()
@@ -317,6 +346,14 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
             selected="acid_stimulation",
             options=(("acid_stimulation", "increases", 0.7), ("porosity", "increases", 0.6)),
             sentences=("Selected: acid_stimulation.",),
+        )
+    if SOURCE_BELIEF in judgement.filled:
+        belief = AnswerBelief(
+            statement="does acid stimulation increase permeability?",
+            confidence=0.71,
+            status="provisional",
+            supporting=("acid_stimulation —increases→ permeability (confidence 0.70)",),
+            contradicting=(),
         )
     if SOURCE_INFERRED in judgement.filled:
         inferred = (InferredRelation("a", "is_a", "b", 0.5, ("a —is_a→ b",)),)
@@ -358,6 +395,7 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
         relation_facts=facts,
         plan=plan,
         decision=decision,
+        belief=belief,
         inferred=inferred,
         connections=connections,
         causal_paths=causal,
@@ -402,6 +440,7 @@ def reasoning_trace_accuracy(
 
 
 __all__ = [
+    "SOURCE_BELIEF",
     "SOURCE_CAUSAL",
     "SOURCE_CONFIDENCE",
     "SOURCE_CONFLICTS",
@@ -409,6 +448,7 @@ __all__ = [
     "SOURCE_DECISION",
     "SOURCE_EVIDENCE",
     "SOURCE_INFERRED",
+    "SOURCE_PLAN",
     "SOURCE_STORED",
     "STEP_ORDER",
     "TRACE_JUDGEMENTS",

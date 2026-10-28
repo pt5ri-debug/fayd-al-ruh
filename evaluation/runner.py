@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from core.acceptance_policy import rejection_reason
 from core.action import Action
 from core.analogy import analogy_accuracy
+from core.answer_belief import belief_accuracy
 from core.answer_confidence import answer_confidence_accuracy
 from core.answer_decision import decision_recommendation_accuracy
 from core.answer_plan import plan_accuracy
@@ -106,6 +107,7 @@ class EvaluationMetrics:
     reasoning_trace_accuracy: float
     plan_accuracy: float
     decision_recommendation_accuracy: float
+    belief_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -836,6 +838,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # finally lets a "what should I do?" question reach the decision engine.
     decision_value = decision_recommendation_accuracy()
 
+    # Belief: held-out expectations about the belief bridge -- with negative
+    # controls (a definitional question, a plain statement, or an evaluative
+    # question the graph cannot speak to must yield *no* belief). This is the
+    # metric for the layer that finally lets a "is ... true?" question reach the
+    # belief revision engine.
+    belief_value = belief_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -890,6 +899,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         trace_value,
         plan_value,
         decision_value,
+        belief_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -930,6 +940,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         reasoning_trace_accuracy=round(trace_value, 6),
         plan_accuracy=round(plan_value, 6),
         decision_recommendation_accuracy=round(decision_value, 6),
+        belief_accuracy=round(belief_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

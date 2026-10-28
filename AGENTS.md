@@ -843,7 +843,8 @@ Arabic is kept as secondary aliases where useful.
 - `core/reasoning_report.py` — the **user-visible reasoning trace**: the one place
   that assembles *"How this answer was reached"* from data already on
   `AssistantAnswer` (retrieved evidence, the graph relations used, the corpus
-  procedure ordered by the planner, multi-hop connections, directed causal paths,
+  procedure ordered by the planner, the recommendation the decision engine ranked,
+  the belief the graph supports, multi-hop connections, directed causal paths,
   stored contradictions, and the confidence breakdown), so the reasoning layer is
   visible, not only auditable.
   `ReasoningStep` (`label`/`lines`/`derived`) is one step -- a derived step is a
@@ -853,8 +854,9 @@ Arabic is kept as secondary aliases where useful.
   `derived_steps` selecting only the derivations that carry content, `is_empty`,
   and a `describe()` that opens with the title and then lists each step (an empty
   step reads `(nothing)`, never hidden). `reasoning_report(question, *, passages,
-  relation_facts, plan, relation_conflicts, inferred, connections, causal_paths,
-  confidence)` is the one builder: it invents nothing and calls no new engine, so
+  relation_facts, plan, decision, belief, relation_conflicts, inferred,
+  connections, causal_paths, confidence)` is the one builder: it invents nothing and
+  calls no new engine, so
   the trace can never claim more than the answer already held. It reaches
   `AssistantAnswer.reasoning` (`core/assistant.py`) and, through
   `JarvisTurn.reasoning_trace`, `ai/chat.format_turn`/`turn_payload` -- and so the
@@ -923,6 +925,38 @@ Arabic is kept as secondary aliases where useful.
   (`DECISION_JUDGEMENTS`) checks the bridge with **negative controls** -- a
   definitional, unrelated, or unanswerable question must yield no recommendation --
   and is a metric in `evaluation/benchmark.py`.
+- `core/answer_belief.py` — the **belief bridge**: the evidence-weighed verdict the
+  knowledge graph supports for a question that asks *whether a claim holds*, run
+  through the project's real `BeliefRevisionEngine`. The belief layer
+  (`Belief`/`BeliefRevisionEngine`/`ConfidenceModel`/`ContradictionDetector`) was
+  reachable only from the `CognitiveController` and the evaluation scenarios, so an
+  evaluative question ("does acid stimulation increase permeability?") got a
+  definition back, never the verdict the graph already supports -- the belief part
+  of Gap 7 of `docs/REASONING_ASSESSMENT.md`. `is_evaluative(question)` recognises
+  a question that asks for a verdict (English and Arabic cues), **anchored to the
+  question's opening** (or an unambiguous verdict phrase anywhere), so a
+  definitional "what is permeability?" is never read as evaluative and a question
+  that merely *contains* "is" ("what is the graph?") never fires. The evidence is
+  the graph's own **typed edges whose both endpoints are concepts the question
+  names**, each turned into an `Evidence` record carrying the relation type in its
+  metadata -- which is what lets the engine's `ContradictionDetector` recognise two
+  antonymous relations on the same ordered pair as a genuine disagreement. The
+  confidence and the lifecycle status that reach the reader are the ones
+  `BeliefRevisionEngine.revise` actually produced (its own evidence-weighted
+  posterior and contradiction detection), so a modestly-seeded claim is honestly
+  *provisional* rather than *accepted*. It is **read-only** -- nothing here changes
+  the knowledge graph -- and it never invents evidence the graph did not state, and
+  returns ``None`` rather than a guess when the question names fewer than two
+  concepts or no edge connects them. It reaches every surface the answer already
+  reaches: `AssistantAnswer.belief` is set in `GroundedAssistant.ask`; it becomes a
+  new `SOURCE_BELIEF` step in `core.reasoning_report` (fixed position: after the
+  decision, before the other derivations); `JarvisTurn.belief` carries the readable
+  lines, so `ai/chat.format_turn` and `turn_payload` render them (and the GUI gets
+  them for free); and `python -m cli relations why` prints them inside the trace and
+  in its ``--json``. The held-out gate `belief_accuracy` (`BELIEF_JUDGEMENTS`)
+  checks the bridge with **negative controls** -- a definitional question, a plain
+  statement, an evaluative question naming one concept, or one the graph cannot
+  speak to must yield no belief -- and is a metric in `evaluation/benchmark.py`.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python

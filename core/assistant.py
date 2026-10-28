@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from core.answer_belief import AnswerBelief, answer_belief
 from core.answer_confidence import AnswerConfidence, answer_confidence
 from core.answer_decision import AnswerDecision, answer_decision
 from core.answer_plan import AnswerPlan, answer_plan
@@ -155,6 +156,21 @@ class AssistantAnswer:
     asks nothing to do (a definitional "what is permeability?") or the graph states
     no option in the direction asked for -- never a guessed recommendation.
     """
+    belief: AnswerBelief | None = None
+    """The evidence-weighed belief the graph supports, for a question that asks
+    *whether a claim holds*.
+
+    The belief layer (`Belief`/`BeliefRevisionEngine`/`ConfidenceModel`/
+    `ContradictionDetector`) was reachable only from the controller and the
+    evaluation scenarios, so an evaluative question ("is acid stimulation
+    increasing permeability?") got a definition back, never the evidence-weighed
+    verdict the knowledge graph already supports. This is the first time a belief
+    reaches an answer: the graph's own typed edges between the concepts the
+    question names, weighed by the project's real ``BeliefRevisionEngine`` (its own
+    evidence-weighted posterior and contradiction detection). ``None`` when the
+    question asks no verdict (a definitional "what is permeability?") or the graph
+    holds no edge between the concepts it names -- never a guessed belief.
+    """
     confidence_report: AnswerConfidence | None = None
     """How the confidence was reached: the evidence term, the graph support it
     gained, and the contradiction penalty it lost.
@@ -254,6 +270,9 @@ class GroundedAssistant:
         graph_decision = answer_decision(
             question, ontology=getattr(self.retriever, "ontology", None)
         )
+        graph_belief = answer_belief(
+            question, ontology=getattr(self.retriever, "ontology", None)
+        )
 
         # The answer's confidence weighs the retrieved evidence *and* what the graph
         # reasoned: entailed relations, walked connections, stated causal paths, and
@@ -276,6 +295,7 @@ class GroundedAssistant:
             relation_facts=facts,
             plan=graph_plan,
             decision=graph_decision,
+            belief=graph_belief,
             inferred=graph_inferences,
             connections=graph_connections,
             causal_paths=graph_causal,
@@ -302,6 +322,7 @@ class GroundedAssistant:
             causal_paths=graph_causal,
             plan=graph_plan,
             decision=graph_decision,
+            belief=graph_belief,
             confidence_report=confidence_report,
             reasoning=trace,
         )
