@@ -161,6 +161,31 @@ def _course_document(course) -> Document:
     )
 
 
+def _arabic_documents() -> list[Document]:
+    """The project's knowledge as citable Arabic documents (Phase 50).
+
+    The project is Arabic-first, but before Phase 50 every document here was
+    English, so an Arabic answer's *body* was English even when its Arabic
+    reasoning frame was Arabic. These are the same disciplines, courses, and
+    corpus entries rendered into Arabic sentences by ``core.arabic_prose`` -- one
+    document each, so retrieval ranks the relevant Arabic text first and a
+    retrieved Arabic answer can quote and cite Arabic like any other source. It
+    invents nothing: every line is derived from the seeded graph.
+    """
+    from core.arabic_prose import arabic_document_sections
+
+    return [
+        Document(
+            doc_id=doc_id,
+            title=title,
+            text="\n".join(lines),
+            source="arabic_prose",
+            metadata={"kind": "arabic_knowledge", "language": "ar"},
+        )
+        for doc_id, title, lines in arabic_document_sections()
+    ]
+
+
 def build_knowledge_documents() -> list[Document]:
     """Turn the seeded disciplines, courses, and corpus into citable documents."""
     from core.learned_knowledge import learned_documents
@@ -168,6 +193,7 @@ def build_knowledge_documents() -> list[Document]:
     documents = [_discipline_document(discipline) for discipline in disciplines()]
     documents.extend(_course_document(course) for course in courses())
     documents.extend(corpus_documents())
+    documents.extend(_arabic_documents())
     documents.extend(learned_documents())
     return documents
 
