@@ -66,6 +66,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("knowledge_carry_accuracy", True, label="Knowledge carry accuracy (held-out cross-session shapes)"),
     MetricSpec("answer_path_accuracy", True, label="Answer path accuracy (held-out connected-path shapes)"),
     MetricSpec("arabic_answer_path_accuracy", True, label="Arabic answer path accuracy (held-out connected-path shapes)"),
+    MetricSpec("arabic_readable_body_accuracy", True, label="Arabic readable body accuracy (held-out: no identifier leaks into an Arabic body)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )

@@ -124,6 +124,12 @@ class AnswerDecision:
     sentences: tuple[str, ...]
     """The decision engine's own explanation: the selection and each option's scores."""
 
+    labels: tuple[str, ...] = ()
+    """The concept labels the question named, kept apart so a surface can join them
+    with the connective of the *question's* language (``" and "`` in English,
+    ``" و"`` in Arabic) instead of the English-only join ``goal`` carries. Empty on
+    an object built before this field, in which case ``goal`` is used as it is."""
+
     def describe(self) -> str:
         """The recommendation as a heading followed by its ranked options."""
         if self.direction:
@@ -288,6 +294,7 @@ def _decide(
         selected=trace.selected.action.name,
         options=ranked,
         sentences=DecisionExplainer().explain(trace),
+        labels=tuple(labels),
     )
 
 

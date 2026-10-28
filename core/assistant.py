@@ -323,6 +323,7 @@ class GroundedAssistant:
             analogy=graph_analogy,
             belief=graph_belief,
             temporal=graph_temporal,
+            ontology=ontology,
         )
         lead_text = lead.describe() if lead is not None else ""
 

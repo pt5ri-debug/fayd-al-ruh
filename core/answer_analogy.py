@@ -124,9 +124,11 @@ class AnswerAnalogy:
             lines = [head]
             lines.extend(f"  - تطابق: {line}" for line in self.matched)
             if self.transferred:
+                from core.arabic_prose import relation_arabic
+
                 lines.append("  - استنتاجات مرشَّحة (غير مؤكَّدة):")
                 lines.extend(
-                    f"    {source} —{relation}→ {target} (ثقة {confidence:.2f})"
+                    f"    {source} {relation_arabic(relation)} {target} (ثقة {confidence:.2f})"
                     for source, relation, target, confidence in self.transferred
                 )
             if self.unmapped_base:
@@ -195,20 +197,45 @@ def _named_concepts(ontology: Ontology, question: str) -> list[str]:
     return labels
 
 
-def _matched_lines(analogy: Analogy) -> tuple[str, ...]:
-    """The mapped relations as readable lines, literal matches first."""
+def _matched_lines(analogy: Analogy, language: str, ontology: Ontology | None) -> tuple[str, ...]:
+    """The mapped relations as readable lines, literal matches first.
+
+    In Arabic the concept names are rendered with
+    :func:`core.arabic_prose.arabic_render` and the relation with
+    :func:`core.arabic_prose.relation_arabic`, so an Arabic comparison does not
+    carry an English identifier or a ``--relation-->`` arrow; the structural
+    ``==`` that marks a mapped pair is kept either way, because it is the shape
+    the comparison is about.
+    """
+    render = None
+    if language == "ar":
+        from core.arabic_prose import arabic_render, relation_arabic
+
+        render = (arabic_render, relation_arabic)
     rows: list[tuple[int, str]] = []
     for match in analogy.mapping.matched_edges:
         base, counterpart = match.base, match.target
         marker = "" if match.exact else " (by role)"
-        rows.append(
-            (
-                0 if match.exact else 1,
+        if render is not None:
+            arabic_render, relation_arabic = render
+            left = (
+                f"{arabic_render(base.source, ontology)} {relation_arabic(base.relation_type)}"
+                f" {arabic_render(base.target, ontology)}"
+            )
+            right = (
+                f"{arabic_render(counterpart.source, ontology)}"
+                f" {relation_arabic(counterpart.relation_type)}"
+                f" {arabic_render(counterpart.target, ontology)}"
+            )
+            marker = "" if match.exact else " (بحسب الدور)"
+            line = f"{left}  ==  {right}{marker}"
+        else:
+            line = (
                 f"{base.source} --{base.relation_type}--> {base.target}"
                 f"  ==  {counterpart.source} --{counterpart.relation_type}-->"
-                f" {counterpart.target}{marker}",
+                f" {counterpart.target}{marker}"
             )
-        )
+        rows.append((0 if match.exact else 1, line))
     rows.sort(key=lambda row: (row[0], row[1]))
     return tuple(line for _rank, line in rows)
 
@@ -225,15 +252,36 @@ def _build(
     """Align two named concepts and package the engine's own verdict."""
     analogy = AnalogyEngine(ontology).between_concepts(base, target, hops=hops)
     transferred = analogy.mapping.transferred()[:limit]
+    if language == "ar":
+        from core.arabic_prose import arabic_render
+
+        base = arabic_render(base, ontology)
+        target = arabic_render(target, ontology)
+        transferred = tuple(
+            (
+                arabic_render(source, ontology),
+                relation,
+                arabic_render(tgt, ontology),
+                confidence,
+            )
+            for source, relation, tgt, confidence in transferred
+        )
+        unmapped_base = tuple(arabic_render(node, ontology) for node in analogy.mapping.unmapped_base_nodes)
+        unmapped_target = tuple(
+            arabic_render(node, ontology) for node in analogy.mapping.unmapped_target_nodes
+        )
+    else:
+        unmapped_base = analogy.mapping.unmapped_base_nodes
+        unmapped_target = analogy.mapping.unmapped_target_nodes
     return AnswerAnalogy(
         base=base,
         target=target,
         meaningful=analogy.is_meaningful,
         score=analogy.score,
-        matched=_matched_lines(analogy),
+        matched=_matched_lines(analogy, language, ontology),
         transferred=transferred,
-        unmapped_base=analogy.mapping.unmapped_base_nodes,
-        unmapped_target=analogy.mapping.unmapped_target_nodes,
+        unmapped_base=unmapped_base,
+        unmapped_target=unmapped_target,
         language=language,
     )
 
