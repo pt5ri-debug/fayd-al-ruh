@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from core.answer_confidence import AnswerConfidence, answer_confidence
+from core.answer_decision import AnswerDecision, answer_decision
 from core.answer_plan import AnswerPlan, answer_plan
 from core.causal_paths import CausalExplanation, causal_explanations
 from core.conversation import Conversation, ConversationMemory
@@ -141,6 +142,19 @@ class AssistantAnswer:
     question asks no procedure (a definitional "what is porosity?") or no entry
     matches -- never a guessed plan.
     """
+    decision: AnswerDecision | None = None
+    """The ranked recommendation the graph states, for a question that asks what to do.
+
+    The decision layer (`DecisionEngine`/`UtilityModel`/`RiskModel`/
+    `DecisionExplainer`) was reachable only from the controller and the evaluation
+    scenarios, so a decisional question ("what should I do to increase
+    permeability?") got a definition back, never the ranked recommendation the
+    knowledge graph already states. This is the first time a recommendation reaches
+    an answer: the graph's own typed edges into the concept the question is about,
+    ranked by the project's real ``DecisionEngine``. ``None`` when the question
+    asks nothing to do (a definitional "what is permeability?") or the graph states
+    no option in the direction asked for -- never a guessed recommendation.
+    """
     confidence_report: AnswerConfidence | None = None
     """How the confidence was reached: the evidence term, the graph support it
     gained, and the contradiction penalty it lost.
@@ -237,6 +251,9 @@ class GroundedAssistant:
         graph_connections = concept_connections(getattr(self.retriever, "ontology", None), question)
         graph_causal = causal_explanations(getattr(self.retriever, "ontology", None), question)
         graph_plan = answer_plan(question)
+        graph_decision = answer_decision(
+            question, ontology=getattr(self.retriever, "ontology", None)
+        )
 
         # The answer's confidence weighs the retrieved evidence *and* what the graph
         # reasoned: entailed relations, walked connections, stated causal paths, and
@@ -258,6 +275,7 @@ class GroundedAssistant:
             passages=passages,
             relation_facts=facts,
             plan=graph_plan,
+            decision=graph_decision,
             inferred=graph_inferences,
             connections=graph_connections,
             causal_paths=graph_causal,
@@ -283,6 +301,7 @@ class GroundedAssistant:
             connections=graph_connections,
             causal_paths=graph_causal,
             plan=graph_plan,
+            decision=graph_decision,
             confidence_report=confidence_report,
             reasoning=trace,
         )

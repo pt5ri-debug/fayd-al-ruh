@@ -98,6 +98,11 @@ class JarvisTurn:
     """The ordered procedure the corpus states for a question that asks *how*, as
     readable numbered steps. Empty when the question asks no procedure, so a
     definitional question carries no plan rather than a guessed one."""
+    decision: tuple[str, ...] = field(default_factory=tuple)
+    """The ranked recommendation the graph states for a question that asks what to
+    do, as readable lines (``acid_stimulation (increases, confidence 0.70)``).
+    Empty when the question asks nothing to do, so a definitional question carries
+    no recommendation rather than a guessed one."""
     confidence: float = 0.0
     """The answer's confidence: the retrieved evidence weighed with the graph's own
     reasoning and its contradictions (``core.answer_confidence``). ``0.0`` when the
@@ -267,6 +272,12 @@ class JarvisMode:
                 getattr(getattr(answer, "plan", None), "steps", ()) or (), start=1
             )
         )
+        decision = tuple(
+            f"{option} ({relation}, confidence {confidence:.2f})"
+            for option, relation, confidence in (
+                getattr(getattr(answer, "decision", None), "options", ()) or ()
+            )
+        )
         report = getattr(answer, "confidence_report", None)
         confidence_note = report.describe() if report is not None else ""
         trace = getattr(answer, "reasoning", None)
@@ -285,6 +296,7 @@ class JarvisMode:
             connections=connections,
             causal_paths=causal,
             plan=plan,
+            decision=decision,
             confidence=float(getattr(answer, "confidence", 0.0) or 0.0),
             confidence_note=confidence_note,
             reasoning_trace=reasoning_trace,

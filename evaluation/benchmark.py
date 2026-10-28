@@ -58,6 +58,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("grounding_accuracy", True, label="Grounding gate accuracy (held-out publish decisions)"),
     MetricSpec("reasoning_trace_accuracy", True, label="Reasoning trace accuracy (held-out trace shapes)"),
     MetricSpec("plan_accuracy", True, label="Plan accuracy (held-out plan shapes)"),
+    MetricSpec("decision_recommendation_accuracy", True, label="Decision recommendation accuracy (held-out decision shapes)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )

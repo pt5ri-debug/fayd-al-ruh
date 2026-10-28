@@ -452,6 +452,19 @@ def run_why(args: argparse.Namespace) -> int:
                 if answer.plan is not None
                 else None
             ),
+            "decision": (
+                {
+                    "goal": answer.decision.goal,
+                    "direction": answer.decision.direction,
+                    "selected": answer.decision.selected,
+                    "options": [
+                        {"option": option, "relation": relation, "confidence": confidence}
+                        for option, relation, confidence in answer.decision.options
+                    ],
+                }
+                if answer.decision is not None
+                else None
+            ),
             "reasoning": (
                 {
                     "steps": [
