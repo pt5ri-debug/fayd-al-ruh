@@ -4589,8 +4589,22 @@ regression monitor each can refuse a change.
   ontology and returns text, writes nothing, and leaves every English block exactly
   as it was. Wired into `ml.llm.corpus.arabic_sentences()` (the corpus's Arabic
   share moved from **0% to ~20%**) and `core.documents._arabic_documents()`.
+  Phase 51 adds the **display** seam: `arabic_render(label, ontology)` is the same
+  resolution as `arabic_label` but *never leaves a Latin identifier raw* -- a label
+  the glossary has not reached is read as the words it is spelled with
+  (`injection_pattern` -> `injection pattern`) rather than a code token -- and
+  `render_arabic_text(text, ontology)` is the one pass over an assembled Arabic
+  text that applies it to every snake_case identifier, so a reasoning layer that
+  prints a *label* (the decision's options, the belief's evidence, the analogy's
+  mapped edges) cannot leak one into the body. Its identifier pattern mirrors
+  `core.composition`'s (Latin-only boundaries, so an Arabic `لـ` prefix does not
+  hide the token behind it), it is idempotent, and it is distinct from
+  `arabic_label`, which the *training corpus* uses and which must keep returning the
+  English label unchanged.
   `tests/test_arabic_prose.py` pins the renderer, the tables, the label resolution,
-  the composer bug it exposed, and the corpus/document wiring.
+  the composer bug it exposed, and the corpus/document wiring;
+  `tests/test_arabic_identifiers.py` pins the display seam, the reasoning layers'
+  Arabic, and the whole-answer leak measurement.
 
 - Phase 48 — **the evaluation measures the connected answer path, not the isolated
   layer** (Gap 9): Phases 37-47 bridged every reasoning layer to the answer and gave
@@ -4686,3 +4700,44 @@ regression monitor each can refuse a change.
   the label resolution, the composer bug, and the corpus/document wiring. Gates:
   pytest 4190 passed / 200 skipped, ruff clean, mypy 750 files OK, evaluation PASS
   (`overall` 0.9853 unchanged, `semantic_separation` 0.5427 unchanged).
+- Phase 51 — **concept identifiers rendered readably in Arabic answers**. Phase 49
+  fixed the input (an Arabic question reaches the graph) and Phase 50 fixed the
+  *output path* (the corpus and the citable documents are Arabic). A measured battery
+  then found the remaining leak: the **reasoning layers** print the graph's own
+  concept *labels* in the answer **body**, and a label is snake_case, so an Arabic
+  answer carried code tokens -- `shut_in`, `injection_pattern`,
+  `blowout_preventer_stack` -- 25 across 8 questions. The leak had **two** causes and
+  the phase fixes both. (A) A *rendering* bug: `arabic_label` deliberately returns an
+  unknown label verbatim (the training corpus must not invent a term), so a label the
+  glossary had no Arabic alias for reached the reader as an identifier. The new
+  `core.arabic_prose.arabic_render(label, ontology)` is the **display** counterpart:
+  it resolves through the same aliases, and for a label it does not hold it reads the
+  *words the label is spelled with* (`injection_pattern` -> `injection pattern`) --
+  never a code token, never an invented term -- while still leaving a Latin
+  identifier the domain keeps (`SPE`) alone. `render_arabic_text(text, ontology)` is
+  the one pass over an assembled Arabic text that applies it to every snake_case
+  identifier, with Latin-only boundaries (so an Arabic `لـ` prefix does not hide the
+  token behind it) and idempotent. (B) A *coverage* gap: 258 of the 495 seeded
+  concepts had **no** Arabic alias at all, so there was no term to render them with;
+  the curated `ARABIC_ALIASES` table gained those 258 (grouped by domain --
+  geoscience, rock mechanics, reservoir, drilling, completions, stimulation, EOR,
+  artificial lift, subsea, safety/environment, economics, computing/mathematics,
+  physics/chemistry, professional practice), moving coverage from **237/495 (48%) to
+  495/495 (100%)**. The reasoning layers were made language-aware rather than
+  English-only: `core.answer_belief` builds its evidence lines in the question's
+  language and carries a `language` field; `core.answer_analogy` renders its
+  matched/transferred edges and endpoints; `core.answer_decision` carries the
+  question's `labels` so the recommendation lead joins them with the Arabic
+  connective `و` instead of the English `" and "`; and `core.answer_lead` threads the
+  ontology through the procedure/recommendation/verdict/comparison builders and
+  renders the assembled Arabic lead. The English path is byte-identical (the English
+  recommendation still shows `acid_stimulation`). A new held-out metric
+  `arabic_readable_body_accuracy` (in `core.answer_audit.py`'s
+  `ARABIC_READABLE_EXPECTATIONS`, `evaluation/runner.py`, `benchmark.py`, and
+  `baseline.json`) runs the **connected path** and fails if any identifier survives,
+  so a regression is caught on the real answer, not only in a unit test.
+  `tests/test_arabic_identifiers.py` pins the renderer, the pass, the reasoning
+  layers' Arabic, the English negative control, and the whole-answer leak
+  measurement (0 leaks across a 12-question Arabic battery). Gates: pytest
+  4206 passed / 200 skipped, ruff clean, mypy 751 files OK, evaluation PASS
+  (`arabic_readable_body_accuracy` 1.0000; `overall` 0.9853 → 0.9856).

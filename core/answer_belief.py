@@ -92,8 +92,28 @@ class AnswerBelief:
     """The graph edges that oppose the claim, as readable lines. Empty when the
     graph is consistent on this claim."""
 
+    language: str = "en"
+    """``"ar"`` or ``"en"`` -- the language the verdict's evidence lines were
+    written in. Defaults to English, so an object built before this field (or a
+    caller that names no language) is unchanged."""
+
     def describe(self) -> str:
         """The verdict as a heading followed by the evidence it rests on."""
+        if self.language == "ar":
+            head = (
+                f"الحكم المرجَّح بالدليل على «{self.statement}»: "
+                f"ثقة {self.confidence:.2f} ({self.status})."
+            )
+            lines = [head]
+            if self.supporting:
+                lines.append("  ما يدعم الادعاء:")
+                lines.extend(f"    - {line}" for line in self.supporting)
+            if self.contradicting:
+                lines.append("  ما يعارض الادعاء:")
+                lines.extend(f"    - {line}" for line in self.contradicting)
+            if not self.supporting and not self.contradicting:
+                lines.append("  لا توجد حافة في الرسم تربط مفاهيم الادعاء.")
+            return "\n".join(lines)
         head = (
             f"Evidence-weighed belief in \"{self.statement}\": "
             f"confidence {self.confidence:.2f} ({self.status})."
@@ -137,7 +157,7 @@ def _named_concepts(ontology: Ontology, question: str) -> list[str]:
 
 
 def _evidence(
-    ontology: Ontology, concept_ids: list[str]
+    ontology: Ontology, concept_ids: list[str], *, language: str = "en"
 ) -> tuple[list[Evidence], tuple[str, ...]]:
     """One ``Evidence`` record per graph edge between the question's concepts.
 
@@ -147,6 +167,12 @@ def _evidence(
     engine's ``ContradictionDetector`` recognise two *antonymous* relations on the
     same ordered pair as a genuine disagreement. Returns the records and the
     readable lines, strongest first then by labels.
+
+    When ``language`` is ``"ar"`` the readable line is written in Arabic (the
+    concepts by their Arabic term, the relation by its Arabic clause), so an
+    Arabic verdict does not carry an English identifier in its evidence; the
+    record's own ``description`` stays English, because it is what the belief
+    engine's ``Evidence`` carries and what the confidence is computed over.
     """
     wanted = set(concept_ids)
     labels = {concept_id: concept.label for concept_id, concept in ontology.concepts.items()}
@@ -159,6 +185,13 @@ def _evidence(
         if source is None or target is None:
             continue
         line = f"{source} —{relation.relation_type}→ {target} (confidence {relation.confidence:.2f})"
+        if language == "ar":
+            from core.arabic_prose import arabic_render, relation_arabic
+
+            line = (
+                f"{arabic_render(source, ontology)} {relation_arabic(relation.relation_type)} "
+                f"{arabic_render(target, ontology)} (ثقة {relation.confidence:.2f})"
+            )
         record = Evidence(
             description=line,
             source=GRAPH_SOURCE,
@@ -184,7 +217,10 @@ def _decide(
     concept_ids = _named_concepts(ontology, question)
     if len(concept_ids) < 2:
         return None
-    evidence, lines = _evidence(ontology, concept_ids)
+    from core.voices import detect_language
+
+    language = detect_language(question)
+    evidence, lines = _evidence(ontology, concept_ids, language=language)
     if not evidence:
         return None
 
@@ -202,6 +238,7 @@ def _decide(
         status=belief.status.value,
         supporting=supporting,
         contradicting=contradicting,
+        language=language,
     )
 
 

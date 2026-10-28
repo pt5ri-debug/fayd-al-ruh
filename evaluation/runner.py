@@ -6,7 +6,11 @@ from core.acceptance_policy import rejection_reason
 from core.action import Action
 from core.analogy import analogy_accuracy
 from core.answer_analogy import analogy_answer_accuracy
-from core.answer_audit import AUDIT_EXPECTATIONS_AR, answer_path_accuracy
+from core.answer_audit import (
+    ARABIC_READABLE_EXPECTATIONS,
+    AUDIT_EXPECTATIONS_AR,
+    answer_path_accuracy,
+)
 from core.answer_belief import belief_accuracy
 from core.answer_confidence import answer_confidence_accuracy
 from core.answer_decision import decision_recommendation_accuracy
@@ -121,6 +125,13 @@ class EvaluationMetrics:
     answer_path_accuracy: float
     # ... and the same path in Arabic (Phase 49)
     arabic_answer_path_accuracy: float
+    """The Arabic twin of ``answer_path_accuracy``: the connected path in Arabic."""
+
+    arabic_readable_body_accuracy: float
+    """An Arabic answer that names concepts must name them readably (Phase 51):
+    the share of held-out Arabic questions whose body carries no snake_case
+    identifier (``shut_in``, ``injection_pattern``)."""
+
     semantic_separation: float
     # Aggregate
     overall: float
@@ -927,6 +938,15 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         AUDIT_EXPECTATIONS_AR, answer_for=_lead_answer_for()
     )
 
+    # Arabic readable body (Phase 51): an Arabic answer that names concepts must
+    # name them *readably* -- the graph's snake_case identifiers (``shut_in``,
+    # ``injection_pattern``) reached the body as code tokens before this phase. The
+    # metric runs the same connected path and fails if any identifier survives, so
+    # a regression that stops rendering them is caught here.
+    arabic_readable_value = answer_path_accuracy(
+        ARABIC_READABLE_EXPECTATIONS, answer_for=_lead_answer_for()
+    )
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -988,6 +1008,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         carry_value,
         path_value,
         arabic_path_value,
+        arabic_readable_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1035,6 +1056,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         knowledge_carry_accuracy=round(carry_value, 6),
         answer_path_accuracy=round(path_value, 6),
         arabic_answer_path_accuracy=round(arabic_path_value, 6),
+        arabic_readable_body_accuracy=round(arabic_readable_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

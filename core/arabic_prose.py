@@ -32,6 +32,7 @@ existing test or metric moves because of it.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 from core.arabic_glossary import ARABIC_ALIASES, has_arabic
@@ -405,9 +406,57 @@ def arabic_label(label: str, ontology: Ontology | None = None) -> str:
     return TOPIC_ARABIC.get(label, label)
 
 
+def arabic_render(label: str, ontology: Ontology | None = None) -> str:
+    """A concept label rendered for an Arabic answer *body*.
+
+    :func:`arabic_label` leaves an unknown label exactly as it is, which is right
+    for the training corpus (a term must never be invented) but wrong for a reader:
+    a concept the glossary has not reached yet (``shut_in``, ``injection_pattern``)
+    reached an Arabic answer body as a snake_case identifier, which is what the
+    Phase 51 measurement found. This renders the label *readably* instead -- the
+    Arabic term when one exists, otherwise the identifier with its underscores
+    turned to spaces -- so a Latin identifier never leaks into Arabic prose as a
+    code token. It still never invents a term: an unknown label becomes the words
+    it is already spelled with, nothing more.
+    """
+    term = arabic_label(label, ontology)
+    if has_arabic(term) or term != label:
+        return term
+    return label.replace("_", " ").strip() or label
+
+
 def relation_arabic(relation_type: str) -> str:
     """The Arabic clause for a relation type, or the honest default."""
     return RELATION_ARABIC.get(relation_type, DEFAULT_RELATION_ARABIC)
+
+
+#: A snake_case identifier, the shape a concept label takes in the graph. Mirrors
+#: ``core.composition``'s own pattern (the model-output half), so an identifier is
+#: recognised the same way whichever surface reads it. The boundary is
+#: **Latin-only**: an Arabic prefix (the ``لـ`` a heading writes before a concept)
+#: must not hide the identifier behind it, which a ``\w`` boundary would.
+_IDENTIFIER_RE = re.compile(
+    r"(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+(?![A-Za-z0-9_])"
+)
+
+
+def render_arabic_text(text: str, ontology: Ontology | None = None) -> str:
+    """Render every snake_case identifier in an Arabic text readably.
+
+    The reasoning layers (``core.answer_lead``) and the citable documents
+    (``arabic_document_sections``) print concept labels, and a label the glossary
+    has not reached yet (``shut_in``, ``injection_pattern``,
+    ``blowout_preventer_stack``) reached an Arabic answer body as a code token --
+    the leak the Phase 51 measurement found (25 identifiers across 8 questions).
+    This is the one pass that closes it: each identifier is replaced by
+    :func:`arabic_render`, which prefers the ontology's Arabic alias and otherwise
+    only removes the code separator. Applied to the assembled text, so it catches
+    an identifier whichever helper printed it, and it is idempotent (Arabic output
+    carries no identifier). It never invents a term.
+    """
+    if not text or "_" not in text:
+        return text
+    return _IDENTIFIER_RE.sub(lambda match: arabic_render(match.group(0), ontology), text)
 
 
 def arabic_relation_sentence(source: str, relation_type: str, target: str) -> str:
@@ -596,7 +645,7 @@ def arabic_document_sections(
             lines.append(f"مفاهيم {title}: {'، '.join(dict.fromkeys(concept_terms))}.")
         relation_lines = [
             arabic_relation_sentence(
-                arabic_label(source, graph), relation, arabic_label(target, graph)
+                arabic_render(source, graph), relation, arabic_render(target, graph)
             )
             for source, target, relation, _confidence in entry.facts
         ]
@@ -629,6 +678,8 @@ __all__ = [
     "arabic_label",
     "arabic_procedural_sentences",
     "arabic_relation_sentence",
+    "arabic_render",
     "arabic_sentence_blocks",
     "relation_arabic",
+    "render_arabic_text",
 ]

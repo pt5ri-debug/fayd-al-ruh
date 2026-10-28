@@ -27,7 +27,7 @@ so there is no second script check.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from core.voices import detect_language
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from core.answer_decision import AnswerDecision
     from core.answer_plan import AnswerPlan
     from core.answer_temporal import AnswerTemporal
+    from core.ontology import Ontology
 
 #: The lead kinds, strongest first: a question that asks *how* is answered with
 #: the procedure, one that asks *what to do* with the recommendation, one that asks
@@ -86,7 +87,7 @@ class AnswerLead:
         return f"{self.heading}\n{self.body}"
 
 
-def _procedure_lead(plan: AnswerPlan, language: str) -> AnswerLead:
+def _procedure_lead(plan: AnswerPlan, language: str, ontology: Ontology | None = None) -> AnswerLead:
     """The plan bridge as an answer lead: the corpus's ordered steps.
 
     The heading names the corpus entry the procedure came from (``plan.source``),
@@ -96,7 +97,10 @@ def _procedure_lead(plan: AnswerPlan, language: str) -> AnswerLead:
     """
     steps = plan.steps
     if language == "ar":
-        heading = f"يحمل متن المشروع هذا الإجراء لـ{plan.topic} ({plan.source}):"
+        from core.arabic_prose import arabic_render
+
+        topic = arabic_render(plan.topic, ontology)
+        heading = f"يحمل متن المشروع هذا الإجراء لـ{topic} ({plan.source}):"
         body = "\n".join(f"  {index}. {step}" for index, step in enumerate(steps, start=1))
     else:
         heading = f"The corpus states this procedure for {plan.topic} ({plan.source}):"
@@ -104,15 +108,27 @@ def _procedure_lead(plan: AnswerPlan, language: str) -> AnswerLead:
     return AnswerLead(KIND_PROCEDURE, heading, body, language)
 
 
-def _recommendation_lead(decision: AnswerDecision, language: str) -> AnswerLead:
-    """The decision bridge as an answer lead: the graph's ranked options."""
+def _recommendation_lead(
+    decision: AnswerDecision, language: str, ontology: Ontology | None = None
+) -> AnswerLead:
+    """The decision bridge as an answer lead: the graph's ranked options.
+
+    The option names and the goal are the graph's own *labels*, so each is rendered
+    with :func:`core.arabic_prose.arabic_render` in Arabic -- the Arabic term when
+    the glossary has one, otherwise the words the label is spelled with -- so no
+    identifier (``casing``, ``blowout_preventer_stack``) reaches the reader.
+    """
     options = decision.options
     if language == "ar":
-        heading = (
-            f"الخيارات المرجّحة التي يحملها الرسم البياني لـ{decision.goal}:"
-        )
+        from core.arabic_prose import arabic_render, relation_arabic
+
+        # Join the question's own concepts with the Arabic connective (" و") rather
+        # than the English " and " the ``goal`` string carries.
+        labels = decision.labels or tuple(decision.goal.split(" and "))
+        goal = " و".join(arabic_render(label, ontology) for label in labels)
+        heading = f"الخيارات المرجّحة التي يحملها الرسم البياني لـ{goal}:"
         body = "\n".join(
-            f"  - {option} ({relation}، ثقة {confidence:.2f})"
+            f"  - {arabic_render(option, ontology)} ({relation_arabic(relation)}، ثقة {confidence:.2f})"
             for option, relation, confidence in options
         )
     else:
@@ -125,7 +141,13 @@ def _recommendation_lead(decision: AnswerDecision, language: str) -> AnswerLead:
 
 
 def _verdict_lead(belief: AnswerBelief, language: str) -> AnswerLead:
-    """The belief bridge as an answer lead: the evidence-weighed verdict."""
+    """The belief bridge as an answer lead: the evidence-weighed verdict.
+
+    The support lines are the belief's **own** (``belief.supporting`` /
+    ``belief.contradicting``), which are already written in the belief's language,
+    so an Arabic verdict shows Arabic evidence rather than the English identifiers
+    the belief was built from.
+    """
     status = belief.status
     if language == "ar":
         status = _STATUS_AR.get(status, status)
@@ -179,9 +201,11 @@ def _analogy_lead(analogy: AnswerAnalogy, language: str) -> AnswerLead:
             heading = f"المقارنة البنيوية بين {analogy.base} و{analogy.target}: لا يوجد نظام علاقات مشترك."
         lines = [f"  - تطابق: {line}" for line in analogy.matched]
         if analogy.transferred:
+            from core.arabic_prose import relation_arabic
+
             lines.append("  - استنتاجات مرشَّحة (غير مؤكَّدة):")
             lines.extend(
-                f"    {source} —{relation}→ {target} (ثقة {confidence:.2f})"
+                f"    {source} {relation_arabic(relation)} {target} (ثقة {confidence:.2f})"
                 for source, relation, target, confidence in analogy.transferred
             )
     else:
@@ -214,6 +238,7 @@ def answer_lead(
     belief: AnswerBelief | None = None,
     temporal: AnswerTemporal | None = None,
     language: str | None = None,
+    ontology: Ontology | None = None,
 ) -> AnswerLead | None:
     """The lead the question warrants, or ``None`` when no bridge fired.
 
@@ -222,21 +247,34 @@ def answer_lead(
     built, so a question is never handed two competing leads. ``None`` means the
     answer keeps its retrieval opening: nothing is invented to fill a lead a
     question did not earn.
+
+    An Arabic lead is rendered readably (:func:`core.arabic_prose.render_arabic_text`)
+    when an ``ontology`` is given, so a concept label the glossary has not reached
+    yet (``shut_in``) does not reach the reader as a snake_case identifier.
     """
     if not question.strip():
         return None
     lang = language or detect_language(question)
+    lead: AnswerLead | None = None
     if plan is not None and plan.steps:
-        return _procedure_lead(plan, lang)
-    if decision is not None and decision.options:
-        return _recommendation_lead(decision, lang)
-    if analogy is not None and analogy.matched:
-        return _analogy_lead(analogy, lang)
-    if belief is not None:
-        return _verdict_lead(belief, lang)
-    if temporal is not None and temporal.entries:
-        return _timeline_lead(temporal, lang)
-    return None
+        lead = _procedure_lead(plan, lang, ontology)
+    elif decision is not None and decision.options:
+        lead = _recommendation_lead(decision, lang, ontology)
+    elif analogy is not None and analogy.matched:
+        lead = _analogy_lead(analogy, lang)
+    elif belief is not None:
+        lead = _verdict_lead(belief, lang)
+    elif temporal is not None and temporal.entries:
+        lead = _timeline_lead(temporal, lang)
+    if lead is None or lang != "ar":
+        return lead
+    from core.arabic_prose import render_arabic_text
+
+    return replace(
+        lead,
+        heading=render_arabic_text(lead.heading, ontology),
+        body=render_arabic_text(lead.body, ontology),
+    )
 
 
 @dataclass(frozen=True)

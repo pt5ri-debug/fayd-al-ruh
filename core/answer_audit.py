@@ -155,6 +155,16 @@ class AuditExpectation:
     forbidden: tuple[str, ...] = ()
     body: bool = False
     timeline: bool = False
+    readable: bool = False
+    """Ask that no snake_case concept identifier reach the answer body.
+
+    Set on an Arabic expectation whose answer names concepts (the recommendation,
+    the verdict, the comparison): the graph's own labels are snake_case, and
+    before Phase 51 they reached the reader as code tokens (``shut_in``,
+    ``injection_pattern``). A ``readable`` expectation fails if any survives, so a
+    regression that stops rendering them is caught on the connected path, not only
+    in the unit test.
+    """
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -297,6 +307,38 @@ AUDIT_EXPECTATIONS_AR: tuple[AuditExpectation, ...] = (
     ),
 )
 
+#: The Phase 51 catalogue: an Arabic answer that names concepts must name them
+#: **readably**. Each question reaches a different layer that prints graph labels
+#: (the recommendation, the verdict, the comparison), and ``readable`` asks that no
+#: snake_case identifier survive in the body. Held-out from the unit tests' battery
+#: -- a couple of questions differ -- so the metric is not a copy of the test.
+ARABIC_READABLE_EXPECTATIONS: tuple[AuditExpectation, ...] = (
+    AuditExpectation(
+        "توصية عربية بلا معرّفات إنجليزية",
+        "ماذا أفعل لزيادة الإنتاج؟",
+        required=(LAYER_DECISION,),
+        readable=True,
+    ),
+    AuditExpectation(
+        "حكم عربي بلا معرّفات إنجليزية",
+        "هل التحميض يزيد النفاذية؟",
+        required=(LAYER_BELIEF,),
+        readable=True,
+    ),
+    AuditExpectation(
+        "مقارنة عربية بلا معرّفات إنجليزية",
+        "هل التكسير الهيدروليكي مثل التحميض؟",
+        required=(LAYER_ANALOGY,),
+        readable=True,
+    ),
+    AuditExpectation(
+        "توصية عربية عند التحكم في الآبار بلا معرّفات",
+        "ماذا أفعل للتحكم في الاندفاع؟",
+        required=(LAYER_DECISION,),
+        readable=True,
+    ),
+)
+
 
 def _probe_conversation():
     """A minimal four-turn conversation, so a temporal question can earn a timeline.
@@ -330,6 +372,18 @@ def _lead_in_body(answer: AssistantAnswer) -> bool:
     return bool(lead.heading) and text.startswith(lead.heading)
 
 
+def _no_identifier_in_body(answer: AssistantAnswer) -> bool:
+    """Whether the answer body carries no snake_case concept identifier.
+
+    The graph's labels are snake_case, and Phase 51 renders them readably for an
+    Arabic reader (:func:`core.arabic_prose.render_arabic_text`); a body that still
+    carries one is the leak the Phase 51 measurement found.
+    """
+    from core.arabic_prose import _IDENTIFIER_RE
+
+    return not _IDENTIFIER_RE.search(answer.text or "")
+
+
 def audit_answer(
     expectation: AuditExpectation,
     answer_for,
@@ -338,8 +392,9 @@ def audit_answer(
 
     Runs ``answer_for`` (the assistant's own ``ask``), reads the layers off the
     answer object, and checks the required/forbidden sets and, when asked, that
-    the lead is in the body. A missing answer or a raised error is a failure, not
-    a skip: the point of the audit is that the connected path must deliver.
+    the lead is in the body and that no identifier leaks into it. A missing answer
+    or a raised error is a failure, not a skip: the point of the audit is that the
+    connected path must deliver.
     """
     kwargs: dict[str, object] = {}
     if expectation.timeline:
@@ -356,6 +411,8 @@ def audit_answer(
     if set(expectation.forbidden) & layers:
         return False
     if expectation.body and not _lead_in_body(answer):
+        return False
+    if expectation.readable and not _no_identifier_in_body(answer):
         return False
     return True
 
@@ -382,6 +439,7 @@ def answer_path_accuracy(
 
 __all__ = [
     "ALL_LAYERS",
+    "ARABIC_READABLE_EXPECTATIONS",
     "AUDIT_EXPECTATIONS",
     "AUDIT_EXPECTATIONS_AR",
     "LAYER_ANALOGY",

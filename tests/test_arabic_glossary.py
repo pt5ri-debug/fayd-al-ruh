@@ -42,10 +42,10 @@ def test_controller_applies_the_glossary_on_start(controller):
     assert covered >= 200, "the Arabic frame must reach the seeded concepts"
 
 
-def test_glossary_covers_most_of_the_seeded_concepts(controller):
-    """The gap Phase 49 closed: 39/495 before, most of them after."""
+def test_glossary_covers_the_seeded_concepts(controller):
+    """The gap Phase 49 opened and Phase 51 closed: 39/495 before, all after."""
     covered, total = arabic_alias_coverage(controller.ontology)
-    assert covered / total > 0.4
+    assert covered == total, "every seeded concept carries an Arabic term"
 
 
 def test_glossary_is_idempotent(controller):
@@ -86,9 +86,14 @@ def test_glossary_never_touches_a_relation():
 
 
 def test_missing_arabic_labels_reports_the_remaining_gap(controller):
+    """Phase 51 closed the last of the gap, so the honest report is now empty.
+
+    The helper still reports what it finds rather than hiding it -- the seed has no
+    uncovered concept left, so it returns ``()``; the property (sorted, no Arabic)
+    is checked on a table the ontology does not fully hold.
+    """
     missing = missing_arabic_labels(controller.ontology)
-    assert missing, "an honest report still names what is uncovered"
-    assert all(not has_arabic(label) for label in missing)
+    assert missing == (), "every seeded concept now carries an Arabic term"
     assert missing == tuple(sorted(missing))
 
 
