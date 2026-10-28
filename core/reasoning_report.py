@@ -27,6 +27,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
+from core.answer_analogy import AnswerAnalogy
 from core.answer_belief import AnswerBelief
 from core.answer_confidence import AnswerConfidence
 from core.answer_decision import AnswerDecision
@@ -44,6 +45,7 @@ SOURCE_EVIDENCE = "Retrieved evidence"
 SOURCE_STORED = "Stored in the knowledge graph"
 SOURCE_PLAN = "The procedure the corpus states (ordered by the planner)"
 SOURCE_DECISION = "The options the graph states (ranked by the decision engine)"
+SOURCE_ANALOGY = "The structural analogy the graph supports (aligned by structure mapping)"
 SOURCE_BELIEF = "The evidence-weighed belief the graph supports"
 SOURCE_INFERRED = "Entailed by the graph (derived, not stored)"
 SOURCE_CONNECTIONS = "Walked connections (multi-hop, not stored)"
@@ -59,6 +61,7 @@ STEP_ORDER: tuple[str, ...] = (
     SOURCE_STORED,
     SOURCE_PLAN,
     SOURCE_DECISION,
+    SOURCE_ANALOGY,
     SOURCE_BELIEF,
     SOURCE_INFERRED,
     SOURCE_CONNECTIONS,
@@ -154,6 +157,23 @@ def _decision_lines(decision: AnswerDecision | None) -> tuple[str, ...]:
     )
 
 
+def _analogy_lines(analogy: AnswerAnalogy | None) -> tuple[str, ...]:
+    if analogy is None:
+        return ()
+    verdict = "meaningful analogy" if analogy.meaningful else "not an analogy"
+    lines = [f"{analogy.base} ~ {analogy.target} ({verdict}, score {analogy.score:.2f})"]
+    lines.extend(f"matched: {line}" for line in analogy.matched)
+    lines.extend(
+        f"candidate: {source} --{relation}--> {target} (confidence {confidence:.2f})"
+        for source, relation, target, confidence in analogy.transferred
+    )
+    if analogy.unmapped_base:
+        lines.append(f"unmapped in {analogy.base}: {', '.join(analogy.unmapped_base)}")
+    if analogy.unmapped_target:
+        lines.append(f"unmapped in {analogy.target}: {', '.join(analogy.unmapped_target)}")
+    return tuple(lines)
+
+
 def _belief_lines(belief: AnswerBelief | None) -> tuple[str, ...]:
     if belief is None:
         return ()
@@ -189,6 +209,7 @@ def reasoning_report(
     relation_facts: Iterable[RelationFact] = (),
     plan: AnswerPlan | None = None,
     decision: AnswerDecision | None = None,
+    analogy: AnswerAnalogy | None = None,
     belief: AnswerBelief | None = None,
     inferred: Iterable[InferredRelation] = (),
     connections: Iterable[ConceptConnection] = (),
@@ -211,6 +232,9 @@ def reasoning_report(
         ),
         ReasoningStep(
             SOURCE_DECISION, _decision_lines(decision), derived=True
+        ),
+        ReasoningStep(
+            SOURCE_ANALOGY, _analogy_lines(analogy), derived=True
         ),
         ReasoningStep(
             SOURCE_BELIEF, _belief_lines(belief), derived=True
@@ -290,6 +314,13 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
         "the graph's options ranked by the decision engine are a derivation",
     ),
     TraceJudgement(
+        "one analogy",
+        (SOURCE_ANALOGY,),
+        0,
+        1,
+        "two neighbourhoods aligned by structure mapping are a derivation",
+    ),
+    TraceJudgement(
         "one belief",
         (SOURCE_BELIEF,),
         0,
@@ -327,6 +358,7 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
             SOURCE_STORED,
             SOURCE_PLAN,
             SOURCE_DECISION,
+            SOURCE_ANALOGY,
             SOURCE_BELIEF,
             SOURCE_INFERRED,
             SOURCE_CONNECTIONS,
@@ -336,8 +368,8 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
             SOURCE_CONFIDENCE,
         ),
         4,
-        7,
-        "every step filled, four stored and seven derived",
+        8,
+        "every step filled, four stored and eight derived",
     ),
 )
 
@@ -348,6 +380,7 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
     facts: tuple[RelationFact, ...] = ()
     plan: AnswerPlan | None = None
     decision: AnswerDecision | None = None
+    analogy: AnswerAnalogy | None = None
     belief: AnswerBelief | None = None
     inferred: tuple[InferredRelation, ...] = ()
     connections: tuple[ConceptConnection, ...] = ()
@@ -377,6 +410,18 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
             selected="acid_stimulation",
             options=(("acid_stimulation", "increases", 0.7), ("porosity", "increases", 0.6)),
             sentences=("Selected: acid_stimulation.",),
+        )
+    if SOURCE_ANALOGY in judgement.filled:
+        analogy = AnswerAnalogy(
+            base="porosity",
+            target="permeability",
+            meaningful=True,
+            score=23.8,
+            matched=("core_sample --measures--> porosity  ==  core_sample --measures--> permeability",),
+            transferred=(("rock", "contains", "porosity", 0.4),),
+            unmapped_base=(),
+            unmapped_target=("waterflood",),
+            language="en",
         )
     if SOURCE_BELIEF in judgement.filled:
         belief = AnswerBelief(
@@ -443,6 +488,7 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
         relation_facts=facts,
         plan=plan,
         decision=decision,
+        analogy=analogy,
         belief=belief,
         inferred=inferred,
         connections=connections,
@@ -489,6 +535,7 @@ def reasoning_trace_accuracy(
 
 
 __all__ = [
+    "SOURCE_ANALOGY",
     "SOURCE_BELIEF",
     "SOURCE_CAUSAL",
     "SOURCE_CONFIDENCE",

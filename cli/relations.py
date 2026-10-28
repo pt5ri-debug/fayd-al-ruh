@@ -497,6 +497,21 @@ def run_why(args: argparse.Namespace) -> int:
                 if answer.temporal is not None
                 else None
             ),
+            "analogy": (
+                {
+                    "base": answer.analogy.base,
+                    "target": answer.analogy.target,
+                    "meaningful": answer.analogy.meaningful,
+                    "score": answer.analogy.score,
+                    "matched": list(answer.analogy.matched),
+                    "transferred": [
+                        {"source": source, "relation": relation, "target": target, "confidence": confidence}
+                        for source, relation, target, confidence in answer.analogy.transferred
+                    ],
+                }
+                if answer.analogy is not None
+                else None
+            ),
             "reasoning": (
                 {
                     "steps": [

@@ -48,6 +48,7 @@
   "metrics": {
     "acceptance_gate_accuracy": 1.0,
     "analogy_accuracy": 1.0,
+    "analogy_answer_accuracy": 1.0,
     "answer_confidence_accuracy": 1.0,
     "belief_accuracy": 1.0,
     "brier_score": 0.018302,
@@ -65,7 +66,7 @@
     "grounding_accuracy": 1.0,
     "inference_accuracy": 1.0,
     "lead_accuracy": 1.0,
-    "overall": 0.983628,
+    "overall": 0.984071,
     "petroleum_causal_accuracy": 1.0,
     "petroleum_generalisation_accuracy": 1.0,
     "petroleum_inference_accuracy": 1.0,

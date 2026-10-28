@@ -964,9 +964,9 @@ Arabic is kept as secondary aliases where useful.
   **body** was still the retrieval template ("Here is what the available sources
   say about ..."), so the reasoning sat in a footer a reader may never open. This
   module puts the reasoning **in the answer itself**. `answer_lead(question,
-  plan=, decision=, belief=, temporal=)` builds the lead strongest-first —
-  procedure, then recommendation, then verdict, then timeline — and only the first
-  that applies, so a question is
+  plan=, decision=, analogy=, belief=, temporal=)` builds the lead strongest-first —
+  procedure, then recommendation, then comparison, then verdict, then timeline — and
+  only the first that applies, so a question is
   never handed two competing leads. Each lead is a *named* source: the procedure
   heading names the corpus entry it came from (`plan.source`), the recommendation
   lists the graph's ranked options, and the verdict states the claim, its
@@ -1024,6 +1024,43 @@ Arabic is kept as secondary aliases where useful.
   (`TEMPORAL_JUDGEMENTS`) checks the bridge with **negative controls** -- a
   definitional or unrelated question, or a temporal question with one event, must
   yield no timeline -- and is a metric in `evaluation/benchmark.py`.
+- `core/answer_analogy.py` — the **analogy bridge**: the analogical half of Gap 7
+  of `docs/REASONING_ASSESSMENT.md`, and the last isolated engine in it. The
+  project carried a whole analogical layer (`AnalogyEngine`,
+  `StructureMappingEngine`, `Structure`, `StructureMapping`) but it was reachable
+  only from the controller, `cli/analogy.py`, and the evaluation scenarios, so a
+  question like *"is porosity like permeability?"* got a definition back -- or,
+  worse, the belief bridge read its `is ... ?` opening as a verdict about a
+  *different* claim ("does porosity increase permeability?"). `answer_analogy(
+  question, *, ontology=, hops=, limit=)` reads the concepts the question names,
+  builds each one's relational neighbourhood, and aligns them with the project's
+  real `AnalogyEngine` (through `StructureMappingEngine`) -- so the comparison that
+  reaches the reader is the one the structure-mapping engine actually produced:
+  its matched relations, its systematicity, and its **candidate inferences** (each
+  a *candidate*, discounted by how much of the structure really aligned, and never
+  asserted into the graph). It is gated to an *analogical* question
+  (`is_analogical`, `ANALOGY_CUES` in either language, over a normalised question
+  so "what is porosity like?" fires like an interior "like"), so a definitional
+  question never drags a comparison into its answer, and it returns ``None``
+  rather than a guess when the question names fewer than two known concepts. It is
+  **honest by construction**: it reports the engine's own `meaningful` verdict even
+  when it is `False` -- a pair sharing no relational system is said to be *not* an
+  analogy, not dressed up as one -- and it reports what it could **not** map as
+  well as what it could. `AnswerAnalogy` carries the `base`/`target`, the
+  `meaningful` verdict, the `score`, the `matched` relations, the `transferred`
+  inferences, the `unmapped_base`/`unmapped_target`, and the `language`; `describe()`
+  renders the comparison. The comparison can open the answer as a lead
+  (`core.answer_lead`'s `KIND_ANALOGY`, between recommendation and verdict) and it
+  is carried on the machine-readable turn (`JarvisTurn.analogy`,
+  `turn_payload["analogy"]`), in the reasoning trace
+  (`core.reasoning_report.SOURCE_ANALOGY`), and in `cli relations why --json`. It
+  also stops the belief bridge from answering a comparison as a claim
+  (`is_analogical` → no belief). The held-out gate `analogy_answer_accuracy`
+  (`ANALOGY_ANSWER_JUDGEMENTS`) checks the bridge with **negative controls** -- a
+  definitional question, an unrelated one, or an analogical question naming one
+  concept must yield no comparison, and a pair with no shared relational system
+  must be reported as *not* an analogy -- and is a metric in
+  `evaluation/benchmark.py`.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
@@ -4346,3 +4383,38 @@ regression monitor each can refuse a change.
   `tests/test_answer_temporal.py` pins the cue gate, the chronological order, the
   latest change, the pattern and its prediction, the conversation source, the
   lead, the body/trace/turn wiring, and the gate with its negative controls.
+
+- Phase 46 — **the structural analogy reaches the answer** (the analogical half of
+  Gap 7, and its last isolated engine): the project carried a whole analogical
+  layer (`AnalogyEngine`, `StructureMappingEngine`, `Structure`, `StructureMapping`)
+  but it was reachable only from the controller, `cli/analogy.py`, and the
+  evaluation scenarios, so *"is porosity like permeability?"* got a definition
+  back -- or, worse, the belief bridge read its `is ... ?` opening as a verdict
+  about a *different* claim ("does porosity increase permeability?").
+  `core/answer_analogy.py` closes it: `answer_analogy(question, *, ontology=,
+  hops=, limit=)` reads the concepts the question names, builds each one's
+  relational neighbourhood, and aligns them with the project's real `AnalogyEngine`
+  (through `StructureMappingEngine`), so the comparison that reaches the reader is
+  the one the structure-mapping engine actually produced -- its matched relations,
+  its systematicity, and its candidate inferences (each a *candidate*, discounted
+  by how much of the structure really aligned, and never asserted into the graph).
+  It is gated to an *analogical* question (`is_analogical`, `ANALOGY_CUES` in
+  either language, over a normalised question so "what is porosity like?" fires
+  like an interior "like"), and returns ``None`` rather than a guess when the
+  question names fewer than two known concepts. It is **honest by construction**:
+  it reports the engine's own `meaningful` verdict even when it is `False` (a pair
+  sharing no relational system is said to be *not* an analogy, not dressed up as
+  one) and reports what it could **not** map as well as what it could. The
+  comparison can open the answer as a lead (`core.answer_lead`'s `KIND_ANALOGY`,
+  between recommendation and verdict), and it is carried on the machine-readable
+  turn (`JarvisTurn.analogy`, `turn_payload["analogy"]`), in the reasoning trace
+  (`core.reasoning_report.SOURCE_ANALOGY`), and in `cli relations why --json`; it
+  also stops the belief bridge from answering a comparison as a claim. The held-out
+  gate `analogy_answer_accuracy` (`ANALOGY_ANSWER_JUDGEMENTS`) checks it with
+  **negative controls** -- a definitional question, an unrelated one, or an
+  analogical question naming one concept must yield no comparison, and a pair with
+  no shared relational system must be reported as *not* an analogy -- and is a
+  metric in `evaluation/benchmark.py` (overall 0.9836 → 0.9841).
+  `tests/test_answer_analogy.py` pins the cue gate, the comparison, the honest
+  non-analogy verdict, the unmapped report, the lead, the body/trace/turn wiring,
+  the belief suppression, and the gate with its negative controls.

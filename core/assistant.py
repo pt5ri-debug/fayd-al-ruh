@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from core.answer_analogy import AnswerAnalogy, answer_analogy, is_analogical
 from core.answer_belief import AnswerBelief, answer_belief
 from core.answer_confidence import AnswerConfidence, answer_confidence
 from core.answer_decision import AnswerDecision, answer_decision
@@ -217,6 +218,20 @@ class AssistantAnswer:
     question asks nothing temporal or the conversation holds fewer than two turns
     -- never a guessed timeline.
     """
+    analogy: AnswerAnalogy | None = None
+    """The structural comparison the graph holds, for a question that asks how two
+    things are alike.
+
+    The analogical layer (`AnalogyEngine`/`StructureMappingEngine`) was reachable
+    only from the controller, the ``analogy`` CLI, and the evaluation scenarios, so
+    a question like *"is porosity like permeability?"* got a definition back -- or,
+    worse, the belief bridge read its ``is ... ?`` opening as a verdict about a
+    *different* claim. This is the first time a structural comparison reaches an
+    answer: the two concepts' relational neighbourhoods aligned by the real
+    structure-mapping engine, with its own matches, its own systematicity, and its
+    own candidate inferences (never asserted). ``None`` when the question asks no
+    comparison, names fewer than two concepts, or the mapping has no match to show.
+    """
 
     def __post_init__(self) -> None:
         if not self.text.strip():
@@ -283,12 +298,19 @@ class GroundedAssistant:
         ontology = getattr(self.retriever, "ontology", None)
         graph_plan = answer_plan(question)
         graph_decision = answer_decision(question, ontology=ontology)
-        graph_belief = answer_belief(question, ontology=ontology)
+        graph_analogy = answer_analogy(question, ontology=ontology)
+        # A question that asks *how two things are alike* is a comparison, not a
+        # yes/no claim about a relation between them: without this, "is porosity
+        # like permeability?" would also earn a belief verdict about a *different*
+        # statement ("does porosity increase permeability?") and the trace would
+        # show reasoning the reader never asked for.
+        graph_belief = None if is_analogical(question) else answer_belief(question, ontology=ontology)
         graph_temporal = answer_temporal(question, conversation=conversation)
         lead = answer_lead(
             question,
             plan=graph_plan,
             decision=graph_decision,
+            analogy=graph_analogy,
             belief=graph_belief,
             temporal=graph_temporal,
         )
@@ -336,6 +358,7 @@ class GroundedAssistant:
             relation_facts=facts,
             plan=graph_plan,
             decision=graph_decision,
+            analogy=graph_analogy,
             belief=graph_belief,
             inferred=graph_inferences,
             connections=graph_connections,
@@ -369,6 +392,7 @@ class GroundedAssistant:
             reasoning=trace,
             lead=lead,
             temporal=graph_temporal,
+            analogy=graph_analogy,
         )
 
     def _augment(self, question: str, internal: list[RetrievedPassage]) -> WebAugmentation | None:
