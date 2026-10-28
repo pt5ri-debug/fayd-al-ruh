@@ -8,6 +8,7 @@ from core.analogy import analogy_accuracy
 from core.answer_belief import belief_accuracy
 from core.answer_confidence import answer_confidence_accuracy
 from core.answer_decision import decision_recommendation_accuracy
+from core.answer_lead import lead_accuracy
 from core.answer_plan import plan_accuracy
 from core.belief import Belief
 from core.belief_revision import BeliefRevisionEngine
@@ -108,6 +109,7 @@ class EvaluationMetrics:
     plan_accuracy: float
     decision_recommendation_accuracy: float
     belief_accuracy: float
+    lead_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -119,6 +121,23 @@ class EvaluationReport:
     scenarios: tuple[ScenarioResult, ...]
     domain_scores: dict[str, float]
     calibration: tuple[CalibrationBin, ...] = ()
+
+
+def _lead_answer_for():
+    """The assistant's own ``ask``, or ``None`` when it cannot be built here.
+
+    The lead metric's body check must exercise the *real* answer path, so it is
+    handed the project's assistant. Building it can need the corpus and the
+    retriever; a failure means the check is skipped rather than faked, and the
+    metric is then computed over the pure-bridge judgements only.
+    """
+    try:
+        from core.assistant import build_default_assistant
+
+        assistant = build_default_assistant()
+    except Exception:
+        return None
+    return assistant.ask
 
 
 def _actions(specs: tuple[DecisionActionSpec, ...]) -> list[Action]:
@@ -845,6 +864,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # belief revision engine.
     belief_value = belief_accuracy()
 
+    # Lead: held-out expectations about the *answer body* -- with negative controls
+    # (a definitional or unrelated question must earn no lead). This is the metric
+    # for the last step of the reasoning bridge: the reasoning is in the body the
+    # reader sees, not only in the trailing trace. It exercises the real answer
+    # path through the assistant's own ``ask``.
+    lead_value = lead_accuracy(answer_for=_lead_answer_for())
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -900,6 +926,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         plan_value,
         decision_value,
         belief_value,
+        lead_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -941,6 +968,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         plan_accuracy=round(plan_value, 6),
         decision_recommendation_accuracy=round(decision_value, 6),
         belief_accuracy=round(belief_value, 6),
+        lead_accuracy=round(lead_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

@@ -132,6 +132,13 @@ class JarvisTurn:
     *whether a claim holds*, as readable lines (the claim, its confidence and
     status, and the edges it rests on). Empty when the question asks no verdict, so
     a definitional question carries no belief rather than a guessed one."""
+    lead: str = ""
+    """The reasoning the question warranted, as it opens the answer body -- the
+    strongest of the plan, decision, and belief bridges, already at the head of
+    ``response`` (``core.answer_lead``). Empty when the question warranted no
+    reasoning, so a definitional answer carries no lead rather than a guessed one.
+    Carried separately so a machine-readable turn can show the reasoning *as the
+    answer's own opening*, not only in the trailing ``reasoning_trace``."""
     confidence: float = 0.0
     """The answer's confidence: the retrieved evidence weighed with the graph's own
     reasoning and its contradictions (``core.answer_confidence``). ``0.0`` when the
@@ -308,6 +315,7 @@ class JarvisMode:
             )
         )
         belief = _belief_lines(getattr(answer, "belief", None))
+        lead = getattr(getattr(answer, "lead", None), "describe", lambda: "")()
         report = getattr(answer, "confidence_report", None)
         confidence_note = report.describe() if report is not None else ""
         trace = getattr(answer, "reasoning", None)
@@ -328,6 +336,7 @@ class JarvisMode:
             plan=plan,
             decision=decision,
             belief=belief,
+            lead=lead,
             confidence=float(getattr(answer, "confidence", 0.0) or 0.0),
             confidence_note=confidence_note,
             reasoning_trace=reasoning_trace,

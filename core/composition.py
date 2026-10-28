@@ -25,6 +25,19 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+
+def _language(text: str) -> str:
+    """``"ar"`` when the text carries Arabic letters, else ``"en"``.
+
+    A local import keeps this module import-light (and free of a cycle with the
+    voice layer); :func:`core.voices.detect_language` remains the one script
+    check, so the topic phrase and the answer lead agree on the language.
+    """
+    from core.voices import detect_language
+
+    return detect_language(text)
+
+
 _WHITESPACE_RE = re.compile(r"\s+")
 # Split on sentence-final punctuation followed by a new sentence. A decimal
 # point ("0.052") has no space after it, so it is never split.
@@ -161,6 +174,25 @@ _TOPIC_STOPWORDS = frozenset(
     }
 )
 _TOPIC_TOKEN_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
+
+#: Pronouns a question omits as the subject ("how do **I** measure porosity").
+#: Dropped from an English topic phrase so the phrase is the noun phrase, not a
+#: broken clause. A *leading* pronoun only -- a pronoun elsewhere is the user's
+#: own wording.
+_TOPIC_PRONOUNS = frozenset({"i", "we", "you", "one", "they"})
+
+#: Verbs that carry no topic on their own. Dropped from an English topic phrase so
+#: "porosity **relate** permeability" reads "porosity permeability". Deliberately
+#: small and unambiguously verbal: a word that could be a noun (a process, a
+#: property) is never listed, so nothing the user named disappears.
+_TOPIC_VERBS = frozenset(
+    {
+        "measure", "calculate", "compute", "determine", "estimate", "find",
+        "relate", "compare", "increase", "reduce", "decrease", "improve",
+        "prevent", "maintain", "control", "optimize", "optimise",
+        "happen", "occur", "work", "mean", "differ", "affect", "cause",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -481,6 +513,16 @@ def topic_phrase(question: str) -> str:
     Word order is preserved (``"drilling oil wells"``, not the alphabetised
     ``"drilling meaning oil wells"``) and question words are dropped, so the
     phrase reads as the subject the user named.
+
+    The phrase is read in the **language of the question**, because the two
+    languages need different work:
+
+    * English: the auxiliary/verb that survives a dropped question word is
+      stripped ("how do I measure porosity" would otherwise read
+      ``"I measure porosity"``, and ``"porosity relate permeability"`` loses its
+      bare verb), so the phrase is the noun phrase the user named.
+    * Arabic: the phrase is left as written -- Arabic question words are already
+      dropped and the remainder ("المسامية"، "قياس المسامية") reads as the topic.
     """
     terms = [
         token
@@ -488,9 +530,29 @@ def topic_phrase(question: str) -> str:
         if token.casefold() not in _TOPIC_STOPWORDS
     ]
     if terms:
-        return " ".join(terms)
+        if _language(question) == "ar":
+            return " ".join(terms)
+        return _english_topic_phrase(terms)
     value = clean(question).rstrip("?.!")
     return value or "this question"
+
+
+def _english_topic_phrase(terms: Sequence[str]) -> str:
+    """Drop a leading pronoun and a bare verb from an English topic phrase.
+
+    ``"I measure porosity core sample"`` becomes ``"porosity core sample"`` and
+    ``"porosity relate permeability"`` becomes ``"porosity permeability"``, so the
+    phrase is the noun phrase rather than a broken clause. Only a *leading*
+    pronoun is dropped (the subject the question omitted) and only a *known
+    non-noun* verb; a word that could be a noun is kept, so nothing the user named
+    disappears.
+    """
+    kept = [term for term in terms if term.casefold() not in _TOPIC_PRONOUNS]
+    if kept and kept[0].casefold() in _TOPIC_VERBS:
+        kept = kept[1:]
+    kept = [term for term in kept if term.casefold() not in _TOPIC_VERBS]
+    return " ".join(kept) if kept else " ".join(terms)
+
 
 
 def sources_block(citations: Sequence[str]) -> str:
@@ -533,21 +595,72 @@ def _attributed(sources: Sequence[Source], limit: int = 3) -> str:
     return " ".join(parts)
 
 
-def grounded_answer(question: str, sources: Sequence[Source]) -> str:
+def with_lead(question: str, lead: str, body: str) -> str:
+    """Join a reasoning ``lead`` to a retrieved ``body`` under one framing.
+
+    The lead is the reasoning the question warranted (the plan, the
+    recommendation, or the verdict); the body is the cited evidence. The lead
+    opens the answer and the body follows under a label that says it is what the
+    sources add, so a reader can tell the project's own reasoning from the
+    retrieved text. When either half is empty the other is returned unchanged --
+    nothing is invented to fill a gap.
+    """
+    lead = lead.strip()
+    body = body.strip()
+    if not lead:
+        return body
+    if not body:
+        note = (
+            "No supporting sources were retrieved for this question."
+            if _language(question) != "ar"
+            else "لم تُسترجَع مصادر مساندة لهذا السؤال."
+        )
+        return f"{lead}\n\n{note}"
+    topic = topic_phrase(question)
+    label = (
+        f"What the sources add about {topic}:"
+        if _language(question) != "ar"
+        else f"ما تضيفه المصادر عن {topic}:"
+    )
+    return f"{lead}\n\n{label}\n{body}"
+
+
+def grounded_answer(
+    question: str,
+    sources: Sequence[Source],
+    *,
+    lead: str = "",
+) -> str:
     """Render an answer body from retrieved passages, with no inline citations.
 
     This is what the assistant falls back to when no model is available (or its
     output is not grounded). The body reads as connected prose; the citations
     that support it are exposed separately (``GroundedAssistant.answer.citations``)
     and printed once at the end by the CLI, never mid-sentence.
+
+    ``lead`` is the reasoning the question warranted (the plan, the
+    recommendation, or the verdict, from :mod:`core.answer_lead`). When it is
+    present the answer **opens with it** and the retrieved evidence follows under
+    a label that says it is what the sources add -- so a procedural question is
+    answered with the procedure, not with a definition and a footnote. When
+    ``lead`` is empty the answer keeps its retrieval opening, so a definitional
+    question is unchanged.
     """
     topic = topic_phrase(question)
     present = [source for source in sources if clean(source.text)]
     if not present:
+        if lead.strip():
+            return with_lead(question, lead, "")
         return f"There is not enough evidence on file to answer this question about {topic}."
-    lead = f"Here is what the available sources say about {topic}."
     body = _attributed(present)
-    return "\n\n".join(block for block in (lead, body) if block)
+    if lead.strip():
+        return with_lead(question, lead, body)
+    opening = (
+        f"Here is what the available sources say about {topic}."
+        if _language(question) != "ar"
+        else f"هذه خلاصة المصادر عن {topic}."
+    )
+    return "\n\n".join(block for block in (opening, body) if block)
 
 
 def web_answer(question: str, sources: Sequence[Source], internal: Sequence[str] = ()) -> str:
@@ -658,4 +771,5 @@ __all__ = [
     "sources_block",
     "topic_phrase",
     "web_answer",
+    "with_lead",
 ]

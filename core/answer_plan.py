@@ -100,6 +100,13 @@ def _entry_terms(entry: CorpusEntry) -> set[str]:
     do something usually names the very words the procedure uses ("measure
     porosity ... on a core sample"), so the entry whose procedure matches the
     question is preferred over one that merely shares a concept.
+
+    The entry's **glossary** is included too, because that is where the corpus
+    states each term's Arabic alias ("porosity / مسامية"): without it an Arabic
+    procedural question ("كيف أقيس المسامية؟") shared no term with any entry and
+    the plan bridge answered nothing, even though the corpus states the very
+    procedure. Both sides are normalised by the shared tokenizer, so the Arabic
+    alias and the Arabic question meet in the same space.
     """
     terms: set[str] = set()
     for label, aliases in entry.concepts:
@@ -110,6 +117,9 @@ def _entry_terms(entry: CorpusEntry) -> set[str]:
             terms |= set(content_terms(label.replace("_", " ")))
     for step in entry.procedures:
         terms |= set(content_terms(step))
+    for term, alias in entry.glossary:
+        for phrase in (term, alias):
+            terms |= set(content_terms(phrase))
     return terms
 
 
