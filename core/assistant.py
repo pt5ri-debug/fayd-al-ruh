@@ -31,6 +31,7 @@ from core.documents import Document, DocumentStore
 from core.grounding import check_grounding
 from core.model_interface import CognitiveModel, ModelRequest
 from core.rag import RagRetriever, RetrievedPassage
+from core.reasoning_report import ReasoningReport, reasoning_report
 from core.relation_connections import ConceptConnection, concept_connections
 from core.relation_consistency import RelationConflict, relation_conflicts
 from core.relation_facts import RelationFact, relation_facts
@@ -137,6 +138,15 @@ class AssistantAnswer:
     Carried as *data* so a caller can show which term moved the number, and
     ``None`` only for an answer built without the report (a hand-made one).
     """
+    reasoning: ReasoningReport | None = None
+    """The whole trace of *why* this answer: what was read, what was derived, and
+    how the confidence was reached, as one ordered, labelled account.
+
+    The reasoning layer existed but no surface showed it; this is the first time
+    an answer carries its own auditable trace (``core.reasoning_report``). Carried
+    as *data* and rendered under a label, so a reader can see the steps rather
+    than taking the answer on trust. ``None`` only for a hand-made answer.
+    """
 
     def __post_init__(self) -> None:
         if not self.text.strip():
@@ -226,6 +236,19 @@ class GroundedAssistant:
             conflicts=graph_conflicts,
         )
         confidence = confidence_report.final
+        # The whole trace of *why* this answer, assembled from the data above in one
+        # place (``core.reasoning_report``), so a caller can show the steps a reader
+        # would otherwise have to take on trust.
+        trace = reasoning_report(
+            question,
+            passages=passages,
+            relation_facts=facts,
+            inferred=graph_inferences,
+            connections=graph_connections,
+            causal_paths=graph_causal,
+            conflicts=graph_conflicts,
+            confidence=confidence_report,
+        )
         conversation.add_assistant(text, citations)
         self.memory.save(conversation)
         return AssistantAnswer(
@@ -245,6 +268,7 @@ class GroundedAssistant:
             connections=graph_connections,
             causal_paths=graph_causal,
             confidence_report=confidence_report,
+            reasoning=trace,
         )
 
     def _augment(self, question: str, internal: list[RetrievedPassage]) -> WebAugmentation | None:

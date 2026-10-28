@@ -370,6 +370,8 @@ def format_turn(turn: JarvisTurn) -> str:
         )
     if turn.confidence_note:
         parts.append(f"Confidence in this answer (evidence weighed with the graph): {turn.confidence_note}")
+    if turn.reasoning_trace:
+        parts.append(turn.reasoning_trace)
     block = sources_block(turn.citations)
     if block:
         parts.append(block)
@@ -391,6 +393,7 @@ def turn_payload(turn: JarvisTurn) -> dict:
         "causal_paths": list(turn.causal_paths),
         "confidence": turn.confidence,
         "confidence_note": turn.confidence_note,
+        "reasoning_trace": turn.reasoning_trace,
         "used_web": turn.used_web,
         "learned": turn.learned,
         "conversation_id": turn.conversation_id,

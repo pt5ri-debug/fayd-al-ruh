@@ -236,3 +236,33 @@ def test_causal_needs_a_question(capsys):
 def test_causal_rejects_bad_bounds(capsys):
     assert relations_cli.main(["causal", "porosity permeability", "--limit", "0"]) == relations_cli.EXIT_USAGE
     assert relations_cli.main(["causal", "porosity permeability", "--max-depth", "0"]) == relations_cli.EXIT_USAGE
+
+
+# --- why: the full reasoning trace behind an answer ------------------------
+
+
+def test_why_prints_the_answer_and_its_trace(capsys):
+    code = relations_cli.main(["why", "how does waterflood affect production?"])
+    assert code == relations_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "How this answer was reached" in out
+    assert "Retrieved evidence" in out
+
+
+def test_why_json_is_machine_readable(capsys):
+    code = relations_cli.main(["why", "how does waterflood affect production?", "--json"])
+    assert code == relations_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["question"] == "how does waterflood affect production?"
+    assert payload["answer"]
+    steps = payload["reasoning"]["steps"]
+    assert steps
+    assert {"label", "lines", "derived"} <= set(steps[0])
+
+
+def test_why_needs_a_question(capsys):
+    assert relations_cli.main(["why"]) == relations_cli.EXIT_NOTHING
+
+
+def test_why_rejects_a_bad_limit(capsys):
+    assert relations_cli.main(["why", "porosity", "--limit", "0"]) == relations_cli.EXIT_USAGE

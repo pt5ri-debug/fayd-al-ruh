@@ -840,6 +840,24 @@ Arabic is kept as secondary aliases where useful.
   `_is_grounded` in `core/assistant.py` is kept as a thin wrapper. The held-out gate
   `grounding_accuracy` (`GROUNDING_JUDGEMENTS`, with negative controls) is a metric in
   `evaluation/benchmark.py`.
+- `core/reasoning_report.py` — the **user-visible reasoning trace**: the one place
+  that assembles *"How this answer was reached"* from data already on
+  `AssistantAnswer` (retrieved evidence, the graph relations used, multi-hop
+  connections, directed causal paths, stored contradictions, and the confidence
+  breakdown), so the reasoning layer is visible, not only auditable.
+  `ReasoningStep` (`label`/`lines`/`derived`) is one step -- a derived step is a
+  claim the graph *entailed* rather than stored -- and `ReasoningReport`
+  (`question`/`steps`) carries them in the fixed `STEP_ORDER`, with
+  `derived_steps` selecting only the derivations that carry content, `is_empty`,
+  and a `describe()` that opens with the title and then lists each step (an empty
+  step reads `(nothing)`, never hidden). `reasoning_report(question, *, passages,
+  relation_facts, relation_conflicts, inferred, connections, causal_paths,
+  confidence)` is the one builder: it invents nothing and calls no new engine, so
+  the trace can never claim more than the answer already held. It reaches
+  `AssistantAnswer.reasoning` (`core/assistant.py`) and, through
+  `JarvisTurn.reasoning_trace`, `ai/chat.format_turn`/`turn_payload` -- and so the
+  GUI too -- plus the Jarvis `why` control (`core/jarvis_controls.py`,
+  `core/jarvis.py`) and the CLI `python -m cli relations why`.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
@@ -3968,3 +3986,40 @@ regression monitor each can refuse a change.
   the nested-endpoint drop, the forward/reverse/reverse-marker cases, the
   association-not-a-reversal rule, the gate with its negative controls, and the
   assistant wiring (32 tests).
+- Phase 40 — **the reasoning trace reaches the user**: the reasoning layer was
+  *auditable* but not *visible* -- a reader saw the answer and its citations, never
+  **how** the answer was reached -- Gap 6 of `docs/REASONING_ASSESSMENT.md`.
+  `core/reasoning_report.py` assembles one readable trace from data that was
+  already on `AssistantAnswer`: the retrieved evidence, the graph relations the
+  answer used, the multi-hop connections, the directed causal paths, any stored
+  contradictions, and the confidence breakdown. It invents nothing -- every line
+  comes from a value the answer already carried, and a step that contributed
+  nothing says ``(nothing)`` rather than being hidden. `ReasoningStep`
+  (``label``/``lines``/``derived``) and `ReasoningReport`
+  (``question``/``steps``, with ``derived_steps`` selecting only the derivations
+  that carry content, ``is_empty``, and a ``describe()`` that opens with *"How
+  this answer was reached"*) are the two types; `reasoning_report(...)` is the one
+  builder, and `STEP_ORDER` fixes the order so two runs read the same way. The
+  trace reaches every surface the answer already reached:
+  `AssistantAnswer.reasoning` is set in `GroundedAssistant.ask`;
+  `JarvisTurn.reasoning_trace` carries its text, so `ai/chat.format_turn` and
+  `turn_payload` render it -- and the GUI gets it for free, because the GUI draws
+  turns through `format_turn`. A new Jarvis control, **`why`** (``why``, ``explain``,
+  ``show your reasoning``, ``لماذا``, ``اشرح`` -- matched exactly, so a real question
+  that merely *begins* with "why" still reaches the assistant), replays the last
+  trace on demand and is cleared by a new conversation; `HELP_TEXT`/
+  `TEXT_HELP_TEXT` name it. The CLI twin is
+  `python -m cli relations why "<question>" [--limit] [--json]`, which answers and
+  then prints the same trace. The held-out gate `reasoning_trace_accuracy`
+  (`TRACE_JUDGEMENTS`) checks the *shape* of a trace with negative controls -- a
+  trace with nothing must read empty, an evidence-only trace must keep every other
+  step present-but-empty (never dropped), and a derivation must be labelled derived,
+  not stored -- so a trace that invents a step, drops an empty one, or mislabels a
+  derivation fails as surely as one that omits real evidence; it is a metric in
+  `evaluation/benchmark.py` (`evaluation/baseline.json`, overall 0.9804 → 0.9810).
+  `tests/test_reasoning_report.py` pins the step and
+  report objects, the fixed order, the honest empty case, the confidence step, the
+  assistant wiring, the ``why`` control (both directions -- it matches, and a
+  "why does ...?" question does not), the new-conversation reset, the
+  `format_turn`/`turn_payload` rendering, and the gate with its negative controls
+  (36 tests).

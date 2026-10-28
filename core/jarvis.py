@@ -32,7 +32,8 @@ from core.wake_word import AudioSpeechGate, WakeWordDetector
 
 HELP_TEXT = (
     "Conversation controls: say 'stop' to mute my voice, 'speak' to turn it back "
-    "on, 'repeat' to hear the last answer again, 'new conversation' to start over, "
+    "on, 'repeat' to hear the last answer again, 'why' to hear how I reached it, "
+    "'new conversation' to start over, "
     "'save' to persist this session, 'sessions' to list saved ones, 'web on' or "
     "'web off' to toggle internet lookups, 'that's right' to confirm my last "
     "answer, 'that's wrong, it's ...' to correct it, or 'help' for this list. "
@@ -44,7 +45,8 @@ HELP_TEXT = (
 TEXT_HELP_TEXT = (
     "Conversation controls: type 'new conversation' to start over, 'save' to "
     "persist this session, 'sessions' to list saved ones, 'repeat' to show the "
-    "last answer again, 'web on' or 'web off' to toggle internet lookups, "
+    "last answer again, 'why' to show how I reached it, 'web on' or 'web off' to "
+    "toggle internet lookups, "
     "'that's right' to confirm my last answer, 'that's wrong, it's ...' to correct "
     "it, or 'quit' to leave. Anything else, ask me a question or give me a command."
 )
@@ -101,6 +103,12 @@ class JarvisTurn:
     gained, the contradiction penalty it lost. Rendered under a label that says it is
     a confidence, so a reader can see which term moved the number rather than taking
     a bare figure on trust. Empty when no answer was produced."""
+    reasoning_trace: str = ""
+    """The whole trace of *why* this answer -- what was read, what was derived, and
+    how the confidence was reached -- as one ordered, labelled block
+    (``core.reasoning_report``). Rendered under a heading that says it is the
+    reasoning, so a reader sees the steps rather than taking the answer on trust.
+    Empty when no answer was produced or the answer carried no trace."""
     spoken: AudioClip | None = None
     playback_error: str = ""
     conversation_id: str = ""
@@ -140,6 +148,10 @@ class JarvisMode:
         self.mute = mute
         self.help_text = help_text
         self._conversation: Conversation | None = None
+        # The last answer's reasoning trace, kept so the ``why`` control can repeat
+        # it on demand. Held as text (not the whole answer) so nothing else is kept
+        # alive and a new conversation drops it.
+        self._last_reasoning = ""
 
     @property
     def conversation(self) -> Conversation:
@@ -151,6 +163,7 @@ class JarvisMode:
     def reset_conversation(self) -> Conversation:
         """Start a new memory session, leaving earlier turns behind."""
         self._conversation = self.memory.start("Jarvis session")
+        self._last_reasoning = ""
         return self._conversation
 
     def save_session(self) -> str:
@@ -246,6 +259,9 @@ class JarvisMode:
         )
         report = getattr(answer, "confidence_report", None)
         confidence_note = report.describe() if report is not None else ""
+        trace = getattr(answer, "reasoning", None)
+        reasoning_trace = trace.describe() if trace is not None else ""
+        self._last_reasoning = reasoning_trace
         return JarvisTurn(
             heard=utterance.strip(),
             response=response,
@@ -260,6 +276,7 @@ class JarvisMode:
             causal_paths=causal,
             confidence=float(getattr(answer, "confidence", 0.0) or 0.0),
             confidence_note=confidence_note,
+            reasoning_trace=reasoning_trace,
             spoken=self._speak(response, speak),
             conversation_id=conversation.id,
             used_web=used_web,
@@ -313,7 +330,13 @@ class JarvisMode:
         if intent is ControlIntent.CORRECT:
             response = self._handle_feedback(control.utterance, confirmed=False, correction=control.correction)
             return self._control_turn(utterance, intent, response, self._speak(response, speak))
-        # HELP
+        if intent is ControlIntent.WHY:
+            if not self._last_reasoning:
+                response = "There is no recent answer to explain yet."
+            else:
+                response = self._last_reasoning
+            return self._control_turn(utterance, intent, response, self._speak(response, speak))
+        # HELP is the remaining control.
         return self._control_turn(utterance, intent, self.help_text, self._speak(self.help_text, speak))
 
     def _handle_feedback(
