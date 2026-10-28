@@ -32,6 +32,11 @@ Honesty is the whole point:
 * A layer counts only when it is on the answer the path returned -- an isolated
   bridge that still produces its object but whose object never reaches the answer
   fails the expectation, which is the whole point.
+
+Phase 49 adds the **Arabic-parallel** catalogue (``AUDIT_EXPECTATIONS_AR``): the
+project is Arabic-first, so the connected path must deliver in Arabic too. Each
+English expectation has an Arabic twin, and a regression that breaks only the
+Arabic path fails there while the English catalogue stays green.
 """
 
 from __future__ import annotations
@@ -226,6 +231,72 @@ AUDIT_EXPECTATIONS: tuple[AuditExpectation, ...] = (
     ),
 )
 
+#: The **Arabic-parallel** catalogue (Phase 49). The project is Arabic-first, so
+#: the connected path must deliver in Arabic too -- and until Phase 49 it did not:
+#: only 39 of 495 concepts carried an Arabic alias, so an Arabic question reached
+#: almost none of the graph. Each English expectation above has an Arabic twin, so
+#: a regression that breaks only the Arabic path fails here while the English
+#: catalogue stays green.
+AUDIT_EXPECTATIONS_AR: tuple[AuditExpectation, ...] = (
+    AuditExpectation(
+        "سؤال إجرائي يصل إلى الخطة ورأس الإجراء",
+        "كيف أقيس المسامية والنفاذية على عينة لب؟",
+        required=(LAYER_PLAN, LAYER_LEAD, LAYER_REASONING),
+        body=True,
+    ),
+    AuditExpectation(
+        "سؤال قراري يصل إلى التوصية",
+        "ماذا أفعل لزيادة النفاذية؟",
+        required=(LAYER_DECISION, LAYER_LEAD, LAYER_REASONING),
+        body=True,
+    ),
+    AuditExpectation(
+        "سؤال تقييمي يصل إلى حكم الاعتقاد",
+        "هل التحميض يزيد النفاذية؟",
+        required=(LAYER_BELIEF, LAYER_LEAD, LAYER_REASONING),
+        body=True,
+    ),
+    AuditExpectation(
+        "سؤال تناظري يصل إلى المقارنة",
+        "هل المسامية مثل النفاذية؟",
+        required=(LAYER_ANALOGY, LAYER_LEAD, LAYER_REASONING),
+        body=True,
+    ),
+    AuditExpectation(
+        "سؤال زمني يصل إلى الخط الزمني",
+        "ما الذي تغيّر خلال الجلسة؟",
+        required=(LAYER_TEMPORAL, LAYER_LEAD, LAYER_REASONING),
+        body=True,
+        timeline=True,
+    ),
+    AuditExpectation(
+        "سؤال عن الاتصال يصل إلى الروابط المسلوكة",
+        "كيف ترتبط المسامية والنفاذية؟",
+        required=(LAYER_CONNECTIONS, LAYER_REASONING),
+    ),
+    AuditExpectation(
+        "سؤال عن حواف الرسم يصل إلى العلاقات المخزَّنة",
+        "ما هي المسامية؟",
+        required=(LAYER_FACTS, LAYER_REASONING),
+    ),
+    # Negative controls: an Arabic question that asks no reasoning must invent none.
+    AuditExpectation(
+        "سؤال تعريفي لا يحمل أي طبقة استدلالية",
+        "ما هي النفاذية؟",
+        forbidden=tuple(sorted(REASONING_LAYERS)),
+    ),
+    AuditExpectation(
+        "سؤال غير ذي صلة لا يحمل أي طبقة استدلالية",
+        "ما هي عاصمة فرنسا؟",
+        forbidden=tuple(sorted(REASONING_LAYERS)),
+    ),
+    AuditExpectation(
+        "سؤال مبهم لا يحمل أي طبقة استدلالية",
+        "أخبرني بشيء",
+        forbidden=tuple(sorted(REASONING_LAYERS)),
+    ),
+)
+
 
 def _probe_conversation():
     """A minimal four-turn conversation, so a temporal question can earn a timeline.
@@ -312,6 +383,7 @@ def answer_path_accuracy(
 __all__ = [
     "ALL_LAYERS",
     "AUDIT_EXPECTATIONS",
+    "AUDIT_EXPECTATIONS_AR",
     "LAYER_ANALOGY",
     "LAYER_BELIEF",
     "LAYER_CAUSAL",

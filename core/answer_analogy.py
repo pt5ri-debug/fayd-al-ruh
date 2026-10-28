@@ -59,9 +59,13 @@ ANALOGY_CUES: tuple[str, ...] = (
     "شبيهة",
     "مماثل",
     "مماثلة",
+    "مثلما",
+    "مشابه",
+    "مشابهة",
     "قارن",
     "مقارنة",
     "على غرار",
+    " مثل ",
 )
 
 #: How many candidate inferences one comparison reports. A pair whose neighbourhoods

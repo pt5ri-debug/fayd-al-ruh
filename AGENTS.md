@@ -1060,7 +1060,10 @@ Arabic is kept as secondary aliases where useful.
   definitional question, an unrelated one, or an analogical question naming one
   concept must yield no comparison, and a pair with no shared relational system
   must be reported as *not* an analogy -- and is a metric in
-  `evaluation/benchmark.py`.
+  `evaluation/benchmark.py`. Phase 49 added the Arabic cues (`يشبه`, `تشبه`,
+  `شبيه`, `مماثل`, `مثلما`, `مشابه`, `قارن`, `مقارنة`, `على غرار`, and the `مثل`
+  inside "هل المسامية مثل النفاذية؟") to `ANALOGY_CUES`, so an Arabic analogical
+  question now fires the comparison instead of a belief verdict.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
@@ -4527,7 +4530,41 @@ regression monitor each can refuse a change.
   as the metric `answer_path_accuracy` (`evaluation/benchmark.py`/`runner.py`/
   `baseline.json`, entering `overall`, 0.984516 → 0.984911).
   `tests/test_answer_audit.py` pins the catalogue, the layer reading, the negative
-  controls, the body check, the discrimination, and the honest `0.0`.
+  controls, the body check, the discrimination, and the honest `0.0`. Phase 49 adds
+  `AUDIT_EXPECTATIONS_AR`, the **Arabic-parallel** catalogue (ten expectations, each
+  English one twinned with an Arabic question asking for exactly the same layers),
+  so a regression that breaks only the Arabic path fails while the English
+  catalogue stays green.
+
+- `core/arabic_glossary.py` — **Arabic-first, for real** (Phase 49). The project is
+  Arabic-first by design, but the ontology did not reflect it: of 495 seeded
+  concepts only **39 carried an Arabic alias**, so an Arabic question reached almost
+  none of the graph (the measured symptom: `"هل التحميض يزيد النفاذية؟"` never
+  reached the belief layer, `"هل المسامية مثل النفاذية؟"` never reached the analogy).
+  `ARABIC_ALIASES` is a curated **English-label → Arabic-term** table (230 entries:
+  `porosity → مسامية`, `acid_stimulation → التحميض`, `blowout_preventer → مانع
+  الانفجار`, ...); `apply_arabic_aliases` resolves each entry by its **label** --
+  never an internal `CON-…` id, which carries a random suffix that changes every run,
+  and never a shared alias -- and adds it through `Ontology.add_concept_alias`, which
+  **keeps the concept's id**, so every relation that references it survives.
+  `_concept_for_label` matches the label exactly (case-folded): resolving by *word*
+  matched `acidizing` -- an alias of both `well_stimulation` and `acid_stimulation`
+  -- to the wrong concept and silently lost the Arabic term, and
+  `test_glossary_resolves_a_label_exactly_not_by_a_shared_alias` pins the fix. The
+  pass is idempotent (a term already present is a no-op) and a concept may carry more
+  than one Arabic term, so a synonym is added beside the primary one. Honest by
+  construction: a label the ontology does not hold is **reported** in
+  `GlossaryReport.unknown` and skipped -- nothing is invented -- and
+  `missing_arabic_labels`/`arabic_alias_coverage` report the remaining gap (coverage
+  rose from **39/495 to 237/495**) rather than hiding it. `has_arabic` is a
+  dependency-free script check; `normalize_arabic_term` reuses the project's own
+  `core.tokenize.normalize_phrase`. Wired into `CognitiveController.__init__` **and**
+  `build_default_assistant` before the retriever indexes the graph, so an Arabic
+  question reaches the same concepts an English one does.
+  `tests/test_arabic_glossary.py` pins the script detection, the idempotence, the
+  unknown-label report, the relation safety, the exact-label resolution, the
+  coverage, and that an Arabic question reaches the plan/decision/belief/analogy
+  layers while an unrelated one stays plain.
 
 - Phase 48 — **the evaluation measures the connected answer path, not the isolated
   layer** (Gap 9): Phases 37-47 bridged every reasoning layer to the answer and gave
@@ -4549,3 +4586,38 @@ regression monitor each can refuse a change.
   completes the nine gaps of `docs/REASONING_ASSESSMENT.md`; the next step is to
   **widen** the held-out catalogue (parallel Arabic questions, broader negative
   controls, multi-step path metrics) rather than close another gap.
+
+- Phase 49 — **Arabic-first, for real**: the project is Arabic-first by design
+  (English code/menus/docs, Arabic as secondary aliases), but the ontology did not
+  reflect it -- of 495 seeded concepts only **39 carried an Arabic alias**, so an
+  Arabic question reached almost none of the graph. The measured symptom was
+  `"هل التحميض يزيد النفاذية؟"` (does acidizing increase permeability?) never
+  reaching the belief layer and `"هل المسامية مثل النفاذية؟"` never reaching the
+  analogy, because neither `التحميض` nor the Arabic cue resolved. Three pieces close
+  it. `core/arabic_glossary.py` (new) is a curated **English-label → Arabic-term**
+  table of 230 entries (`porosity → مسامية`, `acid_stimulation → التحميض`,
+  `blowout_preventer → مانع الانفجار`, ...), applied through
+  `Ontology.add_concept_alias`, which **keeps each concept's id**, so every relation
+  survives; it resolves by **label, never by an id** (ids carry a random suffix that
+  changes every run), is idempotent, and **reports** a label the ontology does not
+  hold in `GlossaryReport.unknown` rather than inventing a concept. A real regression
+  was caught and fixed here: resolving by *word* matched `acidizing` -- an alias of
+  both `well_stimulation` and `acid_stimulation` -- to the wrong concept and silently
+  lost the Arabic term; `_concept_for_label` now matches the label exactly, pinned by
+  `test_glossary_resolves_a_label_exactly_not_by_a_shared_alias`. Coverage rose from
+  **39/495 to 237/495**, and `missing_arabic_labels`/`arabic_alias_coverage` report
+  the remaining gap honestly rather than hiding it. `core/answer_audit.py` gains
+  `AUDIT_EXPECTATIONS_AR`, a **ten-expectation Arabic-parallel catalogue** -- every
+  English expectation has an Arabic twin asking for *exactly the same layers*, with
+  the same three negative controls -- and `test_arabic_catalogue_is_a_true_parallel_
+  of_the_english_one` keeps the two from drifting. The metric
+  `arabic_answer_path_accuracy` (in `evaluation/runner.py`, `benchmark.py`, and
+  `baseline.json`) makes the Arabic path a gate of its own, because a green English
+  metric let an Arabic-only regression pass before. The glossary is wired into
+  `CognitiveController.__init__` **and** `build_default_assistant` before the
+  retriever indexes the graph. `tests/test_arabic_glossary.py` pins the script
+  detection, the idempotence, the unknown-label report, the relation safety, the
+  exact-label resolution, the coverage, and that an Arabic question reaches the
+  plan/decision/belief/analogy layers while an unrelated one stays plain. Gates:
+  4165 passed / 200 skipped, ruff clean, mypy 748 files OK, evaluation PASS
+  (`overall` 0.984911 → 0.9853).
