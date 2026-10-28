@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from core.acceptance_policy import rejection_reason
 from core.action import Action
 from core.analogy import analogy_accuracy
+from core.answer_confidence import answer_confidence_accuracy
 from core.belief import Belief
 from core.belief_revision import BeliefRevisionEngine
 from core.causal_link import CausalLink
@@ -96,6 +97,7 @@ class EvaluationMetrics:
     inference_accuracy: float
     connection_reasoning_accuracy: float
     causal_reasoning_accuracy: float
+    answer_confidence_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -792,6 +794,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # layer reaching the answer path.
     causal_reasoning_value = causal_reasoning_accuracy()
 
+    # Answer confidence: held-out expectations about how graph support and stored
+    # contradictions must move an answer's confidence -- with negative controls (a
+    # graph signal with no evidence must stay at zero, a contradiction must lower
+    # the number). This is the metric for the confidence layer weighing the graph's
+    # own reasoning.
+    confidence_value = answer_confidence_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -841,6 +850,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         inference_value,
         connection_reasoning_value,
         causal_reasoning_value,
+        confidence_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -876,6 +886,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         inference_accuracy=round(inference_value, 6),
         connection_reasoning_accuracy=round(connection_reasoning_value, 6),
         causal_reasoning_accuracy=round(causal_reasoning_value, 6),
+        answer_confidence_accuracy=round(confidence_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

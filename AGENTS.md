@@ -810,6 +810,21 @@ Arabic is kept as secondary aliases where useful.
   whose catalogues carry **negative controls**. `docs/REASONING_ASSESSMENT.md`
   records which of the reasoning layer's 69 modules reach an answer and which do
   not.
+- `core/answer_confidence.py` — how the answer path weighs an answer's confidence.
+  `evidence_confidence` is the passage-only base (the original
+  `0.7 * top + 0.3 * coverage`), and `answer_confidence` folds the graph's own
+  reasoning into it: the strongest graph-derived signal (entailed relations, walked
+  connections, stated causal paths) may fill at most `GRAPH_SUPPORT_WEIGHT` (0.25)
+  of the room to certainty, and **only when retrieved evidence exists** (no
+  evidence ⇒ `final == 0`, so a graph fact can never manufacture confidence); stored
+  contradictions then **multiply** the number down (`CONFLICT_PENALTY_WEIGHT` 0.5,
+  severity summed and capped) so they can never be outvoted by support. The
+  breakdown (`AnswerConfidence.evidence`/`graph_support`/`conflict_penalty`/`final`/
+  `reasons`, `describe()`) reaches the caller as *data* (`AssistantAnswer.confidence_report`,
+  `JarvisTurn.confidence`/`confidence_note`, `ai/chat.format_turn`, `turn_payload`),
+  so a reader sees which term moved the number. The held-out gate
+  `answer_confidence_accuracy` (`CONFIDENCE_JUDGEMENTS`, with negative controls)
+  is a metric in `evaluation/benchmark.py`.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
@@ -3857,3 +3872,45 @@ regression monitor each can refuse a change.
   confidence, the labelled block, the endpoint-duplication fix, the negative
   controls, the gate, and the assistant/Jarvis/format wiring; `tests/test_relations_cli.py`
   pins the `causal` command, its JSON, its empty case, and its argument validation.
+- Phase 38 — **uncertainty and graph reasoning reach the answer's confidence**:
+  `AssistantAnswer` always carried a confidence, but it was computed from the
+  retrieved passages **alone** -- `0.7 * top_score + 0.3 * coverage` -- and ignored
+  everything else the answer path had just learned: the relations the graph
+  *entails* (`core.relation_inference`), the chains it *walks*
+  (`core.relation_connections`), the causal paths it *states* (`core.causal_paths`),
+  and the claims it holds **contradictorily** (`core.relation_consistency`). So an
+  answer resting on a graph-derived mechanism could not read as more confident than
+  one resting on a single weak passage, and an answer the graph **contradicts**
+  could not read as less -- the exact Gap 4 of `docs/REASONING_ASSESSMENT.md`.
+  `core/answer_confidence.py` is now the one place that number is computed.
+  `evidence_confidence` is the original formula, kept in one place so the answer
+  path and its tests agree on the base term. A graph-derived signal may then fill
+  at most `GRAPH_SUPPORT_WEIGHT` (0.25) of the room between the base and certainty,
+  and **only when there is a base to fill**: with no retrieved evidence the
+  confidence stays `0.0`, so a graph fact can never **manufacture** confidence in an
+  answer the sources do not support. The support term is the **maximum** of the
+  three signal groups, not their sum -- three weak derivations of one fact are one
+  piece of support, not three. Stored contradictions are applied last and
+  **multiply** the result down (`CONFLICT_PENALTY_WEIGHT` 0.5, severity summed and
+  capped), so a contradiction is never outvoted by derived support and the number
+  can never leave `[0, 1]`. The whole breakdown is returned as an
+  `AnswerConfidence` (`evidence`, `graph_support`, `conflict_penalty`, `final`,
+  `reasons`), so a reader can see exactly which term moved the number and by how
+  much -- and `describe()` names the term that moved rather than a bare figure.
+  `AssistantAnswer.confidence_report` carries it as *data*, `JarvisTurn` gained
+  `confidence` and `confidence_note`, `ai/chat.format_turn` renders the note under
+  a label (so the GUI shows it for free, because it renders through `format_turn`),
+  and `turn_payload` exposes both for `--json`. `ConfidenceSignal`/`ConfidenceConflict`
+  are the minimal shapes a caller (or the gate) can pass when it has the number but
+  not the full object. The gate is `answer_confidence_accuracy`: a held-out
+  catalogue of hand-written expectations (`CONFIDENCE_JUDGEMENTS`) about how each
+  term **must** move the number -- support raises it, a contradiction lowers it, no
+  evidence pins it at zero, and the result is always bounded -- including **negative
+  controls**, so a model that manufactures confidence, lets a contradiction be
+  outvoted, or produces an out-of-range value fails as surely as one that ignores
+  the graph; added to `evaluation/benchmark.py`, `evaluation/runner.py`, and
+  `evaluation/baseline.json` (overall 0.9790 → 0.9797). `tests/test_answer_confidence.py`
+  pins the evidence term, the bounded support, the maximum-not-sum rule, the
+  no-evidence-zero rule, the summed-and-capped penalty, the not-outvoted rule, the
+  non-negative floor, the report validation and wording, the determinism, the
+  assistant/Jarvis/format/payload wiring, and the gate (33 tests).

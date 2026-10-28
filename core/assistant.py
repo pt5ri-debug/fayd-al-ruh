@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from core.answer_confidence import AnswerConfidence, answer_confidence
 from core.causal_paths import CausalExplanation, causal_explanations
 from core.conversation import Conversation, ConversationMemory
 from core.documents import Document, DocumentStore
@@ -125,6 +126,16 @@ class AssistantAnswer:
     when the question names fewer than two concepts or no causal chain connects
     them.
     """
+    confidence_report: AnswerConfidence | None = None
+    """How the confidence was reached: the evidence term, the graph support it
+    gained, and the contradiction penalty it lost.
+
+    The confidence number was always computed from the retrieved passages alone;
+    this is the first time the graph's *reasoning* -- entailed relations, walked
+    connections, stated causal paths -- and its *contradictions* weigh into it.
+    Carried as *data* so a caller can show which term moved the number, and
+    ``None`` only for an answer built without the report (a hand-made one).
+    """
 
     def __post_init__(self) -> None:
         if not self.text.strip():
@@ -183,8 +194,6 @@ class GroundedAssistant:
                 self._index_learned(augmentation)
                 passages = self.retriever.retrieve(question, limit=limit)
 
-        confidence = _confidence(passages)
-
         if self.model is not None and passages:
             text, used_model = self._generate(question, conversation, passages, temperature, seed)
         else:
@@ -203,6 +212,19 @@ class GroundedAssistant:
         graph_inferences = inferred_relations(getattr(self.retriever, "ontology", None), question)
         graph_connections = concept_connections(getattr(self.retriever, "ontology", None), question)
         graph_causal = causal_explanations(getattr(self.retriever, "ontology", None), question)
+
+        # The answer's confidence weighs the retrieved evidence *and* what the graph
+        # reasoned: entailed relations, walked connections, stated causal paths, and
+        # the contradictions it holds. Kept in one place so a reader can see which
+        # term moved the number (``answer_confidence`` returns the breakdown).
+        confidence_report = answer_confidence(
+            passages,
+            inferences=graph_inferences,
+            connections=graph_connections,
+            causal_paths=graph_causal,
+            conflicts=graph_conflicts,
+        )
+        confidence = confidence_report.final
         conversation.add_assistant(text, citations)
         self.memory.save(conversation)
         return AssistantAnswer(
@@ -221,6 +243,7 @@ class GroundedAssistant:
             inferred=graph_inferences,
             connections=graph_connections,
             causal_paths=graph_causal,
+            confidence_report=confidence_report,
         )
 
     def _augment(self, question: str, internal: list[RetrievedPassage]) -> WebAugmentation | None:
@@ -339,15 +362,6 @@ def _learned_passages(retriever, augmentation: WebAugmentation, existing) -> tup
             signal="learned",
         ),
     )
-
-
-def _confidence(passages: list[RetrievedPassage]) -> float:
-    """Evidence-aware confidence: coverage and strength of the retrieved passages."""
-    if not passages:
-        return 0.0
-    top = passages[0].score
-    coverage = min(len(passages), 4) / 4
-    return round(min(1.0, 0.7 * top + 0.3 * coverage), 6)
 
 
 def _extractive_answer(question: str, passages: list[RetrievedPassage]) -> str:
