@@ -85,6 +85,35 @@ def _belief_lines(belief: object) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def _temporal_lines(temporal: object) -> tuple[str, ...]:
+    """The conversation's timeline as readable lines, or ``()`` when there is none.
+
+    Takes the answer's own ``AnswerTemporal`` (``core.answer_temporal``) through
+    ``getattr`` so the turn carries only what the answer actually produced -- a
+    question that asks nothing temporal, or a conversation too short to have a
+    timeline, yields no lines rather than a guessed one.
+    """
+    if temporal is None:
+        return ()
+    entries = getattr(temporal, "entries", ()) or ()
+    if not entries:
+        return ()
+    lines = [f"{entry.role}: {entry.text}" for entry in entries]
+    change = getattr(temporal, "change", "")
+    relation = getattr(temporal, "relation", "")
+    if change:
+        lines.append(f"latest change: {change} ({relation})")
+    pattern = getattr(temporal, "pattern", None)
+    if pattern is not None:
+        lines.append(
+            f"pattern \"{pattern.description}\" x{pattern.occurrences} ({pattern.direction})"
+        )
+    prediction = getattr(temporal, "prediction", None)
+    if prediction is not None:
+        lines.append(f"next expected: {prediction.predicted_time.isoformat()}")
+    return tuple(lines)
+
+
 @dataclass
 class JarvisTurn:
     """The full record of one Jarvis exchange."""
@@ -134,11 +163,17 @@ class JarvisTurn:
     a definitional question carries no belief rather than a guessed one."""
     lead: str = ""
     """The reasoning the question warranted, as it opens the answer body -- the
-    strongest of the plan, decision, and belief bridges, already at the head of
-    ``response`` (``core.answer_lead``). Empty when the question warranted no
-    reasoning, so a definitional answer carries no lead rather than a guessed one.
-    Carried separately so a machine-readable turn can show the reasoning *as the
-    answer's own opening*, not only in the trailing ``reasoning_trace``."""
+    strongest of the plan, decision, belief, and timeline bridges, already at the
+    head of ``response`` (``core.answer_lead``). Empty when the question warranted
+    no reasoning, so a definitional answer carries no lead rather than a guessed
+    one. Carried separately so a machine-readable turn can show the reasoning *as
+    the answer's own opening*, not only in the trailing ``reasoning_trace``."""
+    temporal: tuple[str, ...] = field(default_factory=tuple)
+    """The timeline the conversation holds for a question that asks *what changed*,
+    as readable lines (each turn, the latest change, and any pattern the temporal
+    reasoner found). Empty when the question asks nothing temporal or the
+    conversation holds fewer than two turns, so a definitional question carries no
+    timeline rather than a guessed one (``core.answer_temporal``)."""
     confidence: float = 0.0
     """The answer's confidence: the retrieved evidence weighed with the graph's own
     reasoning and its contradictions (``core.answer_confidence``). ``0.0`` when the
@@ -315,6 +350,7 @@ class JarvisMode:
             )
         )
         belief = _belief_lines(getattr(answer, "belief", None))
+        temporal = _temporal_lines(getattr(answer, "temporal", None))
         lead = getattr(getattr(answer, "lead", None), "describe", lambda: "")()
         report = getattr(answer, "confidence_report", None)
         confidence_note = report.describe() if report is not None else ""
@@ -337,6 +373,7 @@ class JarvisMode:
             decision=decision,
             belief=belief,
             lead=lead,
+            temporal=temporal,
             confidence=float(getattr(answer, "confidence", 0.0) or 0.0),
             confidence_note=confidence_note,
             reasoning_trace=reasoning_trace,

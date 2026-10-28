@@ -260,6 +260,15 @@ def test_why_json_is_machine_readable(capsys):
     assert {"label", "lines", "derived"} <= set(steps[0])
 
 
+def test_why_json_carries_the_temporal_key(capsys):
+    """A one-turn run has no timeline, but the key is present and honest."""
+    code = relations_cli.main(["why", "how does waterflood affect production?", "--json"])
+    assert code == relations_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert "temporal" in payload
+    assert payload["temporal"] is None
+
+
 def test_why_needs_a_question(capsys):
     assert relations_cli.main(["why"]) == relations_cli.EXIT_NOTHING
 

@@ -31,6 +31,7 @@ from core.answer_belief import AnswerBelief
 from core.answer_confidence import AnswerConfidence
 from core.answer_decision import AnswerDecision
 from core.answer_plan import AnswerPlan
+from core.answer_temporal import AnswerTemporal
 from core.causal_paths import CausalExplanation
 from core.rag import RetrievedPassage
 from core.relation_connections import ConceptConnection
@@ -47,6 +48,7 @@ SOURCE_BELIEF = "The evidence-weighed belief the graph supports"
 SOURCE_INFERRED = "Entailed by the graph (derived, not stored)"
 SOURCE_CONNECTIONS = "Walked connections (multi-hop, not stored)"
 SOURCE_CAUSAL = "Directed causal paths the graph states"
+SOURCE_TEMPORAL = "The timeline the conversation holds (ordered by the temporal reasoner)"
 SOURCE_CONFLICTS = "Contradictions the graph holds"
 SOURCE_CONFIDENCE = "How the confidence was reached"
 
@@ -61,6 +63,7 @@ STEP_ORDER: tuple[str, ...] = (
     SOURCE_INFERRED,
     SOURCE_CONNECTIONS,
     SOURCE_CAUSAL,
+    SOURCE_TEMPORAL,
     SOURCE_CONFLICTS,
     SOURCE_CONFIDENCE,
 )
@@ -162,6 +165,23 @@ def _belief_lines(belief: AnswerBelief | None) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def _temporal_lines(temporal: AnswerTemporal | None) -> tuple[str, ...]:
+    if temporal is None:
+        return ()
+    lines = [
+        f"{entry.role}: {entry.text} @ {entry.at.isoformat()}" for entry in temporal.entries
+    ]
+    lines.append(f"latest change: {temporal.change} ({temporal.relation})")
+    if temporal.pattern is not None:
+        lines.append(
+            f"pattern \"{temporal.pattern.description}\" x{temporal.pattern.occurrences} "
+            f"({temporal.pattern.direction})"
+        )
+    if temporal.prediction is not None:
+        lines.append(f"next expected: {temporal.prediction.predicted_time.isoformat()}")
+    return tuple(lines)
+
+
 def reasoning_report(
     question: str,
     *,
@@ -173,6 +193,7 @@ def reasoning_report(
     inferred: Iterable[InferredRelation] = (),
     connections: Iterable[ConceptConnection] = (),
     causal_paths: Iterable[CausalExplanation] = (),
+    temporal: AnswerTemporal | None = None,
     conflicts: Iterable[RelationConflict] = (),
     confidence: AnswerConfidence | None = None,
 ) -> ReasoningReport:
@@ -205,6 +226,7 @@ def reasoning_report(
         ReasoningStep(
             SOURCE_CAUSAL, tuple(item.describe() for item in causal_paths), derived=True
         ),
+        ReasoningStep(SOURCE_TEMPORAL, _temporal_lines(temporal), derived=True),
         ReasoningStep(SOURCE_CONFLICTS, tuple(item.describe() for item in conflicts)),
         ReasoningStep(SOURCE_CONFIDENCE, _confidence_lines(confidence)),
     )
@@ -285,6 +307,13 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
         "one causal path", (SOURCE_CAUSAL,), 0, 1, "a causal chain is a derivation"
     ),
     TraceJudgement(
+        "one timeline",
+        (SOURCE_TEMPORAL,),
+        0,
+        1,
+        "a conversation ordered by the temporal reasoner is a derivation",
+    ),
+    TraceJudgement(
         "evidence and a causal path",
         (SOURCE_EVIDENCE, SOURCE_CAUSAL),
         1,
@@ -302,12 +331,13 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
             SOURCE_INFERRED,
             SOURCE_CONNECTIONS,
             SOURCE_CAUSAL,
+            SOURCE_TEMPORAL,
             SOURCE_CONFLICTS,
             SOURCE_CONFIDENCE,
         ),
         4,
-        6,
-        "every step filled, four stored and six derived",
+        7,
+        "every step filled, four stored and seven derived",
     ),
 )
 
@@ -322,6 +352,7 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
     inferred: tuple[InferredRelation, ...] = ()
     connections: tuple[ConceptConnection, ...] = ()
     causal: tuple[CausalExplanation, ...] = ()
+    temporal: AnswerTemporal | None = None
     conflicts: tuple[RelationConflict, ...] = ()
     confidence: AnswerConfidence | None = None
     if SOURCE_EVIDENCE in judgement.filled:
@@ -379,6 +410,23 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
                 sentence="A drives B.",
             ),
         )
+    if SOURCE_TEMPORAL in judgement.filled:
+        from datetime import UTC, datetime, timedelta
+
+        from core.answer_temporal import TimelineEntry
+
+        base = datetime(2026, 1, 1, tzinfo=UTC)
+        temporal = AnswerTemporal(
+            entries=(
+                TimelineEntry("Q", "what changed?", base),
+                TimelineEntry("A", "an answer", base + timedelta(seconds=5)),
+            ),
+            relation="before",
+            change="the discussion moved on",
+            pattern=None,
+            prediction=None,
+            language="en",
+        )
     if SOURCE_CONFLICTS in judgement.filled:
         conflicts = (RelationConflict("a", "increases", "b", "reduces", 0.7),)
     if SOURCE_CONFIDENCE in judgement.filled:
@@ -399,6 +447,7 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
         inferred=inferred,
         connections=connections,
         causal_paths=causal,
+        temporal=temporal,
         conflicts=conflicts,
         confidence=confidence,
     )
@@ -450,6 +499,7 @@ __all__ = [
     "SOURCE_INFERRED",
     "SOURCE_PLAN",
     "SOURCE_STORED",
+    "SOURCE_TEMPORAL",
     "STEP_ORDER",
     "TRACE_JUDGEMENTS",
     "ReasoningReport",

@@ -61,6 +61,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("decision_recommendation_accuracy", True, label="Decision recommendation accuracy (held-out decision shapes)"),
     MetricSpec("belief_accuracy", True, label="Belief accuracy (held-out belief shapes)"),
     MetricSpec("lead_accuracy", True, label="Lead accuracy (held-out answer-body lead shapes)"),
+    MetricSpec("temporal_accuracy", True, label="Temporal accuracy (held-out timeline shapes)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )

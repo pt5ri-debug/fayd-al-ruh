@@ -10,6 +10,7 @@ from core.answer_confidence import answer_confidence_accuracy
 from core.answer_decision import decision_recommendation_accuracy
 from core.answer_lead import lead_accuracy
 from core.answer_plan import plan_accuracy
+from core.answer_temporal import temporal_accuracy
 from core.belief import Belief
 from core.belief_revision import BeliefRevisionEngine
 from core.causal_link import CausalLink
@@ -110,6 +111,7 @@ class EvaluationMetrics:
     decision_recommendation_accuracy: float
     belief_accuracy: float
     lead_accuracy: float
+    temporal_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -871,6 +873,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # path through the assistant's own ``ask``.
     lead_value = lead_accuracy(answer_for=_lead_answer_for())
 
+    # Temporal: held-out expectations about the *timeline* -- with negative controls
+    # (a definitional or unrelated question must earn no timeline, and a conversation
+    # with fewer than two turns must earn none either). This is the metric for the
+    # layer that finally lets a "what changed?" question reach the temporal
+    # reasoner's own ordering, pattern detection, and next-time prediction.
+    temporal_value = temporal_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -927,6 +936,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         decision_value,
         belief_value,
         lead_value,
+        temporal_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -969,6 +979,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         decision_recommendation_accuracy=round(decision_value, 6),
         belief_accuracy=round(belief_value, 6),
         lead_accuracy=round(lead_value, 6),
+        temporal_accuracy=round(temporal_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

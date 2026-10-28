@@ -476,6 +476,27 @@ def run_why(args: argparse.Namespace) -> int:
                 if answer.belief is not None
                 else None
             ),
+            "temporal": (
+                {
+                    "relation": answer.temporal.relation,
+                    "change": answer.temporal.change,
+                    "entries": [
+                        {"role": entry.role, "text": entry.text, "at": entry.at.isoformat()}
+                        for entry in answer.temporal.entries
+                    ],
+                    "pattern": (
+                        {
+                            "description": answer.temporal.pattern.description,
+                            "occurrences": answer.temporal.pattern.occurrences,
+                            "direction": answer.temporal.pattern.direction,
+                        }
+                        if answer.temporal.pattern is not None
+                        else None
+                    ),
+                }
+                if answer.temporal is not None
+                else None
+            ),
             "reasoning": (
                 {
                     "steps": [
