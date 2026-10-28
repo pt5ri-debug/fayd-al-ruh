@@ -368,6 +368,8 @@ def format_turn(turn: JarvisTurn) -> str:
             "Causal paths the graph states (directed, cause → effect):\n"
             + "\n".join(f"  - {item}" for item in turn.causal_paths)
         )
+    if turn.confidence_note:
+        parts.append(f"Confidence in this answer (evidence weighed with the graph): {turn.confidence_note}")
     block = sources_block(turn.citations)
     if block:
         parts.append(block)
@@ -387,6 +389,8 @@ def turn_payload(turn: JarvisTurn) -> dict:
         "inferred": list(turn.inferred),
         "connections": list(turn.connections),
         "causal_paths": list(turn.causal_paths),
+        "confidence": turn.confidence,
+        "confidence_note": turn.confidence_note,
         "used_web": turn.used_web,
         "learned": turn.learned,
         "conversation_id": turn.conversation_id,

@@ -92,6 +92,15 @@ class JarvisTurn:
     readable lines with the path and the mechanism. Rendered under a label that says
     the path is directed (cause → effect), so an association is never read as a
     cause."""
+    confidence: float = 0.0
+    """The answer's confidence: the retrieved evidence weighed with the graph's own
+    reasoning and its contradictions (``core.answer_confidence``). ``0.0`` when the
+    turn carried no answer (a control, a silence, a tool run)."""
+    confidence_note: str = ""
+    """Why the confidence is what it is -- the evidence term, the graph support it
+    gained, the contradiction penalty it lost. Rendered under a label that says it is
+    a confidence, so a reader can see which term moved the number rather than taking
+    a bare figure on trust. Empty when no answer was produced."""
     spoken: AudioClip | None = None
     playback_error: str = ""
     conversation_id: str = ""
@@ -235,6 +244,8 @@ class JarvisMode:
         causal = tuple(
             item.describe() for item in getattr(answer, "causal_paths", ()) or ()
         )
+        report = getattr(answer, "confidence_report", None)
+        confidence_note = report.describe() if report is not None else ""
         return JarvisTurn(
             heard=utterance.strip(),
             response=response,
@@ -247,6 +258,8 @@ class JarvisMode:
             inferred=inferences,
             connections=connections,
             causal_paths=causal,
+            confidence=float(getattr(answer, "confidence", 0.0) or 0.0),
+            confidence_note=confidence_note,
             spoken=self._speak(response, speak),
             conversation_id=conversation.id,
             used_web=used_web,
