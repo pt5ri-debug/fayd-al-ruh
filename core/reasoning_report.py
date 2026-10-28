@@ -26,6 +26,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from core.answer_confidence import AnswerConfidence
+from core.answer_decision import AnswerDecision
 from core.answer_plan import AnswerPlan
 from core.causal_paths import CausalExplanation
 from core.rag import RetrievedPassage
@@ -38,6 +39,7 @@ from core.relation_inference import InferredRelation
 SOURCE_EVIDENCE = "Retrieved evidence"
 SOURCE_STORED = "Stored in the knowledge graph"
 SOURCE_PLAN = "The procedure the corpus states (ordered by the planner)"
+SOURCE_DECISION = "The options the graph states (ranked by the decision engine)"
 SOURCE_INFERRED = "Entailed by the graph (derived, not stored)"
 SOURCE_CONNECTIONS = "Walked connections (multi-hop, not stored)"
 SOURCE_CAUSAL = "Directed causal paths the graph states"
@@ -50,6 +52,7 @@ STEP_ORDER: tuple[str, ...] = (
     SOURCE_EVIDENCE,
     SOURCE_STORED,
     SOURCE_PLAN,
+    SOURCE_DECISION,
     SOURCE_INFERRED,
     SOURCE_CONNECTIONS,
     SOURCE_CAUSAL,
@@ -134,12 +137,22 @@ def _plan_lines(plan: AnswerPlan | None) -> tuple[str, ...]:
     return tuple(f"{index}. {step}" for index, step in enumerate(plan.steps, start=1))
 
 
+def _decision_lines(decision: AnswerDecision | None) -> tuple[str, ...]:
+    if decision is None:
+        return ()
+    return tuple(
+        f"{option} ({relation}, confidence {confidence:.2f})"
+        for option, relation, confidence in decision.options
+    )
+
+
 def reasoning_report(
     question: str,
     *,
     passages: Iterable[RetrievedPassage] = (),
     relation_facts: Iterable[RelationFact] = (),
     plan: AnswerPlan | None = None,
+    decision: AnswerDecision | None = None,
     inferred: Iterable[InferredRelation] = (),
     connections: Iterable[ConceptConnection] = (),
     causal_paths: Iterable[CausalExplanation] = (),
@@ -157,6 +170,9 @@ def reasoning_report(
         ReasoningStep(SOURCE_STORED, tuple(fact.describe() for fact in relation_facts)),
         ReasoningStep(
             SOURCE_PLAN, _plan_lines(plan), derived=True
+        ),
+        ReasoningStep(
+            SOURCE_DECISION, _decision_lines(decision), derived=True
         ),
         ReasoningStep(
             SOURCE_INFERRED, tuple(item.describe() for item in inferred), derived=True
@@ -225,6 +241,13 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
         "a corpus procedure ordered by the planner is a derivation",
     ),
     TraceJudgement(
+        "one recommendation",
+        (SOURCE_DECISION,),
+        0,
+        1,
+        "the graph's options ranked by the decision engine are a derivation",
+    ),
+    TraceJudgement(
         "one walked connection",
         (SOURCE_CONNECTIONS,),
         0,
@@ -247,6 +270,7 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
             SOURCE_EVIDENCE,
             SOURCE_STORED,
             SOURCE_PLAN,
+            SOURCE_DECISION,
             SOURCE_INFERRED,
             SOURCE_CONNECTIONS,
             SOURCE_CAUSAL,
@@ -254,8 +278,8 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
             SOURCE_CONFIDENCE,
         ),
         4,
-        4,
-        "every step filled, four stored and four derived",
+        5,
+        "every step filled, four stored and five derived",
     ),
 )
 
@@ -265,6 +289,7 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
     passages: tuple[RetrievedPassage, ...] = ()
     facts: tuple[RelationFact, ...] = ()
     plan: AnswerPlan | None = None
+    decision: AnswerDecision | None = None
     inferred: tuple[InferredRelation, ...] = ()
     connections: tuple[ConceptConnection, ...] = ()
     causal: tuple[CausalExplanation, ...] = ()
@@ -285,6 +310,14 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
         facts = (RelationFact("porosity", "increases", "permeability", 0.6),)
     if SOURCE_PLAN in judgement.filled:
         plan = AnswerPlan(topic="Reservoir rock properties", source="reservoir_rock_properties", steps=("Measure porosity.", "Compare with logs."))
+    if SOURCE_DECISION in judgement.filled:
+        decision = AnswerDecision(
+            goal="permeability",
+            direction="increase",
+            selected="acid_stimulation",
+            options=(("acid_stimulation", "increases", 0.7), ("porosity", "increases", 0.6)),
+            sentences=("Selected: acid_stimulation.",),
+        )
     if SOURCE_INFERRED in judgement.filled:
         inferred = (InferredRelation("a", "is_a", "b", 0.5, ("a —is_a→ b",)),)
     if SOURCE_CONNECTIONS in judgement.filled:
@@ -324,6 +357,7 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
         passages=passages,
         relation_facts=facts,
         plan=plan,
+        decision=decision,
         inferred=inferred,
         connections=connections,
         causal_paths=causal,
@@ -372,6 +406,7 @@ __all__ = [
     "SOURCE_CONFIDENCE",
     "SOURCE_CONFLICTS",
     "SOURCE_CONNECTIONS",
+    "SOURCE_DECISION",
     "SOURCE_EVIDENCE",
     "SOURCE_INFERRED",
     "SOURCE_STORED",

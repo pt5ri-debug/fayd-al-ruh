@@ -883,6 +883,46 @@ Arabic is kept as secondary aliases where useful.
   (`PLAN_JUDGEMENTS`, with negative controls: a definitional/unrelated question
   yields no plan, a circular/dangling dependency is refused, out-of-order steps
   come back in dependency order) is a metric in `evaluation/benchmark.py`.
+- `core/answer_decision.py` — the **decision bridge**: the ranked recommendation
+  the knowledge graph states for a question that asks *what to do*, run through the
+  project's real `DecisionEngine`. The decision layer (`DecisionEngine`/
+  `UtilityModel`/`RiskModel`/`DecisionExplainer`) was reachable only from the
+  `CognitiveController` and the evaluation scenarios, so a decisional question
+  ("what should I do to increase permeability?") got a definition back, never the
+  ranked recommendation the graph already states (`acid_stimulation —increases→
+  permeability`, `hydraulic_fracturing —increases→ permeability`) -- the decision
+  half of Gap 7 of `docs/REASONING_ASSESSMENT.md`. `is_decisional(question)`
+  recognises a question that asks what to do (English and Arabic cues), so a
+  definitional "what is permeability?" is never read as decisional and never drags
+  a recommendation into a definitional answer. `direction_of(question)` reads the
+  direction the question asks for (`increase`/`reduce`/`prevent`/`maintain`/
+  `control`), or `""` when it names none; it is scanned in a fixed order, so the
+  same question always yields the same direction. The options are the graph's own
+  **typed inbound edges** into the concept the question is about, restricted to the
+  relation types that match the direction asked for (`DIRECTION_RELATIONS`), so an
+  option is never offered when the graph says it moves the goal the *other* way --
+  "what should I do to reduce permeability?" returns ``None`` because the graph
+  holds no edge that reduces permeability, rather than offering one that increases
+  it. Each option becomes an `Action` that adds the goal at a cost of
+  ``1 - confidence`` (a better-attested option is cheaper); a source the graph
+  links to several of the question's goals becomes **one** action advancing all of
+  them, which is the multi-objective case the utility model exists for.
+  `answer_decision(question, ontology=...)` runs those actions through
+  `DecisionEngine.decide` and ranks them with `DecisionExplainer.explain`, and
+  returns an `AnswerDecision` (`goal`/`direction`/`selected`/`options` +
+  `describe()`) only when the question is decisional *and* the graph states at
+  least one option in the direction asked for, else ``None`` -- never a guess.
+  Nothing is executed: the recommendation is a *reported* artifact. It reaches
+  every surface the answer already reaches: `AssistantAnswer.decision` is set in
+  `GroundedAssistant.ask`; it becomes a new `SOURCE_DECISION` step in
+  `core.reasoning_report` (fixed position: after the plan, before the other
+  derivations); `JarvisTurn.decision` carries the ranked lines, so
+  `ai/chat.format_turn` and `turn_payload` render them (and the GUI gets them for
+  free); and `python -m cli relations why` prints them inside the trace and in its
+  ``--json``. The held-out gate `decision_recommendation_accuracy`
+  (`DECISION_JUDGEMENTS`) checks the bridge with **negative controls** -- a
+  definitional, unrelated, or unanswerable question must yield no recommendation --
+  and is a metric in `evaluation/benchmark.py`.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
@@ -4084,3 +4124,43 @@ regression monitor each can refuse a change.
   refusals, the matching, the ``None`` cases, the trace step, the assistant/Jarvis/
   `format_turn`/`turn_payload` wiring, and the gate with its negative controls
   (30 tests).
+- Phase 42 — **the decision reaches the answer**: the decision layer
+  (`DecisionEngine`/`UtilityModel`/`RiskModel`/`DecisionExplainer`) was reachable
+  only from the `CognitiveController` and the evaluation scenarios, so a
+  *decisional* question ("what should I do to increase permeability?") got a
+  definition back, never the ranked recommendation the knowledge graph already
+  states -- the decision half of Gap 7 of `docs/REASONING_ASSESSMENT.md`.
+  `core/answer_decision.py` closes it. `is_decisional(question)` recognises a
+  question that asks what to do (English and Arabic cues), so a definitional "what
+  is permeability?" is never read as decisional and never drags a recommendation
+  into a definitional answer. `direction_of(question)` reads the direction asked
+  for (`increase`/`reduce`/`prevent`/`maintain`/`control`), scanned in a fixed
+  order so the same question always yields the same direction. The options are the
+  graph's own **typed inbound edges** into the concept the question is about,
+  restricted to the relation types that match the direction asked for, so an option
+  is never offered when the graph says it moves the goal the *other* way -- "what
+  should I do to reduce permeability?" returns ``None`` rather than offering an
+  edge that increases permeability. Each option is an `Action` that adds the goal
+  at a cost of ``1 - confidence``, and a source the graph links to several of the
+  question's goals becomes **one** action advancing all of them (the
+  multi-objective case the utility model exists for). `answer_decision(question,
+  ontology=...)` runs those actions through the project's **real**
+  `DecisionEngine.decide` and ranks them with `DecisionExplainer.explain`, and
+  returns an `AnswerDecision` only when the question is decisional *and* the graph
+  states an option in the direction asked for, else ``None`` -- never a guess.
+  Nothing is executed: the recommendation is a *reported* artifact.
+  The recommendation reaches every surface the answer already reaches:
+  `AssistantAnswer.decision` is set in `GroundedAssistant.ask`; it becomes a new
+  `SOURCE_DECISION` step in `core.reasoning_report` (fixed position: after the
+  plan, before the other derivations); `JarvisTurn.decision` carries the ranked
+  lines, so `ai/chat.format_turn` and `turn_payload` render them (and the GUI gets
+  them for free); and `python -m cli relations why` prints them inside the trace
+  and in its ``--json``. The held-out gate `decision_recommendation_accuracy`
+  (`DECISION_JUDGEMENTS`) checks the bridge with **negative controls** -- a
+  definitional, unrelated, or unanswerable question must yield no recommendation --
+  and is a metric in `evaluation/benchmark.py` (`evaluation/baseline.json`, overall
+  0.9816 → 0.9821). `tests/test_answer_decision.py` pins the decisional cue (both
+  languages, and its negative), the direction reading, the ranking, the
+  direction-only options, the ``None`` cases, the trace step, the
+  assistant/Jarvis/`format_turn`/`turn_payload` wiring, and the gate with its
+  negative controls (34 tests).
