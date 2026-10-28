@@ -447,6 +447,11 @@ def run_why(args: argparse.Namespace) -> int:
             "confidence": answer.confidence,
             "used_model": answer.used_model,
             "citations": list(answer.citations),
+            "plan": (
+                {"topic": answer.plan.topic, "source": answer.plan.source, "steps": list(answer.plan.steps)}
+                if answer.plan is not None
+                else None
+            ),
             "reasoning": (
                 {
                     "steps": [

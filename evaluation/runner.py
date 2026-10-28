@@ -6,6 +6,7 @@ from core.acceptance_policy import rejection_reason
 from core.action import Action
 from core.analogy import analogy_accuracy
 from core.answer_confidence import answer_confidence_accuracy
+from core.answer_plan import plan_accuracy
 from core.belief import Belief
 from core.belief_revision import BeliefRevisionEngine
 from core.causal_link import CausalLink
@@ -102,6 +103,7 @@ class EvaluationMetrics:
     answer_confidence_accuracy: float
     grounding_accuracy: float
     reasoning_trace_accuracy: float
+    plan_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -819,6 +821,12 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # metric for the layer that shows *how* an answer was reached.
     trace_value = reasoning_trace_accuracy()
 
+    # Plan: held-out expectations about the plan bridge -- with negative controls
+    # (a definitional or unrelated question must yield *no* plan; a circular or
+    # dangling dependency must be refused, not reordered). This is the metric for
+    # the layer that finally lets a procedural question reach the planner.
+    plan_value = plan_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -871,6 +879,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         confidence_value,
         grounding_value,
         trace_value,
+        plan_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -909,6 +918,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         answer_confidence_accuracy=round(confidence_value, 6),
         grounding_accuracy=round(grounding_value, 6),
         reasoning_trace_accuracy=round(trace_value, 6),
+        plan_accuracy=round(plan_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

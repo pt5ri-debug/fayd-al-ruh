@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from core.answer_confidence import AnswerConfidence, answer_confidence
+from core.answer_plan import AnswerPlan, answer_plan
 from core.causal_paths import CausalExplanation, causal_explanations
 from core.conversation import Conversation, ConversationMemory
 from core.documents import Document, DocumentStore
@@ -128,6 +129,18 @@ class AssistantAnswer:
     when the question names fewer than two concepts or no causal chain connects
     them.
     """
+    plan: AnswerPlan | None = None
+    """The ordered procedure the corpus states, for a question that asks *how*.
+
+    The planning layer (`Planner`/`Action`/`Goal`/`PlanStep`) was reachable only
+    from the controller and the evaluation scenarios, so a procedural question
+    ("how do I measure porosity on a core sample?") got a definition back, never
+    the ordered procedure the corpus already states. This is the first time a plan
+    reaches an answer: the corpus's own procedure for the entry the question is
+    about, ordered by the project's real ``Planner.order_steps``. ``None`` when the
+    question asks no procedure (a definitional "what is porosity?") or no entry
+    matches -- never a guessed plan.
+    """
     confidence_report: AnswerConfidence | None = None
     """How the confidence was reached: the evidence term, the graph support it
     gained, and the contradiction penalty it lost.
@@ -223,6 +236,7 @@ class GroundedAssistant:
         graph_inferences = inferred_relations(getattr(self.retriever, "ontology", None), question)
         graph_connections = concept_connections(getattr(self.retriever, "ontology", None), question)
         graph_causal = causal_explanations(getattr(self.retriever, "ontology", None), question)
+        graph_plan = answer_plan(question)
 
         # The answer's confidence weighs the retrieved evidence *and* what the graph
         # reasoned: entailed relations, walked connections, stated causal paths, and
@@ -243,6 +257,7 @@ class GroundedAssistant:
             question,
             passages=passages,
             relation_facts=facts,
+            plan=graph_plan,
             inferred=graph_inferences,
             connections=graph_connections,
             causal_paths=graph_causal,
@@ -267,6 +282,7 @@ class GroundedAssistant:
             inferred=graph_inferences,
             connections=graph_connections,
             causal_paths=graph_causal,
+            plan=graph_plan,
             confidence_report=confidence_report,
             reasoning=trace,
         )

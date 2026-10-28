@@ -842,22 +842,47 @@ Arabic is kept as secondary aliases where useful.
   `evaluation/benchmark.py`.
 - `core/reasoning_report.py` — the **user-visible reasoning trace**: the one place
   that assembles *"How this answer was reached"* from data already on
-  `AssistantAnswer` (retrieved evidence, the graph relations used, multi-hop
-  connections, directed causal paths, stored contradictions, and the confidence
-  breakdown), so the reasoning layer is visible, not only auditable.
+  `AssistantAnswer` (retrieved evidence, the graph relations used, the corpus
+  procedure ordered by the planner, multi-hop connections, directed causal paths,
+  stored contradictions, and the confidence breakdown), so the reasoning layer is
+  visible, not only auditable.
   `ReasoningStep` (`label`/`lines`/`derived`) is one step -- a derived step is a
-  claim the graph *entailed* rather than stored -- and `ReasoningReport`
+  claim the graph *entailed* or a procedure it *ordered* rather than stored -- and
+  `ReasoningReport`
   (`question`/`steps`) carries them in the fixed `STEP_ORDER`, with
   `derived_steps` selecting only the derivations that carry content, `is_empty`,
   and a `describe()` that opens with the title and then lists each step (an empty
   step reads `(nothing)`, never hidden). `reasoning_report(question, *, passages,
-  relation_facts, relation_conflicts, inferred, connections, causal_paths,
+  relation_facts, plan, relation_conflicts, inferred, connections, causal_paths,
   confidence)` is the one builder: it invents nothing and calls no new engine, so
   the trace can never claim more than the answer already held. It reaches
   `AssistantAnswer.reasoning` (`core/assistant.py`) and, through
   `JarvisTurn.reasoning_trace`, `ai/chat.format_turn`/`turn_payload` -- and so the
   GUI too -- plus the Jarvis `why` control (`core/jarvis_controls.py`,
   `core/jarvis.py`) and the CLI `python -m cli relations why`.
+- `core/answer_plan.py` — the **plan bridge**: the corpus's own ordered procedure
+  for a question that asks *how*, run through the project's real `Planner`. The
+  planning layer (`Planner`/`Action`/`Goal`/`PlanStep`) was reachable only from the
+  `CognitiveController` and the evaluation scenarios, so a procedural question
+  ("how do I measure porosity on a core sample?") got a definition back, never the
+  procedure the corpus already states (48 entries carry `procedures`) -- Gap 7 of
+  `docs/REASONING_ASSESSMENT.md`. `is_procedural(question)` recognises a question
+  that asks *how* (English and Arabic cues), so a definitional "what is porosity?"
+  is never read as procedural. `match_entry(question)` scores each entry by the
+  content terms it shares with the question (its concepts, its relation endpoints,
+  **and its own procedure text**), breaks ties on the entry key, and returns
+  ``None`` for a question that shares no term -- never a guess.
+  `order_procedure(steps, ...)` runs the steps through `Planner.order_steps`, so a
+  circular or dangling dependency is **refused** with ``ValueError`` rather than
+  silently reordered; nothing is executed. `answer_plan(question)` returns an
+  `AnswerPlan` (``topic``/``source``/``steps`` + a numbered ``describe()``) only
+  when the question is procedural *and* an entry with a stated procedure matches
+  it, else ``None``. `AssistantAnswer.plan` carries it, it becomes the `SOURCE_PLAN`
+  step of the reasoning trace, `JarvisTurn.plan` renders it in
+  `ai/chat.format_turn`/`turn_payload`, and the held-out gate `plan_accuracy`
+  (`PLAN_JUDGEMENTS`, with negative controls: a definitional/unrelated question
+  yields no plan, a circular/dangling dependency is refused, out-of-order steps
+  come back in dependency order) is a metric in `evaluation/benchmark.py`.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
@@ -4023,3 +4048,39 @@ regression monitor each can refuse a change.
   "why does ...?" question does not), the new-conversation reset, the
   `format_turn`/`turn_payload` rendering, and the gate with its negative controls
   (36 tests).
+- Phase 41 — **the plan reaches the answer**: the planning layer
+  (`Planner`/`Action`/`Goal`/`PlanStep`) was reachable only from the
+  `CognitiveController` and the evaluation scenarios, so a *procedural* question
+  ("how do I measure porosity and permeability on a core sample?") got a
+  definition back, never the ordered procedure the corpus already states (48
+  entries carry `procedures`) -- Gap 7 of `docs/REASONING_ASSESSMENT.md`.
+  `core/answer_plan.py` closes it. `is_procedural(question)` recognises a question
+  that asks *how* (English and Arabic cues), so a definitional "what is porosity?"
+  is never read as procedural and never drags a procedure into a definitional
+  answer. `match_entry(question)` scores each entry by the content terms it shares
+  with the question (its concepts, its relation endpoints, **and its own procedure
+  text**), breaks ties on the entry key, and returns ``None`` for a question that
+  shares no term -- never a guess. `order_procedure(steps, ...)` runs the corpus's
+  own steps through the project's **real** `Planner.order_steps`, so a circular or
+  dangling dependency is **refused** with ``ValueError`` rather than silently
+  reordered. `answer_plan(question)` builds an `AnswerPlan`
+  (``topic``/``source``/``steps`` + a numbered ``describe()``) only when the
+  question is procedural *and* an entry with a stated procedure matches it, else
+  ``None``. Nothing is executed: the plan is a *reported* artifact.
+  The plan reaches every surface the answer already reaches:
+  `AssistantAnswer.plan` is set in `GroundedAssistant.ask`; it becomes a new
+  `SOURCE_PLAN` step in `core.reasoning_report` (fixed position: after the stored
+  claims, before the other derivations, because a plan *is* a derivation), so the
+  user-visible trace now shows the procedure too; `JarvisTurn.plan` carries the
+  numbered steps, so `ai/chat.format_turn` and `turn_payload` render them (and the
+  GUI gets them for free); and `python -m cli relations why` prints them inside the
+  trace and in its ``--json``. The held-out gate `plan_accuracy`
+  (`PLAN_JUDGEMENTS`) checks the bridge with **negative controls** -- a definitional
+  or unrelated question must yield no plan, a circular or dangling dependency must
+  be *refused*, and steps given out of order must come back in dependency order --
+  and is a metric in `evaluation/benchmark.py` (`evaluation/baseline.json`, overall
+  0.9810 → 0.9816). `tests/test_answer_plan.py` pins the procedural cue (both
+  languages, and its negative), the ordering through the real planner, the
+  refusals, the matching, the ``None`` cases, the trace step, the assistant/Jarvis/
+  `format_turn`/`turn_payload` wiring, and the gate with its negative controls
+  (30 tests).
