@@ -388,6 +388,11 @@ def format_turn(turn: JarvisTurn) -> str:
             "What changed over this conversation (ordered by the temporal reasoner):\n"
             + "\n".join(f"  - {item}" for item in turn.temporal)
         )
+    if turn.analogy:
+        parts.append(
+            "The structural analogy the graph supports (aligned by structure mapping):\n"
+            + "\n".join(f"  - {item}" for item in turn.analogy)
+        )
     if turn.confidence_note:
         parts.append(f"Confidence in this answer (evidence weighed with the graph): {turn.confidence_note}")
     if turn.reasoning_trace:
@@ -416,6 +421,7 @@ def turn_payload(turn: JarvisTurn) -> dict:
         "belief": list(turn.belief),
         "lead": turn.lead,
         "temporal": list(turn.temporal),
+        "analogy": list(turn.analogy),
         "confidence": turn.confidence,
         "confidence_note": turn.confidence_note,
         "reasoning_trace": turn.reasoning_trace,

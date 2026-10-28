@@ -269,6 +269,26 @@ def test_why_json_carries_the_temporal_key(capsys):
     assert payload["temporal"] is None
 
 
+def test_why_json_carries_the_analogy_key(capsys):
+    """An analogical question carries the comparison, not a definitional answer."""
+    code = relations_cli.main(["why", "is porosity like permeability?", "--json"])
+    assert code == relations_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert "analogy" in payload
+    assert payload["analogy"] is not None
+    assert payload["analogy"]["base"] == "porosity"
+    assert payload["analogy"]["target"] == "permeability"
+    assert payload["analogy"]["meaningful"] is True
+
+
+def test_why_json_has_no_analogy_for_a_definitional_question(capsys):
+    """A negative control: a plain question earns no comparison."""
+    code = relations_cli.main(["why", "what is porosity?", "--json"])
+    assert code == relations_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["analogy"] is None
+
+
 def test_why_needs_a_question(capsys):
     assert relations_cli.main(["why"]) == relations_cli.EXIT_NOTHING
 

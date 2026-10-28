@@ -33,19 +33,22 @@ from typing import TYPE_CHECKING
 from core.voices import detect_language
 
 if TYPE_CHECKING:
+    from core.answer_analogy import AnswerAnalogy
     from core.answer_belief import AnswerBelief
     from core.answer_decision import AnswerDecision
     from core.answer_plan import AnswerPlan
     from core.answer_temporal import AnswerTemporal
 
 #: The lead kinds, strongest first: a question that asks *how* is answered with
-#: the procedure, one that asks *what to do* with the recommendation, one that
-#: asks *whether a claim holds* with the verdict, and one that asks *what changed*
-#: with the timeline. Only one lead is built -- the first kind the question
-#: actually warrants -- so a decisional question that happens to name two concepts
-#: is not also handed a verdict.
+#: the procedure, one that asks *what to do* with the recommendation, one that asks
+#: *how two things are alike* with the comparison, one that asks *whether a claim
+#: holds* with the verdict, and one that asks *what changed* with the timeline. Only
+#: one lead is built -- the first kind the question actually warrants -- so a
+#: decisional question that happens to name two concepts is not also handed a
+#: verdict.
 KIND_PROCEDURE = "procedure"
 KIND_RECOMMENDATION = "recommendation"
+KIND_ANALOGY = "analogy"
 KIND_VERDICT = "verdict"
 KIND_TIMELINE = "timeline"
 
@@ -161,11 +164,53 @@ def _timeline_lead(temporal: AnswerTemporal, language: str) -> AnswerLead:
     return AnswerLead(KIND_TIMELINE, heading, "\n".join(lines), language)
 
 
+def _analogy_lead(analogy: AnswerAnalogy, language: str) -> AnswerLead:
+    """The analogy bridge as an answer lead: the structural comparison.
+
+    The heading names the two concepts and the engine's own verdict, so a reader
+    sees *whether* the two share a shape; the body is the mapping's own matched
+    relations and candidate inferences (each labelled as unasserted), never a
+    relation the graph did not state.
+    """
+    if language == "ar":
+        if analogy.meaningful:
+            heading = f"المقارنة البنيوية بين {analogy.base} و{analogy.target}: تشابه في البنية."
+        else:
+            heading = f"المقارنة البنيوية بين {analogy.base} و{analogy.target}: لا يوجد نظام علاقات مشترك."
+        lines = [f"  - تطابق: {line}" for line in analogy.matched]
+        if analogy.transferred:
+            lines.append("  - استنتاجات مرشَّحة (غير مؤكَّدة):")
+            lines.extend(
+                f"    {source} —{relation}→ {target} (ثقة {confidence:.2f})"
+                for source, relation, target, confidence in analogy.transferred
+            )
+    else:
+        if analogy.meaningful:
+            heading = (
+                f"The structural analogy between {analogy.base} and {analogy.target}: "
+                "a shared relational system."
+            )
+        else:
+            heading = (
+                f"The structural analogy between {analogy.base} and {analogy.target}: "
+                "no shared relational system."
+            )
+        lines = [f"  - matched: {line}" for line in analogy.matched]
+        if analogy.transferred:
+            lines.append("  - candidate inferences (not asserted):")
+            lines.extend(
+                f"    {source} --{relation}--> {target} (confidence {confidence:.2f})"
+                for source, relation, target, confidence in analogy.transferred
+            )
+    return AnswerLead(KIND_ANALOGY, heading, "\n".join(lines), language)
+
+
 def answer_lead(
     question: str,
     *,
     plan: AnswerPlan | None = None,
     decision: AnswerDecision | None = None,
+    analogy: AnswerAnalogy | None = None,
     belief: AnswerBelief | None = None,
     temporal: AnswerTemporal | None = None,
     language: str | None = None,
@@ -173,10 +218,10 @@ def answer_lead(
     """The lead the question warrants, or ``None`` when no bridge fired.
 
     The kinds are tried strongest first -- procedure, then recommendation, then
-    verdict, then timeline -- and only the first that applies is built, so a
-    question is never handed two competing leads. ``None`` means the answer keeps
-    its retrieval opening: nothing is invented to fill a lead a question did not
-    earn.
+    comparison, then verdict, then timeline -- and only the first that applies is
+    built, so a question is never handed two competing leads. ``None`` means the
+    answer keeps its retrieval opening: nothing is invented to fill a lead a
+    question did not earn.
     """
     if not question.strip():
         return None
@@ -185,6 +230,8 @@ def answer_lead(
         return _procedure_lead(plan, lang)
     if decision is not None and decision.options:
         return _recommendation_lead(decision, lang)
+    if analogy is not None and analogy.matched:
+        return _analogy_lead(analogy, lang)
     if belief is not None:
         return _verdict_lead(belief, lang)
     if temporal is not None and temporal.entries:
@@ -238,6 +285,12 @@ LEAD_JUDGEMENTS: tuple[LeadJudgement, ...] = (
         "kind",
         question="does acid stimulation increase permeability?",
         expected=KIND_VERDICT,
+    ),
+    LeadJudgement(
+        "an analogical question earns the comparison lead",
+        "kind",
+        question="is porosity like permeability?",
+        expected=KIND_ANALOGY,
     ),
     LeadJudgement(
         "a temporal question earns the timeline lead",
@@ -321,6 +374,7 @@ def lead_accuracy(
     catalogue = tuple(judgements)
     if not catalogue:
         return 0.0
+    from core.answer_analogy import answer_analogy
     from core.answer_belief import answer_belief
     from core.answer_decision import answer_decision
     from core.answer_plan import answer_plan
@@ -336,10 +390,16 @@ def lead_accuracy(
             continue
         plan = answer_plan(judgement.question)
         decision = answer_decision(judgement.question)
+        analogy = answer_analogy(judgement.question)
         belief = answer_belief(judgement.question)
         temporal = answer_temporal(judgement.question, events=_temporal_probe_events(judgement.question))
         lead = answer_lead(
-            judgement.question, plan=plan, decision=decision, belief=belief, temporal=temporal
+            judgement.question,
+            plan=plan,
+            decision=decision,
+            analogy=analogy,
+            belief=belief,
+            temporal=temporal,
         )
         if judgement.kind == "kind":
             counted += 1
@@ -367,6 +427,7 @@ def lead_accuracy(
 
 
 __all__ = [
+    "KIND_ANALOGY",
     "KIND_PROCEDURE",
     "KIND_RECOMMENDATION",
     "KIND_TIMELINE",

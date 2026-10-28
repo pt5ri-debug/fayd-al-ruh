@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from core.acceptance_policy import rejection_reason
 from core.action import Action
 from core.analogy import analogy_accuracy
+from core.answer_analogy import analogy_answer_accuracy
 from core.answer_belief import belief_accuracy
 from core.answer_confidence import answer_confidence_accuracy
 from core.answer_decision import decision_recommendation_accuracy
@@ -112,6 +113,7 @@ class EvaluationMetrics:
     belief_accuracy: float
     lead_accuracy: float
     temporal_accuracy: float
+    analogy_answer_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -880,6 +882,15 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # reasoner's own ordering, pattern detection, and next-time prediction.
     temporal_value = temporal_accuracy()
 
+    # Analogy: held-out expectations about the *comparison* the answer carries --
+    # with negative controls (a definitional question, an unrelated one, or an
+    # analogical question naming one concept must earn none, and a pair with no
+    # shared relational system must be reported as *not* an analogy). This is the
+    # metric for the last isolated engine of Gap 7: the analogical layer finally
+    # reaches a "is X like Y?" question instead of a definition -- or a belief
+    # verdict about a different claim.
+    analogy_answer_value = analogy_answer_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -937,6 +948,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         belief_value,
         lead_value,
         temporal_value,
+        analogy_answer_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -980,6 +992,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         belief_accuracy=round(belief_value, 6),
         lead_accuracy=round(lead_value, 6),
         temporal_accuracy=round(temporal_value, 6),
+        analogy_answer_accuracy=round(analogy_answer_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

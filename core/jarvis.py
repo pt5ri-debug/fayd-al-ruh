@@ -114,6 +114,31 @@ def _temporal_lines(temporal: object) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def _analogy_lines(analogy: object) -> tuple[str, ...]:
+    """The structural comparison as readable lines, or ``()`` when there is none.
+
+    Takes the answer's own ``AnswerAnalogy`` (``core.answer_analogy``) through
+    ``getattr`` so the turn carries only what the answer actually produced -- a
+    question that asks no comparison, or names fewer than two concepts, yields no
+    lines rather than a guessed one.
+    """
+    if analogy is None:
+        return ()
+    matched = getattr(analogy, "matched", ()) or ()
+    if not matched:
+        return ()
+    base = getattr(analogy, "base", "")
+    target = getattr(analogy, "target", "")
+    verdict = "meaningful analogy" if getattr(analogy, "meaningful", False) else "not an analogy"
+    lines = [f"{base} ~ {target} ({verdict}, score {getattr(analogy, 'score', 0.0):.2f})"]
+    lines.extend(f"matched: {line}" for line in matched)
+    lines.extend(
+        f"candidate: {source} --{relation}--> {target} (confidence {confidence:.2f})"
+        for source, relation, target, confidence in getattr(analogy, "transferred", ())
+    )
+    return tuple(lines)
+
+
 @dataclass
 class JarvisTurn:
     """The full record of one Jarvis exchange."""
@@ -174,6 +199,12 @@ class JarvisTurn:
     reasoner found). Empty when the question asks nothing temporal or the
     conversation holds fewer than two turns, so a definitional question carries no
     timeline rather than a guessed one (``core.answer_temporal``)."""
+    analogy: tuple[str, ...] = field(default_factory=tuple)
+    """The structural comparison the graph holds for a question that asks how two
+    things are alike, as readable lines (the engine's verdict, its matched
+    relations, and its candidate inferences). Empty when the question asks no
+    comparison or names fewer than two concepts, so a definitional question carries
+    no comparison rather than a guessed one (``core.answer_analogy``)."""
     confidence: float = 0.0
     """The answer's confidence: the retrieved evidence weighed with the graph's own
     reasoning and its contradictions (``core.answer_confidence``). ``0.0`` when the
@@ -351,6 +382,7 @@ class JarvisMode:
         )
         belief = _belief_lines(getattr(answer, "belief", None))
         temporal = _temporal_lines(getattr(answer, "temporal", None))
+        analogy = _analogy_lines(getattr(answer, "analogy", None))
         lead = getattr(getattr(answer, "lead", None), "describe", lambda: "")()
         report = getattr(answer, "confidence_report", None)
         confidence_note = report.describe() if report is not None else ""
@@ -374,6 +406,7 @@ class JarvisMode:
             belief=belief,
             lead=lead,
             temporal=temporal,
+            analogy=analogy,
             confidence=float(getattr(answer, "confidence", 0.0) or 0.0),
             confidence_note=confidence_note,
             reasoning_trace=reasoning_trace,
