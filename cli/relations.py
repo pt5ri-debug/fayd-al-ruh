@@ -8,6 +8,7 @@
     python -m cli relations conflicts                # contradictory claims on file
     python -m cli relations infer "what does a well penetrate?"  # what the graph entails
     python -m cli relations connections "how do casing and perforating link?"  # walked chains
+    python -m cli relations why "how does waterflood affect production?"  # the full reasoning trace
 
 The extractor matches a sentence's own verb phrase onto the ontology's relation
 types, so it reports *which* concepts are related and *how* -- ``porosity
@@ -91,6 +92,14 @@ def _build_parser() -> argparse.ArgumentParser:
     causal.add_argument("--limit", type=int, default=None, help="State at most this many paths.")
     causal.add_argument("--max-depth", type=int, default=None, help="The longest causal chain to walk.")
     causal.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+
+    why = sub.add_parser(
+        "why",
+        help="Ask a question and show the full reasoning trace behind the answer.",
+    )
+    why.add_argument("question", nargs="?", help="The question to answer.")
+    why.add_argument("--limit", type=int, default=4, help="Evidence passages to read.")
+    why.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
     scan = sub.add_parser("scan", help="Read relations from the ingested knowledge store.")
     scan.add_argument("--store-dir", help="The knowledge store to read (default: the data folder).")
@@ -417,6 +426,47 @@ def run_causal(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_why(args: argparse.Namespace) -> int:
+    """Answer a question and print the full reasoning trace behind the answer."""
+    from ai.jarvis import build_session
+
+    question = args.question or ""
+    if not question.strip():
+        print("Nothing to explain: pass a question.")
+        return EXIT_NOTHING
+    if args.limit < 1:
+        print("--limit must be at least 1.")
+        return EXIT_USAGE
+    session = build_session(text_only=True)
+    answer = session.assistant.ask(question, limit=args.limit)
+    report = answer.reasoning
+    if args.json:
+        payload = {
+            "question": question,
+            "answer": answer.text,
+            "confidence": answer.confidence,
+            "used_model": answer.used_model,
+            "citations": list(answer.citations),
+            "reasoning": (
+                {
+                    "steps": [
+                        {"label": step.label, "lines": list(step.lines), "derived": step.derived}
+                        for step in report.steps
+                    ]
+                }
+                if report is not None
+                else None
+            ),
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(answer.text)
+    if report is not None:
+        print()
+        print(report.describe())
+    return EXIT_OK
+
+
 def run_scan(args: argparse.Namespace) -> int:
     from core.knowledge_base import KnowledgeBaseStore, default_knowledge_base_dir
     from core.relation_extraction import extract_from_store
@@ -460,6 +510,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "infer": run_infer,
         "connections": run_connections,
         "causal": run_causal,
+        "why": run_why,
         "scan": run_scan,
     }
     handler = handlers.get(args.command)

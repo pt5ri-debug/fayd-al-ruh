@@ -17,6 +17,7 @@ from core.evidence import Evidence
 from core.goal import Goal
 from core.grounding import grounding_accuracy
 from core.observation import Observation
+from core.reasoning_report import reasoning_trace_accuracy
 from core.relation_connections import connection_reasoning_accuracy
 from core.relation_consistency import consistency_accuracy
 from core.relation_extraction import extraction_accuracy
@@ -100,6 +101,7 @@ class EvaluationMetrics:
     causal_reasoning_accuracy: float
     answer_confidence_accuracy: float
     grounding_accuracy: float
+    reasoning_trace_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -810,6 +812,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # from being shown.
     grounding_value = grounding_accuracy()
 
+    # Reasoning trace: held-out expectations about the *shape* of the user-visible
+    # trace -- with negative controls (a trace with nothing must render empty; an
+    # evidence-only trace must keep every other step present-but-empty, never
+    # dropped; a derivation must be labelled derived, not stored). This is the
+    # metric for the layer that shows *how* an answer was reached.
+    trace_value = reasoning_trace_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -861,6 +870,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         causal_reasoning_value,
         confidence_value,
         grounding_value,
+        trace_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -898,6 +908,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         causal_reasoning_accuracy=round(causal_reasoning_value, 6),
         answer_confidence_accuracy=round(confidence_value, 6),
         grounding_accuracy=round(grounding_value, 6),
+        reasoning_trace_accuracy=round(trace_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

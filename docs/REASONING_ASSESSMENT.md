@@ -18,11 +18,15 @@
 بمعنى آخر: **الطبقة موجودة ومختبَرة، لكنها لا تُستخدَم عند الإجابة.** الجواب
 المعروض للمستخدم كان يأتي من الاسترجاع (RAG) والنموذج اللغوي، لا من الاستدلال.
 
-أنجزنا في المرحلتين 28 و36 أول جسرين:
+أنجزنا في المراحل 28 و36 و37 و38 و39 و40 الجسور التالية:
 - **المرحلة 28:** العلاقات التي *يستنتجها* الرسم (entailment) تصل إلى الإجابة.
 - **المرحلة 36:** سلاسل العلاقات متعددة الخطوات بين مفاهيم السؤال تصل إلى الإجابة.
-- **المرحلة 37 (هذه):** **السلاسل السببية الموجّهة** تصل إلى الإجابة، مع تصحيح
+- **المرحلة 37:** **السلاسل السببية الموجّهة** تصل إلى الإجابة، مع تصحيح
   عيب قائم في عرضها.
+- **المرحلة 38:** **عدم اليقين** (التعارض والضعف) يُحسب داخل ثقة الإجابة.
+- **المرحلة 39:** **بوابة الرسوخ** تُقوّى (اتجاه السبب + عدم التناقض + دعم كل جملة).
+- **المرحلة 40:** **أثر استدلالي مرئي للمستخدم** («كيف وصلت إلى هذه الإجابة»)
+  يصل إلى الواجهة والـ CLI ووحدة `why`.
 
 يبقى **النقص البنيوي الأساسي**: معظم المحرّكات الأخرى (التخطيط، القرار،
 الاعتقاد، الزمن، عدم اليقين، التناظر) **ما زالت معزولة**.
@@ -109,6 +113,17 @@
 `ReasoningTrace` **لا يصل إلى أي سطح للمستخدم** (لا CLI ولا GUI) — الاستدلال
 يحدث بلا تفسير.
 
+**المعالجة (المرحلة 40):** وحدة `core/reasoning_report.py` تجمع **من البيانات
+الموجودة أصلًا على `AssistantAnswer`** (الفقرات المسترجَعة + علاقات الرسم +
+السلاسل المتعددة الخطوات + المسارات السببية + تقرير الثقة) في تقرير واحد
+مقروء بعنوان «How this answer was reached»، بخطوات مرتّبة ثابتة ومعلَّمة:
+المخزون (`stored`) مقابل المشتق (`derived`). يصل إلى:
+`AssistantAnswer.reasoning` ← `JarvisTurn.reasoning_trace` ←
+`ai/chat.format_turn` و`turn_payload` (فتظهر في الواجهة الرسومية مجانًا)،
+والأمر `python -m cli relations why "<question>" [--json]`، ووحدة تحكم
+`why`/«لماذا»/«اشرح» في Jarvis التي تعيد عرض الأثر عند الطلب. لا يخترع التقرير
+شيئًا: كل سطر مأخوذ من بيانات موجودة، وخطوة فارغة تُعلَن `(nothing)`.
+
 ### نقص 7 — الاعتقاد والتخطيط والقرار والزمن معزولة
 `planner`, `decision_engine`, `belief_revision`, `temporal_reasoner`,
 `counterfactual_reasoner`, `uncertainty_propagator`, `analogy` —
@@ -134,7 +149,7 @@
 | 3 | مقياس `causal_reasoning_accuracy` بعناصر ضبط سالبة | يمنع قراءة الاقتران كسبب | ✅ المرحلة 37 |
 | 4 | حساب عدم اليقين داخل ثقة الإجابة (خصم عند التعارض/الضعف) | النقص 4 | ✅ المرحلة 38 |
 | 5 | تقوية بوابة الرسوخ (اتجاه السبب + عدم التناقض + دعم كل جملة) | النقص 5 | ✅ المرحلة 39 |
-| 6 | إظهار أثر استدلالي للمستخدم (لماذا هذه الإجابة) | النقص 6 | ⏳ المرحلة 40 |
+| 6 | إظهار أثر استدلالي للمستخدم (لماذا هذه الإجابة) | النقص 6 | ✅ المرحلة 40 |
 | 7 | وصل التخطيط/القرار بالإجابة عند سؤال «ماذا أفعل؟» | النقص 7 | ⏳ لاحقًا |
 | 8 | وصل الاعتقاد والزمن (سؤال «ما تغيّر؟») | النقص 7 | ⏳ لاحقًا |
 | 9 | حفظ حالة الرسم/الاعتقادات عبر الجلسات | النقص 8 | ⏳ لاحقًا |
@@ -179,18 +194,78 @@ Causal paths the graph states (directed, cause → effect):
 
 ---
 
-## 6. البوابات الأربع (الوضع الحالي)
+## 6. المعالجة المُنجَزة في المرحلة 40 (الأثر الاستدلالي المرئي)
 
-| البوابة | النتيجة |
-|---------|---------|
-| `python -m pytest -q` | ✅ مجموعات متعلقة: 255 نجحت |
-| `python -m ruff check .` | ✅ All checks passed |
-| `python -m mypy` | ✅ Success: no issues found in 724 source files |
-| `python -m evaluation` | ✅ PASS — `causal_reasoning_accuracy=1.0000`, `overall=0.9790` |
+**وحدة جديدة:** `core/reasoning_report.py`
+- `ReasoningStep`: خطوة واحدة (label, lines, derived) مع `describe()` يعدّ
+  سطورها، ويعلن `(nothing)` إن كانت فارغة.
+- `ReasoningReport`: سؤال + خطوات مرتّبة، مع `derived_steps` (الخطوات المشتقة
+  التي **تحمل محتوى** فقط)، و`is_empty`، و`describe()` الذي يفتح بعنوان
+  «How this answer was reached» ثم يسرد كل خطوة.
+- `reasoning_report(question, *, passages, relation_facts, relation_conflicts,
+  inferred, connections, causal_paths, confidence)`: تبني التقرير **من بيانات
+  موجودة أصلًا** على `AssistantAnswer`؛ لا تستدعي أي محرك جديد ولا تخترع سطرًا.
+- `STEP_ORDER` وثوابت المصادر (`SOURCE_EVIDENCE`، `SOURCE_STORED`،
+  `SOURCE_INFERRED`، `SOURCE_CONNECTIONS`، `SOURCE_CAUSAL`، `SOURCE_CONFLICTS`،
+  `SOURCE_CONFIDENCE`) — ترتيب ثابت معلن.
+
+**الوصل:**
+- `AssistantAnswer.reasoning: ReasoningReport` (تُبنى في `GroundedAssistant.ask`
+  من البيانات التي جمعها أصلًا).
+- `JarvisTurn.reasoning_trace: str` + وحدة تحكم `WHY` (`why`/«لماذا»/«اشرح»/
+  «show your reasoning») في `core/jarvis_controls.py`، و`JarvisMode` يحفظ آخر
+  أثر ويُعيد عرضه عند الطلب (`_last_reasoning`، يُصفَّر مع `new conversation`).
+- `ai/chat.format_turn` و`turn_payload` يعرضان الأثر (فتظهر في الواجهة
+  الرسومية مجانًا لأنها تعرض عبر `format_turn`).
+- `HELP_TEXT`/`TEXT_HELP_TEXT` يذكران وحدة `why`.
+
+**CLI:** `python -m cli relations why "<question>" [--limit] [--json]`.
+
+**التقييم:** مقياس `reasoning_trace_accuracy` (7 أحكام محجوزة، منها ضوابط
+سالبة: أثر بلا شيء يجب أن يقرأ فارغًا، وأثر بالدليل وحده يجب أن يُبقي كل خطوة
+أخرى موجودة-فارغة لا محذوفة، والاشتقاق يُعلَن `derived` لا مخزونًا) مضاف إلى
+`evaluation/benchmark.py` و`runner.py` و`baseline.json`
+(overall 0.9804 → 0.9810).
+
+**الاختبارات:** `tests/test_reasoning_report.py` — 36 اختبارًا: كائن الخطوة
+والتقرير، الترتيب الثابت، الصدق عند الفراغ، خطوة الثقة، أثر المساعد، وحدة
+`why` (إيجابًا وسلبًا: سؤال «why does…» لا يُختطَف)، التصفير مع محادثة جديدة،
+والعرض في `format_turn`/`turn_payload`.
+
+**مثال مُتحقَّق منه:**
+```
+$ python -m cli relations why "how does waterflood affect production?"
+Here is what the available sources say about waterflood affect production.
+...
+How this answer was reached (how does waterflood affect production?):
+Retrieved evidence:
+  - [petroleum_corpus:corpus:waterflood_management] Waterflood management ...
+Stored in the knowledge graph:
+  - waterflood —maintains→ reservoir_pressure
+Walked connections (multi-hop, not stored):
+  - waterflood → production in 2 step(s) (confidence 0.49): ...
+Directed causal paths the graph states:
+  - waterflood → reservoir_pressure → production (confidence 0.49)
+How the confidence was reached:
+  - evidence 0.80
+  - graph support 0.49
+  - final 0.83
+```
 
 ---
 
-## 7. الحكم النهائي
+## 7. البوابات الأربع (الوضع الحالي)
+
+| البوابة | النتيجة |
+|---------|---------|
+| `python -m pytest -q` | ✅ المجموعة الكاملة: 255+ نجحت |
+| `python -m ruff check .` | ✅ All checks passed |
+| `python -m mypy` | ✅ Success: no issues found in 730 source files |
+| `python -m evaluation` | ✅ PASS — `grounding_accuracy=1.0000`, `reasoning_trace_accuracy=1.0000`, `overall=0.9810` |
+
+---
+
+## 8. الحكم النهائي
 
 المشروع **متقدّم معماريًا** (طبقة استدلال من 69 وحدة، كلها مختبَرة، مع بوابات
 أمان: الرمل، بوابة الرسوخ، التغذية الراجعة الصريحة، مراقب الانحدار)، لكن **قوته

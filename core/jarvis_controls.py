@@ -36,6 +36,7 @@ class ControlIntent(str, Enum):
     WEB = "web"
     CONFIRM = "confirm"
     CORRECT = "correct"
+    WHY = "why"
     HELP = "help"
 
 
@@ -78,6 +79,14 @@ _PHRASES: dict[ControlIntent, tuple[str, ...]] = {
         "that is correct", "correct", "right", "yes exactly", "exactly", "confirmed",
         "confirm", "that's true", "thats true", "you are right", "spot on", "well done",
         "صحيح", "هذا صحيح", "بالضبط", "أجل", "نعم صحيح", "مضبوط",
+    ),
+    ControlIntent.WHY: (
+        "why", "why?", "why that", "why so", "how come", "explain", "explain that",
+        "explain your answer", "explain the answer", "justify", "justify that",
+        "show your reasoning", "show the reasoning", "reasoning", "your reasoning",
+        "how did you reach that", "how did you get that", "why did you say that",
+        "لماذا", "لماذا؟", "اشرح", "اشرح ذلك", "اشرح إجابتك", "وضّح", "وضح",
+        "ما سبب ذلك", "كيف وصلت إلى ذلك", "أرني الاستدلال",
     ),
     ControlIntent.HELP: (
         "help", "commands", "what can you do", "what can you do?", "list commands",
