@@ -39,9 +39,14 @@ def _language(text: str) -> str:
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
+# The Arabic letter blocks. A sentence may open on one of these exactly as it may
+# open on an English capital, so both the splitter below and the whole-sentence
+# check in ``complete_sentences`` have to accept them -- otherwise an Arabic
+# document is read as one unsplittable blob and then dropped entirely (Phase 50).
+_ARABIC_LETTERS = "\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff"
 # Split on sentence-final punctuation followed by a new sentence. A decimal
 # point ("0.052") has no space after it, so it is never split.
-_SENTENCE_RE = re.compile(r'(?<=[.!?])\s+(?=[A-Z0-9"\u201c])')
+_SENTENCE_RE = re.compile(rf'(?<=[.!?])\s+(?=[A-Z0-9"\u201c{_ARABIC_LETTERS}])')
 # A leading list marker ("- ", "1) ", "2. "). The marker must be followed by
 # whitespace: a bare "1." is the integer half of a decimal ("1.5 times the
 # gradient"), which the byte model emits, and stripping it would corrupt the
@@ -151,6 +156,10 @@ _MAX_MODEL_SENTENCES = 3
 _MODEL_TOKEN_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
 
 _CONNECTORS = ("First, ", "In addition, ", "Finally, ")
+# The Arabic twins of ``_CONNECTORS``. A sentence is joined to the one before it
+# the same way in both languages; only the words differ, and an Arabic answer that
+# opened with "First, " would read as a translation rather than as Arabic.
+_ARABIC_CONNECTORS = ("أولًا، ", "بالإضافة إلى ذلك، ", "أخيرًا، ")
 # A rendered statement with fewer words than this is a fragment (a bare heading
 # such as "Wellbore."), not a quotable point, so it is skipped when better
 # evidence exists.
@@ -243,11 +252,25 @@ def complete_sentences(text: str, limit: int | None = None) -> str:
         boundary = max((value.rfind(mark) for mark in _TERMINAL), default=-1)
         value = value[: boundary + 1] if boundary >= 0 else ""
     parts = sentences(value)
-    while parts and not (parts[0][0].isupper() or parts[0][0].isdigit()):
+    while parts and not _starts_sentence(parts[0]):
         parts.pop(0)
     if limit is not None:
         parts = parts[:limit]
     return " ".join(parts)
+
+
+def _starts_sentence(text: str) -> bool:
+    """Whether ``text`` may open a sentence: an English capital or a digit.
+
+    A leading Arabic letter counts too: ``str.isupper()`` is ``False`` for Arabic
+    (the script is caseless), so an Arabic sentence used to fail this check and be
+    dropped as a fragment -- which is how every Arabic document was silently
+    discarded before Phase 50.
+    """
+    if not text:
+        return False
+    first = text[0]
+    return first.isupper() or first.isdigit() or bool(re.match(rf"[{_ARABIC_LETTERS}]", first))
 
 
 def ensure_terminal(text: str) -> str:
@@ -563,14 +586,15 @@ def sources_block(citations: Sequence[str]) -> str:
     return "Sources:\n" + "\n".join(f"  - {citation}" for citation in unique)
 
 
-def _attributed(sources: Sequence[Source], limit: int = 3) -> str:
+def _attributed(sources: Sequence[Source], limit: int = 3, language: str = "en") -> str:
     """A flowing paragraph that states each source's key sentence.
 
     Attribution is *not* embedded here -- citations are returned as data and
     rendered once after the answer. Statements are read as whole sentences
     (one to two), and a source whose text is only a fragment is skipped when a
     longer statement is available, so the paragraph does not degenerate into
-    bare headings.
+    bare headings. ``language`` selects the connector words, so an Arabic answer
+    joins its sentences with Arabic connectors rather than ``"First, "``.
     """
     chosen = [source for source in sources if clean(source.text)]
     if not chosen:
@@ -588,9 +612,10 @@ def _attributed(sources: Sequence[Source], limit: int = 3) -> str:
         return ""
     if len(statements) == 1:
         return statements[0]
+    connectors = _ARABIC_CONNECTORS if language == "ar" else _CONNECTORS
     parts: list[str] = []
     for index, statement in enumerate(statements):
-        connector = _CONNECTORS[index] if index < len(_CONNECTORS) else ""
+        connector = connectors[index] if index < len(connectors) else ""
         parts.append(f"{connector}{statement}")
     return " ".join(parts)
 
@@ -651,8 +676,10 @@ def grounded_answer(
     if not present:
         if lead.strip():
             return with_lead(question, lead, "")
+        if _language(question) == "ar":
+            return f"لا توجد أدلة كافية في الملفات للإجابة عن هذا السؤال بشأن {topic}."
         return f"There is not enough evidence on file to answer this question about {topic}."
-    body = _attributed(present)
+    body = _attributed(present, language=_language(question))
     if lead.strip():
         return with_lead(question, lead, body)
     opening = (

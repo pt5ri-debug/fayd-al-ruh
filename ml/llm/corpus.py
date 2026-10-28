@@ -111,7 +111,8 @@ def repository_sentences(*, include_runtime: bool = True) -> list[str]:
     documents = [
         document
         for document in iter_documents(kb_max_chunks=0, include_runtime=include_runtime)
-        if document.source not in {"domain_knowledge", "curriculum_knowledge", "petroleum_corpus"}
+        if document.source
+        not in {"domain_knowledge", "curriculum_knowledge", "petroleum_corpus", "arabic_prose"}
     ]
     return sentences_from_documents(documents)
 
@@ -270,6 +271,7 @@ def build_corpus(
     curriculum = keep(curriculum_sentences())
     corpus = keep(corpus_sentences())
     procedures = keep(procedural_sentences())
+    arabic = keep(arabic_sentences())
     repositories = keep(repository_sentences(include_runtime=include_runtime))
     sessions = keep(session_sentences(sources=session_sources)) if include_sessions else ""
     bulk = keep(knowledge_base_sentences(kb_max_chunks=kb_max_chunks))
@@ -280,6 +282,7 @@ def build_corpus(
         + (curriculum + " ") * (repeats if curriculum else 0)
         + (corpus + " ") * (repeats if corpus else 0)
         + (procedures + " ") * (repeats if procedures else 0)
+        + (arabic + " ") * (repeats if arabic else 0)
         + (repositories + " ") * (repeats if repositories else 0)
         + (sessions + " ") * (session_repeats if sessions else 0)
         + (bulk + " ") * (kb_repeats if bulk else 0)
@@ -315,6 +318,20 @@ def procedural_sentences() -> list[str]:
     return sentences
 
 
+def arabic_sentences() -> list[str]:
+    """Arabic training prose rendered from the same knowledge (Phase 50).
+
+    The project is Arabic-first, yet before Phase 50 every block above was 100%
+    English, so the in-project model could not speak Arabic at all. This renders
+    the same disciplines, courses, corpus entries, and relations into Arabic
+    sentences (``core.arabic_prose``), so the model is trained on the knowledge in
+    the language the project is for. It is *additive*: no English block changes.
+    """
+    from core.arabic_prose import arabic_sentence_blocks
+
+    return arabic_sentence_blocks()
+
+
 def corpus_units(*, include_sessions: bool = False) -> list[str]:
     """Unique documents for splitting and tokenizer training.
 
@@ -333,6 +350,7 @@ def corpus_units(*, include_sessions: bool = False) -> list[str]:
         + curriculum_sentences()
         + corpus_sentences()
         + procedural_sentences()
+        + arabic_sentences()
         + repository_sentences(include_runtime=False)
     )
     if include_sessions:

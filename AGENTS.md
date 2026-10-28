@@ -4565,6 +4565,32 @@ regression monitor each can refuse a change.
   unknown-label report, the relation safety, the exact-label resolution, the
   coverage, and that an Arabic question reaches the plan/decision/belief/analogy
   layers while an unrelated one stays plain.
+- `core/arabic_prose.py` — the Arabic **output** half (Phase 50). Phase 49 closed
+  the input (an Arabic question reaches the graph); the output was still English:
+  the language model's training corpus was **0.00% Arabic** and every citable
+  document was English, so an Arabic answer's body was English even under an Arabic
+  reasoning frame. This renders the graph's own knowledge into Arabic.
+  `arabic_label(label, ontology)` resolves a concept label through the ontology's
+  aliases first (the Phase 49 glossary plus the petroleum corpus's own glossary),
+  then the curated `TOPIC_ARABIC` table (the disciplines, courses, and corpus-entry
+  titles -- a *phrase* the concept glossary never held), then returns the English
+  label unchanged; it never invents a term, so a Latin identifier the domain keeps
+  (`SPE`, `API`) is left alone. `RELATION_ARABIC` maps the seeds' 160 relation types
+  onto an Arabic clause (`measures → يقيس`, `prevents → يمنع`), and
+  `DEFAULT_RELATION_ARABIC` (`يرتبط بـ`) is the fallback for a relation the map does
+  not name, so no edge is silently dropped. `arabic_relation_sentence` renders
+  ``"{source} {clause} {target}."``; `arabic_curriculum_sentences`,
+  `arabic_corpus_sentences`, and `arabic_procedural_sentences` produce the training
+  text (`CORE_ARABIC_SENTENCES` is the Arabic twin of the English general block);
+  `arabic_document_lines` and `arabic_document_sections` produce the citable
+  documents (one per discipline, course, and corpus entry, so retrieval ranks the
+  relevant Arabic text first rather than one large block whose opening names an
+  unrelated discipline). It is **additive and presentation-only**: it reads the
+  ontology and returns text, writes nothing, and leaves every English block exactly
+  as it was. Wired into `ml.llm.corpus.arabic_sentences()` (the corpus's Arabic
+  share moved from **0% to ~20%**) and `core.documents._arabic_documents()`.
+  `tests/test_arabic_prose.py` pins the renderer, the tables, the label resolution,
+  the composer bug it exposed, and the corpus/document wiring.
 
 - Phase 48 — **the evaluation measures the connected answer path, not the isolated
   layer** (Gap 9): Phases 37-47 bridged every reasoning layer to the answer and gave
@@ -4621,3 +4647,42 @@ regression monitor each can refuse a change.
   plan/decision/belief/analogy layers while an unrelated one stays plain. Gates:
   4165 passed / 200 skipped, ruff clean, mypy 748 files OK, evaluation PASS
   (`overall` 0.984911 → 0.9853).
+- Phase 50 — **the Arabic *output* half** (prose + citable documents). Phase 49
+  closed the *input*: an Arabic question finally reached the ontology. The output
+  was still English, and measurably so -- the language model's training corpus was
+  **0.00% Arabic** across `curriculum_sentences` (1139), `corpus_sentences` (836),
+  and `procedural_sentences` (146), so the in-project model could not speak Arabic
+  at all; and every citable document was English, so an Arabic answer's *body* was
+  English even when its Arabic reasoning frame ("هذه خلاصة المصادر عن المسامية") was
+  Arabic (measured: 4-7% Arabic letters). `core/arabic_prose.py` (new) renders the
+  graph's **own** knowledge into Arabic and closes both: `arabic_label` resolves a
+  concept label through the ontology's aliases (the Phase 49 glossary plus the
+  petroleum corpus's own glossary) and then a curated `TOPIC_ARABIC` table of the
+  disciplines, courses, and corpus-entry titles, falling back to the English label
+  for anything it does not hold (a Latin identifier the domain keeps, like `SPE`,
+  is left alone -- it never invents a term); `RELATION_ARABIC` maps the seeds'
+  relation vocabulary onto an Arabic clause with a **default clause** so an edge the
+  map does not name is never dropped; and `arabic_curriculum_sentences`,
+  `arabic_corpus_sentences`, `arabic_procedural_sentences`, `arabic_document_lines`,
+  and `arabic_document_sections` produce the training text and the citable documents
+  (one document per discipline, course, and corpus entry, so retrieval ranks the
+  relevant Arabic text first rather than one large block). It is **additive**: no
+  English block changes. Wiring: `ml.llm.corpus.arabic_sentences()` joins
+  `build_corpus`/`corpus_units` (the corpus's Arabic share moved from **0% to
+  ~20%**), and `core.documents._arabic_documents()` joins
+  `build_knowledge_documents()`. The wiring exposed a **real bug** in
+  `core.composition`: `_SENTENCE_RE` split only before an ASCII capital/digit and
+  `complete_sentences` dropped any part not starting with one -- `str.isupper()` is
+  `False` for Arabic (the script is caseless), so *every Arabic sentence was silently
+  discarded as a fragment*; the splitter and `_starts_sentence` now accept the Arabic
+  letter blocks, and `_ARABIC_CONNECTORS` joins an Arabic answer's statements with
+  Arabic words instead of `"First, "`. Measured end to end, an Arabic question's
+  answer body moved from **4-7% Arabic to 68-100% Arabic** while an English question
+  stays English (no regression). One honest regression was caught and fixed:
+  `semantic_separation` fell 0.5427 → 0.3564 because `repository_sentences` (a
+  catch-all) swept the new Arabic documents into the held-out semantic-space
+  evaluation and diluted it; excluding the dedicated `arabic_prose` source there
+  restored it exactly. `tests/test_arabic_prose.py` pins the renderer, the tables,
+  the label resolution, the composer bug, and the corpus/document wiring. Gates:
+  pytest 4190 passed / 200 skipped, ruff clean, mypy 750 files OK, evaluation PASS
+  (`overall` 0.9853 unchanged, `semantic_separation` 0.5427 unchanged).
