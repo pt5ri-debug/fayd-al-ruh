@@ -957,6 +957,44 @@ Arabic is kept as secondary aliases where useful.
   checks the bridge with **negative controls** -- a definitional question, a plain
   statement, an evaluative question naming one concept, or one the graph cannot
   speak to must yield no belief -- and is a metric in `evaluation/benchmark.py`.
+- `core/answer_lead.py` — the **answer-body lead**: the last step of the reasoning
+  bridge. Phases 41-43 (plan, decision, belief) let a procedural, decisional, or
+  evaluative question reach the planner, the decision engine, and the belief
+  revision engine — but the bridge stopped at the trailing *trace*: the answer
+  **body** was still the retrieval template ("Here is what the available sources
+  say about ..."), so the reasoning sat in a footer a reader may never open. This
+  module puts the reasoning **in the answer itself**. `answer_lead(question,
+  plan=, decision=, belief=)` builds the lead strongest-first — procedure, then
+  recommendation, then verdict — and only the first that applies, so a question is
+  never handed two competing leads. Each lead is a *named* source: the procedure
+  heading names the corpus entry it came from (`plan.source`), the recommendation
+  lists the graph's ranked options, and the verdict states the claim, its
+  confidence, and the edges it rests on. `AnswerLead` carries the `kind`, the
+  `heading`, the `body`, and the `language`; `describe()` is the heading alone when
+  there is no detail. ``None`` means the question warranted no reasoning, so a
+  definitional question keeps its retrieval opening and nothing is invented to fill
+  a lead. `core.composition.with_lead(question, lead, body)` joins the lead to the
+  retrieved body under the *"What the sources add about ..."* label, and
+  `grounded_answer(question, sources, *, lead="")` gained the `lead` parameter, so
+  the lead opens the answer while the cited evidence still follows. The same
+  lead is used whether the model wrote the body or the extractive fallback did, so
+  the reasoning is never silently replaced by either. The held-out gate
+  `lead_accuracy` (`LEAD_JUDGEMENTS`) checks the bridge with **negative controls** —
+  a definitional, unrelated, or blank question must earn **no** lead — and its body
+  judgements run the real answer path through the assistant's own ``ask``
+  (`answer_for=`), so a regression that left the reasoning in the trace while the
+  body kept the template would lower the metric; it is a metric in
+  `evaluation/benchmark.py`. The fix is also carried on the machine-readable turn:
+  `JarvisTurn.lead` (set in `core/jarvis.py`) and `turn_payload["lead"]` in
+  `ai/chat.py`, so a caller can see the reasoning *as the answer's own opening*, not
+  only in the trailing `reasoning_trace`. Two related fixes landed with it: the
+  plan bridge's `match_entry` now reads the corpus **glossary**, where each term's
+  Arabic alias lives ("porosity / مسامية"), so an Arabic procedural question
+  ("كيف أقيس المسامية؟") matches the entry and reaches the planner; and
+  `core.composition.topic_phrase` no longer emits a broken clause — a bare verb and
+  the pronoun the question omitted are dropped ("how does porosity relate to
+  permeability" → "porosity permeability"), while a word that could be a noun is
+  kept, so nothing the user named disappears.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
@@ -4198,3 +4236,53 @@ regression monitor each can refuse a change.
   direction-only options, the ``None`` cases, the trace step, the
   assistant/Jarvis/`format_turn`/`turn_payload` wiring, and the gate with its
   negative controls (34 tests).
+
+- Phase 43 — **the belief reaches the answer**: the belief layer
+  (`Belief`/`BeliefRevisionEngine`/`ConfidenceModel`/`ContradictionDetector`) was
+  reachable only from the `CognitiveController` and the evaluation scenarios, so an
+  *evaluative* question ("does acid stimulation increase permeability?") got a
+  definition back, never the evidence-weighed verdict the knowledge graph already
+  supports -- the belief half of Gap 7 of `docs/REASONING_ASSESSMENT.md`.
+  `core/answer_belief.py` closes it: `is_evaluative` (English + Arabic cues,
+  anchored to the question's opening) recognises a verdict question, the evidence
+  is the graph's own typed edges between the concepts the question names (each an
+  `Evidence` record carrying the relation type, so the engine's
+  `ContradictionDetector` can spot two antonymous relations on the same pair), and
+  the confidence and lifecycle status are the ones `BeliefRevisionEngine.revise`
+  actually produced. It is read-only, never invents evidence, and returns ``None``
+  rather than a guess. `AssistantAnswer.belief`, a `SOURCE_BELIEF` trace step,
+  `JarvisTurn.belief`, and `python -m cli relations why` carry it; the held-out
+  gate `belief_accuracy` checks it with negative controls (overall 0.9821 →
+  0.9827); `tests/test_answer_belief.py` pins it.
+
+- Phase 44 — **the reasoning reaches the answer BODY, not just the trace**:
+  Phases 41-43 let a procedural, decisional, or evaluative question reach the
+  planner, the decision engine, and the belief revision engine -- but the bridge
+  stopped at the trailing *trace*. The answer **body** was still the retrieval
+  template ("Here is what the available sources say about ..."), so the reasoning
+  sat in a footer a reader may never open, and the evaluation could pass while the
+  prose a user actually reads was unchanged. `core/answer_lead.py` closes that last
+  step: `answer_lead(question, plan=, decision=, belief=)` builds the lead
+  strongest-first -- procedure, then recommendation, then verdict -- and only the
+  first that applies, so a question is never handed two competing leads. Each lead
+  is a *named* source (the procedure heading names the corpus entry, the
+  recommendation lists the graph's ranked options, the verdict states the claim,
+  its confidence, and the edges it rests on), and ``None`` means the question
+  warranted no reasoning, so a definitional question keeps its retrieval opening
+  and nothing is invented to fill a lead. `core.composition.with_lead(question,
+  lead, body)` joins the lead to the cited body, and `grounded_answer(...,
+  lead=...)` gained the parameter, so the reasoning opens the answer while the
+  evidence still follows -- whether a model wrote the body or the extractive
+  fallback did, so neither silently replaces the other. The reasoning is on the
+  machine-readable turn too (`JarvisTurn.lead`, `turn_payload["lead"]`). The
+  held-out gate `lead_accuracy` (`LEAD_JUDGEMENTS`) checks it with negative
+  controls and runs the *real* answer path through the assistant's own ``ask``
+  (`answer_for=`), so a regression that left the reasoning in the trace while the
+  body kept the template would lower the metric (overall 0.9827 → 0.9832). Two
+  related fixes landed with it: the plan bridge's `match_entry` now reads the
+  corpus **glossary** (where each term's Arabic alias lives), so an Arabic
+  procedural question ("كيف أقيس المسامية؟") matches the entry and reaches the
+  planner; and `core.composition.topic_phrase` no longer emits a broken clause
+  ("how does porosity relate to permeability" → "porosity permeability").
+  `tests/test_answer_lead.py` and `tests/test_answer_plan.py` pin the lead, its
+  negative controls, the body check, the Arabic match, and the turn payload.

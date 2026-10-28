@@ -409,6 +409,7 @@ def turn_payload(turn: JarvisTurn) -> dict:
         "plan": list(turn.plan),
         "decision": list(turn.decision),
         "belief": list(turn.belief),
+        "lead": turn.lead,
         "confidence": turn.confidence,
         "confidence_note": turn.confidence_note,
         "reasoning_trace": turn.reasoning_trace,

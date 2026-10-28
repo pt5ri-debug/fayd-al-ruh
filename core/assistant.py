@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from core.answer_belief import AnswerBelief, answer_belief
 from core.answer_confidence import AnswerConfidence, answer_confidence
 from core.answer_decision import AnswerDecision, answer_decision
+from core.answer_lead import AnswerLead, answer_lead
 from core.answer_plan import AnswerPlan, answer_plan
 from core.causal_paths import CausalExplanation, causal_explanations
 from core.conversation import Conversation, ConversationMemory
@@ -190,6 +191,18 @@ class AssistantAnswer:
     as *data* and rendered under a label, so a reader can see the steps rather
     than taking the answer on trust. ``None`` only for a hand-made answer.
     """
+    lead: AnswerLead | None = None
+    """The reasoning the question warranted, as the **answer body's own opening**.
+
+    Phases 41-43 bridged planning, decision, and belief to the answer, but the
+    bridge stopped at the trailing *trace*: the answer body was still the
+    retrieval template, so the reasoning sat in a footer a user may never open.
+    This is the reasoning *in the answer itself* -- the lead the body opens with,
+    chosen strongest-first (procedure, then recommendation, then verdict) by
+    :mod:`core.answer_lead`. ``None`` when the question warranted no reasoning, so
+    a definitional question keeps the retrieval answer it had and nothing is
+    invented to fill a lead.
+    """
 
     def __post_init__(self) -> None:
         if not self.text.strip():
@@ -248,10 +261,26 @@ class GroundedAssistant:
                 self._index_learned(augmentation)
                 passages = self.retriever.retrieve(question, limit=limit)
 
+        # The reasoning layers are read *before* the answer is written, because the
+        # lead they produce is the answer's own opening (``core.answer_lead``): a
+        # procedural question is answered with the procedure, a decisional one with
+        # the recommendation, and an evaluative one with the verdict -- not with a
+        # footnote a user may never open.
+        ontology = getattr(self.retriever, "ontology", None)
+        graph_plan = answer_plan(question)
+        graph_decision = answer_decision(question, ontology=ontology)
+        graph_belief = answer_belief(question, ontology=ontology)
+        lead = answer_lead(
+            question, plan=graph_plan, decision=graph_decision, belief=graph_belief
+        )
+        lead_text = lead.describe() if lead is not None else ""
+
         if self.model is not None and passages:
-            text, used_model = self._generate(question, conversation, passages, temperature, seed)
+            text, used_model = self._generate(
+                question, conversation, passages, temperature, seed, lead=lead_text
+            )
         else:
-            text = _extractive_answer(question, passages)
+            text = _extractive_answer(question, passages, lead=lead_text)
             used_model = False
 
         if augmentation is not None:
@@ -261,18 +290,11 @@ class GroundedAssistant:
         citations = tuple(dict.fromkeys(passage.citation for passage in passages))
         if augmentation is not None:
             citations = tuple(dict.fromkeys(citations + augmentation.citations))
-        facts = relation_facts(getattr(self.retriever, "ontology", None), question)
-        graph_conflicts = relation_conflicts(getattr(self.retriever, "ontology", None), question)
-        graph_inferences = inferred_relations(getattr(self.retriever, "ontology", None), question)
-        graph_connections = concept_connections(getattr(self.retriever, "ontology", None), question)
-        graph_causal = causal_explanations(getattr(self.retriever, "ontology", None), question)
-        graph_plan = answer_plan(question)
-        graph_decision = answer_decision(
-            question, ontology=getattr(self.retriever, "ontology", None)
-        )
-        graph_belief = answer_belief(
-            question, ontology=getattr(self.retriever, "ontology", None)
-        )
+        facts = relation_facts(ontology, question)
+        graph_conflicts = relation_conflicts(ontology, question)
+        graph_inferences = inferred_relations(ontology, question)
+        graph_connections = concept_connections(ontology, question)
+        graph_causal = causal_explanations(ontology, question)
 
         # The answer's confidence weighs the retrieved evidence *and* what the graph
         # reasoned: entailed relations, walked connections, stated causal paths, and
@@ -325,6 +347,7 @@ class GroundedAssistant:
             belief=graph_belief,
             confidence_report=confidence_report,
             reasoning=trace,
+            lead=lead,
         )
 
     def _augment(self, question: str, internal: list[RetrievedPassage]) -> WebAugmentation | None:
@@ -369,6 +392,8 @@ class GroundedAssistant:
         passages: list[RetrievedPassage],
         temperature: float,
         seed: int | None,
+        *,
+        lead: str = "",
     ) -> tuple[str, bool]:
         context = tuple(
             f"{passage.citation}\n{passage.text}" for passage in passages
@@ -381,14 +406,17 @@ class GroundedAssistant:
         try:
             response = self.model.generate(request)  # type: ignore[union-attr]
         except (ValueError, KeyError):
-            return _extractive_answer(question, passages), False
+            return _extractive_answer(question, passages, lead=lead), False
         text = response.text.strip()
         if not text:
-            return _extractive_answer(question, passages), False
+            return _extractive_answer(question, passages, lead=lead), False
         check = check_grounding(text, passages, ontology=getattr(self.retriever, "ontology", None))
         if not check.grounded:
-            return _extractive_answer(question, passages), False
-        return text, True
+            return _extractive_answer(question, passages, lead=lead), False
+        # The reasoning leads even when a model wrote the body, so the answer a
+        # reader sees always carries the project's own reasoning *and* the model's
+        # prose -- never one silently in place of the other.
+        return _with_lead(question, lead, text), True
 
 
 def _is_grounded(text: str, passages: list[RetrievedPassage]) -> bool:
@@ -441,11 +469,16 @@ def _learned_passages(retriever, augmentation: WebAugmentation, existing) -> tup
     )
 
 
-def _extractive_answer(question: str, passages: list[RetrievedPassage]) -> str:
+def _extractive_answer(
+    question: str, passages: list[RetrievedPassage], *, lead: str = ""
+) -> str:
     """A citation-only answer used when no model is available.
 
     Composed by :mod:`core.composition` so the fallback reads as connected prose
-    rather than a raw dump, while keeping every claim's citation.
+    rather than a raw dump, while keeping every claim's citation. ``lead`` is the
+    reasoning the question warranted (``core.answer_lead``); it opens the answer
+    and the retrieved evidence follows under a label, so a procedural question is
+    answered with the procedure rather than with a definition and a footnote.
     """
     from core.composition import Source, grounded_answer
 
@@ -453,7 +486,14 @@ def _extractive_answer(question: str, passages: list[RetrievedPassage]) -> str:
         Source(title=passage.title, text=passage.text, label=passage.citation)
         for passage in passages
     ]
-    return grounded_answer(question, sources)
+    return grounded_answer(question, sources, lead=lead)
+
+
+def _with_lead(question: str, lead: str, body: str) -> str:
+    """Open an answer with its reasoning lead, then the model's own prose."""
+    from core.composition import with_lead
+
+    return with_lead(question, lead, body)
 
 
 def _default_bulk_retriever() -> BulkCorpusRetriever | None:

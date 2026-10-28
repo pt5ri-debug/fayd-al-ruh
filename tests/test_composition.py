@@ -446,7 +446,17 @@ def test_grounded_answer_reads_as_prose_without_inline_citations():
 
 def test_topic_phrase_keeps_word_order_and_drops_question_words():
     assert topic_phrase("what is the meaning of drilling oil wells?") == "drilling oil wells"
-    assert topic_phrase("how does porosity relate to permeability") == "porosity relate permeability"
+    # A bare verb and the pronoun the question omitted are dropped, so the phrase
+    # is the noun phrase the user named rather than a broken clause.
+    assert topic_phrase("how does porosity relate to permeability") == "porosity permeability"
+    assert topic_phrase("how do I measure porosity on a core sample?") == "porosity core sample"
+    # A word that could be a noun is kept, so nothing the user named disappears.
+    assert topic_phrase("how does water flooding affect oil recovery") == "water flooding oil recovery"
+
+
+def test_topic_phrase_leaves_an_arabic_question_in_arabic():
+    assert topic_phrase("ما هي المسامية؟") == "المسامية"
+    assert topic_phrase("كيف أقيس النفاذية؟") == "أقيس النفاذية"
 
 
 def test_grounded_answer_skips_bare_fragment_sources():

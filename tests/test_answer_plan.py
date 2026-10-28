@@ -232,3 +232,26 @@ def test_catalogue_has_negative_controls():
     kinds = {judgement.kind for judgement in PLAN_JUDGEMENTS}
     assert "no-plan" in kinds
     assert "reject" in kinds
+
+
+def test_an_arabic_procedural_question_matches_the_corpus_entry():
+    """The corpus glossary is where the Arabic aliases live, so it must be read.
+
+    Without the glossary the Arabic procedural question shared no term with any
+    entry and the plan bridge answered nothing, even though the corpus states the
+    very procedure for porosity. Both the entry and the question are normalised by
+    the shared tokenizer, so they meet in the same space.
+    """
+    entry = match_entry("كيف أقيس المسامية؟")
+    assert entry is not None
+    assert entry.key == "reservoir_rock_properties"
+    plan = answer_plan("كيف أقيس المسامية؟")
+    assert plan is not None
+    assert plan.steps == entry.procedures
+
+
+def test_an_arabic_procedural_question_reaches_the_planner(tmp_path):
+    turn = _jarvis(tmp_path).handle("كيف أقيس المسامية؟", speak=False)
+    payload = turn_payload(turn)
+    assert payload["plan"]
+    assert payload["plan"][0].startswith("1.")
