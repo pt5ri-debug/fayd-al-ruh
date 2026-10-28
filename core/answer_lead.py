@@ -36,15 +36,18 @@ if TYPE_CHECKING:
     from core.answer_belief import AnswerBelief
     from core.answer_decision import AnswerDecision
     from core.answer_plan import AnswerPlan
+    from core.answer_temporal import AnswerTemporal
 
 #: The lead kinds, strongest first: a question that asks *how* is answered with
-#: the procedure, one that asks *what to do* with the recommendation, and one
-#: that asks *whether a claim holds* with the verdict. Only one lead is built --
-#: the first kind the question actually warrants -- so a decisional question that
-#: happens to name two concepts is not also handed a verdict.
+#: the procedure, one that asks *what to do* with the recommendation, one that
+#: asks *whether a claim holds* with the verdict, and one that asks *what changed*
+#: with the timeline. Only one lead is built -- the first kind the question
+#: actually warrants -- so a decisional question that happens to name two concepts
+#: is not also handed a verdict.
 KIND_PROCEDURE = "procedure"
 KIND_RECOMMENDATION = "recommendation"
 KIND_VERDICT = "verdict"
+KIND_TIMELINE = "timeline"
 
 #: The lifecycle status the belief engine assigns, in Arabic. A status the map
 #: does not carry is left as the engine's own word rather than guessed.
@@ -139,20 +142,41 @@ def _verdict_lead(belief: AnswerBelief, language: str) -> AnswerLead:
     return AnswerLead(KIND_VERDICT, heading, "\n".join(lines), language)
 
 
+def _timeline_lead(temporal: AnswerTemporal, language: str) -> AnswerLead:
+    """The temporal bridge as an answer lead: the ordered account of what changed.
+
+    The heading names the span the timeline covers, so a reader sees *how much*
+    time the account is about, and the body is the reasoner's own timeline plus the
+    change it named -- never a step the conversation did not contain.
+    """
+    if language == "ar":
+        heading = f"ما تغيّر خلال هذه المحادثة (امتداد {temporal.span_seconds:.0f} ثانية):"
+    else:
+        heading = f"What changed over this conversation (span {temporal.span_seconds:.0f} s):"
+    lines = [f"  - {entry.role}: {entry.text}" for entry in temporal.entries]
+    if language == "ar":
+        lines.append(f"  آخر تغيّر: {temporal.change} (العلاقة الزمنية: {temporal.relation}).")
+    else:
+        lines.append(f"  Latest change: {temporal.change} (temporal relation: {temporal.relation}).")
+    return AnswerLead(KIND_TIMELINE, heading, "\n".join(lines), language)
+
+
 def answer_lead(
     question: str,
     *,
     plan: AnswerPlan | None = None,
     decision: AnswerDecision | None = None,
     belief: AnswerBelief | None = None,
+    temporal: AnswerTemporal | None = None,
     language: str | None = None,
 ) -> AnswerLead | None:
     """The lead the question warrants, or ``None`` when no bridge fired.
 
     The kinds are tried strongest first -- procedure, then recommendation, then
-    verdict -- and only the first that applies is built, so a question is never
-    handed two competing leads. ``None`` means the answer keeps its retrieval
-    opening: nothing is invented to fill a lead a question did not earn.
+    verdict, then timeline -- and only the first that applies is built, so a
+    question is never handed two competing leads. ``None`` means the answer keeps
+    its retrieval opening: nothing is invented to fill a lead a question did not
+    earn.
     """
     if not question.strip():
         return None
@@ -163,6 +187,8 @@ def answer_lead(
         return _recommendation_lead(decision, lang)
     if belief is not None:
         return _verdict_lead(belief, lang)
+    if temporal is not None and temporal.entries:
+        return _timeline_lead(temporal, lang)
     return None
 
 
@@ -191,9 +217,9 @@ class LeadJudgement:
 
 #: The held-out lead catalogue -- hand-written with **negative controls**: a
 #: procedural question must earn the procedure, a decisional one the
-#: recommendation, an evaluative one the verdict; the lead must be in the answer
-#: *body* (not only the trace); and a definitional or unrelated question must
-#: earn **no** lead, so nothing is fabricated to fill one.
+#: recommendation, an evaluative one the verdict, a temporal one the timeline; the
+#: lead must be in the answer *body* (not only the trace); and a definitional or
+#: unrelated question must earn **no** lead, so nothing is fabricated to fill one.
 LEAD_JUDGEMENTS: tuple[LeadJudgement, ...] = (
     LeadJudgement(
         "a procedural question earns the procedure lead",
@@ -212,6 +238,12 @@ LEAD_JUDGEMENTS: tuple[LeadJudgement, ...] = (
         "kind",
         question="does acid stimulation increase permeability?",
         expected=KIND_VERDICT,
+    ),
+    LeadJudgement(
+        "a temporal question earns the timeline lead",
+        "kind",
+        question="what changed over the session?",
+        expected=KIND_TIMELINE,
     ),
     LeadJudgement(
         "the procedure lead reaches the answer body",
@@ -242,6 +274,29 @@ LEAD_JUDGEMENTS: tuple[LeadJudgement, ...] = (
 )
 
 
+def _temporal_probe_events(question: str):
+    """A minimal two-turn timeline, so a temporal question can earn its lead.
+
+    The temporal bridge reads a *conversation*; a held-out judgement has none, so
+    this supplies the shortest honest timeline (two turns) for the pure-bridge
+    check. It is used only when the question is temporal -- a non-temporal question
+    ignores it -- and it never fabricates content: the events name the question
+    itself and a reply to it.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from core.answer_temporal import is_temporal
+    from core.temporal_event import TemporalEvent
+
+    if not is_temporal(question):
+        return None
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    return [
+        TemporalEvent(f"Q: {question.strip()[:40]}", base),
+        TemporalEvent("A: an earlier reply", base + timedelta(seconds=5)),
+    ]
+
+
 def lead_accuracy(
     judgements: tuple[LeadJudgement, ...] = LEAD_JUDGEMENTS,
     *,
@@ -269,6 +324,7 @@ def lead_accuracy(
     from core.answer_belief import answer_belief
     from core.answer_decision import answer_decision
     from core.answer_plan import answer_plan
+    from core.answer_temporal import answer_temporal
 
     correct = 0
     counted = 0
@@ -281,7 +337,10 @@ def lead_accuracy(
         plan = answer_plan(judgement.question)
         decision = answer_decision(judgement.question)
         belief = answer_belief(judgement.question)
-        lead = answer_lead(judgement.question, plan=plan, decision=decision, belief=belief)
+        temporal = answer_temporal(judgement.question, events=_temporal_probe_events(judgement.question))
+        lead = answer_lead(
+            judgement.question, plan=plan, decision=decision, belief=belief, temporal=temporal
+        )
         if judgement.kind == "kind":
             counted += 1
             if lead is not None and lead.kind == judgement.expected:
@@ -310,6 +369,7 @@ def lead_accuracy(
 __all__ = [
     "KIND_PROCEDURE",
     "KIND_RECOMMENDATION",
+    "KIND_TIMELINE",
     "KIND_VERDICT",
     "LEAD_JUDGEMENTS",
     "AnswerLead",

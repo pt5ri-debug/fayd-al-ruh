@@ -65,7 +65,7 @@
     "grounding_accuracy": 1.0,
     "inference_accuracy": 1.0,
     "lead_accuracy": 1.0,
-    "overall": 0.983161,
+    "overall": 0.983628,
     "petroleum_causal_accuracy": 1.0,
     "petroleum_generalisation_accuracy": 1.0,
     "petroleum_inference_accuracy": 1.0,
@@ -86,7 +86,8 @@
     "resolution": 0.18858,
     "retrieval_accuracy": 1.0,
     "retrieval_mrr": 1.0,
-    "semantic_separation": 0.542689
+    "semantic_separation": 0.542689,
+    "temporal_accuracy": 1.0
   },
   "scenarios": [
     {

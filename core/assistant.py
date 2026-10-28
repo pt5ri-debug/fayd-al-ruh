@@ -29,6 +29,7 @@ from core.answer_confidence import AnswerConfidence, answer_confidence
 from core.answer_decision import AnswerDecision, answer_decision
 from core.answer_lead import AnswerLead, answer_lead
 from core.answer_plan import AnswerPlan, answer_plan
+from core.answer_temporal import AnswerTemporal, answer_temporal
 from core.causal_paths import CausalExplanation, causal_explanations
 from core.conversation import Conversation, ConversationMemory
 from core.documents import Document, DocumentStore
@@ -198,10 +199,23 @@ class AssistantAnswer:
     bridge stopped at the trailing *trace*: the answer body was still the
     retrieval template, so the reasoning sat in a footer a user may never open.
     This is the reasoning *in the answer itself* -- the lead the body opens with,
-    chosen strongest-first (procedure, then recommendation, then verdict) by
-    :mod:`core.answer_lead`. ``None`` when the question warranted no reasoning, so
-    a definitional question keeps the retrieval answer it had and nothing is
-    invented to fill a lead.
+    chosen strongest-first (procedure, then recommendation, then verdict, then
+    timeline) by :mod:`core.answer_lead`. ``None`` when the question warranted no
+    reasoning, so a definitional question keeps the retrieval answer it had and
+    nothing is invented to fill a lead.
+    """
+    temporal: AnswerTemporal | None = None
+    """The timeline the conversation holds, for a question that asks *what changed*.
+
+    The temporal layer (`TemporalReasoner`/`Timeline`/`TemporalEvent`/
+    `TemporalPattern`/`TimePrediction`) was reachable only from tests, so a
+    question like *"what changed over the session?"* got a definition back, never
+    the ordered account of what actually happened. This is the first time a
+    timeline reaches an answer: the conversation's own timestamped turns, ordered
+    by the project's real ``Timeline`` and related by its real ``TemporalReasoner``
+    (with its own pattern detection and next-time prediction). ``None`` when the
+    question asks nothing temporal or the conversation holds fewer than two turns
+    -- never a guessed timeline.
     """
 
     def __post_init__(self) -> None:
@@ -270,8 +284,13 @@ class GroundedAssistant:
         graph_plan = answer_plan(question)
         graph_decision = answer_decision(question, ontology=ontology)
         graph_belief = answer_belief(question, ontology=ontology)
+        graph_temporal = answer_temporal(question, conversation=conversation)
         lead = answer_lead(
-            question, plan=graph_plan, decision=graph_decision, belief=graph_belief
+            question,
+            plan=graph_plan,
+            decision=graph_decision,
+            belief=graph_belief,
+            temporal=graph_temporal,
         )
         lead_text = lead.describe() if lead is not None else ""
 
@@ -321,6 +340,7 @@ class GroundedAssistant:
             inferred=graph_inferences,
             connections=graph_connections,
             causal_paths=graph_causal,
+            temporal=graph_temporal,
             conflicts=graph_conflicts,
             confidence=confidence_report,
         )
@@ -348,6 +368,7 @@ class GroundedAssistant:
             confidence_report=confidence_report,
             reasoning=trace,
             lead=lead,
+            temporal=graph_temporal,
         )
 
     def _augment(self, question: str, internal: list[RetrievedPassage]) -> WebAugmentation | None:

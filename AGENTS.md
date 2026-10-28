@@ -964,8 +964,9 @@ Arabic is kept as secondary aliases where useful.
   **body** was still the retrieval template ("Here is what the available sources
   say about ..."), so the reasoning sat in a footer a reader may never open. This
   module puts the reasoning **in the answer itself**. `answer_lead(question,
-  plan=, decision=, belief=)` builds the lead strongest-first — procedure, then
-  recommendation, then verdict — and only the first that applies, so a question is
+  plan=, decision=, belief=, temporal=)` builds the lead strongest-first —
+  procedure, then recommendation, then verdict, then timeline — and only the first
+  that applies, so a question is
   never handed two competing leads. Each lead is a *named* source: the procedure
   heading names the corpus entry it came from (`plan.source`), the recommendation
   lists the graph's ranked options, and the verdict states the claim, its
@@ -995,6 +996,34 @@ Arabic is kept as secondary aliases where useful.
   the pronoun the question omitted are dropped ("how does porosity relate to
   permeability" → "porosity permeability"), while a word that could be a noun is
   kept, so nothing the user named disappears.
+- `core/answer_temporal.py` — the **timeline bridge**: the temporal half of Gap 7
+  of `docs/REASONING_ASSESSMENT.md`. The project carried a whole temporal layer
+  (`TemporalReasoner`, `Timeline`, `TemporalEvent`, `TemporalPattern`,
+  `TimePrediction`) but it was reachable only from tests, so a question like *"what
+  changed over the session?"* got a definition back, never the ordered account of
+  what actually happened. `answer_temporal(question, *, conversation=, events=)`
+  reads the one real timeline the answer path already holds -- the conversation's
+  own **timestamped turns** -- turns them into `TemporalEvent`s, and runs them
+  through the project's real `TemporalReasoner`: the order is chronological, the
+  relation between the last two turns is the reasoner's own
+  (`before`/`during`/`simultaneous`...), and any repeating pattern and its
+  next-time prediction are the ones `find_pattern`/`predict_next` actually
+  produced. `AnswerTemporal` carries the `entries` (`TimelineEntry` role/text/at),
+  the `relation`, the readable `change`, the `pattern`, the `prediction`, and the
+  `language`; `span_seconds` measures the wall-clock window and `describe()`
+  renders the account. It is gated to a *temporal* question (`is_temporal`,
+  `TEMPORAL_CUES` in either language), so a definitional question never drags an
+  account of the session into its answer, and it returns ``None`` rather than a
+  guess when there is no timeline (fewer than two turns, or no conversation).
+  `SYSTEM`/`CONTEXT` turns are skipped -- a system instruction and an attached file
+  are not things that happened in the conversation. The timeline can open the
+  answer as a lead (`core.answer_lead`'s `KIND_TIMELINE`, tried after procedure,
+  recommendation, and verdict) and it is carried on the machine-readable turn
+  (`JarvisTurn.temporal`, `turn_payload["temporal"]`) and in the reasoning trace
+  (`core.reasoning_report.SOURCE_TEMPORAL`). The held-out gate `temporal_accuracy`
+  (`TEMPORAL_JUDGEMENTS`) checks the bridge with **negative controls** -- a
+  definitional or unrelated question, or a temporal question with one event, must
+  yield no timeline -- and is a metric in `evaluation/benchmark.py`.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
@@ -4286,3 +4315,34 @@ regression monitor each can refuse a change.
   ("how does porosity relate to permeability" → "porosity permeability").
   `tests/test_answer_lead.py` and `tests/test_answer_plan.py` pin the lead, its
   negative controls, the body check, the Arabic match, and the turn payload.
+
+- Phase 45 — **the timeline reaches the answer** (the temporal half of Gap 7):
+  the project carried a whole temporal layer (`TemporalReasoner`, `Timeline`,
+  `TemporalEvent`, `TemporalPattern`, `TimePrediction`) but it was reachable only
+  from tests, so a question like *"what changed over the session?"* got a
+  definition back, never the ordered account of what actually happened.
+  `core/answer_temporal.py` closes it: `answer_temporal(question, *,
+  conversation=, events=)` reads the one real timeline the answer path already
+  holds -- the conversation's own **timestamped turns** -- and runs them through
+  the project's real `TemporalReasoner`, so the order is chronological, the
+  relation between the last two turns is the reasoner's own
+  (`before`/`during`/`simultaneous`...), and any repeating pattern and its
+  next-time prediction are the ones `find_pattern`/`predict_next` actually
+  produced. It is gated to a *temporal* question (`is_temporal`, `TEMPORAL_CUES`
+  in either language), skips `SYSTEM`/`CONTEXT` turns (a system instruction and an
+  attached file are not things that happened in the conversation), and returns
+  ``None`` rather than a guess when there is no timeline (fewer than two turns, or
+  no conversation). `AnswerTemporal` carries the entries, the relation, the
+  readable change, the pattern, the prediction, and the language; `span_seconds`
+  measures the wall-clock window. The timeline can open the answer as a lead
+  (`core.answer_lead`'s `KIND_TIMELINE`, tried after procedure, recommendation,
+  and verdict), and it is carried on the machine-readable turn
+  (`JarvisTurn.temporal`, `turn_payload["temporal"]`) and in the reasoning trace
+  (`core.reasoning_report.SOURCE_TEMPORAL`). The held-out gate
+  `temporal_accuracy` (`TEMPORAL_JUDGEMENTS`) checks it with **negative
+  controls** -- a definitional or unrelated question, or a temporal question with
+  one event, must yield no timeline -- and is a metric in
+  `evaluation/benchmark.py` (overall 0.9832 → 0.9836).
+  `tests/test_answer_temporal.py` pins the cue gate, the chronological order, the
+  latest change, the pattern and its prediction, the conversation source, the
+  lead, the body/trace/turn wiring, and the gate with its negative controls.
