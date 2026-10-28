@@ -28,6 +28,7 @@ from core.answer_confidence import AnswerConfidence, answer_confidence
 from core.causal_paths import CausalExplanation, causal_explanations
 from core.conversation import Conversation, ConversationMemory
 from core.documents import Document, DocumentStore
+from core.grounding import check_grounding
 from core.model_interface import CognitiveModel, ModelRequest
 from core.rag import RagRetriever, RetrievedPassage
 from core.relation_connections import ConceptConnection, concept_connections
@@ -302,26 +303,22 @@ class GroundedAssistant:
         except (ValueError, KeyError):
             return _extractive_answer(question, passages), False
         text = response.text.strip()
-        if not text or not _is_grounded(text, passages):
+        if not text:
+            return _extractive_answer(question, passages), False
+        check = check_grounding(text, passages, ontology=getattr(self.retriever, "ontology", None))
+        if not check.grounded:
             return _extractive_answer(question, passages), False
         return text, True
 
 
 def _is_grounded(text: str, passages: list[RetrievedPassage]) -> bool:
-    """A weak groundedness gate: the answer must share a content term with its evidence.
+    """Backward-compatible thin wrapper over :func:`core.grounding.check_grounding`.
 
-    The in-project model is tiny, so it can produce fluent-looking text that has
-    nothing to do with the retrieved passages. Refusing such output and falling
-    back to the extractive answer keeps every published answer traceable to a
-    source.
+    Kept because it is the historical name of the gate; the real work -- term
+    coverage, per-sentence support, and causal-direction checking -- lives in
+    :mod:`core.grounding`.
     """
-    from core.rag import _query_terms
-
-    answer_terms = _query_terms(text)
-    evidence_terms: set[str] = set()
-    for passage in passages:
-        evidence_terms |= _query_terms(f"{passage.title} {passage.text}")
-    return bool(answer_terms & evidence_terms)
+    return check_grounding(text, passages).grounded
 
 
 def _is_weak(passages: list[RetrievedPassage], threshold: float) -> bool:

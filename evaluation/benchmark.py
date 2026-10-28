@@ -55,6 +55,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("connection_reasoning_accuracy", True, label="Connection reasoning accuracy (held-out answer-path pairs)"),
     MetricSpec("causal_reasoning_accuracy", True, label="Causal reasoning accuracy (held-out answer-path causal pairs)"),
     MetricSpec("answer_confidence_accuracy", True, label="Answer confidence accuracy (held-out term expectations)"),
+    MetricSpec("grounding_accuracy", True, label="Grounding gate accuracy (held-out publish decisions)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )
