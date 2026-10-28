@@ -15,6 +15,7 @@ from core.curriculum_knowledge import curriculum_coverage_score
 from core.embeddings import evaluate_held_out
 from core.evidence import Evidence
 from core.goal import Goal
+from core.grounding import grounding_accuracy
 from core.observation import Observation
 from core.relation_connections import connection_reasoning_accuracy
 from core.relation_consistency import consistency_accuracy
@@ -98,6 +99,7 @@ class EvaluationMetrics:
     connection_reasoning_accuracy: float
     causal_reasoning_accuracy: float
     answer_confidence_accuracy: float
+    grounding_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -801,6 +803,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # own reasoning.
     confidence_value = answer_confidence_accuracy()
 
+    # Grounding gate: held-out expectations about whether model text may be
+    # published -- with negative controls (a paragraph riding one incidental word,
+    # a majority of unsupported sentences, a reversed causal mechanism must each be
+    # refused). This is the metric for the gate that keeps an untraceable answer
+    # from being shown.
+    grounding_value = grounding_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -851,6 +860,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         connection_reasoning_value,
         causal_reasoning_value,
         confidence_value,
+        grounding_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -887,6 +897,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         connection_reasoning_accuracy=round(connection_reasoning_value, 6),
         causal_reasoning_accuracy=round(causal_reasoning_value, 6),
         answer_confidence_accuracy=round(confidence_value, 6),
+        grounding_accuracy=round(grounding_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

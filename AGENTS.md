@@ -221,7 +221,7 @@ Arabic is kept as secondary aliases where useful.
   hashed semantic, and multi-hop ontology signals into `RetrievedPassage` with
   citations.   `core/assistant.py` — `GroundedAssistant` / `build_default_assistant`;
   answers with citations, extractive fallback with no model, and a groundedness gate
-  that rejects ungrounded model output. CLI: `python -m cli chat` (text-only
+  (`core/grounding.py`) that rejects ungrounded model output. CLI: `python -m cli chat` (text-only
   conversation) and `python -m cli jarvis` (listen/act/speak; `python -m ai.voice`
   and `python -m ai.jarvis` also use it). Both build their session through
   `ai/jarvis.py:build_session`, so the assistant, learner, and sandbox wiring
@@ -825,6 +825,21 @@ Arabic is kept as secondary aliases where useful.
   so a reader sees which term moved the number. The held-out gate
   `answer_confidence_accuracy` (`CONFIDENCE_JUDGEMENTS`, with negative controls)
   is a metric in `evaluation/benchmark.py`.
+- `core/grounding.py` — the answer path's **groundedness gate**, the one place that
+  decides whether model text may be published. It replaced a rule that accepted an
+  answer as soon as it shared **one** content term with the evidence. `check_grounding`
+  makes three deterministic checks and **fails closed** (the caller falls back to the
+  always-traceable extractive answer): (1) enough of the answer's content terms must
+  appear in the evidence (`DEFAULT_MIN_COVERAGE` 0.3, not just one); (2) each
+  content-bearing sentence must share a term with the evidence, and a majority of
+  unsupported sentences fails (`DEFAULT_MIN_SENTENCE_SUPPORT` 0.5), so a fluent
+  paragraph cannot ride one incidental word in; (3) a causal link the answer states
+  **in the direction the graph contradicts** (the graph holds the reverse edge and
+  not the forward one) fails -- the same honesty rule the causal layer applies to its
+  own walks, now applied to the model's words. `GroundingCheck` carries every reason;
+  `_is_grounded` in `core/assistant.py` is kept as a thin wrapper. The held-out gate
+  `grounding_accuracy` (`GROUNDING_JUDGEMENTS`, with negative controls) is a metric in
+  `evaluation/benchmark.py`.
 - `core/speech.py` — speech I/O contracts (ASR/TTS), dependency-free `AudioClip`
   (PCM/WAV), transcript + silent fallbacks, `VoiceAssistant` voice loop. The TTS
   engine itself is a *system* program (espeak-ng/espeak/flite/`say`), not a Python
@@ -3914,3 +3929,42 @@ regression monitor each can refuse a change.
   no-evidence-zero rule, the summed-and-capped penalty, the not-outvoted rule, the
   non-negative floor, the report validation and wording, the determinism, the
   assistant/Jarvis/format/payload wiring, and the gate (33 tests).
+- Phase 39 — **the groundedness gate gets real teeth**: the gate that decides
+  whether model text may be published -- `_is_grounded` in `core/assistant.py` --
+  accepted an answer as soon as it shared **one** content term with the evidence.
+  So a fluent paragraph could ride one incidental word into a published answer, a
+  sentence unsupported by any passage was never noticed, and a model that
+  **reversed** a mechanism the graph states (saying *"production drives waterflood"*
+  when the graph stores ``waterflood → production``) was published as-is -- Gap 5 of
+  `docs/REASONING_ASSESSMENT.md`.
+  `core/grounding.py` is now the one place the gate lives. `check_grounding` makes
+  three deterministic checks and **fails closed** -- when in doubt the caller falls
+  back to the extractive answer, which is always traceable:
+  (1) **term coverage** -- at least `DEFAULT_MIN_COVERAGE` (0.3) of the answer's
+  content terms must appear in the evidence, not just one, and the ratio scales so
+  a long answer sharing a word or two fails; (2) **per-sentence support** -- each
+  content-bearing sentence must share a term with the evidence, and a majority of
+  unsupported sentences (`DEFAULT_MIN_SENTENCE_SUPPORT` 0.5) fails the gate, so a
+  paragraph cannot smuggle in material the sources do not carry; (3) **causal
+  direction** -- if the answer states a causal link between two concepts in the
+  direction the graph **contradicts** (the graph stores the reverse edge and not
+  the forward one), the gate fails, applying the causal layer's own no-reverse rule
+  to the model's words. The reversal check is deliberately conservative: it matches
+  concepts on whole-phrase word boundaries (so ``pressure`` inside "reservoir
+  pressure" is not counted as a second concept), reads both forward markers
+  (``drives``) and reverse markers (``caused by``), and only fires when both
+  endpoints are known causal concepts and the graph holds the opposite edge alone.
+  `GroundingCheck` carries the coverage, the unsupported sentences, the reversals,
+  and one readable reason per failed check; `_is_grounded` is kept as a thin
+  backward-compatible wrapper. The held-out gate is `grounding_accuracy`: a
+  catalogue of hand-written expectations (`GROUNDING_JUDGEMENTS`) with **negative
+  controls** -- a fluent paragraph riding one incidental word, a supported sentence
+  outnumbered by unsupported ones, a reversed mechanism -- so publishing
+  untraceable or reversed text fails as surely as refusing a genuinely grounded
+  answer; added to `evaluation/benchmark.py`, `evaluation/runner.py`, and
+  `evaluation/baseline.json` (overall 0.9797 → 0.9804). `tests/test_grounding.py`
+  pins the check object, the coverage rule, the no-evidence fail-closed rule, the
+  per-sentence support (and its half threshold), the word-boundary marker match,
+  the nested-endpoint drop, the forward/reverse/reverse-marker cases, the
+  association-not-a-reversal rule, the gate with its negative controls, and the
+  assistant wiring (32 tests).
