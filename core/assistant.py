@@ -708,6 +708,7 @@ def build_default_assistant(
     earlier session is already in the graph (Gap 8). With no store the assistant
     is exactly as before -- a read-only session never touches disk.
     """
+    from core.arabic_glossary import apply_arabic_aliases
     from core.curriculum_knowledge import seed_curriculum
     from core.documents import build_document_store
     from core.domain_knowledge import seed_ontology
@@ -718,6 +719,9 @@ def build_default_assistant(
     seed_ontology(ontology)
     seed_curriculum(ontology)
     seed_petroleum_corpus(ontology)
+    # The Arabic frame, applied before the retriever indexes the graph, so an
+    # Arabic question reaches the same concepts an English one does.
+    apply_arabic_aliases(ontology)
     store = documents or build_document_store()
     bulk_retriever = _default_bulk_retriever() if bulk else None
     retriever = RagRetriever(store, ontology=ontology, bulk=bulk_retriever)

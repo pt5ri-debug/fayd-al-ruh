@@ -13,6 +13,10 @@ import pytest
 from core.answer_audit import (
     ALL_LAYERS,
     AUDIT_EXPECTATIONS,
+    AUDIT_EXPECTATIONS_AR,
+    LAYER_BELIEF,
+    LAYER_LEAD,
+    LAYER_REASONING,
     REASONING_LAYERS,
     AuditExpectation,
     answer_layers,
@@ -147,3 +151,72 @@ def test_audit_fails_honestly_when_the_path_raises():
 
 def test_audit_fails_honestly_when_the_path_returns_nothing():
     assert answer_path_accuracy(answer_for=lambda question, **kwargs: None) == 0.0
+
+
+# --- Phase 49: the Arabic-parallel audit --------------------------------------
+
+
+def test_arabic_catalogue_only_names_known_layers():
+    for expectation in AUDIT_EXPECTATIONS_AR:
+        assert set(expectation.required) <= ALL_LAYERS
+        assert set(expectation.forbidden) <= ALL_LAYERS
+
+
+def test_arabic_catalogue_has_positive_expectations_and_negative_controls():
+    positives = [e for e in AUDIT_EXPECTATIONS_AR if e.required]
+    negatives = [e for e in AUDIT_EXPECTATIONS_AR if e.forbidden]
+    assert positives, "the Arabic audit must check layers do arrive"
+    assert negatives, "the Arabic audit must include negative controls"
+    for control in negatives:
+        assert set(control.forbidden) == REASONING_LAYERS
+
+
+def test_arabic_catalogue_is_a_true_parallel_of_the_english_one():
+    """Each English expectation has an Arabic twin asking for the same layers."""
+    assert len(AUDIT_EXPECTATIONS_AR) == len(AUDIT_EXPECTATIONS)
+    english = {(e.required, e.forbidden, e.timeline) for e in AUDIT_EXPECTATIONS}
+    arabic = {(e.required, e.forbidden, e.timeline) for e in AUDIT_EXPECTATIONS_AR}
+    assert english == arabic
+
+
+def test_arabic_catalogue_questions_are_arabic():
+    for expectation in AUDIT_EXPECTATIONS_AR:
+        assert any("\u0600" <= ch <= "\u06ff" for ch in expectation.question), expectation.name
+
+
+def test_arabic_path_accuracy_is_one_on_the_real_assistant(assistant):
+    assert answer_path_accuracy(AUDIT_EXPECTATIONS_AR, answer_for=assistant.ask) == 1.0
+
+
+def test_arabic_path_accuracy_is_honest_with_no_path():
+    assert answer_path_accuracy(AUDIT_EXPECTATIONS_AR, answer_for=None) == 0.0
+
+
+def test_arabic_audit_fails_when_a_layer_is_dropped(assistant):
+    """A leaked Arabic answer must fail, exactly as the English one does."""
+    evaluative = next(e for e in AUDIT_EXPECTATIONS_AR if e.required == (LAYER_BELIEF, LAYER_LEAD, LAYER_REASONING))
+
+    def leaky(question, **kwargs):
+        answer = assistant.ask(question, **kwargs)
+        answer.belief = None
+        return answer
+
+    assert answer_path_accuracy((evaluative,), answer_for=leaky) < 1.0
+
+
+def test_arabic_evaluative_question_reaches_the_belief_engine():
+    """The root cause Phase 49 fixed: an Arabic term must resolve to its concept."""
+    from core.answer_belief import answer_belief
+    from core.cognitive_controller import CognitiveController
+
+    ontology = CognitiveController().ontology
+    belief = answer_belief("هل التحميض يزيد النفاذية؟", ontology=ontology)
+    assert belief is not None
+    assert belief.supporting, "the Arabic evaluative question must find supporting relations"
+
+
+def test_arabic_analogical_question_is_analogical():
+    from core.answer_analogy import is_analogical
+
+    assert is_analogical("هل المسامية مثل النفاذية؟")
+    assert not is_analogical("ما هي المسامية؟")

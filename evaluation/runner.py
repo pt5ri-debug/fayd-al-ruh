@@ -6,7 +6,7 @@ from core.acceptance_policy import rejection_reason
 from core.action import Action
 from core.analogy import analogy_accuracy
 from core.answer_analogy import analogy_answer_accuracy
-from core.answer_audit import answer_path_accuracy
+from core.answer_audit import AUDIT_EXPECTATIONS_AR, answer_path_accuracy
 from core.answer_belief import belief_accuracy
 from core.answer_confidence import answer_confidence_accuracy
 from core.answer_decision import decision_recommendation_accuracy
@@ -119,6 +119,8 @@ class EvaluationMetrics:
     knowledge_carry_accuracy: float
     # Answer path: the *connected* path, not the isolated layer (Gap 9)
     answer_path_accuracy: float
+    # ... and the same path in Arabic (Phase 49)
+    arabic_answer_path_accuracy: float
     semantic_separation: float
     # Aggregate
     overall: float
@@ -915,6 +917,16 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # that stops reaching the answer fails even while its isolated bridge passes.
     path_value = answer_path_accuracy(answer_for=_lead_answer_for())
 
+    # Arabic answer path: the same connected-path audit, in Arabic (Phase 49).
+    # The project is Arabic-first, so the metric must measure the Arabic path too;
+    # until Phase 49 only 39 of 495 concepts carried an Arabic alias, so an Arabic
+    # question reached almost none of the graph. Each English expectation has an
+    # Arabic twin, so a regression that breaks only Arabic fails here while the
+    # English catalogue stays green.
+    arabic_path_value = answer_path_accuracy(
+        AUDIT_EXPECTATIONS_AR, answer_for=_lead_answer_for()
+    )
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -975,6 +987,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         analogy_answer_value,
         carry_value,
         path_value,
+        arabic_path_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1021,6 +1034,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         analogy_answer_accuracy=round(analogy_answer_value, 6),
         knowledge_carry_accuracy=round(carry_value, 6),
         answer_path_accuracy=round(path_value, 6),
+        arabic_answer_path_accuracy=round(arabic_path_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from core.action import Action
 from core.analogy import Analogy, AnalogyEngine
+from core.arabic_glossary import apply_arabic_aliases
 from core.belief import Belief
 from core.belief_revision import BeliefRevision, BeliefRevisionEngine
 from core.causal_discovery import CausalDiscovery
@@ -169,6 +170,10 @@ class CognitiveController:
         seed_ontology(self.ontology)
         seed_curriculum(self.ontology)
         seed_petroleum_corpus(self.ontology)
+        # The Arabic frame: the project is Arabic-first, so the seeded labels gain
+        # their Arabic aliases before any index is built, and an Arabic question
+        # reaches the same graph an English one does.
+        apply_arabic_aliases(self.ontology)
         self.ontology_reasoner = OntologyReasoner()
         self.ontology_retriever = OntologyGuidedRetriever(self.ontology, self.ontology_reasoner)
         self.ontology_learner = OntologyLearner(self.ontology)
