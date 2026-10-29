@@ -31,11 +31,15 @@ def test_full_cognitive_loop():
     # Belief revision + causal update + knowledge graph + subsequent prediction.
     controller.revise_belief(belief.id)
     evidence_ids = [item.id for item in controller.graph.get_belief_evidence(belief.id)]
+    # The controller now loads the seed's directed causal edges at construction
+    # (Phase 52), so the graph is not empty to begin with; the added link must still
+    # land on top of whatever the seed already stated.
+    seeded_links = controller.causal_graph.link_count
     controller.add_causal_link(CausalLink("rain", "wet_ground", .9, evidence_ids))
     third = controller.process(observed, belief, EvidencePolarity.SUPPORTS)
 
     assert controller.graph.get_belief(belief.id) is belief
-    assert controller.causal_graph.link_count == 1
+    assert controller.causal_graph.link_count == seeded_links + 1
     assert third.loop_result.predictions
     assert controller.learner.history.events
     assert controller.validate_contexts() == []

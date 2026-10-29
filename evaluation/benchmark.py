@@ -54,6 +54,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("inference_accuracy", True, label="Graph inference accuracy (held-out entailments)"),
     MetricSpec("connection_reasoning_accuracy", True, label="Connection reasoning accuracy (held-out answer-path pairs)"),
     MetricSpec("causal_reasoning_accuracy", True, label="Causal reasoning accuracy (held-out answer-path causal pairs)"),
+    MetricSpec("controller_causal_accuracy", True, label="Controller causal accuracy (held-out pairs walked on the controller's own causal graph)"),
     MetricSpec("answer_confidence_accuracy", True, label="Answer confidence accuracy (held-out term expectations)"),
     MetricSpec("grounding_accuracy", True, label="Grounding gate accuracy (held-out publish decisions)"),
     MetricSpec("reasoning_trace_accuracy", True, label="Reasoning trace accuracy (held-out trace shapes)"),

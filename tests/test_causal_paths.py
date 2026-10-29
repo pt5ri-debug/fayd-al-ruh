@@ -199,6 +199,46 @@ def test_negative_control_in_catalogue():
     assert controls, "the catalogue must carry at least one negative control"
 
 
+def test_controller_loads_the_seeded_causal_edges():
+    # Phase 52: the controller's own causal graph must be populated from the seed,
+    # not left empty while the answer-path walk rebuilds one on every call.
+    controller = CognitiveController()
+    assert controller.causal_graph.link_count > 0
+
+
+def test_controller_causal_accuracy_is_perfect_on_the_catalogue():
+    from core.causal_paths import controller_causal_accuracy
+
+    assert controller_causal_accuracy() == 1.0
+
+
+def test_controller_causal_accuracy_empty_catalogue_is_zero():
+    from core.causal_paths import controller_causal_accuracy
+
+    assert controller_causal_accuracy(judgements=()) == 0.0
+
+
+def test_controller_causal_graph_walks_a_seeded_multi_hop_chain():
+    from core.causal_reasoner import CausalReasoner
+
+    controller = CognitiveController()
+    chain = CausalReasoner().explain(
+        controller.causal_graph, "waterflood", "production"
+    )
+    assert chain is not None
+    assert chain.cause == "waterflood" and chain.effect == "production"
+    assert len(chain.links) == 2
+
+
+def test_controller_causal_graph_holds_only_causal_edges():
+    # An association (`measures`) must never appear as a link, so the loaded graph
+    # cannot read a correlation as a cause.
+    controller = CognitiveController()
+    mechanisms = {link.mechanism for link in controller.causal_graph.links.values()}
+    assert mechanisms <= CAUSAL_RELATION_TYPES
+    assert "measures" not in mechanisms
+
+
 def test_default_limit_is_positive():
     assert DEFAULT_CAUSAL_LIMIT >= 1
 

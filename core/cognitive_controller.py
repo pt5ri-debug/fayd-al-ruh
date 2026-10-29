@@ -11,6 +11,7 @@ from core.causal_discovery import CausalDiscovery
 from core.causal_graph import CausalGraph
 from core.causal_intervention import CausalIntervention, InterventionResult
 from core.causal_link import CausalLink
+from core.causal_paths import causal_graph_from_ontology
 from core.causal_reasoner import CausalReasoner
 from core.causal_validator import CausalValidator
 from core.cognitive_context import ContextRegistry
@@ -174,6 +175,14 @@ class CognitiveController:
         # their Arabic aliases before any index is built, and an Arabic question
         # reaches the same graph an English one does.
         apply_arabic_aliases(self.ontology)
+        # The seeded ontology states directed causal edges (``causes``, ``drives``,
+        # ``controls``, ``prevents`` ...). Loading them into the controller's own
+        # ``CausalGraph`` is what lets ``CausalReasoner``, ``CausalIntervention``,
+        # and ``CounterfactualReasoner`` walk the *seeded* knowledge instead of an
+        # empty graph -- the answer path already read the edges directly
+        # (``core.causal_paths``), but nothing had ever put them where the causal
+        # engine looks. Read-only: it copies existing edges, never invents one.
+        self.causal_graph = causal_graph_from_ontology(self.ontology)
         self.ontology_reasoner = OntologyReasoner()
         self.ontology_retriever = OntologyGuidedRetriever(self.ontology, self.ontology_reasoner)
         self.ontology_learner = OntologyLearner(self.ontology)
