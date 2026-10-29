@@ -63,6 +63,7 @@
     "connection_reasoning_accuracy": 1.0,
     "consistency_accuracy": 1.0,
     "contradiction_rate": 1.0,
+    "controller_causal_accuracy": 1.0,
     "curriculum_coverage": 1.0,
     "decision_explanation_quality": 1.0,
     "decision_recommendation_accuracy": 1.0,

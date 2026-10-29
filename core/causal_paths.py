@@ -285,6 +285,35 @@ def causal_reasoning_accuracy(
     return correct / len(catalogue)
 
 
+def controller_causal_accuracy(
+    judgements: tuple[CausalJudgement, ...] = CAUSAL_JUDGEMENTS,
+) -> float:
+    """The share of held-out judgements the **controller's own** causal graph gets.
+
+    Phase 52's gap: `causal_reasoning_accuracy` rebuilt a causal graph from the
+    ontology on every call, so it passed even while the controller's own
+    ``CausalGraph`` stayed empty (0 links against the 111 the seed states) -- the
+    metric exercised the *walker*, never the *wiring*. This walks the graph the
+    controller actually builds in ``__init__``, so an empty or unloaded graph fails
+    where the rebuilt one did not.
+    """
+    catalogue = tuple(judgements)
+    if not catalogue:
+        return 0.0
+    from core.causal_reasoner import CausalReasoner
+    from core.cognitive_controller import CognitiveController
+
+    controller = CognitiveController()
+    reasoner = CausalReasoner()
+    correct = 0
+    for judgement in catalogue:
+        chain = reasoner.explain(controller.causal_graph, judgement.cause, judgement.effect)
+        hops = len(chain.links) if chain is not None else None
+        if hops == judgement.expected_hops:
+            correct += 1
+    return correct / len(catalogue)
+
+
 __all__ = [
     "CAUSAL_JUDGEMENTS",
     "CAUSAL_RELATION_TYPES",
@@ -295,5 +324,6 @@ __all__ = [
     "causal_explanations",
     "causal_graph_from_ontology",
     "causal_reasoning_accuracy",
+    "controller_causal_accuracy",
     "describe_causal_explanations",
 ]

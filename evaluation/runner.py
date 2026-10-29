@@ -20,7 +20,7 @@ from core.answer_temporal import temporal_accuracy
 from core.belief import Belief
 from core.belief_revision import BeliefRevisionEngine
 from core.causal_link import CausalLink
-from core.causal_paths import causal_reasoning_accuracy
+from core.causal_paths import causal_reasoning_accuracy, controller_causal_accuracy
 from core.cognitive_controller import CognitiveController
 from core.curriculum_knowledge import curriculum_coverage_score
 from core.embeddings import evaluate_held_out
@@ -111,6 +111,7 @@ class EvaluationMetrics:
     inference_accuracy: float
     connection_reasoning_accuracy: float
     causal_reasoning_accuracy: float
+    controller_causal_accuracy: float
     answer_confidence_accuracy: float
     grounding_accuracy: float
     reasoning_trace_accuracy: float
@@ -845,6 +846,12 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # layer reaching the answer path.
     causal_reasoning_value = causal_reasoning_accuracy()
 
+    # The controller's *own* causal graph (Phase 52): the walk above rebuilt a graph
+    # from the ontology on every call, so it stayed green while the controller's
+    # ``CausalGraph`` was empty (0 links against the 111 the seed states). This walks
+    # the graph the controller actually builds, so an unwired causal layer fails here.
+    controller_causal_value = controller_causal_accuracy()
+
     # Answer confidence: held-out expectations about how graph support and stored
     # contradictions must move an answer's confidence -- with negative controls (a
     # graph signal with no evidence must stay at zero, a contradiction must lower
@@ -1044,6 +1051,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         inference_accuracy=round(inference_value, 6),
         connection_reasoning_accuracy=round(connection_reasoning_value, 6),
         causal_reasoning_accuracy=round(causal_reasoning_value, 6),
+        controller_causal_accuracy=round(controller_causal_value, 6),
         answer_confidence_accuracy=round(confidence_value, 6),
         grounding_accuracy=round(grounding_value, 6),
         reasoning_trace_accuracy=round(trace_value, 6),

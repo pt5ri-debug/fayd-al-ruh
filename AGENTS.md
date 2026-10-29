@@ -807,7 +807,13 @@ Arabic is kept as secondary aliases where useful.
   reach an answer as *data* (`AssistantAnswer.connections`/`causal_paths`,
   `JarvisTurn.connections`/`causal_paths`, rendered by `ai/chat.format_turn`), with
   a held-out gate (`connection_reasoning_accuracy`, `causal_reasoning_accuracy`)
-  whose catalogues carry **negative controls**. `docs/REASONING_ASSESSMENT.md`
+  whose catalogues carry **negative controls**. `core.causal_paths` is also what
+  `CognitiveController.__init__` calls (Phase 52) to load the seed's 111 causal
+  edges into the controller's **own** `CausalGraph`, so `CausalReasoner`,
+  `CausalIntervention`, and `CounterfactualReasoner` walk the seeded knowledge
+  instead of an empty graph; `controller_causal_accuracy` is the held-out gate that
+  walks *that* graph (so an unwired layer fails, where `causal_reasoning_accuracy`'s
+  rebuilt graph hid it). `docs/REASONING_ASSESSMENT.md`
   records which of the reasoning layer's 69 modules reach an answer and which do
   not.
 - `core/answer_confidence.py` — how the answer path weighs an answer's confidence.
@@ -4741,3 +4747,27 @@ regression monitor each can refuse a change.
   measurement (0 leaks across a 12-question Arabic battery). Gates: pytest
   4206 passed / 200 skipped, ruff clean, mypy 751 files OK, evaluation PASS
   (`arabic_readable_body_accuracy` 1.0000; `overall` 0.9853 → 0.9856).
+- Phase 52 — **the causal layer loaded into the controller's own graph**. The
+  seeded ontology states **111 directed causal edges** (`causes`, `drives`,
+  `controls`, `prevents`, `reduces`, `increases`, ...), and the answer path already
+  read them (`core.causal_paths`), but `CognitiveController.__init__` built its
+  `CausalGraph` **empty** -- `CausalGraph()` with no links -- so `CausalReasoner`,
+  `CausalIntervention`, and `CounterfactualReasoner` all walked nothing on seeded
+  knowledge. The gap was invisible because `causal_reasoning_accuracy` **rebuilt** a
+  causal graph from the ontology on every call, so the metric exercised the
+  *walker*, never the *wiring*, and stayed 1.0 while the controller's graph held 0
+  links. `CognitiveController.__init__` now calls
+  `core.causal_paths.causal_graph_from_ontology(self.ontology)` and stores the
+  result in `self.causal_graph`, so the causal engines run on the seed
+  (111 links; 20 two-hop chains such as `waterflood → reservoir_pressure →
+  production` and `weight_on_bit → rate_of_penetration → cost`). It is read-only:
+  it copies existing edges through the closed `CAUSAL_RELATION_TYPES` set (an
+  association such as `measures` can never become a link) and invents none. A new
+  held-out metric `controller_causal_accuracy` (in `core.causal_paths.py`,
+  `evaluation/runner.py`, `benchmark.py`, and `baseline.json`) walks the graph the
+  controller **actually builds**, so an unwired or empty causal layer fails where
+  the rebuilt-graph metric did not -- the honesty fix that makes the Phase 52 gap
+  measurable rather than hidden. `tests/test_causal_paths.py` gains five tests: the
+  loaded graph is non-empty, holds only causal mechanisms, walks the seeded
+  `waterflood → production` two-hop chain, and the new metric is 1.0 on the
+  catalogue and 0.0 on an empty one.
