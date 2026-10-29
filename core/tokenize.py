@@ -15,6 +15,7 @@ import ``_query_terms`` from there.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 _TOKEN_RE = re.compile(r"\w+", flags=re.UNICODE)
 _DIACRITICS_RE = re.compile(r"[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed]")
@@ -35,6 +36,12 @@ _STOPWORDS = frozenset(
 _ALEF = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ى": "ي", "ة": "ه", "ؤ": "و", "ئ": "ي"})
 _PREFIXES = ("وال", "بال", "فال", "كال", "ال", "و", "ب", "ل", "ك", "ف")
 
+#: How many distinct tokens :func:`normalize_token` remembers. The token vocabulary
+#: of a session is small and highly repetitive (every retrieval re-normalises the
+#: same document tokens, and the corpus words recur across documents), so a modest
+#: bound covers a whole session's working set while keeping memory flat.
+_TOKEN_CACHE_SIZE = 20_000
+
 
 def normalize_token(token: str) -> str:
     """Light Arabic normalisation: strip diacritics, unify letters, drop affixes.
@@ -44,7 +51,18 @@ def normalize_token(token: str) -> str:
     four remain, because ``ك`` and ``ب`` are real prefixes but also the first
     letter of countless ordinary words -- without the longer floor ``كتاب``
     would be reduced to ``تاب``.
+
+    The function is pure and its inputs repeat heavily (a retrieval normalises the
+    same document tokens on every query, and the same corpus words recur across
+    documents), so the result is memoised. The bound keeps a long session with
+    unusual input from growing without limit; the transform itself is a handful of
+    string operations, so a cache miss stays cheap.
     """
+    return _normalize_token_cached(token)
+
+
+@lru_cache(maxsize=_TOKEN_CACHE_SIZE)
+def _normalize_token_cached(token: str) -> str:
     value = _DIACRITICS_RE.sub("", token).replace("ـ", "").translate(_ALEF).casefold()
     changed = True
     while changed and len(value) > 3:

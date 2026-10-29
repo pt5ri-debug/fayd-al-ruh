@@ -77,6 +77,19 @@ def test_glossary_resolves_a_label_exactly_not_by_a_shared_alias():
     assert labels == {"acid_stimulation"}
 
 
+def test_glossary_adds_every_term_of_a_label_that_appears_twice():
+    """One label may carry two Arabic terms, and both must survive the pass.
+
+    ``acid_stimulation`` is named twice in the table. The single-pass lookup reads
+    each concept once and then refreshes its own entry after an alias is added, so
+    the second term lands on the same (already aliased) concept instead of being
+    looked up against a stale snapshot and reported as already present.
+    """
+    ontology = CognitiveController().ontology
+    for term in ("التحفيز الحمضي", "التحميض"):
+        assert ontology.find_concepts(term), f"{term} must resolve to a concept"
+
+
 def test_glossary_never_touches_a_relation():
     """Adding an alias keeps the concept id, so the graph's edges survive."""
     ontology = CognitiveController().ontology

@@ -596,13 +596,11 @@ def _concept_for_label(ontology: Ontology, label: str) -> Concept | None:
     never to a *different* concept that happens to share an alias. ``acidizing``
     is an alias of both ``well_stimulation`` and ``acid_stimulation``, so a lookup
     by that word returned the wrong concept and the Arabic term was silently lost;
-    matching the label exactly (case-insensitively) is the honest resolution.
+    matching the label exactly (case-insensitively) is the honest resolution. The
+    scan is delegated to the ontology's own cached label index, so a caller that
+    resolves many labels (an Arabic answer, the alias table) pays for it once.
     """
-    wanted = label.casefold()
-    for concept in ontology.concepts.values():
-        if concept.label.casefold() == wanted:
-            return concept
-    return None
+    return ontology.concept_for_label(label)
 
 
 def apply_arabic_aliases(ontology: Ontology, table: tuple[tuple[str, str], ...] = ARABIC_ALIASES) -> GlossaryReport:
@@ -615,6 +613,10 @@ def apply_arabic_aliases(ontology: Ontology, table: tuple[tuple[str, str], ...] 
     present is a no-op, so calling this twice changes nothing; a concept may carry
     more than one Arabic term, so a synonym is added beside the primary one. The
     concept's id is preserved, so every relation that references it stays intact.
+
+    Each label is resolved through the ontology's own cached label index, so the
+    pass costs one lookup per entry rather than a full concept scan per entry
+    (which made seeding quadratic -- ~1M label comparisons per startup).
     """
     added: list[str] = []
     already: list[str] = []
@@ -623,7 +625,7 @@ def apply_arabic_aliases(ontology: Ontology, table: tuple[tuple[str, str], ...] 
         term = arabic.strip()
         if not term:
             continue
-        concept = _concept_for_label(ontology, label)
+        concept = ontology.concept_for_label(label)
         if concept is None:
             unknown.append(label)
             continue

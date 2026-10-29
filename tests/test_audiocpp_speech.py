@@ -407,6 +407,70 @@ def test_synthesizer_reports_a_missing_engine_without_a_fallback(tmp_path):
         a.AudioCppSynthesizer(root=tmp_path / "empty")
 
 
+def test_a_flaky_server_retries_on_the_cli_runner_and_keeps_the_voice(monkeypatch):
+    """A dropped server request must not silently downgrade to the system voice.
+
+    The resident server is the fast path but an HTTP request into a long-lived
+    process can drop; the engine used to let that bubble up so the caller's
+    system-engine fallback spoke the text in the *wrong* voice. The single-process
+    runner is kept as the retry, so the chosen voice survives a server hiccup.
+    """
+    from core import speech
+
+    class _Server:
+        """A server runner whose batch call drops the first time."""
+
+        def __init__(self) -> None:
+            self.dropped = False
+
+        def synthesize(self, text, **kwargs):
+            raise a.AudioCppUnavailable("server dropped")
+
+        def synthesize_many(self, texts, **kwargs):
+            self.dropped = True
+            raise a.AudioCppUnavailable("Remote end closed connection without response")
+
+    class _Cli:
+        """The reliable single-process runner that answers the retry."""
+
+        def __init__(self) -> None:
+            self.seen: list[str] = []
+
+        def synthesize(self, text, **kwargs):
+            self.seen.append(text)
+            return Path("/dev/null")
+
+        def synthesize_many(self, texts, **kwargs):
+            self.seen.extend(texts)
+            return [Path("/dev/null") for _ in texts]
+
+    class _Fallback:
+        name = "fallback"
+
+        def __init__(self) -> None:
+            self.seen: list[str] = []
+
+        def synthesize(self, text: str) -> speech.AudioClip:
+            self.seen.append(text)
+            return speech.AudioClip((7, 7, 7))
+
+    fallback = _Fallback()
+    synth = a.AudioCppSynthesizer(runner=_Server(), fallback=fallback)
+    cli = _Cli()
+    synth._cli_runner = cli
+    # The batch runner reports no audio paths, so ``synthesize_many`` reads them
+    # back through the real WAV reader; stub it so the test stays focused on
+    # *which* runner answered, not on decoding a file.
+    monkeypatch.setattr(
+        a.AudioClip, "read_wav", staticmethod(lambda path: speech.AudioClip((3, 3, 3)))
+    )
+    clip = synth.synthesize("مرحبا")
+    assert synth._runner is cli, "the retry must switch to the reliable runner"
+    assert cli.seen == ["مرحبا"], "the CLI runner must have read the text"
+    assert not clip.is_silent
+    assert fallback.seen == [], "the system engine must never speak for a server hiccup"
+
+
 # ------------------------------------------------------------ voice routing
 
 
@@ -491,6 +555,23 @@ def test_cli_say_rejects_an_unknown_voice(capsys):
 
     assert cli_audio.main(["say", "hello", "--voice", "model:audio.cpp:Nobody"]) == 3
     assert "voices" in capsys.readouterr().out
+
+
+def test_cli_say_defaults_to_the_fast_path():
+    """``say`` must default to the module's fast settings, not the slow engine ones.
+
+    The parser hard-coded 8 diffusion steps (the module's own default is 4) and
+    made the resident server opt-in, so a plain ``say`` took the slow path twice
+    over. Both now match ``core.audiocpp_speech``: 4 steps and the server on, with
+    ``--no-server`` as the explicit opt-out.
+    """
+    from cli import audio as cli_audio
+
+    parser = cli_audio._build_parser()
+    args = parser.parse_args(["say", "hello"])
+    assert args.steps == a.DEFAULT_INFERENCE_STEPS
+    assert args.server is True
+    assert parser.parse_args(["say", "hello", "--no-server"]).server is False
 
 
 def test_cli_import_clone_and_remove_round_trip(tmp_path, monkeypatch, capsys):

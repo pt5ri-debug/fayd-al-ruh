@@ -30,6 +30,7 @@ from pathlib import Path
 
 from core.audiocpp_speech import (
     AUDIOCPP_ENGINE_NAME,
+    DEFAULT_INFERENCE_STEPS,
     AudioCppUnavailable,
     audiocpp_status,
     clone_voice,
@@ -242,12 +243,21 @@ def _build_parser() -> argparse.ArgumentParser:
     say = sub.add_parser("say", help="synthesize speech from text")
     say.add_argument("text", help="the text to read aloud")
     say.add_argument("--voice", help="a model voice key (model:audio.cpp:Sarah, ...)")
-    say.add_argument("--steps", type=int, default=8, help="diffusion steps (default 8)")
+    say.add_argument(
+        "--steps",
+        type=int,
+        default=DEFAULT_INFERENCE_STEPS,
+        help=(
+            f"diffusion steps (default {DEFAULT_INFERENCE_STEPS}; the model's own "
+            "default is 32, so this is the fast, intelligible setting)"
+        ),
+    )
     say.add_argument("--write-wav", type=Path, help="also write the audio to this WAV file")
     say.add_argument(
         "--server",
-        action="store_true",
-        help="keep the model resident in a local server (faster for long text)",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="keep the model resident in a local server (faster for long text; --no-server disables)",
     )
     return parser
 

@@ -1756,6 +1756,12 @@ class AudioCppSynthesizer:
         self._fallback = fallback
         self._root = root
         self._server_runner: AudioCppServerRunner | None = None
+        # The reliable single-process runner, always built: it is the engine's real
+        # path and the retry target when the resident server (a faster but flakier
+        # HTTP path) drops a request. Keeping it means a server hiccup falls back to
+        # the *right voice*, never to the system engine -- which is what made a read
+        # come out in the wrong voice with no explanation.
+        self._cli_runner: AudioCppCliRunner | None = None
         # A zero-shot cloning engine reproduces the reference clip's voice, so a mood
         # has almost nothing to change here; it is carried so the *fallback* (the
         # system engine) can still read the mood when this engine cannot.
@@ -1774,7 +1780,11 @@ class AudioCppSynthesizer:
         # The resident server keeps the weights loaded across a whole read, which is
         # the real fix for a slow read (a per-paragraph process reloads 1.35 GB each
         # time). It is used when the build ships the server binary and the caller
-        # asked for it; otherwise the single-process engine is the honest fallback.
+        # asked for it; the single-process runner stays available as the retry so a
+        # dropped HTTP request never costs the voice.
+        self._cli_runner = AudioCppCliRunner(
+            cli, model, backend=backend, threads=threads, perf_mode=perf_mode
+        )
         server = find_server(root) if use_server else None
         if server is not None:
             self._server_runner = AudioCppServerRunner(
@@ -1782,9 +1792,7 @@ class AudioCppSynthesizer:
             )
             self._runner = self._server_runner
             return
-        self._runner = AudioCppCliRunner(
-            cli, model, backend=backend, threads=threads, perf_mode=perf_mode
-        )
+        self._runner = self._cli_runner
 
     def stop(self) -> None:
         """Stop a resident server this synthesizer started, releasing the model.
@@ -1861,13 +1869,30 @@ class AudioCppSynthesizer:
         """
         batch = getattr(self._runner, "synthesize_many", None)
         if callable(batch):
-            return batch(
-                prepared,
-                language=self.language,
-                reference=reference,
-                reference_text=reference_text,
-                steps=self.steps,
-            )
+            try:
+                return batch(
+                    prepared,
+                    language=self.language,
+                    reference=reference,
+                    reference_text=reference_text,
+                    steps=self.steps,
+                )
+            except AudioCppUnavailable:
+                # The resident server is a faster but flakier path (it is an HTTP
+                # request into a long-lived process); when it drops a request, the
+                # reliable single-process runner reads the text instead of the whole
+                # read degrading to the system engine -- so the chosen voice is kept.
+                # A caller-supplied runner has no such retry, so it propagates.
+                if self._cli_runner is None or self._runner is self._cli_runner:
+                    raise
+                self._runner = self._cli_runner
+                return self._cli_runner.synthesize_many(
+                    prepared,
+                    language=self.language,
+                    reference=reference,
+                    reference_text=reference_text,
+                    steps=self.steps,
+                )
         return [
             self._runner.synthesize(
                 text,

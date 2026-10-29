@@ -55,6 +55,11 @@ class Ontology:
         self._exact_index: dict[str, list[Concept]] | None = None
         self._prefix_index: dict[str, list[tuple[str, list[Concept]]]] | None = None
         self._text_cache: dict[str, frozenset[str]] = {}
+        # A case-insensitive label -> concept map, built once and dropped whenever a
+        # concept changes. An Arabic answer resolves a label per rendered term, and a
+        # per-call scan of every concept made that quadratic (340k ``casefold`` calls
+        # in one session); the map turns each lookup into a dict hit.
+        self._label_index: dict[str, Concept] | None = None
 
     # ------------------------------------------------------------- indexes
 
@@ -62,7 +67,26 @@ class Ontology:
         """Drop the derived indexes after a bulk change the incremental path cannot serve."""
         self._exact_index = None
         self._prefix_index = None
+        self._label_index = None
         self._text_cache.clear()
+
+    def concept_for_label(self, label: str) -> Concept | None:
+        """The concept whose **label** is exactly ``label`` (case-insensitively), or ``None``.
+
+        A label must resolve to the concept it names -- never to a *different*
+        concept that happens to share an alias. ``acidizing`` is an alias of both
+        ``well_stimulation`` and ``acid_stimulation``, so a lookup by that word
+        returned the wrong concept and the Arabic term was silently lost; matching
+        the label exactly is the honest resolution. The map is built once and kept
+        until a concept changes, so a per-term lookup stays cheap.
+        """
+        index = self._label_index
+        if index is None:
+            index = {}
+            for concept in self.concepts.values():
+                index.setdefault(concept.label.casefold(), concept)
+            self._label_index = index
+        return index.get(label.casefold())
 
     def _ensure_index(self) -> None:
         if self._exact_index is not None:
@@ -129,6 +153,8 @@ class Ontology:
             raise ValueError(f"Concept '{concept.id}' already exists.")
         self.concepts[concept.id] = concept
         self._index_concept(concept)
+        if self._label_index is not None:
+            self._label_index.setdefault(concept.label.casefold(), concept)
         self._text_cache.clear()
 
     def add_concept_once(self, label: str, aliases: frozenset[str] = frozenset()) -> Concept:
@@ -206,29 +232,46 @@ class Ontology:
         found = self._exact_index.get(normalized) if self._exact_index else None
         return list(found) if found else []
 
-    def _candidate_terms(self, tokens: list[str]) -> list[tuple[str, list[Concept]]]:
-        """The indexed ``(term, concepts)`` pairs a text's tokens could match.
+    def _match_spans(self, tokens: list[str]) -> list[tuple[int, int, list[Concept]]]:
+        """Every ``(start, end, concepts)`` a text's tokens match, in one pass.
 
-        Only a term whose head is a prefix of one of the text's tokens can match
-        (:func:`_token_matches` requires the token to *start* with the term), so the
-        candidates are gathered by looking each token up in the reverse index --
-        which is what makes the cost proportional to the text rather than to the
-        graph. A term shorter than :data:`_INDEX_PREFIX` letters indexes under its
-        whole self, so slicing the token by the same width still reaches it.
+        The reverse index is walked **once per token position** (``O(tokens x
+        candidates-per-token)``) rather than once per candidate term over every
+        position, which is what the callers used to do: on the real graph a query
+        scanned ~830 candidate terms across every position of every document, ~3 s
+        of a 3.3 s answer. Asking each position what *could* start there is the
+        same match set for a fraction of the work, because a term can only match a
+        token that starts with its head.
+
+        Spans are half-open token indices; a multi-word term is matched only when
+        every one of its words matches at the same offset. Order is positional
+        (by start, then longest first), and the callers re-sort for their own needs.
         """
         self._ensure_index()
         assert self._prefix_index is not None
         prefix_index = self._prefix_index
-        seen: set[str] = set()
-        candidates: list[tuple[str, list[Concept]]] = []
-        for token in set(tokens):
+        found: list[tuple[int, int, list[Concept]]] = []
+        total = len(tokens)
+        for index in range(total):
+            token = tokens[index]
             if not token:
                 continue
             for term, concepts in prefix_index.get(token[:_INDEX_PREFIX], ()):
-                if term not in seen:
-                    seen.add(term)
-                    candidates.append((term, concepts))
-        return candidates
+                width = term.count(" ") + 1
+                if width == 1:
+                    if _token_matches(token, term):
+                        found.append((index, index + 1, concepts))
+                    continue
+                end = index + width
+                if end > total:
+                    continue
+                term_tokens = term.split()
+                if all(
+                    _token_matches(tokens[index + offset], term_tokens[offset])
+                    for offset in range(width)
+                ):
+                    found.append((index, end, concepts))
+        return found
 
     def match_concepts(self, text: str) -> list[tuple[int, int, Concept]]:
         """Known concepts in ``text`` as ``(start, end, concept)`` spans.
@@ -247,22 +290,14 @@ class Ontology:
         """
         spans = token_spans(text)
         tokens = [normalized for _start, _end, normalized in spans]
+        # One pass over the token positions (see _match_spans), then the character
+        # span of each match is read off the token spans.
         found: list[tuple[int, int, Concept]] = []
-        for term, concepts in self._candidate_terms(tokens):
-            term_tokens = term.split()
-            width = len(term_tokens)
-            if not width or width > len(tokens):
-                continue
-            for index in range(len(tokens) - width + 1):
-                if not all(
-                    _token_matches(tokens[index + offset], term_tokens[offset])
-                    for offset in range(width)
-                ):
-                    continue
-                start = spans[index][0]
-                end = spans[index + width - 1][1]
-                for concept in concepts:
-                    found.append((start, end, concept))
+        for start_index, end_index, concepts in self._match_spans(tokens):
+            start = spans[start_index][0]
+            end = spans[end_index - 1][1]
+            for concept in concepts:
+                found.append((start, end, concept))
         found.sort(key=lambda item: (item[0], -(item[1] - item[0])))
         kept: list[tuple[int, int, Concept]] = []
         for start, end, concept in found:
@@ -293,18 +328,8 @@ class Ontology:
             return set(cached)
         tokens = [normalized for _start, _end, normalized in token_spans(text)]
         ids: set[str] = set()
-        for term, concepts in self._candidate_terms(tokens):
-            term_tokens = term.split()
-            width = len(term_tokens)
-            if not width or width > len(tokens):
-                continue
-            for index in range(len(tokens) - width + 1):
-                if all(
-                    _token_matches(tokens[index + offset], term_tokens[offset])
-                    for offset in range(width)
-                ):
-                    ids.update(concept.id for concept in concepts)
-                    break
+        for _start, _end, concepts in self._match_spans(tokens):
+            ids.update(concept.id for concept in concepts)
         if len(self._text_cache) >= _TEXT_CACHE_SIZE:
             self._text_cache.clear()
         self._text_cache[text] = frozenset(ids)
@@ -327,6 +352,10 @@ class Ontology:
         updated = Concept(concept.label, concept.aliases | {value}, concept.id)
         self.concepts[concept_id] = updated
         self._index_concept(updated)
+        if self._label_index is not None:
+            # The label is unchanged, so the entry is replaced with the wider concept
+            # in place -- dropping the whole map would rebuild it for every alias.
+            self._label_index[concept.label.casefold()] = updated
         self._text_cache.clear()
         return updated
 
