@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from collections.abc import Callable
+from pathlib import Path
 
 from gui.typography import Typography
 
@@ -159,4 +160,159 @@ def _token(theme: object, name: str) -> str:
     return str(getattr(theme, name, getattr(theme, "surface", "#21252F")))
 
 
-__all__ = ["SidebarSection"]
+class SidebarColumn:
+    """A dialog's left column: a scrollable stack of collapsible sections.
+
+    Every window in the project except the main one used to draw its left side as
+    a flat list of ``SECTION LABEL`` headers over their contents, all with the same
+    weight and none of them collapsible. A graphics or design program does not look
+    like that; it groups related controls under short headers the user can fold
+    away. This class is the one place that shape is built, so every dialog's column
+    reads the same and none of them re-implements the canvas, the scrollbar, the
+    wheel bindings, or the section bookkeeping.
+
+    ``shell`` is the outer frame the caller grids or packs; ``body`` is the inner
+    frame the sections are stacked in; :meth:`add` returns a section's body frame
+    to fill. The scrollbar is **always visible** (not only on overflow), so the
+    column reads as one scrollable list rather than a dead end on a short window.
+
+    A ``scope`` and ``state_root`` make the open/closed choice survive a restart
+    (stored beside the main window's own section state); without them the sections
+    simply start at their declared state and are not persisted.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        theme: object,
+        typography: Typography,
+        width: int,
+        scope: str = "",
+        state_root: Path | str | None = None,
+        grid: bool = True,
+    ) -> None:
+        self._theme = theme
+        self._type = typography
+        self._scope = scope
+        self._state_root = state_root
+        self._states: dict[str, bool] = (
+            load_section_states(scope, state_root) if scope else {}
+        )
+        self.sections: dict[str, SidebarSection] = {}
+
+        self.shell = tk.Frame(parent, bg=_token(theme, "surface"), width=width)
+        if grid:
+            self.shell.grid(row=0, column=0, sticky="nsew")
+        # Propagation is left **on** (only the grid pass is pinned) so the shell
+        # grows to fit the canvas *and* the always-visible scrollbar beside it; a
+        # fixed-width shell would squeeze the scrollbar out entirely.
+        self.shell.grid_propagate(False)
+
+        self.canvas = tk.Canvas(
+            self.shell, bg=_token(theme, "surface"), highlightthickness=0, width=width
+        )
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar = tk.Scrollbar(self.shell, command=self.canvas.yview)
+        # Always visible, so the column is never a dead end on a short window.
+        self.scrollbar.pack(side="right", fill="y")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.body = tk.Frame(self.canvas, bg=_token(theme, "surface"))
+        self._window = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
+        self.body.bind(
+            "<Configure>", lambda _e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self._window, width=e.width))
+        for widget in (self.canvas, self.body):
+            widget.bind("<MouseWheel>", self._on_wheel)
+            widget.bind("<Button-4>", self._on_wheel)
+            widget.bind("<Button-5>", self._on_wheel)
+
+    def add(
+        self,
+        key: str,
+        title: str,
+        *,
+        icon: str = "",
+        open: bool = True,
+    ) -> tk.Frame:
+        """Add a collapsible section and return its **body** frame to fill."""
+        section = SidebarSection(
+            self.body,
+            key=key,
+            title=title,
+            icon=icon,
+            theme=self._theme,
+            typography=self._type,
+            open=self._states.get(key, open),
+            on_toggle=self._on_toggle if self._scope else None,
+        )
+        self.sections[key] = section
+        return section.body
+
+    def set_open(self, key: str, open: bool = True) -> None:
+        """Open (or close) a section programmatically, without persisting it."""
+        section = self.sections.get(key)
+        if section is not None:
+            section.set_open(open, persist=False)
+
+    def _on_toggle(self, key: str, is_open: bool) -> None:
+        self._states[key] = is_open
+        if self._scope:
+            save_section_states(self._scope, self._states, self._state_root)
+
+    def _on_wheel(self, event: tk.Event) -> None:
+        delta = -1 if getattr(event, "delta", 0) > 0 else 1
+        if getattr(event, "num", None) == 4:
+            delta = -1
+        elif getattr(event, "num", None) == 5:
+            delta = 1
+        self.canvas.yview_scroll(delta, "units")
+
+
+#: The namespace the per-dialog section states are stored under (beside the main
+#: window's own ``sidebar_sections`` record).
+_SECTIONS_NAMESPACE = "gui"
+
+
+def load_section_states(scope: str, root: Path | str | None = None) -> dict[str, bool]:
+    """The saved open/closed state of one dialog's sidebar sections.
+
+    A missing or broken record reads as empty and a value that is not a real bool
+    is dropped, so a corrupt store can never leave a section undrawable.
+    """
+    from core.paths import data_dir
+    from storage.json_store import JsonStore
+
+    try:
+        saved = JsonStore(root if root is not None else data_dir()).load(
+            _SECTIONS_NAMESPACE, f"sidebar_sections:{scope}"
+        )
+    except Exception:
+        return {}
+    raw = saved.get("sections") if isinstance(saved, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): value for key, value in raw.items() if isinstance(value, bool)}
+
+
+def save_section_states(scope: str, states: dict[str, bool], root: Path | str | None = None) -> None:
+    """Persist one dialog's sidebar sections' open/closed state (best effort)."""
+    from core.best_effort import best_effort
+    from core.paths import data_dir
+    from storage.json_store import JsonStore
+
+    payload = {str(key): bool(value) for key, value in states.items()}
+    with best_effort(f"save the {scope} sidebar sections"):
+        JsonStore(root if root is not None else data_dir()).save(
+            _SECTIONS_NAMESPACE, f"sidebar_sections:{scope}", {"sections": payload}
+        )
+
+
+__all__ = [
+    "SidebarColumn",
+    "SidebarSection",
+    "load_section_states",
+    "save_section_states",
+]

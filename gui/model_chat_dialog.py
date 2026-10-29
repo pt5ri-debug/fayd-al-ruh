@@ -44,6 +44,7 @@ from gui.chat_composer import ChatComposer
 from gui.image_preview import load_scaled
 from gui.message_footer import MessageFooter, strip_markdown
 from gui.model_chat import ModelChatService, mouth_title
+from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import fit_geometry, install_window_controls
 
@@ -162,12 +163,6 @@ class ModelChatDialog:
         )
         tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
 
-    def _section_label(self, parent: tk.Misc, text: str) -> None:
-        tk.Label(
-            parent, text=text.upper(), bg=self.theme.surface, fg=self.theme.text_dim,
-            font=self._type.font("2xs", weight="bold"), anchor="w",
-        ).pack(fill="x", padx=14, pady=(12, 2))
-
     def _button(self, parent: tk.Misc, text: str, command: Any, *, small: bool = False) -> tk.Button:
         return tk.Button(
             parent, text=text, command=command, relief="flat", borderwidth=0,
@@ -180,50 +175,36 @@ class ModelChatDialog:
     # -- sidebar ----------------------------------------------------------
 
     def _build_sidebar(self, parent: tk.Frame) -> None:
-        theme = self.theme
-        shell = tk.Frame(parent, bg=theme.surface, width=SIDEBAR_WIDTH)
-        shell.grid(row=0, column=0, sticky="nsew")
-        shell.grid_propagate(False)
-
-        canvas = tk.Canvas(shell, bg=theme.surface, highlightthickness=0, width=SIDEBAR_WIDTH)
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar = tk.Scrollbar(shell, command=canvas.yview)
-        # The sidebar scrollbar is always visible (not shown only on overflow), so
-        # the left column reads as one scrollable list and the model/voice options
-        # are never a dead end on a short window.
-        scrollbar.pack(side="right", fill="y")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        self._sidebar_canvas = canvas
-        self._sidebar_scrollbar = scrollbar
-
-        sidebar = tk.Frame(canvas, bg=theme.surface)
-        self._sidebar = sidebar
-        window = canvas.create_window((0, 0), window=sidebar, anchor="nw")
-        self._sidebar_window = window
-        sidebar.bind(
-            "<Configure>",
-            lambda _e: canvas.configure(scrollregion=canvas.bbox("all")),
+        # The left column is a stack of **collapsible sections** (the shared
+        # :class:`~gui.sidebar.SidebarColumn`), the way a graphics program groups
+        # its tools: the character's identity, its reading voice, and its language
+        # model -- each under its own header, each foldable, and each remembering
+        # its state. The column's scrollbar is always visible, so nothing is a dead
+        # end on a short window.
+        column = SidebarColumn(
+            parent,
+            theme=self.theme,
+            typography=self._type,
+            width=SIDEBAR_WIDTH,
+            scope=f"model-chat:{self.service.mouth}",
+            state_root=getattr(self.service, "data_root", None),
         )
-        canvas.bind(
-            "<Configure>",
-            lambda e: canvas.itemconfigure(window, width=e.width),
-        )
-        for widget in (canvas, sidebar):
-            widget.bind("<MouseWheel>", self._on_sidebar_wheel)
-            widget.bind("<Button-4>", self._on_sidebar_wheel)
-            widget.bind("<Button-5>", self._on_sidebar_wheel)
+        self._sidebar_column = column
+        # Kept as named attributes so the existing handlers and tests are untouched.
+        self._sidebar_canvas = column.canvas
+        self._sidebar_scrollbar = column.scrollbar
+        self._sidebar = column.body
 
-        self._build_identity(sidebar)
-        self._build_voice_section(sidebar)
-        self._build_model_section(sidebar)
+        self._build_identity(column.add("character", "Character", icon="🎭"))
+        self._build_voice_section(column.add("voice", "Reading voice", icon="🗣"))
+        self._build_model_section(column.add("model", "Language model", icon="🧠"))
 
     # -- identity (logo + name) ------------------------------------------
 
     def _build_identity(self, sidebar: tk.Frame) -> None:
         theme = self.theme
-        self._section_label(sidebar, "Character")
         block = tk.Frame(sidebar, bg=theme.surface)
-        block.pack(fill="x", padx=14, pady=(0, 4))
+        block.pack(fill="x", padx=14, pady=(4, 4))
 
         self._logo_canvas = tk.Canvas(
             block, width=LOGO_SIZE, height=LOGO_SIZE, bg=theme.surface,
@@ -321,10 +302,9 @@ class ModelChatDialog:
 
     def _build_voice_section(self, sidebar: tk.Frame) -> None:
         theme = self.theme
-        self._section_label(sidebar, "Reading voice")
         self._voice_var = tk.StringVar(value=self.service.voice_key())
         holder = tk.Frame(sidebar, bg=theme.surface)
-        holder.pack(fill="x", padx=10)
+        holder.pack(fill="x", padx=10, pady=(4, 0))
 
         for section in self.service.voice_sections():
             self._voice_group(holder, section.title, indent=4)
@@ -412,9 +392,8 @@ class ModelChatDialog:
 
     def _build_model_section(self, sidebar: tk.Frame) -> None:
         theme = self.theme
-        self._section_label(sidebar, "Language model")
         holder = tk.Frame(sidebar, bg=theme.surface)
-        holder.pack(fill="both", expand=True, padx=12)
+        holder.pack(fill="both", expand=True, padx=12, pady=(4, 0))
 
         self._model_list = tk.Listbox(
             holder, bg=theme.base, fg=theme.foreground, relief="flat",
@@ -917,12 +896,6 @@ class ModelChatDialog:
         )
         self._canvas.yview_scroll(delta, "units")
         self._toggle_scrollbar()
-
-    def _on_sidebar_wheel(self, event: tk.Event) -> None:
-        delta = -1 * (event.delta // 120) if getattr(event, "delta", 0) else (
-            -1 if getattr(event, "num", 0) == 4 else 1
-        )
-        self._sidebar_canvas.yview_scroll(delta, "units")
 
     def _scroll_to_bottom(self) -> None:
         self._canvas.update_idletasks()

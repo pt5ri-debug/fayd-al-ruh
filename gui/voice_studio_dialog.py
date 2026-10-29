@@ -56,6 +56,7 @@ from gui.app import RoundedBox
 from gui.chat_composer import ChatComposer
 from gui.image_preview import load_scaled
 from gui.message_footer import MessageFooter, strip_markdown
+from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.voice_studio import DOCUMENT_SUFFIXES, VoiceStudioService
 from gui.window_controls import fit_geometry, install_window_controls
@@ -171,12 +172,6 @@ class VoiceStudioDialog:
         )
         tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
 
-    def _section_label(self, parent: tk.Misc, text: str) -> None:
-        tk.Label(
-            parent, text=text.upper(), bg=self.theme.surface, fg=self.theme.text_dim,
-            font=self._type.font("2xs", weight="bold"), anchor="w",
-        ).pack(fill="x", padx=14, pady=(12, 2))
-
     def _button(self, parent: tk.Misc, text: str, command: Any, *, small: bool = False) -> tk.Button:
         return tk.Button(
             parent, text=text, command=command, relief="flat", borderwidth=0,
@@ -189,50 +184,41 @@ class VoiceStudioDialog:
     # -- sidebar ----------------------------------------------------------
 
     def _build_sidebar(self, parent: tk.Frame) -> None:
-        theme = self.theme
-        shell = tk.Frame(parent, bg=theme.surface, width=SIDEBAR_WIDTH)
-        shell.grid(row=0, column=0, sticky="nsew")
-        shell.grid_propagate(False)
-
-        canvas = tk.Canvas(shell, bg=theme.surface, highlightthickness=0, width=SIDEBAR_WIDTH)
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar = tk.Scrollbar(shell, command=canvas.yview)
-        scrollbar.pack(side="right", fill="y")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        self._sidebar_canvas = canvas
-        self._sidebar_scrollbar = scrollbar
-
-        sidebar = tk.Frame(canvas, bg=theme.surface)
-        self._sidebar = sidebar
-        window = canvas.create_window((0, 0), window=sidebar, anchor="nw")
-        self._sidebar_window = window
-        sidebar.bind(
-            "<Configure>",
-            lambda _e: canvas.configure(scrollregion=canvas.bbox("all")),
+        # The left column is a stack of **collapsible sections** (the shared
+        # :class:`~gui.sidebar.SidebarColumn`): the engine's identity, its reading
+        # voice, its own voice (the cloning engine only), the mood, the document,
+        # and the engine setup -- each under its own header, each foldable, and
+        # each remembering its state.
+        column = SidebarColumn(
+            parent,
+            theme=self.theme,
+            typography=self._type,
+            width=SIDEBAR_WIDTH,
+            scope=f"voice-studio:{self.service.source}",
+            state_root=getattr(self.service, "data_root", None),
         )
-        canvas.bind(
-            "<Configure>",
-            lambda e: canvas.itemconfigure(window, width=e.width),
-        )
-        for widget in (canvas, sidebar):
-            widget.bind("<MouseWheel>", self._on_sidebar_wheel)
-            widget.bind("<Button-4>", self._on_sidebar_wheel)
-            widget.bind("<Button-5>", self._on_sidebar_wheel)
+        self._sidebar_column = column
+        # Kept as named attributes so the existing handlers and tests are untouched.
+        self._sidebar_canvas = column.canvas
+        self._sidebar_scrollbar = column.scrollbar
+        self._sidebar = column.body
 
-        self._build_identity(sidebar)
-        self._build_voice_section(sidebar)
-        self._build_own_voice_section(sidebar)
-        self._build_mood_section(sidebar)
-        self._build_document_section(sidebar)
-        self._build_setup_section(sidebar)
+        self._build_identity(column.add("engine", "Engine", icon="🔊"))
+        self._build_voice_section(column.add("voice", "Reading voice", icon="🗣"))
+        # The clone block exists only for the engine that can clone from a clip, so
+        # a studio whose engine cannot gets no empty section header.
+        if self.service.can_import_voices():
+            self._build_own_voice_section(column.add("my-voice", "My voice (clone)", icon="🎙"))
+        self._build_mood_section(column.add("mood", "Mood / state", icon="🎚"))
+        self._build_document_section(column.add("document", "Document", icon="📄"))
+        self._build_setup_section(column.add("setup", "Engine setup", icon="⚙"))
 
     # -- identity (logo + name) ------------------------------------------
 
     def _build_identity(self, sidebar: tk.Frame) -> None:
         theme = self.theme
-        self._section_label(sidebar, "Engine")
         block = tk.Frame(sidebar, bg=theme.surface)
-        block.pack(fill="x", padx=14, pady=(0, 4))
+        block.pack(fill="x", padx=14, pady=(4, 4))
 
         self._logo_canvas = tk.Canvas(
             block, width=LOGO_SIZE, height=LOGO_SIZE, bg=theme.surface,
@@ -328,7 +314,6 @@ class VoiceStudioDialog:
 
     def _build_voice_section(self, sidebar: tk.Frame) -> None:
         theme = self.theme
-        self._section_label(sidebar, "Reading voice")
         self._voice_var = tk.StringVar(value=self.service.voice_key())
         self._voice_host = sidebar
         holder = tk.Frame(sidebar, bg=theme.surface)
@@ -443,7 +428,6 @@ class VoiceStudioDialog:
         if not self.service.can_import_voices():
             return
         theme = self.theme
-        self._section_label(sidebar, "My voice (clone)")
         actions = tk.Frame(sidebar, bg=theme.surface)
         actions.pack(fill="x", padx=12)
 
@@ -603,7 +587,6 @@ class VoiceStudioDialog:
 
     def _build_mood_section(self, sidebar: tk.Frame) -> None:
         theme = self.theme
-        self._section_label(sidebar, "Mood / state")
         holder = tk.Frame(sidebar, bg=theme.surface)
         holder.pack(fill="x", padx=10)
 
@@ -657,7 +640,6 @@ class VoiceStudioDialog:
     # -- document ---------------------------------------------------------
 
     def _build_document_section(self, sidebar: tk.Frame) -> None:
-        self._section_label(sidebar, "Document")
         actions = tk.Frame(sidebar, bg=self.theme.surface)
         actions.pack(fill="x", padx=12)
         self._open_button = self._button(
@@ -692,7 +674,6 @@ class VoiceStudioDialog:
         run on the worker thread, and the voices are re-listed when they succeed.
         """
         theme = self.theme
-        self._section_label(sidebar, "Engine setup")
         holder = tk.Frame(sidebar, bg=theme.surface)
         holder.pack(fill="x", padx=12)
 
@@ -1146,12 +1127,6 @@ class VoiceStudioDialog:
             -1 if getattr(event, "num", 0) == 4 else 1
         )
         self._canvas.yview_scroll(delta, "units")
-
-    def _on_sidebar_wheel(self, event: tk.Event) -> None:
-        delta = -1 * (event.delta // 120) if getattr(event, "delta", 0) else (
-            -1 if getattr(event, "num", 0) == 4 else 1
-        )
-        self._sidebar_canvas.yview_scroll(delta, "units")
 
     def _scroll_to_bottom(self) -> None:
         self._canvas.update_idletasks()

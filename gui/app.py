@@ -818,8 +818,20 @@ class FaydGUI:
         save_sidebar_sections(self._section_states, getattr(self.service, "data_root", None))
         if key == "voices":
             self._voices_open = is_open
+            # The voice list is the one menu that must reflect what is installed
+            # *right now*, so it is (re)built the moment the section is opened --
+            # a plain header click is how a user reaches it, and it must not open
+            # to an empty panel.
+            if is_open:
+                self._rebuild_voice_section()
         elif key == "settings":
             self._settings_open = is_open
+            # The settings contents are built on first open (they touch the cloud
+            # pickers), so a plain header click must build them too -- otherwise the
+            # section would open empty.
+            if is_open and not self._settings_built:
+                self._build_settings_panel(self._settings_panel)
+                self._settings_built = True
         self.root.after_idle(self._toggle_sidebar_scrollbar)
 
     def _search_placeholder(self) -> None:
@@ -2201,9 +2213,10 @@ class FaydGUI:
         )
         self._composer.wrap.pack(side="top", fill="x")
         self._composer_box = self._composer.box
-        # The box's own height settles *after* the outer frame's last configure --
-        # the model row wraps, which grows the box -- so listen to the box too, or
-        # the lift would be computed from a height the box no longer has.
+        # The box's own height settles after the outer frame's last configure, so
+        # listen to the box too, or the lift would be computed from a height the
+        # box no longer has. (The model row now sits *below* the box, so it no
+        # longer contributes to the box's own height -- only to the lift's input.)
         self._composer_box.bind("<Configure>", self._on_composer_configure, add="+")
         self._entry = self._composer.entry
         self._send = self._composer.send_button
@@ -2249,12 +2262,13 @@ class FaydGUI:
             tip="The operating mode for this conversation",
         )
 
-        # The model-switch row inside the card, under the input: one chip per
+        # The model-switch row *below* the card, outside it: one chip per
         # answering model, in the order asked for, so the mouth is one click from
-        # the composer. Clicking a chip opens that model's *own* chat window
-        # (``_open_model_chat``), with its logo, its exclusive reading voice, and
-        # its language model; the header's selector still switches *this*
-        # conversation's mouth, so both remain available.
+        # the composer without cluttering the input panel itself. Clicking a chip
+        # opens that model's *own* chat window (``_open_model_chat``), with its
+        # logo, its exclusive reading voice, and its language model; the header's
+        # selector still switches *this* conversation's mouth, so both remain
+        # available.
         self._model_bar = self._composer.model_bar()
         for key, name, hint in MODEL_BUTTONS:
             self._model_bar.add(

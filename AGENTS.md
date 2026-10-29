@@ -1840,16 +1840,32 @@ Arabic is kept as secondary aliases where useful.
   default);
   `app.py` is the Tkinter window (imported lazily, so `cli/` never imports Tk).
   Reachable as `python -m cli gui` and `python -m gui`.
-- `gui/sidebar.py` — the shared **collapsible sidebar section** every group in
-  the window's sidebar is built from. `SidebarSection(parent, key=, title=, icon=,
-  theme=, typography=, open=, on_toggle=)` draws a full-width clickable header (an
-  icon, a title, and a `▾`/`▸` chevron) over a body frame the caller fills. The
-  body is created **once** and only packed/unpacked by `toggle()`/`set_open()`, so
-  a widget inside it (a voice list, a Cloud picker) keeps its state across a
-  collapse instead of being rebuilt; `on_toggle(key, is_open)` is called on every
-  change so the caller can persist the choice, and the header carries a real hover
-  tint like every other control. Tk-free of `gui.app` (it takes duck-typed theme
-  tokens), so the window builds on it without a circular import.
+- `gui/sidebar.py` — the shared **collapsible sidebar** every window builds on.
+  `SidebarSection(parent, key=, title=, icon=, theme=, typography=, open=,
+  on_toggle=)` draws a full-width clickable header (an icon, a title, and a
+  `▾`/`▸` chevron) over a body frame the caller fills. The body is created
+  **once** and only packed/unpacked by `toggle()`/`set_open()`, so a widget inside
+  it (a voice list, a Cloud picker) keeps its state across a collapse instead of
+  being rebuilt; `on_toggle(key, is_open)` is called on every change so the caller
+  can persist the choice, and the header carries a real hover tint like every
+  other control. `SidebarColumn(parent, theme=, typography=, width=, scope=,
+  state_root=, grid=)` is the **whole left column** for a dialog: it owns the
+  scrolling canvas, the **always-visible** scrollbar (so a column is never a dead
+  end on a short window), the wheel bindings, and the section bookkeeping, and
+  `add(key, title, icon=, open=)` returns the section body to fill. Its open/closed
+  state persists per `scope` (`load_section_states`/`save_section_states` under the
+  `gui`/`sidebar_sections:<scope>` record, best-effort and corruption-tolerant), so
+  a user's layout survives a restart; a **programmatic** `set_open` deliberately
+  does not persist, so showing a panel the program asked for never rewrites the
+  layout the user arranged. Every dialog except the main window builds its left
+  column from it (`gui/voice_studio_dialog.py`, `gui/code_studio_dialog.py`,
+  `gui/docs_dialog.py`, `gui/presentation_dialog.py`,
+  `gui/presentation_finalize_dialog.py`, `gui/presentation_course_dialog.py`,
+  `gui/scene3d_dialog.py`, `gui/model_chat_dialog.py`), so each reads like a
+  graphics program's tool panel -- a short stack of foldable groups rather than one
+  long flat list -- and none re-implements the canvas or the scrollbar. Tk-free of
+  `gui.app` (it takes duck-typed theme tokens), so the window builds on it without
+  a circular import.
 - `gui/modes.py` — the two operating modes. **AI Mode** (`allows_tools=False`)
   answers conversationally; **Jarvics Mode** (`allows_tools=True`) also runs the
   sandboxed tools. `AnswerOnlyRouter` is the brain of AI Mode: it subclasses the
@@ -1933,14 +1949,17 @@ Arabic is kept as secondary aliases where useful.
   keeping its own attributes (`_entry`, `_question`, `_request_var`, …) pointed at
   the panel's widgets so every existing handler and test is untouched.
   `with_model_bar=True` (the main window) adds the optional **model-switch row**
-  inside the card, between the input and the toolbars, reached through
-  `model_bar()`: a `ModelButtonBar` of `ModelButton` chips, one per answering
+  **below** the card, on the page background -- reached through `model_bar()`: a
+  `ModelButtonBar` of `ModelButton` chips, one per answering
   mouth. A chip is a Canvas-painted rounded rectangle (`_rounded_points`, the same
   shape `RoundedBox` uses) carrying the model's name and what it is for; a click
   runs the caller's command, `set_active(key)` paints the live choice with the
   primary accent and leaves the others plain, and a destroyed chip clears its own
   `command` for the same cycle/deadlock reason the panel's submit handler is
-  dropped. The row **wraps** onto as many lines as the card's width needs (Tk has
+  dropped. The bar (and each chip) takes the surface it is drawn on through `bg=`,
+  so a row *outside* the card paints the page `base` and its rounded shape is
+  never a lighter box on a lighter panel. The row **wraps** onto as many lines as
+  the card's width needs (Tk has
   no flow layout): `_columns_for` measures the *column* widths `grid` will share,
   not each row's own sum, because measuring rows independently under-counts a
   layout whose first column holds a wide chip and whose later rows do not -- which
@@ -1968,7 +1987,15 @@ Arabic is kept as secondary aliases where useful.
   assistant action group, and *Settings* with the **Cloud provider**/**Model**
   dropdowns and the appearance switch; the sandbox-tools
   list and the answering-mouth radios are deliberately *not* in the sidebar --
-  the header's model selector is the one visible mouth switch) behind a
+  the header's model selector is the one visible mouth switch). The *Reading
+  Voice* list is built the moment the section is **opened** -- including by a
+  plain header click, not only by the programmatic entry point -- so it never
+  opens empty, and it shows every voice the machine really has, grouped under the
+  source each came from (the OS's installed voices, VoiceTut-TTS, Piper, Qwen3-TTS,
+  and the synthetic catalog), with an honest note for any source that contributed
+  none; choosing one applies it at once and persists the key. The *Settings*
+  section likewise builds its contents on first open (a header click or the
+  programmatic entry point). The sidebar sits behind a
   scrollbar that
   appears only when the content overflows, a title bar showing the active mode by
   name (one switch) plus the **model selector** (`MOUTH_CHOICES`: *From sources
@@ -2000,8 +2027,8 @@ Arabic is kept as secondary aliases where useful.
   training loop never freezes the window. The composer's **＋** menu also opens
   the **Code Studio**, the **Presentation Studio**, **Doc's Studio**, and the
   image pages (below).
-  The composer's card also carries the **model-switch row** (below the input,
-  above the pills), one chip per answering mouth in the order asked for --
+  The composer's card is followed by the **model-switch row** (below the card,
+  outside it), one chip per answering mouth in the order asked for --
   **Jarvis (Sources)**, **Ultron (General)**, **Vision (Petroleum)**,
   **Banner (Instructor)**, **Natasha (Personality)**, **Hakeem (Religion)**,
   **Cloud (Network)** (`MODEL_BUTTONS`) -- built through
@@ -2029,10 +2056,11 @@ Arabic is kept as secondary aliases where useful.
   trailing chips so the gap survives the wrap.
   The window also **reads text aloud**: every message footer carries a
   "🔊 Read aloud" control (`_speak_label`/`_speak_text`), and the sidebar holds the
-  reading-voice menus. A dedicated **Voices** dropdown (`_toggle_voices`, right
-  under Chats) puts the voice choice one click away, and the Settings panel holds
-  the same list (`_build_voice_picker`); both call the one
-  `_build_voice_sections`, so the two menus can never drift apart. Each voice sits
+  one reading-voice menu: the **Reading Voice** collapsible section (the only place
+  a voice is chosen -- the Settings section no longer repeats it). It is built the
+  moment the section is opened, by a plain header click or by the programmatic
+  `_toggle_voices` entry point, so it never opens empty, and it calls the one
+  `_build_voice_sections`. Each voice sits
   under the **source** it came from -- *Installed Voices*, *VoiceTut-TTS*, *Piper*,
   *Qwen3-TTS*, and the synthetic catalog (`ChatService.voice_sections` →
   `core.voices.voice_sections`) -- with the catalog grouped under

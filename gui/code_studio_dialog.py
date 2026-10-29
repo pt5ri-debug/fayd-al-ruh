@@ -46,6 +46,7 @@ from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
 
@@ -193,82 +194,88 @@ class CodeStudioDialog:
 
     # -- sidebar ----------------------------------------------------------
 
-    def _section_label(self, parent: tk.Misc, text: str) -> None:
-        tk.Label(
-            parent, text=text.upper(), bg=self.theme.surface, fg=self.theme.text_dim,
-            font=self._type.font("2xs", weight="bold"), anchor="w",
-        ).pack(fill="x", padx=14, pady=(10, 2))
-
     def _build_sidebar(self, parent: tk.Frame) -> None:
-        theme = self.theme
-        sidebar = tk.Frame(parent, bg=theme.surface)
-        sidebar.grid(row=0, column=0, sticky="nsew")
+        # A stack of collapsible sections (the shared :class:`~gui.sidebar.SidebarColumn`),
+        # so the Studio's left column reads like a graphics program's tool panel
+        # rather than one long flat list.
+        column = SidebarColumn(
+            parent,
+            theme=self.theme,
+            typography=self._type,
+            width=280,
+            scope="code-studio",
+            state_root=getattr(self.service, "data_root", None),
+        )
+        self._sidebar_column = column
+        self._sidebar_canvas = column.canvas
+        self._sidebar_scrollbar = column.scrollbar
+        self._sidebar = column.body
 
-        brand = tk.Frame(sidebar, bg=theme.surface)
+        brand = tk.Frame(column.body, bg=self.theme.surface)
         brand.pack(fill="x", padx=14, pady=(14, 4))
-        dot = tk.Canvas(brand, width=24, height=24, bg=theme.surface, highlightthickness=0)
-        dot.create_oval(1, 1, 23, 23, fill=theme.primary, outline="")
-        dot.create_text(12, 13, text="ف", fill=theme.primary_foreground, font=self._type.font("sm", weight="bold"))
+        dot = tk.Canvas(brand, width=24, height=24, bg=self.theme.surface, highlightthickness=0)
+        dot.create_oval(1, 1, 23, 23, fill=self.theme.primary, outline="")
+        dot.create_text(12, 13, text="ف", fill=self.theme.primary_foreground, font=self._type.font("sm", weight="bold"))
         dot.pack(side="left")
         tk.Label(
-            brand, text=TITLE, bg=theme.surface, fg=theme.contrast,
+            brand, text=TITLE, bg=self.theme.surface, fg=self.theme.contrast,
             font=self._type.font("heading3", weight="bold"), anchor="w",
         ).pack(side="left", padx=(8, 0))
 
         self._status_line = tk.Label(
-            sidebar, text=DEFAULT_MODEL_NOTE, bg=theme.surface, fg=theme.text_dim,
+            column.body, text=DEFAULT_MODEL_NOTE, bg=self.theme.surface, fg=self.theme.text_dim,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=248,
         )
         self._status_line.pack(fill="x", padx=14, pady=(0, 2))
 
-        self._section_label(sidebar, "Workspaces")
+        sidebar = column.add("workspaces", "Workspaces", icon="🗂")
         self._workspace_list = tk.Listbox(
-            sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
-            selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
+            sidebar, bg=self.theme.base, fg=self.theme.foreground, selectbackground=self.theme.primary,
+            selectforeground=self.theme.primary_foreground, relief="flat", highlightthickness=0,
             font=self._type.font("xs"), height=6, activestyle="none",
         )
-        self._workspace_list.pack(fill="x", padx=14, pady=(0, 6))
+        self._workspace_list.pack(fill="x", padx=14, pady=(4, 6))
         self._workspace_list.bind("<<ListboxSelect>>", self._on_workspace_select)
 
         tk.Label(
             sidebar, text="Workspaces are named for you, in order (PR1, PR2, …).",
-            bg=theme.surface, fg=theme.text_secondary, font=self._type.font("2xs"),
+            bg=self.theme.surface, fg=self.theme.text_secondary, font=self._type.font("2xs"),
             anchor="w", justify="left", wraplength=248,
         ).pack(fill="x", padx=14, pady=(0, 4))
-        row = tk.Frame(sidebar, bg=theme.surface)
+        row = tk.Frame(sidebar, bg=self.theme.surface)
         row.pack(fill="x", padx=14, pady=(0, 6))
         self._button(row, "Start a new change", self._on_new_change).pack(side="left")
         self._button(row, "Refresh", self.refresh).pack(side="left", padx=(6, 0))
 
         self._workspace_label = tk.Label(
-            sidebar, text="No workspace selected.", bg=theme.surface, fg=theme.text_secondary,
+            sidebar, text="No workspace selected.", bg=self.theme.surface, fg=self.theme.text_secondary,
             font=self._type.font("xs", weight="bold"), anchor="w", justify="left", wraplength=248,
         )
         self._workspace_label.pack(fill="x", padx=14, pady=(0, 2))
 
-        self._section_label(sidebar, "Files")
+        files = column.add("files", "Files", icon="📄")
         self._file_list = tk.Listbox(
-            sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
-            selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
+            files, bg=self.theme.base, fg=self.theme.foreground, selectbackground=self.theme.primary,
+            selectforeground=self.theme.primary_foreground, relief="flat", highlightthickness=0,
             font=self._type.mono("2xs"), height=8, activestyle="none",
         )
-        self._file_list.pack(fill="both", expand=True, padx=14, pady=(0, 6))
+        self._file_list.pack(fill="both", expand=True, padx=14, pady=(4, 6))
         self._file_list.bind("<<ListboxSelect>>", self._on_file_select)
 
-        self._section_label(sidebar, "Review and apply")
-        gate = tk.Frame(sidebar, bg=theme.surface)
-        gate.pack(fill="x", padx=14, pady=(0, 4))
+        review = column.add("review", "Review and apply", icon="✔")
+        gate = tk.Frame(review, bg=self.theme.surface)
+        gate.pack(fill="x", padx=14, pady=(4, 4))
         self._merge_button = self._button(gate, "Apply to the project", self._on_merge)
         self._merge_button.pack(side="left")
         self._merge_button.configure(state="disabled")
         self._button(gate, "Discard change", self._on_discard).pack(side="left", padx=(6, 0))
         self._checks_label = tk.Label(
-            sidebar, text="Checks have not run yet.", bg=theme.surface, fg=theme.text_dim,
+            review, text="Checks have not run yet.", bg=self.theme.surface, fg=self.theme.text_dim,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=248,
         )
         self._checks_label.pack(fill="x", padx=14)
         self._merge_note = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.text_secondary, font=self._type.font("2xs"),
+            review, text="", bg=self.theme.surface, fg=self.theme.text_secondary, font=self._type.font("2xs"),
             anchor="w", justify="left", wraplength=248,
         )
         self._merge_note.pack(fill="x", padx=14, pady=(4, 14))

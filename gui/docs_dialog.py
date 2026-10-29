@@ -44,6 +44,7 @@ from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
 from gui.docs_studio import DocsStudioService, picker_filetypes
 from gui.image_preview import load_scaled
+from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
 
@@ -164,12 +165,6 @@ class DocsDialog:
         )
         tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
 
-    def _section_label(self, parent: tk.Misc, text: str) -> None:
-        tk.Label(
-            parent, text=text.upper(), bg=self.theme.surface, fg=self.theme.text_dim,
-            font=self._type.font("2xs", weight="bold"), anchor="w",
-        ).pack(fill="x", padx=14, pady=(10, 2))
-
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
         return tk.Button(
             parent, text=text, command=command, relief="flat", borderwidth=0,
@@ -181,11 +176,23 @@ class DocsDialog:
     # -- sidebar ----------------------------------------------------------
 
     def _build_sidebar(self, parent: tk.Frame) -> None:
-        theme = self.theme
-        sidebar = tk.Frame(parent, bg=theme.surface)
-        sidebar.grid(row=0, column=0, sticky="nsew")
+        # A stack of collapsible sections (the shared :class:`~gui.sidebar.SidebarColumn`):
+        # the brand and the open-document actions, the document list, the read/save
+        # actions, and the model block -- each under its own foldable header.
+        column = SidebarColumn(
+            parent,
+            theme=self.theme,
+            typography=self._type,
+            width=280,
+            scope="docs-studio",
+        )
+        self._sidebar_column = column
+        self._sidebar_canvas = column.canvas
+        self._sidebar_scrollbar = column.scrollbar
+        self._sidebar = column.body
 
-        brand = tk.Frame(sidebar, bg=theme.surface)
+        theme = self.theme
+        brand = tk.Frame(column.body, bg=theme.surface)
         brand.pack(fill="x", padx=14, pady=(14, 4))
         dot = tk.Canvas(brand, width=24, height=24, bg=theme.surface, highlightthickness=0)
         dot.create_oval(1, 1, 23, 23, fill=theme.primary, outline="")
@@ -199,33 +206,32 @@ class DocsDialog:
             font=self._type.font("body", weight="bold"),
         ).pack(side="left", padx=(8, 0))
 
-        actions = tk.Frame(sidebar, bg=theme.surface)
-        actions.pack(fill="x", padx=12, pady=(6, 2))
+        actions = column.add("open", "Open a document", icon="📂")
         self._open_button = self._button(actions, "Open a document…", self._on_open_document)
-        self._open_button.pack(fill="x", pady=(0, 4))
+        self._open_button.pack(fill="x", padx=12, pady=(4, 4))
         self._open_folder_button = self._button(
             actions, "Open a folder…", self._on_open_folder
         )
-        self._open_folder_button.pack(fill="x", pady=(0, 4))
+        self._open_folder_button.pack(fill="x", padx=12, pady=(0, 4))
         self._close_button = self._button(
             actions, "Close this document", self._on_close_document
         )
-        self._close_button.pack(fill="x", pady=(0, 4))
+        self._close_button.pack(fill="x", padx=12, pady=(0, 4))
         self._close_button.configure(state="disabled")
 
-        self._section_label(sidebar, "Open documents")
-        list_wrap = tk.Frame(sidebar, bg=theme.surface)
-        list_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+        docs = column.add("documents", "Open documents", icon="📚")
+        list_wrap = tk.Frame(docs, bg=theme.surface)
+        list_wrap.pack(fill="both", expand=True, padx=12, pady=(4, 6))
         self._document_list = tk.Listbox(
             list_wrap, bg=theme.base, fg=theme.foreground, relief="flat",
             highlightthickness=0, borderwidth=0, selectbackground=theme.interactive_active,
             selectforeground=theme.contrast, font=self._type.font("xs"), activestyle="none",
-            exportselection=False,
+            exportselection=False, height=6,
         )
         self._document_list.pack(fill="both", expand=True)
         self._document_list.bind("<<ListboxSelect>>", self._on_select_document)
 
-        info = tk.Frame(sidebar, bg=theme.surface)
+        info = tk.Frame(docs, bg=theme.surface)
         info.pack(fill="x", padx=14, pady=(0, 6))
         self._document_note = tk.Label(
             info, text="No document is open.", bg=theme.surface, fg=theme.text_secondary,
@@ -233,29 +239,28 @@ class DocsDialog:
         )
         self._document_note.pack(fill="x")
 
-        text_actions = tk.Frame(sidebar, bg=theme.surface)
-        text_actions.pack(fill="x", padx=12, pady=(0, 6))
+        text_actions = column.add("text", "Text and reading", icon="📝")
         self._read_button = self._button(
             text_actions, "Read the document (scanned pages)", self._on_read_document
         )
-        self._read_button.pack(fill="x", pady=(0, 4))
+        self._read_button.pack(fill="x", padx=12, pady=(4, 4))
         self._read_button.configure(state="disabled")
         self._save_text_button = self._button(
             text_actions, "Save the extracted text…", self._on_save_text
         )
-        self._save_text_button.pack(fill="x")
+        self._save_text_button.pack(fill="x", padx=12, pady=(0, 4))
         self._save_text_button.configure(state="disabled")
 
-        self._section_label(sidebar, "Model")
-        model_box = tk.Frame(sidebar, bg=theme.surface)
-        model_box.pack(fill="x", padx=14, pady=(0, 14))
+        model_box = column.add("model", "Model", icon="🧠")
+        model_inner = tk.Frame(model_box, bg=theme.surface)
+        model_inner.pack(fill="x", padx=14, pady=(4, 14))
         self._model_note = tk.Label(
-            model_box, text="", bg=theme.surface, fg=theme.text_secondary,
+            model_inner, text="", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=250,
         )
         self._model_note.pack(fill="x", pady=(0, 4))
         self._download_button = self._button(
-            model_box, "Download the model…", self._on_download_model
+            model_inner, "Download the model…", self._on_download_model
         )
         self._download_button.pack(fill="x")
 

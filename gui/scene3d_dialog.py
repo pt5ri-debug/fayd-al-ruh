@@ -50,6 +50,7 @@ from gui.scene3d import (
     SceneStudioService,
     command_help,
 )
+from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
 
@@ -181,11 +182,22 @@ class SceneStudioDialog:
     # -- sidebar ----------------------------------------------------------
 
     def _build_sidebar(self, parent: tk.Frame) -> None:
-        theme = self.theme
-        sidebar = tk.Frame(parent, bg=theme.surface)
-        sidebar.grid(row=0, column=0, sticky="nsew")
+        # A stack of collapsible sections (the shared :class:`~gui.sidebar.SidebarColumn`):
+        # scene file actions, the figure presets, the props, and the pose presets.
+        column = SidebarColumn(
+            parent,
+            theme=self.theme,
+            typography=self._type,
+            scope="scene-studio",
+            width=300,
+        )
+        self._sidebar_column = column
+        self._sidebar_canvas = column.canvas
+        self._sidebar_scrollbar = column.scrollbar
+        self._sidebar = column.body
 
-        brand = tk.Frame(sidebar, bg=theme.surface)
+        theme = self.theme
+        brand = tk.Frame(column.body, bg=theme.surface)
         brand.pack(fill="x", padx=14, pady=(14, 4))
         dot = tk.Canvas(brand, width=24, height=24, bg=theme.surface, highlightthickness=0)
         dot.create_oval(1, 1, 23, 23, fill=theme.primary, outline="")
@@ -199,38 +211,37 @@ class SceneStudioDialog:
             font=self._type.font("body", weight="bold"),
         ).pack(side="left", padx=(8, 0))
 
-        actions = tk.Frame(sidebar, bg=theme.surface)
-        actions.pack(fill="x", padx=12, pady=(6, 2))
+        actions = column.add("scene", "Scene", icon="🎬")
         self._new_button = self._button(actions, "New scene", self._on_new_scene)
-        self._new_button.pack(fill="x", pady=(0, 4))
+        self._new_button.pack(fill="x", padx=12, pady=(4, 4))
         self._open_button = self._button(actions, "Open a model or scene…", self._on_open)
-        self._open_button.pack(fill="x", pady=(0, 4))
+        self._open_button.pack(fill="x", padx=12, pady=(0, 4))
         self._save_button = self._button(actions, "Save the scene…", self._on_save)
-        self._save_button.pack(fill="x", pady=(0, 4))
+        self._save_button.pack(fill="x", padx=12, pady=(0, 4))
         self._export_button = self._button(actions, "Export OBJ…", self._on_export)
-        self._export_button.pack(fill="x")
+        self._export_button.pack(fill="x", padx=12, pady=(0, 4))
 
-        self._section_label(sidebar, "Figures")
-        figures = tk.Frame(sidebar, bg=theme.surface)
-        figures.pack(fill="x", padx=12, pady=(0, 4))
+        figures = column.add("figures", "Figures", icon="🧍")
+        figure_row = tk.Frame(figures, bg=theme.surface)
+        figure_row.pack(fill="x", padx=12, pady=(4, 4))
         for preset in self.service.figure_preset_names():
-            self._button(figures, preset.capitalize(), lambda p=preset: self._on_add_figure(p)).pack(
+            self._button(figure_row, preset.capitalize(), lambda p=preset: self._on_add_figure(p)).pack(
                 fill="x", pady=(0, 3)
             )
 
-        self._section_label(sidebar, "Props")
-        props = tk.Frame(sidebar, bg=theme.surface)
-        props.pack(fill="x", padx=12, pady=(0, 4))
+        props = column.add("props", "Props", icon="🪑")
+        prop_row = tk.Frame(props, bg=theme.surface)
+        prop_row.pack(fill="x", padx=12, pady=(4, 4))
         for key in self.service.prop_names():
-            self._button(props, key.capitalize(), lambda k=key: self._on_add_prop(k)).pack(
+            self._button(prop_row, key.capitalize(), lambda k=key: self._on_add_prop(k)).pack(
                 fill="x", pady=(0, 3)
             )
 
-        self._section_label(sidebar, "Poses")
-        poses = tk.Frame(sidebar, bg=theme.surface)
-        poses.pack(fill="x", padx=12, pady=(0, 12))
+        poses = column.add("poses", "Poses", icon="🤸")
+        pose_row = tk.Frame(poses, bg=theme.surface)
+        pose_row.pack(fill="x", padx=12, pady=(4, 12))
         for pose in POSE_PRESETS:
-            self._button(poses, pose.capitalize(), lambda p=pose: self._on_pose_preset(p)).pack(
+            self._button(pose_row, pose.capitalize(), lambda p=pose: self._on_pose_preset(p)).pack(
                 fill="x", pady=(0, 3)
             )
 

@@ -45,6 +45,7 @@ from core.presentation import (
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
 
@@ -149,12 +150,6 @@ class PresentationFinalizeDialog:
         )
         tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
 
-    def _section_label(self, parent: tk.Misc, text: str) -> None:
-        tk.Label(
-            parent, text=text.upper(), bg=self.theme.surface, fg=self.theme.text_dim,
-            font=self._type.font("2xs", weight="bold"), anchor="w",
-        ).pack(fill="x", padx=14, pady=(10, 2))
-
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
         return tk.Button(
             parent, text=text, command=command, relief="flat", borderwidth=0,
@@ -166,11 +161,23 @@ class PresentationFinalizeDialog:
     # -- sidebar ----------------------------------------------------------
 
     def _build_sidebar(self, parent: tk.Frame) -> None:
-        theme = self.theme
-        sidebar = tk.Frame(parent, bg=theme.surface)
-        sidebar.grid(row=0, column=0, sticky="nsew")
+        # A stack of collapsible sections (the shared :class:`~gui.sidebar.SidebarColumn`):
+        # the deck's slides, the deck look, and the export gate -- each foldable, so
+        # the final editor's left column reads like a graphics program's tool panel.
+        column = SidebarColumn(
+            parent,
+            theme=self.theme,
+            typography=self._type,
+            scope="presentation-final",
+            width=300,
+        )
+        self._sidebar_column = column
+        self._sidebar_canvas = column.canvas
+        self._sidebar_scrollbar = column.scrollbar
+        self._sidebar = column.body
 
-        brand = tk.Frame(sidebar, bg=theme.surface)
+        theme = self.theme
+        brand = tk.Frame(column.body, bg=theme.surface)
         brand.pack(fill="x", padx=14, pady=(14, 4))
         dot = tk.Canvas(brand, width=24, height=24, bg=theme.surface, highlightthickness=0)
         dot.create_oval(1, 1, 23, 23, fill=theme.primary, outline="")
@@ -185,48 +192,48 @@ class PresentationFinalizeDialog:
         ).pack(side="left", padx=(8, 0))
 
         self._project_label = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
+            column.body, text="", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("xs", weight="bold"), anchor="w", justify="left", wraplength=260,
         )
         self._project_label.pack(fill="x", padx=14, pady=(2, 2))
         self._state_label = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
+            column.body, text="", bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
             anchor="w", justify="left", wraplength=260,
         )
         self._state_label.pack(fill="x", padx=14, pady=(0, 4))
 
-        self._section_label(sidebar, "Slides")
+        slides = column.add("slides", "Slides", icon="🗂")
         self._slide_list = tk.Listbox(
-            sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
+            slides, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
             font=self._type.font("xs"), height=10, activestyle="none",
         )
-        self._slide_list.pack(fill="both", expand=True, padx=14, pady=(0, 6))
+        self._slide_list.pack(fill="both", expand=True, padx=14, pady=(4, 6))
         self._slide_list.bind("<<ListboxSelect>>", self._on_slide_select)
 
-        order = tk.Frame(sidebar, bg=theme.surface)
+        order = tk.Frame(slides, bg=theme.surface)
         order.pack(fill="x", padx=14, pady=(0, 6))
         self._button(order, "Move up", lambda: self._on_move(-1)).pack(side="left")
         self._button(order, "Move down", lambda: self._on_move(1)).pack(side="left", padx=(6, 0))
         self._button(order, "Remove", self._on_remove_slide).pack(side="left", padx=(6, 0))
 
-        self._section_label(sidebar, "Deck look")
-        look = tk.Frame(sidebar, bg=theme.surface)
-        look.pack(fill="x", padx=14, pady=(0, 6))
+        look = column.add("look", "Deck look", icon="🎨")
+        look_row = tk.Frame(look, bg=theme.surface)
+        look_row.pack(fill="x", padx=14, pady=(4, 6))
         tk.Label(
-            look, text="Theme", bg=theme.surface, fg=theme.text_dim,
+            look_row, text="Theme", bg=theme.surface, fg=theme.text_dim,
             font=self._type.font("2xs"),
         ).pack(anchor="w")
         self._theme_choice = tk.StringVar(value="professional")
         theme_picker = ttk.Combobox(
-            look, textvariable=self._theme_choice, state="readonly",
+            look_row, textvariable=self._theme_choice, state="readonly",
             values=list(theme_names()), font=self._type.font("2xs"),
         )
         theme_picker.pack(fill="x")
         theme_picker.bind("<<ComboboxSelected>>", self._on_theme_change)
 
         shape = tk.Frame(look, bg=theme.surface)
-        shape.pack(fill="x", pady=(4, 0))
+        shape.pack(fill="x", padx=14, pady=(0, 4))
         tk.Label(
             shape, text="Size", bg=theme.surface, fg=theme.text_dim,
             font=self._type.font("2xs"),
@@ -245,14 +252,14 @@ class PresentationFinalizeDialog:
             activebackground=theme.surface, font=self._type.font("2xs"),
         ).pack(side="left", padx=(6, 0))
 
-        self._section_label(sidebar, "Export")
-        gate = tk.Frame(sidebar, bg=theme.surface)
-        gate.pack(fill="x", padx=14, pady=(0, 4))
+        export = column.add("export", "Export", icon="📤")
+        gate = tk.Frame(export, bg=theme.surface)
+        gate.pack(fill="x", padx=14, pady=(4, 4))
         self._export_button = self._button(gate, "Export the .pptx", self._on_export)
         self._export_button.pack(side="left")
         self._export_button.configure(state="disabled")
         self._button(gate, "Save as…", self._on_export_as).pack(side="left", padx=(6, 0))
-        check_row = tk.Frame(sidebar, bg=theme.surface)
+        check_row = tk.Frame(export, bg=theme.surface)
         check_row.pack(fill="x", padx=14, pady=(0, 4))
         self._check_button = self._button(check_row, "Check the deck", self._on_validate)
         self._check_button.pack(side="left")
@@ -262,7 +269,7 @@ class PresentationFinalizeDialog:
         self._download_button.pack(side="left", padx=(6, 0))
         self._download_button.configure(state="disabled")
         self._export_note = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
+            export, text="", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
         )
         self._export_note.pack(fill="x", padx=14, pady=(4, 14))

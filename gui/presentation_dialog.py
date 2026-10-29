@@ -53,6 +53,7 @@ from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
 
@@ -201,12 +202,6 @@ class PresentationDialog:
         )
         tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
 
-    def _section_label(self, parent: tk.Misc, text: str) -> None:
-        tk.Label(
-            parent, text=text.upper(), bg=self.theme.surface, fg=self.theme.text_dim,
-            font=self._type.font("2xs", weight="bold"), anchor="w",
-        ).pack(fill="x", padx=14, pady=(10, 2))
-
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
         return tk.Button(
             parent, text=text, command=command, relief="flat", borderwidth=0,
@@ -218,11 +213,24 @@ class PresentationDialog:
     # -- sidebar ----------------------------------------------------------
 
     def _build_sidebar(self, parent: tk.Frame) -> None:
-        theme = self.theme
-        sidebar = tk.Frame(parent, bg=theme.surface)
-        sidebar.grid(row=0, column=0, sticky="nsew")
+        # A stack of collapsible sections (the shared :class:`~gui.sidebar.SidebarColumn`),
+        # so the Studio's left column reads like a graphics program's tool panel:
+        # the project list, the eight workflow steps, the slides, the deck look,
+        # the export gate, and the course bridge -- each foldable.
+        column = SidebarColumn(
+            parent,
+            theme=self.theme,
+            typography=self._type,
+            scope="presentation",
+            width=300,
+        )
+        self._sidebar_column = column
+        self._sidebar_canvas = column.canvas
+        self._sidebar_scrollbar = column.scrollbar
+        self._sidebar = column.body
 
-        brand = tk.Frame(sidebar, bg=theme.surface)
+        theme = self.theme
+        brand = tk.Frame(column.body, bg=theme.surface)
         brand.pack(fill="x", padx=14, pady=(14, 4))
         dot = tk.Canvas(brand, width=24, height=24, bg=theme.surface, highlightthickness=0)
         dot.create_oval(1, 1, 23, 23, fill=theme.primary, outline="")
@@ -236,18 +244,18 @@ class PresentationDialog:
             font=self._type.font("heading3", weight="bold"), anchor="w",
         ).pack(side="left", padx=(8, 0))
 
-        self._section_label(sidebar, "Projects")
+        projects = column.add("projects", "Projects", icon="📊")
         self._project_list = tk.Listbox(
-            sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
+            projects, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
             font=self._type.font("xs"), height=5, activestyle="none",
         )
-        self._project_list.pack(fill="x", padx=14, pady=(0, 6))
+        self._project_list.pack(fill="x", padx=14, pady=(4, 6))
         self._project_list.bind("<<ListboxSelect>>", self._on_project_select)
-        row = tk.Frame(sidebar, bg=theme.surface)
+        row = tk.Frame(projects, bg=theme.surface)
         row.pack(fill="x", padx=14, pady=(0, 4))
         self._button(row, "New presentation", self._on_new_project).pack(side="left")
-        manage = tk.Frame(sidebar, bg=theme.surface)
+        manage = tk.Frame(projects, bg=theme.surface)
         manage.pack(fill="x", padx=14, pady=(0, 4))
         self._rename_button = self._button(manage, "Rename", self._on_rename_project)
         self._rename_button.pack(side="left")
@@ -257,26 +265,26 @@ class PresentationDialog:
         self._delete_button.pack(side="left", padx=(6, 0))
 
         self._project_label = tk.Label(
-            sidebar, text="No project selected.", bg=theme.surface, fg=theme.text_secondary,
+            projects, text="No project selected.", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("xs", weight="bold"), anchor="w", justify="left", wraplength=260,
         )
         self._project_label.pack(fill="x", padx=14, pady=(2, 2))
         self._state_label = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
+            projects, text="", bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
             anchor="w", justify="left", wraplength=260,
         )
         self._state_label.pack(fill="x", padx=14, pady=(0, 4))
 
-        self._section_label(sidebar, "The workflow")
+        workflow = column.add("workflow", "The workflow", icon="🧭")
         self._step_buttons: dict[str, tk.Button] = {}
         for key, label in STEPS:
-            button = self._button(sidebar, label, lambda k=key: self._run_step(k))
+            button = self._button(workflow, label, lambda k=key: self._run_step(k))
             button.pack(fill="x", padx=14, pady=1)
             self._step_buttons[key] = button
 
-        self._section_label(sidebar, "Slides")
-        batch_row = tk.Frame(sidebar, bg=theme.surface)
-        batch_row.pack(fill="x", padx=14, pady=(0, 4))
+        slides = column.add("slides", "Slides", icon="🗂")
+        batch_row = tk.Frame(slides, bg=theme.surface)
+        batch_row.pack(fill="x", padx=14, pady=(4, 4))
         tk.Label(
             batch_row, text="Draft", bg=theme.surface, fg=theme.text_dim,
             font=self._type.font("2xs", weight="bold"),
@@ -293,30 +301,30 @@ class PresentationDialog:
             font=self._type.font("2xs"),
         ).pack(side="left", padx=(6, 0))
         self._slide_list = tk.Listbox(
-            sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
+            slides, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
             font=self._type.font("xs"), height=6, activestyle="none",
         )
         self._slide_list.pack(fill="both", expand=True, padx=14, pady=(0, 6))
         self._slide_list.bind("<<ListboxSelect>>", self._on_slide_select)
 
-        self._section_label(sidebar, "Deck look")
-        look = tk.Frame(sidebar, bg=theme.surface)
-        look.pack(fill="x", padx=14, pady=(0, 6))
+        look = column.add("look", "Deck look", icon="🎨")
+        theme_row = tk.Frame(look, bg=theme.surface)
+        theme_row.pack(fill="x", padx=14, pady=(4, 6))
         tk.Label(
-            look, text="Theme", bg=theme.surface, fg=theme.text_dim,
+            theme_row, text="Theme", bg=theme.surface, fg=theme.text_dim,
             font=self._type.font("2xs"),
         ).pack(anchor="w")
         self._theme_choice = tk.StringVar(value="professional")
         theme_picker = ttk.Combobox(
-            look, textvariable=self._theme_choice, state="readonly",
+            theme_row, textvariable=self._theme_choice, state="readonly",
             values=list(theme_names()), font=self._type.font("2xs"),
         )
         theme_picker.pack(fill="x")
         theme_picker.bind("<<ComboboxSelected>>", self._on_theme_change)
 
         shape = tk.Frame(look, bg=theme.surface)
-        shape.pack(fill="x", pady=(4, 0))
+        shape.pack(fill="x", padx=14, pady=(0, 4))
         tk.Label(
             shape, text="Size", bg=theme.surface, fg=theme.text_dim,
             font=self._type.font("2xs"),
@@ -335,14 +343,14 @@ class PresentationDialog:
             activebackground=theme.surface, font=self._type.font("2xs"),
         ).pack(side="left", padx=(6, 0))
 
-        self._section_label(sidebar, "Export")
-        gate = tk.Frame(sidebar, bg=theme.surface)
-        gate.pack(fill="x", padx=14, pady=(0, 4))
+        export = column.add("export", "Export", icon="📤")
+        gate = tk.Frame(export, bg=theme.surface)
+        gate.pack(fill="x", padx=14, pady=(4, 4))
         self._export_button = self._button(gate, "Export the .pptx", self._on_export)
         self._export_button.pack(side="left")
         self._export_button.configure(state="disabled")
         self._button(gate, "Save as…", self._on_export_as).pack(side="left", padx=(6, 0))
-        check_row = tk.Frame(sidebar, bg=theme.surface)
+        check_row = tk.Frame(export, bg=theme.surface)
         check_row.pack(fill="x", padx=14, pady=(0, 4))
         self._check_button = self._button(check_row, "Check the deck", self._on_validate)
         self._check_button.pack(side="left")
@@ -354,7 +362,7 @@ class PresentationDialog:
         self._download_button.pack(side="left", padx=(6, 0))
         self._download_button.configure(state="disabled")
         self._engine_note = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
+            export, text="", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
         )
         self._engine_note.pack(fill="x", padx=14, pady=(4, 0))
@@ -362,19 +370,19 @@ class PresentationDialog:
         # when installed, else the project's assistant. Said plainly, so the user
         # knows what is writing the content and what to install for the better one.
         self._model_note = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
+            export, text="", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
         )
         self._model_note.pack(fill="x", padx=14, pady=(4, 0))
         self._export_note = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
+            export, text="", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
         )
         self._export_note.pack(fill="x", padx=14, pady=(4, 0))
 
-        self._section_label(sidebar, "Course content")
-        course_row = tk.Frame(sidebar, bg=theme.surface)
-        course_row.pack(fill="x", padx=14, pady=(0, 4))
+        course = column.add("course", "Course content", icon="🎓")
+        course_row = tk.Frame(course, bg=theme.surface)
+        course_row.pack(fill="x", padx=14, pady=(4, 4))
         # Enabled only once the deck's own slides match one of the project's
         # courses; the window opens when suitable content is reached, never before.
         self._course_button = self._button(
@@ -383,7 +391,7 @@ class PresentationDialog:
         self._course_button.pack(side="left")
         self._course_button.configure(state="disabled")
         self._course_note = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
+            course, text="", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
         )
         self._course_note.pack(fill="x", padx=14, pady=(4, 14))
