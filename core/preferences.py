@@ -30,6 +30,10 @@ class PreferenceRecord:
     language: str = "en"
     speak: bool = True
     wake_word: str = "jarvis"
+    #: Whether Jarvis may search the internet. Off by default: a search leaves the
+    #: machine and costs a network round trip, so it is an explicit opt-in, and the
+    #: ``web on``/``web off`` control flips this and persists it.
+    web: bool = False
 
     def __post_init__(self) -> None:
         if self.language not in SUPPORTED_LANGUAGES:
@@ -43,6 +47,7 @@ class PreferenceRecord:
             "language": self.language,
             "speak": self.speak,
             "wake_word": self.wake_word,
+            "web": self.web,
         }
 
     @classmethod
@@ -52,6 +57,7 @@ class PreferenceRecord:
             language=str(data.get("language", "en")),
             speak=bool(data.get("speak", True)),
             wake_word=str(data.get("wake_word", "jarvis")),
+            web=bool(data.get("web", False)),
         )
 
 
@@ -80,7 +86,7 @@ class UserPreferences:
 
     def update(self, **changes: object) -> PreferenceRecord:
         """Apply explicit changes, persist them, and return the new record."""
-        unknown = set(changes) - {"user_name", "language", "speak", "wake_word"}
+        unknown = set(changes) - {"user_name", "language", "speak", "wake_word", "web"}
         if unknown:
             raise ValueError(f"Unknown preference(s): {', '.join(sorted(unknown))}")
         current = self._record
@@ -89,6 +95,7 @@ class UserPreferences:
             language=str(changes.get("language", current.language)),
             speak=bool(changes.get("speak", current.speak)),
             wake_word=str(changes.get("wake_word", current.wake_word)),
+            web=bool(changes.get("web", current.web)),
         )
         self.save()
         return self._record

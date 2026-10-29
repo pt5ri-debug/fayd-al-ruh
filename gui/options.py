@@ -18,6 +18,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=None, help="sandbox root directory for tools")
     parser.add_argument("--read-write", action="store_true", help="allow writing tools in the sandbox")
     parser.add_argument("--no-web", action="store_true", help="answer only from internal knowledge")
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="allow searching the internet when internal evidence is weak (off by default)",
+    )
     parser.add_argument("--mind", action="store_true", help="start answering from the trained model")
     parser.add_argument("--model-checkpoint", default=None, help="path to a language-model checkpoint")
     parser.add_argument(

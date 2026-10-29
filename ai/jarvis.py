@@ -100,6 +100,7 @@ def build_session(
     root: Path | None = None,
     read_write: bool = False,
     no_web: bool = False,
+    web: bool | None = None,
     web_threshold: float | None = None,
     no_feedback: bool = False,
     asr: str = "auto",
@@ -114,13 +115,27 @@ def build_session(
     means a fix to any gate applies to both entry points. With ``text_only`` the
     session uses the transcript/silent speech engines and the text-worded help,
     so a voice-less conversation never talks about muting or replaying audio.
+
+    Internet search is **off by default**: it is the one step that leaves the
+    machine and costs a network round trip on every weak question, so it is an
+    explicit opt-in rather than something a plain question triggers. ``web=True``
+    turns it on, ``web=False`` (or ``no_web=True``) keeps it off, and ``None``
+    (the default) follows the saved preference -- so a user who turns it on with
+    the ``web on`` control keeps it on across sessions, and a fresh install never
+    reaches the network unasked.
     """
     sandbox_root = root.expanduser() if root else _default_sandbox_root()
     sandbox = build_sandbox(sandbox_root, read_only=not read_write)
     documents = _documents()
+    preferences = UserPreferences(data_dir())
+    if web is None:
+        # The saved preference, unless the caller explicitly disabled it.
+        web_enabled = preferences.record.web and not no_web
+    else:
+        web_enabled = bool(web) and not no_web
     assistant = build_default_assistant(
         documents=documents,
-        web_enabled=not no_web,
+        web_enabled=web_enabled,
         web_threshold=web_threshold if web_threshold is not None else _WEAK_EVIDENCE,
         on_learn=documents.save,
         bulk=bulk_knowledge_available(),
@@ -128,13 +143,16 @@ def build_session(
     )
     learner = ContinuousLearner(KnowledgeUpdater(documents))
     router = NaturalLanguageRouter(sandbox)
-    preferences = UserPreferences(data_dir())
     wake = WakeWordDetector(
         phrases=(preferences.record.wake_word, "hey " + preferences.record.wake_word, "يا جارفيس")
     )
     recognizer = load_recognizer("transcript" if text_only else asr)
     synthesizer = load_synthesizer("silent" if text_only else tts)
     voice = VoiceAssistant(assistant, recognizer=recognizer, synthesizer=synthesizer)
+
+    def remember(name: str, value: object) -> None:
+        preferences.update(**{name: value})
+
     return JarvisMode(
         assistant,
         router=router,
@@ -147,6 +165,7 @@ def build_session(
         learner=None if no_feedback else learner,
         mute=text_only or not preferences.record.speak,
         help_text=TEXT_HELP_TEXT if text_only else HELP_TEXT,
+        on_preference=remember,
     )
 
 
@@ -155,6 +174,7 @@ def _build_mode(args: argparse.Namespace) -> JarvisMode:
         root=Path(args.root) if args.root else None,
         read_write=args.read_write,
         no_web=args.no_web,
+        web=True if getattr(args, "web", False) else None,
         web_threshold=args.web_threshold,
         no_feedback=args.no_feedback,
         asr=args.asr,
@@ -252,6 +272,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--list-sessions", action="store_true", help="list saved sessions and exit")
     parser.add_argument("--no-feedback", action="store_true", help="disable learning from confirm/correct controls")
     parser.add_argument("--no-web", action="store_true", help="answer only from internal knowledge; do not search the internet")
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="allow searching the internet when internal evidence is weak (off by default; also remembered with 'web on')",
+    )
     parser.add_argument(
         "--web-threshold",
         type=float,

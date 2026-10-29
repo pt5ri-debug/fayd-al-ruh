@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from core.best_effort import best_effort
 from core.command_router import NaturalLanguageRouter, RouteKind
 from core.continuous_learning import ContinuousLearner, Feedback
 from core.conversation import Conversation, ConversationMemory
@@ -245,6 +246,7 @@ class JarvisMode:
         learner: ContinuousLearner | None = None,
         mute: bool = False,
         help_text: str = HELP_TEXT,
+        on_preference=None,
     ) -> None:
         self.assistant = assistant
         self.router = router
@@ -258,6 +260,9 @@ class JarvisMode:
         self.learner = learner
         self.mute = mute
         self.help_text = help_text
+        #: Called with ``(name, value)`` when a conversation control changes a
+        #: preference, so ``web on`` is remembered across sessions.
+        self._on_preference = on_preference
         self._conversation: Conversation | None = None
         # The last answer's reasoning trace, kept so the ``why`` control can repeat
         # it on demand. Held as text (not the whole answer) so nothing else is kept
@@ -520,13 +525,20 @@ class JarvisMode:
         return "Thank you -- I recorded your feedback."
 
     def _handle_web_control(self, control: JarvisControl) -> str:
-        """Turn the assistant's internet lookups on or off, honestly."""
+        """Turn the assistant's internet lookups on or off, honestly.
+
+        The choice is persisted when a preference hook is wired, so ``web on``
+        survives a restart instead of having to be repeated every session.
+        """
         assistant = self.assistant
         if getattr(assistant, "web", None) is None:
             return "Internet lookups are not configured in this session."
         tokens = control.phrase.split()
         enable = not ("off" in tokens or control.phrase == "offline")
         assistant.web_enabled = enable
+        if self._on_preference is not None:
+            with best_effort("remember the internet-lookup preference"):
+                self._on_preference("web", enable)
         if enable:
             return "Internet lookups are on: I will search, compare, and learn trusted answers."
         return "Internet lookups are off: I will answer only from what I already know."

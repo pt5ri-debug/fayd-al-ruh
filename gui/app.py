@@ -440,6 +440,7 @@ class FaydGUI:
         service: ChatService | None = None,
         model_checkpoint: str | None = None,
         no_web: bool = False,
+        web: bool | None = None,
         session: str | None = None,
         theme: str | None = None,
         operating_mode: str | None = None,
@@ -447,6 +448,7 @@ class FaydGUI:
         self.root = root
         self.service = service or ChatService(
             no_web=no_web,
+            web=web,
             model_checkpoint=model_checkpoint,
             session=session,
             operating_mode=operating_mode,
@@ -3207,6 +3209,7 @@ def main(argv: list[str] | None = None) -> int:
 
     service = ChatService(
         no_web=args.no_web,
+        web=True if getattr(args, "web", False) else None,
         root=Path(args.root) if args.root else None,
         read_write=args.read_write,
         model_checkpoint=args.model_checkpoint,

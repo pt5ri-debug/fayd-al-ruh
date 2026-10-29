@@ -618,6 +618,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--read-write", action="store_true", help="allow writing tools in the sandbox")
     parser.add_argument("--no-web", action="store_true", help="answer only from internal knowledge; do not search the internet")
     parser.add_argument(
+        "--web",
+        action="store_true",
+        help="allow searching the internet when internal evidence is weak (off by default)",
+    )
+    parser.add_argument(
         "--web-threshold",
         type=float,
         default=None,
@@ -701,6 +706,7 @@ def main(argv: list[str] | None = None) -> int:
         root=Path(args.root) if args.root else None,
         read_write=args.read_write,
         no_web=args.no_web,
+        web=True if getattr(args, "web", False) else None,
         web_threshold=args.web_threshold,
         no_feedback=args.no_feedback,
         text_only=True,

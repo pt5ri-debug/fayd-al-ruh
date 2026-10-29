@@ -417,6 +417,16 @@ def test_web_control_is_honest_without_a_verifier(tmp_path):
     assert "not configured" in turn.response
 
 
+def test_web_control_remembers_the_choice_through_the_hook(tmp_path):
+    """``web on`` is persisted, so it does not have to be repeated every session."""
+    recorded: list[tuple[str, object]] = []
+    mode = _web_mode(tmp_path)
+    mode._on_preference = lambda name, value: recorded.append((name, value))
+    mode.handle("web on")
+    mode.handle("web off")
+    assert recorded == [("web", True), ("web", False)]
+
+
 def test_jarvis_reports_a_web_learned_answer(tmp_path):
     documents = build_document_store()
     mode = _web_mode(tmp_path, documents=documents, on_learn=documents.save)

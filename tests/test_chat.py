@@ -185,6 +185,35 @@ def test_text_session_help_avoids_voice_wording(tmp_path, monkeypatch) -> None:
     assert "mute my voice" not in turn.response
 
 
+def test_internet_search_is_off_by_default_and_explicitly_enabled(tmp_path, monkeypatch) -> None:
+    """A fresh session never reaches the network; ``web=True`` is the opt-in."""
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    from ai.jarvis import build_session
+
+    default = build_session(text_only=True)
+    assert default.assistant.web_enabled is False
+
+    opted_in = build_session(text_only=True, web=True)
+    assert opted_in.assistant.web_enabled is True
+
+    # ``--no-web`` wins over ``--web``, so a caller can always force it off.
+    forced_off = build_session(text_only=True, web=True, no_web=True)
+    assert forced_off.assistant.web_enabled is False
+
+
+def test_saved_web_preference_is_honoured_on_the_next_session(tmp_path, monkeypatch) -> None:
+    """Turning search on with the control keeps it on after a restart."""
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    from ai.jarvis import build_session
+    from core.preferences import UserPreferences
+
+    mode = build_session(text_only=True, web=True)
+    mode.handle("web on")  # persists through the preference hook
+    assert UserPreferences(tmp_path).record.web is True
+
+    assert build_session(text_only=True).assistant.web_enabled is True
+
+
 # --- menu / CLI wiring ----------------------------------------------------
 
 

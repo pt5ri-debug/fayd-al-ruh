@@ -4771,3 +4771,24 @@ regression monitor each can refuse a change.
   loaded graph is non-empty, holds only causal mechanisms, walks the seeded
   `waterflood → production` two-hop chain, and the new metric is 1.0 on the
   catalogue and 0.0 on an empty one.
+- Phase 53 — **the internet is an opt-in, not a default**: the last slow path in a
+  plain question was the web search. `ai/jarvis.py:build_session` passed
+  `web_enabled=not no_web`, so a *fresh* session -- the GUI, `python -m cli chat`,
+  `python -m cli jarvis` -- searched the internet on every weak question by
+  default: one network round trip (connect + TLS + query + fetch, ~1.3 s before
+  Phase 35's pooled session) added to the answer, unasked, and the only way to stop
+  it was to know about `--no-web`. Search is now **off by default** and an explicit
+  opt-in: `build_session(web=True)` (the CLI's new `--web`, and the GUI's `--web`)
+  turns it on, `no_web=True` always wins, and the bare default consults the *saved
+  preference* -- `PreferenceRecord.web`, a new field that is `False` on a fresh
+  install and on a preferences file written before the field existed, so an upgrade
+  never silently starts reaching the network. The `web on`/`web off` control now
+  **persists** through a `JarvisMode(on_preference=...)` hook (`build_session`
+  wires it to `UserPreferences.update`), so turning it on once keeps it on across
+  sessions instead of having to be repeated -- the control was already the natural
+  place to decide this, and a decision that is forgotten every restart is not
+  really a preference. `tests/test_preferences.py` pins the new field, its
+  persistence, and the pre-existing-file default; `tests/test_chat.py` pins that a
+  fresh session is off, `web=True` turns it on, `no_web` overrides, and a saved
+  choice is honoured on the next session; `tests/test_jarvis.py` pins the control's
+  persistence hook.

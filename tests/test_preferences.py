@@ -12,6 +12,9 @@ def test_defaults_are_conservative(tmp_path):
     assert record.language == "en"
     assert record.speak is True
     assert record.wake_word == "jarvis"
+    # Internet search is the one step that leaves the machine, so it is off
+    # until the user asks for it.
+    assert record.web is False
 
 
 def test_update_persists_across_instances(tmp_path):
@@ -43,3 +46,17 @@ def test_corrupt_store_falls_back_to_defaults(tmp_path):
 def test_record_round_trips_through_primitive():
     record = PreferenceRecord(user_name="Noor", language="ar", speak=False, wake_word="jarvis")
     assert PreferenceRecord.from_primitive(record.to_primitive()) == record
+
+
+def test_web_preference_persists_across_instances(tmp_path):
+    UserPreferences(tmp_path).update(web=True)
+    assert UserPreferences(tmp_path).record.web is True
+    UserPreferences(tmp_path).update(web=False)
+    assert UserPreferences(tmp_path).record.web is False
+
+
+def test_missing_web_field_reads_as_off(tmp_path):
+    # A preferences file written before the field existed must not turn search on.
+    store = UserPreferences(tmp_path)
+    store.store.save("jarvis", "preferences", {"user_name": "Sam", "speak": True})
+    assert UserPreferences(tmp_path).record.web is False

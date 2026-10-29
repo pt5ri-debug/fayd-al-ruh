@@ -129,6 +129,7 @@ class ChatService:
         *,
         mode: JarvisMode | None = None,
         no_web: bool = False,
+        web: bool | None = None,
         no_feedback: bool = False,
         root: Path | None = None,
         read_write: bool = False,
@@ -161,6 +162,7 @@ class ChatService:
             root=root,
             read_write=read_write,
             no_web=no_web,
+            web=web,
             no_feedback=no_feedback,
             text_only=True,
         )
