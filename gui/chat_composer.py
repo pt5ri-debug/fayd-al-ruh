@@ -305,6 +305,114 @@ class ModeSelector(tk.Menubutton):
         self.configure(text=f"{self._icon}  {label}  ⌄")
 
 
+class WebToggle(tk.Frame):
+    """A compact on/off switch for internet lookups, in the composer toolbar.
+
+    It reads as one control -- a small rounded *track* with a knob that slides to
+    the right when search is on -- so the state is visible at a glance, not hidden
+    in a menu. The caller owns the behaviour: ``command`` is called with the
+    *requested* state (``True``/``False``), and the switch then shows whatever
+    ``set_state`` is told, so a refused or unavailable lookup can never be drawn as
+    "on". ``set_state`` also paints the track with the theme's primary accent when
+    on, and greys the whole control when search cannot be configured here, so the
+    control is honest in every state.
+
+    A destroyed switch clears its own ``command`` and its canvas bindings for the
+    same reason every other composer control does: a bound method kept in a Tk
+    widget would hold the whole window in a reference cycle only the cyclic
+    collector could break, and that can run on a worker thread, where a Tcl call
+    deadlocks (see :class:`gui.window_controls.WindowControls`).
+    """
+
+    WIDTH = 40
+    HEIGHT = 22
+    PAD = 3
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        theme: Any,
+        typography: Typography,
+        command: Callable[[bool], Any],
+        tip: str = "",
+        initial: bool = False,
+        available: bool = True,
+    ) -> None:
+        super().__init__(parent, bg=theme.surface, cursor="hand2")
+        self.theme = theme
+        self._type = typography
+        self._command: Callable[[bool], Any] | None = command
+        self._on = bool(initial)
+        self._available = bool(available)
+        self.canvas = tk.Canvas(
+            self, width=self.WIDTH, height=self.HEIGHT,
+            bg=theme.surface, highlightthickness=0, borderwidth=0, cursor="hand2",
+        )
+        self.canvas.pack(side="left")
+        self.label = tk.Label(
+            self, text="Web", bg=theme.surface, fg=theme.text_dim,
+            font=typography.font("xs", weight="bold"), padx=4, cursor="hand2",
+        )
+        self.label.pack(side="left")
+        self.canvas.bind("<Button-1>", self._on_click)
+        self.label.bind("<Button-1>", self._on_click)
+        self.bind("<Destroy>", self._on_destroy, add="+")
+        if tip:
+            Tooltip(self, tip, theme, typography)
+        self._paint()
+
+    # ---------------------------------------------------------------- state
+
+    def set_state(self, on: bool, *, available: bool | None = None) -> None:
+        """Show the state now in force (never the state that was merely asked for)."""
+        self._on = bool(on)
+        if available is not None:
+            self._available = bool(available)
+        self._paint()
+
+    def set_tooltip(self, text: str) -> None:
+        """Replace the hover hint (the caller's own honest status line)."""
+        self._tooltip_text = text
+        Tooltip(self, text, self.theme, self._type)
+
+    def _paint(self) -> None:
+        theme = self.theme
+        if not self._available:
+            track, knob, text = theme.disabled, theme.surface, theme.text_dim
+        elif self._on:
+            track, knob, text = theme.primary, theme.surface, theme.contrast
+        else:
+            track, knob, text = theme.border_subtle, theme.text_dim, theme.text_secondary
+        self.canvas.delete("all")
+        self.canvas.configure(bg=theme.surface)
+        radius = self.HEIGHT // 2
+        # The track: a pill (Tk has no corner radius, so two circles + a bar).
+        self.canvas.create_oval(0, 0, self.HEIGHT, self.HEIGHT, fill=track, outline=track)
+        self.canvas.create_oval(
+            self.WIDTH - self.HEIGHT, 0, self.WIDTH, self.HEIGHT, fill=track, outline=track
+        )
+        self.canvas.create_rectangle(radius, 0, self.WIDTH - radius, self.HEIGHT, fill=track, outline=track)
+        # The knob: right when on, left when off.
+        knob_x = self.WIDTH - self.HEIGHT + self.PAD if self._on else self.PAD
+        self.canvas.create_oval(
+            knob_x, self.PAD, knob_x + self.HEIGHT - 2 * self.PAD, self.HEIGHT - self.PAD,
+            fill=knob, outline=knob,
+        )
+        self.label.configure(text="Web", fg=text)
+        self.configure(bg=theme.surface)
+
+    def _on_click(self, _event: tk.Event | None = None) -> None:
+        if not self._available or self._command is None:
+            return
+        self._command(not self._on)
+
+    def _on_destroy(self, _event: tk.Event) -> None:
+        # Release the caller's bound method while the widget still exists, so the
+        # dead window is not held in a cycle only the cyclic collector can break.
+        self._command = None
+
+
 class ModelButton(tk.Frame):
     """One model switch: a rounded chip that behaves like a button.
 
@@ -716,6 +824,10 @@ class ChatComposer:
         # calls :meth:`add_mic` rather than showing a control that does nothing.
         self.mic_button: tk.Button | None = None
 
+        # The internet-lookup switch is optional too; a screen that cannot search
+        # simply never calls :meth:`add_web_toggle` rather than showing a dead one.
+        self.web_toggle: WebToggle | None = None
+
         # The model-switch row is optional too, and lives inside the card, under
         # the input and above the toolbars, so the answering model is chosen from
         # the input panel itself (the reference design's row of controls). The
@@ -800,6 +912,30 @@ class ChatComposer:
         widget.pack(side="left", padx=(6, 0))
         self._toolbar_widgets.append(widget)
         return widget
+
+    def add_web_toggle(
+        self,
+        command: Callable[[bool], Any],
+        *,
+        initial: bool = False,
+        available: bool = True,
+        tip: str = "Internet lookups: on or off",
+    ) -> WebToggle:
+        """Add the internet-lookup on/off switch to the bottom-right toolbar.
+
+        The caller passes the behaviour and the *real* initial state, so a screen
+        never shows a switch that disagrees with the session it belongs to.
+        """
+        toggle = WebToggle(
+            self.right_tools, theme=self.theme, typography=self._type,
+            command=command, tip=tip, initial=initial, available=available,
+        )
+        # Packed after the dot/mic group, before any caller actions, so the row
+        # reads [dot] [mic] [Web] [actions] left to right.
+        toggle.pack(side="left", padx=(0, 4))
+        self._toolbar_widgets.append(toggle)
+        self.web_toggle = toggle
+        return toggle
 
     def _toolbar_button(self, parent: tk.Misc, glyph: str, tip: str) -> tk.Button:
         button = tk.Button(

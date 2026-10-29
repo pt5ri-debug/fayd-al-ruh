@@ -592,6 +592,9 @@ class ModelChatDialog:
         else:
             self._model_note.configure(fg=self.theme.text_secondary)
         self._refresh_model_buttons()
+        # The lookup switch follows the live mouth: switching to a language-model
+        # mouth greys it, switching back to the sources re-enables it.
+        self._refresh_web_toggle()
 
     # -- conversation -----------------------------------------------------
 
@@ -636,7 +639,36 @@ class ModelChatDialog:
         self._mic_button = composer.add_mic(self._toggle_mic, tip="Dictate with the microphone")
         if not self.service.microphone_available():
             self._mic_button.configure(state="disabled")
+        # The internet-lookup switch, beside the microphone: one click turns web
+        # search on or off for *this* window. Only the grounded sources mouth can
+        # search, so a language-model window shows it greyed rather than lying.
+        self._web_toggle = composer.add_web_toggle(
+            self._on_web_toggled,
+            initial=bool(getattr(self.service, "web_enabled", lambda: False)()),
+            available=bool(getattr(self.service, "web_available", lambda: False)()),
+            tip=self.service.web_status()
+            if hasattr(self.service, "web_status") else "Internet lookups: on or off",
+        )
         composer.focus()
+
+    def _on_web_toggled(self, enabled: bool) -> None:
+        """Turn this window's internet lookups on or off from the switch."""
+        setter = getattr(self.service, "set_web", None)
+        if setter is not None:
+            setter(enabled)
+        self._refresh_web_toggle()
+
+    def _refresh_web_toggle(self) -> None:
+        """Keep the switch in step with the live session."""
+        toggle = getattr(self, "_web_toggle", None)
+        if toggle is None:
+            return
+        available_fn = getattr(self.service, "web_available", None)
+        enabled_fn = getattr(self.service, "web_enabled", None)
+        toggle.set_state(
+            bool(enabled_fn()) if enabled_fn is not None else False,
+            available=bool(available_fn()) if available_fn is not None else False,
+        )
 
     # -- geometry helpers --------------------------------------------------
 

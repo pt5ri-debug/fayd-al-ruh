@@ -32,6 +32,18 @@ class FakeSession:
         self.memory: Any = None
         self._conversation = SimpleNamespace(id="CNV-fake")
         self.saved_ids: tuple[str, ...] = ()
+        # A live internet-lookup switch: the window's control reads and flips this.
+        self._web_enabled = False
+
+    def web_available(self) -> bool:
+        return True
+
+    def web_enabled(self) -> bool:
+        return self._web_enabled
+
+    def set_web(self, enabled: bool) -> bool:
+        self._web_enabled = bool(enabled)
+        return self._web_enabled
 
     @property
     def conversation(self) -> SimpleNamespace:
@@ -129,6 +141,12 @@ def _fake_model_chat_service(mouth: str) -> Any:
         start_recording=lambda: None,
         stop_recording=lambda: None,
         transcribe=lambda recording: "",
+        # The lookup switch: only the sources mouth can search, so a model mouth
+        # reports it unavailable (the window greys the control).
+        web_available=lambda: mouth == "sources",
+        web_enabled=lambda: False,
+        set_web=lambda enabled: bool(enabled) and mouth == "sources",
+        web_status=lambda: "Internet lookups: on or off",
     )
 
 
@@ -1129,6 +1147,122 @@ def test_main_window_composer_has_attach_dot_mic_and_send(tmp_path) -> None:
         # The toolbars sit below the input, and Send is rightmost.
         assert composer.send_button.winfo_rootx() > composer.mic_button.winfo_rootx()
         assert composer.send_button.winfo_rooty() > composer.entry.winfo_rooty()
+    finally:
+        root.destroy()
+
+
+# --- the internet-lookup switch ---------------------------------------------
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_web_toggle_is_opt_in_and_flips() -> None:
+    """The composer's Web switch reflects state and calls back with the request."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    requests: list[bool] = []
+    root = tk.Tk()
+    try:
+        root.geometry("900x400")
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask…", on_submit=lambda: None, with_attach=False,
+        )
+        composer.wrap.pack(fill="x")
+        # A screen that never calls add_web_toggle shows no switch at all.
+        assert composer.web_toggle is None
+        toggle = composer.add_web_toggle(requests.append, initial=False, available=True)
+        root.update()
+        assert toggle.winfo_ismapped()
+        # Off at first: a click asks to turn it on.
+        toggle._on_click()
+        assert requests == [True]
+        # The switch only shows what it is told, so a refused lookup cannot lie.
+        assert toggle._on is False
+        toggle.set_state(True)
+        assert toggle._on is True
+        # A click while on asks to turn it off.
+        toggle._on_click()
+        assert requests == [True, False]
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_web_toggle_is_greyed_when_unavailable() -> None:
+    """An unavailable lookup cannot be switched on from the control."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    requests: list[bool] = []
+    root = tk.Tk()
+    try:
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask…", on_submit=lambda: None, with_attach=False,
+        )
+        composer.wrap.pack(fill="x")
+        toggle = composer.add_web_toggle(requests.append, initial=False, available=False)
+        root.update()
+        toggle._on_click()
+        assert requests == []  # a dead control calls nothing
+        # Live again once the session can search: off, so a click asks for on.
+        toggle.set_state(False, available=True)
+        toggle._on_click()
+        assert requests == [True]
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_shared_composer_web_toggle_releases_its_command_on_destroy() -> None:
+    """A destroyed switch drops the caller's bound method (no cycle)."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.chat_composer import ChatComposer
+    from gui.typography import resolve
+
+    root = tk.Tk()
+    try:
+        composer = ChatComposer(
+            root, theme=DARK_THEME, typography=resolve(root),
+            placeholder="Ask…", on_submit=lambda: None, with_attach=False,
+        )
+        composer.wrap.pack(fill="x")
+        toggle = composer.add_web_toggle(lambda _on: None, initial=False, available=True)
+        root.update()
+        toggle.destroy()
+        assert toggle._command is None
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_main_window_composer_carries_the_web_toggle(tmp_path) -> None:
+    """The main window's composer shows the switch, off by default, beside the mic."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        toggle = app._composer.web_toggle
+        assert toggle is not None and toggle.winfo_ismapped()
+        # Off by default, and the label reads as part of the composer row.
+        assert toggle._on is False
+        mic = app._composer.mic_button
+        assert mic is not None
+        assert toggle.winfo_rootx() > mic.winfo_rootx()
+        assert toggle.winfo_rooty() > app._composer.entry.winfo_rooty()
     finally:
         root.destroy()
 

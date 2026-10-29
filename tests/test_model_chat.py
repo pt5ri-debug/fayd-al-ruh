@@ -952,6 +952,69 @@ def test_window_shows_the_identity_the_voice_and_the_model(data_root) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_shows_the_web_switch_only_for_the_sources_mouth(data_root) -> None:
+    """The dedicated window carries the lookup switch, greyed for a model mouth.
+
+    Web search belongs to the grounded *sources* mouth, so a language-model window
+    (Ultron here) shows the switch honestly unavailable -- a click cannot turn on a
+    lookup that mouth cannot perform.
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.model_chat import ModelChatService
+    from gui.model_chat_dialog import ModelChatDialog
+
+    root = tk.Tk()
+    try:
+        service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root)
+        dialog = ModelChatDialog(
+            root, service, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+        )
+        root.update()
+        toggle = dialog._composer.web_toggle
+        assert toggle is not None and toggle.winfo_ismapped()
+        assert service.web_available() is False
+        assert toggle._available is False
+        # A click on an unavailable switch asks for nothing.
+        toggle._on_click()
+        assert service.web_enabled() is False
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_web_switch_turns_lookups_on_for_the_sources_mouth(data_root) -> None:
+    """The sources window's switch really flips the session's lookup state."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.model_chat import ModelChatService
+    from gui.model_chat_dialog import ModelChatDialog
+
+    root = tk.Tk()
+    try:
+        service = ModelChatService(catalog.MOUTH_SOURCES, data_root=data_root)
+        dialog = ModelChatDialog(
+            root, service, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+        )
+        root.update()
+        toggle = dialog._composer.web_toggle
+        assert toggle is not None
+        assert service.web_available() is True
+        assert toggle._on is False
+        # The window's own handler turns it on and the switch follows the truth.
+        dialog._on_web_toggled(True)
+        assert service.web_enabled() is True
+        assert toggle._on is True
+        dialog._on_web_toggled(False)
+        assert service.web_enabled() is False
+        assert toggle._on is False
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_opens_at_ninety_percent_height_and_keeps_both_scrollbars(data_root) -> None:
     """The window is shorter than before, and both areas always show a scrollbar.
 

@@ -4792,3 +4792,38 @@ regression monitor each can refuse a change.
   fresh session is off, `web=True` turns it on, `no_web` overrides, and a saved
   choice is honoured on the next session; `tests/test_jarvis.py` pins the control's
   persistence hook.
+
+- Phase 54 — **the internet switch is a button, in every chat window**: Phase 53
+  made search an opt-in but the only place to change it was the CLI (`--web` /
+  `--no-web`) or the Jarvis `web on`/`web off` control, so a GUI user had no way to
+  turn it on or off. Every chat surface now carries one **reciprocal toggle**.
+  `gui.chat_composer.WebToggle` is a small `tk.Menubutton` styled like the mode
+  pills (hover tint, a `Tooltip`, a `set_state(on, available)` that greys the
+  control when the mouth cannot search and a `<Destroy>` that drops its own
+  command, exactly like every other composer control), added to the shared
+  composer through `ChatComposer.add_web_toggle(...)` and exposed as
+  `composer.web_toggle`. `gui.service.ChatService` gains the session-facing API --
+  `web_available()` (True only when the *grounded sources* mouth is answering, so a
+  language-model mouth honestly offers no switch), `web_enabled()`, `set_web()`,
+  `toggle_web()`, `web_status()` -- and `set_web` refuses to enable a mouth that
+  cannot search rather than reporting "on" for a session that could not do it.
+  `core.jarvis.JarvisMode` gains `web_available`/`web_enabled`/`set_web` and an
+  injectable `web_verifier_factory`, so a session built with search **off** can
+  still be switched **on** without a restart: the verifier is built lazily on the
+  first enable (once, then kept), the choice is persisted through the same
+  `on_preference` hook Phase 53 added, and a mode with neither a verifier nor a
+  factory reports `False` rather than lying. `ai.jarvis.build_session` wires the
+  factory, so the GUI, Jarvis, and every mouth get a live switch. `gui/app.py`
+  (the main window) and `gui/model_chat_dialog.py` (each per-mouth window, through
+  `gui.model_chat.ModelChatService`) both build the toggle beside the microphone,
+  read its state from the live session on open, and refresh it after a click -- so
+  the control always shows what is really in force. Honest by construction: only
+  the retrieval mouth can search, so a model window's toggle is greyed; the choice
+  survives a restart; and a stand-in service with no web API cannot crash a window
+  (the wiring reads each member defensively). `tests/test_gui_design.py` pins the
+  shared widget (opt-in, the click callback, the greyed state, the command
+  released on destroy), the main window's row placement, and the per-model window
+  opening from its chip; `tests/test_gui.py` pins the service API (the delegate,
+  the persistence, and the language-model refusal); `tests/test_model_chat.py`
+  pins the per-mouth window's switch; `tests/test_jarvis.py` pins the lazy verifier
+  build, the honest refusal, and the persistence hook.

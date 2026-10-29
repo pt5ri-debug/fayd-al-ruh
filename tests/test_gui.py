@@ -32,6 +32,25 @@ class FakeSession:
         self.voice = SimpleNamespace(assistant=self.assistant)
         self._conversation = SimpleNamespace(id="CNV-fake")
         self.saved_ids: tuple[str, ...] = ()
+        # A live internet-lookup switch, so the service's toggle has a session to
+        # drive (a real ``JarvisMode`` exposes the same three members).
+        self._web_enabled = False
+        self._web_verifier_factory: Any = None
+
+    @property
+    def web_available(self) -> bool:
+        verifier = getattr(self.assistant, "web", None)
+        return verifier is not None or self._web_verifier_factory is not None
+
+    @property
+    def web_enabled(self) -> bool:
+        return self._web_enabled
+
+    def set_web(self, enabled: bool) -> bool:
+        if enabled and not self.web_available:
+            return False
+        self._web_enabled = bool(enabled)
+        return self._web_enabled
 
     @property
     def conversation(self) -> SimpleNamespace:
@@ -247,6 +266,46 @@ def test_service_marks_control_turns() -> None:
 
     assert reply.is_control is True
     assert reply.text.startswith("[help]")
+
+
+def test_service_web_toggle_delegates_to_the_session() -> None:
+    """The window's switch calls the session's own ``set_web`` and reads it back."""
+    from core.assistant import build_default_assistant
+
+    session = FakeSession()
+    session.assistant = build_default_assistant()  # no verifier: search off
+
+    class _Verifier:
+        pass
+
+    session._web_verifier_factory = _Verifier
+    service = _service(session)
+
+    assert service.web_available() is True
+    assert service.web_enabled() is False
+    assert service.toggle_web() is True
+    assert service.web_enabled() is True
+    assert "on" in service.web_status().casefold()
+    assert service.set_web(False) is False
+    assert service.web_enabled() is False
+    assert "off" in service.web_status().casefold()
+
+
+def test_service_web_is_unavailable_for_a_language_model_mouth() -> None:
+    """Only the grounded sources mouth searches, so the switch is honestly off."""
+    session = FakeSession()
+    session.assistant = SimpleNamespace(web=None, web_enabled=False)
+
+    class _Verifier:
+        pass
+
+    session._web_verifier_factory = _Verifier
+    service = _service(session)
+    assert service.web_available() is True  # the sources mouth can search
+
+    service.switcher._mouth = "ultron"  # a language-model mouth
+    assert service.web_available() is False
+    assert service.set_web(True) is False
 
 
 def test_service_hints_when_sources_cannot_answer() -> None:
