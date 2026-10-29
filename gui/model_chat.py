@@ -500,6 +500,47 @@ class ModelChatService:
     def session(self) -> str | None:
         return self.service.session
 
+    # ------------------------------------------------- internet lookup toggle
+
+    def web_available(self) -> bool:
+        """True when this window's mouth can search the internet.
+
+        Only the grounded *sources* mouth searches; a language-model mouth answers
+        from its own weights, so its window honestly has no lookup switch. The
+        answer is keyed on *this window's own mouth*, not on whichever mouth the
+        wrapped session happens to have active at the moment.
+        """
+        if self.mouth != catalog.MOUTH_SOURCES:
+            return False
+        check = getattr(self.service, "web_available", None)
+        return bool(check()) if check is not None else False
+
+    def web_enabled(self) -> bool:
+        """True when this window will actually search the internet right now."""
+        check = getattr(self.service, "web_enabled", None)
+        return bool(check()) if check is not None else False
+
+    def set_web(self, enabled: bool) -> bool:
+        """Turn internet lookups on or off; returns the state now in force.
+
+        Delegates to the window's own session, so the switch here changes *this*
+        window's lookups and persists the choice for the next session. A mouth
+        that cannot search refuses to be switched on.
+        """
+        if enabled and not self.web_available():
+            return False
+        setter = getattr(self.service, "set_web", None)
+        return bool(setter(enabled)) if setter is not None else False
+
+    def web_status(self) -> str:
+        """An honest one-line status for the switch's tooltip."""
+        status = getattr(self.service, "web_status", None)
+        if status is not None:
+            return str(status())
+        if not self.web_available():
+            return "Internet lookups are not available for this model."
+        return "Internet lookups: on or off"
+
     # ----------------------------------------------------------- microphone
 
     def microphone_available(self) -> bool:

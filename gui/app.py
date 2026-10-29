@@ -1757,6 +1757,30 @@ class FaydGUI:
         self._status.configure(text="Listening… click the microphone again to stop.")
         self._add_bubble("note", "🎤 Listening… click the microphone again to stop and transcribe.")
 
+    def _on_web_toggled(self, enabled: bool) -> None:
+        """Turn internet lookups on or off from the composer's switch.
+
+        The switch is a *view* of the session's real state: it is repainted from
+        what the service reports after the change, so a lookup that cannot be
+        configured (or was refused) never leaves the control reading "on".
+        """
+        now = self.service.set_web(enabled)
+        self._refresh_web_toggle()
+        if enabled and not now:
+            self._add_bubble("note", self.service.web_status())
+            return
+        self._status.configure(text=self.service.web_status())
+
+    def _refresh_web_toggle(self) -> None:
+        """Keep the switch in step with the live session (after any change)."""
+        toggle = getattr(self, "_web_toggle", None)
+        if toggle is None:
+            return
+        toggle.set_state(
+            self.service.web_enabled(),
+            available=self.service.web_available(),
+        )
+
     def _finish_recording(self) -> None:
         """Stop the recording and transcribe it in the background."""
         recording = self.service.stop_recording()
@@ -2077,6 +2101,18 @@ class FaydGUI:
         self._mic_button = self._composer.add_mic(
             self._toggle_mic, "Dictate with the microphone (Qwen3-ASR)"
         )
+
+        # The internet-lookup switch, beside the microphone: one click turns web
+        # search on or off for *this* conversation. It starts from the session's
+        # real state (off by default) and shows whatever the service reports, so a
+        # refused or unavailable lookup is never drawn as "on".
+        self._web_toggle = self._composer.add_web_toggle(
+            self._on_web_toggled,
+            initial=self.service.web_enabled(),
+            available=self.service.web_available(),
+            tip=self.service.web_status(),
+        )
+        self._refresh_web_toggle()
 
         # The two compact mode selectors of the composer's bottom-left toolbar.
         # They are *views* of the real controls, not a second source of truth: the

@@ -133,9 +133,13 @@ def build_session(
         web_enabled = preferences.record.web and not no_web
     else:
         web_enabled = bool(web) and not no_web
+    # The assistant is always built with search *off*: the verifier is built lazily,
+    # on the first "web on" (or by the window's toggle), so a session that never
+    # searches never constructs one. ``web_enabled`` is then applied through the
+    # same path the toggle uses, so startup and a live toggle cannot diverge.
     assistant = build_default_assistant(
         documents=documents,
-        web_enabled=web_enabled,
+        web_enabled=False,
         web_threshold=web_threshold if web_threshold is not None else _WEAK_EVIDENCE,
         on_learn=documents.save,
         bulk=bulk_knowledge_available(),
@@ -153,7 +157,28 @@ def build_session(
     def remember(name: str, value: object) -> None:
         preferences.update(**{name: value})
 
-    return JarvisMode(
+    def build_verifier():
+        """Build the internet verifier over *this* session's own retriever.
+
+        Sharing the retriever means a statement learned from the web is retrievable
+        by the very next question, exactly as when the assistant was built with
+        search on -- the only difference is *when* the verifier is constructed.
+        """
+        from core.web_verifier import (
+            approved_gate,
+            build_web_verifier,
+            granted_permissions,
+            internet_provider,
+        )
+
+        return build_web_verifier(
+            provider=internet_provider(),
+            permissions=granted_permissions(),
+            approvals=approved_gate(),
+            retriever=assistant.retriever,
+        )
+
+    mode = JarvisMode(
         assistant,
         router=router,
         agent=ToolAgent(sandbox),
@@ -166,7 +191,11 @@ def build_session(
         mute=text_only or not preferences.record.speak,
         help_text=TEXT_HELP_TEXT if text_only else HELP_TEXT,
         on_preference=remember,
+        web_verifier_factory=build_verifier,
     )
+    if web_enabled:
+        mode.set_web(True)
+    return mode
 
 
 def _build_mode(args: argparse.Namespace) -> JarvisMode:

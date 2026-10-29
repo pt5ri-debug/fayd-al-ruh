@@ -427,6 +427,48 @@ def test_web_control_remembers_the_choice_through_the_hook(tmp_path):
     assert recorded == [("web", True), ("web", False)]
 
 
+def test_set_web_is_the_programmatic_twin_of_the_control(tmp_path):
+    """A window's switch and the typed control do exactly the same thing."""
+    recorded: list[tuple[str, object]] = []
+    mode = _web_mode(tmp_path)
+    mode._on_preference = lambda name, value: recorded.append((name, value))
+    assert mode.web_available is True
+    assert mode.set_web(True) is True
+    assert mode.web_enabled is True
+    assert mode.set_web(False) is False
+    assert mode.web_enabled is False
+    assert recorded == [("web", True), ("web", False)]
+
+
+def test_set_web_builds_the_verifier_lazily_on_first_enable(tmp_path):
+    """A session created with search off can still turn it on, building the verifier."""
+    mode = _mode(tmp_path)  # a plain grounded assistant: no verifier at all
+    assert mode.web_available is False  # nothing to build from yet
+    built: list[int] = []
+
+    class _Verifier:
+        pass
+
+    mode._web_verifier_factory = lambda: (built.append(1), _Verifier())[1]
+    assert mode.web_available is True  # buildable through the factory
+    assert mode.set_web(True) is True
+    assert built == [1]
+    assert mode.web_enabled is True
+    # Turning it off keeps the verifier; turning it back on does not rebuild it.
+    mode.set_web(False)
+    mode.set_web(True)
+    assert built == [1]
+
+
+def test_set_web_reports_honestly_when_it_cannot_configure(tmp_path):
+    """With no verifier and no factory, enabling reports ``False`` rather than lying."""
+    mode = _mode(tmp_path)
+    mode._web_verifier_factory = None
+    assert mode.web_available is False
+    assert mode.set_web(True) is False
+    assert mode.web_enabled is False
+
+
 def test_jarvis_reports_a_web_learned_answer(tmp_path):
     documents = build_document_store()
     mode = _web_mode(tmp_path, documents=documents, on_learn=documents.save)

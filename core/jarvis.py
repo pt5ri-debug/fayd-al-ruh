@@ -247,6 +247,7 @@ class JarvisMode:
         mute: bool = False,
         help_text: str = HELP_TEXT,
         on_preference=None,
+        web_verifier_factory=None,
     ) -> None:
         self.assistant = assistant
         self.router = router
@@ -263,6 +264,11 @@ class JarvisMode:
         #: Called with ``(name, value)`` when a conversation control changes a
         #: preference, so ``web on`` is remembered across sessions.
         self._on_preference = on_preference
+        #: Builds the web verifier on first use. The assistant is created with
+        #: search *off*, so nothing here touches the network or builds a verifier
+        #: until the user actually turns it on -- and it is built lazily, on the
+        #: first ``web on``, rather than at startup.
+        self._web_verifier_factory = web_verifier_factory
         self._conversation: Conversation | None = None
         # The last answer's reasoning trace, kept so the ``why`` control can repeat
         # it on demand. Held as text (not the whole answer) so nothing else is kept
@@ -528,20 +534,73 @@ class JarvisMode:
         """Turn the assistant's internet lookups on or off, honestly.
 
         The choice is persisted when a preference hook is wired, so ``web on``
-        survives a restart instead of having to be repeated every session.
+        survives a restart instead of having to be repeated every session. Turning
+        it *on* builds the verifier on the spot when the session was created with
+        search off (the default), so a window can offer the toggle even though the
+        assistant started without one.
         """
         assistant = self.assistant
-        if getattr(assistant, "web", None) is None:
-            return "Internet lookups are not configured in this session."
         tokens = control.phrase.split()
         enable = not ("off" in tokens or control.phrase == "offline")
-        assistant.web_enabled = enable
+        if enable:
+            if getattr(assistant, "web", None) is None and self._web_verifier_factory is not None:
+                with best_effort("build the internet-lookup verifier"):
+                    assistant.web = self._web_verifier_factory()
+            if getattr(assistant, "web", None) is None:
+                return "Internet lookups are not configured in this session."
+            assistant.web_enabled = True
+        else:
+            assistant.web_enabled = False
         if self._on_preference is not None:
             with best_effort("remember the internet-lookup preference"):
                 self._on_preference("web", enable)
         if enable:
             return "Internet lookups are on: I will search, compare, and learn trusted answers."
         return "Internet lookups are off: I will answer only from what I already know."
+
+    # ------------------------------------------------- internet lookup toggle
+
+    @property
+    def web_available(self) -> bool:
+        """True when this session can reach the internet at all.
+
+        A verifier is either already wired (the session started with search on) or
+        buildable on demand (a factory was supplied), so a window can show a real
+        toggle instead of a dead control.
+        """
+        if getattr(self.assistant, "web", None) is not None:
+            return True
+        return self._web_verifier_factory is not None
+
+    @property
+    def web_enabled(self) -> bool:
+        """True when the assistant will actually search the internet right now."""
+        return bool(getattr(self.assistant, "web_enabled", False))
+
+    def set_web(self, enabled: bool) -> bool:
+        """Turn internet lookups on or off and return the state now in force.
+
+        This is the programmatic twin of the ``web on``/``web off`` control, so a
+        window's toggle and a typed control do exactly the same thing: it builds
+        the verifier on first enable, persists the choice through the preference
+        hook, and reports honestly (``False``) when search cannot be configured.
+        """
+        if not enabled:
+            self.assistant.web_enabled = False
+            if self._on_preference is not None:
+                with best_effort("remember the internet-lookup preference"):
+                    self._on_preference("web", False)
+            return False
+        if getattr(self.assistant, "web", None) is None and self._web_verifier_factory is not None:
+            with best_effort("build the internet-lookup verifier"):
+                self.assistant.web = self._web_verifier_factory()
+        if getattr(self.assistant, "web", None) is None:
+            return False
+        self.assistant.web_enabled = True
+        if self._on_preference is not None:
+            with best_effort("remember the internet-lookup preference"):
+                self._on_preference("web", True)
+        return True
 
     def _record_exchange(self, feedback: str, statement: str) -> None:
         """Append the feedback turn, refreshing the retriever when one is wired."""

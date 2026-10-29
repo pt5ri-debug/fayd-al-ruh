@@ -601,6 +601,66 @@ class ChatService:
         """Answer from retrieved passages with citations."""
         self.switcher.use_sources()
 
+    # ------------------------------------------------- internet lookup toggle
+
+    def web_available(self) -> bool:
+        """True when this session can reach the internet at all.
+
+        Web search belongs to the *grounded* mouth (it searches, compares, and
+        learns into the corpus); a language-model mouth answers from its own
+        weights and never searches, so the switch is honestly unavailable there
+        rather than showing a control that could not do anything. The verifier is
+        built on demand, so the switch is live in a fresh sources session.
+        """
+        if self.source != chat_module.MOUTH_SOURCES:
+            return False
+        check = getattr(self.mode, "web_available", None)
+        if check is None:
+            return False
+        # ``JarvisMode`` exposes this as a property; a stand-in may expose it as a
+        # method, so accept either rather than assuming one shape.
+        return bool(check() if callable(check) else check)
+
+    def web_enabled(self) -> bool:
+        """True when the assistant will actually search the internet right now."""
+        check = getattr(self.mode, "web_enabled", None)
+        if check is None:
+            return False
+        return bool(check() if callable(check) else check)
+
+    def set_web(self, enabled: bool) -> bool:
+        """Turn internet lookups on or off; returns the state now in force.
+
+        Delegates to the session's own ``set_web`` so a window's button and the
+        typed ``web on`` control do exactly the same thing -- including persisting
+        the choice, so it survives a restart. Falls back to flipping the
+        assistant's flag when a stand-in mode has no ``set_web``.
+        """
+        setter = getattr(self.mode, "set_web", None)
+        if setter is not None:
+            # A language-model mouth never searches, so enabling is refused here
+            # rather than reported as "on" by a session that could not do it.
+            if enabled and not self.web_available():
+                return False
+            return bool(setter(enabled))
+        assistant = getattr(self.mode, "assistant", None)
+        if assistant is not None and getattr(assistant, "web", None) is not None:
+            assistant.web_enabled = bool(enabled)
+            return bool(assistant.web_enabled)
+        return False
+
+    def toggle_web(self) -> bool:
+        """Flip internet lookups and return the new state (the window's button)."""
+        return self.set_web(not self.web_enabled())
+
+    def web_status(self) -> str:
+        """An honest one-line status for the toggle's tooltip and label."""
+        if not self.web_available():
+            return "Internet lookups are not available in this session."
+        if self.web_enabled():
+            return "Internet lookups are on: weak answers are searched, compared, and learned."
+        return "Internet lookups are off: answers come only from what the project already knows."
+
     def ask(self, message: str) -> ChatReply:
         """Handle one user message and return the rendered reply."""
         turn = self.mode.handle(message, require_wake=False, speak=False)
