@@ -53,6 +53,44 @@ from cli.menu import (
 
 Command = Callable[[Sequence[str]], int]
 
+#: Concise sidebar labels for the visible actions, keyed by action key. The full
+#: ``GuiAction.label`` stays the honest, complete name (the CLI reads it); this is
+#: only what the narrow sidebar draws, so a grouped menu reads cleanly instead of
+#: showing a sentence per row. An action with no entry here keeps its full label.
+SIDEBAR_LABELS: dict[str, str] = {
+    "insight": "✨   What the AI can do",
+    "learn": "Learn from feedback",
+    "internet-learner": "Learn from the internet",
+    "web": "Ask the web",
+    "knowledge-build": "Build the knowledge base",
+    "knowledge-stats": "Knowledge base status",
+    "ingest-connectors": "Ingest sources…",
+    "ingest-stats": "Ingestion status",
+    "natasha-traits": "Traits",
+    "natasha-mood": "Mood",
+    "natasha-initiative": "Initiative",
+    "natasha-relationship-memory": "Relationship memory",
+    "qwen-speech": "Qwen3 — status",
+    "qwen-speech-asr": "Qwen3 — download ASR",
+    "qwen-speech-tts": "Qwen3 — download TTS",
+    "piper": "Piper — status",
+    "piper-download": "Piper — download a voice",
+    "audio-speech": "VoiceTut — status",
+    "audio-speech-voices": "VoiceTut — voices",
+    "audio-speech-download": "VoiceTut — download the model",
+    "llm": "Train the language model",
+    "llm-sessions": "Train on my chats",
+    "ml": "Train the ML pipeline",
+    "release": "Train a release",
+    "release-sessions": "Train a release (with my chats)",
+    "curriculum": "Curriculum",
+    "demo": "Cognitive demo",
+    "deps": "Install optional support…",
+    "evaluation": "Run the evaluation",
+    "selfcheck": "Self-check",
+    "update": "Search for updates",
+}
+
 
 @dataclass(frozen=True)
 class GuiAction:
@@ -69,6 +107,17 @@ class GuiAction:
     #: switches use this: the header's model selector already offers them.
     hidden: bool = False
 
+    @property
+    def sidebar_label(self) -> str:
+        """The short label the sidebar draws, else the full ``label``.
+
+        The full label is a sentence (it has to explain the action on the CLI);
+        in a 288-pixel column under a group header, that reads as a wall of text.
+        A concise label is used where one is defined, so the sidebar stays tidy
+        while ``label`` remains the honest, complete name for the CLI.
+        """
+        return SIDEBAR_LABELS.get(self.key, self.label)
+
 
 @dataclass(frozen=True)
 class SessionItem:
@@ -78,6 +127,141 @@ class SessionItem:
     label: str
     session_id: str
     is_current: bool = False
+
+
+@dataclass(frozen=True)
+class ActionGroup:
+    """A named, collapsible section of the sidebar.
+
+    The sidebar is drawn as a short list of these (a professional, grouped menu
+    like the ones graphics and design programs use) instead of one long flat
+    column. ``title`` is what the user reads, ``icon`` is a single glyph for the
+    header, and ``keys`` are the :class:`GuiAction` keys the section holds, in
+    the order they are drawn. A key that is not a *visible* action is skipped, so
+    the groups can never resurrect a hidden row.
+    """
+
+    key: str
+    title: str
+    icon: str
+    keys: tuple[str, ...]
+
+
+#: The sidebar's sections, in the order a user meets them: the things used every
+#: day first (chats, the reading voice, the characters), then the knowledge and
+#: speech engines, then the power-user tools (training, system, preferences). The
+#: grouping is the fix for the flat, repetitive column the window used to draw --
+#: every action appears in exactly one section, and the sections mirror the CLI
+#: menu's own neighbourhoods so the two never disagree about what belongs where.
+ACTION_GROUPS: tuple[ActionGroup, ...] = (
+    ActionGroup(
+        "assistant",
+        "Assistant",
+        "✨",
+        ("insight",),
+    ),
+    ActionGroup(
+        "knowledge",
+        "Knowledge & Web",
+        "📚",
+        (
+            "learn",
+            "internet-learner",
+            "web",
+            "knowledge-build",
+            "knowledge-stats",
+            "ingest-connectors",
+            "ingest-stats",
+            "import-center",
+        ),
+    ),
+    ActionGroup(
+        "companion",
+        "Companion",
+        "💬",
+        (
+            "natasha-traits",
+            "natasha-mood",
+            "natasha-initiative",
+            "natasha-relationship-memory",
+        ),
+    ),
+    ActionGroup(
+        "speech",
+        "Speech Models",
+        "🔊",
+        (
+            "qwen-speech",
+            "qwen-speech-asr",
+            "qwen-speech-tts",
+            "piper",
+            "piper-download",
+            "audio-speech",
+            "audio-speech-voices",
+            "audio-speech-download",
+        ),
+    ),
+    ActionGroup(
+        "training",
+        "Training & Learning",
+        "🧠",
+        (
+            "llm",
+            "llm-sessions",
+            "ml",
+            "release",
+            "release-sessions",
+            "curriculum",
+            "demo",
+        ),
+    ),
+    ActionGroup(
+        "system",
+        "System",
+        "⚙",
+        (
+            "deps",
+            "evaluation",
+            "selfcheck",
+            "update",
+        ),
+    ),
+)
+
+
+def action_group_by_key(key: str) -> ActionGroup:
+    """Look up one group by its stable key. Raises ``KeyError`` if unknown."""
+    for group in ACTION_GROUPS:
+        if group.key == key:
+            return group
+    raise KeyError(key)
+
+
+def grouped_visible_actions() -> tuple[tuple[ActionGroup, tuple[GuiAction, ...]], ...]:
+    """The visible actions grouped into sections, each action appearing once.
+
+    An action that no group names is appended to the last group, so a newly
+    added action can never silently vanish from the sidebar; the order inside a
+    group is the group's own ``keys`` order.
+    """
+    visible = {action.key: action for action in visible_actions()}
+    seen: set[str] = set()
+    grouped: list[tuple[ActionGroup, tuple[GuiAction, ...]]] = []
+    for group in ACTION_GROUPS:
+        members = tuple(
+            visible[key] for key in group.keys if key in visible and key not in seen
+        )
+        seen.update(member.key for member in members)
+        if members:
+            grouped.append((group, members))
+    leftover = tuple(action for key, action in visible.items() if key not in seen)
+    if leftover:
+        if grouped:
+            last_group, last_members = grouped[-1]
+            grouped[-1] = (last_group, (*last_members, *leftover))
+        else:
+            grouped.append((ACTION_GROUPS[-1], leftover))
+    return tuple(grouped)
 
 
 # Numbered CLI menu items 5..11, plus the training entries the sidebar already had.
@@ -354,10 +538,14 @@ def saved_session_items(
 
 __all__ = [
     "ACTIONS",
+    "ACTION_GROUPS",
+    "ActionGroup",
     "Command",
     "GuiAction",
     "SessionItem",
     "action_by_key",
+    "action_group_by_key",
+    "grouped_visible_actions",
     "saved_session_items",
     "visible_actions",
 ]

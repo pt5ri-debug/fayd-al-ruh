@@ -1828,11 +1828,28 @@ Arabic is kept as secondary aliases where useful.
   the header's model selector offers them, and the Import Center, Code Studio,
   Presentation Studio, Doc's Studio, and image generation are hidden because the
   composer's ＋
-  menu already opens them; `options.py` has the argument parser
+  menu already opens them. The visible actions are then **grouped into named,
+  collapsible sections** — `ActionGroup` and the ordered `ACTION_GROUPS`
+  (*Assistant*, *Knowledge & Web*, *Companion*, *Speech Models*, *Training &
+  Learning*, *System*), read by `grouped_visible_actions()`, which places every
+  visible action in exactly one section and appends any action no group names to
+  the last section so a newly added action can never vanish; this is what turns
+  the sidebar from one flat, repetitive column into a short grouped menu.
+  `options.py` has the argument parser
   (`--mode ai|jarvics`, and the three mouth starts `--mind` / `--ultron` /
   default);
   `app.py` is the Tkinter window (imported lazily, so `cli/` never imports Tk).
   Reachable as `python -m cli gui` and `python -m gui`.
+- `gui/sidebar.py` — the shared **collapsible sidebar section** every group in
+  the window's sidebar is built from. `SidebarSection(parent, key=, title=, icon=,
+  theme=, typography=, open=, on_toggle=)` draws a full-width clickable header (an
+  icon, a title, and a `▾`/`▸` chevron) over a body frame the caller fills. The
+  body is created **once** and only packed/unpacked by `toggle()`/`set_open()`, so
+  a widget inside it (a voice list, a Cloud picker) keeps its state across a
+  collapse instead of being rebuilt; `on_toggle(key, is_open)` is called on every
+  change so the caller can persist the choice, and the header carries a real hover
+  tint like every other control. Tk-free of `gui.app` (it takes duck-typed theme
+  tokens), so the window builds on it without a circular import.
 - `gui/modes.py` — the two operating modes. **AI Mode** (`allows_tools=False`)
   answers conversationally; **Jarvics Mode** (`allows_tools=True`) also runs the
   sandboxed tools. `AnswerOnlyRouter` is the brain of AI Mode: it subclasses the
@@ -1945,9 +1962,11 @@ Arabic is kept as secondary aliases where useful.
   **dark** and a **light** theme (the Appearance control toggles it, the choice
   is saved through `JsonStore` and reloaded on the next launch, and the whole
   window is rebuilt for the new palette with the transcript preserved), a
-  collapsible sidebar (brand + version, a filled **New chat** button, a search
-  box, **Conversations** grouped by date, **Settings** with the **Cloud
-  provider**/**Model** dropdowns and the **Actions** list; the sandbox-tools
+  collapsible sidebar drawn as a short list of **collapsible sections** rather
+  than one flat column (brand + version, a filled **New chat** button, a search
+  box, then *Chats* grouped by date, *Reading Voice*, one section per answering-
+  assistant action group, and *Settings* with the **Cloud provider**/**Model**
+  dropdowns and the appearance switch; the sandbox-tools
   list and the answering-mouth radios are deliberately *not* in the sidebar --
   the header's model selector is the one visible mouth switch) behind a
   scrollbar that
