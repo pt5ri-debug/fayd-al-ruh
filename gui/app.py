@@ -53,7 +53,7 @@ from hakeem.hakeem_agent import HakeemError
 
 from gui import chat_composer, rich_text
 from gui import markdown as md
-from gui.actions import GuiAction, visible_actions
+from gui.actions import GuiAction, grouped_visible_actions
 from gui.attachments import Attachment, AttachmentNotice
 from gui.chat_composer import (
     ChatComposer,
@@ -73,6 +73,7 @@ from gui.modes import (
 )
 from gui.options import build_parser
 from gui.service import ChatReply, ChatService
+from gui.sidebar import SidebarSection
 from gui.typography import Typography, for_root
 from gui.window_controls import install_window_controls
 
@@ -350,6 +351,44 @@ def save_auto_speak(enabled: bool) -> None:
         JsonStore(data_dir()).save(_THEME_NAMESPACE, _SPEAK_KEY, {"enabled": bool(enabled)})
 
 
+_SECTIONS_KEY = "sidebar_sections"
+
+
+def load_sidebar_sections(root: Path | None = None) -> dict[str, bool]:
+    """The saved open/closed state of the sidebar's collapsible sections.
+
+    A section the user closed stays closed on the next launch, so the sidebar
+    remembers the shape they arranged it into. ``root`` defaults to the app data
+    directory; a caller that owns its own data root (the window, through the
+    service) passes it so the choice is isolated with the rest of that store. A
+    missing or broken record reads as empty, and a value that is not a real bool
+    is dropped, so a corrupt store can never leave a section undrawable.
+    """
+    from storage.json_store import JsonStore
+
+    try:
+        saved = JsonStore(root if root is not None else data_dir()).load(
+            _THEME_NAMESPACE, _SECTIONS_KEY
+        )
+    except Exception:
+        return {}
+    raw = saved.get("sections") if isinstance(saved, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): value for key, value in raw.items() if isinstance(value, bool)}
+
+
+def save_sidebar_sections(states: dict[str, bool], root: Path | None = None) -> None:
+    """Persist the sidebar sections' open/closed state; a store error is recorded."""
+    from storage.json_store import JsonStore
+
+    payload = {str(key): bool(value) for key, value in states.items()}
+    with best_effort("save the sidebar sections"):
+        JsonStore(root if root is not None else data_dir()).save(
+            _THEME_NAMESPACE, _SECTIONS_KEY, {"sections": payload}
+        )
+
+
 def _strip_markdown(text: str) -> str:
     """Turn rendered Markdown back into plain prose, so a reader speaks words.
 
@@ -479,6 +518,17 @@ class FaydGUI:
         self._auto_hidden = False
         self._settings_open = False
         self._voices_open = False
+        # The sidebar's collapsible sections: which are open, and the widget for
+        # each, so a toggle can persist the choice and a rebuild can restore it.
+        # The state is stored under the service's own data root, so the window and
+        # the rest of that store agree, and a test service is isolated.
+        self._section_states: dict[str, bool] = load_sidebar_sections(
+            getattr(self.service, "data_root", None)
+        )
+        self._sections: dict[str, SidebarSection] = {}
+        # The Settings section's contents are built once, on first open, so the
+        # Cloud pickers are not rebuilt on every open (they keep their state).
+        self._settings_built = False
         # The settings-panel radio only exists once the panel is expanded; the
         # mouth can still be switched from the header before that, so the
         # variable is created here and the radio simply attaches to it.
@@ -580,6 +630,10 @@ class FaydGUI:
         self._thinking_row = None
         self._thinking = None
         self._confirm_bar = None
+        # A rebuild (a theme switch) re-creates the sidebar from scratch, so the
+        # sections and the built-once Settings contents start fresh.
+        self._sections = {}
+        self._settings_built = False
         for child in self.root.winfo_children():
             if isinstance(child, tk.Menu):  # the clipboard menu outlives a rebuild
                 continue
@@ -601,7 +655,17 @@ class FaydGUI:
             self._pump()
 
     def _build_sidebar(self, shell: tk.Frame) -> None:
-        """The left sidebar: brand, New chat, search, history, tools, settings."""
+        """The left sidebar: brand, New chat, search, and grouped sections.
+
+        The column is a short list of **collapsible sections** rather than one
+        flat scroll of buttons, the way a graphics or design program arranges its
+        tools: the chat history, the reading voice, the answering-assistant
+        actions (grouped by theme), the speech models, the training tools, the
+        system tools, and the settings -- each with its own header, each closed or
+        opened by a click, and each remembering that choice. Nothing is listed
+        twice: the reading voice lives in exactly one section, and the settings
+        section holds only what no other section already offers.
+        """
         sidebar = tk.Frame(shell, bg=self._theme.surface, width=_SIDEBAR_WIDTH)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
@@ -648,42 +712,58 @@ class FaydGUI:
             widget.bind("<MouseWheel>", self._on_sidebar_wheel)
             widget.bind("<Button-4>", self._on_sidebar_wheel)
             widget.bind("<Button-5>", self._on_sidebar_wheel)
+        self._side_panel = panel
 
-        self._section_label(panel, "Chats", top=2)
-        self._history_panel = tk.Frame(panel, bg=self._theme.surface)
+        # 1. The chat history, open by default -- it is what a user returns to.
+        chats = self._add_section(panel, key="chats", title="Chats", icon="🗂", default_open=True)
+        self._history_panel = tk.Frame(chats.body, bg=self._theme.surface)
         self._history_panel.pack(fill="x")
         self._history_buttons: list[tk.Widget] = []
         self.refresh_history()
 
-        self._section_label(panel, "Voices", top=14)
-        self._voices_button = self._sidebar_button(
-            panel, "🔊   Voices  ▸", self._toggle_voices, small=True
+        # 2. The reading voice, the *one* place a voice is chosen (the settings
+        # section no longer repeats it). Its list is built when the section opens,
+        # so it always reflects what is installed right now.
+        voices = self._add_section(
+            panel, key="voices", title="Reading Voice", icon="🗣", default_open=False
         )
-        self._voices_button.pack(fill="x", padx=12, pady=(0, 4))
-        self._voices_panel = tk.Frame(panel, bg=self._theme.surface)
+        self._voices_panel = tk.Frame(voices.body, bg=self._theme.surface)
         self._voices_panel.pack(fill="x")
+        self._voices_open = voices.is_open
 
-        self._section_label(panel, "Settings", top=14)
-        settings = tk.Frame(panel, bg=self._theme.surface)
-        settings.pack(fill="x")
-        self._settings_button = self._sidebar_button(
-            settings, "⚙   Settings", self._toggle_settings, small=True
+        # 3. The answering-assistant actions, grouped by theme. Each group is its
+        # own section, so the column is a handful of readable headers instead of
+        # one long list of buttons. The buttons are built now (so a search or a
+        # test sees them all) but stay out of sight until their section is opened.
+        self._action_buttons.clear()
+        for group, members in grouped_visible_actions():
+            section = self._add_section(
+                panel,
+                key=f"group:{group.key}",
+                title=group.title,
+                icon=group.icon,
+                default_open=False,
+            )
+            for action in members:
+                button = self._sidebar_button(
+                    section.body, action.sidebar_label, partial(self._on_action, action), small=True
+                )
+                button.pack(fill="x", padx=12, pady=1)
+                # The sidebar shows the short label; the full one is the tooltip,
+                # so the complete explanation is still one hover away.
+                if action.sidebar_label != action.label:
+                    _Tooltip(button, action.label, self._theme, self._type)
+                self._action_buttons.append(button)
+
+        # 4. Settings: the cloud provider/model pickers and the appearance toggle.
+        # Nothing here repeats another section (the voices used to be listed here
+        # as well, which is exactly the duplication that is now gone).
+        settings = self._add_section(
+            panel, key="settings", title="Settings", icon="⚙", default_open=False
         )
-        self._settings_button.pack(fill="x", padx=12, pady=(0, 4))
-        self._settings_panel = tk.Frame(panel, bg=self._theme.surface)
+        self._settings_panel = tk.Frame(settings.body, bg=self._theme.surface)
         self._settings_panel.pack(fill="x")
-
-        self._section_label(panel, "Appearance", top=10)
-        row = tk.Frame(panel, bg=self._theme.surface)
-        row.pack(fill="x", padx=12, pady=(0, 14))
-        right = "light mode  ☀" if self._theme.name == "dark" else "dark mode  ☾"
-        self._sidebar_button(row, right, self._toggle_theme, small=True).pack(
-            fill="x", pady=(0, 4)
-        )
-        tk.Label(
-            row, text="Theme and mode are saved for next launch.", bg=self._theme.surface,
-            fg=self._theme.text_dim, font=self._type.font("2xs"), anchor="w", padx=12,
-        ).pack(fill="x")
+        self._settings_open = settings.is_open
 
         self._status = tk.Label(
             sidebar, text=self._status_text(), bg=self._theme.surface, fg=self._theme.text_dim,
@@ -694,6 +774,53 @@ class FaydGUI:
         if self._is_compact():
             sidebar.pack_forget()
             self._sidebar_visible = False
+
+    def _add_section(
+        self,
+        panel: tk.Misc,
+        *,
+        key: str,
+        title: str,
+        icon: str,
+        default_open: bool,
+    ) -> SidebarSection:
+        """Build one collapsible sidebar section, restoring its saved state."""
+        section = SidebarSection(
+            panel,
+            key=key,
+            title=title,
+            icon=icon,
+            theme=self._theme,
+            typography=self._type,
+            open=self._section_states.get(key, default_open),
+            on_toggle=self._on_section_toggle,
+        )
+        self._sections[key] = section
+        return section
+
+    def _open_section(self, key: str) -> None:
+        """Open a section programmatically (idempotent), if it exists.
+
+        The section headers own the real click-to-collapse behaviour; this is the
+        "show me this panel" entry point the window's own handlers use, so opening
+        an already-open section is a no-op and a missing one is ignored rather
+        than raising. It opens **without persisting**, because showing a panel
+        because the program asked for it must not rewrite the layout the user
+        arranged -- only the header's own click persists.
+        """
+        section = self._sections.get(key)
+        if section is not None:
+            section.set_open(True, persist=False)
+
+    def _on_section_toggle(self, key: str, is_open: bool) -> None:
+        """Remember a section's open/closed choice and keep the scrollbar honest."""
+        self._section_states[key] = is_open
+        save_sidebar_sections(self._section_states, getattr(self.service, "data_root", None))
+        if key == "voices":
+            self._voices_open = is_open
+        elif key == "settings":
+            self._settings_open = is_open
+        self.root.after_idle(self._toggle_sidebar_scrollbar)
 
     def _search_placeholder(self) -> None:
         """Show a greyed hint in the search box while it is empty."""
@@ -772,14 +899,6 @@ class FaydGUI:
             titles, text=f"v{__version__}  ·  petroleum mind", bg=self._theme.surface,
             fg=self._theme.text_dim, font=self._type.font("2xs"), anchor="w",
         ).pack(anchor="w")
-
-    def _section_label(self, parent: tk.Misc, text: str, *, top: int = 6) -> tk.Label:
-        label = tk.Label(
-            parent, text=text.upper(), bg=self._theme.surface, fg=self._theme.text_dim,
-            font=self._type.font("2xs", weight="bold"), anchor="w", padx=18,
-        )
-        label.pack(fill="x", pady=(top, 4))
-        return label
 
     def _sidebar_button(
         self,
@@ -886,14 +1005,24 @@ class FaydGUI:
         ).pack(fill="x")
 
     def _toggle_settings(self) -> None:
-        """Expand/collapse the settings panel inside the sidebar."""
-        if self._settings_open:
-            for child in self._settings_panel.winfo_children():
-                child.destroy()
-            self._settings_open = False
-            return
-        self._settings_open = True
-        panel = self._settings_panel
+        """Ensure the sidebar's **Settings** section is open (and built).
+
+        The section header owns the real open/close click; this method is the
+        programmatic "show the settings" entry point the window and its tests use,
+        so it is idempotent (opening an already-open section is a no-op) and builds
+        the section's contents on first use. The section holds only what no other
+        section offers -- the Cloud provider and model pickers and the appearance
+        switch, plus the two session controls. The reading voice and the assistant
+        actions are deliberately *not* repeated here: they have their own sections,
+        which is what removes the duplication the old flat sidebar carried.
+        """
+        self._open_section("settings")
+        if not self._settings_built:
+            self._build_settings_panel(self._settings_panel)
+            self._settings_built = True
+
+    def _build_settings_panel(self, panel: tk.Misc) -> None:
+        """Build the Settings section's contents (once, on first open)."""
         # The "Answering mouth" radio list is hidden on purpose: the header's model
         # selector is the one visible mouth switch. The variable still tracks the
         # live mouth (the header sets it), so nothing else has to change.
@@ -901,25 +1030,26 @@ class FaydGUI:
 
         self._build_cloud_provider_picker(panel)
 
-        self._section_label(panel, "Reading voice (text to speech)", top=8)
-        self._build_voice_picker(panel)
-
         self._sidebar_button(
             panel, "⤓   Save conversation", self._on_save, small=True
         ).pack(fill="x", padx=12, pady=(6, 0))
         self._sidebar_button(
             panel, "⌫   Clear transcript", self._clear_transcript, small=True
         ).pack(fill="x", padx=12, pady=(2, 0))
-        self._section_label(panel, "Actions", top=8)
-        # Only the visible actions are drawn: the four "Answer from ..." mouth
-        # switches stay in ACTIONS for the CLI/action_by_key but are hidden here,
-        # because the header's model selector already offers them.
-        for action in visible_actions():
-            button = self._sidebar_button(
-                panel, action.label, partial(self._on_action, action), small=True
-            )
-            button.pack(fill="x", padx=12, pady=1)
-            self._action_buttons.append(button)
+
+        # Appearance: one switch, with the same one-line note the old Appearance
+        # block carried, kept inside Settings so the sidebar has a single home for
+        # every preference.
+        row = tk.Frame(panel, bg=self._theme.surface)
+        row.pack(fill="x", padx=12, pady=(10, 2))
+        right = "light mode  ☀" if self._theme.name == "dark" else "dark mode  ☾"
+        self._sidebar_button(row, right, self._toggle_theme, small=True).pack(
+            fill="x", pady=(0, 4)
+        )
+        tk.Label(
+            row, text="Theme and mode are saved for next launch.", bg=self._theme.surface,
+            fg=self._theme.text_dim, font=self._type.font("2xs"), anchor="w", padx=12,
+        ).pack(fill="x")
 
     def _build_cloud_provider_picker(self, panel: tk.Misc) -> None:
         """The Cloud provider picker: choose Gemini *or* Groq (or any provider).
@@ -1139,12 +1269,13 @@ class FaydGUI:
         self._add_bubble("note", f"Cloud will answer from {self._cloud_provider_line(stored)}")
 
     def _build_voice_picker(self, panel: tk.Misc) -> None:
-        """The reading-voice menu plus the auto-speak toggle.
+        """The reading-voice list plus the auto-speak toggle.
 
         The voices are grouped by the **source** they came from -- the OS's own
         installed voices, the local VoiceTut-TTS model, Piper, Qwen3-TTS, and the
         synthetic catalog -- each under the name of its source, with an honest note
-        for any source that contributed no voice here.
+        for any source that contributed no voice here. This is the *one* voice menu
+        in the sidebar (the Settings section no longer repeats it).
         """
         self._build_voice_sections(panel)
         tk.Checkbutton(
@@ -1164,15 +1295,15 @@ class FaydGUI:
             ).pack(fill="x", padx=12, pady=(2, 0))
 
     def _build_voice_sections(self, panel: tk.Misc) -> None:
-        """The voice groups themselves, shared by the dropdown and the settings panel.
+        """The voice groups themselves, used by the reading-voice section.
 
-        One builder for both menus, so they can never drift apart: every voice sits
-        under the name of the **source** it came from -- *Installed Voices*,
-        *VoiceTut-TTS*, *Piper*, *Qwen3-TTS*, and the synthetic catalog -- and each
-        source shows only the voices its engine really reports here, so a listed
-        voice is always one that can actually speak (an engine that is not installed
-        contributes no voices, and the synthetic catalog is dropped entirely when the
-        system engine itself is absent, since those settings would produce silence).
+        Every voice sits under the name of the **source** it came from --
+        *Installed Voices*, *VoiceTut-TTS*, *Piper*, *Qwen3-TTS*, and the
+        synthetic catalog -- and each source shows only the voices its engine
+        really reports here, so a listed voice is always one that can actually
+        speak (an engine that is not installed contributes no voices, and the
+        synthetic catalog is dropped entirely when the system engine itself is
+        absent, since those settings would produce silence).
         """
         for section in self.service.voice_sections():
             self._voice_group_label(panel, section.title, indent=22)
@@ -1212,33 +1343,27 @@ class FaydGUI:
         ).pack(fill="x", padx=indent, pady=0)
 
     def _toggle_voices(self) -> None:
-        """Expand/collapse the sidebar's Voices dropdown.
+        """Ensure the sidebar's **Reading Voice** section is open, and fill it.
 
-        A dedicated dropdown rather than a trip through Settings, so choosing a
-        reading voice -- including a voice of the local Arabic model -- is one click
-        away. The radio list it builds is the same one the settings panel builds,
-        because both call :meth:`_build_voice_sections`.
+        The section header owns the real open/close click; this is the programmatic
+        "show the reading voice" entry point, so it is idempotent. The voice list is
+        (re)built each time it is opened, so it always reflects what is installed
+        right now; this is the one place a reading voice is chosen.
         """
-        if self._voices_open:
-            for child in self._voices_panel.winfo_children():
-                child.destroy()
-            self._voices_open = False
-            self._voices_button.configure(text="🔊   Voices  ▸")
+        self._open_section("voices")
+        self._rebuild_voice_section()
+
+    def _rebuild_voice_section(self) -> None:
+        """Fill the Reading Voice section from the engines' live voice lists."""
+        panel = getattr(self, "_voices_panel", None)
+        if panel is None:
             return
-        self._voices_open = True
-        self._voices_button.configure(text="🔊   Voices  ▾")
+        for child in panel.winfo_children():
+            child.destroy()
         # A stored voice that is no longer installed must not leave the list with
         # nothing selected, so the live key is re-applied to the variable first.
         self._speak_var.set(self._voice_key)
-        self._build_voice_sections(self._voices_panel)
-        self._sidebar_button(
-            self._voices_panel, "▷   Test the reading voice", self._test_voice, small=True
-        ).pack(fill="x", padx=12, pady=(6, 0))
-        if not self.service.reading_available():
-            self._sidebar_button(
-                self._voices_panel, "⤓   Install a speech engine…", self._on_install_speech,
-                small=True,
-            ).pack(fill="x", padx=12, pady=(2, 0))
+        self._build_voice_picker(panel)
 
     def _on_install_speech(self) -> None:
         """Install a real speech engine (a system package), on the worker thread."""
@@ -1258,21 +1383,15 @@ class FaydGUI:
         return install_speech_engine()
 
     def _refresh_voice_menus(self) -> None:
-        """Rebuild an open voice menu so newly installed voices appear at once.
+        """Rebuild the open Reading Voice section so newly installed voices appear.
 
-        Both menus are rebuilt from the same builder, so this only has to run the
-        one that is currently open; a closed menu picks the new voices up when it is
-        next opened.
+        The voice list is the only menu that shows the live engines, so this only
+        has to rebuild it; a closed section picks the new voices up when it is next
+        opened.
         """
-        for open_flag, panel, builder in (
-            (self._settings_open, self._settings_panel, self._build_voice_picker),
-            (self._voices_open, self._voices_panel, self._build_voice_sections),
-        ):
-            if not open_flag:
-                continue
-            for child in panel.winfo_children():
-                child.destroy()
-            builder(panel)
+        section = self._sections.get("voices")
+        if section is not None and section.is_open:
+            self._rebuild_voice_section()
 
     def _test_voice(self) -> None:
         """Speak a short sample so the user can hear the chosen voice."""

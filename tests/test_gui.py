@@ -1203,9 +1203,9 @@ def test_window_reads_a_message_aloud_and_picks_a_voice() -> None:
         installed = (voices_module.SystemVoice("Microsoft Hoda", "ar-SA", "Female"),)
         sections = voices_module.voice_sections(system=installed, model=(), catalog=True)
 
-        # The settings panel exposes one radio per catalog voice, grouped.
+        # The Reading Voice section exposes one radio per catalog voice, grouped.
         with mock.patch.object(app.service, "voice_sections", lambda: sections):
-            app._toggle_settings()
+            app._toggle_voices()
             root.update()
 
             def walk(widget, out):
@@ -1214,7 +1214,7 @@ def test_window_reads_a_message_aloud_and_picks_a_voice() -> None:
                     walk(child, out)
 
             widgets: list = []
-            walk(app._settings_panel, widgets)
+            walk(app._voices_panel, widgets)
             keys = {voice.key for voice in VOICE_CATALOG}
             installed_keys = {voice.key for voice in installed}
             radios = [
@@ -1437,11 +1437,11 @@ def test_window_offers_to_install_the_speech_engine() -> None:
     try:
         app = FaydGUI(root, service=_service(FakeSession()))
         root.update()
-        # The sidebar offers the install entry while no engine is present.
+        # The Reading Voice section offers the install entry while no engine is present.
         if not app.service.reading_available():
-            app._toggle_settings()
+            app._toggle_voices()
             root.update()
-            labels = [w.cget("text") for w in app._settings_panel.winfo_children() if "text" in w.keys()]
+            labels = [w.cget("text") for w in app._voices_panel.winfo_children() if "text" in w.keys()]
             assert any("Install a speech engine" in label for label in labels)
 
         # Rendering a successful install refreshes the reader and confirms it.

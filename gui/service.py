@@ -303,6 +303,17 @@ class ChatService:
     # ------------------------------------------------------------ operating mode
 
     @property
+    def data_root(self) -> Path:
+        """The writable data folder this service persists its own state under.
+
+        The window's per-service preferences (the sidebar's open sections) live
+        beside the mode, the cloud provider, and the reading voice -- under the
+        same root -- so a test that builds a service on a ``tmp_path`` gets an
+        isolated store instead of writing to the developer's own ``data/``.
+        """
+        return self._data_root
+
+    @property
     def operating_mode(self) -> ModeSpec:
         """The current :class:`~gui.modes.ModeSpec` (AI Mode or Jarvics Mode)."""
         return self._mode_spec
