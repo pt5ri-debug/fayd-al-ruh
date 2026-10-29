@@ -34,6 +34,7 @@ from typing import Any
 
 from core.presentation_courses import CourseDetail, CourseMatch
 
+from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
 
@@ -131,52 +132,58 @@ class PresentationCourseDialog:
         self._build_main(body)
 
     def _build_sidebar(self, parent: tk.Frame) -> None:
-        theme = self.theme
-        sidebar = tk.Frame(parent, bg=theme.surface)
-        sidebar.grid(row=0, column=0, sticky="nsew")
+        # A stack of collapsible sections (the shared :class:`~gui.sidebar.SidebarColumn`):
+        # the courses the deck covers and the concepts of the chosen course.
+        column = SidebarColumn(
+            parent,
+            theme=self.theme,
+            typography=self._type,
+            width=320,
+            scope="presentation-course",
+        )
+        self._sidebar_column = column
+        self._sidebar_canvas = column.canvas
+        self._sidebar_scrollbar = column.scrollbar
+        self._sidebar = column.body
 
+        theme = self.theme
         self._course_label = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.contrast,
+            column.body, text="", bg=theme.surface, fg=theme.contrast,
             font=self._type.font("heading4", weight="bold"), anchor="w", justify="left",
             wraplength=290,
         )
         self._course_label.pack(fill="x", padx=14, pady=(14, 0))
         self._branch_label = tk.Label(
-            sidebar, text="", bg=theme.surface, fg=theme.text_secondary,
+            column.body, text="", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=290,
         )
         self._branch_label.pack(fill="x", padx=14, pady=(2, 6))
 
-        tk.Label(
-            sidebar, text="COURSES THE DECK COVERS", bg=theme.surface, fg=theme.text_dim,
-            font=self._type.font("2xs", weight="bold"), anchor="w",
-        ).pack(fill="x", padx=14, pady=(6, 2))
+        matches = column.add("matches", "Courses the deck covers", icon="📚")
         self._match_list = tk.Listbox(
-            sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
+            matches, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
             font=self._type.font("xs"), height=6, activestyle="none",
         )
-        self._match_list.pack(fill="x", padx=14, pady=(0, 6))
+        self._match_list.pack(fill="x", padx=14, pady=(4, 6))
         self._match_list.bind("<<ListboxSelect>>", self._on_match_select)
 
-        tk.Label(
-            sidebar, text="CONCEPTS", bg=theme.surface, fg=theme.text_dim,
-            font=self._type.font("2xs", weight="bold"), anchor="w",
-        ).pack(fill="x", padx=14, pady=(6, 2))
+        concepts = column.add("concepts", "Concepts", icon="🔬")
         self._concept_list = tk.Listbox(
-            sidebar, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
+            concepts, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
             font=self._type.font("xs"), height=12, activestyle="none",
         )
-        self._concept_list.pack(fill="both", expand=True, padx=14, pady=(0, 6))
+        self._concept_list.pack(fill="both", expand=True, padx=14, pady=(4, 6))
         self._concept_list.bind("<<ListboxSelect>>", self._on_concept_select)
 
-        actions = tk.Frame(sidebar, bg=theme.surface)
-        actions.pack(fill="x", padx=14, pady=(0, 12))
-        self._use_button = self._button(actions, "Use the missing concepts", self._on_use_missing)
+        actions = column.add("actions", "Use a concept", icon="✔")
+        action_row = tk.Frame(actions, bg=theme.surface)
+        action_row.pack(fill="x", padx=14, pady=(4, 12))
+        self._use_button = self._button(action_row, "Use the missing concepts", self._on_use_missing)
         self._use_button.pack(side="left")
         self._use_button.configure(state="disabled")
-        self._goto_button = self._button(actions, "Go to its slides", self._on_goto_concept)
+        self._goto_button = self._button(action_row, "Go to its slides", self._on_goto_concept)
         self._goto_button.pack(side="left", padx=(6, 0))
         self._goto_button.configure(state="disabled")
 

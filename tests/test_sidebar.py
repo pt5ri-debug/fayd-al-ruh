@@ -278,3 +278,112 @@ def test_window_settings_toggle_is_idempotent(tmp_path) -> None:
         assert list(app._settings_panel.winfo_children()) == first
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_opening_the_reading_voice_section_by_click_fills_it(tmp_path) -> None:
+    """Clicking the Reading Voice *header* populates the list, not just opens it.
+
+    The list used to be built only by the programmatic ``_toggle_voices`` entry
+    point, so a plain header click (how a user actually reaches it) opened an empty
+    panel. The toggle handler now builds it too.
+    """
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        section = app._sections["voices"]
+        if section.is_open:  # a stored state may have left it open
+            section.set_open(False)
+            root.update()
+        assert not app._voices_panel.winfo_children()
+        section.toggle()  # the header's own click
+        root.update()
+        assert section.is_open is True
+        assert app._voices_panel.winfo_children()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_opening_the_settings_section_by_click_builds_it(tmp_path) -> None:
+    """Clicking the Settings *header* builds its contents (the cloud pickers)."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        section = app._sections["settings"]
+        if section.is_open:
+            section.set_open(False)
+            root.update()
+        assert app._settings_built is False
+        section.toggle()
+        root.update()
+        assert app._settings_built is True
+        assert app._settings_panel.winfo_children()
+    finally:
+        root.destroy()
+
+
+# --------------------------------------------------------- the shared column
+
+
+def test_column_section_states_round_trip_and_ignore_a_corrupt_record(tmp_path) -> None:
+    from gui.sidebar import load_section_states, save_section_states
+
+    assert load_section_states("demo", tmp_path) == {}
+    save_section_states("demo", {"one": True, "two": False}, tmp_path)
+    assert load_section_states("demo", tmp_path) == {"one": True, "two": False}
+    # A different scope is a separate record.
+    assert load_section_states("other", tmp_path) == {}
+    # A non-bool value is dropped rather than handed to a widget.
+    from storage.json_store import JsonStore
+
+    JsonStore(tmp_path).save(
+        "gui", "sidebar_sections:bad", {"sections": {"x": "yes", "y": 1}}
+    )
+    assert load_section_states("bad", tmp_path) == {}
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_sidebar_column_builds_collapsible_sections_and_persists(tmp_path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.sidebar import SidebarColumn, load_section_states
+    from gui.typography import for_root
+
+    root = tk.Tk()
+    try:
+        column = SidebarColumn(
+            root, theme=DARK_THEME, typography=for_root(root), width=240,
+            scope="demo-column", state_root=tmp_path,
+        )
+        body = column.add("one", "One", icon="★")
+        column.add("two", "Two", icon="☆", open=False)
+        root.update()
+        assert set(column.sections) == {"one", "two"}
+        assert column.sections["one"].is_open is True
+        assert column.sections["two"].is_open is False
+        # The scrollbar is always visible, not only on overflow.
+        assert column.scrollbar.winfo_ismapped()
+        # A user's own toggle persists the choice under the scope.
+        column.sections["two"].toggle()
+        root.update()
+        assert load_section_states("demo-column", tmp_path)["two"] is True
+        # A programmatic open does not persist.
+        column.set_open("two", False)
+        assert column.sections["two"].is_open is False
+        assert load_section_states("demo-column", tmp_path)["two"] is True
+        # The section body is the frame the caller fills.
+        assert isinstance(body, tk.Frame)
+    finally:
+        root.destroy()

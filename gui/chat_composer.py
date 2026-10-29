@@ -447,9 +447,16 @@ class ModelButton(tk.Frame):
         hint: str,
         command: Callable[[], Any],
         tip: str = "",
+        bg: str | None = None,
     ) -> None:
         self.theme = theme
         self._type = typography
+        # The surface the chip is drawn on. It is the card's ``surface`` when the
+        # row lives inside the composer, and the page ``base`` when the row sits
+        # *outside* and below the card -- so the chip's background matches whatever
+        # it rests on and its rounded shape is never a lighter box on a lighter
+        # panel.
+        self._bg = bg if bg is not None else theme.surface
         self.name = name
         self.hint = hint
         self._command: Callable[[], Any] | None = command
@@ -464,9 +471,9 @@ class ModelButton(tk.Frame):
         width = text_width + self._PAD_X * 2 + 2
         height = typography.points("sm") + typography.points("2xs") + self._PAD_Y * 2 + 6
 
-        super().__init__(parent, bg=theme.surface, highlightthickness=0, borderwidth=0)
+        super().__init__(parent, bg=self._bg, highlightthickness=0, borderwidth=0)
         self.canvas = tk.Canvas(
-            self, width=width, height=height, bg=theme.surface,
+            self, width=width, height=height, bg=self._bg,
             highlightthickness=0, borderwidth=0, takefocus=0, cursor="hand2",
         )
         self.canvas.pack()
@@ -552,10 +559,20 @@ class ModelButtonBar:
     #: speech-engine group, so the two never read as one run of chips.
     GROUP_GAP = 32
 
-    def __init__(self, parent: tk.Misc, *, theme: Any, typography: Typography) -> None:
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        theme: Any,
+        typography: Typography,
+        bg: str | None = None,
+    ) -> None:
         self.theme = theme
         self._type = typography
-        self.frame = tk.Frame(parent, bg=theme.surface)
+        # The surface the row is drawn on: the card's ``surface`` when it is inside
+        # the composer, or the page ``base`` when it sits outside and below the card.
+        self._bg = bg if bg is not None else theme.surface
+        self.frame = tk.Frame(parent, bg=self._bg)
         self._buttons: dict[str, ModelButton] = {}
         self._trailing: dict[str, ModelButton] = {}
         self._gap: tk.Frame | None = None
@@ -580,7 +597,7 @@ class ModelButtonBar:
         """
         button = ModelButton(
             self.frame, theme=self.theme, typography=self._type,
-            name=name, hint=hint, command=command, tip=tip,
+            name=name, hint=hint, command=command, tip=tip, bg=self._bg,
         )
         if trailing:
             self._trailing[key] = button
@@ -626,7 +643,7 @@ class ModelButtonBar:
         cells: list[tk.Widget] = list(self._buttons.values())
         if self._trailing:
             if self._gap is None:
-                self._gap = tk.Frame(self.frame, bg=self.theme.surface, width=self.GROUP_GAP)
+                self._gap = tk.Frame(self.frame, bg=self._bg, width=self.GROUP_GAP)
             cells.append(self._gap)
         cells.extend(reversed(list(self._trailing.values())))
         return cells
@@ -828,14 +845,17 @@ class ChatComposer:
         # simply never calls :meth:`add_web_toggle` rather than showing a dead one.
         self.web_toggle: WebToggle | None = None
 
-        # The model-switch row is optional too, and lives inside the card, under
-        # the input and above the toolbars, so the answering model is chosen from
-        # the input panel itself (the reference design's row of controls). The
+        # The model-switch row is optional. It used to live *inside* the card, but
+        # it now sits **outside and below** the card, on the page background: the
+        # input panel stays a clean single-purpose surface, and the row of model
+        # and speech-engine chips reads as a separate strip beneath it (the way a
+        # graphics program keeps its tool row apart from its document area). The
         # caller fills it through :meth:`model_bar`.
         self._model_bar: ModelButtonBar | None = None
         if with_model_bar:
             self._model_bar = ModelButtonBar(
-                self.inner, theme=theme, typography=typography
+                self.wrap, theme=theme, typography=typography,
+                bg=outer_bg or theme.base,
             )
 
         self.send_button = CircleButton(
@@ -849,17 +869,18 @@ class ChatComposer:
         # input's own height comes from its line count (see :meth:`_autosize`),
         # so the card grows with the message rather than the layout stretching.
         self.entry.pack(side="top", fill="x", padx=10, pady=(8, 2))
-        # The model row claims its strip before the toolbars are packed: each
-        # side claims the remaining cavity in packing order, so the strip under
-        # the input is the row's, and the toolbars get the strip below it.
-        if self._model_bar is not None:
-            self._model_bar.pack(side="top", fill="x", padx=10, pady=(2, 0))
         # Rightmost is Send; the dot/mic/actions group sits immediately left of it.
         self.send_button.pack(side="right", padx=(0, 10), pady=(0, 8))
         self.right_tools.pack(side="right", padx=(0, 4), pady=(0, 8))
         if self.attach_button is not None:
             self.attach_button.pack(side="left", padx=(10, 0), pady=(0, 8))
         self.left_tools.pack(side="left", padx=(0, 4), pady=(0, 8))
+
+        # The model row is packed last and *outside* the card, so it lands below
+        # the whole rounded panel (``wrap`` holds the box, then the row). It is
+        # packed after the box so its own strip is the one under the card.
+        if self._model_bar is not None:
+            self._model_bar.pack(side="top", fill="x", pady=(8, 0))
 
         self._sync_placeholder()
         self._update_send_state()

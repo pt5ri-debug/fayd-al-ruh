@@ -1508,9 +1508,8 @@ def test_window_composer_carries_the_model_row(tmp_path) -> None:
         assert bar.engine_keys() == tuple(
             reversed([key for key, _n, _h in VOICE_ENGINE_BUTTONS])
         )
-        # Every chip is inside the rounded composer card, under the input and
-        # above the toolbars.
-        entry_y = app._entry.winfo_rooty()
+        # Every chip sits *below* the rounded composer card, outside it, so the
+        # input panel itself stays uncluttered.
         toolbar_y = app._composer.left_tools.winfo_rooty()
         for key, name, hint in (*MODEL_BUTTONS, *VOICE_ENGINE_BUTTONS):
             button = _chip(bar, key)
@@ -1518,7 +1517,7 @@ def test_window_composer_carries_the_model_row(tmp_path) -> None:
             assert button.canvas.winfo_ismapped()
             assert button.name == name and button.hint == hint
             y = button.canvas.winfo_rooty()
-            assert entry_y < y <= toolbar_y, key
+            assert y >= toolbar_y, key
     finally:
         root.destroy()
 
