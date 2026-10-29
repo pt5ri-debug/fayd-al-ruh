@@ -605,6 +605,21 @@ def _concept_for_label(ontology: Ontology, label: str) -> Concept | None:
     return None
 
 
+def _label_index(ontology: Ontology) -> dict[str, Concept]:
+    """A case-insensitive label -> concept map, built once for a whole pass.
+
+    :func:`_concept_for_label` scans every concept, so calling it per table entry
+    made seeding quadratic (~1M label comparisons per startup). The map holds the
+    same rule -- exact label, case-insensitive -- so a pass resolves each label in
+    one lookup. On the rare duplicate label the first concept wins, matching the
+    scan's own first-match behaviour.
+    """
+    index: dict[str, Concept] = {}
+    for concept in ontology.concepts.values():
+        index.setdefault(concept.label.casefold(), concept)
+    return index
+
+
 def apply_arabic_aliases(ontology: Ontology, table: tuple[tuple[str, str], ...] = ARABIC_ALIASES) -> GlossaryReport:
     """Add the curated Arabic aliases to ``ontology`` in place, idempotently.
 
@@ -619,11 +634,12 @@ def apply_arabic_aliases(ontology: Ontology, table: tuple[tuple[str, str], ...] 
     added: list[str] = []
     already: list[str] = []
     unknown: list[str] = []
+    labels = _label_index(ontology)
     for label, arabic in table:
         term = arabic.strip()
         if not term:
             continue
-        concept = _concept_for_label(ontology, label)
+        concept = labels.get(label.casefold())
         if concept is None:
             unknown.append(label)
             continue
@@ -631,6 +647,11 @@ def apply_arabic_aliases(ontology: Ontology, table: tuple[tuple[str, str], ...] 
             already.append(label)
             continue
         ontology.add_concept_alias(concept.id, term)
+        # The alias widens the concept in place, so re-read it for the next entry
+        # that names the same label (a concept may carry more than one Arabic term).
+        refreshed = ontology.concepts.get(concept.id)
+        if refreshed is not None:
+            labels[label.casefold()] = refreshed
         added.append(label)
     return GlossaryReport(tuple(added), tuple(already), tuple(unknown))
 

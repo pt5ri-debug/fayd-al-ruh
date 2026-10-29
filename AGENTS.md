@@ -4827,3 +4827,57 @@ regression monitor each can refuse a change.
   the persistence, and the language-model refusal); `tests/test_model_chat.py`
   pins the per-mouth window's switch; `tests/test_jarvis.py` pins the lazy verifier
   build, the honest refusal, and the persistence hook.
+
+- Phase 35 — **the answer path and the seed no longer redo work, and the Arabic
+  glossary seeds in one pass**: a speed review of the first answer and of startup.
+  Three hot spots, each measured before and after. (1) `core/tokenize.py`'s
+  `normalize_token` is pure and its inputs repeat heavily (every retrieval
+  re-normalises the same document tokens, and corpus words recur across
+  documents), so it is now memoised behind a bounded `functools.lru_cache`
+  (`_TOKEN_CACHE_SIZE`), which takes it off the profile's top. (2)
+  `core/ontology.py` gained `_match_spans`, which walks the reverse prefix index
+  **once per token position** instead of scanning every candidate term across
+  every position -- the old `match_concepts`/`concepts_in` scanned ~830 candidate
+  terms over every position of every document, which was most of a first answer.
+  The match set is identical (same `_token_matches` rule, same positional order),
+  and the now-dead `_candidate_terms` was removed. (3)
+  `core/arabic_glossary.py`'s `apply_arabic_aliases` built a label→concept index
+  **once per pass** (`_label_index`) instead of calling `_concept_for_label` (a
+  full 495-concept scan) per table entry -- ~1M comparisons at startup, now a
+  dict lookup; the entry for a label is refreshed after an alias is added, so a
+  label named twice (`acid_stimulation`) still receives both its Arabic terms.
+  `_concept_for_label` is kept because `core/arabic_prose.py` still uses it.
+  Measured on this machine: first answer 1.116 s → 0.359 s, a second profile
+  3.36 s → 0.33 s, `build_session` 0.95 s → 0.27 s, `apply_arabic_aliases`
+  ~320 ms → ~7 ms. `tests/test_arabic_glossary.py` pins the two-term label;
+  `tests/test_ontology.py`/`test_ontology_retrieval.py` pin that the one-pass
+  matcher returns what the old scan did.
+
+- Phase 36 — **a VoiceTut read keeps its voice when the resident server drops a
+  request, and `say` defaults to the fast path**: the reported "the voices don't
+  work" was not the engine (Sarah and Ahmed produce distinct audio) but the
+  *path*: the resident server is the default (`use_server`), it is an HTTP
+  request into a long-lived process, and when it drops one ("Remote end closed
+  connection without response") the engine let that bubble up -- so the caller's
+  system-engine fallback spoke the text in the **wrong voice**, with no
+  explanation. `core/audiocpp_speech.py`'s `AudioCppSynthesizer` now always builds
+  the reliable single-process `AudioCppCliRunner` (`_cli_runner`) beside the
+  server and, in `_render_paths`, retries a dropped batch on it before giving up,
+  so a server hiccup costs a little time and never the voice; a caller-supplied
+  runner (a test's) still propagates its own failure, as before. `cli/audio.py`'s
+  `say` was also taking the slow path twice over -- it hard-coded 8 diffusion
+  steps (the module's own default is `DEFAULT_INFERENCE_STEPS` = 4) and made the
+  resident server opt-in; both now match the module, with `--no-server` as the
+  explicit opt-out. **Honest about the engine's real cost**: VoiceTut is a
+  diffusion TTS, so on a CPU it is the inference itself that dominates. Measured
+  with the engine's own `--metrics`: a 17-word sentence is ~8.3 s of audio in
+  ~21 s at 4 steps (RTF ~2.5) and ~11.6 s at 2 steps (RTF ~1.4), and the wall time
+  is very nearly linear in the step count. Two steps is therefore 1.8x faster, but
+  it also **doubles** the output's zero-crossing rate (5122/s vs 2380/s) -- audibly
+  noisier speech -- so 4 stays the default and 2 remains a caller's explicit
+  choice. The resident server keeps the 1.35 GB GGUF loaded across a whole read
+  (~116 s cold for a 6.5 s batch, ~49 s warm) and the batching in `core.reading`
+  keeps it to one load per document; no smaller-quantised package exists upstream
+  (only Q8_0 and F16), so the model itself is the floor. The CLI now says so.
+  `tests/test_audiocpp_speech.py` pins the retry (the CLI runner answers and the
+  system engine never speaks) and the fast `say` defaults.

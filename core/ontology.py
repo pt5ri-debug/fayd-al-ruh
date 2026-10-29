@@ -206,29 +206,46 @@ class Ontology:
         found = self._exact_index.get(normalized) if self._exact_index else None
         return list(found) if found else []
 
-    def _candidate_terms(self, tokens: list[str]) -> list[tuple[str, list[Concept]]]:
-        """The indexed ``(term, concepts)`` pairs a text's tokens could match.
+    def _match_spans(self, tokens: list[str]) -> list[tuple[int, int, list[Concept]]]:
+        """Every ``(start, end, concepts)`` a text's tokens match, in one pass.
 
-        Only a term whose head is a prefix of one of the text's tokens can match
-        (:func:`_token_matches` requires the token to *start* with the term), so the
-        candidates are gathered by looking each token up in the reverse index --
-        which is what makes the cost proportional to the text rather than to the
-        graph. A term shorter than :data:`_INDEX_PREFIX` letters indexes under its
-        whole self, so slicing the token by the same width still reaches it.
+        The reverse index is walked **once per token position** (``O(tokens x
+        candidates-per-token)``) rather than once per candidate term over every
+        position, which is what the callers used to do: on the real graph a query
+        scanned ~830 candidate terms across every position of every document, ~3 s
+        of a 3.3 s answer. Asking each position what *could* start there is the
+        same match set for a fraction of the work, because a term can only match a
+        token that starts with its head.
+
+        Spans are half-open token indices; a multi-word term is matched only when
+        every one of its words matches at the same offset. Order is positional
+        (by start, then longest first), and the callers re-sort for their own needs.
         """
         self._ensure_index()
         assert self._prefix_index is not None
         prefix_index = self._prefix_index
-        seen: set[str] = set()
-        candidates: list[tuple[str, list[Concept]]] = []
-        for token in set(tokens):
+        found: list[tuple[int, int, list[Concept]]] = []
+        total = len(tokens)
+        for index in range(total):
+            token = tokens[index]
             if not token:
                 continue
             for term, concepts in prefix_index.get(token[:_INDEX_PREFIX], ()):
-                if term not in seen:
-                    seen.add(term)
-                    candidates.append((term, concepts))
-        return candidates
+                width = term.count(" ") + 1
+                if width == 1:
+                    if _token_matches(token, term):
+                        found.append((index, index + 1, concepts))
+                    continue
+                end = index + width
+                if end > total:
+                    continue
+                term_tokens = term.split()
+                if all(
+                    _token_matches(tokens[index + offset], term_tokens[offset])
+                    for offset in range(width)
+                ):
+                    found.append((index, end, concepts))
+        return found
 
     def match_concepts(self, text: str) -> list[tuple[int, int, Concept]]:
         """Known concepts in ``text`` as ``(start, end, concept)`` spans.
@@ -247,22 +264,14 @@ class Ontology:
         """
         spans = token_spans(text)
         tokens = [normalized for _start, _end, normalized in spans]
+        # One pass over the token positions (see _match_spans), then the character
+        # span of each match is read off the token spans.
         found: list[tuple[int, int, Concept]] = []
-        for term, concepts in self._candidate_terms(tokens):
-            term_tokens = term.split()
-            width = len(term_tokens)
-            if not width or width > len(tokens):
-                continue
-            for index in range(len(tokens) - width + 1):
-                if not all(
-                    _token_matches(tokens[index + offset], term_tokens[offset])
-                    for offset in range(width)
-                ):
-                    continue
-                start = spans[index][0]
-                end = spans[index + width - 1][1]
-                for concept in concepts:
-                    found.append((start, end, concept))
+        for start_index, end_index, concepts in self._match_spans(tokens):
+            start = spans[start_index][0]
+            end = spans[end_index - 1][1]
+            for concept in concepts:
+                found.append((start, end, concept))
         found.sort(key=lambda item: (item[0], -(item[1] - item[0])))
         kept: list[tuple[int, int, Concept]] = []
         for start, end, concept in found:
@@ -293,18 +302,8 @@ class Ontology:
             return set(cached)
         tokens = [normalized for _start, _end, normalized in token_spans(text)]
         ids: set[str] = set()
-        for term, concepts in self._candidate_terms(tokens):
-            term_tokens = term.split()
-            width = len(term_tokens)
-            if not width or width > len(tokens):
-                continue
-            for index in range(len(tokens) - width + 1):
-                if all(
-                    _token_matches(tokens[index + offset], term_tokens[offset])
-                    for offset in range(width)
-                ):
-                    ids.update(concept.id for concept in concepts)
-                    break
+        for _start, _end, concepts in self._match_spans(tokens):
+            ids.update(concept.id for concept in concepts)
         if len(self._text_cache) >= _TEXT_CACHE_SIZE:
             self._text_cache.clear()
         self._text_cache[text] = frozenset(ids)
