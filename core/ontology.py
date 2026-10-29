@@ -55,6 +55,11 @@ class Ontology:
         self._exact_index: dict[str, list[Concept]] | None = None
         self._prefix_index: dict[str, list[tuple[str, list[Concept]]]] | None = None
         self._text_cache: dict[str, frozenset[str]] = {}
+        # A case-insensitive label -> concept map, built once and dropped whenever a
+        # concept changes. An Arabic answer resolves a label per rendered term, and a
+        # per-call scan of every concept made that quadratic (340k ``casefold`` calls
+        # in one session); the map turns each lookup into a dict hit.
+        self._label_index: dict[str, Concept] | None = None
 
     # ------------------------------------------------------------- indexes
 
@@ -62,7 +67,26 @@ class Ontology:
         """Drop the derived indexes after a bulk change the incremental path cannot serve."""
         self._exact_index = None
         self._prefix_index = None
+        self._label_index = None
         self._text_cache.clear()
+
+    def concept_for_label(self, label: str) -> Concept | None:
+        """The concept whose **label** is exactly ``label`` (case-insensitively), or ``None``.
+
+        A label must resolve to the concept it names -- never to a *different*
+        concept that happens to share an alias. ``acidizing`` is an alias of both
+        ``well_stimulation`` and ``acid_stimulation``, so a lookup by that word
+        returned the wrong concept and the Arabic term was silently lost; matching
+        the label exactly is the honest resolution. The map is built once and kept
+        until a concept changes, so a per-term lookup stays cheap.
+        """
+        index = self._label_index
+        if index is None:
+            index = {}
+            for concept in self.concepts.values():
+                index.setdefault(concept.label.casefold(), concept)
+            self._label_index = index
+        return index.get(label.casefold())
 
     def _ensure_index(self) -> None:
         if self._exact_index is not None:
@@ -129,6 +153,8 @@ class Ontology:
             raise ValueError(f"Concept '{concept.id}' already exists.")
         self.concepts[concept.id] = concept
         self._index_concept(concept)
+        if self._label_index is not None:
+            self._label_index.setdefault(concept.label.casefold(), concept)
         self._text_cache.clear()
 
     def add_concept_once(self, label: str, aliases: frozenset[str] = frozenset()) -> Concept:
@@ -326,6 +352,10 @@ class Ontology:
         updated = Concept(concept.label, concept.aliases | {value}, concept.id)
         self.concepts[concept_id] = updated
         self._index_concept(updated)
+        if self._label_index is not None:
+            # The label is unchanged, so the entry is replaced with the wider concept
+            # in place -- dropping the whole map would rebuild it for every alias.
+            self._label_index[concept.label.casefold()] = updated
         self._text_cache.clear()
         return updated
 
