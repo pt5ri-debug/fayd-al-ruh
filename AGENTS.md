@@ -4846,10 +4846,17 @@ regression monitor each can refuse a change.
   full 495-concept scan) per table entry -- ~1M comparisons at startup, now a
   dict lookup; the entry for a label is refreshed after an alias is added, so a
   label named twice (`acid_stimulation`) still receives both its Arabic terms.
-  `_concept_for_label` is kept because `core/arabic_prose.py` still uses it.
-  Measured on this machine: first answer 1.116 s → 0.359 s, a second profile
-  3.36 s → 0.33 s, `build_session` 0.95 s → 0.27 s, `apply_arabic_aliases`
-  ~320 ms → ~7 ms. `tests/test_arabic_glossary.py` pins the two-term label;
+  (4) `core/ontology.py` now owns a cached, case-insensitively keyed **label
+  index** (`concept_for_label`): an Arabic answer resolves a label per rendered
+  term, and the old `_concept_for_label` scanned all 495 concepts on each call
+  (1131 calls, 340k `casefold` calls in one session -- the top of the startup
+  profile). The map is refreshed **in place** when a concept is added or widened
+  with an alias (a label never changes, so it is never dropped and rebuilt), and
+  both `_concept_for_label` (still used by `core/arabic_prose.py`) and
+  `apply_arabic_aliases` delegate to it; the duplicate `_label_index` helper is
+  gone. Measured on this machine: first answer 1.116 s → 0.139 s, a second
+  profile 3.36 s → 0.13 s, `build_session` 0.95 s → 0.25 s, `apply_arabic_aliases`
+  ~320 ms → ~7 ms, and `_concept_for_label` no longer appears in the profile. `tests/test_arabic_glossary.py` pins the two-term label;
   `tests/test_ontology.py`/`test_ontology_retrieval.py` pin that the one-pass
   matcher returns what the old scan did.
 
