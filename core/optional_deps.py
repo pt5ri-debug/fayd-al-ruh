@@ -52,6 +52,8 @@ FEATURE_PPTX = "pptx"
 FEATURE_PRESENTATION = "presentation"
 FEATURE_BANNER = "banner"
 FEATURE_NATASHA = "natasha"
+FEATURE_HAKEEM = "hakeem"
+FEATURE_SHARED = "shared"
 FEATURE_QWEN_ASR = "qwen-asr"
 FEATURE_QWEN_TTS = "qwen-tts"
 FEATURE_PIPER = "piper"
@@ -206,6 +208,39 @@ FEATURES: dict[str, OptionalFeature] = {
             "`.gguf` file into the data/natasha folder."
         ),
         system_missing_note="no `.gguf` companion model file is present yet.",
+    ),
+    FEATURE_HAKEEM: OptionalFeature(
+        key=FEATURE_HAKEEM,
+        title="Hakeem in-process model",
+        summary=(
+            "Let Hakeem, the scholar of religion and history, talk through his own "
+            "local GGUF file loaded in-process, with no Ollama server running."
+        ),
+        requirements_file="requirements-hakeem.txt",
+        import_names=("llama_cpp", "huggingface_hub"),
+        system_note=(
+            "The model weights are a separate one-time, human-approved download: "
+            "run `python -m cli hakeem download --approve` (~2.5 GB), or drop a "
+            "`.gguf` file into the data/hakeem folder (a shared model in "
+            "data/shared_models is used too)."
+        ),
+        system_missing_note="no `.gguf` scholar model file is present yet.",
+    ),
+    FEATURE_SHARED: OptionalFeature(
+        key=FEATURE_SHARED,
+        title="Shared language models",
+        summary=(
+            "One public folder of general GGUF models (data/shared_models) that "
+            "every character may run through the project's in-process runtime."
+        ),
+        requirements_file="requirements-shared.txt",
+        import_names=("llama_cpp", "huggingface_hub"),
+        system_note=(
+            "The model weights are a separate one-time, human-approved download: "
+            "run `python -m cli shared-models download --approve`, or drop a "
+            "`.gguf` file into the data/shared_models folder."
+        ),
+        system_missing_note="no shared model file is present yet.",
     ),
     FEATURE_QWEN_ASR: OptionalFeature(
         key=FEATURE_QWEN_ASR,
@@ -414,10 +449,31 @@ def _natasha_model_cached() -> bool:
     Natasha has her own ``[natasha]`` runtime extra (the same ``llama-cpp-python``
     Ultron, Vision, Banner, and the two Studios use); the model file is a separate
     one-time download (or a file the user drops in), so this is the second half of
-    "usable right now". Without a file Natasha still runs against an existing
-    Ollama server, which the status line reports separately.
+    "usable right now". Her model layer falls back to the public shared folder, so
+    a shared model counts too. Without a file Natasha still runs against an
+    existing Ollama server, which the status line reports separately.
     """
     from companion.model import model_is_cached
+
+    return model_is_cached()
+
+
+def _hakeem_model_cached() -> bool:
+    """Whether at least one Hakeem model file (a ``.gguf``) is already on disk.
+
+    Hakeem has his **own** model folder (``data/hakeem``) and his own
+    ``[hakeem]`` extra; his model layer falls back to the public shared folder, so
+    a shared model counts too. Without a file he still runs against an existing
+    Ollama server, which the status line reports separately.
+    """
+    from hakeem.model import model_is_cached
+
+    return model_is_cached()
+
+
+def _shared_model_cached() -> bool:
+    """Whether at least one shared model file (a ``.gguf``) is already on disk."""
+    from core.shared_models import model_is_cached
 
     return model_is_cached()
 
@@ -475,6 +531,10 @@ def status(key: str) -> FeatureStatus:
         system_ok = _banner_model_cached() if python_ok else False
     elif key == FEATURE_NATASHA:
         system_ok = _natasha_model_cached() if python_ok else False
+    elif key == FEATURE_HAKEEM:
+        system_ok = _hakeem_model_cached() if python_ok else False
+    elif key == FEATURE_SHARED:
+        system_ok = _shared_model_cached() if python_ok else False
     elif key == FEATURE_QWEN_ASR:
         system_ok = _qwen_speech_model_cached("asr") if python_ok else False
     elif key == FEATURE_QWEN_TTS:
@@ -638,10 +698,12 @@ __all__ = [
     "FEATURE_AUDIOCPP",
     "FEATURE_BANNER",
     "FEATURE_DOCS",
+    "FEATURE_HAKEEM",
     "FEATURE_IMAGE",
     "FEATURE_NATASHA",
     "FEATURE_OCR",
     "FEATURE_PDF",
+    "FEATURE_SHARED",
     "FEATURE_ULTRON",
     "FEATURE_VISION",
     "FeatureStatus",

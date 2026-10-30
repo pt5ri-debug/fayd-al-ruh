@@ -53,10 +53,14 @@ from typing import Any, Protocol, runtime_checkable
 from core.coder_model import CoderMessage, CoderUnavailable, OllamaCoderClient
 from core.human_approval import HumanApprovalGate
 from core.optional_deps import FEATURE_NATASHA, pip_install_command
-from core.paths import natasha_models_dir
+from core.paths import natasha_models_dir, shared_models_dir
 from core.permissions import Capability, PermissionPolicy
 
 from companion.personality import NAME
+
+#: The name a status line and an error message use. A character that reuses this
+#: layer (Hakeem) overrides it, so no message ever calls him Natasha.
+LABEL = NAME
 
 #: The model Natasha speaks through by default, named as an Ollama-style tag so a
 #: status line reads the same whichever runtime answers. A small local Qwen3 model
@@ -168,22 +172,13 @@ class CompanionModelSpec:
 #: The download catalog, keyed by name. ``qwen3-4b`` is the default: it holds a
 #: warm conversation well and fits a modest machine, and with the hidden reasoning
 #: trace turned off (the default) it answers directly instead of spending minutes
-#: on a chain of thought. ``qwen3-1.7b`` is the fastest choice on a slow CPU;
-#: ``qwen3-8b`` is stronger but heavier; ``qwen2.5-7b`` has no reasoning mode at
-#: all. The GGUF repos are the ones the project already ships for Ultron, Vision,
-#: and the Presentation Studio (Apache-2.0), so a user who fetched one downloads
-#: nothing new.
+#: on a chain of thought. ``qwen3-8b`` is stronger but heavier; ``qwen2.5-7b`` has
+#: no reasoning mode at all. The GGUF repos are the ones the project already ships
+#: for Ultron, Vision, and the Presentation Studio (Apache-2.0), so a user who
+#: fetched one downloads nothing new. A small general model that every character
+#: can share now lives in the project's public folder instead
+#: (:mod:`core.shared_models`, ``data/shared_models``), so it is not duplicated here.
 CATALOG: dict[str, CompanionModelSpec] = {
-    "qwen3-1.7b": CompanionModelSpec(
-        key="qwen3-1.7b",
-        title="Qwen3 1.7B (fastest)",
-        tag="qwen3:1.7b",
-        repo="Qwen/Qwen3-1.7B-GGUF",
-        filename="Qwen3-1.7B-Q4_K_M.gguf",
-        params="1.7B",
-        approx_size_gb=1.1,
-        summary="The lightest choice: replies in seconds on a CPU. Least capable.",
-    ),
     "qwen3-4b": CompanionModelSpec(
         key="qwen3-4b",
         title="Qwen3 4B (default)",
@@ -287,20 +282,26 @@ def _natasha_dir(root: Path | str | None = None) -> Path:
     return Path(root) if root is not None else natasha_models_dir()
 
 
+def _shared_dir(root: Path | str | None = None) -> Path:
+    """The public shared-model folder, which this layer falls back to.
+
+    A model that is not in a character's own folder is still found here, so a
+    model downloaded once into ``data/shared_models`` answers for Natasha and
+    Hakeem alike. A caller that passes an explicit ``root`` (a test's temp folder)
+    keeps the folder scan isolated and the fallback disabled, so the two never mix.
+    """
+    if root is not None:
+        return Path(root)
+    return shared_models_dir()
+
+
 def _registry_file(root: Path | str | None = None) -> Path:
     return _natasha_dir(root) / REGISTRY_FILENAME
 
 
-def find_model_file(root: Path | str | None = None) -> Path | None:
-    """The model file Natasha should load, or ``None`` when none is present.
-
-    Prefers the file named in the registry (``model.json``, written by
-    ``download``), then any single ``.gguf`` in the folder. When several exist with
-    no registry, the largest is chosen -- the biggest file is almost always the
-    highest-quality model the user meant to use.
-    """
-    directory = _natasha_dir(root)
-    registry = _registry_file(root)
+def _find_in(directory: Path) -> Path | None:
+    """The registry's file in ``directory``, else its largest ``.gguf``."""
+    registry = directory / REGISTRY_FILENAME
     if registry.is_file():
         try:
             data = json.loads(registry.read_text(encoding="utf-8"))
@@ -317,6 +318,36 @@ def find_model_file(root: Path | str | None = None) -> Path | None:
         reverse=True,
     )
     return candidates[0] if candidates else None
+
+
+def find_model_in(own_dir: Path | str, shared_dir: Path | str | None = None) -> Path | None:
+    """A model file in ``own_dir``, else in ``shared_dir`` (the public folder).
+
+    The one place the "own folder first, shared folder second" rule lives, so a
+    character's model layer and Hakeem's own layer cannot disagree about it. A
+    ``shared_dir`` of ``None`` disables the fallback (an explicit ``root`` from a
+    test keeps its folder scan isolated).
+    """
+    found = _find_in(Path(own_dir))
+    if found is not None:
+        return found
+    if shared_dir is None:
+        return None
+    return _find_in(Path(shared_dir))
+
+
+def find_model_file(root: Path | str | None = None) -> Path | None:
+    """The model file a character should load, or ``None`` when none is present.
+
+    Prefers the file named in the registry (``model.json``, written by
+    ``download``), then any single ``.gguf`` in the character's own folder; when
+    several exist with no registry, the largest is chosen. When the character's own
+    folder holds no model, the **shared** folder (``data/shared_models``) is
+    consulted, so a model downloaded once for every character is found here too. A
+    caller that passed an explicit ``root`` gets that folder alone.
+    """
+    shared = None if root is not None else _shared_dir(root)
+    return find_model_in(_natasha_dir(root), shared)
 
 
 def model_is_cached(root: Path | str | None = None) -> bool:
@@ -522,11 +553,25 @@ class LlamaCppNatashaClient:
         threads: int = DEFAULT_THREADS,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         think: bool | None = False,
+        label: str = LABEL,
+        download_hint: str = DOWNLOAD_HINT,
+        model_dir: str | Path | None = None,
+        feature: str = FEATURE_NATASHA,
     ) -> None:
         self.model = model
         #: Marks this client for :func:`natasha_model_status`, so the status line
         #: never tells an in-process user to start a server.
         self.backend = "in-process"
+        #: The character's name, so a missing-file message names *this* character.
+        self.label = label
+        #: The command that fetches this character's weights, shown in the message.
+        self.download_hint = download_hint
+        #: The character's own folder, named in a missing-file message. ``None``
+        #: uses Natasha's (the companion is this layer's original owner).
+        self._model_dir = Path(model_dir) if model_dir is not None else None
+        #: The optional extra a missing-runtime message points at, so Hakeem's
+        #: message names `[hakeem]` rather than the companion's `[natasha]`.
+        self._feature = feature
         self.root = root
         self._path = Path(model_path) if model_path is not None else None
         self._runner = runner
@@ -544,15 +589,16 @@ class LlamaCppNatashaClient:
         if self._path is not None:
             if not self._path.is_file():
                 raise CompanionModelUnavailable(
-                    f"The companion model file is missing: {self._path}"
+                    f"The {self.label} model file is missing: {self._path}"
                 )
             return self._path
         found = find_model_file(self.root)
         if found is None:
-            directory = _natasha_dir(self.root)
+            directory = self._model_dir or _natasha_dir(self.root)
             raise CompanionModelUnavailable(
-                f"No companion model file in {directory}. Download one with "
-                f"`{DOWNLOAD_HINT}`, or drop a `.gguf` file there."
+                f"No {self.label} model file in {directory}. Download one with "
+                f"`{self.download_hint}`, or drop a `.gguf` file there (a model in "
+                "the shared folder is used too)."
             )
         return found
 
@@ -571,12 +617,13 @@ class LlamaCppNatashaClient:
         """Why the in-process model cannot answer, in one actionable line."""
         if not extra_available():
             return (
-                "Natasha's in-process model needs the optional natasha extra. "
-                f"Install it with: {pip_install_command(FEATURE_NATASHA)}"
+                f"{self.label}'s in-process model needs the optional runtime. "
+                f"Install it with: {pip_install_command(self._feature)}"
             )
+        directory = self._model_dir or _natasha_dir(self.root)
         return (
-            f"No companion model file in {_natasha_dir(self.root)}. Download one "
-            f"with `{DOWNLOAD_HINT}`, or drop a `.gguf` file there."
+            f"No {self.label} model file in {directory}. Download one "
+            f"with `{self.download_hint}`, or drop a `.gguf` file there."
         )
 
     def _load(self) -> NatashaRunner:
@@ -623,7 +670,7 @@ class LlamaCppNatashaClient:
             raise
         except Exception as error:
             raise CompanionModelUnavailable(
-                f"The in-process companion model failed: {error}"
+                f"The in-process {self.label} model failed: {error}"
             ) from error
 
 
@@ -647,17 +694,20 @@ class NatashaModelStatus:
     models: tuple[str, ...] = ()
     detail: str = ""
     hint: str = PULL_HINT
+    #: The character's name, so a status line names *this* character (Natasha, or
+    #: Hakeem when he reuses this layer).
+    label: str = LABEL
 
     def summary(self) -> str:
         """A one-line, plain-language status for the CLI and the window."""
         if self.available:
             where = "in-process" if self.backend == "in-process" else "Ollama"
-            return f"{NAME} is ready ({self.model}, {where})."
+            return f"{self.label} is ready ({self.model}, {where})."
         if self.backend == "in-process":
-            return self.detail or f"{NAME} has no local model file yet."
+            return self.detail or f"{self.label} has no local model file yet."
         if not self.server_reachable:
             return (
-                f"Natasha cannot reach Ollama at the configured address. "
+                f"{self.label} cannot reach Ollama at the configured address. "
                 f"Start it with `ollama serve`. ({self.detail})"
             )
         return (
@@ -709,13 +759,17 @@ def build_client(
     gpu_layers: int = DEFAULT_GPU_LAYERS,
     threads: int = DEFAULT_THREADS,
     keep_alive: str | None = DEFAULT_KEEP_ALIVE,
+    label: str = LABEL,
+    download_hint: str = DOWNLOAD_HINT,
 ) -> NatashaModelClient:
     """Build the client for the resolved runtime.
 
     The one place the choice is made, so the CLI, the chat mouth, and the window
-    cannot disagree about which runtime Natasha speaks through. Explicit arguments
-    rather than a config object keep this module free of a cycle with
-    :mod:`companion.config`, which reads its defaults from here.
+    cannot disagree about which runtime the character speaks through. Explicit
+    arguments rather than a config object keep this module free of a cycle with
+    :mod:`companion.config`, which reads its defaults from here. ``label`` and
+    ``download_hint`` name the character in a message, so Hakeem's error never
+    calls him Natasha.
     """
     if resolve_backend(backend, root=root, model_file=model_file) == BACKEND_GGUF:
         return LlamaCppNatashaClient(
@@ -727,6 +781,8 @@ def build_client(
             threads=threads,
             max_tokens=max_tokens,
             think=think,
+            label=label,
+            download_hint=download_hint,
         )
     return OllamaNatashaClient(
         model=model,
@@ -745,18 +801,21 @@ def natasha_model_status(
     backend: str | None = None,
     root: Path | str | None = None,
     model: str = DEFAULT_MODEL,
+    label: str = LABEL,
 ) -> NatashaModelStatus:
-    """Report whether Natasha's model can answer, without pretending.
+    """Report whether the character's model can answer, without pretending.
 
     A missing runtime, a missing model file, a missing server, and a missing Ollama
     tag are reported separately, because the next step differs. An injected client
     (a test's) is honoured unchanged, and its own ``backend`` attribute decides how
-    the report is worded.
+    the report is worded. ``label`` names the character in the report, so Hakeem --
+    who reuses this layer -- is never called Natasha.
     """
     if client is None:
-        client = build_client(backend=backend, model=model, root=root)
+        client = build_client(backend=backend, model=model, root=root, label=label)
     active = client
     kind = str(getattr(active, "backend", BACKEND_OLLAMA))
+    name = str(getattr(active, "label", label))
     try:
         models = active.list_models()
     except CoderUnavailable as error:
@@ -767,6 +826,7 @@ def natasha_model_status(
             installed=False,
             backend=kind,
             detail=str(error),
+            label=name,
         )
     installed = model_present(active.model, models)
     is_installed = getattr(active, "is_installed", None)
@@ -776,7 +836,7 @@ def natasha_model_status(
         detail = ""
     elif kind == "in-process":
         missing = getattr(active, "missing_detail", None)
-        detail = missing() if callable(missing) else "No companion model file is present."
+        detail = missing() if callable(missing) else "No model file is present."
     else:
         detail = f"`{active.model}` is not pulled."
     hint = DOWNLOAD_HINT if kind == "in-process" else f"ollama pull {active.model}"
@@ -789,6 +849,7 @@ def natasha_model_status(
         models=models,
         detail=detail,
         hint=hint,
+        label=name,
     )
 
 
@@ -958,6 +1019,7 @@ __all__ = [
     "DEFAULT_THREADS",
     "DOWNLOAD_HINT",
     "DOWNLOAD_TOOL",
+    "LABEL",
     "MAX_CONTEXT",
     "MAX_TOKENS_CEILING",
     "NAME",
@@ -979,6 +1041,7 @@ __all__ = [
     "download_model",
     "extra_available",
     "find_model_file",
+    "find_model_in",
     "model_is_cached",
     "model_present",
     "natasha_model_status",

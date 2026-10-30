@@ -3,9 +3,8 @@
 :class:`HakeemAgent` is the one object a front end needs. It owns his database and
 his managers (conversations, memory, dialogue tone), builds each prompt through
 :class:`~hakeem.prompt_builder.PromptBuilder`, and talks to the local model
-through :mod:`hakeem.model` -- which is the **same** model the project's
-companion, Natasha, speaks through. Hakeem is a different *character* speaking
-through the same *model*.
+through :mod:`hakeem.model` -- Hakeem's **own** model, in his own folder, separate
+from the companion Natasha's. He is a character in his own right, on his own model.
 
 It is deliberately free of any user interface: the CLI (:mod:`ai.hakeem`), the
 chat mouth, and the GUI all call this same object, so they can never disagree
@@ -133,8 +132,8 @@ class HakeemAgent:
         """The client Hakeem speaks through, built once for the configured runtime.
 
         The choice between the in-process GGUF model and the Ollama fallback is
-        made in :func:`companion.model.build_client`, the one place it lives, so
-        the CLI, the chat mouth, and the window cannot disagree about it.
+        made in :func:`hakeem.model.build_client`, the one place it lives, so the
+        CLI, the chat mouth, and the window cannot disagree about it.
         """
         if self._client is None:
             config = self.config

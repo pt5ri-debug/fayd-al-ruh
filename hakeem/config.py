@@ -1,10 +1,10 @@
 """Configuration for Hakeem, the project's scholar of religion and history.
 
 Every tunable lives in this one place: the model and server, timeouts, how much
-context is sent, and where his database sits. Hakeem speaks through the **same**
-model as Natasha, the companion, so the model defaults are the companion's own
-(see :mod:`hakeem.model`); only the storage location differs, so the two
-characters keep separate memories and sessions.
+context is sent, and where his database sits. Hakeem has his **own** model and his
+own model folder (see :mod:`hakeem.model`), separate from the companion Natasha's,
+just as his database is a separate file -- so the two characters can run on
+different models while sharing the project's one runtime.
 
 Nothing here duplicates a setting that already exists elsewhere in Fayd Al-Ruh,
 and no absolute path is hard-coded -- the data folder is discovered through
@@ -86,8 +86,9 @@ class HakeemConfig:
     #: the extra and a model file are present, else Ollama), ``gguf`` (force the
     #: in-process model), or ``ollama`` (force the server).
     backend: str = BACKEND_AUTO
-    #: An explicit GGUF file to load, overriding the folder scan. ``None`` uses the
-    #: companion's ``data/natasha`` folder, since it is the same model.
+    #: An explicit GGUF file to load, overriding the folder scan. ``None`` uses
+    #: Hakeem's own ``data/hakeem`` folder (the registry, then the largest
+    #: ``.gguf``), falling back to the project's shared ``data/shared_models``.
     model_file: Path | None = None
     base_url: str = DEFAULT_OLLAMA_URL
     #: How long to wait for one reply before reporting a failure. Sized for a

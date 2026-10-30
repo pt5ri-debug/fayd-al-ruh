@@ -3,9 +3,9 @@
 Hakeem (Arabic ``حكيم``, "the wise one") is a self-contained character layer that
 gives the project a scholar to talk with: he discusses the Abrahamic faiths --
 Islam, Christianity, and Judaism -- compares them fairly, and is at home in
-history and the ancient civilisations. He speaks through the **same local model**
-the project's companion, Natasha, speaks through (see :mod:`hakeem.model`); he is
-a different character on the same model.
+history and the ancient civilisations. He has his **own** local model, in his own
+folder (see :mod:`hakeem.model`), separate from the companion Natasha's -- he is a
+character in his own right, on his own model.
 
 Like the companion, it is *not* the cognitive core. Nothing here writes to
 entities, relations, evidence, beliefs, or the knowledge graph; Hakeem keeps his

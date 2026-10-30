@@ -535,7 +535,7 @@ class ChatService:
     def use_hakeem(self) -> None:
         """Talk with Hakeem, the scholar of religion and history.
 
-        He speaks through the same local model as the companion, so this raises
+        He has his own local model, so this raises
         :class:`~hakeem.hakeem_agent.HakeemError` when that model cannot answer,
         and the caller can report the real next step.
         """

@@ -593,7 +593,7 @@ def test_the_in_process_client_reports_and_refuses_honestly(
         client.model_path()
     # The next step names whichever half is missing: the runtime, or the file.
     monkeypatch.setattr("companion.model.extra_available", lambda: True)
-    assert "no companion model file" in client.missing_detail().lower()
+    assert "no natasha model file" in client.missing_detail().lower()
     monkeypatch.setattr("companion.model.extra_available", lambda: False)
     assert "requirements-natasha.txt" in client.missing_detail()
 

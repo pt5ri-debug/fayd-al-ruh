@@ -294,8 +294,37 @@ def test_the_factory_falls_back_to_the_default_for_an_unknown_key(monkeypatch, d
     assert seen["model_file"] is None
 
 
-def test_a_character_mouth_is_handed_the_shared_model(monkeypatch, data_root) -> None:
-    """Natasha and Hakeem share one file, so the choice resolves the same way."""
+def test_hakeem_mouth_is_handed_his_own_model(monkeypatch, data_root) -> None:
+    """Hakeem has his own catalog, so his choice resolves through it."""
+    from ai import mouths
+
+    folder = data_root / "hakeem"
+    folder.mkdir(parents=True)
+    from hakeem.model import resolve_spec
+
+    spec = resolve_spec("qwen3.5-4b")
+    (folder / spec.filename).write_bytes(b"GGUF")
+
+    seen: dict[str, Any] = {}
+
+    def fake_loader(model=None, model_file=None, **kwargs):
+        seen["model"] = model
+        seen["model_file"] = model_file
+        return "agent"
+
+    monkeypatch.setattr(mouths.hakeem_mouth, "load_hakeem_assistant", fake_loader)
+    mouths.build_mouth(catalog.MOUTH_HAKEEM, model_key="qwen3.5-4b")
+    assert seen["model"] == spec.tag
+    assert seen["model_file"] == folder / spec.filename
+
+
+def test_a_character_mouth_may_run_a_model_from_another_catalog(monkeypatch, data_root) -> None:
+    """The GGUF mouths share one runtime, so a key from another catalog resolves.
+
+    Hakeem's window offers *every* GGUF model the project has; a key the
+    companion's catalog names (``qwen3-4b``) is resolved through that catalog, and
+    the file it found in Natasha's folder is handed over explicitly.
+    """
     from ai import mouths
 
     folder = data_root / "natasha"

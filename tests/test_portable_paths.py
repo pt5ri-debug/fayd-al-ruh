@@ -103,3 +103,36 @@ def test_default_checkpoint_prefers_data_dir(monkeypatch, tmp_path: Path) -> Non
     trained.parent.mkdir(parents=True)
     trained.write_bytes(b"trained")
     assert paths.default_checkpoint() == trained
+
+
+def test_the_model_folders_live_under_the_data_dir(monkeypatch, tmp_path: Path) -> None:
+    """Every per-character and shared model folder follows FAYD_DATA_DIR."""
+    monkeypatch.setenv(paths.ENV_DATA_DIR, str(tmp_path))
+    data = tmp_path.resolve()
+
+    assert paths.shared_models_dir() == data / "shared_models"
+    assert paths.hakeem_models_dir() == data / "hakeem"
+    assert paths.natasha_models_dir() == data / "natasha"
+    # Hakeem is separated from Natasha: his folder is his own, not hers.
+    assert paths.hakeem_models_dir() != paths.natasha_models_dir()
+
+
+def test_ensure_data_layout_gathers_a_legacy_model_into_the_shared_folder(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """An upgrade moves the legacy general model out of Natasha's folder once."""
+    root = tmp_path / "checkout"
+    natasha = root / "data" / "natasha"
+    natasha.mkdir(parents=True)
+    # The user's own spelling of the legacy file, which the loose match must find.
+    (natasha / "qwen3-1.7b-q4_k_m.gguf").write_bytes(b"GGUF")
+
+    monkeypatch.delenv(paths.ENV_DATA_DIR, raising=False)
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    monkeypatch.setattr(paths, "_source_root", lambda: root)
+
+    paths.ensure_data_layout()
+
+    shared = root / "data" / "shared_models"
+    assert (shared / "Qwen3-1.7B-Q4_K_M.gguf").is_file()
+    assert not (natasha / "qwen3-1.7b-q4_k_m.gguf").exists()
