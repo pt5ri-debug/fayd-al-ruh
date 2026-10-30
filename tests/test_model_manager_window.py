@@ -65,6 +65,34 @@ class StubService:
     def snapshot(self):
         return self._snapshot
 
+    def search(self, query="", *, state="", runtime="", rows=None):
+        source = tuple(rows) if rows is not None else self.rows
+        needle = str(query or "").strip().casefold()
+        wanted = str(state or "").strip()
+        result = []
+        for row in source:
+            if wanted and row.state != wanted:
+                continue
+            if runtime and row.runtime != runtime:
+                continue
+            if needle and needle not in " ".join(
+                (row.display_name, row.model_id, row.path)
+            ).casefold():
+                continue
+            result.append(row)
+        return tuple(result)
+
+    def state_names(self):
+        return ("ready", "not-downloaded", "missing", "damaged", "unknown")
+
+    def diagnostics(self):
+        from core.model_manager import DiagnosticsReport, ModelManagerStatus
+
+        return DiagnosticsReport(
+            status=ModelManagerStatus(registry_path="/tmp/registry"),
+            resources=None,
+        )
+
     def task_names(self):
         return ("chat", "petroleum")
 
@@ -345,5 +373,81 @@ def test_the_sidebar_lists_the_tasks_and_the_model_in_force() -> None:
         body = dialog._tasks_label.cget("text")
         assert "chat: Ready Model" in body
         assert "petroleum: none ready" in body
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_search_box_filters_the_table() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._search_var.set("missing")
+        listed = dialog._table.get_children()
+        assert listed == ("m-missing",)
+        dialog._search_var.set("")
+        assert set(dialog._table.get_children()) == {"m-ready", "m-missing"}
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_state_filter_limits_the_table() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._state_var.set("ready")
+        dialog._fill_table()
+        assert dialog._table.get_children() == ("m-ready",)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_dashboard_reports_what_is_loaded_and_the_machine() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        body = dialog._diagnostics_label.cget("text")
+        assert "No model is loaded" in body
+        assert "No recent errors" in body
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_running_diagnostics_shows_the_report() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        service = StubService()
+        dialog = _dialog(root, service)
+        # Drive the finish path directly, so the test does not race the worker
+        # thread; ``_on_diagnostics`` is checked separately for not raising.
+        dialog._on_diagnostics()
+        dialog._finish_diagnostics(service.diagnostics(), None)
+        body = dialog._detail_text.get("1.0", "end")
+        assert "Model Manager" in body
+        assert "Diagnostics ready." == dialog._status_label.cget("text")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_diagnostics_button_is_enabled_and_wired() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        assert dialog._diagnostics_button.cget("text") == "Run diagnostics"
+        assert dialog._diagnostics_button.cget("state") == "normal"
     finally:
         root.destroy()

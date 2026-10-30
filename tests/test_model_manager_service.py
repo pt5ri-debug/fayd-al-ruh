@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import struct
 import threading
+from pathlib import Path
 
 import pytest
-from core.model_manager import ModelManager
+from core.model_manager import STATE_ORDER, STATE_READY, ModelManager
 from core.model_runtime import (
     RUNTIME_LLAMA_CPP,
     InferenceResult,
@@ -510,3 +511,73 @@ def test_select_for_task_is_none_when_nothing_can_run(service):
 
 def test_models_for_task_of_an_unknown_task_is_empty(service):
     assert service.models_for_task("no-such-task") == ()
+
+
+# ------------------------------------------------------- search + dashboard
+
+
+def test_search_matches_the_display_name(service, tmp_path):
+    service.register(write_gguf(tmp_path / "m.gguf"), display_name="Findable Model")
+    rows = service.search("findable")
+    assert [row.display_name for row in rows] == ["Findable Model"]
+
+
+def test_search_matches_the_path_case_insensitively(service, tmp_path):
+    service.register(write_gguf(tmp_path / "Unique.gguf"), display_name="X")
+    assert service.search("unique.GGUF")
+
+
+def test_search_with_a_blank_query_keeps_everything(service):
+    all_rows = service.rows()
+    assert service.search("") == all_rows
+    assert service.search("   ") == all_rows
+
+
+def test_search_filters_by_state(service, tmp_path):
+    service.register(write_gguf(tmp_path / "ready.gguf"), display_name="Ready One")
+    ready = service.search(state=STATE_READY)
+    assert any(row.display_name == "Ready One" for row in ready)
+    assert all(row.state == STATE_READY for row in ready)
+
+
+def test_search_of_nothing_returns_nothing(service):
+    assert service.search("no-such-model-name-anywhere") == ()
+
+
+def test_search_never_re_reads_the_registry(service):
+    # Passing an explicit ``rows`` tuple must be honoured, so a caller can filter
+    # a listing it already holds without a second read.
+    rows = service.rows()
+    assert service.search("", rows=rows) == rows
+
+
+def test_state_names_come_from_the_manager_order():
+    manager = ModelManager(Path("/tmp/nonexistent-root"), adapter_factory=lambda r: FakeAdapter())
+    assert ModelManagerService(Path("/tmp/nonexistent-root"), manager=manager).state_names() == (
+        STATE_ORDER
+    )
+
+
+def test_the_snapshot_carries_the_machine_resources(service):
+    snapshot = service.snapshot()
+    assert snapshot.resources is not None
+    assert snapshot.resources.system
+
+
+def test_the_snapshot_reports_the_active_models(service, tmp_path):
+    row = service.register(write_gguf(tmp_path / "m.gguf"), display_name="Mine")
+    service.load(row.model_id)
+    snapshot = service.snapshot()
+    assert snapshot.active == (row.model_id,)
+
+
+def test_the_snapshot_has_no_active_models_before_a_load(service, tmp_path):
+    service.register(write_gguf(tmp_path / "m.gguf"), display_name="Mine")
+    assert service.snapshot().active == ()
+
+
+def test_diagnostics_comes_straight_from_the_manager(service):
+    report = service.diagnostics()
+    assert report.status.registered == 0
+    assert report.resources is not None
+

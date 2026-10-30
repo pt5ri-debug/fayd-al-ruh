@@ -569,6 +569,12 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Model Manager: what the local runtimes can do here", run_models, ("runtimes",)),
     ("Model Manager: scan the project's folders for model files", run_models, ("discover",)),
     ("Model Manager: which models suit a task (chat, petroleum, ...)", run_models, ("select",)),
+    ("Model Manager: the models loaded right now", run_models, ("active",)),
+    (
+        "Model Manager: machine, runtimes, active models, and recent errors",
+        run_models,
+        ("diagnostics",),
+    ),
     ("Characters: manage the seven characters and the project's own model", run_characters, ("list",)),
     (
         "Speech-engine studios: read a document aloud per engine (voice + mood)",

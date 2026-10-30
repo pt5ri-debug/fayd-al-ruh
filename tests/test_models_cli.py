@@ -532,3 +532,76 @@ def test_select_json_is_machine_readable(capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["task"] == "petroleum"
     assert payload["models"] == []
+
+
+# ------------------------------------------------------- search + dashboard
+
+
+def test_search_matches_a_registered_model(tmp_path, capsys):
+    target = write_gguf(tmp_path / "m.gguf")
+    run(capsys, "register", str(target), "--name", "Findable")
+    code, out, _ = run(capsys, "search", "findable")
+    assert code == 0
+    assert "Findable" in out
+
+
+def test_search_with_no_match_exits_three(capsys):
+    code, out, _ = run(capsys, "search", "no-such-model-name")
+    assert code == 3
+    assert "No models matched" in out
+
+
+def test_search_json_is_machine_readable(tmp_path, capsys):
+    target = write_gguf(tmp_path / "m.gguf")
+    run(capsys, "register", str(target), "--name", "Findable")
+    code, out, _ = run(capsys, "search", "findable", "--json")
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["query"] == "findable"
+    assert payload["models"]
+
+
+def test_search_filters_by_state(capsys):
+    code, out, _ = run(capsys, "search", "--state", "ready")
+    # A fresh machine has nothing ready, so this is the honest empty answer.
+    assert code == 3
+    assert "No models matched" in out
+
+
+def test_active_reports_nothing_loaded_on_a_fresh_machine(capsys):
+    code, out, _ = run(capsys, "active")
+    assert code == 0
+    assert "No model is loaded" in out
+
+
+def test_active_json_is_machine_readable(capsys):
+    code, out, _ = run(capsys, "active", "--json")
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["models"] == []
+
+
+def test_diagnostics_reports_the_machine_and_the_runtimes(capsys):
+    code, out, _ = run(capsys, "diagnostics")
+    assert code == 0
+    assert "This machine" in out
+    assert "Runtimes" in out
+    assert "llama.cpp" in out
+
+
+def test_diagnostics_json_is_machine_readable(capsys):
+    code, out, _ = run(capsys, "diagnostics", "--json")
+    assert code == 0
+    payload = json.loads(out)
+    assert "resources" in payload
+    assert "runtimes" in payload
+    assert "active" in payload
+    assert isinstance(payload["status"]["registered"], int)
+
+
+def test_the_menu_offers_active_and_diagnostics():
+    from cli.menu import MENU
+
+    labels = [label for label, _action, _args in MENU]
+    assert any("loaded right now" in label for label in labels)
+    assert any("recent errors" in label for label in labels)
