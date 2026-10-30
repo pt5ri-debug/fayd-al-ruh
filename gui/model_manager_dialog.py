@@ -1,0 +1,703 @@
+"""The Model Manager window: every local model, in one place.
+
+Reached from the sidebar's **Model Manager** entry, this window is the one
+surface where the project's language models can be seen, inspected, and run:
+
+* **Discover / Register** -- find GGUF files on disk, or add one by hand.
+* **Inspect** -- re-read a file and report its format, size, and integrity.
+* **Check** -- say whether a model can run here, and why not when it cannot,
+  with the memory figure named as an *estimate*, never a measurement.
+* **Load / Test / Unload** -- run a model through its runtime and ask it a
+  trivial question, to prove it really answers.
+* **Settings** -- the model's own inference settings (temperature, top-p, and
+  the rest), saved and reset.
+* **Operations log** -- the most recent actions, so a failure is visible.
+
+The page is a thin view over :class:`gui.model_manager.ModelManagerService`, so
+the whole workflow is testable with no display. Tk is imported lazily with the
+rest of the window, so the CLI never touches it. Long work (a scan, a load, a
+test) runs on a worker thread whose result is handed back through a queue the UI
+thread drains, so the window never freezes.
+
+Everything stays honest: this window **manages** models, it does not fetch them.
+A model whose weights are absent says so and names the real next step (the
+project's own governed download command), and a runtime that is not installed
+reports the exact install line instead of pretending.
+"""
+
+from __future__ import annotations
+
+import queue
+import threading
+import tkinter as tk
+from collections.abc import Callable
+from tkinter import filedialog, ttk
+from typing import Any, Literal
+
+from gui.model_manager import (
+    ManagerSnapshot,
+    ModelDetail,
+    ModelManagerService,
+    ModelRow,
+    detail_text,
+    human_size,
+)
+from gui.sidebar import SidebarColumn
+from gui.typography import resolve
+from gui.window_controls import install_window_controls
+
+TITLE = "Model Manager"
+SUBTITLE = (
+    "Every language model this build knows about — discover, register, inspect, "
+    "check, load, and test them, all on this machine."
+)
+HONESTY_LINE = (
+    "The Model Manager inspects and runs models that are already here. It does "
+    "not download weights itself: when a model is missing, it names the command "
+    "the owning engine already provides, and you run it. Memory figures are "
+    "estimates from the file size, never measurements."
+)
+
+#: The transcript/detail column reads as a centred column, capped like the chat
+#: window's, so a wide screen does not stretch a paragraph across it.
+_COLUMN_MAX = 880
+
+class ModelManagerDialog:
+    """A window listing, inspecting, and running the project's language models."""
+
+    def __init__(
+        self,
+        parent: tk.Tk | tk.Toplevel,
+        service: ModelManagerService,
+        *,
+        theme: Any,
+        font: str,
+        mono: str,
+        on_close: Callable[[], None] | None = None,
+    ) -> None:
+        self.service = service
+        self.theme = theme
+        self.font = font
+        self.mono = mono
+        self._type = resolve(parent, ui_family=font, mono_family=mono)
+        self._on_close = on_close
+        self._closed = False
+        self._busy = False
+        self._rows: list[ModelRow] = []
+        self._detail: ModelDetail | None = None
+        self._selected_id = ""
+
+        # Worker threads hand results back through a queue the UI thread drains on
+        # its own clock: calling `after` from a worker thread races with the main
+        # loop (Tk is not thread-safe), which is what the rest of the project does.
+        self._results: queue.Queue[
+            tuple[Callable[[Any, Exception | None], None], Any, Exception | None]
+        ] = queue.Queue()
+
+        self.window = tk.Toplevel(parent)
+        self.window.title(TITLE)
+        self.window.configure(bg=theme.base)
+        self.window.geometry("1200x720")
+        self.window.minsize(940, 620)
+        self.window.transient(parent)
+        self.window.protocol("WM_DELETE_WINDOW", self._close)
+        self._build()
+        self._reload()
+
+    # -- layout -----------------------------------------------------------
+
+    def _build(self) -> None:
+        self._build_header()
+        theme = self.theme
+        body = tk.Frame(self.window, bg=theme.base)
+        body.pack(fill="both", expand=True)
+        body.rowconfigure(0, weight=1)
+        body.columnconfigure(0, weight=0, minsize=300)
+        body.columnconfigure(1, weight=1)
+        self._body = body
+        self._build_sidebar(body)
+        self._build_main(body)
+
+    def _build_header(self) -> None:
+        theme = self.theme
+        bar = tk.Frame(self.window, bg=theme.titlebar)
+        bar.pack(fill="x")
+        inner = tk.Frame(bar, bg=theme.titlebar)
+        inner.pack(fill="x", padx=16, pady=(12, 8))
+        titles = tk.Frame(inner, bg=theme.titlebar)
+        titles.pack(side="left", anchor="w")
+        tk.Label(
+            titles, text=TITLE, bg=theme.titlebar, fg=theme.contrast,
+            font=self._type.font("heading3", weight="bold"), anchor="w",
+        ).pack(anchor="w")
+        tk.Label(
+            titles, text=SUBTITLE, bg=theme.titlebar, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=800,
+        ).pack(anchor="w", pady=(2, 0))
+        self._spinner = ttk.Progressbar(inner, mode="indeterminate", length=120)
+        install_window_controls(
+            self.window, inner, theme=theme, typography=self._type, on_close=self._close
+        )
+        tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
+
+    def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
+        return tk.Button(
+            parent, text=text, command=command, relief="flat", borderwidth=0,
+            highlightthickness=0, bg=self.theme.surface_raised, fg=self.theme.foreground,
+            activebackground=self.theme.interactive_active, activeforeground=self.theme.contrast,
+            font=self._type.font("2xs", weight="bold"), padx=10, pady=4, cursor="hand2",
+        )
+
+    # -- sidebar ----------------------------------------------------------
+
+    def _build_sidebar(self, parent: tk.Frame) -> None:
+        column = SidebarColumn(
+            parent, theme=self.theme, typography=self._type, width=300, scope="model-manager"
+        )
+        self._sidebar_column = column
+
+        theme = self.theme
+        brand = tk.Frame(column.body, bg=theme.surface)
+        brand.pack(fill="x", padx=14, pady=(14, 4))
+        dot = tk.Canvas(brand, width=24, height=24, bg=theme.surface, highlightthickness=0)
+        dot.create_oval(1, 1, 23, 23, fill=theme.primary, outline="")
+        dot.create_text(
+            12, 13, text="ف", fill=theme.primary_foreground,
+            font=self._type.font("sm", weight="bold"),
+        )
+        dot.pack(side="left")
+        tk.Label(
+            brand, text="Model Manager", bg=theme.surface, fg=theme.contrast,
+            font=self._type.font("body", weight="bold"),
+        ).pack(side="left", padx=(8, 0))
+
+        summary = column.add("summary", "Summary", icon="📊")
+        self._summary_label = tk.Label(
+            summary, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._summary_label.pack(fill="x", padx=14, pady=(4, 10))
+
+        tasks = column.add("tasks", "Tasks", icon="🎯")
+        self._tasks_label = tk.Label(
+            tasks, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._tasks_label.pack(fill="x", padx=14, pady=(4, 10))
+
+        library = column.add("library", "Library", icon="📚")
+        self._register_button = self._button(
+            library, "Register a model file…", self._on_register
+        )
+        self._register_button.pack(fill="x", padx=12, pady=(4, 4))
+        self._discover_button = self._button(
+            library, "Discover models in a folder…", self._on_discover
+        )
+        self._discover_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._import_button = self._button(
+            library, "Import models added by hand", self._on_import_custom
+        )
+        self._import_button.pack(fill="x", padx=12, pady=(0, 8))
+
+        self._runtimes = column.add("runtimes", "Runtimes", icon="⚙")
+        self._runtimes_label = tk.Label(
+            self._runtimes, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._runtimes_label.pack(fill="x", padx=14, pady=(4, 10))
+
+        log = column.add("log", "Operations log", icon="🧾")
+        log_wrap = tk.Frame(log, bg=theme.surface)
+        log_wrap.pack(fill="both", expand=True, padx=12, pady=(4, 12))
+        self._log = tk.Text(
+            log_wrap, height=8, bg=theme.base, fg=theme.foreground, relief="flat",
+            highlightthickness=0, borderwidth=0, wrap="word",
+            font=self._type.font("2xs"), state="disabled", cursor="arrow",
+        )
+        self._log.pack(fill="both", expand=True)
+        self._log.configure(state="disabled")
+
+    # -- main -------------------------------------------------------------
+
+    def _build_main(self, parent: tk.Frame) -> None:
+        theme = self.theme
+        col = tk.Frame(parent, bg=theme.base)
+        col.grid(row=0, column=1, sticky="nsew")
+
+        head = tk.Frame(col, bg=theme.base)
+        head.pack(fill="x", padx=16, pady=(14, 6))
+        tk.Label(
+            head, text="MODELS", bg=theme.base, fg=theme.text_dim,
+            font=self._type.font("2xs", weight="bold"),
+        ).pack(side="left")
+        self._status_label = tk.Label(
+            head, text="", bg=theme.base, fg=theme.text_secondary,
+            font=self._type.font("2xs"),
+        )
+        self._status_label.pack(side="right")
+
+        # The model table. ``ttk.Treeview`` gives real columns and selection, so a
+        # listing stays readable without a hand-built grid of labels.
+        table_wrap = tk.Frame(col, bg=theme.base)
+        table_wrap.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        columns = ("state", "runtime", "format", "size", "source")
+        self._table = ttk.Treeview(
+            table_wrap, columns=columns, show="tree headings", height=10, selectmode="browse"
+        )
+        self._table.heading("#0", text="Model")
+        self._table.column("#0", width=300, anchor="w")
+        for key, label, width in (
+            ("state", "State", 130),
+            ("runtime", "Runtime", 110),
+            ("format", "Format", 90),
+            ("size", "Size", 90),
+            ("source", "Source", 100),
+        ):
+            self._table.heading(key, text=label)
+            self._table.column(key, width=width, anchor="w")
+        table_scroll = tk.Scrollbar(table_wrap, command=self._table.yview)
+        self._table.configure(yscrollcommand=table_scroll.set)
+        self._table.pack(side="left", fill="both", expand=True)
+        table_scroll.pack(side="right", fill="y")
+        self._table.bind("<<TreeviewSelect>>", self._on_select_row)
+
+        # Actions for the selected model.
+        actions = tk.Frame(col, bg=theme.base)
+        actions.pack(fill="x", padx=16, pady=(0, 8))
+        self._action_buttons: list[tk.Button] = []
+        for text, command in (
+            ("Inspect", self._on_inspect),
+            ("Check", self._on_check),
+            ("Load", self._on_load),
+            ("Test", self._on_test),
+            ("Unload", self._on_unload),
+            ("Save settings", self._on_save_settings),
+            ("Reset settings", self._on_reset_settings),
+            ("Forget", self._on_forget),
+        ):
+            button = self._button(actions, text, command)
+            button.pack(side="left", padx=(0, 6))
+            self._action_buttons.append(button)
+
+        # Detail pane. A plain rounded panel is enough here (the transcript-style
+        # bubble machinery is not needed for a fixed detail block).
+        detail_card = tk.Frame(col, bg=theme.surface)
+        detail_card.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        self._detail_card = detail_card
+        inner = tk.Frame(detail_card, bg=theme.surface)
+        inner.pack(fill="both", expand=True, padx=16, pady=14)
+
+        tk.Label(
+            inner, text="DETAILS", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs", weight="bold"),
+        ).pack(anchor="w")
+        self._detail_text = tk.Text(
+            inner, height=14, bg=theme.surface, fg=theme.foreground, relief="flat",
+            highlightthickness=0, borderwidth=0, wrap="word",
+            font=self._type.font("2xs"), state="disabled", cursor="arrow",
+        )
+        self._detail_text.pack(fill="both", expand=True, pady=(4, 8))
+
+        settings_row = tk.Frame(inner, bg=theme.surface)
+        settings_row.pack(fill="x")
+        tk.Label(
+            settings_row, text="temperature", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"),
+        ).pack(side="left")
+        self._temperature_var = tk.StringVar(value="")
+        self._temperature = tk.Entry(
+            settings_row, textvariable=self._temperature_var, width=8,
+            bg=theme.base, fg=theme.foreground, relief="flat", highlightthickness=1,
+            highlightbackground=theme.border_subtle, font=self._type.font("2xs"),
+        )
+        self._temperature.pack(side="left", padx=(6, 14))
+        tk.Label(
+            settings_row, text="max tokens", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"),
+        ).pack(side="left")
+        self._max_tokens_var = tk.StringVar(value="")
+        self._max_tokens = tk.Entry(
+            settings_row, textvariable=self._max_tokens_var, width=8,
+            bg=theme.base, fg=theme.foreground, relief="flat", highlightthickness=1,
+            highlightbackground=theme.border_subtle, font=self._type.font("2xs"),
+        )
+        self._max_tokens.pack(side="left", padx=(6, 14))
+        tk.Label(
+            settings_row, text="context", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"),
+        ).pack(side="left")
+        self._context_var = tk.StringVar(value="")
+        self._context = tk.Entry(
+            settings_row, textvariable=self._context_var, width=8,
+            bg=theme.base, fg=theme.foreground, relief="flat", highlightthickness=1,
+            highlightbackground=theme.border_subtle, font=self._type.font("2xs"),
+        )
+        self._context.pack(side="left", padx=(6, 14))
+
+        self._detail_text.configure(state="disabled")
+
+    # -- data -------------------------------------------------------------
+
+    def _reload(self) -> None:
+        """Read the snapshot and draw the whole page. Never raises."""
+        try:
+            snapshot = self.service.snapshot()
+        except Exception as error:  # a broken registry must not blank the window
+            self._set_status(f"Could not read the model registry: {error}")
+            return
+        self._apply_snapshot(snapshot)
+
+    def _apply_snapshot(self, snapshot: ManagerSnapshot) -> None:
+        self._rows = list(snapshot.rows)
+        self._summary_label.configure(text=snapshot.summary())
+        self._runtimes_label.configure(text="\n".join(snapshot.runtime_lines) or "none")
+        self._tasks_label.configure(text=self._task_summary())
+        self._render_log()
+        self._fill_table()
+        self._set_status(snapshot.summary())
+
+    def _task_summary(self) -> str:
+        """Which model answers each task right now, or the honest next step."""
+        lines: list[str] = []
+        try:
+            names = self.service.task_names()
+        except Exception:
+            names = ()
+        for task in names:
+            try:
+                row = self.service.select_for_task(task)
+            except Exception:
+                row = None
+            lines.append(f"{task}: {row.display_name}" if row is not None else f"{task}: none ready")
+        return "\n".join(lines) or "no tasks"
+
+    def _fill_table(self) -> None:
+        selected = self._selected_id
+        self._table.delete(*self._table.get_children())
+        for row in self._rows:
+            self._table.insert(
+                "", "end", iid=row.model_id, text=row.display_name,
+                values=(
+                    row.state_marker,
+                    row.runtime,
+                    row.format,
+                    human_size(row.size_bytes),
+                    row.source,
+                ),
+            )
+        if selected and selected in self._table.get_children():
+            self._table.selection_set(selected)
+
+    def _render_log(self) -> None:
+        try:
+            events = self.service.log_tail(40)
+        except Exception:
+            events = ()
+        lines = [event.describe() if hasattr(event, "describe") else str(event) for event in events]
+        self._log.configure(state="normal")
+        self._log.delete("1.0", "end")
+        self._log.insert("1.0", "\n".join(lines) or "No operations yet.")
+        self._log.configure(state="disabled")
+
+    def _set_status(self, text: str) -> None:
+        self._status_label.configure(text=text)
+
+    # -- selection --------------------------------------------------------
+
+    def _on_select_row(self, _event: tk.Event | None = None) -> None:
+        selection = self._table.selection()
+        if not selection:
+            return
+        self._selected_id = selection[0]
+        self.service.select(self._selected_id)
+        self._show_detail(self._selected_id)
+
+    def _show_detail(self, model_id: str) -> None:
+        try:
+            detail = self.service.detail(model_id)
+        except Exception as error:
+            self._set_detail(f"Could not read this model's record: {error}")
+            return
+        self._detail = detail
+        self._set_detail(detail_text(detail))
+        self._fill_settings(detail)
+
+    def _set_detail(self, text: str) -> None:
+        self._detail_text.configure(state="normal")
+        self._detail_text.delete("1.0", "end")
+        self._detail_text.insert("1.0", text)
+        self._detail_text.configure(state="disabled")
+
+    def _fill_settings(self, detail: ModelDetail) -> None:
+        settings = detail.settings
+        if settings is None:
+            self._temperature_var.set("")
+            self._max_tokens_var.set("")
+            self._context_var.set("")
+            return
+        self._temperature_var.set(str(getattr(settings, "temperature", "")))
+        self._max_tokens_var.set(str(getattr(settings, "max_tokens", "")))
+        self._context_var.set(str(getattr(settings, "context", "")))
+
+    # -- actions ----------------------------------------------------------
+
+    def _on_register(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self.window,
+            title="Choose a model file",
+            filetypes=[("GGUF models", "*.gguf"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        self._run_background(
+            "Registering the model…",
+            lambda: self.service.register(path),
+            self._finish_register,
+        )
+
+    def _finish_register(self, row: ModelRow, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not register the model: {error}")
+            return
+        self._selected_id = row.model_id
+        self._reload()
+        self._set_status(f"Registered {row.display_name}.")
+
+    def _on_discover(self) -> None:
+        folder = filedialog.askdirectory(parent=self.window, title="Choose a folder to scan")
+        if not folder:
+            return
+        self._run_background(
+            "Scanning for models…",
+            lambda: self.service.discover([folder]),
+            self._finish_discover,
+        )
+
+    def _finish_discover(self, report: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not scan the folder: {error}")
+            return
+        found = getattr(report, "probes", ())
+        self._set_status(f"Found {len(found)} model file(s).")
+        self._reload()
+
+    def _on_import_custom(self) -> None:
+        self._run_background(
+            "Importing models added by hand…",
+            self.service.import_custom_models,
+            self._finish_import_custom,
+        )
+
+    def _finish_import_custom(self, rows: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not import the models: {error}")
+            return
+        self._reload()
+        self._set_status(f"Imported {len(rows)} model(s).")
+
+    def _on_inspect(self) -> None:
+        model_id = self._require_selection()
+        if model_id is None:
+            return
+        self._run_background(
+            "Inspecting the model file…",
+            lambda: self.service.inspect(model_id),
+            lambda probe, error: self._finish_inspect(probe, error, model_id),
+        )
+
+    def _finish_inspect(self, probe: Any, error: Exception | None, model_id: str) -> None:
+        if error is not None:
+            self._set_status(f"Could not inspect the model: {error}")
+            return
+        self._reload()
+        self._show_detail(model_id)
+        self._set_status(probe.describe() if hasattr(probe, "describe") else "Inspected.")
+
+    def _on_check(self) -> None:
+        model_id = self._require_selection()
+        if model_id is None:
+            return
+        self._run_background(
+            "Checking whether the model can run here…",
+            lambda: self.service.compatibility(model_id),
+            self._finish_check,
+        )
+
+    def _finish_check(self, report: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not check the model: {error}")
+            return
+        self._set_detail(report.describe())
+        self._set_status("can run here" if report.can_run else "cannot run here")
+
+    def _on_load(self) -> None:
+        model_id = self._require_selection()
+        if model_id is None:
+            return
+        self._run_background(
+            "Loading the model…",
+            lambda: self.service.load(model_id),
+            self._finish_operation,
+        )
+
+    def _on_test(self) -> None:
+        model_id = self._require_selection()
+        if model_id is None:
+            return
+        self._run_background(
+            "Asking the model a test question…",
+            lambda: self.service.test(model_id, prompt="Reply with the single word: ready."),
+            self._finish_operation,
+        )
+
+    def _on_unload(self) -> None:
+        model_id = self._selected_id or ""
+        self._run_background(
+            "Releasing the model…",
+            lambda: self.service.unload(model_id),
+            self._finish_operation,
+        )
+
+    def _finish_operation(self, report: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"The operation failed: {error}")
+            self._render_log()
+            return
+        self._set_status(report.describe() if hasattr(report, "describe") else "done")
+        self._render_log()
+
+    def _on_save_settings(self) -> None:
+        model_id = self._require_selection()
+        if model_id is None:
+            return
+        changes = self._collect_settings()
+        if changes is None:
+            return
+        try:
+            self.service.update_settings(model_id, **changes)
+        except Exception as error:
+            self._set_status(f"Could not save the settings: {error}")
+            return
+        self._show_detail(model_id)
+        self._set_status("Settings saved.")
+
+    def _on_reset_settings(self) -> None:
+        model_id = self._require_selection()
+        if model_id is None:
+            return
+        try:
+            self.service.reset_settings(model_id)
+        except Exception as error:
+            self._set_status(f"Could not reset the settings: {error}")
+            return
+        self._show_detail(model_id)
+        self._set_status("Settings reset to the project defaults.")
+
+    def _collect_settings(self) -> dict[str, Any] | None:
+        """Read the three fields, refusing a value that is not a number."""
+        changes: dict[str, Any] = {}
+        for name, var in (
+            ("temperature", self._temperature_var),
+            ("max_tokens", self._max_tokens_var),
+            ("context", self._context_var),
+        ):
+            raw = var.get().strip()
+            if not raw:
+                continue
+            try:
+                changes[name] = float(raw) if name == "temperature" else int(raw)
+            except ValueError:
+                self._set_status(f"{name} must be a number.")
+                return None
+        return changes
+
+    def _on_forget(self) -> None:
+        model_id = self._require_selection()
+        if model_id is None:
+            return
+        try:
+            self.service.remove(model_id, confirm=True)
+        except Exception as error:
+            self._set_status(f"Could not forget the model: {error}")
+            return
+        self._selected_id = ""
+        self._set_detail("")
+        self._reload()
+        self._set_status("Forgotten. The file itself was not touched.")
+
+    def _require_selection(self) -> str | None:
+        if not self._selected_id:
+            self._set_status("Choose a model first.")
+            return None
+        return self._selected_id
+
+    # -- worker -----------------------------------------------------------
+
+    def _run_background(
+        self,
+        message: str,
+        job: Callable[[], Any],
+        finish: Callable[[Any, Exception | None], None],
+    ) -> None:
+        """Run ``job`` on a worker thread, then hand its result back on the UI thread."""
+        self._busy = True
+        self._set_status(message)
+        self._set_busy_buttons(False)
+        self._spinner.pack(side="right", padx=8)
+        self._spinner.start(12)
+
+        def run() -> None:
+            try:
+                result = job()
+                self._results.put((finish, result, None))
+            except Exception as error:
+                self._results.put((finish, None, error))
+
+        threading.Thread(target=run, daemon=True).start()
+        self.window.after(60, self._pump_results)
+
+    def _pump_results(self) -> None:
+        try:
+            while True:
+                finish, result, error = self._results.get_nowait()
+                self._finish(finish, result, error)
+        except queue.Empty:
+            pass
+        if self._busy:
+            self.window.after(60, self._pump_results)
+
+    def _finish(self, finish: Callable[[Any, Exception | None], None], result: Any, error: Exception | None) -> None:
+        self._busy = False
+        self._spinner.stop()
+        self._spinner.pack_forget()
+        self._set_busy_buttons(True)
+        try:
+            finish(result, error)
+        except Exception as inner:  # a view bug must not kill the pump
+            self._set_status(f"Unexpected error: {inner}")
+
+    def _set_busy_buttons(self, enabled: bool) -> None:
+        state: Literal["normal", "disabled"] = "normal" if enabled else "disabled"
+        for button in self._action_buttons:
+            button.configure(state=state)
+        for button in (self._register_button, self._discover_button, self._import_button):
+            button.configure(state=state)
+
+    # -- lifecycle --------------------------------------------------------
+
+    def _close(self) -> None:
+        self._closed = True
+        if self._on_close is not None:
+            self._on_close()
+        try:
+            self.window.destroy()
+        except tk.TclError:
+            pass
+
+
+__all__ = [
+    "HONESTY_LINE",
+    "SUBTITLE",
+    "TITLE",
+    "ModelManagerDialog",
+]

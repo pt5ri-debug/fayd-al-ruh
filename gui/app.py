@@ -2821,6 +2821,53 @@ class FaydGUI:
         """Drop the closed Characters window's reference, so it is not held alive."""
         self._characters_dialog = None
 
+    def _open_model_manager(self) -> None:
+        """Open (or focus) the Model Manager window.
+
+        The sidebar's **Model Manager** entry opens this: one window that lists
+        every model the build knows about, shows the chosen one's record and
+        settings, and runs the safe operations (inspect, check, load, test,
+        unload, forget). One window is kept and reused, so clicking the entry
+        twice raises the window already open.
+        """
+        existing = getattr(self, "_model_manager_dialog", None)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:  # the window was closed out from under us
+                self._model_manager_dialog = None
+
+        from gui.model_manager_dialog import ModelManagerDialog
+
+        self._model_manager_dialog = ModelManagerDialog(
+            self.root,
+            self._model_manager_service(),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=self._forget_model_manager,
+        )
+
+    def _model_manager_service(self):
+        """The service the Model Manager window drives.
+
+        A real :class:`gui.model_manager.ModelManagerService` by default.
+        ``model_manager_service_factory`` may be set to build a lighter one, so a
+        test can open the window without a full data directory.
+        """
+        factory = getattr(self, "model_manager_service_factory", None)
+        if factory is not None:
+            return factory()
+        from gui.model_manager import ModelManagerService
+
+        return ModelManagerService(data_dir())
+
+    def _forget_model_manager(self) -> None:
+        """Drop the closed Model Manager window's reference, so it is not held alive."""
+        self._model_manager_dialog = None
+
     def _open_image_gen(self) -> None:
         """Open the text-to-image screen as a separate window."""
         from gui.image_gen_dialog import ImageGenDialog
@@ -3222,6 +3269,10 @@ class FaydGUI:
         # The Characters entry opens the character management window.
         if action.key in {"characters", "characters-shareable"}:
             self._open_characters()
+            return
+        # The Model Manager entry opens its own window (the listing is long).
+        if action.key == "models":
+            self._open_model_manager()
             return
         # The text-to-image screen likewise has its own window.
         if action.key == "image":

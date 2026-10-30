@@ -2260,6 +2260,60 @@ Arabic is kept as secondary aliases where useful.
   (`_strip_markdown`) so the engine speaks words, not `**`/backticks. Reading runs
   on the worker thread and reports honestly: a missing engine says to install
   espeak-ng, and a silent render is named as such rather than shown as success.
+- `core/model_manager.py` — the **Model Manager**, the one central place that
+  discovers, registers, inspects, checks, loads, tests, and unloads the project's
+  language models, and reports what a download *would* be. It is a **view** over
+  the facts that already exist, never a second source of truth: the shipped
+  catalog comes from `core.language_models.all_language_models()`, the user's own
+  records from `core.model_registry.ModelRegistry` (a `JsonStore` document under
+  the data folder), the files are inspected by `core.model_files`, the inference
+  settings by `core.model_settings`, and the runtimes by
+  `core.model_runtime`'s adapters. `ModelManager(root, *, registry, log,
+  adapter_factory, catalog)` exposes two test seams (`adapter_factory` and
+  `catalog`) so the whole subsystem is exercised with no runtime and no weights.
+  `list_models`/`ready_models`/`get`/`compatibility`/`adapter`/`status`/
+  `discover`/`import_custom_models`/`load`/`unload`/`test`/`inference` are the
+  operations; every one reports honestly (a state of `ready` /
+  `not-downloaded` / `missing` / `damaged` / `unknown`, a `CompatibilityReport`
+  with its reasons, an `OperationResult`). **It never fetches weights itself** --
+  that stays with the engines behind their own permission and human-approval
+  gates -- and it never touches the training pipeline.
+  **Task-based model selection** is the manager's answer to "which model should
+  answer this?" (`TASKS` maps a task -- `chat`, `code`, `presentation`,
+  `petroleum`, `companion`, `religion` -- to the catalog engine(s) that suit it);
+  `models_for_task(task)` returns the ready models, the task's own engine first
+  and every other ready model after, so a task with a dedicated engine still
+  falls back to whatever else can answer, and `select_for_task(task)` returns the
+  single best or `None` (the honest "nothing here can answer this"). An unknown
+  task yields nothing rather than raising. Surfaced by
+  `gui/model_manager.ModelManagerService` (`task_names`/`models_for_task`/
+  `select_for_task`), the window's sidebar *Tasks* block (which names the model
+  in force per task), and `python -m cli models select [TASK]`.
+- `core/model_registry.py` / `core/model_runtime.py` / `core/model_settings.py` /
+  `core/model_files.py` / `core/model_log.py` — the Model Manager's five support
+  modules: the durable **registry** (`ModelRegistry`, `ModelRecord`,
+  `ModelNotFoundError`, `RegistryError`, `ConfirmationRequired`; a `JsonStore`
+  document, `SOURCE_LOCAL`/`SOURCE_CATALOG`/`SOURCE_TRAINED`), the **runtime
+  adapters** (`RuntimeAdapter` protocol, `RuntimeCapabilities`/`RuntimeStatus`/
+  `LoadResult`/`InferenceResult`, `RuntimeUnavailable`/`UnsupportedCapability`,
+  and the `RUNTIME_LLAMA_CPP`/`RUNTIME_OLLAMA`/`RUNTIME_INPROCESS_TRAINED`/
+  `RUNTIME_CLOUD` names), the **inference settings** (`ModelSettings` with the
+  project defaults -- temperature 0.7, top-p 0.95, context 4096, max tokens 512),
+  the **file inspection** (`inspect_model_file`/`ModelFileError`, reading a
+  GGUF's own header for architecture/context/parameter count and never executing
+  it), and the **operations log** (`ModelLog`, `ModelEvent`, bounded and
+  append-only). Each is dependency-light and Tk-free.
+- `gui/model_manager.py` / `gui/model_manager_dialog.py` / `cli/models.py` — the
+  Model Manager's three **surfaces**, all driving the *same* core API so they can
+  never disagree: the Tk-free `ModelManagerService` (`ManagerSnapshot`/`ModelRow`/
+  `ModelDetail`/`OperationReport`, `run_in_background` for the worker thread), the
+  window (opened from the sidebar's *Model Manager* entry,
+  `gui/app.py:_open_model_manager`), and the CLI
+  (`python -m cli models list|status|runtimes|discover|register|import-custom|
+  show|inspect|check|load|unload|test|settings|update|remove|select|log`, wired in
+  `cli/__main__.py` as `models`/`model-manager`). Exit codes: `0` success, `2`
+  invalid arguments, `3` the model is unknown or not usable, `4` a gate refused
+  the operation, `5` an unexpected failure.
 - `core/language_models.py` — the **one language-model catalog** the whole
   program reads. Before it, each mouth knew only its *own* models
   (`core.ultron.CATALOG`, `core.vision_model.CATALOG`, `core.banner`/
