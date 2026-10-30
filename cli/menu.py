@@ -373,6 +373,11 @@ def run_voice_studio(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.voice_studio", argv)
 
 
+def run_characters(argv: Sequence[str] = ()) -> int:
+    """Manage the seven characters and the project's own model."""
+    return _run_module("cli.characters", argv)
+
+
 def run_analogy(argv: Sequence[str] = ()) -> int:
     """Reason by analogy over the project's own concept graph."""
     return _run_module("cli.analogy", argv)
@@ -539,6 +544,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Scene Studio: build, pose, and render a 3D figure locally", run_scene3d, ("status",)),
     ("Scene Studio: render the built-in figure to a PNG", run_scene3d, ("render",)),
     ("Model chat windows: each model's own name, logo, voice, and model", run_model_chat, ("mouths",)),
+    ("Characters: manage the seven characters and the project's own model", run_characters, ("list",)),
     (
         "Speech-engine studios: read a document aloud per engine (voice + mood)",
         run_voice_studio,
@@ -693,6 +699,7 @@ __all__ = [
     "run_analogy",
     "run_banner",
     "run_banner_chat",
+    "run_characters",
     "run_chat",
     "run_choice",
     "run_cloud",

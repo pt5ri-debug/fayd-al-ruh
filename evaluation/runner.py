@@ -21,6 +21,7 @@ from core.belief import Belief
 from core.belief_revision import BeliefRevisionEngine
 from core.causal_link import CausalLink
 from core.causal_paths import causal_reasoning_accuracy, controller_causal_accuracy
+from core.character_isolation_gate import character_isolation_accuracy
 from core.cognitive_controller import CognitiveController
 from core.curriculum_knowledge import curriculum_coverage_score
 from core.embeddings import evaluate_held_out
@@ -132,6 +133,12 @@ class EvaluationMetrics:
     """An Arabic answer that names concepts must name them readably (Phase 51):
     the share of held-out Arabic questions whose body carries no snake_case
     identifier (``shut_in``, ``injection_pattern``)."""
+
+    character_isolation_accuracy: float
+    """The share of held-out isolation and knowledge-sharing judgements the
+    backend satisfies: a cross-character read refused, the main model kept out of
+    Natasha's store, provenance carried onto its own copy, no duplicate on a
+    second share (Phase: independent characters)."""
 
     semantic_separation: float
     # Aggregate
@@ -954,6 +961,15 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         ARABIC_READABLE_EXPECTATIONS, answer_for=_lead_answer_for()
     )
 
+    # Character isolation and sharing: held-out judgements about the seven
+    # characters' independent learning stores and the main model's controlled
+    # knowledge sharing -- with negative controls (a cross-character read must be
+    # refused, the main model must never reach Natasha's records, and a hand-edited
+    # configuration must not be able to enable sharing for her). This is the gate
+    # for the character upgrade: a regression that opened one boundary fails here
+    # even though the unit tests that pinned the good case still pass.
+    character_isolation_value = character_isolation_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1016,6 +1032,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         path_value,
         arabic_path_value,
         arabic_readable_value,
+        character_isolation_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1065,6 +1082,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         answer_path_accuracy=round(path_value, 6),
         arabic_answer_path_accuracy=round(arabic_path_value, 6),
         arabic_readable_body_accuracy=round(arabic_readable_value, 6),
+        character_isolation_accuracy=round(character_isolation_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

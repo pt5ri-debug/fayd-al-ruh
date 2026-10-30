@@ -2775,6 +2775,52 @@ class FaydGUI:
         if dialogs is not None:
             dialogs.pop(source, None)
 
+    def _open_characters(self) -> None:
+        """Open (or focus) the Characters management window.
+
+        The sidebar's **Characters** entry opens this: one window that lists the
+        seven characters and the project's own model, and shows the chosen one's
+        full editable configuration with an APPLY button. One window is kept and
+        reused, so clicking the entry twice raises the window already open.
+        """
+        existing = getattr(self, "_characters_dialog", None)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:  # the window was closed out from under us
+                self._characters_dialog = None
+
+        from gui.character_dialog import CharacterManagerDialog
+
+        self._characters_dialog = CharacterManagerDialog(
+            self.root,
+            self._character_service(),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=self._forget_characters,
+        )
+
+    def _character_service(self):
+        """The service the Characters window drives.
+
+        A real :class:`gui.character_manager.CharacterManagerService` by default.
+        ``character_service_factory`` may be set to build a lighter one, so a test
+        can open the window without a full data directory.
+        """
+        factory = getattr(self, "character_service_factory", None)
+        if factory is not None:
+            return factory()
+        from gui.character_manager import CharacterManagerService
+
+        return CharacterManagerService(data_root=data_dir())
+
+    def _forget_characters(self) -> None:
+        """Drop the closed Characters window's reference, so it is not held alive."""
+        self._characters_dialog = None
+
     def _open_image_gen(self) -> None:
         """Open the text-to-image screen as a separate window."""
         from gui.image_gen_dialog import ImageGenDialog
@@ -3172,6 +3218,10 @@ class FaydGUI:
         # running the headless prompt (which has no terminal to read from here).
         if action.key == "import-center":
             self._open_import_center()
+            return
+        # The Characters entry opens the character management window.
+        if action.key in {"characters", "characters-shareable"}:
+            self._open_characters()
             return
         # The text-to-image screen likewise has its own window.
         if action.key == "image":

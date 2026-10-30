@@ -321,6 +321,136 @@ Arabic is kept as secondary aliases where useful.
   `wrap_character(mouth, assistant)` returns a non-character mouth untouched, so
   it is safe to call on every mouth; `is_character`/`CHARACTER_MOUTHS` say which
   mouths have a character. Nothing here imports Tk or loads a model.
+  **The personality is configuration-driven** (Phase: independent characters): the
+  standing instruction is rendered from the character's saved
+  `core.character_config.CharacterConfig` (loaded through
+  `core.character_registry.default_registry()`) rather than from the hard-coded
+  persona alone, so an edit in the Characters window really changes how the
+  character speaks -- while the persona's own identity, traits, and rules stay the
+  *defaults*, so a character that was never edited behaves exactly as before. A
+  `CharacterMouth(..., registry=, learning_store=)` seam lets a test inject both,
+  and `reload_config()` re-reads the configuration so an APPLY is in force on the
+  next answer. Every exchange is *also* written as a provenance-carrying
+  `LearningRecord` into the character's own isolated store through
+  `core.learning_pipeline` (the record's source is `internet` when the answer came
+  from the web, `language_model` otherwise; a record is never born verified, and a
+  failure is `best_effort` so it can never break a chat).
+- `core/learning_isolation.py` — **who exists and where their records live**: the
+  one source of truth for the seven characters (`CHARACTER_OWNERS`) and the project
+  model (`MAIN_MODEL_OWNER = "fayd_al_ruh"`), the private/shareable policy
+  (`PRIVATE_OWNERS = {natasha}`, `SHAREABLE_OWNERS` = the other six), and the one
+  path resolver `store_dir(owner)` / `store_dir_for(owner, data_root)`
+  (`data/learning/fayd_al_ruh/main` for the model,
+  `.../characters/<key>` for a character). `owner_for()` accepts either vocabulary
+  (`sources`/`jarvis`, `model`/`fayd_al_ruh`); `decide`/`assert_read`/`assert_owner`
+  are the pure access guard every read/write path calls **before** resolving a
+  directory, so isolation is structural rather than a policy flag. Nothing here
+  imports Tk or loads a model.
+- `core/learning_records.py` — `LearningRecord`, a **frozen** record carrying every
+  field the task requires (a unique `record_id`, `owner`, `source_type` +
+  `source_reference`, `question`, `answer`, `knowledge`, `created_at`,
+  `confidence`, `verification`, `evidence`, `learning_status`, and the provenance
+  fields `source_character`/`source_record_id`/`source_date`). A revision is a
+  *new* record, so the original is never mutated. `SOURCE_*` (language_model,
+  internet, user, character, system) and `STATUS_*` (pending, provisional,
+  verified, rejected, contradicted, superseded) are closed sets, and `trusted` is
+  true only for provisional/verified.
+- `core/character_learning_store.py` — **one owner's independent store**, built for
+  exactly one owner (its path resolved from the isolation policy, never from a
+  caller, so it has no method that takes another owner's key). On disk:
+  `records.jsonl` (append-only -- nothing is rewritten, a revision appends a new
+  version pointing back at the one it supersedes) and `stats.json` (an atomically
+  replaced count by status). Reading is streaming and bounded (`recent` keeps only
+  the tail), a corrupt line is skipped and counted rather than crashing the reader,
+  and `export`/`clear` are the backup and the confirmed reset.
+- `core/learning_pipeline.py` — **the one controlled path** from a response to a
+  stored record: receive → extract statements → identify factual statements →
+  check contradictions → evaluate confidence → store → (optionally) update the
+  graph through the existing bounded learner → preserve the original and its
+  provenance → allow later correction. It **never auto-verifies** (a fresh record
+  is `provisional` or `rejected`; only an explicit `verify()` reaches `verified`)
+  and **preserves contradictions** (the held record is untouched, the new one is
+  marked `contradicted` with the note naming it). Learning is *not* fine-tuning:
+  the GGUF weights are never touched.
+- `core/knowledge_sharing.py` — the **controlled knowledge-sharing interface** for
+  the main model. `KnowledgeSharing.learn_from(character)` refuses a private
+  character **before it resolves any path** (so Natasha's records are never even
+  opened) and logs the refusal; for a permitted character each trusted record
+  becomes a **new** record owned by the main model carrying `source_character`,
+  `source_record_id`, `source_date`, and the source status (knowledge kept
+  verbatim, the copy starting `provisional`). The source store is opened read-only
+  and is never written, and a second share does not duplicate (the source id is the
+  dedup key). The **knowledge is shared but the private exchange is not**: the
+  source's `question`/`answer` are copied over only when the source character's own
+  configuration sets `share_conversation_history`, and the check fails **closed**
+  (an unreadable configuration exposes nothing) -- so a plain share can never leak a
+  private conversation, and Natasha is refused before the flag is even read.
+  `learn_from_all()` iterates `SHAREABLE_OWNERS` only, so Natasha can
+  never be reached by "share all".
+- `core/learning_audit.py` — the append-only learning audit (`LearningAudit`),
+  recording every learn/verify/status/reset and every **refused** cross-character
+  access with its actor and owner.
+- `core/character_config.py` — the **structured, editable configuration**, one
+  serialisable object per character with five sections: `GeneralConfig` (name,
+  description, role, active), `PersonalityConfig` (traits, behaviour, communication
+  and reasoning style, formality, emotional expression, response length, preferred
+  language `match`/`en`/`ar`, system instructions, rules, knowledge domain,
+  objectives), `ModelConfig` (catalog key, provider, model id/path, temperature,
+  top-p, context, max tokens, model-specific system prompt, active), `VoiceConfig`
+  (engine from a closed set, voice, model path, language, gender, speed, pitch,
+  volume, active) and `LearningSettings` (enabled, learn-from-model,
+  learn-from-internet, verification/confidence thresholds, mode, sharing flags).
+  The defaults are **derived from the existing `PERSONAS`**, so a character that
+  was never edited behaves exactly as before. `validate()` is the one validator;
+  `replace_general`/`replace_personality`/`replace_model`/`replace_voice`/
+  `replace_learning` keep every editor from reaching into a section by name; and
+  `effective_sharing` is the flag **and** `not is_private`, so a hand-edited
+  configuration can never enable sharing for Natasha. `owner_names()` lists the
+  eight owners.
+- `core/character_registry.py` — persistence and the **APPLY**. Shipped read-only
+  defaults live in the tracked `config/` folder; the applied configuration lives
+  under the git-ignored `data/config/`, so a program update can fast-forward the
+  shipped defaults without overwriting what the user configured. `apply()` validates
+  first, snapshots the current configuration, saves atomically, runs the caller's
+  activation hook, and **restores the snapshot if the hook raises** -- a character
+  is never left half-configured. `default_registry()` is the shared instance.
+- `core/character_isolation_gate.py` — the **held-out gate** for isolation and
+  sharing (`ISOLATION_JUDGEMENTS` + `character_isolation_accuracy`), a catalogue of
+  hand-written scenarios run against the real store, sharing, and configuration --
+  with **negative controls** (a cross-character read, a read of Natasha's records,
+  a "share all" that must not reach Natasha, a hand-edited config that must not
+  enable her sharing). Wired into `evaluation` as the `character_isolation_accuracy`
+  metric, so a regression that opened one boundary fails the gate.
+- `gui/character_manager.py` — the **Tk-free engine** behind the Characters window
+  and the CLI: `CharacterManagerService` (`summaries`/`config`/`validate`/`apply`/
+  `reset`, `model_choices`/`voice_choices`/`voice_support`, the store reads
+  `stats`/`records`/`search`/`history`/`verify`/`reject`/`export`/`reset_learning`,
+  the sharing `shareable_characters`/`can_share`/`share_reason`/`learn_from_character`/
+  `learn_from_all_characters`/`main_model_records`, and the `audit_tail`/`denials`).
+  `config()` **refuses an unknown key** rather than answering with a made-up
+  character, and every store access goes through the policy, so no method can be
+  pointed at another character's records.
+- `gui/character_dialog.py` — the **Characters window**: one window listing the
+  seven characters and the project model (Natasha marked private), with the chosen
+  character's full editable page (A. General · B. Personality · C. Language model ·
+  D. Voice · E. Learning · F. Memory and learning management), a **Knowledge
+  sharing** block stating who may share and who may not, and an **APPLY** button
+  that validates, saves, activates what it can now, names anything that needs a
+  restart, and rolls back on failure. Built like every other window (the same
+  `Theme`, `RoundedBox`, `SidebarColumn`, `window_controls`, and worker-thread/
+  queue pattern). Opened by `FaydGUI._open_characters()` from the sidebar's visible
+  **Characters** entry (`gui/actions.py`, its own **Characters** group); one window
+  is kept and reused.
+- `cli/characters.py` — the **headless twin** of that window (`list`/`show`/`set`/
+  `reset`/`stats`/`records`/`search`/`verify`/`reject`/`export`/`reset-learning`/
+  `share`/`main`/`audit`/`shareable`, wired as `python -m cli characters`). It
+  drives the *same* `CharacterManagerService`, so the CLI and the window share one
+  set of characters, one applied configuration, one store per character, and one
+  sharing gate. Exit codes: `0` success, `2` invalid arguments, `3` the character or
+  record is unknown, `4` a gate refused the operation, `5` an unexpected failure.
+- `docs/CHARACTER_ARCHITECTURE.md` / `docs/CHARACTER_IMPLEMENTATION_REPORT.md` —
+  the Phase-1 analysis and the implementation report for the independent-character
+  upgrade.
 - `core/ultron.py` — **Ultron**, the project's *general* mouth: a real, advanced
   model that runs **locally** through `llama-cpp-python` and speaks on every
   field of life (no subject filter), unlike the petroleum-grounded assistant and

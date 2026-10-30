@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from cli.menu import (
     run_audio_speech,
     run_banner_chat,
+    run_characters,
     run_cloud_chat,
     run_code_studio,
     run_curriculum,
@@ -70,6 +71,8 @@ SIDEBAR_LABELS: dict[str, str] = {
     "natasha-mood": "Mood",
     "natasha-initiative": "Initiative",
     "natasha-relationship-memory": "Relationship memory",
+    "characters": "Characters",
+    "characters-shareable": "Who may share knowledge",
     "qwen-speech": "Qwen3 — status",
     "qwen-speech-asr": "Qwen3 — download ASR",
     "qwen-speech-tts": "Qwen3 — download TTS",
@@ -160,6 +163,15 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         "Assistant",
         "✨",
         ("insight",),
+    ),
+    ActionGroup(
+        "characters",
+        "Characters",
+        "🧑",
+        (
+            "characters",
+            "characters-shareable",
+        ),
     ),
     ActionGroup(
         "knowledge",
@@ -337,6 +349,19 @@ ACTIONS: tuple[GuiAction, ...] = (
         "Answer from Hakeem (scholar of religion and history)",
         run_hakeem_chat,
         (),
+        hidden=True,
+    ),
+    GuiAction(
+        "characters",
+        "Characters: manage the seven characters and the project's own model",
+        run_characters,
+        ("list",),
+    ),
+    GuiAction(
+        "characters-shareable",
+        "Characters: which characters may share knowledge with the main model",
+        run_characters,
+        ("shareable",),
         hidden=True,
     ),
     GuiAction("learn", "Continuous learning and regression gate", run_learn, ()),
