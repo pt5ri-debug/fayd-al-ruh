@@ -246,9 +246,16 @@ def test_model_settings_come_from_the_environment(monkeypatch: pytest.MonkeyPatc
     assert config.think is False
 
 
-def test_the_client_is_built_with_the_configured_settings() -> None:
+def test_the_client_is_built_with_the_configured_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """The cap and the reasoning toggle reach the Ollama client, not just the config."""
+    from companion import model as companion_model
     from core.coder_model import OllamaCoderClient
+
+    # Pin the Ollama fallback regardless of what this machine has installed (the
+    # GGUF runtime and a model in the shared folder), so the test is deterministic
+    # on a developer box as well as on a clean CI runner.
+    monkeypatch.setattr(companion_model, "extra_available", lambda: False)
+    monkeypatch.setattr(companion_model, "find_model_file", lambda root=None: None)
 
     config = CompanionConfig(
         db_path=None, persistent=False, max_tokens=4096, think=False, timeout=600.0
@@ -323,9 +330,13 @@ def test_the_ollama_payload_carries_the_window_and_keep_alive() -> None:
     assert payload["keep_alive"] == "30m"  # type: ignore[index]
 
 
-def test_the_configured_client_carries_the_fast_defaults() -> None:
+def test_the_configured_client_carries_the_fast_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """The fast defaults reach the Ollama client, not just the config object."""
+    from companion import model as companion_model
     from core.coder_model import OllamaCoderClient
+
+    monkeypatch.setattr(companion_model, "extra_available", lambda: False)
+    monkeypatch.setattr(companion_model, "find_model_file", lambda root=None: None)
 
     agent = CompanionAgent(CompanionConfig(db_path=None, persistent=False))
     client = agent._active_client()
@@ -395,9 +406,13 @@ def test_the_in_process_client_leaves_the_prompt_alone_when_thinking_is_on(
 
 
 # -- the model layer ------------------------------------------------------
-def test_the_client_is_natashas_own_ollama_client() -> None:
+def test_the_client_is_natashas_own_ollama_client(monkeypatch: pytest.MonkeyPatch) -> None:
     """Natasha speaks through her own client, not the coding model's directly."""
+    from companion import model as companion_model
     from companion.model import NatashaModelClient, OllamaNatashaClient
+
+    monkeypatch.setattr(companion_model, "extra_available", lambda: False)
+    monkeypatch.setattr(companion_model, "find_model_file", lambda root=None: None)
 
     agent = CompanionAgent(CompanionConfig(db_path=None, persistent=False))
     client = agent._active_client()
@@ -1117,9 +1132,14 @@ def test_cli_download_can_pull_the_tag_into_ollama(monkeypatch, capsys) -> None:
 
 def test_cli_status_names_the_runtime(tmp_path: Path, monkeypatch, capsys) -> None:
     from ai import natasha
+    from companion import model as companion_model
 
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("FAYD_NATASHA_BACKEND", "gguf")
+    # Pin the "runtime absent" case, whatever this machine has installed, so the
+    # next-step message is the pip install rather than a real model's absence.
+    monkeypatch.setattr(companion_model, "extra_available", lambda: False)
+    monkeypatch.setattr(companion_model, "find_model_file", lambda root=None: None)
     code = natasha.main(["status", "--json"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["backend"] == "in-process"

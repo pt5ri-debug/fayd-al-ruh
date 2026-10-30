@@ -396,6 +396,7 @@ def test_hakeems_own_messages_name_his_folder_and_extra(tmp_path: Path, monkeypa
     rather than at Natasha's folder and extra.
     """
     import hakeem.model as model
+    from companion import model as companion_model
     from companion.model import CompanionModelUnavailable
 
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
@@ -407,11 +408,14 @@ def test_hakeems_own_messages_name_his_folder_and_extra(tmp_path: Path, monkeypa
     assert "hakeem" in message
     assert "natasha" not in message.lower()
 
-    monkeypatch.setattr(model, "extra_available", lambda: False)
+    # The client class is the companion's, so its runtime check resolves in the
+    # companion module; patch it there to pin the "runtime absent" message.
+    monkeypatch.setattr(companion_model, "extra_available", lambda: False)
     runtime = model.build_client(backend="gguf")
     detail = runtime.missing_detail()  # type: ignore[attr-defined]
     assert "Hakeem's in-process model" in detail
     assert "requirements-hakeem.txt" in detail
+    assert "requirements-natasha.txt" not in detail
 
 
 def test_hakeem_model_status_is_honest_without_a_server(tmp_path: Path, monkeypatch) -> None:

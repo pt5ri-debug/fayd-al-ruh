@@ -281,7 +281,18 @@ def test_download_reports_the_missing_runtime_instead_of_failing_obscurely(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """With approval but no ``huggingface_hub``, the error names the real next step."""
-    monkeypatch.setattr(module, "extra_available", lambda: False)
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _no_hub(name: str, *args: object, **kwargs: object):
+        if name == "huggingface_hub":
+            raise ImportError("No module named 'huggingface_hub'")
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    # The download checks the *import*, not ``extra_available``, so simulate the
+    # missing runtime by making the import fail -- and never touch the network.
+    monkeypatch.setattr(builtins, "__import__", _no_hub)
     with pytest.raises(PresentationModelUnavailable) as excinfo:
         download_model("qwen3-8b", root=tmp_path, approved=True)
     assert "requirements-presentation.txt" in str(excinfo.value)
