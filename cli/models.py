@@ -453,6 +453,7 @@ def _cmd_select(args: argparse.Namespace) -> int:
 def _cmd_log(args: argparse.Namespace) -> int:
     mgr = _manager()
     events = mgr.log_tail(args.limit)
+
     if args.json:
         print(
             json.dumps(
@@ -478,6 +479,119 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
     for event in events:
         print(event.describe())
+    return 0
+
+
+def _cmd_search(args: argparse.Namespace) -> int:
+    """Filter the listing by free text and/or state -- a *view*, never a new list."""
+    mgr = _manager()
+    needle = (args.query or "").strip().casefold()
+    state = (args.state or "").strip()
+    runtime = (args.runtime or "").strip()
+    rows: list[Any] = []
+    for entry in mgr.list_models(include_catalog=not args.registered_only):
+        record = entry.record
+        if state and entry.state != state:
+            continue
+        if runtime and entry.runtime != runtime:
+            continue
+        if needle:
+            haystack = " ".join(
+                (
+                    entry.display_name,
+                    entry.model_id,
+                    str(record.path or ""),
+                    entry.runtime,
+                    record.quantization,
+                    record.source,
+                )
+            ).casefold()
+            if needle not in haystack:
+                continue
+        rows.append(entry)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "query": args.query or "",
+                    "state": state,
+                    "runtime": runtime,
+                    "models": [_entry_payload(entry) for entry in rows],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if not rows:
+        print("No models matched.")
+        return 3
+    print(f"{len(rows)} model(s) matched:")
+    _print_entries(tuple(rows))
+    return 0
+
+
+def _cmd_active(args: argparse.Namespace) -> int:
+    """The models currently *loaded* in their runtime."""
+    mgr = _manager()
+    entries = mgr.active_models()
+    if args.json:
+        print(
+            json.dumps(
+                {"models": [_entry_payload(entry) for entry in entries]},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if not entries:
+        print("No model is loaded right now.")
+        return 0
+    print(f"{len(entries)} model(s) loaded right now:")
+    _print_entries(entries)
+    return 0
+
+
+def _cmd_diagnostics(args: argparse.Namespace) -> int:
+    """The whole diagnostics body: machine, runtimes, active models, errors."""
+    mgr = _manager()
+    report = mgr.diagnostics()
+    if args.json:
+        resources = report.resources
+        print(
+            json.dumps(
+                {
+                    "status": {
+                        "registered": report.status.registered,
+                        "catalog": report.status.catalog,
+                        "ready": report.status.ready,
+                        "registry_path": str(report.status.registry_path),
+                        "log_events": report.status.log_events,
+                        "corrupt_records": list(report.status.corrupt_records),
+                    },
+                    "resources": (
+                        {
+                            "system": resources.system,
+                            "machine": resources.machine,
+                            "python": resources.python,
+                            "cpu_count": resources.cpu_count,
+                            "total_memory_bytes": resources.total_memory_bytes,
+                            "available_memory_bytes": resources.available_memory_bytes,
+                            "disk_free_bytes": resources.disk_free_bytes,
+                        }
+                        if resources is not None
+                        else None
+                    ),
+                    "runtimes": list(report.runtime_lines),
+                    "active": list(report.active),
+                    "errors": list(report.errors),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    print(report.describe())
     return 0
 
 
@@ -571,6 +685,24 @@ def _build_parser() -> argparse.ArgumentParser:
     log.add_argument("--limit", type=int, default=30, help="how many events to show")
     log.add_argument("--json", action="store_true", help="print JSON")
 
+    search = sub.add_parser("search", help="filter the listing by text and/or state")
+    search.add_argument("query", nargs="?", default="", help="free text to match")
+    search.add_argument("--state", help="only models in this state")
+    search.add_argument("--runtime", help="only models on this runtime")
+    search.add_argument(
+        "--registered-only", action="store_true",
+        help="only the models the user registered (skip the shipped catalog)",
+    )
+    search.add_argument("--json", action="store_true", help="print JSON")
+
+    active = sub.add_parser("active", help="the models loaded in their runtime right now")
+    active.add_argument("--json", action="store_true", help="print JSON")
+
+    diagnostics = sub.add_parser(
+        "diagnostics", help="machine, runtimes, active models, and recent errors"
+    )
+    diagnostics.add_argument("--json", action="store_true", help="print JSON")
+
     select = sub.add_parser(
         "select", help="which models suit a task (chat, petroleum, presentation, ...)"
     )
@@ -600,6 +732,9 @@ _HANDLERS = {
     "update": _cmd_update,
     "remove": _cmd_remove,
     "log": _cmd_log,
+    "search": _cmd_search,
+    "active": _cmd_active,
+    "diagnostics": _cmd_diagnostics,
     "select": _cmd_select,
 }
 

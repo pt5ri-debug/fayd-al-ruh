@@ -245,6 +245,43 @@ class ModelManagerStatus:
         return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class DiagnosticsReport:
+    """The dashboard's and the diagnostics surface's whole body, in one read.
+
+    Every field is already-computed data from the module that owns it -- the
+    machine's figures from :mod:`core.model_resources`, the runtimes' statuses,
+    the loaded models, the failures, and the log tail. Nothing here is measured
+    twice or guessed, and an empty tuple means "nothing to report", never "unknown".
+    """
+
+    status: ModelManagerStatus
+    resources: Any = None
+    runtime_lines: tuple[str, ...] = ()
+    active: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
+    recent: tuple[str, ...] = ()
+
+    def describe(self) -> str:
+        """A readable block, honest about an empty section."""
+        lines = [self.status.describe(), ""]
+        if self.resources is not None:
+            lines.append(self.resources.describe())
+            lines.append("")
+        lines.append("Active models (loaded right now)")
+        if self.active:
+            lines.extend(f"  {line}" for line in self.active)
+        else:
+            lines.append("  none — no model is loaded.")
+        lines.append("")
+        lines.append("Recent errors")
+        if self.errors:
+            lines.extend(f"  {line}" for line in self.errors)
+        else:
+            lines.append("  none recorded.")
+        return "\n".join(lines)
+
+
 class ModelManager:
     """The one place a caller asks about, and acts on, models.
 
@@ -865,6 +902,56 @@ class ModelManager:
         )
 
     # ----------------------------------------------------------- status
+
+    def active_models(self) -> tuple[ModelEntry, ...]:
+        """The models currently **loaded** in their runtime, in listing order.
+
+        "Loaded" is the runtime's own answer (its ``loaded()``), never a guess from
+        the registry: a model that is registered and ready is not thereby active.
+        A runtime that cannot be built (its extra is missing) is skipped, so asking
+        this never raises on a machine with no runtime at all.
+        """
+        active: list[ModelEntry] = []
+        for entry in self.list_models():
+            record = entry.record
+            if record.path is None:
+                continue
+            try:
+                adapter = self.adapter(record.runtime)
+            except RuntimeUnavailable:
+                continue
+            probe = getattr(adapter, "loaded", None)
+            if not callable(probe):
+                continue
+            try:
+                if probe():
+                    active.append(entry)
+            except Exception:  # a broken runtime must not blank the dashboard
+                continue
+        return tuple(active)
+
+    def diagnostics(self) -> DiagnosticsReport:
+        """Everything a diagnostics surface shows, in one honest read.
+
+        Bundles the machine's own figures (through
+        :mod:`core.model_resources`), the runtimes' own statuses, the models
+        currently loaded, the recent failures, and the operation log's tail --
+        each read from the module that owns it, so nothing is recomputed or
+        guessed.
+        """
+        from core.model_resources import system_resources
+
+        errors = tuple(
+            event for event in self.log.entries() if not event.ok
+        )[-20:]
+        return DiagnosticsReport(
+            status=self.status(),
+            resources=system_resources(),
+            runtime_lines=tuple(self.runtime_report().splitlines()),
+            active=tuple(entry.describe() for entry in self.active_models()),
+            errors=tuple(event.describe() for event in errors),
+            recent=tuple(event.describe() for event in self.log_tail(20)),
+        )
 
     def status(self) -> ModelManagerStatus:
         """The whole subsystem's state, for a status line or a diagnostics report."""

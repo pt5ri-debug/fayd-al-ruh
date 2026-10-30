@@ -31,10 +31,12 @@ from core.model_manager import (
     STATE_DAMAGED,
     STATE_MISSING,
     STATE_NOT_DOWNLOADED,
+    STATE_ORDER,
     STATE_READY,
     STATE_UNKNOWN,
     TASKS,
     CompatibilityReport,
+    DiagnosticsReport,
     ModelEntry,
     ModelManager,
     OperationResult,
@@ -142,6 +144,14 @@ class ManagerSnapshot:
     runtime_lines: tuple[str, ...] = ()
     corrupt_records: tuple[str, ...] = ()
     log_events: int = 0
+    #: The models currently *loaded* in their runtime (their ids), so a dashboard
+    #: can say what is active rather than only what is present.
+    active: tuple[str, ...] = ()
+    #: Recent failed operations, newest first, ready to show under "Errors".
+    errors: tuple[str, ...] = ()
+    #: The machine's own figures (a :class:`core.model_resources.SystemResources`),
+    #: or ``None`` when they could not be read.
+    resources: Any = None
 
     def summary(self) -> str:
         return (
@@ -189,9 +199,23 @@ class ModelManagerService:
     # ------------------------------------------------------------- snapshot
 
     def snapshot(self) -> ManagerSnapshot:
-        """Every model plus the subsystem's counts, in one read."""
+        """Every model plus the subsystem's counts, in one read.
+
+        Includes what a *dashboard* needs beyond a listing: the models currently
+        loaded, the recent failures, and the machine's own figures -- each read
+        from the module that owns it, so nothing is recomputed here.
+        """
         status = self.manager.status()
         rows = tuple(self._row(entry) for entry in self.manager.list_models())
+        active = tuple(entry.model_id for entry in self.manager.active_models())
+        errors = tuple(
+            event.describe() for event in self.manager.log_tail(50) if not event.ok
+        )[:10]
+        resources = None
+        with best_effort("read the machine's resources"):
+            from core.model_resources import system_resources
+
+            resources = system_resources()
         return ManagerSnapshot(
             rows=rows,
             registered=status.registered,
@@ -200,7 +224,55 @@ class ModelManagerService:
             runtime_lines=tuple(status.runtimes.splitlines()),
             corrupt_records=tuple(status.corrupt_records),
             log_events=status.log_events,
+            active=active,
+            errors=errors,
+            resources=resources,
         )
+
+    def search(
+        self,
+        query: str = "",
+        *,
+        state: str = "",
+        runtime: str = "",
+        rows: tuple[ModelRow, ...] | None = None,
+    ) -> tuple[ModelRow, ...]:
+        """Filter a listing by free text and by state/runtime.
+
+        A *view* over the rows already read, so the same models are never listed
+        twice. The text matches the display name, model id, path, engine, and
+        quantization, case-insensitively; an empty filter keeps everything, so a
+        blank box shows the whole library.
+        """
+        source = rows if rows is not None else self.rows()
+        needle = str(query or "").strip().casefold()
+        wanted_state = str(state or "").strip()
+        wanted_runtime = str(runtime or "").strip()
+        result: list[ModelRow] = []
+        for row in source:
+            if wanted_state and row.state != wanted_state:
+                continue
+            if wanted_runtime and row.runtime != wanted_runtime:
+                continue
+            if needle and needle not in self._haystack(row):
+                continue
+            result.append(row)
+        return tuple(result)
+
+    @staticmethod
+    def _haystack(row: ModelRow) -> str:
+        """The lower-cased text a search matches against one row."""
+        return " ".join(
+            (row.display_name, row.model_id, row.path, row.runtime, row.quantization, row.source)
+        ).casefold()
+
+    def state_names(self) -> tuple[str, ...]:
+        """Every distinct state a row can carry, in the build's honest order."""
+        return STATE_ORDER
+
+    def diagnostics(self) -> DiagnosticsReport:
+        """The whole diagnostics body, straight from the core manager."""
+        return self.manager.diagnostics()
 
     def rows(self, *, registered_only: bool = False) -> tuple[ModelRow, ...]:
         """The models as table rows, catalog first filtered if asked."""

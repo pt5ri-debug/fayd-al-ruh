@@ -5277,3 +5277,55 @@ regression monitor each can refuse a change.
   `tests/test_model_chat.py` pin the catalog, the honest status, the governed
   download, the migration, the shared model's reach into every GGUF mouth, and
   Hakeem's own model/folder.
+
+- Phase 57 — **the Model Manager reaches the GUI and the CLI as one integrated
+  surface**: the subsystem (`core/model_manager.py` and its registry, files,
+  settings, log, and runtime modules) shipped as a *backend*, but the window was
+  a plain listing and the CLI had no way to ask the two questions a user actually
+  has -- *what is loaded right now* and *what does this machine look like*. Three
+  gaps were closed **without a second application and without duplicating
+  model-management logic**; the window and the CLI both keep driving the one
+  `core.model_manager.ModelManager`. (1) **A dashboard**: `core/model_resources.py`
+  (new, dependency-free, stdlib only) reads the machine's own figures honestly --
+  `system_resources()` returns a `SystemResources` with `system`/`machine`/
+  `python`, `cpu_count`, `total_memory_bytes`/`available_memory_bytes` (Windows
+  `GlobalMemoryStatusEx` through `ctypes`, Linux `/proc/meminfo` then
+  `os.sysconf`, macOS `sysctl`), and `disk_free()`, each an honest ``None`` where
+  the platform cannot report it, with `HONESTY_LINE` stating that a *model's*
+  memory need is an estimate from its file, never a measurement. `ModelManager`
+  gained `active_models()` (the entries whose runtime reports `loaded()` -- the
+  **loaded-vs-running** distinction, read through each adapter and skipping a
+  runtime that cannot be built) and `diagnostics()` (a `DiagnosticsReport` joining
+  the status, the machine figures, the runtime lines, the active model lines, and
+  the recent **failures** from the log), whose `describe()` is the one readable
+  body. (2) **Search and filtering**: `ModelManagerService.search(query, state=,
+  runtime=, rows=)` filters a listing the caller already holds -- it never re-reads
+  the registry -- and `state_names()` exposes the manager's own `STATE_ORDER`; the
+  window gained a search box and a state selector that redraw the existing
+  `Treeview` (a *view* over rows already read), and the CLI gained `search`
+  (free text, `--state`, `--runtime`, `--registered-only`, `--json`). (3) **The
+  CLI's two new questions and the window's controls**: `python -m cli models
+  active` and `... diagnostics` (both `--json`), mirrored as the window's
+  *Run diagnostics* button and its dashboard block. **Cancellation and
+  safe-close** were added to the window: a *Cancel* control that is *cooperative*
+  (the result is dropped when it arrives, the spinner stops, and the status says
+  the running step may still finish in the background, so nothing is overstated),
+  and `_close` now cancels the pending `after` pump ticket and stops the spinner
+  before destroying the window -- a pending callback firing into a destroyed
+  window is the ``TclError`` hazard, and the ticket is what closes it.
+  `gui/model_manager.py`'s `ManagerSnapshot` now carries `active`, `errors`, and
+  `resources`, so the dashboard reads straight from the snapshot the table beside
+  it uses and the two can never disagree. Wired as the existing
+  `python -m cli models` command and the existing sidebar **Model Manager** entry
+  (no new window, no new menu framework), with two new menu entries
+  (*the models loaded right now*, *machine, runtimes, active models, and recent
+  errors*). `tests/test_model_resources.py` (new) pins the figure parsing and the
+  honest ``None``; `tests/test_model_manager.py` pins `active_models` (empty
+  before a load, the loaded model after, a runtime that cannot be built) and
+  `diagnostics`; `tests/test_model_manager_service.py` pins `search` (name, path,
+  state, the blank query, no re-read), `state_names`, the snapshot's active/
+  resources, and `diagnostics`; `tests/test_models_cli.py` pins `search`/`active`/
+  `diagnostics` (plain and `--json`) and the two menu entries;
+  `tests/test_model_manager_window.py` pins the search box, the state filter, the
+  dashboard text, and the diagnostics button, with the stub service extended to
+  the same interface.

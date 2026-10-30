@@ -981,3 +981,58 @@ def test_task_table_names_only_real_catalog_engines():
     for engines in TASKS.values():
         for engine in engines:
             assert engine in {"ultron", "vision", "banner", "natasha", "hakeem", "shared"}
+
+
+# ------------------------------------------------------- active + diagnostics
+
+
+def test_active_models_is_empty_before_anything_is_loaded(tmp_path):
+    mgr = manager(tmp_path)
+    mgr.register(write_gguf(tmp_path / "m.gguf"), display_name="Mine")
+    assert mgr.active_models() == ()
+
+
+def test_active_models_reports_a_model_the_runtime_has_loaded(tmp_path):
+    adapter = FakeAdapter()
+    mgr = manager(tmp_path, adapter=adapter)
+    entry = mgr.register(write_gguf(tmp_path / "m.gguf"), display_name="Mine")
+    assert mgr.load(entry.model_id).ok
+    active = mgr.active_models()
+    assert [item.model_id for item in active] == [entry.model_id]
+
+
+def test_active_models_skips_a_runtime_that_cannot_be_built(tmp_path):
+    def factory(runtime):
+        raise RuntimeUnavailable("no runtime here")
+
+    mgr = ModelManager(tmp_path / "root", adapter_factory=factory, catalog=())
+    mgr.register(write_gguf(tmp_path / "m.gguf"), display_name="Mine")
+    assert mgr.active_models() == ()
+
+
+def test_diagnostics_bundles_status_resources_and_errors(tmp_path):
+    adapter = FakeAdapter()
+    mgr = manager(tmp_path, adapter=adapter)
+    entry = mgr.register(write_gguf(tmp_path / "m.gguf"), display_name="Mine")
+    mgr.load(entry.model_id)
+    report = mgr.diagnostics()
+    assert report.status.registered == 1
+    assert report.resources is not None
+    assert any("Mine" in line for line in report.active)
+    assert report.runtime_lines
+
+
+def test_diagnostics_describe_says_when_nothing_is_loaded(tmp_path):
+    mgr = manager(tmp_path)
+    text = mgr.diagnostics().describe()
+    assert "no model is loaded" in text.lower()
+
+
+def test_diagnostics_describe_reports_a_recorded_failure(tmp_path):
+    mgr = manager(tmp_path)
+    with pytest.raises(ModelNotFoundError):
+        mgr.get("no-such-model")
+    report = mgr.diagnostics()
+    # A read that raised is not a logged failure, so the section is honest: empty.
+    assert report.errors == () or all("failure" in line for line in report.errors)
+

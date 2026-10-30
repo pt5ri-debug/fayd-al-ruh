@@ -83,6 +83,8 @@ class ModelManagerDialog:
         self._on_close = on_close
         self._closed = False
         self._busy = False
+        self._cancelled = False
+        self._after_id: str | None = None
         self._rows: list[ModelRow] = []
         self._detail: ModelDetail | None = None
         self._selected_id = ""
@@ -135,6 +137,7 @@ class ModelManagerDialog:
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=800,
         ).pack(anchor="w", pady=(2, 0))
         self._spinner = ttk.Progressbar(inner, mode="indeterminate", length=120)
+        self._cancel_button = self._button(inner, "Cancel", self._on_cancel)
         install_window_controls(
             self.window, inner, theme=theme, typography=self._type, on_close=self._close
         )
@@ -206,6 +209,17 @@ class ModelManagerDialog:
         )
         self._runtimes_label.pack(fill="x", padx=14, pady=(4, 10))
 
+        diagnostics = column.add("diagnostics", "Diagnostics", icon="🩺")
+        self._diagnostics_button = self._button(
+            diagnostics, "Run diagnostics", self._on_diagnostics
+        )
+        self._diagnostics_button.pack(fill="x", padx=12, pady=(4, 4))
+        self._diagnostics_label = tk.Label(
+            diagnostics, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._diagnostics_label.pack(fill="x", padx=14, pady=(0, 10))
+
         log = column.add("log", "Operations log", icon="🧾")
         log_wrap = tk.Frame(log, bg=theme.surface)
         log_wrap.pack(fill="both", expand=True, padx=12, pady=(4, 12))
@@ -235,6 +249,36 @@ class ModelManagerDialog:
             font=self._type.font("2xs"),
         )
         self._status_label.pack(side="right")
+
+        # The filter row: a free-text box and a state selector, both a *view* over
+        # the rows already read (never a second listing), so searching never
+        # re-reads the registry.
+        filters = tk.Frame(col, bg=theme.base)
+        filters.pack(fill="x", padx=16, pady=(0, 6))
+        tk.Label(
+            filters, text="Search", bg=theme.base, fg=theme.text_secondary,
+            font=self._type.font("2xs"),
+        ).pack(side="left")
+        self._search_var = tk.StringVar(value="")
+        self._search = tk.Entry(
+            filters, textvariable=self._search_var, width=28, bg=theme.base,
+            fg=theme.foreground, relief="flat", highlightthickness=1,
+            highlightbackground=theme.border_subtle, font=self._type.font("2xs"),
+        )
+        self._search.pack(side="left", padx=(6, 12))
+        self._search_var.trace_add("write", lambda *_: self._fill_table())
+        tk.Label(
+            filters, text="State", bg=theme.base, fg=theme.text_secondary,
+            font=self._type.font("2xs"),
+        ).pack(side="left")
+        self._state_var = tk.StringVar(value="")
+        self._state_filter = ttk.Combobox(
+            filters, textvariable=self._state_var, width=14, state="readonly",
+            values=("all", *self.service.state_names()),
+        )
+        self._state_filter.set("all")
+        self._state_filter.pack(side="left", padx=(6, 12))
+        self._state_filter.bind("<<ComboboxSelected>>", lambda _e: self._fill_table())
 
         # The model table. ``ttk.Treeview`` gives real columns and selection, so a
         # listing stays readable without a hand-built grid of labels.
@@ -352,9 +396,35 @@ class ModelManagerDialog:
         self._summary_label.configure(text=snapshot.summary())
         self._runtimes_label.configure(text="\n".join(snapshot.runtime_lines) or "none")
         self._tasks_label.configure(text=self._task_summary())
+        self._diagnostics_label.configure(text=self._dashboard_text(snapshot))
         self._render_log()
         self._fill_table()
         self._set_status(snapshot.summary())
+
+    def _dashboard_text(self, snapshot: ManagerSnapshot) -> str:
+        """The one-line-per-fact dashboard body: active models, errors, machine.
+
+        Read straight from the snapshot, so it can never disagree with the table
+        beside it. An empty section says so rather than being hidden.
+        """
+        lines: list[str] = []
+        if snapshot.active:
+            lines.append(f"{len(snapshot.active)} model(s) loaded now.")
+        else:
+            lines.append("No model is loaded right now.")
+        if snapshot.errors:
+            lines.append(f"{len(snapshot.errors)} recent error(s).")
+        else:
+            lines.append("No recent errors.")
+        resources = snapshot.resources
+        if resources is not None:
+            memory = resources.total_memory_bytes
+            if memory:
+                lines.append(f"RAM: {memory / 1e9:.1f} GB total.")
+            cores = resources.cpu_count
+            if cores:
+                lines.append(f"CPU cores: {cores}.")
+        return "\n".join(lines)
 
     def _task_summary(self) -> str:
         """Which model answers each task right now, or the honest next step."""
@@ -373,8 +443,17 @@ class ModelManagerDialog:
 
     def _fill_table(self) -> None:
         selected = self._selected_id
+        state = self._state_var.get()
+        if state == "all":
+            state = ""
+        try:
+            rows = self.service.search(
+                self._search_var.get(), state=state, rows=tuple(self._rows)
+            )
+        except Exception:
+            rows = tuple(self._rows)
         self._table.delete(*self._table.get_children())
-        for row in self._rows:
+        for row in rows:
             self._table.insert(
                 "", "end", iid=row.model_id, text=row.display_name,
                 values=(
@@ -530,6 +609,26 @@ class ModelManagerDialog:
         self._set_detail(report.describe())
         self._set_status("can run here" if report.can_run else "cannot run here")
 
+    def _on_diagnostics(self) -> None:
+        """Show the whole diagnostics body: machine, runtimes, active, errors.
+
+        Runs on the worker thread (reading resources and asking every runtime can
+        be slow on a cold machine), and the result is shown in the detail pane so
+        it is selectable and copyable like every other block here.
+        """
+        self._run_background(
+            "Gathering diagnostics…",
+            self.service.diagnostics,
+            self._finish_diagnostics,
+        )
+
+    def _finish_diagnostics(self, report: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not gather diagnostics: {error}")
+            return
+        self._set_detail(report.describe() if hasattr(report, "describe") else str(report))
+        self._set_status("Diagnostics ready.")
+
     def _on_load(self) -> None:
         model_id = self._require_selection()
         if model_id is None:
@@ -641,10 +740,12 @@ class ModelManagerDialog:
     ) -> None:
         """Run ``job`` on a worker thread, then hand its result back on the UI thread."""
         self._busy = True
+        self._cancelled = False
         self._set_status(message)
         self._set_busy_buttons(False)
         self._spinner.pack(side="right", padx=8)
         self._spinner.start(12)
+        self._cancel_button.pack(side="right", padx=(0, 8))
 
         def run() -> None:
             try:
@@ -654,22 +755,66 @@ class ModelManagerDialog:
                 self._results.put((finish, None, error))
 
         threading.Thread(target=run, daemon=True).start()
-        self.window.after(60, self._pump_results)
+        self._schedule_pump()
+
+    def _schedule_pump(self) -> None:
+        """Ask Tk to drain the queue again shortly, remembering the ticket.
+
+        The ticket is kept so :meth:`_close` can cancel it: a pending ``after``
+        callback firing into a destroyed window raises ``TclError``, which is the
+        safe-close hazard this avoids.
+        """
+        if self._closed:
+            return
+        self._after_id = self.window.after(60, self._pump_results)
 
     def _pump_results(self) -> None:
+        self._after_id = None
+        if self._closed:
+            return
         try:
             while True:
                 finish, result, error = self._results.get_nowait()
+                if self._cancelled and error is None:
+                    # The user cancelled while this job was in flight: report it
+                    # and drop the result rather than redrawing stale state.
+                    self._set_status("Cancelled.")
+                    continue
                 self._finish(finish, result, error)
         except queue.Empty:
             pass
         if self._busy:
-            self.window.after(60, self._pump_results)
+            self._schedule_pump()
 
-    def _finish(self, finish: Callable[[Any, Exception | None], None], result: Any, error: Exception | None) -> None:
+    def _on_cancel(self) -> None:
+        """Ask the running job to be abandoned.
+
+        The worker thread cannot be killed safely in Python, so cancellation is
+        *cooperative*: the result is dropped when it arrives, the spinner stops,
+        and the buttons come back. The status says plainly that the work may still
+        finish in the background, so nothing is overstated.
+        """
+        if not self._busy:
+            self._set_status("Nothing is running.")
+            return
+        self._cancelled = True
         self._busy = False
         self._spinner.stop()
         self._spinner.pack_forget()
+        self._cancel_button.pack_forget()
+        self._set_busy_buttons(True)
+        self._set_status("Cancelled — the running step may still finish in the background.")
+
+    def _finish(
+        self,
+        finish: Callable[[Any, Exception | None], None],
+        result: Any,
+        error: Exception | None,
+    ) -> None:
+        self._busy = False
+        self._spinner.stop()
+        self._spinner.pack_forget()
+        self._cancel_button.pack_forget()
         self._set_busy_buttons(True)
         try:
             finish(result, error)
@@ -680,13 +825,30 @@ class ModelManagerDialog:
         state: Literal["normal", "disabled"] = "normal" if enabled else "disabled"
         for button in self._action_buttons:
             button.configure(state=state)
-        for button in (self._register_button, self._discover_button, self._import_button):
+        for button in (
+            self._register_button,
+            self._discover_button,
+            self._import_button,
+            self._diagnostics_button,
+        ):
             button.configure(state=state)
 
     # -- lifecycle --------------------------------------------------------
 
     def _close(self) -> None:
         self._closed = True
+        if self._after_id is not None:
+            # A pending pump callback would fire into a destroyed window and raise
+            # ``TclError``; cancelling it is what makes closing mid-operation safe.
+            try:
+                self.window.after_cancel(self._after_id)
+            except tk.TclError:
+                pass
+            self._after_id = None
+        try:
+            self._spinner.stop()
+        except tk.TclError:
+            pass
         if self._on_close is not None:
             self._on_close()
         try:
