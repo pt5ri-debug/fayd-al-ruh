@@ -6,11 +6,12 @@ queue; Tk is only ever touched from the main thread, as Tk requires.
 
 The layout follows ChatGPT closely: a collapsible left sidebar (logo, New chat,
 search, conversation history grouped by date, tools, settings), a slim header
-that names the active **operating mode** and the model selector, a centred
+that names the active **Fayd Al-Ruh Model** and the model selector, a centred
 transcript with Markdown-rendered messages, and a rounded composer pinned to the
-bottom. Two operating modes are offered -- **AI Mode** (conversation only) and
-**Jarvics Mode** (conversation plus sandboxed tools) -- with one obvious switch
-and a persisted choice; see :mod:`gui.modes`.
+bottom. The window has **one** operating mode -- the project's own model, named
+by the header -- and the model selector on the right chooses which answering
+character (Jarvis with sources + web, Ultron, Vision, Banner, Natasha, Hakeem, or
+Cloud) speaks in the same conversation; see :mod:`gui.modes`.
 
 The window is a thin shell over :class:`gui.service.ChatService`; it holds no
 answer logic of its own. This module is imported lazily by the CLI, so importing
@@ -64,11 +65,10 @@ from gui.chat_composer import (
     Tooltip as _Tooltip,
 )
 from gui.modes import (
-    MODES,
+    FAYD_MODEL_MODE,
     HistoryItem,
     ModeSpec,
     group_by_date,
-    resolve_mode,
     search_items,
 )
 from gui.options import build_parser
@@ -80,11 +80,12 @@ from gui.window_controls import install_window_controls
 #: The answering mouths the header's model selector offers, in order. The label
 #: is what the user reads; the key is the value :class:`ChatService` expects.
 #: Ultron, Vision, and Banner are mouths *inside* this chat, exactly like the other
-#: two, so a conversation with any of them happens in the project's own window, not
-#: a separate one.
+#: ones, so a conversation with any of them happens in the project's own window,
+#: not a separate one. The project's own trained model -- the **Fayd Al-Ruh
+#: Model** -- is *not* listed here: it is the window's default mouth (named by the
+#: header's mode control), so the selector is the switch to the other characters.
 MOUTH_CHOICES: tuple[tuple[str, str], ...] = (
-    (chat_module.MOUTH_SOURCES, "From sources (cited)"),
-    (chat_module.MOUTH_MODEL, "From trained model"),
+    (chat_module.MOUTH_SOURCES, "Jarvis (Internal Sources + Web)"),
     (chat_module.MOUTH_ULTRON, "Ultron (general local model)"),
     (chat_module.MOUTH_VISION, "Vision (petroleum local model)"),
     (chat_module.MOUTH_BANNER, "Banner (presentation local model)"),
@@ -92,14 +93,21 @@ MOUTH_CHOICES: tuple[tuple[str, str], ...] = (
     (chat_module.MOUTH_NATASHA, "Natasha (companion: memory, tone)"),
     (chat_module.MOUTH_HAKEEM, "Hakeem (scholar of religion and history)"),
 )
-MOUTH_LABELS: dict[str, str] = dict(MOUTH_CHOICES)
+MOUTH_LABELS: dict[str, str] = {
+    **dict(MOUTH_CHOICES),
+    # The project's own trained model is the window's default mouth, named by the
+    # header's mode control rather than listed in the selector, but it still needs
+    # a readable label for the header and the status line.
+    chat_module.MOUTH_MODEL: FAYD_MODEL_MODE,
+}
 
 #: The seven model switches the composer's bottom row offers, left to right, in
 #: the order they were asked for: the mouth key, the model's own name, and what it
-#: is for. The row is the quick switch beside the input -- the header's model
-#: selector still lists *every* mouth, including the small trained model -- and
-#: both drive the one :meth:`FaydGUI._switch_mouth`, so the two can never disagree
-#: about which model answers.
+#: is for. The row is the quick switch beside the input, and the header's model
+#: selector on the right offers the same seven characters -- both drive the one
+#: :meth:`FaydGUI._switch_mouth`, so the two can never disagree about which model
+#: answers. The project's own trained model is the window's default (returned to
+#: by the header's mode control), so it is not listed in either switch.
 MODEL_BUTTONS: tuple[tuple[str, str, str], ...] = (
     (chat_module.MOUTH_SOURCES, "Jarvis", "Sources"),
     (chat_module.MOUTH_ULTRON, "Ultron", "General"),
@@ -1457,19 +1465,24 @@ class FaydGUI:
         )
         self._sidebar_toggle.pack(side="left")
 
-        # The mode switch: one obvious control, the active mode shown by name.
+        # The mode control: the project's one model, shown by name. The window no
+        # longer switches between two operating modes -- the Fayd Al-Ruh Model is
+        # the chat, and Jarvis (sources + web) is chosen from the model selector on
+        # the right -- so this is a plain button naming the model in force, and
+        # pressing it returns to that model from any other character.
         self._mode_var = tk.StringVar(value=self.service.operating_mode.label)
-        self._mode_menu = tk.OptionMenu(
-            inner, self._mode_var, *[mode.label for mode in MODES], command=self._on_mode_menu,
+        self._mode_menu = tk.Button(
+            inner, textvariable=self._mode_var, command=self._on_mode_menu,
+            bg=self._theme.surface_raised, fg=self._theme.contrast,
+            activebackground=self._theme.interactive_active, activeforeground=self._theme.contrast,
+            font=self._type.font("sm", weight="bold"), padx=10, pady=4,
+            relief="flat", borderwidth=0, cursor="hand2",
         )
-        self._mode_menu.configure(
-            bg=self._theme.surface_raised, fg=self._theme.contrast, activebackground=self._theme.interactive_active,
-            activeforeground=self._theme.contrast, relief="flat", highlightthickness=0,
-            font=self._type.font("sm", weight="bold"), padx=10, pady=4, bd=0, cursor="hand2",
-            indicatoron=True,
-        )
-        self._mode_menu["menu"].configure(bg=self._theme.surface, fg=self._theme.foreground)
         self._mode_menu.pack(side="left", padx=(8, 0))
+        _Tooltip(self._mode_menu, "Answer with the project's own trained model", self._theme, self._type)
+        # The one-line mode description, shown small beside the name. It is kept
+        # short so the header never outgrows a narrow window (the model selector
+        # and the three window controls share the same bar).
         self._mode_label = tk.Label(
             inner, text="", bg=self._theme.titlebar, fg=self._theme.text_secondary,
             font=self._type.font("xs"), anchor="w",
@@ -1596,22 +1609,23 @@ class FaydGUI:
         tk.Label(
             self._empty,
             text=(
-                "Answering mouth: “From sources” cites passages · “From trained model” "
-                "shows what it learned · “Ultron” answers anything, locally · “Vision” "
-                "is the petroleum local model (no citations) · “Banner” drafts "
-                "presentation outlines and slide content"
+                "Answering mouths: the “Fayd Al-Ruh Model” answers from its own "
+                "trained knowledge · “Jarvis” cites the project's sources (and the "
+                "web) · “Ultron” answers anything, locally · “Vision” is the "
+                "petroleum local model · “Banner” drafts presentation outlines and "
+                "slide content · “Natasha”, “Hakeem”, and “Cloud” each answer in "
+                "their own character, with their own memory and learning"
             ),
             bg=self._theme.base, fg=self._theme.text_dim, font=self._type.font("xs"), justify="center",
             wraplength=560,
         ).pack(pady=(16, 0))
 
     def _hero_subtitle(self) -> str:
-        if self.service.tools_enabled:
-            return (
-                "Jarvics Mode: ask a question, or give a command — list files, read a "
-                "file, search, or calculate — run inside the sandbox."
-            )
-        return "AI Mode: reservoir rock, drilling, production, petrophysics … answers with citations."
+        return (
+            "Fayd Al-Ruh Model: reservoir rock, drilling, production, petrophysics … "
+            "answers from the project's knowledge and its own trained model, and from "
+            "the web when you turn it on."
+        )
 
     # -------------------------------------------------------------- transcript
 
@@ -2246,20 +2260,20 @@ class FaydGUI:
         )
         self._refresh_web_toggle()
 
-        # The two compact mode selectors of the composer's bottom-left toolbar.
-        # They are *views* of the real controls, not a second source of truth: the
-        # Code Studio pill opens the Studio (its only real "code mode"), and the
-        # Chat Studio pill lists the operating modes the header already switches,
-        # so nothing here invents a mode the app does not have.
+        # The two compact selectors of the composer's bottom-left toolbar. They are
+        # *views* of the real controls, not a second source of truth: the Code
+        # Studio pill opens the Studio (its only real "code mode"), and the Chat
+        # Studio pill offers the same answering models the header's selector does,
+        # so nothing here invents a model the app does not have.
         self._code_mode_selector = self._composer.add_mode_selector(
             icon="⌘", label="Code Studio",
             options=[("Open the Code Studio…", self._open_code_studio)],
             tip="Code Studio: edit and merge the project's own code",
         )
         self._chat_mode_selector = self._composer.add_mode_selector(
-            icon="💬", label=self.service.operating_mode.label,
-            options=[(mode.label, partial(self._on_mode_menu, mode.label)) for mode in MODES],
-            tip="The operating mode for this conversation",
+            icon="💬", label=self._source_choice_label(),
+            options=[(text, partial(self._switch_mouth, key)) for key, text in MOUTH_CHOICES],
+            tip="The answering model for this conversation",
         )
 
         # The model-switch row *below* the card, outside it: one chip per
@@ -2304,12 +2318,18 @@ class FaydGUI:
     # ------------------------------------------------------------- behavior
 
     def _apply_mode_label(self) -> None:
-        """Reflect the current operating mode in the header and the composer hint."""
+        """Reflect the current model in the header and the composer pill.
+
+        The window has one operating mode -- the **Fayd Al-Ruh Model** -- so the
+        header names the project's own model, and the composer's Chat pill shows
+        the *answering mouth* in force (the trained model by default, or whichever
+        character the selector chose).
+        """
         spec = self.service.operating_mode
         self._mode_var.set(spec.label)
         self._mode_label.configure(text=f"{spec.label} · {spec.description}")
         self._mode_menu.configure(fg=self._theme.contrast)
-        self._chat_mode_selector.set_label(spec.label)
+        self._chat_mode_selector.set_label(self._source_choice_label())
 
     def _source_choice_label(self) -> str:
         return MOUTH_LABELS.get(self.service.source, MOUTH_LABELS[chat_module.MOUTH_SOURCES])
@@ -2320,10 +2340,16 @@ class FaydGUI:
             f"{self.service.operating_mode.label} · Ctrl+N new · Ctrl+S save"
         )
 
-    def _on_mode_menu(self, label: str) -> None:
-        """Switch operating mode from the header control; messages are preserved."""
-        spec = resolve_mode(label)
-        self._set_mode(spec)
+    def _on_mode_menu(self) -> None:
+        """The header's model control: answer with the project's own model again.
+
+        The window has one operating mode -- the **Fayd Al-Ruh Model** -- and the
+        model selector on the right switches to the other characters (Jarvis,
+        Ultron, Vision, Banner, Natasha, Hakeem, Cloud). Pressing this control
+        returns the conversation to the trained model from whichever character is
+        answering, so the model is always one click away.
+        """
+        self._switch_mouth(chat_module.MOUTH_MODEL)
 
     def _set_mode(self, spec: ModeSpec) -> None:
         previous = self.service.operating_mode
@@ -2400,6 +2426,7 @@ class FaydGUI:
         self._source_var.set(self.service.source)
         self._source_menu_var_reset()
         self._sync_model_buttons()
+        self._apply_mode_label()
         self._add_bubble("note", chat_module.mouth_switched_message(want))
 
     def _on_enter(self, _event: tk.Event) -> str:

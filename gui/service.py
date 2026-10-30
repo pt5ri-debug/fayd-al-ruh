@@ -21,6 +21,7 @@ from ai import mind as mind_module
 from ai import mouths as mouths_module
 from ai.jarvis import build_session
 from core import language_models as language_models_module
+from core.best_effort import best_effort
 from core.command_router import RoutedCommand, RouteKind
 from core.jarvis import JarvisMode, JarvisTurn
 from core.paths import data_dir
@@ -219,10 +220,19 @@ class ChatService:
                 chat_module.MOUTH_HAKEEM,
                 lambda: hakeem_mouth.load_hakeem_assistant(),
             ),
+            characters=True,
+            character_root=data_root,
         )
         self.session = session
         if session and not self.mode.resume_session(session):
             self.session = None
+        # The window opens on the project's own model -- the **Fayd Al-Ruh Model**
+        # -- so the default chat answers from the trained model, and Jarvis
+        # (sources + web) is one selection away in the model selector. A mouth
+        # that cannot load (no checkpoint yet) leaves the grounded assistant in
+        # place, so the window always opens and reports the real next step.
+        with best_effort("start on the trained model"):
+            self.switcher.use_model()
         # Files the user attached to this conversation, kept so they can be listed
         # in the UI and detached again. Their text is in the assistant's store
         # (see attach_file) *and* in the conversation as reference material, so

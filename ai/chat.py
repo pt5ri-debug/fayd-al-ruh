@@ -57,6 +57,7 @@ import json
 import re
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from companion.companion_agent import CompanionError
 from core.banner import BannerUnavailable
@@ -170,6 +171,8 @@ class ModelSwitcher:
         cloud_loader: Callable[[], cloud_mouth.CloudAssistant] | None = None,
         natasha_loader: Callable[[], natasha_mouth.NatashaAssistant] | None = None,
         hakeem_loader: Callable[[], hakeem_mouth.HakeemAssistant] | None = None,
+        characters: bool = False,
+        character_root: Any = None,
     ) -> None:
         self.mode = mode
         self.grounded = mode.assistant
@@ -182,6 +185,13 @@ class ModelSwitcher:
         self._natasha_loader = natasha_loader or natasha_mouth.load_natasha_assistant
         self._hakeem_loader = hakeem_loader or hakeem_mouth.load_hakeem_assistant
         self._max_new_tokens = max_new_tokens
+        # Whether each mouth is wrapped as its own character -- its standing
+        # personality and its own learning record (see :mod:`ai.characters`). Off
+        # by default so a lightweight switcher (a test, a scripted probe) is
+        # untouched; the GUI and the CLI turn it on and keep the records under
+        # ``character_root``.
+        self._characters = characters
+        self._character_root = character_root
         self._mind: mind_module.MindAssistant | None = None
         self._ultron: ultron_mouth.UltronAssistant | None = None
         self._vision: vision_mouth.VisionAssistant | None = None
@@ -190,6 +200,26 @@ class ModelSwitcher:
         self._natasha: natasha_mouth.NatashaAssistant | None = None
         self._hakeem: hakeem_mouth.HakeemAssistant | None = None
         self._mouth = MOUTH_SOURCES
+        if self._characters:
+            # The grounded assistant is a character too (Jarvis, the cited one):
+            # wrapping it here means its answers carry its own personality and are
+            # recorded in its learning file, exactly like the model-backed mouths.
+            wrapped = self._characterize(MOUTH_SOURCES, self.grounded)
+            if wrapped is not self.grounded:
+                if mode.assistant is self.grounded:
+                    mode.assistant = wrapped
+                voice = getattr(mode, "voice", None)
+                if voice is not None and getattr(voice, "assistant", None) is self.grounded:
+                    voice.assistant = wrapped
+                self.grounded = wrapped
+
+    def _characterize(self, mouth: str, assistant):
+        """Wrap ``assistant`` as ``mouth``'s character when the switch is on."""
+        if not self._characters:
+            return assistant
+        from ai.characters import wrap_character
+
+        return wrap_character(mouth, assistant, root=self._character_root)
 
     @property
     def mouth(self) -> str:
@@ -204,43 +234,46 @@ class ModelSwitcher:
     @property
     def mind(self) -> mind_module.MindAssistant:
         if self._mind is None:
-            self._mind = mind_module.MindAssistant(self._loader(), max_new_tokens=self._max_new_tokens)
+            self._mind = self._characterize(
+                MOUTH_MODEL,
+                mind_module.MindAssistant(self._loader(), max_new_tokens=self._max_new_tokens),
+            )
         return self._mind
 
     @property
     def ultron(self) -> ultron_mouth.UltronAssistant:
         if self._ultron is None:
-            self._ultron = self._ultron_loader()
+            self._ultron = self._characterize(MOUTH_ULTRON, self._ultron_loader())
         return self._ultron
 
     @property
     def vision(self) -> vision_mouth.VisionAssistant:
         if self._vision is None:
-            self._vision = self._vision_loader()
+            self._vision = self._characterize(MOUTH_VISION, self._vision_loader())
         return self._vision
 
     @property
     def banner(self) -> banner_mouth.BannerAssistant:
         if self._banner is None:
-            self._banner = self._banner_loader()
+            self._banner = self._characterize(MOUTH_BANNER, self._banner_loader())
         return self._banner
 
     @property
     def cloud(self) -> cloud_mouth.CloudAssistant:
         if self._cloud is None:
-            self._cloud = self._cloud_loader()
+            self._cloud = self._characterize(MOUTH_CLOUD, self._cloud_loader())
         return self._cloud
 
     @property
     def natasha(self) -> natasha_mouth.NatashaAssistant:
         if self._natasha is None:
-            self._natasha = self._natasha_loader()
+            self._natasha = self._characterize(MOUTH_NATASHA, self._natasha_loader())
         return self._natasha
 
     @property
     def hakeem(self) -> hakeem_mouth.HakeemAssistant:
         if self._hakeem is None:
-            self._hakeem = self._hakeem_loader()
+            self._hakeem = self._characterize(MOUTH_HAKEEM, self._hakeem_loader())
         return self._hakeem
 
     def _swap(self, assistant, mouth: str, help_suffix: str) -> None:
@@ -751,6 +784,11 @@ def main(argv: list[str] | None = None) -> int:
             session_id=args.hakeem_session,
             model=args.hakeem_model,
         ),
+        # Each mouth answers as its own character -- its standing personality and
+        # its own learning record, kept under ``data/characters/learning`` (the
+        # same files the GUI uses, and the same files the project's own model
+        # trains on). So a fact a character learns in the CLI reaches the model.
+        characters=True,
     )
     if args.mind:
         failure = _apply_switch(switcher, MOUTH_MODEL)

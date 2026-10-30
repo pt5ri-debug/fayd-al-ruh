@@ -216,6 +216,26 @@ def session_sentences(
     return list(OrderedDict.fromkeys(sentence for sentence in spoken if sentence.strip()))
 
 
+def character_learning_sentences() -> list[str]:
+    """Training prose from the seven characters' own learning (per-character memory).
+
+    Each character -- Jarvis, Ultron, Vision, Banner, Natasha, Hakeem, and Cloud
+    -- keeps a small, file-backed learning record (the facts it was told and the
+    exchanges it took part in) under the git-ignored ``data/characters/learning``
+    folder (see :mod:`core.character_learning`). This renders that record as
+    training prose so the project's own **Fayd Al-Ruh model** trains on what its
+    characters learned, which is the bridge the task asks for.
+
+    It is **off by default** in :func:`build_corpus` / :func:`corpus_units`
+    (``include_characters=True``) for the same reason the mouths' saved
+    conversations are: a character's learning is personal. A character with an
+    empty record contributes nothing.
+    """
+    from core.character_learning import character_learning_sentences as _sentences
+
+    return _sentences()
+
+
 def build_corpus(
     *,
     repeats: int = 40,
@@ -226,6 +246,8 @@ def build_corpus(
     include_sessions: bool = False,
     session_sources: Iterable[str] | None = None,
     session_repeats: int = 1,
+    include_characters: bool = False,
+    character_repeats: int = 1,
     exclude: set[str] | frozenset[str] | None = None,
     include: set[str] | frozenset[str] | None = None,
 ) -> str:
@@ -238,7 +260,9 @@ def build_corpus(
     curriculum), numbered procedural text, prose from the other repositories
     (promoted learned statements and runtime documents), the local mouths' own
     saved conversations when ``include_sessions`` is set (Jarvis, Ultron,
-    Vision, and Banner -- off by default, because a transcript is personal), a
+    Vision, and Banner -- off by default, because a transcript is personal), the
+    seven characters' own learning when ``include_characters`` is set (off by
+    default for the same reason), a
     relevance-filtered sample of the bulk knowledge base when ``kb_max_chunks``
     is positive (repeated ``kb_repeats`` times, since it is large and broad),
     and JSON objects in the shape ``MODEL_OUTPUT_SCHEMA`` expects. The JSON
@@ -258,6 +282,8 @@ def build_corpus(
         kb_repeats = 1
     if session_repeats < 1:
         session_repeats = 1
+    if character_repeats < 1:
+        character_repeats = 1
     held = exclude or frozenset()
     chosen = include
 
@@ -274,6 +300,7 @@ def build_corpus(
     arabic = keep(arabic_sentences())
     repositories = keep(repository_sentences(include_runtime=include_runtime))
     sessions = keep(session_sentences(sources=session_sources)) if include_sessions else ""
+    characters = keep(character_learning_sentences()) if include_characters else ""
     bulk = keep(knowledge_base_sentences(kb_max_chunks=kb_max_chunks))
     structured = " ".join(structured_examples())
     return (
@@ -285,6 +312,7 @@ def build_corpus(
         + (arabic + " ") * (repeats if arabic else 0)
         + (repositories + " ") * (repeats if repositories else 0)
         + (sessions + " ") * (session_repeats if sessions else 0)
+        + (characters + " ") * (character_repeats if characters else 0)
         + (bulk + " ") * (kb_repeats if bulk else 0)
         + (structured + " ") * structured_repeats
     )
@@ -332,7 +360,7 @@ def arabic_sentences() -> list[str]:
     return arabic_sentence_blocks()
 
 
-def corpus_units(*, include_sessions: bool = False) -> list[str]:
+def corpus_units(*, include_sessions: bool = False, include_characters: bool = False) -> list[str]:
     """Unique documents for splitting and tokenizer training.
 
     Concatenating the repeated training text would let the same sentence appear
@@ -340,7 +368,8 @@ def corpus_units(*, include_sessions: bool = False) -> list[str]:
     so a document-level split stays honest. The small structured-JSON block is
     left out on purpose -- it teaches output shape and is always trained on.
     The mouths' saved conversations are included only when ``include_sessions``
-    is set, matching :func:`build_corpus`.
+    is set, and the seven characters' own learning only when
+    ``include_characters`` is set, matching :func:`build_corpus`.
     """
     from collections import OrderedDict
 
@@ -355,6 +384,8 @@ def corpus_units(*, include_sessions: bool = False) -> list[str]:
     )
     if include_sessions:
         units = units + session_sentences()
+    if include_characters:
+        units = units + character_learning_sentences()
     return list(OrderedDict.fromkeys(unit for unit in units if unit.strip()))
 
 
@@ -421,11 +452,16 @@ def normalise(text: str) -> str:
 __all__ = [
     "DEFAULT_MAX_SESSION_CHARS",
     "MOUTH_SESSION_SOURCES",
+    "arabic_sentences",
     "build_corpus",
+    "character_learning_sentences",
     "corpus_sentences",
+    "corpus_units",
     "curriculum_sentences",
     "knowledge_base_sentences",
     "normalise",
+    "procedural_sentences",
     "repository_sentences",
     "session_sentences",
+    "structured_examples",
 ]

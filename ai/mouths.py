@@ -64,6 +64,11 @@ def build_mouth(
     loaders do, so a caller reports the real next step instead of switching to a
     mouth that could not speak. ``kwargs`` are passed to the loader unchanged, so
     a test can inject its own agent/client.
+
+    This is a pure factory: it returns the mouth's own assistant. Wrapping a mouth
+    as its character -- its standing personality and its own learning record -- is
+    the switcher's job (see :mod:`ai.characters` and ``ai.chat.ModelSwitcher``), so
+    the wrapping happens once, in one place, and a caller here gets the real mouth.
     """
     choice = model_choice(mouth, model_key)
     path = choice.path if choice is not None else None

@@ -662,7 +662,7 @@ def test_service_activates_its_mouth_on_open(data_root) -> None:
     # (the main window's) is untouched by that.
     from gui.service import ChatService
 
-    assert ChatService(data_root=data_root).switcher.mouth == catalog.MOUTH_SOURCES
+    assert ChatService(data_root=data_root).switcher.mouth == catalog.MOUTH_MODEL
 
 
 def test_service_activation_reports_the_real_next_step(data_root) -> None:
@@ -677,7 +677,7 @@ def test_service_activation_reports_the_real_next_step(data_root) -> None:
     # A separate ChatService is untouched by the failed activation.
     from gui.service import ChatService
 
-    assert ChatService(data_root=data_root).switcher.mouth == catalog.MOUTH_SOURCES
+    assert ChatService(data_root=data_root).switcher.mouth == catalog.MOUTH_MODEL
 
 
 def test_service_add_model_makes_it_active(data_root, tmp_path) -> None:

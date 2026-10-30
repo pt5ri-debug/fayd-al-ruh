@@ -648,9 +648,10 @@ def test_window_reports_a_missing_vision_in_the_transcript(tmp_path) -> None:
         app._on_source_menu(MOUTH_LABELS[MOUTH_VISION])
         root.update()
 
-        # The mouth did not change, and the real next step is shown.
-        assert service.source == MOUTH_SOURCES
-        assert app._source_choice_label() == MOUTH_LABELS[MOUTH_SOURCES]
+        # The mouth did not change (the window opened on the project's own model),
+        # and the real next step is shown.
+        assert service.source == MOUTH_MODEL
+        assert app._source_choice_label() == MOUTH_LABELS[MOUTH_MODEL]
         texts = [entry.text for entry in app._rows]
         assert any("Could not load Vision" in text for text in texts)
         assert any("requirements-vision.txt" in text for text in texts)

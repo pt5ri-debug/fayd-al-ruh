@@ -70,8 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mode",
         default=None,
-        choices=("ai", "jarvics"),
-        help="start in 'ai' mode (conversation only) or 'jarvics' mode (conversation plus sandboxed tools)",
+        choices=("ai",),
+        help=(
+            "the window's one operating mode: 'ai' (the Fayd Al-Ruh Model -- "
+            "conversation only; Jarvis with sources + web is chosen from the model "
+            "selector)"
+        ),
     )
     return parser
 

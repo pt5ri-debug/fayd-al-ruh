@@ -278,6 +278,49 @@ Arabic is kept as secondary aliases where useful.
   `ai/jarvis.py`, `core/jarvis.py`, `JarvisMode`, `build_session`, or the shared
   `JarvisControls`, so Jarvis is unaffected. Every model answer is labelled as
   ungrounded on purpose.
+- `core/character_learning.py` — **each character's own personality, memory, and
+  learning**. The project answers through seven characters inside the chat --
+  **Jarvis** (the grounded, cited mouth), **Ultron** (general local model),
+  **Vision** (petroleum local model), **Banner** (presentation model), **Natasha**
+  (companion), **Hakeem** (scholar of religion and history), and **Cloud** (remote
+  model) -- plus the project's own **Fayd Al-Ruh model**. `CHARACTER_KEYS` names
+  the seven; `PROJECT_MODEL_KEY` is the project model (and the fallback an unknown
+  key resolves to). `CharacterPersona` is a character's *standing character*: its
+  `identity` (a stable description of who it is and what it is for), its `traits`
+  (named trait dials, rendered as *tone guidance* rather than bare numbers), its
+  `behaviour` (how it answers -- cite when grounded, never claim a tool ran, stay
+  in character), and a `system_prompt(learned_facts=...)` that renders all of it
+  into one instruction; `PERSONAS` ships one per character and `persona_for(key)`
+  maps an unknown key to the project model, so a mouth with no persona of its own
+  still answers as the project. `CharacterLearning(key)` is the durable record, a
+  small JSON file under the git-ignored
+  `data/characters/learning/character_learning/<key>.json`
+  (`core.paths.character_learning_dir`, `FAYD_DATA_DIR`-aware): the trait profile,
+  the durable **facts** it was told (`add_fact`/`facts`, de-duplicated and
+  bounded) and the **exchanges** it took part in (`remember`/`exchanges`, each
+  carrying the question, the answer, and where the answer came from -- the web, a
+  learned statement, cited sources); a corrupt or unreadable file reads as an
+  empty record rather than crashing a chat, and `in_memory=True` is the test seam.
+  `character_learning_sentences()` renders every character's facts and exchanges
+  as training text, so **the project's own model learns from what the characters
+  learn** (wired through `ml.llm.corpus.character_learning_sentences` and the
+  `--llm-characters` flag). Dependency-free, no Tk, no model loaded at import.
+- `ai/characters.py` — the **wiring** that gives each mouth its character.
+  `CharacterMouth(key, assistant, *, root=, in_memory=)` wraps any mouth's
+  assistant and does two things once per mouth: it **prepends the character's
+  standing instruction** (re-rendered with the character's learned facts before
+  every answer, so a fact learned earlier is in force for the next one) to the
+  engine's `system_prompt` or the grounded assistant's `system_instruction` -- the
+  mouth's own honesty rules stay underneath it, never replaced -- and it
+  **records each exchange** into the character's own learning file. The wrapper is
+  deliberately transparent: an unknown attribute **read and write** is forwarded
+  to the wrapped mouth (so the Jarvis `web on` control reaches the real
+  assistant), and it reports the wrapped mouth's own `__class__`, so
+  `isinstance(character, GroundedAssistant)` and every existing caller (the Jarvis
+  loop, the switcher, the service's `_retriever`) keep working unchanged.
+  `wrap_character(mouth, assistant)` returns a non-character mouth untouched, so
+  it is safe to call on every mouth; `is_character`/`CHARACTER_MOUTHS` say which
+  mouths have a character. Nothing here imports Tk or loads a model.
 - `core/ultron.py` — **Ultron**, the project's *general* mouth: a real, advanced
   model that runs **locally** through `llama-cpp-python` and speaks on every
   field of life (no subject filter), unlike the petroleum-grounded assistant and
@@ -297,7 +340,7 @@ Arabic is kept as secondary aliases where useful.
   (`python -m cli ultron`), and — as a **mouth inside the project's own chat**
   (`ai/ultron_mouth.py`, the headless twin `python -m cli ultron-chat`) — the
   window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
-  *From sources (cited)* and *From trained model*; the sidebar **Answer from
+  *Jarvis (Internal Sources + Web)*; the sidebar **Answer from
   Ultron** action exists but is hidden (`hidden=True` in `gui/actions.py`), so
   the header selector is the one visible switch. The conversation stays
   in the same transcript and session, never a separate window. Every answer is
@@ -333,7 +376,7 @@ Arabic is kept as secondary aliases where useful.
   (`python -m cli vision`), and — as a **mouth inside the project's own chat**
   (`ai/vision_mouth.py`, the headless twin `python -m cli vision-chat`) — the
   window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
-  *From sources (cited)*, *From trained model*, and Ultron; the sidebar
+  *Jarvis (Internal Sources + Web)* and Ultron; the sidebar
   **Answer from Vision** action exists but is hidden, so the header selector is
   the one visible switch. The conversation
   stays in the same transcript and session, never a separate window. Every answer
@@ -365,7 +408,7 @@ Arabic is kept as secondary aliases where useful.
   CLI (`python -m cli banner`), and — as a **mouth inside the project's own
   chat** (`ai/banner_mouth.py`, the headless twin `python -m cli banner-chat`) —
   the window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
-  *From sources (cited)*, *From trained model*, Ultron, and Vision; the
+  *Jarvis (Internal Sources + Web)*, Ultron, and Vision; the
   sidebar **Answer from Banner** action exists but is hidden. The conversation stays in the same transcript and session, never a separate window.
   Every answer is labelled as the local presentation model's own, not grounded in
   cited sources. `ai/banner.py` is the CLI entry point (`chat` default,
@@ -426,8 +469,7 @@ Arabic is kept as secondary aliases where useful.
   Banner** in the menu (`cli.menu.run_cloud`), CLI (`python -m cli cloud`), and —
   as a **mouth inside the project's own chat** (`ai/cloud_mouth.py`, the headless
   twin `python -m cli cloud-chat`) — the window's header model selector
-  (`MOUTH_CHOICES` in `gui/app.py`), beside *From sources (cited)*, *From trained
-  model*, Ultron, Vision, and Banner; the sidebar **Answer from Cloud** action
+  (`MOUTH_CHOICES` in `gui/app.py`), beside *Jarvis (Internal Sources + Web)*, Ultron, Vision, and Banner; the sidebar **Answer from Cloud** action
   exists but is hidden. The conversation stays in the same
   transcript and session, never a separate window. `CloudAssistant.ask` reads an
   attached file from the conversation's `CONTEXT` turns exactly as Ultron and
@@ -655,7 +697,7 @@ Arabic is kept as secondary aliases where useful.
   project's own chat**
   (`ai/natasha_mouth.py`, the headless twin `python -m cli natasha-chat`) — the
   window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
-  *From sources (cited)*, *From trained model*, Ultron, Vision, Banner, and Cloud;
+  *Jarvis (Internal Sources + Web)*, Ultron, Vision, Banner, and Cloud;
   the sidebar **Answer from Natasha** action exists but is hidden. The conversation
   stays in the same transcript and session, never a separate window. Everything
   stays on this machine — the only call is to the local Ollama server, so Natasha
@@ -735,7 +777,7 @@ Arabic is kept as secondary aliases where useful.
   `--new`), and — as a **mouth inside the project's own chat**
   (`ai/hakeem_mouth.py`, the headless twin `python -m cli hakeem-chat`) — the
   window's header model selector (`MOUTH_CHOICES` in `gui/app.py`), beside
-  *From sources (cited)*, *From trained model*, Ultron, Vision, Banner, Cloud, and
+  *Jarvis (Internal Sources + Web)*, Ultron, Vision, Banner, Cloud, and
   Natasha; the sidebar **Answer from Hakeem** action exists but is hidden, so the
   header selector is the one visible switch. The conversation stays in the same
   transcript and session, never a separate window. Everything stays on this
@@ -779,7 +821,7 @@ Arabic is kept as secondary aliases where useful.
 - **Every window's title bar** is the `Theme.titlebar` band (a dark grey a step
   above the page base, `#181C25` dark / `#DCE3EE` light) closed by a
   `titlebar_edge` hairline, and carries the three controls above on its right. The
-  main window's bar is the same band, so the header's mode switch, model selector,
+  main window's bar is the same band, so the header's model control, model selector,
   and controls read as one piece with every dialog; `Theme` gained the two tokens
   and each window paints its bar, its title labels, and the control frame with
   them, so one appearance switch restyles every window at once.
@@ -1866,14 +1908,18 @@ Arabic is kept as secondary aliases where useful.
   long flat list -- and none re-implements the canvas or the scrollbar. Tk-free of
   `gui.app` (it takes duck-typed theme tokens), so the window builds on it without
   a circular import.
-- `gui/modes.py` — the two operating modes. **AI Mode** (`allows_tools=False`)
-  answers conversationally; **Jarvics Mode** (`allows_tools=True`) also runs the
-  sandboxed tools. `AnswerOnlyRouter` is the brain of AI Mode: it subclasses the
-  real `NaturalLanguageRouter` and always decides *answer*, so a command-shaped
-  sentence can never run a tool there. The chosen key persists through `JsonStore`
-  (`load_mode_key`/`save_mode_key`), `resolve_mode` accepts a key or a label and
-  falls back safely, and `HistoryItem`/`group_by_date`/`search_items` feed the
-  sidebar's dated, searchable history. Tk-free, so it is testable headless.
+- `gui/modes.py` — the interface's one operating mode, **`FAYD_MODEL_MODE` =
+  "Fayd Al-Ruh Model"**. The old two-mode split (*AI Mode* vs *Jarvics Mode*) is
+  gone: `MODES` holds a single `ModeSpec` (`key="ai"`, `allows_tools=False`), so
+  the window has one mode and no sandboxed tool ever runs. `AnswerOnlyRouter` is
+  its brain: it subclasses the real `NaturalLanguageRouter` and always decides
+  *answer*, so a command-shaped sentence can never run a tool. The chosen key
+  persists through `JsonStore` (`load_mode_key`/`save_mode_key`), and
+  `resolve_mode` accepts a key or a label and falls back to the one mode for
+  anything unknown -- including the retired `"jarvics"` key -- so a stale saved
+  preference never stops the window opening. `HistoryItem`/`group_by_date`/
+  `search_items` feed the sidebar's dated, searchable history. Tk-free, so it is
+  testable headless.
 - `gui/markdown.py` — a dependency-free block/segment renderer for the
   transcript: headings, lists, block quotes, fenced code (with a light token
   highlighter), tables, horizontal rules, and inline bold/code, returned as
@@ -1997,10 +2043,16 @@ Arabic is kept as secondary aliases where useful.
   section likewise builds its contents on first open (a header click or the
   programmatic entry point). The sidebar sits behind a
   scrollbar that
-  appears only when the content overflows, a title bar showing the active mode by
-  name (one switch) plus the **model selector** (`MOUTH_CHOICES`: *From sources
-  (cited)* / *From trained model* / *Ultron (general local model)*, matched to the
-  mouth keys `ai.chat` uses) and the three **title-bar controls** (minimize /
+  appears only when the content overflows, a title bar showing the project's one
+  model by name (the header's top-left control is a plain **button** naming
+  *Fayd Al-Ruh Model*; pressing it returns the conversation to that model from any
+  other character) plus the **model selector** (`MOUTH_CHOICES`: *Jarvis (Internal
+  Sources + Web)* / *Ultron (general local model)* / *Vision (petroleum local
+  model)* / *Banner (presentation local model)* / *Cloud (remote model)* /
+  *Natasha (companion: memory, tone)* / *Hakeem (scholar of religion and history)*,
+  matched to the mouth keys `ai.chat` uses -- the project's own trained model is
+  the default mouth the header button returns to, so it is *not* a selector entry)
+  and the three **title-bar controls** (minimize /
   maximize / close, the same trio every dialog carries, through
   `gui.window_controls`), and a centred hero/empty state that
   gives way to the first message (and returns when the transcript is cleared).
@@ -2012,8 +2064,8 @@ Arabic is kept as secondary aliases where useful.
   `gui/chat_composer.ChatComposer` (the window's attributes `_entry`/`_send`/
   `_attach_button`/`_mic_button` point at its widgets), and its bottom-left
   toolbar carries the two mode pills -- *Code Studio* (opens the one real code
-  surface) and the operating-mode pill, fed by `gui.modes.MODES` so it lists the
-  modes the app really has. A **＋** button beside
+  surface) and the Chat pill, fed by `MOUTH_CHOICES` so it lists the answering
+  characters the app really has (and shows the mouth in force). A **＋** button beside
   the input attaches a Word (`.docx`/`.docm`) or text file: the file's text is
   indexed into the source assistant's store and previewed in the transcript, a
   removable chip tracks it, and detaching (the chip's ✕, or a new chat) removes
@@ -4935,3 +4987,62 @@ regression monitor each can refuse a change.
   (only Q8_0 and F16), so the model itself is the floor. The CLI now says so.
   `tests/test_audiocpp_speech.py` pins the retry (the CLI runner answers and the
   system engine never speaks) and the fast `say` defaults.
+
+- Phase 55 — **one operating mode, the project's own model as the default mouth,
+  and a real character (personality + memory + learning) per answering mouth**:
+  three changes to the window and the mouths. (1) The old **two-mode split** --
+  *AI Mode* vs *Jarvics Mode* -- is gone: `gui/modes.py` now declares the single
+  mode **`FAYD_MODEL_MODE` = "Fayd Al-Ruh Model"** (`MODES` holds one `ModeSpec`,
+  `allows_tools=False`, and `resolve_mode` falls back for the retired `"jarvics"`
+  key), and the header's top-left control is no longer an `OptionMenu` but a plain
+  `tk.Button` (`_on_mode_menu` is parameterless) that names the model and, pressed,
+  returns the conversation to it (`_switch_mouth(MOUTH_MODEL)`) from any other
+  character. The window opens on that model (`ChatService.__init__` calls
+  `switcher.use_model()` under `best_effort`, so a missing checkpoint leaves the
+  grounded mouth in place and reports the next step). (2) The header's model
+  selector (top-right) was renamed and trimmed: *From sources (cited)* became
+  **Jarvis (Internal Sources + Web)**, **`From trained model` was removed** (the
+  project's own model is now the default mouth the header button returns to, so it
+  is not a selector entry; `MOUTH_LABELS` still carries its readable label for the
+  header and status line), and `MOUTH_CHOICES` lists the seven characters -- so
+  choosing *Jarvis (Internal Sources + Web)* makes Jarvis active in the chat, as
+  asked. (3) **Every character now has its own personality, memory, and learning.**
+  `core/character_learning.py` is the data layer: `CharacterLearning(key)` keeps a
+  small file-backed record per character under the git-ignored
+  `data/characters/learning/character_learning/<key>.json` (see
+  `core.paths.character_learning_dir`) holding the trait profile, the durable
+  facts it was told (`add_fact`/`facts`), and the exchanges it took part in
+  (`remember`/`exchanges`) -- and `character_learning_sentences()` renders those
+  records as training text, so **the project's own Fayd Al-Ruh model learns from
+  what the seven characters learn**. `core/character_learning.PERSONAS` gives each
+  of the seven (Jarvis, Ultron, Vision, Banner, Natasha, Hakeem, Cloud) and the
+  project model its own standing identity, trait dials, and behaviour rules, and
+  `persona_for(key)` maps an unknown key to the project model. `ai/characters.py`
+  is the wiring: `CharacterMouth` wraps a mouth's assistant, **prepends the
+  character's standing instruction** (re-rendered with its learned facts before
+  every answer) to the engine's `system_prompt` / the grounded assistant's
+  `system_instruction`, and **records each exchange** into the character's own
+  learning file. The wrapper is transparent -- an unknown attribute read *and
+  write* is forwarded to the wrapped mouth (so the Jarvis `web on` control reaches
+  the real assistant), and it reports the wrapped mouth's own `__class__`, so
+  `isinstance` and every existing caller keep working unchanged -- and it never
+  widens a character's authority (the groundedness gate, the cloud approval gate,
+  and a character's own boundaries all still run underneath). `ai/chat.ModelSwitcher`
+  gained `characters=True`/`character_root=`, wrapping every mouth (including the
+  grounded Jarvis mouth and the project model) at load; the GUI
+  (`gui/service.ChatService`) and the CLI (`ai/chat.main`) both turn it on and
+  keep the records under `data/`, so a fact a character learns in one surface
+  reaches the others and the model's next training run. The training surface was
+  completed: `ml.llm.__main__.train_and_save` and `ml.release.TrainingConfig` gained
+  `include_characters` (the `--llm-characters` flag), `ml.llm.corpus` gained
+  `character_learning_sentences()` joining `build_corpus`/`corpus_units`, and the
+  CLI/GUI menus gained the *Train the language model on the characters' own
+  learning* entry (`llm-characters`). `tests/test_character_learning.py` (33 tests)
+  pins the personas, the record (facts/exchanges/serialisation), the wrapper's
+  transparency and persona injection, the model training on the records, and the
+  CLI/GUI training surfaces; `tests/test_gui_design.py` gained
+  `test_header_model_control_returns_to_the_fayd_model` (the header button is a
+  `Button`, names the model, the selector no longer lists *From trained model* but
+  does list *Jarvis (Internal Sources + Web)*, and pressing the button asks the one
+  switch to answer with the model again). Gates: pytest 4467 passed / 15 skipped,
+  ruff clean, mypy 756 files OK, evaluation PASS (`overall` 0.9856 unchanged).

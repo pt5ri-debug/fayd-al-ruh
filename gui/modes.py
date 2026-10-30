@@ -1,17 +1,16 @@
-"""The two operating modes of the interface: **AI Mode** and **Jarvics Mode**.
+"""The interface's one operating mode: **Fayd Al-Ruh Model**.
 
-The window used to expose the two *answering mouths* as "From sources" and "From
-trained model", and left the sandboxed tools reachable only through the Actions
-list. This module names the two ways the application actually works, so the
-header can show one obvious switch and the sidebar can stay compact:
+The window used to expose two operating modes -- **AI Mode** (conversation only)
+and **Jarvics Mode** (conversation plus the agent's sandboxed tools) -- switched
+from the header. That split is gone: the header now names the project's own
+model, and this module is the single mode it stands for.
 
-* **AI Mode** -- the conversational, knowledge-grounded assistant. Answers come
-  from retrieval (with citations) or from the trained model; no tool ever runs.
-* **Jarvics Mode** -- the same conversation *plus* the agent's sandboxed tools,
-  so an explicit request ("list the files in notes/", "calculate 2 * (3 + 4)")
-  can run under every existing guarantee.
+* **Fayd Al-Ruh Model** -- the conversational, knowledge-grounded assistant. Its
+  answers come from the project's own knowledge (with citations), from the
+  internet when the user turns that on, and from the project's own trained
+  language model. No sandboxed tool runs.
 
-Nothing here invents a backend capability. A mode only decides *which of the
+Nothing here invents a backend capability. The mode decides *which of the
 project's real, existing code paths a message may take*, exactly the paths the
 CLI already offers:
 
@@ -35,14 +34,14 @@ from typing import Any
 from core.best_effort import best_effort
 from core.command_router import NaturalLanguageRouter, RoutedCommand, RouteKind
 
-#: The exact labels the task requires, and their one-line descriptions.
-AI_MODE = "AI Mode"
-JARVICS_MODE = "Jarvics Mode"
+#: The exact label the header shows, and its one-line description. The mode is
+#: the project's own model, so the label names it.
+FAYD_MODEL_MODE = "Fayd Al-Ruh Model"
 
 
 @dataclass(frozen=True)
 class ModeSpec:
-    """One operating mode: its exact label, a short blurb, and its powers."""
+    """The operating mode: its exact label, a short blurb, and its powers."""
 
     key: str
     label: str
@@ -53,15 +52,9 @@ class ModeSpec:
 MODES: tuple[ModeSpec, ...] = (
     ModeSpec(
         key="ai",
-        label=AI_MODE,
-        description="Conversational answers from knowledge and the trained model.",
+        label=FAYD_MODEL_MODE,
+        description="Knowledge · web · trained model",
         allows_tools=False,
-    ),
-    ModeSpec(
-        key="jarvics",
-        label=JARVICS_MODE,
-        description="Answers plus sandboxed tools for file, code, and knowledge tasks.",
-        allows_tools=True,
     ),
 )
 
@@ -73,10 +66,11 @@ DEFAULT_MODE_KEY = "ai"
 
 
 def resolve_mode(value: str | None) -> ModeSpec:
-    """Resolve a mode by key (``"ai"``) or label (``"AI Mode"``).
+    """Resolve the mode by key (``"ai"``) or label (``"Fayd Al-Ruh Model"``).
 
     Falls back to :data:`DEFAULT_MODE_KEY` for ``None`` or anything unknown, so a
-    stale saved preference can never stop the window opening.
+    stale saved preference (including the retired ``"jarvics"`` key) can never
+    stop the window opening.
     """
     if value is None:
         return MODES_BY_KEY[DEFAULT_MODE_KEY]
@@ -89,16 +83,16 @@ def resolve_mode(value: str | None) -> ModeSpec:
 
 
 class AnswerOnlyRouter(NaturalLanguageRouter):
-    """A router that never proposes a tool -- the brain of **AI Mode**.
+    """A router that never proposes a tool -- the brain of the Fayd Al-Ruh Model.
 
-    AI Mode must not execute anything, even when the user writes a sentence the
-    Jarvics router would read as a command ("list the files in notes/"). This
-    subclass keeps the real router's sandbox and API but always decides
-    :attr:`~core.command_router.RouteKind.ANSWER`, so the message is answered
-    conversationally and no tool is ever planned or run.
+    The Fayd Al-Ruh Model answers conversationally and must not execute anything,
+    even when the user writes a sentence the Jarvis router would read as a command
+    ("list the files in notes/"). This subclass keeps the real router's sandbox and
+    API but always decides :attr:`~core.command_router.RouteKind.ANSWER`, so the
+    message is answered and no tool is ever planned or run.
 
     The class is intentionally tiny: it reuses everything the real router does
-    and overrides only the one decision that gives AI Mode its boundary.
+    and overrides only the one decision that gives the mode its boundary.
     """
 
     def route(self, utterance: str) -> RoutedCommand:
@@ -108,7 +102,7 @@ class AnswerOnlyRouter(NaturalLanguageRouter):
         return RoutedCommand(
             RouteKind.ANSWER,
             text,
-            "AI Mode answers from knowledge; tools are off. Switch to Jarvics Mode to run one.",
+            "Fayd Al-Ruh Model answers from knowledge; no sandboxed tool runs.",
         )
 
 
@@ -120,7 +114,11 @@ _KEY = "operating_mode"
 
 
 def load_mode_key(root: Any) -> str:
-    """The saved operating-mode key, defaulting to AI Mode; never raises."""
+    """The saved operating-mode key, defaulting to the Fayd Al-Ruh Model; never raises.
+
+    A retired key (the old ``"jarvics"``) resolves to the one mode, so an upgrade
+    never leaves the window in a mode it no longer has.
+    """
     from storage.json_store import JsonStore
 
     try:
@@ -212,9 +210,8 @@ def search_items(
 
 
 __all__ = [
-    "AI_MODE",
     "DEFAULT_MODE_KEY",
-    "JARVICS_MODE",
+    "FAYD_MODEL_MODE",
     "MODES",
     "MODES_BY_KEY",
     "MODE_KEYS_BY_LABEL",
