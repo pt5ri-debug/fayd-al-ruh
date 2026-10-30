@@ -279,6 +279,73 @@ def character_learning_dir() -> Path:
     return characters_dir() / "learning"
 
 
+def config_dir() -> Path:
+    """Where the user's saved character configuration lives (``data/config``).
+
+    The *shipped* defaults live in the repository's ``config/`` folder (read-only,
+    tracked, so an update refreshes them); the configuration the user actually
+    edited and applied lives here, under the git-ignored data folder, so a program
+    update can fast-forward without overwriting a character's settings. The folder
+    is git-ignored and ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "config"
+
+
+def character_config_dir() -> Path:
+    """Where each character's applied configuration is saved (``data/config/characters``)."""
+    return config_dir() / "characters"
+
+
+def bundled_config_dir() -> Path:
+    """The shipped, read-only character configuration inside the code or bundle."""
+    return bundle_root() / "config"
+
+
+def learning_root_dir() -> Path:
+    """The root of every independent learning store (``data/learning``).
+
+    Inside it live the project model's own learning directory
+    (``fayd_al_ruh/``) and one strictly isolated directory per character
+    (``characters/<key>/``). It is git-ignored, so a character's learning never
+    dirties the working tree and a program update never overwrites it.
+    ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "learning"
+
+
+def main_model_learning_dir() -> Path:
+    """The **project model's** own independent learning directory.
+
+    The main Fayd Al-Ruh model learns independently here -- from its own
+    interactions, the language-model answers it produced, verified internet
+    information, and (through the controlled sharing interface) the permitted
+    knowledge of six characters. It is a *separate* directory from every
+    character's, and every record it acquires from a character is written here as
+    its **own** record, never into the source character's folder.
+    """
+    return learning_root_dir() / "fayd_al_ruh"
+
+
+def character_learning_store_dir(key: str) -> Path:
+    """One character's strictly isolated learning directory.
+
+    ``data/learning/fayd_al_ruh/characters/<key>``. A
+    :class:`~core.character_learning_store.CharacterLearningStore` is built for
+    exactly one owner and resolves exactly this path, so a character can only ever
+    read and write its own store -- the isolation is structural, not a flag.
+    """
+    return main_model_learning_dir() / "characters" / key
+
+
+def learning_audit_dir() -> Path:
+    """Where the append-only learning audit lives (``data/learning/fayd_al_ruh/audit``).
+
+    Every learning operation and every *refused* cross-character access is written
+    here, so the isolation rules are auditable rather than merely intended.
+    """
+    return main_model_learning_dir() / "audit"
+
+
 def studio_dir() -> Path:
     """Where the Code Studio keeps its own state (git worktrees, run logs).
 
@@ -358,10 +425,14 @@ __all__ = [
     "bundle_root",
     "bundled_artifacts_dir",
     "bundled_checkpoints_dir",
+    "bundled_config_dir",
+    "character_config_dir",
     "character_learning_dir",
+    "character_learning_store_dir",
     "characters_dir",
     "checkpoints_dir",
     "coder_models_dir",
+    "config_dir",
     "data_dir",
     "default_checkpoint",
     "docs_models_dir",
@@ -369,6 +440,9 @@ __all__ = [
     "ensure_data_layout",
     "executable_dir",
     "is_frozen",
+    "learning_audit_dir",
+    "learning_root_dir",
+    "main_model_learning_dir",
     "models_dir",
     "natasha_models_dir",
     "piper_models_dir",

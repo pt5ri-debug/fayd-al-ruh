@@ -429,6 +429,16 @@ class CharacterLearning:
 
     # ------------------------------------------------------------ persistence
 
+    @property
+    def root(self) -> Path | None:
+        """The folder this record lives under, or ``None`` for an in-memory record.
+
+        Exposed so a caller that needs to keep a *related* store (a character's
+        isolated learning directory, for instance) beside this one can reuse the
+        same base rather than guessing it.
+        """
+        return self._root
+
     def _store(self):
         from storage.json_store import JsonStore
 
