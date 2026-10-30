@@ -118,12 +118,22 @@ natasha = [
     "llama-cpp-python>=0.3",
     "huggingface_hub>=0.23",
 ]
-# Hakeem, the project's scholar of religion and history, speaks through the *same*
-# model as the companion (`hakeem/model.py` reuses `companion.model`), so this
-# extra pins the same runtime and the same `data/natasha` model folder -- a
-# machine that already has `[natasha]` needs nothing new. It is named for symmetry
-# with the other mouth extras and because a user may install the scholar alone.
+# Hakeem, the project's scholar of religion and history, has his **own** model
+# folder (`data/hakeem`) and his own default model (`qwen3.5-4b`), so this extra
+# pins the same in-process runtime as Natasha's -- a machine that already has
+# `[natasha]` needs nothing new -- while his weights and catalog are separate. It
+# is named for symmetry with the other mouth extras and because a user may install
+# the scholar alone.
 hakeem = [
+    "llama-cpp-python>=0.3",
+    "huggingface_hub>=0.23",
+]
+# The **shared** language models: one public folder (`data/shared_models`) of
+# general GGUF models every character may run through the project's in-process
+# runtime, so a small general model is downloaded once instead of per character.
+# Same runtime as the mouth extras; the weights are a separate one-time,
+# human-approved download (`python -m cli shared-models download --approve`).
+shared = [
     "llama-cpp-python>=0.3",
     "huggingface_hub>=0.23",
 ]

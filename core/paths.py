@@ -146,6 +146,21 @@ def presentation_models_dir() -> Path:
     return data_dir() / "presentation"
 
 
+def shared_models_dir() -> Path:
+    """Where the **shared language models** every character may use live.
+
+    Besides each character's own model folder, the project keeps one **public**
+    folder of general-purpose GGUF models that *any* character may run: Jarvis,
+    Ultron, Vision, Banner, Natasha, Hakeem, and Cloud all reach it through the
+    project's one in-process runtime (``llama-cpp-python``), so a model downloaded
+    once can answer in any mouth. ``python -m cli shared-models download --approve``
+    fetches a known-good model here. The folder is git-ignored, so a
+    multi-gigabyte model never dirties the working tree or bloats a program
+    update. ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "shared_models"
+
+
 def natasha_models_dir() -> Path:
     """Where Natasha's in-process GGUF models live.
 
@@ -155,11 +170,27 @@ def natasha_models_dir() -> Path:
     daemon has to sit in the background holding RAM. The file lives under
     ``data/natasha`` (or is downloaded there with
     ``python -m cli natasha download --approve``); an existing Ollama setup is
-    still honoured as a fallback. The folder is git-ignored, so a multi-gigabyte
-    model never dirties the working tree or bloats a program update.
-    ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    still honoured as a fallback, and a model that is not in her own folder is
+    still found in the project's :func:`shared_models_dir`. The folder is
+    git-ignored, so a multi-gigabyte model never dirties the working tree or
+    bloats a program update. ``FAYD_DATA_DIR`` moves it with the rest of the data.
     """
     return data_dir() / "natasha"
+
+
+def hakeem_models_dir() -> Path:
+    """Where Hakeem's own in-process GGUF models live (``data/hakeem``).
+
+    Hakeem, the project's scholar of religion and history, is a character in his
+    own right, so he has his **own** model folder -- separate from Natasha's, just
+    as his database is a separate file. His default model (``qwen3.5-4b``) is
+    downloaded here with ``python -m cli hakeem download --approve``; a model that
+    is not in his own folder is still found in the project's
+    :func:`shared_models_dir`, so a shared download works for him too. The folder
+    is git-ignored, so a multi-gigabyte model never dirties the working tree or
+    bloats a program update. ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "hakeem"
 
 
 def qwen_speech_models_dir() -> Path:
@@ -393,6 +424,12 @@ def ensure_data_layout() -> None:
     """
     if is_frozen() or os.environ.get(ENV_DATA_DIR):
         return
+    _copy_preexisting_data()
+    _gather_legacy_models()
+
+
+def _copy_preexisting_data() -> None:
+    """Copy the pre-``data/`` source folders into ``data/`` once (best-effort)."""
     root = _source_root()
     data = root / "data"
     if data.exists():
@@ -418,6 +455,22 @@ def ensure_data_layout() -> None:
         pass
 
 
+def _gather_legacy_models() -> None:
+    """One-time upgrade step: gather a legacy general model into the shared folder.
+
+    ``qwen3-1.7b`` used to live in ``data/natasha``; it is a general model every
+    character may run, so it belongs in the public ``data/shared_models`` folder
+    (see :mod:`core.shared_models`). Best-effort and silent -- a read-only data
+    folder must not crash a run, and a machine with nothing to move is a no-op.
+    """
+    try:
+        from core.shared_models import migrate_legacy_models
+
+        migrate_legacy_models()
+    except Exception:
+        pass
+
+
 __all__ = [
     "ENV_DATA_DIR",
     "artifacts_dir",
@@ -439,6 +492,7 @@ __all__ = [
     "docs_pages_dir",
     "ensure_data_layout",
     "executable_dir",
+    "hakeem_models_dir",
     "is_frozen",
     "learning_audit_dir",
     "learning_root_dir",
@@ -448,6 +502,7 @@ __all__ = [
     "piper_models_dir",
     "presentation_models_dir",
     "qwen_speech_models_dir",
+    "shared_models_dir",
     "studio_dir",
     "studio_workspaces_dir",
     "ultron_models_dir",

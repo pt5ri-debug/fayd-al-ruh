@@ -1,0 +1,26 @@
+# Optional: the shared language models (the [shared] extra).
+#
+# Install with:  python -m pip install -r requirements-shared.txt
+#
+# The project keeps one **public** folder of general GGUF models
+# (`data/shared_models`) that every character may run -- the companion, the
+# scholar, and the answering mouths -- because they all share the one in-process
+# runtime below. A model downloaded here answers everywhere, so a small general
+# model is fetched once instead of once per character. A machine that already
+# installed `requirements-natasha.txt` (or the Ultron/Vision/Banner/Studios
+# runtime) needs nothing new here.
+#
+# ``llama-cpp-python`` runs a GGUF model locally inside this process -- no
+# ``ollama serve`` daemon has to sit in the background holding RAM -- and
+# ``huggingface_hub`` is used only to fetch the weights. On a machine with no
+# prebuilt wheel, ``llama-cpp-python`` compiles from source and needs a C/C++
+# compiler.
+#
+# The model weights are a *separate* one-time, human-approved download:
+#     python -m cli shared-models download --approve
+# or drop any compatible `.gguf` file into the data/shared_models folder. The base
+# install needs none of this: the imports are lazy, and without the extra or a
+# model file a character still runs against an existing Ollama server and reports
+# the real next step instead of pretending.
+llama-cpp-python>=0.3
+huggingface_hub>=0.23

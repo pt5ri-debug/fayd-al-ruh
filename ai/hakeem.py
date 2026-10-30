@@ -7,7 +7,7 @@
     python -m cli hakeem --new                       # start a fresh session
     python -m cli hakeem status                      # which runtime answers, and the next step
     python -m cli hakeem models                      # list the models he can fetch
-    python -m cli hakeem download --approve           # one-time: fetch the GGUF weights (~2.6 GB)
+    python -m cli hakeem download --approve           # one-time: fetch his own GGUF (~2.5 GB)
     python -m cli hakeem download --approve --backend ollama   # or pull an Ollama tag
     python -m cli hakeem remember "أفضل كتب التاريخ" --kind preference
     python -m cli hakeem memories                    # what he remembers
@@ -21,9 +21,10 @@
 
 Hakeem (Arabic ``حكيم``) is the project's **scholar of religion and history**: he
 discusses the Abrahamic faiths -- Islam, Christianity, and Judaism -- compares
-them fairly, and is at home in the ancient civilisations. He speaks through the
-**same local model** the companion Natasha uses, so a machine that already has her
-weights needs nothing new; only his character and his database differ.
+them fairly, and is at home in the ancient civilisations. He has his **own** local
+model (``qwen3.5-4b``) in his **own** folder (``data/hakeem``), separate from the
+companion Natasha's; a model in the project's shared folder is used too, so a
+shared download works for him as well.
 
 He is a scholar, not a preacher: he respects every faith, never proselytises,
 never issues a religious ruling, keeps scripture and history and scholarly opinion
@@ -55,7 +56,7 @@ from hakeem.personality import NAME
 
 INTRO = (
     f"{NAME} (حكيم): a scholar of the Abrahamic religions and of history, speaking "
-    "through the same local model the companion uses. Type 'quit' to exit."
+    "through his own local model. Type 'quit' to exit."
 )
 
 #: Recognised subcommands. Anything else is read as a chat message.
@@ -136,7 +137,7 @@ def run_status(args: argparse.Namespace) -> int:
 
 
 def run_models(args: argparse.Namespace) -> int:
-    """List the models Hakeem can fetch (the same catalog the companion offers)."""
+    """List the models Hakeem can fetch (his own catalog, in his own folder)."""
     if getattr(args, "as_json", False):
         print(
             json.dumps(
@@ -150,7 +151,7 @@ def run_models(args: argparse.Namespace) -> int:
         )
         return 0
     print(f"Models Hakeem can fetch (default: {DEFAULT_SPEC_KEY}):")
-    print("(The same model the companion Natasha uses, so it is downloaded once.)")
+    print("(Fetched into his own folder, data/hakeem; a shared model is used too.)")
     for key, title, size, summary in spec_summaries():
         print(f"  {key:14s} {title:34s} ~{size:.1f} GB")
         print(f"  {'':14s} {summary}")
@@ -160,7 +161,7 @@ def run_models(args: argparse.Namespace) -> int:
 
 
 def run_download(args: argparse.Namespace) -> int:
-    """Fetch the shared model through the permission + human-approval gates.
+    """Fetch Hakeem's model through the permission + human-approval gates.
 
     The default is the in-process GGUF weights (``llama-cpp-python``); pass
     ``--backend ollama`` to pull the same model into a local Ollama server instead.
@@ -420,7 +421,9 @@ def run_chat(args: argparse.Namespace) -> int:
 
 # -- argument parsing -----------------------------------------------------
 def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--model", default=None, help="the local model to use (default qwen3:4b).")
+    parser.add_argument(
+        "--model", default=None, help="the local model to use (default qwen3.5:4b)."
+    )
     parser.add_argument(
         "--backend",
         choices=BACKEND_NAMES,

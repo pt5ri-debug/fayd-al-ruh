@@ -2,17 +2,19 @@
 
 Each answering mouth already owns its own model catalog (``core.ultron``,
 ``core.vision_model``, ``core.presentation_model``, ``companion.model``,
-``core.cloud_model``) and its own folder of weights. That is right for the
-*mouth* -- it is what lets Ultron and Vision never disagree about their own
-models -- but it leaves the user with no single answer to "which language models
-does this program actually have?". This module is that answer.
+``hakeem.model``, ``core.cloud_model``) and its own folder of weights, and the
+project keeps one **public** folder of general models every character may run
+(``core.shared_models``). That is right for the *mouth* -- it is what lets Ultron
+and Vision never disagree about their own models -- but it leaves the user with no
+single answer to "which language models does this program actually have?". This
+module is that answer.
 
 It does not re-implement any catalog: it *reads* the existing ones and reports
 each model once, with the facts a chooser needs:
 
 * every mouth that can run it (``engines``) -- the GGUF mouths share one
-  ``llama-cpp-python`` runtime, so a model fetched for one of them can answer in
-  any of them, and the companion's weights are Hakeem's too;
+  ``llama-cpp-python`` runtime, so a model fetched for one of them (or into the
+  public shared folder) can answer in any of them;
 * whether its file is really present here (``available``), and the real next step
   when it is not (``detail``);
 * the GGUF file it resolves to, when one is on disk (``path``), so a loader can be
@@ -39,8 +41,10 @@ from typing import Any
 from core.paths import (
     data_dir,
     default_checkpoint,
+    hakeem_models_dir,
     natasha_models_dir,
     presentation_models_dir,
+    shared_models_dir,
     ultron_models_dir,
     vision_models_dir,
 )
@@ -56,6 +60,11 @@ MOUTH_BANNER = "banner"
 MOUTH_CLOUD = "cloud"
 MOUTH_NATASHA = "natasha"
 MOUTH_HAKEEM = "hakeem"
+#: Not a *mouth* the user picks, but the project's **public** shared-model folder
+#: (:mod:`core.shared_models`). It is a valid ``engine`` for a catalog model -- a
+#: model downloaded once into ``data/shared_models`` is offered to every GGUF
+#: mouth -- so it lives here beside the mouths it serves.
+MOUTH_SHARED = "shared"
 
 #: A short label per mouth, for a section header in a model picker.
 ENGINE_LABELS: dict[str, str] = {
@@ -67,6 +76,7 @@ ENGINE_LABELS: dict[str, str] = {
     MOUTH_CLOUD: "Cloud (remote provider)",
     MOUTH_NATASHA: "Natasha (companion)",
     MOUTH_HAKEEM: "Hakeem (scholar)",
+    MOUTH_SHARED: "Shared models (every character)",
 }
 
 #: Every mouth this catalog knows about, in the order the composer's model row
@@ -104,6 +114,7 @@ SHORT_LABELS: dict[str, str] = {
     MOUTH_CLOUD: "Cloud",
     MOUTH_NATASHA: "Natasha",
     MOUTH_HAKEEM: "Hakeem",
+    MOUTH_SHARED: "Shared",
 }
 
 #: The two non-GGUF keys, so a caller can name them without a magic string.
@@ -317,18 +328,44 @@ def _gguf_specs() -> list[_Spec]:
                 download=f"python -m cli natasha download {key} --approve",
             )
         )
+
+    from hakeem.model import resolve_spec as hakeem_resolve
+    from hakeem.model import spec_summaries as hakeem_specs
+
+    for key, title, size, summary in hakeem_specs():
+        spec = hakeem_resolve(key)
+        specs.append(
+            _Spec(
+                key=key, title=f"{title} (~{size:.1f} GB)", summary=summary,
+                engine=MOUTH_HAKEEM, folder=hakeem_models_dir(), filename=spec.filename,
+                identity=f"{spec.repo}/{spec.filename}",
+                download=f"python -m cli hakeem download {key} --approve",
+            )
+        )
+
+    from core.shared_models import resolve_spec as shared_resolve
+    from core.shared_models import spec_summaries as shared_specs
+
+    for key, title, size, summary in shared_specs():
+        spec = shared_resolve(key)
+        specs.append(
+            _Spec(
+                key=key, title=f"{title} (~{size:.1f} GB)", summary=summary,
+                engine=MOUTH_SHARED, folder=shared_models_dir(), filename=spec.filename,
+                identity=f"{spec.repo}/{spec.filename}",
+                download=f"python -m cli shared-models download {key} --approve",
+            )
+        )
     return specs
 
 
-def _character_identities() -> set[str]:
-    """The identities of the companion's models, which Hakeem runs too.
+def _hakeem_identities() -> set[str]:
+    """The identities of Hakeem's own models, which he runs in his own folder.
 
-    Read from the companion's own catalog rather than from an entry's ``engine``,
-    because the merge keeps whichever engine registered a shared model first: the
-    companion's ``qwen3-4b`` merges into Banner's entry, so a check on ``engine``
-    would leave Hakeem unable to run a model it shares.
+    Read from Hakeem's own catalog (not from an entry's ``engine``) so a shared
+    model that also appears in the public folder still marks Hakeem as an engine.
     """
-    from companion.model import resolve_spec, spec_summaries
+    from hakeem.model import resolve_spec, spec_summaries
 
     return {
         f"{resolve_spec(key).repo}/{resolve_spec(key).filename}"
@@ -420,21 +457,35 @@ def _cloud_ready(provider) -> bool:
 def _build_gguf() -> tuple[LanguageModel, ...]:
     """The merged GGUF catalog: each model once, with every mouth that can run it.
 
-    The companion's models are marked as Hakeem's too (they share the weights), so
-    a scholar window offers them without a second download. That is decided by the
-    weights' identity, not by an entry's ``engine``: the companion's ``qwen3-4b``
-    merges into Banner's entry, so an engine check would miss it.
+    Hakeem's own models are marked as his (they live in his own folder), and the
+    public shared folder's models are marked for **every** GGUF mouth, because any
+    character can run them. That is decided by the weights' identity, not by an
+    entry's ``engine``: a model named by two engines merges into the first entry,
+    so an engine check would miss the second.
     """
     registry: dict[str, LanguageModel] = {}
     order: list[str] = []
     for spec in _gguf_specs():
         _register(registry, order, spec)
-    shared = _character_identities()
+    hakeem_own = _hakeem_identities()
+    shared_engine = {
+        identity
+        for identity in order
+        if registry[identity].engine == MOUTH_SHARED
+        or MOUTH_SHARED in registry[identity].engines
+    }
     models: list[LanguageModel] = []
     for identity in order:
         model = _finalise(registry[identity])
-        if identity in shared and MOUTH_HAKEEM not in model.engines:
-            model = replace(model, engines=(*model.engines, MOUTH_HAKEEM))
+        engines = model.engines
+        if identity in hakeem_own and MOUTH_HAKEEM not in engines:
+            engines = (*engines, MOUTH_HAKEEM)
+        if identity in shared_engine:
+            # A shared model answers in every GGUF mouth (and the shared folder).
+            extra = tuple(mouth for mouth in (*GGUF_MOUTHS, MOUTH_SHARED) if mouth not in engines)
+            engines = (*engines, *extra)
+        if engines != model.engines:
+            model = replace(model, engines=engines)
         models.append(model)
     return tuple(models)
 
@@ -532,8 +583,16 @@ def _mouth_default_key(mouth: str) -> str | None:
             from core.presentation_model import DEFAULT_SPEC_KEY
 
             return DEFAULT_SPEC_KEY
-        if mouth in (MOUTH_NATASHA, MOUTH_HAKEEM):
+        if mouth == MOUTH_NATASHA:
             from companion.model import DEFAULT_SPEC_KEY
+
+            return DEFAULT_SPEC_KEY
+        if mouth == MOUTH_HAKEEM:
+            from hakeem.model import DEFAULT_SPEC_KEY
+
+            return DEFAULT_SPEC_KEY
+        if mouth == MOUTH_SHARED:
+            from core.shared_models import DEFAULT_SPEC_KEY
 
             return DEFAULT_SPEC_KEY
     except Exception:
@@ -563,7 +622,7 @@ def _gguf_models_all() -> tuple[LanguageModel, ...]:
     return tuple(
         model
         for model in _all()
-        if model.engine in GGUF_MOUTHS or model.engine == MOUTH_MODEL
+        if model.engine in (*GGUF_MOUTHS, MOUTH_SHARED) or model.engine == MOUTH_MODEL
     )
 
 
@@ -679,7 +738,14 @@ def can_download(model: LanguageModel | None) -> bool:
     """
     if model is None or model.custom or not model.download_command:
         return False
-    return model.engine in {MOUTH_ULTRON, MOUTH_VISION, MOUTH_BANNER, MOUTH_NATASHA, MOUTH_HAKEEM}
+    return model.engine in {
+        MOUTH_ULTRON,
+        MOUTH_VISION,
+        MOUTH_BANNER,
+        MOUTH_NATASHA,
+        MOUTH_HAKEEM,
+        MOUTH_SHARED,
+    }
 
 
 def download_model(
@@ -720,8 +786,16 @@ def download_model(
         from core.presentation_model import download_model as fetch
 
         return fetch(catalog_key, approved=approved, progress=progress)
-    if model.engine in (MOUTH_NATASHA, MOUTH_HAKEEM):
+    if model.engine == MOUTH_NATASHA:
         from companion.model import download_model as fetch
+
+        return fetch(catalog_key, approved=approved, progress=progress)
+    if model.engine == MOUTH_HAKEEM:
+        from hakeem.model import download_model as fetch
+
+        return fetch(catalog_key, approved=approved, progress=progress)
+    if model.engine == MOUTH_SHARED:
+        from core.shared_models import download_model as fetch
 
         return fetch(catalog_key, approved=approved, progress=progress)
     raise ValueError(f"{model.title!r} has nothing to download.")
@@ -736,6 +810,7 @@ __all__ = [
     "MOUTH_HAKEEM",
     "MOUTH_MODEL",
     "MOUTH_NATASHA",
+    "MOUTH_SHARED",
     "MOUTH_SOURCES",
     "MOUTH_ULTRON",
     "MOUTH_VISION",

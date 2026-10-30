@@ -1168,12 +1168,15 @@ the user's approval before it is written.
 ### Hakeem: a scholar of religion and history (optional)
 
 Hakeem (Arabic **حكيم**, "the wise one") is a second companion character beside
-Natasha, and he speaks through the **same local model** she uses — the same
-catalog, the same `data/natasha` model folder, and the same governed download —
-so a machine that already fetched her weights downloads **nothing** for him.
-Only the *character* and the database differ: his memories and sessions live in
-their own SQLite file (`data/hakeem.db`), so nothing here writes to the project's
-entities, relations, evidence, beliefs, or knowledge graph.
+Natasha, with his **own** local model (a Qwen3.5 GGUF, `qwen3.5-4b` by default)
+in his **own** folder (`data/hakeem`), separate from hers — so the two characters
+can run on different models while sharing the project's one in-process runtime. A
+model in the project's public **shared** folder (`data/shared_models`, see
+[Shared language models](#shared-language-models-optional)) is used as a fallback,
+so a shared download answers for him too. Only the *character* and the database
+differ: his memories and sessions live in their own SQLite file
+(`data/hakeem.db`), so nothing here writes to the project's entities, relations,
+evidence, beliefs, or knowledge graph.
 
 He discusses the **Abrahamic faiths** — Islam, Christianity, and Judaism — and is
 at home in history and the **ancient civilisations**, with a comparison method
@@ -1186,7 +1189,8 @@ python -m cli hakeem                             # talk with him (type 'quit' to
 python -m cli hakeem "قارن بين مفهوم الزكاة والصدقة في الأديان"   # one message
 python -m cli hakeem --session religions "..."    # keep one named session across runs
 python -m cli hakeem settings --depth 0.9 --citation 0.8
-python -m cli hakeem download --approve           # one-time: the shared GGUF weights
+python -m cli hakeem models                        # his own catalog
+python -m cli hakeem download --approve            # one-time: his own GGUF (~2.5 GB)
 ```
 
 The character is fixed and its **safety floor is unconditional**: he respects
@@ -1218,6 +1222,40 @@ gets English, an Arabic one gets Arabic), and it can be pinned with
 `--reply-language ar|en`. He is also a **mouth inside the project's own chat**
 (`from hakeem`, or the window's model selector) and has a headless twin
 (`python -m cli hakeem-chat`).
+
+### Shared language models (optional)
+
+Besides each character's own model folder, the project keeps **one public folder**
+of general-purpose GGUF models that *every* character may run —
+`data/shared_models`. Because Jarvis, Ultron, Vision, Banner, Natasha, Hakeem, and
+Cloud all run through the project's one in-process runtime
+(`llama-cpp-python`), a small general model downloaded **once** here answers in
+any of them, instead of being copied per character. Each character's own model
+layer falls back to this folder when its own is empty, so a shared download needs
+no per-character step.
+
+The catalog ships three general, small, Apache-2.0 models:
+
+| Key | What it is |
+| --- | --- |
+| `qwen3.5-0.8b` | The lightest — a reply in a second or two on a CPU. |
+| `qwen3.5-2b` | The default — a good balance of quality and speed. |
+| `qwen3-1.7b` | **Moved here** from Natasha's folder, because it is general. |
+
+```bash
+python -m cli shared-models status              # what is in data/shared_models, and the next step
+python -m cli shared-models models              # the fetchable catalog
+python -m cli shared-models download --approve  # one-time: fetch the default (~1.2 GB)
+python -m cli shared-models download-all --approve  # fetch every catalog model
+python -m cli shared-models migrate             # move a legacy model from Natasha's folder
+```
+
+The weights are a **separate one-time, human-approved download** (the CLI's
+`--approve`), like every other model in the project; the base install needs none
+of it, and without the extra or a file a character still runs against an existing
+Ollama server and reports the real next step instead of pretending. On an
+upgrading machine `qwen3-1.7b` — which used to live in `data/natasha` — is moved
+into the shared folder automatically on first run, so no download is wasted.
 
 ## Graphical interface (ChatGPT-style)
 

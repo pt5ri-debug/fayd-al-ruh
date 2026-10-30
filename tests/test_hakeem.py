@@ -1,7 +1,8 @@
 """Hakeem, the scholar of religion and history: character, memory, and wiring.
 
-Hakeem speaks through the *same* local model as the companion Natasha, so the
-model layer is the companion's own; these tests pin what is Hakeem's:
+Hakeem has his **own** local model (``qwen3.5-4b``) in his **own** folder
+(``data/hakeem``), separate from the companion Natasha's; a model in the project's
+public shared folder is used as a fallback. These tests pin what is Hakeem's:
 
 * a stable, honest scholarly character, with the safety rules (respect every
   faith, never proselytise, never issue a ruling, keep scripture/history/opinion
@@ -374,12 +375,43 @@ def test_prompt_builder_labels_recalled_memories() -> None:
     assert "يهتم بالتاريخ" in built.system
 
 
-# -- the shared model -----------------------------------------------------
-def test_hakeem_uses_the_companions_model_by_default() -> None:
-    """Hakeem stands on the model Natasha uses -- the companion's own default."""
+# -- Hakeem's own model ---------------------------------------------------
+def test_hakeem_has_his_own_model_and_folder() -> None:
+    """Hakeem is his own character: his own model, in his own folder."""
     from companion.model import DEFAULT_MODEL as COMPANION_DEFAULT
 
-    assert DEFAULT_MODEL == COMPANION_DEFAULT
+    assert DEFAULT_MODEL != COMPANION_DEFAULT
+    assert DEFAULT_MODEL == "qwen3.5:4b"
+    from core.paths import hakeem_models_dir, natasha_models_dir
+
+    assert hakeem_models_dir() != natasha_models_dir()
+    assert hakeem_models_dir().name == "hakeem"
+
+
+def test_hakeems_own_messages_name_his_folder_and_extra(tmp_path: Path, monkeypatch) -> None:
+    """A missing model/runtime message is Hakeem's, never the companion's.
+
+    The in-process client layer is the companion's, but it is parameterised so a
+    message about Hakeem points at ``data/hakeem`` and ``requirements-hakeem.txt``
+    rather than at Natasha's folder and extra.
+    """
+    import hakeem.model as model
+    from companion.model import CompanionModelUnavailable
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    client = model.build_client(backend="gguf")
+    with pytest.raises(CompanionModelUnavailable) as missing:
+        client.model_path()  # type: ignore[attr-defined]
+    message = str(missing.value)
+    assert "No Hakeem model file" in message
+    assert "hakeem" in message
+    assert "natasha" not in message.lower()
+
+    monkeypatch.setattr(model, "extra_available", lambda: False)
+    runtime = model.build_client(backend="gguf")
+    detail = runtime.missing_detail()  # type: ignore[attr-defined]
+    assert "Hakeem's in-process model" in detail
+    assert "requirements-hakeem.txt" in detail
 
 
 def test_hakeem_model_status_is_honest_without_a_server(tmp_path: Path, monkeypatch) -> None:
@@ -397,11 +429,11 @@ def test_an_injected_caller_makes_hakeem_available(agent: HakeemAgent) -> None:
 
 # -- the CLI --------------------------------------------------------------
 def test_hakeem_defaults_are_sized_for_a_fast_reply() -> None:
-    """Hakeem shares the model, so he shares the fast defaults too.
+    """Hakeem keeps the fast defaults: a hidden reasoning trace is what was slow.
 
-    The hidden reasoning trace is off, the reply cap and context are small, and the
-    history is bounded -- the same shape as the companion's, because it is the same
-    model and the same latency problem.
+    The trace is off, the reply cap and context are small, and the history is
+    bounded -- the same shape as the companion's, because it is the same latency
+    problem on a CPU-only machine.
     """
     config = HakeemConfig(db_path=None, persistent=False)
     assert config.think is False
@@ -529,11 +561,11 @@ def test_cli_download_runs_the_gate_when_approved(monkeypatch, capsys) -> None:
     def fake_download(spec_key, *, approved=False, progress=None):
         calls.append(spec_key)
         assert approved is True
-        return "qwen3-4b"
+        return "qwen3.5-4b"
 
     monkeypatch.setattr(hakeem_cli, "download_model", fake_download)
     assert hakeem_cli.main(["download", "--approve"]) == 0
-    assert calls == ["qwen3-4b"]
+    assert calls == ["qwen3.5-4b"]
 
 
 def test_cli_models_lists_the_catalog(capsys) -> None:
@@ -541,7 +573,7 @@ def test_cli_models_lists_the_catalog(capsys) -> None:
 
     assert hakeem_cli.main(["models"]) == 0
     out = capsys.readouterr().out
-    assert "qwen3-4b" in out
+    assert "qwen3.5-4b" in out
 
 
 def test_cli_help_names_hakeem(capsys) -> None:

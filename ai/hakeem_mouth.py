@@ -4,8 +4,8 @@ The chat already offers several mouths (the grounded sources, the trained model,
 Ultron, Vision, Banner, Cloud, and the companion Natasha). This adds the *scholar*
 one: Hakeem, who discusses the Abrahamic faiths -- Islam, Christianity, and
 Judaism -- compares them fairly, and is at home in history and the ancient
-civilisations (see :mod:`hakeem.hakeem_agent`). He speaks through the **same
-local model** the companion uses; only his character differs.
+civilisations (see :mod:`hakeem.hakeem_agent`). He has his **own** local model, in
+his own folder; only his character differs.
 
 It exists so Hakeem is a *mouth inside the project's own chat* -- the same session,
 the same transcript -- rather than a separate window. The chat's own

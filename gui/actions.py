@@ -46,6 +46,7 @@ from cli.menu import (
     run_release,
     run_scene3d,
     run_selfcheck,
+    run_shared_models,
     run_ultron_chat,
     run_update,
     run_vision_chat,
@@ -71,6 +72,9 @@ SIDEBAR_LABELS: dict[str, str] = {
     "natasha-mood": "Mood",
     "natasha-initiative": "Initiative",
     "natasha-relationship-memory": "Relationship memory",
+    "shared-models": "Shared models — status",
+    "shared-models-download": "Shared models — download",
+    "shared-models-migrate": "Shared models — move from Natasha",
     "characters": "Characters",
     "characters-shareable": "Who may share knowledge",
     "qwen-speech": "Qwen3 — status",
@@ -171,6 +175,16 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         (
             "characters",
             "characters-shareable",
+        ),
+    ),
+    ActionGroup(
+        "models",
+        "Language models",
+        "🧩",
+        (
+            "shared-models",
+            "shared-models-download",
+            "shared-models-migrate",
         ),
     ),
     ActionGroup(
@@ -350,6 +364,24 @@ ACTIONS: tuple[GuiAction, ...] = (
         run_hakeem_chat,
         (),
         hidden=True,
+    ),
+    GuiAction(
+        "shared-models",
+        "Shared models: one public folder every character may run",
+        run_shared_models,
+        ("status",),
+    ),
+    GuiAction(
+        "shared-models-download",
+        "Shared models: download the small general models (~1.7 GB)",
+        run_shared_models,
+        ("download-all", "--approve"),
+    ),
+    GuiAction(
+        "shared-models-migrate",
+        "Shared models: move a legacy model from Natasha's folder",
+        run_shared_models,
+        ("migrate",),
     ),
     GuiAction(
         "characters",

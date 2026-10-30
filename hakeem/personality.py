@@ -3,9 +3,9 @@
 Hakeem (Arabic ``حكيم``, "the wise one") is the project's **scholar of religion
 and history**: a character who discusses the Abrahamic faiths -- Islam,
 Christianity, and Judaism -- and can compare them, and who is also at home in
-history and the ancient civilisations. He speaks through the *same* local model
-Natasha, the project's companion, speaks through (see :mod:`hakeem.model`); only
-his character, his knowledge, and his rules differ.
+history and the ancient civilisations. He has his **own** local model, in his own
+folder (see :mod:`hakeem.model`), separate from Natasha's; only his character, his
+knowledge, and his rules differ from the companion's.
 
 Everything that makes Hakeem *him* lives here: his name, his standing traits, the
 non-negotiable rules he keeps, and the tunable style the user can adjust
@@ -50,8 +50,8 @@ ARABIC_NAME = "حكيم"
 #: A short, honest one-line description.
 BLURB = (
     "Hakeem (حكيم): a scholar of the Abrahamic religions and of history who "
-    "compares faiths fairly and discusses the ancient civilisations, through the "
-    "same local model the project's companion uses."
+    "compares faiths fairly and discusses the ancient civilisations, through his "
+    "own local model."
 )
 
 #: The traits that do not change with the user's settings. These are the

@@ -838,14 +838,15 @@ Arabic is kept as secondary aliases where useful.
   of religion and history*: a self-contained character layer (its own package,
   like the companion, not a mouth over the cognitive core) who discusses the
   **Abrahamic faiths** — Islam, Christianity, and Judaism — compares them fairly,
-  and is at home in history and the **ancient civilisations**. He stands on the
-  **same local model Natasha uses** (`hakeem/model.py` is a thin layer over
-  `companion.model`, reusing the catalog, the `auto`/`gguf`/`ollama` runtime
-  choice, the `data/natasha` model folder, the governed download, and the client
-  seam), so one catalog and one model file mean the two characters can never
-  disagree about what is installed and a user who already fetched the companion's
-  weights downloads **nothing** for Hakeem; only the *character* and the database
-  differ. He is deliberately **not** the cognitive core: nothing in `hakeem/`
+  and is at home in history and the **ancient civilisations**. He has his **own**
+  local model (`qwen3.5-4b` by default) in his **own** folder (`data/hakeem`),
+  separate from the companion Natasha's (`hakeem/model.py` reuses only the shared
+  in-process runtime — the `auto`/`gguf`/`ollama` choice, the governed download, and
+  the client seam — not her catalog or folder), so the two characters can run on
+  different models; a model in the project's **public shared folder**
+  (`core.shared_models`, `data/shared_models`) is a fallback, so a shared download
+  answers for him too. Only the *character* and the database differ. He is
+  deliberately **not** the cognitive core: nothing in `hakeem/`
   writes to entities, relations, evidence, beliefs, or the knowledge graph, and
   his SQLite database is a **separate file** (`data/hakeem.db`) from the
   companion's, so adding him cannot disturb the symbolic architecture.
@@ -5176,3 +5177,49 @@ regression monitor each can refuse a change.
   does list *Jarvis (Internal Sources + Web)*, and pressing the button asks the one
   switch to answer with the model again). Gates: pytest 4467 passed / 15 skipped,
   ruff clean, mypy 756 files OK, evaluation PASS (`overall` 0.9856 unchanged).
+
+- Phase 56 — **one public model folder every character may share, and Hakeem on his
+  own model and folder**: two changes to how the local models are organised. (1) A
+  **public shared-model folder** joins the per-character ones.
+  `core/paths.shared_models_dir()` is `data/shared_models` (git-ignored,
+  `FAYD_DATA_DIR`-aware), and `core/shared_models.py` is its engine: a catalog of
+  three general Apache-2.0 GGUF models (`qwen3.5-0.8b` lightest, `qwen3.5-2b`
+  **default**, and `qwen3-1.7b` -- moved here from Natasha's folder, because it is
+  general), `resolve_spec`/`spec_names`/`spec_summaries`, `find_model_file`/
+  `model_is_cached`/`list_models`/`installed_spec_keys`, and a governed
+  `download_model`/`download_all` that runs only through the permission +
+  human-approval gates (`--approve`) via `huggingface_hub`, writing the same
+  `model.json` registry every other engine writes. **Every character reaches it**:
+  `companion.model` and `hakeem.model` gained `find_model_in(own_dir, shared_dir)`
+  -- the one place "own folder first, shared folder second" lives -- so a model
+  downloaded once into `data/shared_models` answers in any mouth, and the unified
+  catalog (`core.language_models`) marks such a model as an engine of **every**
+  GGUF mouth (`MOUTH_SHARED`, `_build_gguf`). `core.paths.ensure_data_layout()`
+  runs a one-time `migrate_legacy_models()` (through `_gather_legacy_models`) that
+  **moves** a legacy `qwen3-1.7b` out of `data/natasha` into the shared folder
+  (best-effort, never overwriting an existing shared copy), so an upgrade wastes
+  no download. Wired as `python -m cli shared-models status|models|list|download|
+  download-all|migrate` (`cli/shared_models.py`, the headless twin), the menu entry
+  *Shared models: download general models every character may use*, and the
+  `[shared]` extra / `requirements-shared.txt`. (2) **Hakeem is separated from
+  Natasha**: he has his **own** model folder (`core.paths.hakeem_models_dir()`,
+  `data/hakeem`), his **own** catalog (`hakeem/model.py`, default `qwen3.5-4b`,
+  `unsloth/Qwen3.5-4B-GGUF`; also `qwen3.5-0.8b`/`qwen3.5-2b`/`qwen3.5-9b`), his
+  own `DEFAULT_SPEC_KEY`, his own `hakeem_model_status`/`download_model`/`CATALOG`,
+  and the `[hakeem]` extra (`requirements-hakeem.txt`) — he no longer reuses
+  Natasha's catalog, folder, or `data/natasha` weights (a shared model is his
+  fallback). `companion.model`'s client layer was parameterised (`LABEL`,
+  `download_hint`, `model_dir`, `feature`, `find_model_in`) so it can serve either
+  character without a message naming Hakeem Natasha, pointing him at the wrong
+  folder, or offering the wrong install command. `core.language_models` treats Hakeem as a
+  first-class engine (`_hakeem_identities`, `_mouth_default_key`, `can_download`,
+  `download_model` all dispatch to his own catalog), and `ai/mouths._character_tag`
+  resolves a key through each character's **own** catalog first. The remaining
+  wiring (`hakeem/config.py`, `hakeem/hakeem_agent.py`, `ai/hakeem.py`,
+  `ai/hakeem_mouth.py`, `hakeem/personality.py`, `hakeem/__init__.py`, `gui/actions.py`,
+  `cli/menu.py`, `cli/__main__.py`, `pyproject.toml`, README, AGENTS.md) names the
+  new folders, models, and commands. `tests/test_shared_models.py`,
+  `tests/test_shared_models_cli.py`, `tests/test_hakeem.py`, and
+  `tests/test_model_chat.py` pin the catalog, the honest status, the governed
+  download, the migration, the shared model's reach into every GGUF mouth, and
+  Hakeem's own model/folder.

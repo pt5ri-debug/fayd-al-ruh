@@ -92,34 +92,51 @@ def build_mouth(
 
 
 def _build_character(mouth: str, choice: catalog.LanguageModel | None, **kwargs: Any):
-    """Build Natasha's or Hakeem's mouth against a chosen (shared) model.
+    """Build Natasha's or Hakeem's mouth against a chosen model.
 
-    They speak through the same weights, so the choice is resolved the same way
-    for both: the spec's Ollama ``tag`` names the model (the fallback runtime),
-    and the resolved GGUF file is handed over explicitly so the in-process runtime
-    loads *that* file rather than the largest one in the folder.
+    Each character has its **own** model catalog and its own folder, so the choice
+    is resolved through *that* character's catalog: the spec's Ollama ``tag`` names
+    the model (the fallback runtime), and the resolved GGUF file is handed over
+    explicitly so the in-process runtime loads *that* file rather than the largest
+    one in the folder.
     """
     loader = natasha_mouth.load_natasha_assistant if mouth == catalog.MOUTH_NATASHA else hakeem_mouth.load_hakeem_assistant
     if choice is None:
         return loader(**kwargs)
-    tag = _character_tag(choice.catalog_key)
+    tag = _character_tag(mouth, choice.catalog_key)
     return loader(model=tag, model_file=choice.path, **kwargs)
 
 
-def _character_tag(key: str) -> str:
-    """The Ollama tag for a companion/hakeem catalog key.
+def _character_tag(mouth: str, key: str) -> str:
+    """The Ollama tag for a catalog key, from whichever catalog names it.
 
-    A key that is in the companion's own catalog resolves to its spec's tag. A key
-    that came from *another* engine's catalog (the window lets a user pick any GGUF
-    model) is used verbatim: it is only the fallback runtime's name for the model,
-    and a wrong guess would be worse than the honest key.
+    Each character's *own* catalog is tried first (Natasha's for the companion,
+    Hakeem's for the scholar). A character's window also offers every GGUF model
+    the project has -- they share one in-process runtime -- so a key from another
+    catalog (the companion's, the public shared folder's) is resolved too. A key no
+    catalog knows is used verbatim: it is only the fallback runtime's name for the
+    model, and a wrong guess would be worse than the honest key.
     """
-    from companion.model import CompanionModelUnavailable, resolve_spec
+    modules: list[Any] = []
+    if mouth == catalog.MOUTH_HAKEEM:
+        from hakeem import model as hakeem_model
 
+        modules.append(hakeem_model)
+    from companion import model as companion_model
+
+    modules.append(companion_model)
     try:
-        return resolve_spec(key).tag
-    except (CompanionModelUnavailable, ValueError):
-        return key
+        from core import shared_models
+
+        modules.append(shared_models)
+    except Exception:
+        pass
+    for module in modules:
+        try:
+            return module.resolve_spec(key).tag
+        except Exception:
+            continue
+    return key
 
 
 def describe_mouth_model(mouth: str, model_key: str | None) -> str:

@@ -30,7 +30,11 @@ Usage:
     python -m cli hakeem "قارن بين الأديان"  # one message; --session <id> keeps one session
     python -m cli hakeem status       # which runtime answers, and the next step
     python -m cli hakeem models       # list the models he can fetch
-    python -m cli hakeem download --approve   # one-time: fetch the shared weights (~2.6 GB)
+    python -m cli hakeem download --approve   # one-time: fetch his own GGUF (~2.5 GB)
+    python -m cli shared-models        # one public folder of models every character may run
+    python -m cli shared-models status # what is in data/shared_models, and the next step
+    python -m cli shared-models download-all --approve  # fetch the small general models
+    python -m cli shared-models migrate # move a legacy model from Natasha's folder
     python -m cli chat                # chat with the AI in text (Jarvis, no voice)
     python -m cli chat --ultron       # chat answering from Ultron (general local model)
     python -m cli chat --vision       # chat answering from Vision (petroleum local model)
@@ -139,6 +143,7 @@ from cli.menu import (
     run_release,
     run_scene3d,
     run_selfcheck,
+    run_shared_models,
     run_speak,
     run_ultron,
     run_ultron_chat,
@@ -168,6 +173,8 @@ _COMMANDS = {
     "cloud": run_cloud,
     "natasha": run_natasha,
     "hakeem": run_hakeem,
+    "shared-models": run_shared_models,
+    "shared": run_shared_models,
     "chat": run_chat,
     "gui": run_gui,
     "mind-chat": run_mind_chat,

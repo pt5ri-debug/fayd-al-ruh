@@ -158,8 +158,13 @@ def run_natasha(argv: Sequence[str] = ()) -> int:
 
 
 def run_hakeem(argv: Sequence[str] = ()) -> int:
-    """Run Hakeem: the scholar of religion and history (same model as Natasha)."""
+    """Run Hakeem: the scholar of religion and history (his own local model)."""
     return _run_module("ai.hakeem", argv)
+
+
+def run_shared_models(argv: Sequence[str] = ()) -> int:
+    """Manage the shared language models every character may run."""
+    return _run_module("cli.shared_models", argv)
 
 
 def run_chat(argv: Sequence[str] = ()) -> int:
@@ -519,6 +524,17 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         ("relationship-memory",),
     ),
     ("Hakeem (scholar of religion and history: compares the Abrahamic faiths)", run_hakeem, ("status",)),
+    ("Shared models: one public folder every character may run", run_shared_models, ("status",)),
+    (
+        "Shared models: download the small general models (~1.7 GB)",
+        run_shared_models,
+        ("download-all", "--approve"),
+    ),
+    (
+        "Shared models: move a legacy model from Natasha's folder",
+        run_shared_models,
+        ("migrate",),
+    ),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
@@ -728,6 +744,7 @@ __all__ = [
     "run_release",
     "run_scene3d",
     "run_selfcheck",
+    "run_shared_models",
     "run_ultron",
     "run_ultron_chat",
     "run_update",
