@@ -263,6 +263,22 @@ def characters_dir() -> Path:
     return data_dir() / "characters"
 
 
+def character_learning_dir() -> Path:
+    """Where each character's own learning data is written (``data/characters/learning``).
+
+    The seven answering mouths (Jarvis, Ultron, Vision, Banner, Natasha, Hakeem,
+    and Cloud) each keep a small, file-backed learning record here: the trait
+    profile that shapes their replies, the durable facts they were told, and the
+    exchanges they took part in. The folder is git-ignored, so a character's
+    learning never dirties the working tree and a program update never overwrites
+    it -- and the main Fayd Al-Ruh model trains on the same files, so what a
+    character learns reaches the project's own model. ``FAYD_DATA_DIR`` moves it
+    with the rest of the data. It is a subfolder of :func:`characters_dir` so a
+    learning file can never collide with a character's logo image.
+    """
+    return characters_dir() / "learning"
+
+
 def studio_dir() -> Path:
     """Where the Code Studio keeps its own state (git worktrees, run logs).
 
@@ -342,6 +358,7 @@ __all__ = [
     "bundle_root",
     "bundled_artifacts_dir",
     "bundled_checkpoints_dir",
+    "character_learning_dir",
     "characters_dir",
     "checkpoints_dir",
     "coder_models_dir",

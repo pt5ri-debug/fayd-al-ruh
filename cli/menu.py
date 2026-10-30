@@ -569,6 +569,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         ("--llm-sessions", "--steps", "4000"),
     ),
     (
+        "Train the language model on the characters' own learning",
+        run_llm,
+        ("--llm-characters", "--steps", "4000"),
+    ),
+    (
         "Train petroleum-engineering tasks (with procedures)",
         run_petroleum,
         ("--episodes", "120", "--procedural"),

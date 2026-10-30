@@ -154,27 +154,29 @@ def _fake_model_chat_service(mouth: str) -> Any:
 
 
 def test_mode_labels_are_exact() -> None:
-    assert [mode.label for mode in modes.MODES] == ["AI Mode", "Jarvics Mode"]
-    assert modes.AI_MODE == "AI Mode"
-    assert modes.JARVICS_MODE == "Jarvics Mode"
+    # The window has one operating mode: the project's own model.
+    assert [mode.label for mode in modes.MODES] == ["Fayd Al-Ruh Model"]
+    assert modes.FAYD_MODEL_MODE == "Fayd Al-Ruh Model"
+    assert modes.MODES[0].key == "ai"
+    assert modes.MODES[0].allows_tools is False
 
 
 def test_resolve_mode_by_key_label_and_default() -> None:
     assert modes.resolve_mode("ai").key == "ai"
-    assert modes.resolve_mode("jarvics").key == "jarvics"
-    assert modes.resolve_mode("AI Mode").key == "ai"
-    assert modes.resolve_mode("jarvics mode").key == "jarvics"
+    assert modes.resolve_mode("Fayd Al-Ruh Model").key == "ai"
+    # The retired "jarvics" key resolves to the one mode rather than raising.
+    assert modes.resolve_mode("jarvics").key == "ai"
     assert modes.resolve_mode(None).key == "ai"
     assert modes.resolve_mode("nonsense").key == "ai"  # never raises
 
 
 def test_mode_persists_and_reloads(tmp_path) -> None:
     assert modes.load_mode_key(tmp_path) == "ai"
-    modes.save_mode_key(tmp_path, "jarvics")
-    assert modes.load_mode_key(tmp_path) == "jarvics"
-    # An unknown value falls back to the default rather than breaking the window.
+    modes.save_mode_key(tmp_path, "ai")
+    assert modes.load_mode_key(tmp_path) == "ai"
+    # An unknown value (including the retired "jarvics") falls back to the default.
     modes.save_mode_key(tmp_path, "not-a-mode")
-    assert modes.load_mode_key(tmp_path) == "jarvics"
+    assert modes.load_mode_key(tmp_path) == "ai"
 
 
 def test_answer_only_router_never_plans_a_tool(tmp_path) -> None:
@@ -259,31 +261,31 @@ def test_iter_styled_lines_round_trips_the_text() -> None:
 # --- service mode wiring --------------------------------------------------
 
 
-def test_service_defaults_to_ai_mode(tmp_path) -> None:
+def test_service_defaults_to_the_fayd_model_mode(tmp_path) -> None:
     service = _service(tmp_path)
-    assert service.operating_mode.label == "AI Mode"
+    assert service.operating_mode.label == "Fayd Al-Ruh Model"
     assert service.tools_enabled is False
-    # AI Mode answers with the answer-only router, so no tool can be planned.
+    # The one mode answers with the answer-only router, so no tool can be planned.
     assert service.mode.router is service._answer_router
     assert service.mode.router.route("list the files in notes/").kind is RouteKind.ANSWER
 
 
-def test_service_switching_modes_swaps_the_router_and_persists(tmp_path) -> None:
+def test_service_switching_to_the_one_mode_keeps_the_answer_router(tmp_path) -> None:
     service = _service(tmp_path)
-    spec = service.set_operating_mode("jarvics")
-    assert spec.label == "Jarvics Mode"
-    assert service.tools_enabled is True
-    assert service.mode.router is service._tool_router
-    assert modes.load_mode_key(tmp_path) == "jarvics"
-    # A tool sentence is now recognised as a tool plan.
-    preview = service.preview_execution("list the files in notes/")
-    assert preview.kind == "tool"
+    spec = service.set_operating_mode("ai")
+    assert spec.label == "Fayd Al-Ruh Model"
+    assert service.tools_enabled is False
+    assert service.mode.router is service._answer_router
+    assert modes.load_mode_key(tmp_path) == "ai"
+    # A tool sentence is answered, never run: the router decides ANSWER.
+    assert service.mode.router.route("list the files in notes/").kind is RouteKind.ANSWER
 
 
 def test_service_reads_a_saved_mode(tmp_path) -> None:
+    # The retired "jarvics" key resolves to the one mode on load.
     modes.save_mode_key(tmp_path, "jarvics")
     service = _service(tmp_path)
-    assert service.operating_mode_key == "jarvics"
+    assert service.operating_mode_key == "ai"
 
 
 def test_preview_marks_a_write_as_needing_confirmation(tmp_path) -> None:
@@ -351,7 +353,36 @@ def _pillow_available() -> bool:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
-def test_window_mode_switch_preserves_messages(tmp_path) -> None:
+def test_header_model_control_returns_to_the_fayd_model(tmp_path) -> None:
+    """The header control names the model, and pressing it answers with it again."""
+    import tkinter as tk
+
+    from gui.app import MOUTH_CHOICES, FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        # The control names the project's one model and is a real button.
+        assert isinstance(app._mode_menu, tk.Button)
+        assert app._mode_var.get() == "Fayd Al-Ruh Model"
+        # "From trained model" is gone from the selector, and Jarvis now reads as
+        # the internal-sources-plus-web mouth.
+        labels = [text for _key, text in MOUTH_CHOICES]
+        assert "From trained model" not in labels
+        assert "Jarvis (Internal Sources + Web)" in labels
+        # Pressing the control asks the one switch to answer with the model again.
+        calls: list[str] = []
+        app._switch_mouth = calls.append  # type: ignore[assignment]
+        app._on_mode_menu()
+        assert calls == ["model"]
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_has_one_mode_and_preserves_messages(tmp_path) -> None:
+    """The header names the one model (Fayd Al-Ruh Model); messages survive."""
     import tkinter as tk
 
     from gui.app import FaydGUI
@@ -361,10 +392,13 @@ def test_window_mode_switch_preserves_messages(tmp_path) -> None:
         app = FaydGUI(root, service=_service(tmp_path))
         root.update()
         app._add_bubble("assistant", "keep me across the mode switch")
-        assert app.service.operating_mode.label == "AI Mode"
-        app._set_mode(modes.resolve_mode("jarvics"))
+        assert app.service.operating_mode.label == "Fayd Al-Ruh Model"
+        assert app._mode_var.get() == "Fayd Al-Ruh Model"
+        # The one mode cannot be switched away: setting it again is a no-op and
+        # the transcript is untouched.
+        app._set_mode(modes.resolve_mode("ai"))
         root.update()
-        assert app.service.operating_mode.label == "Jarvics Mode"
+        assert app.service.operating_mode.label == "Fayd Al-Ruh Model"
         texts = [entry.text for entry in app._rows]
         assert any("keep me across the mode switch" in text for text in texts)
     finally:
@@ -394,7 +428,8 @@ def test_window_renders_markdown_tags(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
-def test_window_asks_confirmation_before_a_write(tmp_path) -> None:
+def test_window_never_asks_for_tool_confirmation(tmp_path) -> None:
+    """The one mode never runs a tool, so a write sentence is answered, not run."""
     import tkinter as tk
 
     from gui.app import FaydGUI
@@ -403,18 +438,12 @@ def test_window_asks_confirmation_before_a_write(tmp_path) -> None:
     try:
         app = FaydGUI(root, service=_service(tmp_path, read_write=True))
         root.update()
-        app._set_mode(modes.resolve_mode("jarvics"))
-        root.update()
         app._entry.insert("1.0", "write to file notes/a.txt: permeability is high")
         app._on_send()
         root.update()
-        # The plan is shown and the tool has not run: it waits for approval.
-        assert app._pending_message is not None
-        assert app._confirm_bar is not None and app._confirm_bar.winfo_ismapped()
-        app._resolve_confirmation(False)  # cancel
-        root.update()
+        # No tool plan is ever proposed, so nothing waits for approval.
         assert app._pending_message is None
-        assert not (app._confirm_bar is not None and app._confirm_bar.winfo_ismapped())
+        assert app.service.tools_enabled is False
         assert not (tmp_path / "notes" / "a.txt").exists()
     finally:
         root.destroy()
@@ -501,7 +530,7 @@ def test_window_settings_hides_the_answering_mouth_radios(tmp_path) -> None:
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_has_no_tools_section_in_the_sidebar(tmp_path) -> None:
-    """The sidebar's **Tools** list is gone; the tools themselves are unchanged."""
+    """The sidebar's **Tools** list is gone; the sandbox itself is unchanged."""
     import tkinter as tk
 
     from gui.app import FaydGUI
@@ -513,11 +542,10 @@ def test_window_has_no_tools_section_in_the_sidebar(tmp_path) -> None:
         # The panel is not built any more, and the service still knows the tools.
         assert not hasattr(app, "_tools_panel")
         assert app.service.tool_names
-        # Switching mode no longer needs a panel to paint into (it used to call
-        # _render_tools); it must not raise.
-        app._set_mode(modes.resolve_mode("jarvics"))
+        # The one mode never enables a tool, and re-applying it must not raise.
+        app._set_mode(modes.resolve_mode("ai"))
         root.update()
-        assert app.service.tools_enabled is True
+        assert app.service.tools_enabled is False
     finally:
         root.destroy()
 
@@ -1095,7 +1123,7 @@ def test_main_window_composer_carries_both_mode_selectors(tmp_path) -> None:
     """The bottom-left toolbar has the Code Studio and Chat Studio pills."""
     import tkinter as tk
 
-    from gui.app import FaydGUI
+    from gui.app import MOUTH_CHOICES, MOUTH_LABELS, FaydGUI
 
     root = tk.Tk()
     try:
@@ -1105,21 +1133,24 @@ def test_main_window_composer_carries_both_mode_selectors(tmp_path) -> None:
         chat = app._chat_mode_selector
         assert code.winfo_ismapped() and chat.winfo_ismapped()
         assert "Code Studio" in code.cget("text")
-        assert "AI Mode" in chat.cget("text")
+        # The Chat pill shows the answering mouth in force. The window opens on
+        # the project's own model (the Fayd Al-Ruh Model) whenever its checkpoint
+        # loads; with a lightweight test session it stays on the grounded mouth,
+        # so the assertion is against the live source, not a hard-coded label.
+        assert MOUTH_LABELS[app.service.source] in chat.cget("text")
 
-        # The Chat Studio pill lists the real operating modes and switches them.
-        from gui.app import MODES
-
+        # The Chat pill lists the same answering models the header selector does,
+        # and choosing one switches the mouth.
         chat_menu = chat.nametowidget(chat.cget("menu"))
         labels = [
             chat_menu.entrycget(index, "label")
             for index in range(chat_menu.index("end") + 1)
         ]
-        assert labels == [mode.label for mode in MODES]
-        chat_menu.invoke(1)
+        assert labels == [text for _key, text in MOUTH_CHOICES]
+        chat_menu.invoke(0)
         root.update()
-        assert app.service.operating_mode.label == labels[1]
-        assert labels[1] in chat.cget("text")
+        assert app.service.source == MOUTH_CHOICES[0][0]
+        assert labels[0] in chat.cget("text")
 
         # The Code Studio pill opens the one real code surface.
         code_menu = code.nametowidget(code.cget("menu"))
@@ -1537,6 +1568,11 @@ def test_window_model_row_accents_the_answering_mouth(tmp_path) -> None:
         app = FaydGUI(root, service=service)
         root.update()
         bar = app._model_bar
+        # The row accents whichever of its mouths is answering. The window's
+        # default is the project's own model, which has no chip (it is the header's
+        # model control), so select the sources mouth first and check the accent.
+        app._on_source_menu(MOUTH_LABELS["sources"])
+        root.update()
         assert _chip(bar, "sources")._active
         assert not _chip(bar, "ultron")._active
 
@@ -1566,6 +1602,7 @@ def test_window_model_row_click_opens_that_models_own_chat(tmp_path) -> None:
         app.model_chat_service_factory = lambda mouth: _fake_model_chat_service(mouth)
         root.update()
         app._add_bubble("assistant", "keep me in the main transcript")
+        before = app.service.source
 
         _chip(app._model_bar, MOUTH_ULTRON).canvas.event_generate("<Button-1>")
         root.update()
@@ -1575,7 +1612,7 @@ def test_window_model_row_click_opens_that_models_own_chat(tmp_path) -> None:
         assert dialog.service.mouth == MOUTH_ULTRON
         # The main conversation is untouched: its mouth did not change and its
         # transcript is intact.
-        assert app.service.source == "sources"
+        assert app.service.source == before
         assert any("keep me in the main transcript" in row.text for row in app._rows)
         # Clicking the same chip again raises the window rather than opening a
         # second one for the same model.
@@ -1604,13 +1641,14 @@ def test_window_model_row_chip_opens_a_window_even_when_its_model_is_absent(tmp_
         app = FaydGUI(root, service=_service(tmp_path))
         app.model_chat_service_factory = lambda mouth: _fake_model_chat_service(mouth)
         root.update()
+        before = app.service.source
 
         _chip(app._model_bar, MOUTH_BANNER).canvas.event_generate("<Button-1>")
         root.update()
         assert MOUTH_BANNER in app._model_chat_dialogs
-        # The main conversation's mouth never changed.
-        assert app.service.source == "sources"
-        assert _chip(app._model_bar, "sources")._active
+        # The main conversation's mouth never changed: a chip click opens a window
+        # rather than switching the conversation here.
+        assert app.service.source == before
     finally:
         root.destroy()
 

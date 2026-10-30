@@ -148,18 +148,21 @@ def test_service_attach_file_indexes_and_detaches(tmp_path) -> None:
     assert notice.ok is True
     assert len(service.attachments) == 1
     doc_id = service.attachments[0].doc_ids[0]
-    assert session.assistant.retriever.documents.get(doc_id) is not None
+    # The grounded mouth keeps the evidence even while the window answers from the
+    # trained model, so the file is retrievable the moment Jarvis is selected.
+    grounded = service.switcher.grounded
+    assert grounded.retriever.documents.get(doc_id) is not None
     # A question can now retrieve the attached text and cite it.
     from core.assistant import GroundedAssistant
 
-    assert isinstance(session.assistant, GroundedAssistant)
-    answer = session.assistant.ask("What did Zephyrium-9 flow at?")
+    assert isinstance(grounded, GroundedAssistant)
+    answer = grounded.ask("What did Zephyrium-9 flow at?")
     assert any("attachment" in citation for citation in answer.citations)
 
     removed = service.remove_attachment(service.attachments[0])
 
     assert removed == 1
-    assert session.assistant.retriever.documents.get(doc_id) is None
+    assert grounded.retriever.documents.get(doc_id) is None
     assert service.attachments == []
 
 
@@ -239,6 +242,14 @@ def test_service_new_conversation_drops_attachment_reference_material(tmp_path) 
     assert service._context_turns == []
 
 
+def test_service_defaults_to_the_trained_model() -> None:
+    """The window opens on the project's own model -- the Fayd Al-Ruh Model."""
+    service = _service(FakeSession())
+
+    assert service.source == "model"
+    assert service.mode.assistant is not None
+
+
 def test_service_answers_and_renders_sources() -> None:
     turn = JarvisTurn(
         heard="what is porosity?",
@@ -248,6 +259,7 @@ def test_service_answers_and_renders_sources() -> None:
         citations=("Reservoir rock properties (reservoir)",),
     )
     service = _service(FakeSession(turn))
+    service.use_sources()
 
     reply = service.ask("what is porosity?")
 
@@ -280,6 +292,7 @@ def test_service_web_toggle_delegates_to_the_session() -> None:
 
     session._web_verifier_factory = _Verifier
     service = _service(session)
+    service.use_sources()  # search belongs to the grounded sources mouth
 
     assert service.web_available() is True
     assert service.web_enabled() is False
@@ -301,6 +314,7 @@ def test_service_web_is_unavailable_for_a_language_model_mouth() -> None:
 
     session._web_verifier_factory = _Verifier
     service = _service(session)
+    service.use_sources()
     assert service.web_available() is True  # the sources mouth can search
 
     service.switcher._mouth = "ultron"  # a language-model mouth
@@ -319,6 +333,7 @@ def test_service_hints_when_sources_cannot_answer() -> None:
         citations=("some source",),
     )
     service = _service(FakeSession(turn))
+    service.use_sources()
 
     reply = service.ask("q")
 
@@ -351,12 +366,13 @@ def test_service_switches_between_model_and_sources() -> None:
     service = _service(session)
     service.switcher._loader = lambda: "MODEL"  # type: ignore[assignment]
 
-    assert service.source == "sources"
-    service.use_model()
+    # The window opens on the project's own model (the Fayd Al-Ruh Model).
     assert service.source == "model"
-    assert service.mode.assistant is not None
     service.use_sources()
     assert service.source == "sources"
+    assert service.mode.assistant is not None
+    service.use_model()
+    assert service.source == "model"
 
 
 def test_service_lists_and_resumes_saved_sessions() -> None:

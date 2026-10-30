@@ -80,6 +80,7 @@ SIDEBAR_LABELS: dict[str, str] = {
     "audio-speech-download": "VoiceTut — download the model",
     "llm": "Train the language model",
     "llm-sessions": "Train on my chats",
+    "llm-characters": "Train on the characters' learning",
     "ml": "Train the ML pipeline",
     "release": "Train a release",
     "release-sessions": "Train a release (with my chats)",
@@ -208,6 +209,7 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         (
             "llm",
             "llm-sessions",
+            "llm-characters",
             "ml",
             "release",
             "release-sessions",
@@ -497,6 +499,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         "Train the language model on the local mouths' own chats",
         run_llm,
         ("--llm-sessions", "--steps", "4000"),
+    ),
+    GuiAction(
+        "llm-characters",
+        "Train the language model on the characters' own learning",
+        run_llm,
+        ("--llm-characters", "--steps", "4000"),
     ),
     GuiAction("ml", "Train the ML pipeline", run_ml, ("--resume", "--episodes", "60")),
     GuiAction("curriculum", "Show the petroleum-engineering curriculum", run_curriculum, ()),

@@ -49,6 +49,7 @@ from ml.knowledge_corpus import (
 from ml.llm.__main__ import train_and_save
 from ml.llm.corpus import (
     build_corpus,
+    character_learning_sentences,
     corpus_sentences,
     corpus_units,
     curriculum_sentences,
@@ -91,6 +92,7 @@ class TrainingConfig:
     kb_repeats: int = 1
     include_runtime: bool = True
     include_sessions: bool = False
+    include_characters: bool = False
     include_procedural: bool = True
     max_procedural: int | None = None
     measure_perplexity: bool = False
@@ -153,6 +155,7 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
         kb_repeats=config.kb_repeats,
         include_runtime=config.include_runtime,
         include_sessions=config.include_sessions,
+        include_characters=config.include_characters,
     )
     sample = knowledge_sample(
         kb_max_chunks=config.kb_max_chunks, include_runtime=config.include_runtime
@@ -162,6 +165,9 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
         "corpus_sentences": len(corpus_sentences()),
         "repository_sentences": len(repository_sentences(include_runtime=config.include_runtime)),
         "session_sentences": len(session_sentences()) if config.include_sessions else 0,
+        "character_learning_sentences": (
+            len(character_learning_sentences()) if config.include_characters else 0
+        ),
         "knowledge_base_sentences": len(knowledge_base_sentences(kb_max_chunks=config.kb_max_chunks)),
         "structured_examples": len(structured_examples()),
         "characters": len(text),
@@ -170,6 +176,7 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
         "kb_repeats": config.kb_repeats,
         "include_runtime": config.include_runtime,
         "include_sessions": config.include_sessions,
+        "include_characters": config.include_characters,
         "structured_repeats": config.llm_structured_repeats,
         "tokenizer_kind": config.tokenizer_kind,
         "tokenizer_vocab_size": config.tokenizer_vocab_size,
@@ -241,6 +248,7 @@ def describe_checkpoint(
     seed: int = 0,
     model: TransformerLM | None = None,
     include_sessions: bool = False,
+    include_characters: bool = False,
 ) -> Manifest:
     """Describe a saved language-model checkpoint for the manifest.
 
@@ -280,7 +288,7 @@ def describe_checkpoint(
         }
     if measure_perplexity and model is not None:
         split = document_split(
-            corpus_units(include_sessions=include_sessions),
+            corpus_units(include_sessions=include_sessions, include_characters=include_characters),
             val_fraction=0.1,
             test_fraction=0.1,
             seed=seed,
@@ -335,6 +343,7 @@ def train_release(
             "kb_repeats": config.kb_repeats,
             "include_runtime": config.include_runtime,
             "include_sessions": config.include_sessions,
+            "include_characters": config.include_characters,
             "include_procedural": config.include_procedural,
             "max_procedural": config.max_procedural,
             "resume": config.resume,
@@ -379,6 +388,7 @@ def train_release(
         kb_repeats=config.kb_repeats,
         include_runtime=config.include_runtime,
         include_sessions=config.include_sessions,
+        include_characters=config.include_characters,
         preset=config.llm_preset,
         resume=config.resume,
         shard_count=config.shard_count,
@@ -394,6 +404,7 @@ def train_release(
         seed=config.seed,
         model=model,
         include_sessions=config.include_sessions,
+        include_characters=config.include_characters,
         resumed=continued,
     )
     if config.shard_count > 0:
@@ -506,6 +517,13 @@ def main(argv: list[str] | None = None) -> int:
         "answers); off by default, because a transcript is personal",
     )
     parser.add_argument(
+        "--llm-characters",
+        action="store_true",
+        help="also train the language model on the seven characters' own learning "
+        "(their durable facts and the exchanges they took part in); off by default, "
+        "because a character's learning is personal",
+    )
+    parser.add_argument(
         "--no-procedural",
         action="store_true",
         help="skip the procedural tasks derived from the corpus",
@@ -551,6 +569,7 @@ def main(argv: list[str] | None = None) -> int:
         kb_repeats=args.kb_repeats,
         include_runtime=not args.no_runtime_docs,
         include_sessions=args.llm_sessions,
+        include_characters=args.llm_characters,
         include_procedural=not args.no_procedural,
         measure_perplexity=args.measure_perplexity,
         resume=args.resume,

@@ -96,6 +96,7 @@ def train_and_save(
     kb_repeats: int = 1,
     include_runtime: bool = True,
     include_sessions: bool = False,
+    include_characters: bool = False,
     learning_rate: float = 3e-3,
     warmup: int | None = None,
     max_grad_norm: float = 1.0,
@@ -107,7 +108,7 @@ def train_and_save(
     shard_count: int = 0,
     schedule_path_arg: Path | None = None,
 ) -> TransformerLM:
-    units = corpus_units(include_sessions=include_sessions)
+    units = corpus_units(include_sessions=include_sessions, include_characters=include_characters)
     split = document_split(units, val_fraction=0.1, test_fraction=0.1, seed=seed)
     held_out = set(split.validation) | set(split.test)
     plan = ShardPlan(shard_count) if shard_count > 0 else None
@@ -148,6 +149,7 @@ def train_and_save(
         kb_repeats=kb_repeats,
         include_runtime=include_runtime,
         include_sessions=include_sessions,
+        include_characters=include_characters,
         exclude=held_out,
         include=set(shard) if shard is not None else None,
     )
@@ -270,6 +272,13 @@ def main(argv: list[str] | None = None) -> int:
         "default, because a transcript is personal.",
     )
     parser.add_argument(
+        "--llm-characters",
+        action="store_true",
+        help="Also train on the seven characters' own learning (their durable facts "
+        "and the exchanges they took part in). Off by default, because a "
+        "character's learning is personal.",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Continue training from the checkpoint at --checkpoint (and its "
@@ -317,6 +326,7 @@ def main(argv: list[str] | None = None) -> int:
         kb_max_chunks=args.kb_max_chunks,
         include_runtime=not args.no_runtime_docs,
         include_sessions=args.llm_sessions,
+        include_characters=args.llm_characters,
         resume=args.resume,
         shard_count=args.llm_shards,
         progress_every=args.progress_every,
