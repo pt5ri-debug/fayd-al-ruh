@@ -412,6 +412,21 @@ def default_checkpoint() -> Path:
     return bundled_checkpoints_dir() / "fayd-llm.npz"
 
 
+def model_registry_dir() -> Path:
+    """Where the Model Manager's registry records live (``data/model_registry``).
+
+    Git-ignored and ``FAYD_DATA_DIR``-aware, like every other writable folder, so
+    a registry never dirties the working tree and no machine-specific path is
+    ever baked into the code.
+    """
+    return data_dir() / "model_registry"
+
+
+def model_manager_dir() -> Path:
+    """Where the Model Manager's operation log lives (``data/model_manager``)."""
+    return data_dir() / "model_manager"
+
+
 def ensure_data_layout() -> None:
     """One-time upgrade step: gather pre-existing source data under ``data/``.
 
@@ -497,6 +512,8 @@ __all__ = [
     "learning_audit_dir",
     "learning_root_dir",
     "main_model_learning_dir",
+    "model_manager_dir",
+    "model_registry_dir",
     "models_dir",
     "natasha_models_dir",
     "piper_models_dir",

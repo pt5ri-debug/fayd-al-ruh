@@ -1257,6 +1257,43 @@ Ollama server and reports the real next step instead of pretending. On an
 upgrading machine `qwen3-1.7b` — which used to live in `data/natasha` — is moved
 into the shared folder automatically on first run, so no download is wasted.
 
+### The Model Manager (one place for every language model)
+
+Every model the project can run — each mouth's own catalog, the shared folder, the
+models you added by hand, and the project's own trained checkpoint — is listed in
+**one** place: the **Model Manager**. It is a *view* over the facts that already
+exist (the catalog in `core/language_models`, your records in a small registry
+under the data folder, and the files on disk), never a second source of truth, so
+it can never disagree with the mouths about what is installed.
+
+It discovers model files in the project's folders, remembers a GGUF you already
+have, reads a file's own header (architecture, context length, parameter count —
+it never executes anything), tells you whether a model can run **here** and why
+not, loads/unloads/tests it through its runtime, and keeps per-model inference
+settings. It **never downloads weights itself**: a fetch stays with the engine
+that already implements it, behind its own permission and human-approval gate.
+
+The window opens from the sidebar's **Model Manager** entry; the headless twin is
+`python -m cli models`:
+
+```bash
+python -m cli models status                      # a one-screen summary
+python -m cli models list                        # everything the program can run
+python -m cli models runtimes                    # which runtimes work on this machine
+python -m cli models discover --root ~/models    # scan a folder for model files
+python -m cli models register ~/models/x.gguf    # remember a file you already have
+python -m cli models check MODEL                 # can it run here, and why not
+python -m cli models test MODEL                  # prove it answers
+python -m cli models select petroleum            # which models suit a task, best first
+```
+
+**Model selection for different tasks** is built in: `select` maps a task
+(`chat`, `code`, `presentation`, `petroleum`, `companion`, `religion`) onto the
+models that suit it, preferring the task's own engine and falling back to any
+other ready model — and answering honestly (`none ready`) when nothing can run.
+Nothing in the manager is mandatory: with no extra and no model file it still
+opens, lists the catalog, and names the real next step.
+
 ## Graphical interface (ChatGPT-style)
 
 A desktop window that looks and reads like ChatGPT ships **next to** the command

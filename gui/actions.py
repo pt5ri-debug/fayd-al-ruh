@@ -38,6 +38,7 @@ from cli.menu import (
     run_learn,
     run_llm,
     run_ml,
+    run_models,
     run_natasha,
     run_natasha_chat,
     run_piper_speech,
@@ -72,6 +73,7 @@ SIDEBAR_LABELS: dict[str, str] = {
     "natasha-mood": "Mood",
     "natasha-initiative": "Initiative",
     "natasha-relationship-memory": "Relationship memory",
+    "models": "Model Manager",
     "shared-models": "Shared models — status",
     "shared-models-download": "Shared models — download",
     "shared-models-migrate": "Shared models — move from Natasha",
@@ -182,6 +184,7 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         "Language models",
         "🧩",
         (
+            "models",
             "shared-models",
             "shared-models-download",
             "shared-models-migrate",
@@ -364,6 +367,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         run_hakeem_chat,
         (),
         hidden=True,
+    ),
+    GuiAction(
+        "models",
+        "Model Manager: discover, register, inspect, and test local models",
+        run_models,
+        ("status",),
     ),
     GuiAction(
         "shared-models",

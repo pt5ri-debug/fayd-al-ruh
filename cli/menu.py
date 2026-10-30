@@ -373,6 +373,11 @@ def run_model_chat(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.model_chat", argv)
 
 
+def run_models(argv: Sequence[str] = ()) -> int:
+    """Discover, register, inspect, load, and test the project's language models."""
+    return _run_module("cli.models", argv)
+
+
 def run_voice_studio(argv: Sequence[str] = ()) -> int:
     """Read a document aloud with a speech engine's own voice and mood."""
     return _run_module("cli.voice_studio", argv)
@@ -560,6 +565,10 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Scene Studio: build, pose, and render a 3D figure locally", run_scene3d, ("status",)),
     ("Scene Studio: render the built-in figure to a PNG", run_scene3d, ("render",)),
     ("Model chat windows: each model's own name, logo, voice, and model", run_model_chat, ("mouths",)),
+    ("Model Manager: every language model the program can run", run_models, ("list",)),
+    ("Model Manager: what the local runtimes can do here", run_models, ("runtimes",)),
+    ("Model Manager: scan the project's folders for model files", run_models, ("discover",)),
+    ("Model Manager: which models suit a task (chat, petroleum, ...)", run_models, ("select",)),
     ("Characters: manage the seven characters and the project's own model", run_characters, ("list",)),
     (
         "Speech-engine studios: read a document aloud per engine (voice + mood)",
@@ -738,6 +747,7 @@ __all__ = [
     "run_mind_chat",
     "run_ml",
     "run_model_chat",
+    "run_models",
     "run_petroleum",
     "run_presentation",
     "run_relations",

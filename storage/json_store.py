@@ -47,6 +47,23 @@ class JsonStore:
             path = legacy
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def delete(self, namespace: str, key: str) -> bool:
+        """Remove a stored document, returning whether one was there.
+
+        Needed by a registry that must forget a *record* without touching the
+        file the record describes. Both the encoded and the legacy location are
+        removed, so a document written before keys were encoded is forgotten too.
+        """
+        removed = False
+        for path in (self._path(namespace, key), self._legacy_path(namespace, key)):
+            try:
+                if path.exists():
+                    path.unlink()
+                    removed = True
+            except OSError:
+                continue
+        return removed
+
     def list_keys(self, namespace: str) -> list[str]:
         path = self.root / self._encode(namespace)
         keys = {unquote(item.stem) for item in path.glob("*.json")} if path.exists() else set()

@@ -1,0 +1,526 @@
+"""The Model Manager service: the engine behind the window and the CLI.
+
+One Tk-free service drives the whole Model Manager surface, so the window,
+``python -m cli models``, and any other caller share one registry, one runtime
+view, and one operation log -- no listing or state is computed twice.
+
+The service is deliberately a **thin** layer: it does not re-implement discovery,
+inspection, compatibility, or runtime work, all of which already live in
+:mod:`core.model_manager` and its collaborators. What it adds is the shape a
+window and a CLI both want -- rows a table can draw, a saved selection, a
+progress callback for a slow operation, and a background-thread seam so a long
+load or test never freezes the UI.
+
+Everything here is exercised headless: no display, no GPU, and no model file.
+A ``manager`` may be injected (a test's own), so nothing here needs a real
+registry or a real runtime.
+"""
+
+from __future__ import annotations
+
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from core.best_effort import best_effort
+from core.model_files import ModelFileError
+from core.model_log import ModelEvent
+from core.model_manager import (
+    STATE_DAMAGED,
+    STATE_MISSING,
+    STATE_NOT_DOWNLOADED,
+    STATE_READY,
+    STATE_UNKNOWN,
+    TASKS,
+    CompatibilityReport,
+    ModelEntry,
+    ModelManager,
+    OperationResult,
+)
+from core.model_manager import (
+    model_manager as build_model_manager,
+)
+from core.model_registry import (
+    SOURCE_LOCAL,
+    ConfirmationRequired,
+    ModelNotFoundError,
+    RegistryError,
+)
+from core.model_runtime import RuntimeUnavailable
+from core.model_settings import SettingsError
+from core.paths import data_dir
+from storage.json_store import JsonStore
+
+#: A one-word marker per state, for a table cell that has little room.
+STATE_MARKERS: dict[str, str] = {
+    STATE_READY: "✓ ready",
+    STATE_NOT_DOWNLOADED: "· not downloaded",
+    STATE_MISSING: "! file missing",
+    STATE_DAMAGED: "! damaged",
+    STATE_UNKNOWN: "? unknown",
+}
+
+#: A short, honest sentence per state, so a table's tooltip never overstates.
+STATE_BLURBS: dict[str, str] = {
+    STATE_READY: "The file is present and usable; this model can be loaded and run.",
+    STATE_NOT_DOWNLOADED: "The build knows this model, but its weights are not here yet.",
+    STATE_MISSING: "The model was registered, but its file is no longer on disk.",
+    STATE_DAMAGED: "The file is present but unreadable or truncated, so it cannot be loaded.",
+    STATE_UNKNOWN: "The state could not be determined from what is on disk.",
+}
+
+#: The namespace and key the last selection is remembered under.
+_NAMESPACE = "models"
+_KEY = "manager_selection"
+
+
+@dataclass(frozen=True)
+class ModelRow:
+    """One model as a table row: what to draw, and what to sort on."""
+
+    model_id: str
+    display_name: str
+    state: str
+    state_marker: str
+    runtime: str
+    source: str
+    format: str
+    path: str
+    size_bytes: int
+    quantization: str
+    ready: bool
+    from_catalog: bool
+    status_line: str
+
+    def describe(self) -> str:
+        """A one-line description, for a status line or a log entry."""
+        where = self.path or "no local file"
+        return f"{self.display_name} [{self.state_marker}] ({self.runtime}) — {where}"
+
+
+@dataclass(frozen=True)
+class ModelDetail:
+    """One model, opened: the row plus everything the registry holds about it."""
+
+    row: ModelRow
+    identity: str
+    integrity: str
+    integrity_detail: str
+    architecture: str
+    context_length: int | None
+    parameter_count: int | None
+    license: str
+    tags: tuple[str, ...]
+    notes: str
+    engine: str
+    registered_at: str
+    updated_at: str
+    settings: Any = None
+    compatibility: CompatibilityReport | None = None
+    download_command: str = ""
+    corrupt: bool = False
+
+    @property
+    def model_id(self) -> str:
+        return self.row.model_id
+
+    @property
+    def display_name(self) -> str:
+        return self.row.display_name
+
+
+@dataclass(frozen=True)
+class ManagerSnapshot:
+    """Everything a window needs to draw itself in one call."""
+
+    rows: tuple[ModelRow, ...] = ()
+    registered: int = 0
+    catalog: int = 0
+    ready: int = 0
+    runtime_lines: tuple[str, ...] = ()
+    corrupt_records: tuple[str, ...] = ()
+    log_events: int = 0
+
+    def summary(self) -> str:
+        return (
+            f"{self.registered} registered, {self.catalog} in the build's catalog, "
+            f"{self.ready} ready to run."
+        )
+
+
+@dataclass(frozen=True)
+class OperationReport:
+    """The outcome of a background operation, in a shape a window can post."""
+
+    ok: bool
+    operation: str
+    model_id: str = ""
+    detail: str = ""
+    result: OperationResult | None = None
+    events: tuple[ModelEvent, ...] = field(default=())
+
+    def describe(self) -> str:
+        if self.result is not None:
+            return self.result.describe()
+        return self.detail or ("done" if self.ok else "failed")
+
+
+class ModelManagerService:
+    """The window's and the CLI's view over :class:`core.model_manager.ModelManager`.
+
+    ``root`` is the writable data folder; a test passes its own. A ``manager``
+    may be injected instead, so a test can drive the whole service with a fake
+    registry and fake runtimes.
+    """
+
+    def __init__(
+        self,
+        root: Path | str | None = None,
+        *,
+        manager: ModelManager | None = None,
+        store: JsonStore | None = None,
+    ) -> None:
+        self.manager = manager if manager is not None else build_model_manager(root)
+        self._store = store if store is not None else JsonStore(root or data_dir())
+        self._selection: str = self._load_selection()
+
+    # ------------------------------------------------------------- snapshot
+
+    def snapshot(self) -> ManagerSnapshot:
+        """Every model plus the subsystem's counts, in one read."""
+        status = self.manager.status()
+        rows = tuple(self._row(entry) for entry in self.manager.list_models())
+        return ManagerSnapshot(
+            rows=rows,
+            registered=status.registered,
+            catalog=status.catalog,
+            ready=status.ready,
+            runtime_lines=tuple(status.runtimes.splitlines()),
+            corrupt_records=tuple(status.corrupt_records),
+            log_events=status.log_events,
+        )
+
+    def rows(self, *, registered_only: bool = False) -> tuple[ModelRow, ...]:
+        """The models as table rows, catalog first filtered if asked."""
+        return tuple(
+            self._row(entry)
+            for entry in self.manager.list_models(include_catalog=not registered_only)
+        )
+
+    def _row(self, entry: ModelEntry) -> ModelRow:
+        record = entry.record
+        return ModelRow(
+            model_id=entry.model_id,
+            display_name=entry.display_name,
+            state=entry.state,
+            state_marker=STATE_MARKERS.get(entry.state, entry.state),
+            runtime=entry.runtime,
+            source=record.source,
+            format=record.model_format,
+            path=str(record.path) if record.path else "",
+            size_bytes=record.size_bytes,
+            quantization=record.quantization,
+            ready=entry.ready,
+            from_catalog=entry.from_catalog,
+            status_line=entry.status_line,
+        )
+
+    def task_names(self) -> tuple[str, ...]:
+        """Every task a model can be chosen for, in the build's order."""
+        return tuple(TASKS)
+
+    def models_for_task(self, task: str) -> tuple[ModelRow, ...]:
+        """The rows suited to ``task``, best first (see the manager's own rule)."""
+        return tuple(self._row(entry) for entry in self.manager.models_for_task(task))
+
+    def select_for_task(self, task: str) -> ModelRow | None:
+        """The single best ready row for ``task``, or ``None`` when none can run."""
+        entry = self.manager.select_for_task(task)
+        return self._row(entry) if entry is not None else None
+
+    # ------------------------------------------------------------ selection
+
+    def selection(self) -> str:
+        """The remembered model id, or ``""`` when nothing is chosen."""
+        return self._selection
+
+    def select(self, model_id: str) -> str:
+        """Remember which model the user is looking at, and return it."""
+        key = str(model_id or "").strip()
+        self._selection = key
+        with best_effort("remember the model selection"):
+            self._store.save(_NAMESPACE, _KEY, {"model_id": key})
+        return self._selection
+
+    def _load_selection(self) -> str:
+        """Read the remembered selection, tolerating an absent or corrupt record."""
+        try:
+            saved = self._store.load(_NAMESPACE, _KEY)
+        except Exception:
+            return ""
+        if isinstance(saved, dict):
+            return str(saved.get("model_id", "") or "")
+        return ""
+
+    # ---------------------------------------------------------------- detail
+
+    def detail(self, model_id: str) -> ModelDetail:
+        """One model opened: its record, its settings, and its compatibility."""
+        entry = self.manager.get(model_id)
+        record = entry.record
+        settings = None
+        compatibility: CompatibilityReport | None = None
+        download = ""
+        try:
+            settings = self.manager.settings(entry.model_id)
+        except (ModelNotFoundError, RegistryError, SettingsError):
+            settings = None
+        try:
+            compatibility = self.manager.compatibility(entry.model_id)
+        except (ModelNotFoundError, RegistryError, RuntimeUnavailable):
+            compatibility = None
+        try:
+            download = self.manager.download_command(entry.model_id)
+        except (ModelNotFoundError, RegistryError):
+            download = ""
+        return ModelDetail(
+            row=self._row(entry),
+            identity=record.identity,
+            integrity=record.integrity,
+            integrity_detail=record.integrity_detail,
+            architecture=record.architecture,
+            context_length=record.context_length,
+            parameter_count=record.parameter_count,
+            license=record.license,
+            tags=tuple(record.tags),
+            notes=record.notes,
+            engine=record.engine,
+            registered_at=record.registered_at,
+            updated_at=record.updated_at,
+            settings=settings,
+            compatibility=compatibility,
+            download_command=download,
+        )
+
+    # ----------------------------------------------------------- operations
+
+    def discover(self, roots: Any = None) -> Any:
+        """Scan for model files, returning the core report unchanged."""
+        return self.manager.discover(roots)
+
+    def register(self, path: str | Path, **kwargs: Any) -> ModelRow:
+        """Register a local file and return its row."""
+        return self._row(self.manager.register(path, **kwargs))
+
+    def import_custom_models(self, *, replace_existing: bool = False) -> tuple[ModelRow, ...]:
+        """Bring in the models added by hand in a mouth window."""
+        return tuple(
+            self._row(entry)
+            for entry in self.manager.import_custom_models(replace_existing=replace_existing)
+        )
+
+    def update(self, model_id: str, **changes: Any) -> ModelRow:
+        """Edit a record's user-owned fields."""
+        return self._row(self.manager.update(model_id, **changes))
+
+    def remove(self, model_id: str, *, confirm: bool = False) -> ModelRow:
+        """Forget a record (the file is never touched)."""
+        record = self.manager.remove(model_id, confirm=confirm)
+        return self._row(ModelEntry(record=record))
+
+    def inspect(self, model_id: str, *, digest: bool = False) -> Any:
+        """Re-read a model's file from disk."""
+        return self.manager.inspect(model_id, digest=digest)
+
+    def compatibility(self, model_id: str) -> CompatibilityReport:
+        """Whether a model can run here, and why not when it cannot."""
+        return self.manager.compatibility(model_id)
+
+    def download_command(self, model_id: str) -> str:
+        """The command that fetches a model's weights, or ``""`` when none exists."""
+        return self.manager.download_command(model_id)
+
+    # -------------------------------------------------------------- settings
+
+    def settings(self, model_id: str) -> Any:
+        """A model's effective inference settings."""
+        return self.manager.settings(model_id)
+
+    def update_settings(self, model_id: str, **changes: Any) -> Any:
+        """Change a model's inference settings, validating them first."""
+        return self.manager.update_settings(model_id, **changes)
+
+    def reset_settings(self, model_id: str) -> Any:
+        """Return a model's settings to the project defaults."""
+        return self.manager.reset_settings(model_id)
+
+    # ------------------------------------------------------------- runtimes
+
+    def runtime_lines(self) -> tuple[str, ...]:
+        """A readable line per runtime, for a diagnostics panel."""
+        return tuple(self.manager.runtime_report().splitlines())
+
+    def runtime_status(self, runtime: str) -> Any:
+        """One runtime's honest status."""
+        return self.manager.runtime_status(runtime)
+
+    # --------------------------------------------------------------- actions
+
+    def load(self, model_id: str) -> OperationReport:
+        """Load a model into its runtime."""
+        return self._report(self.manager.load(model_id))
+
+    def unload(self, model_id: str = "") -> OperationReport:
+        """Release a loaded model (or every loaded model)."""
+        return self._report(self.manager.unload(model_id))
+
+    def test(self, model_id: str, *, prompt: str = "") -> OperationReport:
+        """Ask a model a trivial question, to prove it really answers."""
+        kwargs: dict[str, Any] = {}
+        if prompt:
+            kwargs["prompt"] = prompt
+        return self._report(self.manager.test(model_id, **kwargs))
+
+    def _report(self, result: OperationResult) -> OperationReport:
+        events = self.manager.log_tail(5)
+        return OperationReport(
+            ok=result.ok,
+            operation=result.operation,
+            model_id=result.model_id,
+            detail=result.detail,
+            result=result,
+            events=tuple(events),
+        )
+
+    def log_tail(self, limit: int = 30) -> tuple[ModelEvent, ...]:
+        """The most recent operations, newest first."""
+        return self.manager.log_tail(limit)
+
+    def run_in_background(
+        self,
+        work: Callable[[], Any],
+        *,
+        on_done: Callable[[Any, Exception | None], None],
+        on_progress: Callable[[str], None] | None = None,
+    ) -> threading.Thread:
+        """Run ``work`` on a worker thread and hand the result to ``on_done``.
+
+        The window's own queue-draining pump is what calls ``on_done``; this only
+        keeps the long operation (a load, a test, a scan) off the UI thread. Tk is
+        not thread-safe, so nothing here touches a widget.
+        """
+
+        def _run() -> None:
+            if on_progress is not None:
+                with best_effort("report progress"):
+                    on_progress("working…")
+            try:
+                result = work()
+            except Exception as error:  # handed back, never swallowed
+                on_done(None, error)
+                return
+            on_done(result, None)
+
+        thread = threading.Thread(target=_run, name="model-manager", daemon=True)
+        thread.start()
+        return thread
+
+
+#: The errors a caller of the service may have to show, re-exported so a window
+#: and the CLI catch one set rather than importing from four core modules.
+MANAGER_ERRORS: tuple[type[BaseException], ...] = (
+    ModelFileError,
+    ModelNotFoundError,
+    RegistryError,
+    RuntimeUnavailable,
+    SettingsError,
+    ConfirmationRequired,
+)
+
+
+def model_manager_service(root: Path | str | None = None, **kwargs: Any) -> ModelManagerService:
+    """A service over the project's own data folder (or ``root``)."""
+    return ModelManagerService(root, **kwargs)
+
+
+def human_size(size: int) -> str:
+    """A readable file size, or ``—`` when it is not known."""
+    if not size:
+        return "—"
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TB"
+
+
+def detail_text(detail: ModelDetail) -> str:
+    """The detail pane's body, honest about what is unknown.
+
+    Tk-free on purpose, so the wording a window shows is testable without a
+    display (and a CLI can print the same block).
+    """
+    row = detail.row
+    lines = [
+        f"{row.display_name}",
+        f"  state:      {row.state_marker} — {STATE_BLURBS.get(row.state, '')}",
+        f"  id:         {row.model_id}",
+        f"  identity:   {detail.identity or '(unknown)'}",
+        f"  runtime:    {row.runtime}",
+        f"  format:     {row.format}",
+        f"  path:       {row.path or 'no local file'}",
+        f"  size:       {human_size(row.size_bytes)}",
+        f"  source:     {row.source}"
+        + (" (from the build's catalog)" if row.from_catalog else ""),
+        f"  engine:     {detail.engine or '(none)'}",
+    ]
+    if detail.architecture:
+        lines.append(f"  arch:       {detail.architecture}")
+    if row.quantization:
+        lines.append(f"  quant:      {row.quantization}")
+    if detail.context_length:
+        lines.append(f"  context:    {detail.context_length}")
+    if detail.parameter_count:
+        lines.append(f"  parameters: {detail.parameter_count:,}")
+    if detail.license:
+        lines.append(f"  license:    {detail.license}")
+    if detail.integrity:
+        verdict = detail.integrity
+        if detail.integrity_detail:
+            verdict += f" ({detail.integrity_detail})"
+        lines.append(f"  integrity:  {verdict}")
+    if detail.tags:
+        lines.append(f"  tags:       {', '.join(detail.tags)}")
+    if detail.notes:
+        lines.append(f"  notes:      {detail.notes}")
+    if detail.registered_at:
+        lines.append(f"  registered: {detail.registered_at}")
+    if detail.updated_at and detail.updated_at != detail.registered_at:
+        lines.append(f"  updated:    {detail.updated_at}")
+    if detail.download_command:
+        lines.append("")
+        lines.append("  To fetch these weights, run:")
+        lines.append(f"    {detail.download_command}")
+    elif not row.ready and not row.from_catalog:
+        lines.append("")
+        lines.append("  The weights are not here, and this build has no fetch command for them.")
+    return "\n".join(lines)
+
+
+__all__ = [
+    "MANAGER_ERRORS",
+    "SOURCE_LOCAL",
+    "STATE_BLURBS",
+    "STATE_MARKERS",
+    "ManagerSnapshot",
+    "ModelDetail",
+    "ModelManagerService",
+    "ModelRow",
+    "OperationReport",
+    "detail_text",
+    "human_size",
+    "model_manager_service",
+]
