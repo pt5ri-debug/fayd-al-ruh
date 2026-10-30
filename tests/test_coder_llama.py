@@ -163,7 +163,12 @@ def test_status_says_in_process_and_not_ollama(tmp_path: Path) -> None:
     assert "Ollama" not in status.summary()
 
 
-def test_status_when_the_extra_is_missing_is_actionable(tmp_path: Path) -> None:
+def test_status_when_the_extra_is_missing_is_actionable(tmp_path: Path, monkeypatch) -> None:
+    from core import coder_llama
+
+    # Pin the "extra absent" case so the test is deterministic on a box where the
+    # GGUF runtime is installed as well as on a clean CI runner.
+    monkeypatch.setattr(coder_llama, "extra_available", lambda: False)
     client = LlamaCppCoderClient(root=tmp_path)
     status = coder_status(client)
     assert status.available is False

@@ -866,6 +866,12 @@ def test_service_status_offers_the_in_process_model_first(
     The in-process model is the preferred runtime and needs no daemon, so the
     status must not present "start `ollama serve`" as the only way forward.
     """
+    from core import coder_llama
+
+    # Pin the "extra absent" case: with the GGUF runtime installed the status
+    # reports a missing *model file* instead, so the test must not depend on
+    # what this machine happens to have installed.
+    monkeypatch.setattr(coder_llama, "extra_available", lambda: False)
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path / "data"))
     service = CodeStudioService(project, studio=CodeStudio(project, workspaces_dir=tmp_path / "ws"))
     summary = service.status().summary()

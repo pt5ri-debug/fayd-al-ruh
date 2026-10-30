@@ -222,7 +222,13 @@ def test_the_window_reads_a_scanned_document_and_shows_its_contents(tmp_path: Pa
 @pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_the_window_names_the_next_step_when_a_scanned_file_needs_the_model(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from core import docs_model
+
+    # Pin the "extra absent" case so the window's next-step wording is the docs
+    # extra, whatever this machine has installed.
+    monkeypatch.setattr(docs_model, "extra_available", lambda: False)
     image = tmp_path / "scan.png"
     image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
     root, dialog, service = _dialog(tmp_path)
