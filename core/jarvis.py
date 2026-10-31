@@ -21,6 +21,7 @@ sentence turn into an action the sandbox forbids.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from core.best_effort import best_effort
 from core.command_router import NaturalLanguageRouter, RouteKind
@@ -215,6 +216,16 @@ class JarvisTurn:
     gained, the contradiction penalty it lost. Rendered under a label that says it is
     a confidence, so a reader can see which term moved the number rather than taking
     a bare figure on trust. Empty when no answer was produced."""
+    answer_model: str = ""
+    """The readable name of the model that produced this answer (``core.answer_provenance``).
+    Empty when no answer was produced, so a control or a tool run carries no model
+    line rather than a guessed one. Rendered under a label so a reader always knows
+    which model answered."""
+    provenance: str = ""
+    """The whole provenance block for this answer -- the answering model and the
+    sources it used -- as one labelled, readable block. Empty when no answer was
+    produced. Carried on the turn so every surface (the CLI, the GUI, the
+    machine-readable payload) shows the same thing without recomputing it."""
     reasoning_trace: str = ""
     """The whole trace of *why* this answer -- what was read, what was derived, and
     how the confidence was reached -- as one ordered, labelled block
@@ -264,6 +275,11 @@ class JarvisMode:
         #: Called with ``(name, value)`` when a conversation control changes a
         #: preference, so ``web on`` is remembered across sessions.
         self._on_preference = on_preference
+        #: The :class:`~ai.chat.ModelSwitcher` driving this session, when one is
+        #: attached (the GUI and CLI attach theirs). It is how the answer's
+        #: provenance names the *selected* mouth's model rather than only whatever
+        #: assistant happens to be current. ``None`` for a plain session.
+        self.switcher: Any = None
         #: Builds the web verifier on first use. The assistant is created with
         #: search *off*, so nothing here touches the network or builds a verifier
         #: until the user actually turns it on -- and it is built lazily, on the
@@ -400,6 +416,11 @@ class JarvisMode:
         trace = getattr(answer, "reasoning", None)
         reasoning_trace = trace.describe() if trace is not None else ""
         self._last_reasoning = reasoning_trace
+        # What answered, and what the answer rests on. The mouth is read from the
+        # switcher when the session carries one (the GUI/CLI sessions do), so the
+        # line names the model the user actually selected; a plain JarvisMode
+        # falls back to the assistant's own describe().
+        provenance = self._provenance(answer, text, used_web=used_web, learned=learned)
         return JarvisTurn(
             heard=utterance.strip(),
             response=response,
@@ -420,11 +441,49 @@ class JarvisMode:
             analogy=analogy,
             confidence=float(getattr(answer, "confidence", 0.0) or 0.0),
             confidence_note=confidence_note,
+            answer_model=provenance.model_label,
+            provenance=provenance.describe(include_sources=False),
             reasoning_trace=reasoning_trace,
             spoken=self._speak(response, speak),
             conversation_id=conversation.id,
             used_web=used_web,
             learned=learned,
+        )
+
+    def _provenance(
+        self,
+        answer,
+        question: str,
+        *,
+        used_web: bool,
+        learned: bool,
+    ):
+        """Build the answer's provenance from what already exists.
+
+        The model is named through :func:`core.answer_provenance.describe_answer_model`,
+        which asks the answering assistant's own ``describe()`` first. The
+        *retrieval-only* flag is true exactly when the grounded assistant answered
+        without a model, so a cited answer says which model wrote the prose and an
+        extractive one says it rests on the corpus rather than naming a model that
+        never ran.
+        """
+        from core.answer_provenance import answer_provenance
+
+        assistant = self.assistant
+        mouth = ""
+        switcher = getattr(self, "switcher", None)
+        if switcher is not None:
+            mouth = getattr(switcher, "mouth", "") or ""
+        citations = tuple(getattr(answer, "citations", ()) or ())
+        retrieval_only = not getattr(answer, "used_model", False)
+        return answer_provenance(
+            assistant,
+            mouth=mouth,
+            citations=citations,
+            used_web=used_web,
+            learned=learned,
+            retrieval_only=retrieval_only,
+            question=question,
         )
 
     def handle_audio(self, clip: AudioClip, *, require_wake: bool = True, speak: bool = True) -> JarvisTurn:

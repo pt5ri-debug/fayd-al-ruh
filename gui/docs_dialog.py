@@ -35,8 +35,10 @@ from tkinter import filedialog, ttk
 from tkinter import font as tkfont
 from typing import Any, Literal
 
+from core.answer_provenance import AnswerProvenance
 from core.docs_model import HEADER
 from core.docs_studio import SUPPORTED_SUFFIXES, DocsStudioError
+from core.voices import detect_language
 
 from gui import markdown as md
 from gui import rich_text
@@ -44,6 +46,7 @@ from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
 from gui.docs_studio import DocsStudioService, picker_filetypes
 from gui.image_preview import load_scaled
+from gui.message_footer import add_provenance_label
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
@@ -432,7 +435,8 @@ class DocsDialog:
     # -- transcript -------------------------------------------------------
 
     def _add_message(
-        self, role: str, text: str, *, title: str = "", mono_body: bool = False, rich: bool = True
+        self, role: str, text: str, *, title: str = "", mono_body: bool = False,
+        rich: bool = True, provenance: str = "",
     ) -> tk.Text:
         """Add one message row in the chat window's style and return its widget."""
         theme = self.theme
@@ -488,6 +492,8 @@ class DocsDialog:
         for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             widget.bind(wheel, self._on_bubble_wheel, add="+")
         self._fit_height(widget)
+        if provenance.strip():
+            add_provenance_label(row, provenance, theme=theme, typography=self._type)
         self._scroll_to_bottom()
         return widget
 
@@ -502,6 +508,32 @@ class DocsDialog:
 
     def _insert_rich(self, widget: tk.Text, text: str) -> None:
         rich_text.insert_markdown(widget, text, theme=self.theme, typography=self._type)
+
+    def _provenance_line(self, result: Any) -> str:
+        """Which vision model read the document, and which pages it used.
+
+        The Doc's Studio answers with its own local vision model, so the model line
+        names it from the service's own honest status (never a guess) and the extra
+        line names the pages the answer actually read -- the studio's equivalent of
+        the chat windows' citations. An unavailable model says so honestly rather
+        than naming weights that did not run.
+        """
+        status = self.service.model_status()
+        available = bool(getattr(status, "available", False))
+        model = status.model if available else ""
+        pages = tuple(
+            getattr(result, "pages_used", ()) or getattr(result, "pages_read", ()) or ()
+        )
+        extra = ("Pages read: " + ", ".join(str(page) for page in pages),) if pages else ()
+        label = f"Doc's Studio: {model} (local vision model, in-process)." if available else ""
+        return AnswerProvenance(
+            model_label=label,
+            mouth="docs",
+            model_key=model,
+            language=detect_language(getattr(result, "question", "")),
+            retrieval_only=not available,
+            extra=extra,
+        ).describe()
 
     def _fit_height(self, widget: tk.Text) -> None:
         widget.update_idletasks()
@@ -755,6 +787,7 @@ class DocsDialog:
                 return
             self._add_message(
                 "docs", f"{HEADER}\n\n{result.text}", title="Doc's Studio — contents",
+                provenance=self._provenance_line(result),
             )
 
         self._run_background("Reading the document…", job, finish)
@@ -910,6 +943,7 @@ class DocsDialog:
                 return
             self._add_message(
                 "docs", f"{HEADER}\n\n{result.text}", title="Doc's Studio",
+                provenance=self._provenance_line(result),
             )
 
         self._run_background("Reading the document…", job, finish)

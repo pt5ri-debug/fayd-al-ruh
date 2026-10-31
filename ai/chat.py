@@ -192,6 +192,10 @@ class ModelSwitcher:
         # ``character_root``.
         self._characters = characters
         self._character_root = character_root
+        # Let the session name the model that answered: the answer's provenance
+        # reads this switcher's mouth, so a turn states which selected model
+        # produced it rather than only the assistant's generic description.
+        mode.switcher = self
         self._mind: mind_module.MindAssistant | None = None
         self._ultron: ultron_mouth.UltronAssistant | None = None
         self._vision: vision_mouth.VisionAssistant | None = None
@@ -433,6 +437,8 @@ def format_turn(turn: JarvisTurn) -> str:
     block = sources_block(turn.citations)
     if block:
         parts.append(block)
+    if turn.provenance:
+        parts.append(turn.provenance)
     return "\n\n".join(parts)
 
 
@@ -457,6 +463,8 @@ def turn_payload(turn: JarvisTurn) -> dict:
         "analogy": list(turn.analogy),
         "confidence": turn.confidence,
         "confidence_note": turn.confidence_note,
+        "answer_model": turn.answer_model,
+        "provenance": turn.provenance,
         "reasoning_trace": turn.reasoning_trace,
         "used_web": turn.used_web,
         "learned": turn.learned,

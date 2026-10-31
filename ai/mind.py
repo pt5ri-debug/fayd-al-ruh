@@ -190,6 +190,17 @@ class MindAssistant:
         self.header = header
         self.memory = None
 
+    def describe(self) -> str:
+        """An honest one-line name of the trained checkpoint answering here.
+
+        The trained model is the project's own, so the line names the checkpoint
+        file it loaded (``fayd-local-llm:<stem>`` is the generator's own model
+        name) rather than a mouth label -- a reader can tell *which* trained file
+        produced the words, not merely that "the model" did.
+        """
+        name = getattr(self.model, "model_name", "") or type(self.model).__name__
+        return f"Fayd Al-Ruh (trained in-project model): {name}."
+
     def answer(self, question: str) -> MindResult:
         """Generate the model's continuation for one question.
 

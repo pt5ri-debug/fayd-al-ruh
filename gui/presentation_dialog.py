@@ -38,6 +38,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter import font as tkfont
 from typing import Any, Literal
 
+from core.answer_provenance import AnswerProvenance
 from core.best_effort import best_effort
 from core.presentation import (
     CONTENT_TYPES,
@@ -53,6 +54,7 @@ from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.message_footer import add_provenance_label
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
@@ -617,7 +619,8 @@ class PresentationDialog:
             self._fit_height(widget)
 
     def _add_message(
-        self, role: str, text: str, *, title: str = "", mono_body: bool = False, rich: bool = True
+        self, role: str, text: str, *, title: str = "", mono_body: bool = False,
+        rich: bool = True, provenance: str = "",
     ) -> tk.Text:
         """Add one message row in the chat window's style and return its widget."""
         theme = self.theme
@@ -673,6 +676,8 @@ class PresentationDialog:
         for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             widget.bind(wheel, self._on_bubble_wheel, add="+")
         self._fit_height(widget)
+        if provenance.strip():
+            add_provenance_label(row, provenance, theme=theme, typography=self._type)
         self._scroll_to_bottom()
         return widget
 
@@ -1185,10 +1190,41 @@ class PresentationDialog:
             if error is not None:
                 self._report_error(error)
                 return
-            self._add_message("assistant", result.answer, title="Assistant")
+            self._add_message(
+                "assistant", result.answer, title="Assistant",
+                provenance=self._answer_provenance_line(),
+            )
             self.refresh()
 
         self._run_background("Asking the assistant…", job, finish)
+
+    def _answer_provenance_line(self) -> str:
+        """Which model wrote this answer, and what it rested on.
+
+        The Studio drafts with its own Qwen3 model when one is installed and with
+        the project's assistant otherwise; the line names whichever it really is
+        (from the same honest status the sidebar note uses) so a reader of the
+        transcript knows what produced the words. The sources are the assistant's
+        own citations when the grounded path answered.
+        """
+        status = None
+        if callable(self._model_status):
+            try:
+                status = self._model_status()
+            except Exception:
+                status = None
+        available = status is not None and bool(getattr(status, "available", False))
+        if available:
+            backend = getattr(status, "backend", "")
+            where = "in-process" if backend == "in-process" else "Ollama"
+            label = f"Presentation Studio: {getattr(status, 'model', 'qwen3:8b')} ({where})."
+        else:
+            label = "Presentation Studio: the project's own assistant (grounded, with citations)."
+        return AnswerProvenance(
+            model_label=label,
+            mouth="presentation",
+            retrieval_only=not available,
+        ).describe()
 
     def _on_draft_outline(self) -> None:
         """Ask the user for an optional outline, then draft one."""

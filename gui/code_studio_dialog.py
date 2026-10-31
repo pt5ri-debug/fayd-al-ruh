@@ -40,12 +40,14 @@ from tkinter import font as tkfont
 from tkinter import ttk
 from typing import Any, Literal
 
-from core.coder_model import PULL_HINT
+from core.answer_provenance import AnswerProvenance
+from core.coder_model import DEFAULT_CODER_MODEL, PULL_HINT
 
 from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.message_footer import add_provenance_label
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
@@ -389,7 +391,8 @@ class CodeStudioDialog:
         return max(160, min(widest, self._available_column()))
 
     def _add_message(
-        self, role: str, text: str, *, title: str = "", mono_body: bool = False, rich: bool = True
+        self, role: str, text: str, *, title: str = "", mono_body: bool = False,
+        rich: bool = True, provenance: str = "",
     ) -> tk.Text:
         """Add one message row in the chat window's style and return its widget."""
         theme = self.theme
@@ -442,6 +445,8 @@ class CodeStudioDialog:
         for wheel in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             widget.bind(wheel, self._on_bubble_wheel, add="+")
         self._fit_height(widget)
+        if provenance.strip():
+            add_provenance_label(row, provenance, theme=theme, typography=self._type)
         self._scroll_to_bottom()
         return widget
 
@@ -1019,7 +1024,29 @@ class CodeStudioDialog:
         """Show the model's work as a transcript message, not a bare panel."""
         if not text:
             return
-        self._trace = self._add_message("model", text, title="Coding model", mono_body=True)
+        self._trace = self._add_message(
+            "model", text, title="Coding model", mono_body=True,
+            provenance=self._coding_model_line(),
+        )
+
+    def _coding_model_line(self) -> str:
+        """Which coding model did the work, and where it ran.
+
+        The Studio's service reports its backend honestly (the in-process GGUF,
+        else a reachable Ollama, else neither), so the line names the model the
+        run really used and its runtime -- never a model that was not loaded.
+        """
+        status = self.service.status()
+        available = bool(getattr(status, "available", False))
+        model = getattr(status, "model", "") or DEFAULT_CODER_MODEL
+        runtime = getattr(status, "backend", "") or "in-process"
+        label = f"Code Studio: {model} ({runtime})." if available else ""
+        return AnswerProvenance(
+            model_label=label,
+            mouth="code",
+            model_key=model,
+            retrieval_only=not available,
+        ).describe()
 
     def _set_review(self, text: str) -> None:
         """Show a diff (or a checks result) as a monospaced transcript message."""
