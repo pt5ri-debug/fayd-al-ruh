@@ -32,6 +32,7 @@ from core import language_models as catalog
 from core import mouth_profile as profiles
 from core.banner import BannerUnavailable
 from core.best_effort import best_effort
+from core.character_engine import apply_character_voice
 from core.cloud_model import CloudUnavailable
 from core.paths import data_dir
 from core.reading import TextReader, batch_chunks, clip_is_silent, split_for_speech
@@ -138,6 +139,12 @@ class ModelChatService:
         saved_voice = self.profile.voice
         if saved_voice:
             self._apply_voice(saved_voice)
+        else:
+            # No per-window voice yet: seed it from the character's own Voice
+            # section, so a voice chosen in the Characters window is in force here
+            # rather than only stored. A voice this machine does not have resolves
+            # to nothing and the reader keeps its default, honestly.
+            self._apply_character_voice()
         self._recording: Any = None
         # The reading in progress, so a second click can stop it (the toggle the
         # user asked for): the text being read and the clip playing right now.
@@ -229,6 +236,21 @@ class ModelChatService:
     def voice_key(self) -> str:
         """The voice key this mouth reads with (its own, not the shared one)."""
         return self._reader.voice.key
+
+    @property
+    def character(self):
+        """This mouth's live character assistant, or ``None`` when it is not loaded.
+
+        Read *without* building it, so a caller (an APPLY hot-applying the
+        character's model settings) can reach the loaded mouth without pulling a
+        model into memory. Returns the character wrapper when the session was built
+        with characters on, and the raw mouth otherwise.
+        """
+        switcher = getattr(self.service, "switcher", None)
+        lookup = getattr(switcher, "assistant_for", None)
+        if callable(lookup):
+            return lookup(self.mouth)
+        return None
 
     def set_voice(self, key: str) -> str:
         """Choose this mouth's reading voice, persist it, and return its key.
@@ -347,6 +369,37 @@ class ModelChatService:
             self._reader.set_voice(key)
         except ValueError:
             self.profile = profiles.save_profile(self.profile.with_voice(""))
+
+    def _apply_character_voice(self) -> str:
+        """Seed this window's voice from the character's own Voice section.
+
+        Returns the voice key that took effect, or "" when the character asks for
+        none or the voice it names is not installed here. The per-window choice
+        (``set_voice``) still wins once the user makes one: this only fills the gap
+        so a voice, language, and speed/pitch/volume chosen in the Characters window
+        are in force.
+        """
+        try:
+            from core.character_registry import default_registry
+
+            config = default_registry().load(self.mouth)
+        except (ValueError, OSError):
+            return ""
+        choice = apply_character_voice(self._reader, config)
+        return self._reader.voice.key if choice.ok else ""
+
+    def reload_character_voice(self) -> bool:
+        """Re-apply the character's Voice section to this window's reader.
+
+        Called when the Characters window's APPLY changes the voice: returns True
+        when this window's reader took the change, so the manager can report the
+        voice as activated honestly. A window the user has pointed at a voice of its
+        own keeps that choice -- only the character's own voice is re-applied here
+        when the window has no per-window override.
+        """
+        if self.profile.voice:
+            return False
+        return bool(self._apply_character_voice())
 
     # ------------------------------------------------------------------ model
 

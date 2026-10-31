@@ -354,6 +354,25 @@ class ModelSwitcher:
         elif mouth == MOUTH_HAKEEM:
             self._hakeem = None
 
+    def assistant_for(self, mouth: str) -> Any:
+        """The loaded assistant for ``mouth``, or ``None`` when it is not loaded.
+
+        Read *without* building it: an APPLY that hot-applies a character's model
+        settings must not pull a multi-gigabyte model into memory just to set a
+        temperature on it, so this returns whatever is already loaded (the mouth
+        currently answering, or one a window has opened) and ``None`` otherwise.
+        """
+        return {
+            MOUTH_SOURCES: self.grounded,
+            MOUTH_MODEL: self._mind,
+            MOUTH_ULTRON: self._ultron,
+            MOUTH_VISION: self._vision,
+            MOUTH_BANNER: self._banner,
+            MOUTH_CLOUD: self._cloud,
+            MOUTH_NATASHA: self._natasha,
+            MOUTH_HAKEEM: self._hakeem,
+        }.get(mouth)
+
     def use_sources(self) -> None:
         """Answer from retrieved passages with citations again."""
         self.mode.assistant = self.grounded

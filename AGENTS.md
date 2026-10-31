@@ -5506,3 +5506,50 @@ regression monitor each can refuse a change.
   manager service); `tests/test_character_window.py` gained the window's memory
   block. Gates: pytest 5275 passed / 15 skipped, ruff clean, mypy 806 files OK,
   evaluation PASS (`overall` 0.9860 unchanged).
+
+- Phase 60 — **a character's own Model and Voice settings really reach the mouth**
+  (the "Phase (B)" implementation pass): Phase 59 made a character's personality,
+  memory, and learning reach the model, but the Characters window's **Model**
+  section (which model, and its temperature, top-p, context, and output cap) and
+  its **Voice** section (engine, voice, language, speed, pitch, volume) were still
+  saved and reported as applied while changing **nothing** -- the engine was built
+  before the wrapper saw it, and no reader ever read the Voice section. So a
+  character could be given its own tuning and its own voice and still answer with
+  the mouth's generic defaults in the machine's default voice. `core/character_engine.py`
+  (new) is the one place that turns those two sections into real effect, under two
+  honesty rules: **it reports what it could not do** (a mouth with no engine, an
+  engine that carries no `top_p`, a voice this machine does not have -- each named
+  in the returned `EngineSettingsReport` / `VoiceChoice` rather than silently
+  dropped), and **it invents nothing** (a blank field means "leave the mouth's own
+  choice alone", and only a field the user actually *changed* is written, so
+  Vision keeps its 0.6 temperature rather than being reset to a generic 0.7).
+  `apply_model_settings` folds the Model section onto whatever object a mouth keeps
+  its generation settings on (`engine`, `model`, or an `agent.config`), and
+  `resolve_character_voice`/`resolve_character_prosody`/`voice_language`/
+  `apply_character_voice` do the same for the Voice section -- resolving the voice
+  through the project's own catalog, pinning the language, and folding
+  speed/pitch/volume into the engine-neutral `Prosody` the engines already take.
+  The wiring: `ai/characters.CharacterMouth` gains `apply_model_settings()` (run at
+  build and on every `reload_config()`, so an APPLY is in force at once) and
+  `voice_choice()`; `core.reading.TextReader` gains `set_prosody()` (an explicit
+  prosody kept apart from the mood, and winning over it) so a character's
+  speed/pitch/volume really shape the reading; `gui.model_chat.ModelChatService`
+  seeds its exclusive voice from the character's Voice section (a per-window choice
+  still wins) and gains `reload_character_voice()`; `gui.character_manager`'s APPLY
+  hot-applies the Model section to a **loaded** mouth (through the `live_lookup`
+  the window supplies) and re-applies the Voice section to an open window's reader
+  (through a new `live_voice` sink), reporting each as activated **only when it
+  really took**; and `gui.app` supplies both lookups, bridging the manager's
+  *owner* keys (`jarvis`, `fayd_al_ruh`) to the session's *mouth* keys
+  (`sources`, `model`) through `OWNER_TO_MOUTH`. The other half of "the chosen
+  model is used": `ai.mouths.configured_model_key` reads a character's own saved
+  Language-model field, and `ChatService._load_mouth` honours it when no per-window
+  override is set -- so a model chosen in the Characters window is no longer saved
+  and ignored. `tests/test_character_engine.py` (new, 36 tests) pins the model
+  fold (the changed-field rule, the `top_p`-less engine, the missing engine, the
+  prompt handling, the default-preservation), the voice resolution (catalog,
+  `system:`/`model:` keys, a missing local voice), the language/prosody helpers
+  and their clamping, `apply_character_voice` over a fake reader, the manager's
+  honest hot-apply (model and voice, with a failing sink), the per-mouth window's
+  seeded voice and `reload_character_voice` honouring a per-window override, and
+  `configured_model_key`. Gates: ruff clean, mypy 808 files OK, pytest green.

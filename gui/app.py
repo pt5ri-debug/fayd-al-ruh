@@ -40,6 +40,7 @@ from core import optional_deps, pdf_ocr, speech
 from core.banner import BannerUnavailable
 from core.best_effort import best_effort
 from core.cloud_model import CloudUnavailable
+from core.learning_isolation import OWNER_TO_MOUTH
 from core.paths import data_dir
 from core.ultron import UltronUnavailable
 from core.version import __version__
@@ -2815,7 +2816,63 @@ class FaydGUI:
             return factory()
         from gui.character_manager import CharacterManagerService
 
-        return CharacterManagerService(data_root=data_dir())
+        service = CharacterManagerService(data_root=data_dir())
+        # Let an APPLY hot-apply a character's model settings to the mouth that is
+        # already loaded, so a temperature or output-cap edit takes effect now
+        # instead of only when the mouth is next built. The lookup reads the live
+        # session without building anything, and returns None for a mouth that is
+        # not loaded -- a character whose window is open gets its settings applied
+        # the moment APPLY is pressed.
+        service.set_live_lookup(self._live_character_assistant)
+        # And let it re-apply the character's voice to an open window's reader, so a
+        # voice/speed/pitch edit is in force on the next reading.
+        service.set_live_voice(self._live_character_voice)
+        return service
+
+    def _live_character_voice(self, key: str) -> bool:
+        """Re-apply a character's Voice section to its open window's reader.
+
+        True only when a live reader took it (so APPLY reports the voice honestly).
+        The per-mouth window owns the reader the character is read with, so its
+        service is asked; nothing is built here.
+        """
+        mouth = OWNER_TO_MOUTH.get(key, key)
+        dialogs = getattr(self, "_model_chat_dialogs", None) or {}
+        dialog = dialogs.get(mouth)
+        if dialog is None:
+            return False
+        apply = getattr(getattr(dialog, "service", None), "reload_character_voice", None)
+        if not callable(apply):
+            return False
+        try:
+            return bool(apply())
+        except Exception:
+            return False
+
+    def _live_character_assistant(self, key: str) -> Any:
+        """The character's loaded assistant in the live session, or ``None``.
+
+        The manager holds an *owner* key (``jarvis``, ``fayd_al_ruh``); the session
+        holds *mouth* keys (``sources``, ``model``). ``OWNER_TO_MOUTH`` bridges them,
+        and the dedicated per-mouth window's own service is checked too, so a
+        character being talked to in either window is found. Nothing is built here.
+        """
+        mouth = OWNER_TO_MOUTH.get(key, key)
+        service = getattr(self, "service", None)
+        switcher = getattr(service, "switcher", None)
+        assistant = None
+        if switcher is not None:
+            lookup = getattr(switcher, "assistant_for", None)
+            if callable(lookup):
+                assistant = lookup(mouth)
+            if assistant is None:
+                assistant = getattr(switcher, "_" + mouth, None)
+        if assistant is None:
+            dialogs = getattr(self, "_model_chat_dialogs", None) or {}
+            dialog = dialogs.get(mouth)
+            if dialog is not None:
+                assistant = getattr(getattr(dialog, "service", None), "character", None)
+        return assistant
 
     def _forget_characters(self) -> None:
         """Drop the closed Characters window's reference, so it is not held alive."""

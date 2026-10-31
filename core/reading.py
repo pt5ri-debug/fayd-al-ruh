@@ -84,6 +84,10 @@ class TextReader:
         # own copy). ``None`` lets each engine resolve its own default.
         self._root = root
         self._mood: Mood | None = _as_mood(mood)
+        # A character's own Voice section (speed/pitch/volume) folds onto the reader
+        # as an explicit prosody, kept apart from the mood so the two cannot be
+        # confused; when set it wins over the mood's own prosody (see ``_prosody``).
+        self._explicit_prosody: Prosody | None = None
         if synthesizer is not None:
             self._engine = synthesizer.name
 
@@ -114,8 +118,27 @@ class TextReader:
         self._synthesizer = None  # the mood is applied when the engine is rebuilt
         return chosen
 
+    def set_prosody(self, prosody: Prosody | None) -> Prosody | None:
+        """Set an explicit prosody (a character's speed/pitch/volume), or clear it.
+
+        Kept apart from the mood: a character's own Voice settings are not an
+        emotional state, and the two are applied the same way but chosen
+        independently. An explicit prosody wins over the mood's while it is set, so
+        the character's settings are what the reader uses.
+        """
+        self._explicit_prosody = prosody
+        self._synthesizer = None  # rebuilt lazily with the new prosody
+        return self._explicit_prosody
+
+    @property
+    def prosody(self) -> Prosody | None:
+        """The explicit prosody in force, or ``None``."""
+        return self._explicit_prosody
+
     def _prosody(self) -> Prosody | None:
-        """The prosody the current mood carries, or ``None`` for the neutral one."""
+        """The prosody the reader applies, or ``None`` for the neutral one."""
+        if self._explicit_prosody is not None and not self._explicit_prosody.neutral:
+            return self._explicit_prosody
         if self._mood is None or self._mood.neutral:
             return None
         return self._mood.prosody

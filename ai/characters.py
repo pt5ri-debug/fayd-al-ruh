@@ -56,6 +56,12 @@ from pathlib import Path
 from typing import Any
 
 from core.best_effort import best_effort
+from core.character_engine import (
+    EngineSettingsReport,
+    VoiceChoice,
+    apply_model_settings,
+    resolve_character_voice,
+)
 from core.character_learning import (
     CHARACTER_KEYS,
     PROJECT_MODEL_KEY,
@@ -191,7 +197,12 @@ class CharacterMouth:
         # back to the model that produced it).
         self._turns = 0
         self._last_question = ""
+        self._engine_report = EngineSettingsReport(mouth=key)
         self._apply_instruction()
+        # The character's Model section (temperature, top-p, context, output cap)
+        # is folded onto the mouth's engine here: the engine was built before this
+        # wrapper saw it, so nothing else would ever apply it.
+        self.apply_model_settings()
 
     # ---------------------------------------------------------- configuration
 
@@ -244,6 +255,10 @@ class CharacterMouth:
         self._load_config()
         if self._pipeline is not None:
             self._pipeline.set_config(self._config)
+        # An APPLY may have changed the Model section, so fold it onto the engine
+        # again -- this is what makes a saved temperature or output cap take effect
+        # without rebuilding the whole mouth.
+        self.apply_model_settings()
         return self._config
 
     # ------------------------------------------------------------ personality
@@ -402,6 +417,7 @@ class CharacterMouth:
             "_supplied_prompt",
             "_turns",
             "_last_question",
+            "_engine_report",
         }
     )
 
@@ -451,6 +467,46 @@ class CharacterMouth:
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"CharacterMouth({self.key!r}, {self.assistant!r})"
+
+    # ------------------------------------------------------ model & voice
+
+    def apply_model_settings(self) -> EngineSettingsReport:
+        """Fold this character's Model section onto the mouth it speaks with.
+
+        The Characters window lets a user set a character's model parameters, but
+        the engine a mouth actually answers with is built *before* the character
+        wrapper sees it, so a saved temperature or output cap would otherwise never
+        reach it. This is the one place those settings are applied, and it reports
+        honestly what reached the engine and what did not (see
+        :mod:`core.character_engine`). It runs once when the character is built and
+        again whenever its configuration is reloaded (an APPLY).
+        """
+        report = apply_model_settings(
+            self.key,
+            self.assistant,
+            self._config,
+            base_system_prompt=self._base_prompt,
+            # The character's model-specific prompt is already rendered into the
+            # standing instruction, so writing it onto the engine here too would
+            # repeat it on every answer.
+            include_system_prompt=False,
+        )
+        self._engine_report = report
+        return report
+
+    @property
+    def engine_report(self) -> EngineSettingsReport:
+        """What this character's model settings last did to the mouth's engine."""
+        return self._engine_report
+
+    def voice_choice(self) -> VoiceChoice:
+        """The voice this character's configuration asks for, resolved honestly.
+
+        A caller (the per-mouth window, or the main window's reader) uses this to
+        seed its reading voice from the character, so a character's Voice section
+        is in force where it speaks rather than only stored.
+        """
+        return resolve_character_voice(self._config)
 
 
 def wrap_character(
