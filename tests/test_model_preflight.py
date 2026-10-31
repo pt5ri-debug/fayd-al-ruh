@@ -117,11 +117,28 @@ class Clock:
 # ----------------------------------------------------------------- resources
 
 
-def test_gpu_info_is_honest_when_nothing_is_found():
-    info = gpu_info(runner=lambda cmd: (1, ""))
+def test_gpu_info_is_honest_when_nothing_is_found(tmp_path):
+    # Both probes are injected, so this is deterministic even on a CI runner that
+    # really exposes a /sys/class/drm/card0 (which the default sysfs path reads).
+    info = gpu_info(runner=lambda cmd: (1, ""), sysfs_root=tmp_path)
     assert not info.available
     assert "nvidia-smi" in info.note
     assert "none detected" in info.describe()
+
+
+def test_gpu_info_reads_sysfs_when_nvidia_smi_is_absent(tmp_path):
+    # An AMD card as the DRM tree reports it: vendor id, driver, and VRAM total.
+    card = tmp_path / "card0" / "device"
+    card.mkdir(parents=True)
+    (card / "vendor").write_text("0x1002\n")
+    (card / "uevent").write_text("DRIVER=amdgpu\n")
+    (card / "mem_info_vram_total").write_text(str(2 * 1024**3))
+    info = gpu_info(runner=lambda cmd: (1, ""), sysfs_root=tmp_path)
+    assert info.available
+    assert info.name == "AMD"
+    assert info.source == "sysfs"
+    assert info.memory_total_bytes == 2 * 1024**3
+    assert info.memory_free_bytes is None  # sysfs reports the total, not a live free
 
 
 def test_gpu_info_reads_nvidia_smi_output():
