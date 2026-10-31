@@ -447,7 +447,20 @@ class CharacterLearning:
         root: str | Path | None = None,
         in_memory: bool = False,
     ) -> None:
-        self.key = key
+        # One identity per character: a mouth key ("sources") and its owner name
+        # ("jarvis") name the *same* character, so the record is keyed on the
+        # **owner** whichever vocabulary the caller holds. This is what makes a
+        # fact a character learns in one window visible in every other window and
+        # in the Characters CLI -- before this, "sources" and "jarvis" were two
+        # separate files and the two surfaces never met.
+        from core.learning_isolation import mouth_key, owner_for
+
+        self.owner = owner_for(key)
+        self.mouth = mouth_key(self.owner)
+        self.key = self.owner
+        # A record written before the keys were unified lives under the mouth key;
+        # it is still read once, so an upgrade loses nothing.
+        self._legacy_key = self.mouth if self.mouth != self.owner else ""
         self._in_memory = in_memory
         if in_memory:
             self._root: Path | None = None
@@ -478,16 +491,56 @@ class CharacterLearning:
         if self._in_memory:
             return CharacterRecord(key=self.key)
         try:
-            data = self._store().load(_NAMESPACE, self.key)
+            store = self._store()
+            data = store.load(_NAMESPACE, self.key)
+            if data is None and self._legacy_key:
+                # A record written before the keys were unified (under the mouth
+                # key) is read once, so an upgrade keeps what the character knew.
+                data = store.load(_NAMESPACE, self._legacy_key)
         except Exception:  # a broken store must never stop a chat
             return CharacterRecord(key=self.key)
         return CharacterRecord.from_primitive(self.key, data)
 
-    def _save(self) -> None:
+    def _save(self, *, merge: bool = True) -> None:
+        """Write the record, merging with what is already on disk first.
+
+        Merging is what makes one shared file safe for *two* live windows: the
+        main chat and a character's dedicated window both hold a
+        :class:`CharacterLearning`, and without the merge whichever wrote last
+        would silently drop the other's fact or exchange -- the exact
+        "one file per character, one window's memory" bug Phase C closes. The
+        merge is a union (facts de-duplicated in order, exchanges by their
+        question/answer/timestamp), so nothing is ever lost. ``clear()`` passes
+        ``merge=False`` because forgetting must actually empty the file.
+        """
         if self._in_memory:
             return
+        if merge:
+            self._merge_from_disk()
         with best_effort(f"save {self.key}'s learning"):
             self._store().save(_NAMESPACE, self.key, self.record.to_primitive())
+
+    def _merge_from_disk(self) -> None:
+        """Fold whatever is already stored into this record (union, order kept)."""
+        try:
+            data = self._store().load(_NAMESPACE, self.key)
+        except Exception:  # a broken store must never stop a chat
+            return
+        stored = CharacterRecord.from_primitive(self.key, data)
+        for fact in stored.facts:
+            if fact not in self.record.facts:
+                self.record.facts.append(fact)
+        del self.record.facts[:-MAX_FACTS]
+        seen = {
+            (exchange.question, exchange.answer, exchange.at)
+            for exchange in self.record.exchanges
+        }
+        for exchange in stored.exchanges:
+            token = (exchange.question, exchange.answer, exchange.at)
+            if token not in seen:
+                self.record.exchanges.append(exchange)
+                seen.add(token)
+        del self.record.exchanges[:-MAX_EXCHANGES]
 
     # ---------------------------------------------------------------- reading
 
@@ -541,7 +594,7 @@ class CharacterLearning:
     def summary(self) -> str:
         """One honest line: how much this character has learned so far."""
         return (
-            f"{persona_for(self.key).name}: {len(self.record.facts)} facts, "
+            f"{persona_for(self.mouth).name}: {len(self.record.facts)} facts, "
             f"{len(self.record.exchanges)} exchanges"
         )
 
@@ -554,11 +607,19 @@ class CharacterLearning:
         of distinct things the character was told, not a log of repeats.
         """
         value = text.strip()
-        if not value or value in self.record.facts:
+        if not value:
+            return False
+        # Fold in what the shared file already holds first, so a fact another
+        # window (or the CLI) already taught this character is recognised as known
+        # rather than appended a second time.
+        self._merge_from_disk()
+        if value in self.record.facts:
             return False
         self.record.facts.append(value)
         del self.record.facts[:-MAX_FACTS]
-        self._save()
+        # Already merged above, so the write must not merge a second time (that
+        # would re-append the facts the trim just dropped and shuffle the order).
+        self._save(merge=False)
         return True
 
     def remember(
@@ -583,15 +644,25 @@ class CharacterLearning:
             learned=bool(learned),
             citations=tuple(citations),
         )
+        # Fold in any exchange another window recorded first, so this write appends
+        # to the character's whole memory rather than replacing it.
+        self._merge_from_disk()
         self.record.exchanges.append(exchange)
         del self.record.exchanges[:-MAX_EXCHANGES]
-        self._save()
+        self._save(merge=False)
         return exchange
 
     def clear(self) -> None:
         """Forget everything this character learned."""
         self.record = CharacterRecord(key=self.key)
-        self._save()
+        # ``merge=False``: forgetting must actually empty the shared file rather
+        # than fold the old contents straight back in.
+        self._save(merge=False)
+        if self._legacy_key:
+            # Drop any pre-unification record too, so a later read cannot revive
+            # what the user just forgot.
+            with best_effort(f"remove {self.key}'s legacy learning"):
+                self._store().delete(_NAMESPACE, self._legacy_key)
 
     def describe(self) -> str:
         """A short, honest report of what this character holds."""

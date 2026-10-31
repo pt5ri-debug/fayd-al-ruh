@@ -296,6 +296,119 @@ def _cmd_shareable(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compare(args: argparse.Namespace) -> int:
+    """Compare the characters dimension by dimension (the contrast tool)."""
+    from core import character_compare
+
+    if args.a and args.b:
+        contrast = character_compare.compare_characters(args.a, args.b)
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "first": contrast.first.describe(),
+                        "second": contrast.second.describe(),
+                        "difference_score": contrast.difference_score,
+                        "dimensions": [
+                            {
+                                "dimension": diff.label,
+                                "first": diff.first,
+                                "second": diff.second,
+                                "relation": diff.relation,
+                            }
+                            for diff in contrast.diffs
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        print(contrast.describe())
+        return 0
+    if args.rank:
+        if args.json:
+            print(
+                json.dumps(
+                    [
+                        {"first": first, "second": second, "differences": score}
+                        for first, second, score in character_compare.most_different()
+                    ],
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        for first, second, score in character_compare.most_different():
+            print(f"{first} vs {second}: {score} dimensions differ")
+        return 0
+    table = character_compare.comparison_table()
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "characters": [profile.describe() for profile in table.profiles],
+                    "rows": [
+                        {"dimension": label, "values": [str(value) for value in values]}
+                        for label, values in table.rows
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    print(table.describe())
+    return 0
+
+
+def _cmd_identity(args: argparse.Namespace) -> int:
+    """Show each character's one identity (owner, mouth, name, role)."""
+    from core.character_identity import all_identities, identity_for
+
+    if args.character:
+        identity = identity_for(args.character)
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "owner": identity.owner,
+                        "mouth": identity.mouth,
+                        "name": identity.name,
+                        "role": identity.role,
+                        "private": identity.private,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        print(identity.describe())
+        return 0
+    identities = all_identities()
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "owner": item.owner,
+                        "mouth": item.mouth,
+                        "name": item.name,
+                        "role": item.role,
+                        "private": item.private,
+                    }
+                    for item in identities
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    for item in identities:
+        print(item.describe())
+    return 0
+
+
 # ------------------------------------------------------------------- editing
 
 
@@ -531,6 +644,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_shareable = sub.add_parser("shareable", help="who may be shared, and who may not")
     p_shareable.add_argument("--json", action="store_true")
     p_shareable.set_defaults(func=_cmd_shareable)
+
+    p_compare = sub.add_parser(
+        "compare", help="compare the characters (tone, length, language, voice)"
+    )
+    p_compare.add_argument("a", nargs="?", help="the first character (with B)")
+    p_compare.add_argument("b", nargs="?", help="the second character (with A)")
+    p_compare.add_argument(
+        "--rank", action="store_true", help="rank every pair by how much they differ"
+    )
+    p_compare.add_argument("--json", action="store_true")
+    p_compare.set_defaults(func=_cmd_compare)
+
+    p_identity = sub.add_parser(
+        "identity", help="each character's one identity (owner, mouth, name)"
+    )
+    p_identity.add_argument("character", nargs="?", help="one character (optional)")
+    p_identity.add_argument("--json", action="store_true")
+    p_identity.set_defaults(func=_cmd_identity)
 
     return parser
 

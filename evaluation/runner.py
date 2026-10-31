@@ -21,6 +21,7 @@ from core.belief import Belief
 from core.belief_revision import BeliefRevisionEngine
 from core.causal_link import CausalLink
 from core.causal_paths import causal_reasoning_accuracy, controller_causal_accuracy
+from core.character_identity_gate import character_identity_accuracy
 from core.character_isolation_gate import character_isolation_accuracy
 from core.cognitive_controller import CognitiveController
 from core.curriculum_knowledge import curriculum_coverage_score
@@ -139,6 +140,13 @@ class EvaluationMetrics:
     backend satisfies: a cross-character read refused, the main model kept out of
     Natasha's store, provenance carried onto its own copy, no duplicate on a
     second share (Phase: independent characters)."""
+
+    character_identity_accuracy: float
+    """The share of held-out identity judgements the wiring satisfies: a
+    character's personality reaches the *answer text* it produces (not only its
+    configuration), the identity does not bleed across mouths, an unknown key
+    falls back to the project's own model, and the two windows that show one
+    character share its memory and its display name (Phase C: one identity)."""
 
     semantic_separation: float
     # Aggregate
@@ -970,6 +978,14 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # even though the unit tests that pinned the good case still pass.
     character_isolation_value = character_isolation_accuracy()
 
+    # Character identity: a character's personality must reach the *answer text*
+    # it produces, not only its configuration -- and the two windows that show one
+    # character (the main chat and its dedicated window) must share its memory and
+    # its display name. Held-out judgements with negative controls (no bleed across
+    # mouths, an unknown key falls back to the project's own model, a non-character
+    # mouth is left unwrapped), so a regression in the identity wiring fails here.
+    character_identity_value = character_identity_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1033,6 +1049,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         arabic_path_value,
         arabic_readable_value,
         character_isolation_value,
+        character_identity_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1083,6 +1100,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         arabic_answer_path_accuracy=round(arabic_path_value, 6),
         arabic_readable_body_accuracy=round(arabic_readable_value, 6),
         character_isolation_accuracy=round(character_isolation_value, 6),
+        character_identity_accuracy=round(character_identity_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )
