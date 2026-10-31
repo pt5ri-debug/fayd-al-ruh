@@ -313,6 +313,42 @@ class CharacterManagerService:
         rows = self.store(key).recent(limit=limit)
         return tuple(record.describe() for record in reversed(rows))
 
+    def remember_fact(self, key: str, text: str) -> bool:
+        """Teach a character one durable fact it will carry into its next answer.
+
+        This is the user-facing write path for a character's *memory* (distinct
+        from the learning records, which are the audit trail of what it answered).
+        The fact is stored in the character's own learning file and is rendered into
+        its standing instruction, so the very next reply can use it -- see
+        :meth:`ai.characters.CharacterMouth.remember_fact`, which the live mouth
+        calls. Returns ``True`` when the fact was new; a blank fact is refused.
+        """
+        from core.character_learning import CharacterLearning
+
+        fact = (text or "").strip()
+        if not fact:
+            return False
+        return CharacterLearning(owner_for(key), root=self._data_root).add_fact(fact)
+
+    def facts(self, key: str) -> tuple[str, ...]:
+        """The durable facts a character has been told, oldest first."""
+        from core.character_learning import CharacterLearning
+
+        return CharacterLearning(owner_for(key), root=self._data_root).facts()
+
+    def forget_facts(self, key: str, *, confirm: bool = False) -> bool:
+        """Forget a character's facts and exchanges; requires ``confirm=True``.
+
+        Like the learning reset, this is destructive, so it is refused unless the
+        caller explicitly confirms.
+        """
+        if not confirm:
+            return False
+        from core.character_learning import CharacterLearning
+
+        CharacterLearning(owner_for(key), root=self._data_root).clear()
+        return True
+
     def verify(self, key: str, record_id: str, *, note: str = "") -> LearningRecord | None:
         """Verify one of the owner's records (supervised verification)."""
         return self.store(key).revise(

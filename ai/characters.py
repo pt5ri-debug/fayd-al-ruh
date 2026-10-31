@@ -10,17 +10,23 @@ took part in, all kept in small files under the git-ignored ``data/characters``
 folder.
 
 This module is the *wiring*. :class:`CharacterMouth` wraps any mouth's assistant
-and does two things, once, for every mouth:
+and does three things, once, for every mouth:
 
 * it **prepends the character's standing instruction** to the model the mouth
-  speaks through (the engine's ``system_prompt``, or the grounded assistant's
-  ``system_instruction``), so the character's traits shape every reply -- and the
-  facts the character has learned are re-rendered into that instruction before
-  each answer, so its memory grows with the conversation;
+  speaks through (the engine's ``system_prompt``, the grounded assistant's
+  ``system_instruction``, or -- for a mouth that exposes neither, such as the
+  companion or the scholar -- a ``system_prompt`` the wrapper itself supplies and
+  the mouth's own prompt builder reads), so the character's traits shape every
+  reply;
+* it **recalls the character's own memory into that instruction**: the durable
+  facts it was told *and* a bounded window of the exchanges it took part in, so a
+  character remembers the conversation rather than only recording it -- and the
+  recall is re-rendered as the memory grows;
 * it **records each exchange** into the character's own learning file -- the
-  question, the answer, and where the answer came from (the web, a learned
-  statement, cited sources) -- so the character's memory is durable and the same
-  files train the project's own model (see
+  question, the answer (with the mouth's honesty header stripped, so the stored
+  text is the model's own words), and where the answer came from (the web, a
+  learned statement, cited sources) -- so the character's memory is durable and the
+  same files train the project's own model (see
   :func:`core.character_learning.character_learning_sentences`).
 
 The wrapper is deliberately transparent: an unknown attribute is forwarded to the
@@ -62,6 +68,63 @@ from core.character_learning import (
 #: bridge that trains it reads the seven characters (see
 #: :data:`core.character_learning.CHARACTER_KEYS`).
 CHARACTER_MOUTHS: tuple[str, ...] = (*CHARACTER_KEYS, PROJECT_MODEL_KEY)
+
+#: How many of a character's own past exchanges are recalled into its standing
+#: instruction. A character's memory is meant to *reach its prompt*; the window is
+#: small on purpose, so recalling memory never floods a small model's context.
+RECALL_LIMIT = 3
+
+#: Re-render the standing instruction (and therefore the recalled memory) every
+#: this-many turns. Re-rendering on *every* turn would append the previous answer
+#: to the instruction it produced, which a small model can learn to echo; a small
+#: period keeps the recall current without that trap.
+RECALL_REFRESH_TURNS = 5
+
+
+def _honesty_headers() -> frozenset[str]:
+    """Every mouth's honesty header, read from the one place each is defined.
+
+    Collecting them (rather than trying one mouth's stripper) means an answer is
+    stripped of whichever header it actually carries, whatever mouth wrote it.
+    """
+    labels: set[str] = set()
+    for module_name, attribute in (
+        ("ai.ultron_mouth", "ULTRON_HEADER"),
+        ("ai.vision_mouth", "VISION_HEADER"),
+        ("ai.banner_mouth", "BANNER_HEADER"),
+        ("ai.cloud_mouth", "CLOUD_HEADER"),
+        ("ai.natasha_mouth", "HEADER"),
+        ("ai.hakeem_mouth", "HEADER"),
+        ("ai.mind", "MIND_HEADER"),
+    ):
+        try:
+            import importlib
+
+            module = importlib.import_module(module_name)
+            value = getattr(module, attribute)
+        except (ImportError, AttributeError):
+            continue
+        if isinstance(value, str) and value:
+            labels.add(value)
+    return frozenset(labels)
+
+
+def _strip_honesty_header(text: str) -> str:
+    """Drop a mouth's honesty header from an answer before it is remembered.
+
+    Each model-backed mouth writes a header above its answer (``[ultron] answered
+    by the local general model; not grounded in cited sources.``). The header is
+    honest on screen, but it is *not* something the character said, so storing it
+    would put a bracketed label into the character's memory and into the training
+    text the project's own model learns from. A mouth without one is left as-is.
+    """
+    if not text:
+        return text
+    labels = _honesty_headers()
+    lines = text.splitlines()
+    while lines and lines[0].strip() in labels:
+        lines.pop(0)
+    return "\n".join(lines).strip()
 
 
 def is_character(mouth: str) -> bool:
@@ -113,6 +176,21 @@ class CharacterMouth:
         engine = getattr(assistant, "engine", None)
         self._base_prompt = getattr(engine, "system_prompt", None)
         self._base_instruction = getattr(assistant, "system_instruction", None)
+        # Whether the wrapper had to *supply* the mouth's ``system_prompt`` because
+        # the mouth exposed none (the companion and the scholar read their
+        # instruction through their own personality, so the wrapper writes the
+        # character block onto the assistant and their prompt builder reads it).
+        # Remembered so a re-render overwrites the wrapper's own block rather than
+        # appending to it a second time.
+        self._supplied_prompt = (
+            engine is None
+            and not isinstance(self._base_instruction, str)
+        )
+        # The turn counter that paces the recall re-render, and the last question
+        # the wrapper asked the mouth (so the just-answered exchange is never fed
+        # back to the model that produced it).
+        self._turns = 0
+        self._last_question = ""
         self._apply_instruction()
 
     # ---------------------------------------------------------- configuration
@@ -170,38 +248,68 @@ class CharacterMouth:
 
     # ------------------------------------------------------------ personality
 
-    def _apply_instruction(self) -> None:
-        """Render the character's instruction (with its facts) into the mouth."""
+    def _apply_instruction(self, *, exclude_questions: tuple[str, ...] = ()) -> None:
+        """Render the character's instruction (with its facts and memory) into the mouth."""
         # Re-read the record from disk first: a fact the character learned in
         # another instance of the program (or through the CLI) must be in force
         # for this answer, not only the facts this wrapper happened to load.
         self.learning.reload()
-        instruction = self.system_prompt()
+        instruction = self.system_prompt(exclude_questions=exclude_questions)
         engine = getattr(self.assistant, "engine", None)
         if engine is not None and isinstance(self._base_prompt, str):
             engine.system_prompt = f"{instruction}\n\n{self._base_prompt}"
+        elif self._supplied_prompt:
+            # The mouth exposed no engine prompt (the companion, the scholar), so
+            # the wrapper supplies one and the mouth's own prompt builder reads it.
+            self.assistant.system_prompt = instruction
         if isinstance(self._base_instruction, str):
             self.assistant.system_instruction = f"{instruction}\n\n{self._base_instruction}"
 
-    def system_prompt(self) -> str:
+    def system_prompt(self, *, exclude_questions: tuple[str, ...] = ()) -> str:
         """The character's current standing instruction, for inspection.
 
         Rendered from the editable configuration when one is available, and from
-        the character's persona otherwise, so the two always agree by default.
+        the character's persona otherwise, so the two always agree by default. The
+        character's durable facts and a bounded window of its own past exchanges
+        are rendered in, so its memory is in force for the next answer.
         """
         facts = self.learning.facts()
+        recalled = tuple(
+            exchange.recall_line()
+            for exchange in self.learning.recall(
+                limit=RECALL_LIMIT, exclude_questions=exclude_questions
+            )
+        )
         config = self._config
         if config is not None:
-            return str(config.system_prompt(learned_facts=facts))
-        return self._persona.system_prompt(learned_facts=facts)
+            return str(config.system_prompt(learned_facts=facts, recalled_memory=recalled))
+        return self._persona.system_prompt(learned_facts=facts, recalled_memory=recalled)
 
     # ---------------------------------------------------------------- asking
 
     def ask(self, question: str, **kwargs: Any):
-        """Answer as the wrapped mouth, then remember the exchange."""
-        self._apply_instruction()
+        """Answer as the wrapped mouth, then remember the exchange.
+
+        The standing instruction is re-rendered before the answer so the character's
+        memory is in force -- but the re-render (which now carries the recalled
+        memory) is paced: doing it on *every* turn would append the previous answer
+        to the very instruction that produced it, which a small model can learn to
+        echo. Facts and an explicit reload still take effect at once; the recalled
+        window is refreshed every few turns, and always on the first answer.
+        """
+        refresh = self._turns % RECALL_REFRESH_TURNS == 0
+        if refresh:
+            self._apply_instruction(exclude_questions=(self._last_question, question))
+        else:
+            self.learning.reload()
+        self._turns += 1
+        self._last_question = question
         answer = self.assistant.ask(question, **kwargs)
-        text = str(getattr(answer, "text", "") or "")
+        raw = str(getattr(answer, "text", "") or "")
+        # The mouth's honesty header is honest on screen but is not the character's
+        # own words, so it is stripped before the exchange is remembered -- keeping
+        # it out of the character's memory and out of the training text built from it.
+        text = _strip_honesty_header(raw) or raw
         used_web = bool(getattr(answer, "used_web", False))
         learned = bool(getattr(answer, "learned", False))
         citations = tuple(getattr(answer, "citations", ()) or ())
@@ -233,6 +341,17 @@ class CharacterMouth:
         pipeline = self._pipeline
         if pipeline is None or not text.strip():
             return
+        # The character's own configuration governs whether it learns at all: a
+        # character whose Learning section is switched off keeps a memory (the
+        # exchange is still remembered above) but writes no learning record, so the
+        # switch in the Characters window really turns learning off.
+        config = self._config
+        if config is not None and not config.learning.enabled:
+            return
+        if used_web and config is not None and not config.learning.learn_from_internet:
+            # A character not allowed to learn from the internet still records what
+            # it said, but as its own model's answer -- never as web knowledge.
+            used_web = False
         from core.learning_records import SOURCE_LANGUAGE_MODEL
 
         with best_effort(f"record {self.key}'s exchange as a learning record"):
@@ -280,8 +399,35 @@ class CharacterMouth:
             "_config",
             "_pipeline",
             "_learning_store",
+            "_supplied_prompt",
+            "_turns",
+            "_last_question",
         }
     )
+
+    # --------------------------------------------------------------- memory API
+
+    def remember_fact(self, text: str) -> bool:
+        """Teach this character one durable fact; ``True`` when it was new.
+
+        This is the one write path a caller needs to make a character's memory
+        grow from outside a chat -- the CLI (``characters remember``) and the
+        Characters window both call it, and the fact is in force on the next answer
+        because the standing instruction is re-rendered from the record.
+        """
+        stored = self.learning.add_fact(text)
+        if stored:
+            self._apply_instruction()
+        return stored
+
+    def facts(self) -> tuple[str, ...]:
+        """The durable facts this character has been told."""
+        return self.learning.facts()
+
+    def forget_facts(self) -> None:
+        """Forget everything this character learned (its facts and exchanges)."""
+        self.learning.clear()
+        self._apply_instruction()
 
     def __getattr__(self, name: str) -> Any:
         # ``assistant`` is set in __init__; anything else is the wrapped mouth's.

@@ -156,6 +156,11 @@ class CompanionAgent:
         self._prompt_builder = PromptBuilder(
             budget=self.config.context_chars, history_window=self.config.history_window
         )
+        #: A standing instruction a caller supplies (the character wrapper writes
+        #: the *editable* character block, with Natasha's recalled memory, here), so
+        #: an edit in the Characters window reaches the companion and she remembers
+        #: earlier conversations. ``None`` keeps her own personality text.
+        self.system_prompt: str | None = None
         self._caller = caller
         self._client = client if caller is None else None
 
@@ -423,6 +428,7 @@ class CompanionAgent:
             mood=mood_state if self.config.mood_enabled else None,
             initiative=initiative_choice.instruction if initiative_choice else None,
             style_guidance=style_guidance,
+            system_prompt_override=self.system_prompt,
         )
 
         try:

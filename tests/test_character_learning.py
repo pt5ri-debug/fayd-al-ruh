@@ -485,3 +485,218 @@ def test_gui_sidebar_offers_the_character_training_action() -> None:
     by_key = {action.key: action for action in visible_actions()}
     assert by_key["llm-characters"].command is run_llm
     assert by_key["llm-characters"].argv == ("--llm-characters", "--steps", "4000")
+
+
+# --- character activation: personality, memory, and the prompt override -----
+
+
+def _natasha_like() -> Any:
+    """A mouth shaped like the real ``NatashaAssistant`` (a ``system_prompt``
+    property proxying to the agent), so the wrapper's injection is exercised the
+    way the companion is actually wired."""
+
+    class _Agent:
+        def __init__(self) -> None:
+            self.system_prompt: str | None = None
+
+    class _NatashaLike:
+        def __init__(self) -> None:
+            self.agent = _Agent()
+
+        @property
+        def system_prompt(self) -> str | None:
+            return self.agent.system_prompt
+
+        @system_prompt.setter
+        def system_prompt(self, value: str | None) -> None:
+            self.agent.system_prompt = value
+
+        def ask(self, question: str, **_kwargs: Any) -> _FakeAnswer:
+            return _FakeAnswer("I remember you.")
+
+    return _NatashaLike()
+
+
+def test_wrapper_supplies_a_prompt_for_a_mouth_that_exposes_none(data_root) -> None:
+    """A companion/scholar mouth has no ``engine``, so the wrapper writes the
+    character block onto the assistant and the mouth's prompt builder reads it."""
+    from ai.characters import wrap_character
+
+    mouth = _natasha_like()
+    wrap_character("natasha", mouth, root=data_root)
+
+    assert cl.PERSONAS["natasha"].identity in (mouth.agent.system_prompt or "")
+
+
+def test_wrapper_memory_recall_reaches_the_instruction(data_root) -> None:
+    """A character's own past exchange is recalled into its standing instruction."""
+    from ai.characters import RECALL_LIMIT, wrap_character
+
+    mouth = _FakeMouth()
+    character = wrap_character("ultron", mouth, root=data_root)
+    for index in range(RECALL_LIMIT + 3):
+        character.ask(f"question {index}")
+
+    prompt = mouth.engine.system_prompt
+    assert "you were asked" in prompt
+    # The recall is bounded, so it never floods a small model's context.
+    assert prompt.count("you were asked") <= RECALL_LIMIT
+
+
+def test_recall_line_is_bounded_and_marked(data_root) -> None:
+    learning = cl.CharacterLearning("ultron", root=data_root)
+    learning.remember("a very long question " * 40, "a very long answer " * 60)
+    exchange = learning.exchanges()[0]
+    line = exchange.recall_line(max_chars=120)
+    assert line.startswith("you were asked")
+    assert len(line) <= 260  # bounded (with the wrapper words), never unbounded
+
+
+def test_recall_skips_the_question_already_on_screen(data_root) -> None:
+    learning = cl.CharacterLearning("ultron", root=data_root)
+    learning.remember("q1", "a1")
+    learning.remember("q2", "a2")
+    recalled = learning.recall(limit=5, exclude_questions=("q2",))
+    assert [item.question for item in recalled] == ["q1"]
+
+
+def test_wrapper_strips_the_mouths_honesty_header_from_memory(data_root) -> None:
+    from ai.characters import wrap_character
+    from ai.ultron_mouth import ULTRON_HEADER
+
+    class _HeaderMouth:
+        class _Engine:
+            system_prompt = "BASE"
+
+        def __init__(self) -> None:
+            self.engine = self._Engine()
+
+        def ask(self, question: str, **_kwargs: Any) -> _FakeAnswer:
+            return _FakeAnswer(f"{ULTRON_HEADER}\n\nPorosity is the void fraction.")
+
+    mouth = _HeaderMouth()
+    character = wrap_character("ultron", mouth, root=data_root)
+    character.ask("what is porosity?")
+
+    stored = cl.CharacterLearning("ultron", root=data_root).exchanges()[0]
+    assert stored.answer == "Porosity is the void fraction."
+    assert ULTRON_HEADER not in stored.answer
+
+
+def test_wrapper_remember_fact_reaches_the_instruction(data_root) -> None:
+    from ai.characters import wrap_character
+
+    mouth = _FakeMouth()
+    character = wrap_character("hakeem", mouth, root=data_root)
+
+    assert character.remember_fact("the Hijra was in 622 CE") is True
+    assert "the Hijra was in 622 CE" in mouth.engine.system_prompt
+    # A repeat is not stored twice.
+    assert character.remember_fact("the Hijra was in 622 CE") is False
+    assert character.facts() == ("the Hijra was in 622 CE",)
+
+
+def test_wrapper_forget_facts_clears_the_memory(data_root) -> None:
+    from ai.characters import wrap_character
+
+    mouth = _FakeMouth()
+    character = wrap_character("vision", mouth, root=data_root)
+    character.remember_fact("a fact")
+    character.forget_facts()
+    assert character.facts() == ()
+    assert "a fact" not in mouth.engine.system_prompt
+
+
+def test_learning_switch_off_writes_no_learning_record(data_root) -> None:
+    """The character's own Learning section really turns learning off."""
+    from ai.characters import wrap_character
+
+    mouth = _FakeMouth()
+    character = wrap_character("ultron", mouth, root=data_root)
+    # A configuration with learning disabled.
+    config = character._config
+    if config is None:
+        pytest.skip("no configuration available")
+    from dataclasses import replace
+
+    from core.character_config import LearningSettings
+
+    character._config = replace(config, learning=LearningSettings(enabled=False))
+    character.ask("a question")
+    # The exchange is still remembered, but no learning record is written.
+    assert len(character.learning.exchanges()) == 1
+
+
+def test_corpus_summary_reports_the_balance(data_root) -> None:
+    from ml.release import TrainingConfig, corpus_summary
+
+    summary = corpus_summary(TrainingConfig(kb_max_chunks=0))
+    assert "balance" in summary
+    balance = summary["balance"]
+    assert set(balance) >= {"owned_sentences", "bulk_sentences", "owned_share", "bulk_share"}
+    # With no bulk sample, the project's own knowledge is the whole corpus.
+    assert balance["bulk_sentences"] == 0
+    assert balance["owned_share"] == 1.0
+
+
+def test_release_defaults_include_characters_and_balance_the_bulk(data_root) -> None:
+    from ml.release import DEFAULT_KB_CHUNKS, DEFAULT_RELEASE_KB_CHUNKS, TrainingConfig
+
+    config = TrainingConfig()
+    # A release trains on its characters by default and does not let the bulk web
+    # dump drown out the project's own knowledge.
+    assert config.include_characters is True
+    assert config.kb_max_chunks == DEFAULT_RELEASE_KB_CHUNKS
+    assert DEFAULT_RELEASE_KB_CHUNKS < DEFAULT_KB_CHUNKS
+
+
+def test_remember_control_teaches_a_fact_through_the_session(data_root) -> None:
+    from ai.characters import CharacterMouth
+    from core.jarvis_controls import ControlIntent, JarvisControls
+
+    controls = JarvisControls()
+    control = controls.match("remember that the field is in the north")
+    assert control is not None and control.intent is ControlIntent.REMEMBER
+    assert control.remembered == "the field is in the north"
+
+    from core.command_router import NaturalLanguageRouter
+    from core.jarvis import JarvisMode
+    from core.tools import build_sandbox
+
+    mouth = _FakeMouth()
+    character = CharacterMouth("ultron", mouth, root=data_root)
+    mode = JarvisMode(character, router=NaturalLanguageRouter(build_sandbox(".", read_only=True)))
+    turn = mode.handle("remember that the field is in the north")
+    assert "Remembered" in turn.response
+    assert "the field is in the north" in mouth.engine.system_prompt
+
+
+def test_character_cli_remembers_and_forgets_a_fact(data_root, capsys) -> None:
+    from cli.characters import main
+
+    assert main(["remember", "ultron", "the reservoir is in the north"]) == 0
+    assert "will remember" in capsys.readouterr().out
+
+    assert main(["facts", "ultron"]) == 0
+    assert "the reservoir is in the north" in capsys.readouterr().out
+
+    assert main(["forget-facts", "ultron", "--confirm"]) == 0
+    capsys.readouterr()
+
+    assert main(["facts", "ultron"]) == 0
+    assert "has not been told anything" in capsys.readouterr().out
+
+
+def test_character_manager_service_remembers_facts(data_root) -> None:
+    from gui.character_manager import CharacterManagerService
+
+    service = CharacterManagerService(data_root=data_root)
+    assert service.remember_fact("ultron", "a durable fact") is True
+    assert service.facts("ultron") == ("a durable fact",)
+    # A blank fact is refused rather than stored.
+    assert service.remember_fact("ultron", "   ") is False
+    # Forgetting requires confirmation.
+    assert service.forget_facts("ultron") is False
+    assert service.facts("ultron") == ("a durable fact",)
+    assert service.forget_facts("ultron", confirm=True) is True
+    assert service.facts("ultron") == ()

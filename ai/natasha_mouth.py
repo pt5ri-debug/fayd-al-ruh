@@ -91,6 +91,21 @@ class NatashaAssistant:
                 agent.new_session("Natasha chat", session_id=session_id)
         self.session_id = session_id
 
+    @property
+    def system_prompt(self) -> str | None:
+        """The standing instruction her prompt builder will use, if any.
+
+        The character wrapper (see :mod:`ai.characters`) writes the *editable*
+        character block here -- with Natasha's recalled memory -- so an edit in the
+        Characters window and her memory both reach her prompt. It is forwarded to
+        the agent, which is what actually renders the request.
+        """
+        return self.agent.system_prompt
+
+    @system_prompt.setter
+    def system_prompt(self, value: str | None) -> None:
+        self.agent.system_prompt = value
+
     def is_available(self) -> bool:
         """True when a reply could be produced now."""
         return self.agent.is_available()

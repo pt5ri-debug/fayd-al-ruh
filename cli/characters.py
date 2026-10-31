@@ -159,6 +159,39 @@ def _cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_remember(args: argparse.Namespace) -> int:
+    service = _service()
+    stored = service.remember_fact(args.character, args.fact)
+    if not stored:
+        print(f"{args.character} already knew that, or the fact was empty.")
+        return 0
+    print(f"{args.character} will remember: {args.fact.strip()}")
+    return 0
+
+
+def _cmd_facts(args: argparse.Namespace) -> int:
+    service = _service()
+    facts = service.facts(args.character)
+    if args.json:
+        print(json.dumps(list(facts), ensure_ascii=False, indent=2))
+        return 0
+    if not facts:
+        print(f"{args.character} has not been told anything to remember yet.")
+        return 0
+    for fact in facts:
+        print(f"- {fact}")
+    return 0
+
+
+def _cmd_forget_facts(args: argparse.Namespace) -> int:
+    service = _service()
+    if not args.confirm:
+        return _fail("Refusing to forget: pass --confirm to confirm the reset.", 4)
+    service.forget_facts(args.character, confirm=True)
+    print(f"{args.character}'s memory (facts and exchanges) was cleared.")
+    return 0
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     service = _service()
     record = service.verify(args.character, args.record_id, note=args.note)
@@ -441,6 +474,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("query")
     p_search.add_argument("--limit", type=int, default=50)
     p_search.set_defaults(func=_cmd_search)
+
+    p_remember = sub.add_parser("remember", help="teach a character one durable fact")
+    p_remember.add_argument("character")
+    p_remember.add_argument("fact")
+    p_remember.set_defaults(func=_cmd_remember)
+
+    p_facts = sub.add_parser("facts", help="the facts a character has been told")
+    p_facts.add_argument("character")
+    p_facts.add_argument("--json", action="store_true")
+    p_facts.set_defaults(func=_cmd_facts)
+
+    p_forget = sub.add_parser("forget-facts", help="clear a character's memory")
+    p_forget.add_argument("character")
+    p_forget.add_argument("--confirm", action="store_true")
+    p_forget.set_defaults(func=_cmd_forget_facts)
 
     p_verify = sub.add_parser("verify", help="verify one record (supervised)")
     p_verify.add_argument("character")

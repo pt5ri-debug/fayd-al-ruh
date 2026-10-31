@@ -94,8 +94,15 @@ class PromptBuilder:
         emotion: DialogueEmotion | None = None,
         emotion_enabled: bool = True,
         reply_language: str | None = None,
+        system_prompt_override: str | None = None,
     ) -> BuiltPrompt:
-        """Assemble the request for ``question`` from the current state."""
+        """Assemble the request for ``question`` from the current state.
+
+        ``system_prompt_override`` replaces the personality's own standing block
+        when a caller supplies one (the character wrapper writes the *editable*
+        character block, with Hakeem's recalled memory, onto the assistant), so an
+        edit in the Characters window reaches the scholar too.
+        """
         if not question.strip():
             raise ValueError("A question is required to build a prompt.")
 
@@ -106,6 +113,7 @@ class PromptBuilder:
             emotion=emotion,
             emotion_enabled=emotion_enabled,
             reply_language=reply_language,
+            system_prompt_override=system_prompt_override,
         )
 
         remaining = self.budget - len(system) - len(question)
@@ -153,8 +161,17 @@ class PromptBuilder:
         emotion: DialogueEmotion | None,
         emotion_enabled: bool,
         reply_language: str | None = None,
+        system_prompt_override: str | None = None,
     ) -> str:
-        blocks: list[str] = [personality.system_prompt(reply_language=reply_language)]
+        # A caller-supplied character block (the character wrapper) wins over the
+        # personality's own standing text, so an edit in the Characters window and
+        # Hakeem's recalled memory both reach his prompt.
+        standing = (
+            system_prompt_override.strip()
+            if system_prompt_override and system_prompt_override.strip()
+            else personality.system_prompt(reply_language=reply_language)
+        )
+        blocks: list[str] = [standing]
         blocks.append(f"## {SECTION_SETTINGS}\n{personality.settings.describe()}")
         blocks.append(f"## {SECTION_SUMMARY}\n{(summary or '').strip() or _NONE}")
         blocks.append(f"## {SECTION_MEMORIES}\n{_format_memories(memories)}")

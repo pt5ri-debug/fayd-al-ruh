@@ -124,6 +124,11 @@ class HakeemAgent:
         self._prompt_builder = PromptBuilder(
             budget=self.config.context_chars, history_window=self.config.history_window
         )
+        #: A standing instruction a caller supplies (the character wrapper writes
+        #: the *editable* character block, with Hakeem's recalled memory, here), so
+        #: an edit in the Characters window reaches the scholar and he remembers
+        #: earlier conversations. ``None`` keeps his own personality text.
+        self.system_prompt: str | None = None
         self._caller = caller
         self._client = client if caller is None else None
 
@@ -262,6 +267,7 @@ class HakeemAgent:
             emotion=emotion,
             emotion_enabled=self.config.emotion_enabled,
             reply_language=reply_language,
+            system_prompt_override=self.system_prompt,
         )
 
         try:

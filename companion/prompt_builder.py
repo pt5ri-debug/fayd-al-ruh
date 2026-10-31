@@ -136,6 +136,7 @@ class PromptBuilder:
         mood: MoodState | None = None,
         initiative: str | None = None,
         style_guidance: str | None = None,
+        system_prompt_override: str | None = None,
     ) -> BuiltPrompt:
         """Assemble the request for ``question`` from the current state.
 
@@ -146,6 +147,10 @@ class PromptBuilder:
         standing traits, the structured relationship memory, the named mood, the
         initiative for this turn, and the anti-repetition guidance -- each rendered
         in its own labelled block, so a small model can act on it.
+        ``system_prompt_override`` replaces the personality's own standing block
+        when a caller supplies one (the character wrapper writes the *editable*
+        character block, with the character's recalled memory, onto the assistant),
+        so an edit in the Characters window reaches the companion too.
         """
         if not question.strip():
             raise ValueError("A question is required to build a prompt.")
@@ -163,6 +168,7 @@ class PromptBuilder:
             mood=mood,
             initiative=initiative,
             style_guidance=style_guidance,
+            system_prompt_override=system_prompt_override,
         )
 
         # The history budget is what is left after the system block and the
@@ -230,8 +236,17 @@ class PromptBuilder:
         mood: MoodState | None = None,
         initiative: str | None = None,
         style_guidance: str | None = None,
+        system_prompt_override: str | None = None,
     ) -> str:
-        blocks: list[str] = [personality.system_prompt(reply_language=reply_language, traits=traits)]
+        # A caller-supplied character block (the character wrapper) wins over the
+        # personality's own standing text, so an edit in the Characters window and
+        # the character's recalled memory both reach the companion's prompt.
+        standing = (
+            system_prompt_override.strip()
+            if system_prompt_override and system_prompt_override.strip()
+            else personality.system_prompt(reply_language=reply_language, traits=traits)
+        )
+        blocks: list[str] = [standing]
         blocks.append(f"## {SECTION_SETTINGS}\n{personality.settings.describe()}")
         blocks.append(f"## {SECTION_SUMMARY}\n{(summary or '').strip() or _NONE}")
         blocks.append(f"## {SECTION_MEMORIES}\n{_format_memories(memories)}")
