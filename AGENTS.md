@@ -451,6 +451,11 @@ Arabic is kept as secondary aliases where useful.
 - `docs/CHARACTER_ARCHITECTURE.md` / `docs/CHARACTER_IMPLEMENTATION_REPORT.md` —
   the Phase-1 analysis and the implementation report for the independent-character
   upgrade.
+- `docs/CHARACTER_EVALUATION.md` — the comprehensive evaluation of the eight
+  characters (Phase A/B/C): the training structure, the per-character memory, the
+  traits, and the development headroom, every figure **measured** on the real code
+  (corpus size and Arabic share, checkpoint parameter count, answer latency, the
+  identity gate's 1.0-vs-0.375 discrimination, the 38-model catalog).
 - `core/ultron.py` — **Ultron**, the project's *general* mouth: a real, advanced
   model that runs **locally** through `llama-cpp-python` and speaks on every
   field of life (no subject filter), unlike the petroleum-grounded assistant and
