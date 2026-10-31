@@ -69,6 +69,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("arabic_answer_path_accuracy", True, label="Arabic answer path accuracy (held-out connected-path shapes)"),
     MetricSpec("arabic_readable_body_accuracy", True, label="Arabic readable body accuracy (held-out: no identifier leaks into an Arabic body)"),
     MetricSpec("character_isolation_accuracy", True, label="Character isolation and sharing accuracy (held-out isolation/sharing judgements)"),
+    MetricSpec("character_identity_accuracy", True, label="Character identity accuracy (held-out: a character's personality reaches its answer text, and the two windows share one memory and one name)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )

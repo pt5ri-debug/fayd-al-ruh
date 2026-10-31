@@ -144,8 +144,15 @@ class LearningPipeline:
         audit: LearningAudit | None = None,
         ontology: Any | None = None,
     ) -> None:
-        self.owner = owner
-        self._store = store if store is not None else CharacterLearningStore(owner)
+        # One identity per character: normalise the owner so a pipeline built with
+        # the chat's mouth key ("sources") stamps and guards its records under the
+        # character's own name ("jarvis"). The store normalises too, so without this
+        # it would refuse every record the pipeline writes and a character would
+        # silently keep no isolated learning at all.
+        from core.learning_isolation import owner_for
+
+        self.owner = owner_for(owner)
+        self._store = store if store is not None else CharacterLearningStore(self.owner)
         self._config = config
         self._audit = audit if audit is not None else default_audit()
         # An optional ontology + learner, so a caller that *wants* the extracted

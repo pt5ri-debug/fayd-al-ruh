@@ -451,6 +451,11 @@ Arabic is kept as secondary aliases where useful.
 - `docs/CHARACTER_ARCHITECTURE.md` / `docs/CHARACTER_IMPLEMENTATION_REPORT.md` —
   the Phase-1 analysis and the implementation report for the independent-character
   upgrade.
+- `docs/CHARACTER_EVALUATION.md` — the comprehensive evaluation of the eight
+  characters (Phase A/B/C): the training structure, the per-character memory, the
+  traits, and the development headroom, every figure **measured** on the real code
+  (corpus size and Arabic share, checkpoint parameter count, answer latency, the
+  identity gate's 1.0-vs-0.375 discrimination, the 38-model catalog).
 - `core/ultron.py` — **Ultron**, the project's *general* mouth: a real, advanced
   model that runs **locally** through `llama-cpp-python` and speaks on every
   field of life (no subject filter), unlike the petroleum-grounded assistant and
@@ -5553,3 +5558,69 @@ regression monitor each can refuse a change.
   honest hot-apply (model and voice, with a failing sink), the per-mouth window's
   seeded voice and `reload_character_voice` honouring a per-window override, and
   `configured_model_key`. Gates: ruff clean, mypy 808 files OK, pytest green.
+
+- Phase 61 — **one identity per character, and a tool that shows what makes them
+  different** (the "Phase (C)" implementation pass): Phases 59/60 made a character's
+  personality, memory, learning, model, and voice *reach* the mouth, but the same
+  character was still **two identities** depending on which window you opened. The
+  chat speaks the *mouth* key (`sources`, `model`) while the Characters window, the
+  CLI, and the per-character learning store speak the *owner* key (`jarvis`,
+  `fayd_al_ruh`), and nothing bridged the two: a fact taught to **Jarvis** in the
+  Characters window was written under `jarvis` while the live Jarvis mouth read
+  under `sources`, so the chat never saw it -- and a character's own exchanges were
+  recorded under the mouth key while the window looked for them under the owner key.
+  A second, quieter bug made it worse: `LearningPipeline`'s owner was **not**
+  normalised, so a record the live mouth wrote through the pipeline could be
+  silently refused. Three pieces close it. **(1) One identity.** `core/character_identity.py`
+  (new) is the one facade: `identity_for(key)` accepts **either** vocabulary and
+  resolves to one `CharacterIdentity` (the canonical `owner`, the `mouth` the chat
+  speaks, the `name`, the `role`, and whether it is private), `same_character(a, b)`
+  is the one "are these the same person?" test, and `all_identities()` lists the
+  eight. `core/learning_pipeline.LearningPipeline.__init__` now normalises its owner
+  through the isolation policy, so a pipeline built from the raw mouth key writes to
+  the owner's own store instead of being refused; `core.character_learning.CharacterLearning`
+  normalises its key the same way (and still reads a legacy key's file, so an
+  existing install is not lost). **(2) One memory, one name, across two live
+  writers.** The memory is one file, but two windows can hold it at once (the main
+  chat and the character's own window), so `add_fact`/`add_exchange` now re-read the
+  shared file and **merge once before trimming** -- previously a second window's
+  write could drop the first's, and a re-read then merged again and *reordered* the
+  facts. `clear()` is the one path that merges nothing. `core.mouth_profile`'s
+  registry is rebuilt per call (so it points at the *current* data folder), and a
+  rename in either store now reaches the other: `set_name` writes the mouth profile
+  **and** the character configuration's `general.name`, and the configuration side
+  is read back into the profile, so the two surfaces show one name. **(3) A
+  contrast tool.** `core/character_compare.py` (new) reads each character's
+  *effective* configuration into a `CharacterProfile` (formality, emotional
+  expression, answer length, preferred language, temperature, top-p, output cap,
+  voice engine/voice/speed/pitch/volume, learning on/off, privacy) and prints a
+  fixed-width comparison table (`comparison_table().describe()`), a pairwise
+  `compare_characters(a, b)` with the dimensions that differ, and `most_different()`
+  ranking every pair -- which is what **revealed** that the shipped defaults were
+  identical except for Natasha's privacy, so a third change followed: `core.character_config`
+  gained per-owner `PERSONALITY_DEFAULTS`/`personality_defaults_for`, and the shipped
+  `config/*.json` files were regenerated from them, so the eight characters are now
+  genuinely distinct out of the box (the scholar is the most formal at 0.80, the
+  companion the least at 0.20; Banner answers short, Ultron/Vision/Hakeem detailed).
+  The held-out gate `character_identity_accuracy` (`core/character_identity_gate.py`,
+  new) runs the **real** wiring: a character's personality must reach the *answer
+  text* it produces (not only its configuration), the identity must not bleed across
+  mouths, an unknown key must fall back to the project's own model, a non-character
+  mouth must be left unwrapped, and the two windows must share one memory and one
+  name -- with negative controls, so a regression fails here even when the unit
+  tests that pinned the good case still pass (dropping `wrap_character` takes it
+  from 1.0 to 0.375). It is wired into `evaluation/benchmark.py`/`runner.py`/
+  `baseline.json` as the metric `character_identity_accuracy` (entering `overall`,
+  0.9860 → 0.9863). The comparison tool and the identity resolver are reachable
+  headless: `python -m cli characters compare [a b] [--rank] [--json]` and
+  `python -m cli characters identity [character] [--json]`. `tests/test_character_identity.py`
+  (new, 35 tests) pins the one identity (both vocabularies, distinctness, privacy),
+  the shared memory (a fact written under the owner read under the mouth, two live
+  writers not clobbering each other's facts or exchanges, the bound holding across
+  writers, `clear` really emptying), the one name (either store's rename reaching
+  the other), the personality reaching the answer text, the held-out gate (1.0 on
+  the shipped wiring, 0.0 for an empty catalogue, discriminating when the wrapper is
+  dropped, the memory judgements present), and the comparison tool (the profile, the
+  differing dimensions, the same-character case, the table, the ranking, an edit
+  changing the score) plus the CLI. Gates: ruff clean, mypy 812 files OK, evaluation
+  PASS (`overall` 0.9860 → 0.9863), pytest green.

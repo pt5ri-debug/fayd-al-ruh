@@ -606,6 +606,44 @@ DEFAULT_NAMES: dict[str, str] = {
 #: does for the seven, so this is a safety net for a character added later).
 DEFAULT_ROLES: dict[str, str] = {}
 
+#: The shipped **personality** per owner: the tone dials and the answer-length and
+#: language choices that make each character read distinctly out of the box.
+#:
+#: Without this every character shipped at the same neutral ``0.5``/``balanced``/
+#: ``match`` defaults, so the comparison tool (see :mod:`core.character_compare`)
+#: honestly reported them as identical and a user had to tune each one by hand to
+#: tell them apart. These values are derived from each persona's own traits -- a
+#: careful cited aide is more formal and measured; a companion is warm and
+#: expressive; a petroleum specialist is precise and detailed; an instructor is
+#: structured and brief; a scholar is formal and thorough; a remote generalist is
+#: balanced; the project's own small model is plain and short. A character that
+#: was never edited behaves exactly as before in *identity* (its persona), and its
+#: dials now say what its persona already said in words.
+PERSONALITY_DEFAULTS: dict[str, dict[str, Any]] = {
+    "jarvis": {"formality": 0.7, "emotional_expression": 0.3, "response_length": "balanced"},
+    "ultron": {"formality": 0.4, "emotional_expression": 0.5, "response_length": "detailed"},
+    "vision": {"formality": 0.65, "emotional_expression": 0.25, "response_length": "detailed"},
+    "banner": {"formality": 0.55, "emotional_expression": 0.4, "response_length": "short"},
+    "natasha": {"formality": 0.2, "emotional_expression": 0.85, "response_length": "balanced"},
+    "hakeem": {"formality": 0.8, "emotional_expression": 0.35, "response_length": "detailed"},
+    "cloud": {"formality": 0.5, "emotional_expression": 0.5, "response_length": "balanced"},
+    MAIN_MODEL_OWNER: {
+        "formality": 0.6,
+        "emotional_expression": 0.2,
+        "response_length": "short",
+    },
+}
+
+
+def personality_defaults_for(owner: str) -> dict[str, Any]:
+    """The shipped personality dials for ``owner`` (a neutral set when unknown).
+
+    A character this build does not know gets the neutral defaults, so
+    :func:`default_config_for` can always build a configuration rather than raise.
+    """
+    resolved = owner_for(owner)
+    return dict(PERSONALITY_DEFAULTS.get(resolved, {}))
+
 
 def _level(value: float) -> str:
     """A 0..1 dial as a readable level, never a bare number.
@@ -644,6 +682,7 @@ def default_config_for(key: str) -> CharacterConfig:
     # the honest fallback for a character this build does not know.
     persona = persona_for(mouth)
     name = DEFAULT_NAMES.get(owner, persona.name)
+    personality = personality_defaults_for(owner)
     return CharacterConfig(
         key=owner,
         owner=owner,
@@ -657,6 +696,9 @@ def default_config_for(key: str) -> CharacterConfig:
             traits=persona.traits,
             rules=persona.rules,
             knowledge_domain=persona.role,
+            formality=float(personality.get("formality", 0.5)),
+            emotional_expression=float(personality.get("emotional_expression", 0.5)),
+            response_length=str(personality.get("response_length", "balanced")),
         ),
         model=ModelConfig(),
         voice=VoiceConfig(),
@@ -720,6 +762,7 @@ __all__ = [
     "MAX_TOKENS_RANGE",
     "MODE_AUTOMATIC",
     "MODE_SUPERVISED",
+    "PERSONALITY_DEFAULTS",
     "PITCH_RANGE",
     "SECTIONS",
     "SECTION_GENERAL",
@@ -742,6 +785,7 @@ __all__ = [
     "default_config_for",
     "default_configs",
     "owner_names",
+    "personality_defaults_for",
     "replace_general",
     "replace_learning",
     "replace_model",

@@ -108,11 +108,36 @@ def _store():
     return JsonStore(characters_dir().parent)
 
 
+def _registry():
+    """The configuration registry for the *current* data folder.
+
+    Built per call (rather than the module-level singleton) so it always points at
+    the data directory in force right now -- a test that moves ``FAYD_DATA_DIR``
+    between cases gets the right registry, and the dedicated window and the
+    Characters surface read one name. This is the bridge that makes a rename in
+    one surface show up in the other.
+    """
+    from core.character_registry import CharacterRegistry
+
+    return CharacterRegistry(data_root=characters_dir().parent)
+
+
+def _configured_name(mouth: str) -> str:
+    """The character's name from the one configuration, or ``""`` on any problem."""
+    try:
+        return _registry().load(mouth).general.name.strip()
+    except (ValueError, OSError):
+        return ""
+
+
 def load_profile(mouth: str) -> MouthProfile:
     """Read a mouth's saved profile, falling back to the default on any problem.
 
     A missing profile, a store that cannot be read, or a saved value of the wrong
-    shape all yield the default rather than raising, so a window always opens.
+    shape all yield the default rather than raising, so a window always opens. The
+    **name** is read from the character's own configuration first, so the name the
+    Characters window set is the name this window shows -- the two surfaces share
+    one identity rather than each keeping its own.
     """
     base = default_profile(mouth)
     try:
@@ -120,11 +145,11 @@ def load_profile(mouth: str) -> MouthProfile:
     except Exception:
         return base
     if not isinstance(saved, dict):
-        return base
+        saved = {}
     name = str(saved.get("name") or "").strip()
     return MouthProfile(
         mouth=mouth,
-        name=name or base.name,
+        name=_configured_name(mouth) or name or base.name,
         logo=str(saved.get("logo") or "").strip(),
         voice=str(saved.get("voice") or "").strip(),
         model=str(saved.get("model") or "").strip(),
@@ -144,8 +169,26 @@ def save_profile(profile: MouthProfile) -> MouthProfile:
 
 
 def set_name(mouth: str, name: str) -> MouthProfile:
-    """Rename a mouth's character and save it."""
-    return save_profile(load_profile(mouth).with_name(name))
+    """Rename a mouth's character and save it **to the one shared identity**.
+
+    The new name is written into the character's own configuration (the file the
+    Characters window edits) *and* kept in the mouth profile as a fallback, so the
+    name is the same in the dedicated window, the Characters window, and the CLI.
+    A configuration write that fails leaves the profile name in force rather than
+    losing the rename.
+    """
+    cleaned = name.strip()
+    profile = load_profile(mouth).with_name(name)
+    if cleaned:
+        from core.best_effort import best_effort
+        from core.character_config import replace_general
+
+        with best_effort(f"rename {mouth}'s character"):
+            registry = _registry()
+            config = replace_general(registry.load(mouth), name=cleaned)
+            config.validate()
+            registry.save(config)
+    return save_profile(profile)
 
 
 def set_voice(mouth: str, voice: str) -> MouthProfile:
