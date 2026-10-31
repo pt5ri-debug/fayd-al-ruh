@@ -24,6 +24,7 @@ Everything is exercised headless: no display, no model, and no microphone.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -130,6 +131,30 @@ class CharacterManagerService:
             if sharing is not None
             else KnowledgeSharing(data_root=data_root, audit=self._audit)
         )
+        #: An optional ``(key) -> live assistant or None`` lookup. When set, an
+        #: APPLY folds the character's Model section onto the mouth that is already
+        #: loaded, so a temperature or output-cap edit takes effect at once instead
+        #: of only at the next rebuild. Unset by default, so the service stays
+        #: usable (and testable) with no session at all.
+        self._live_lookup: Callable[[str], Any] | None = None
+        #: An optional ``(key) -> bool`` sink that re-applies a character's Voice
+        #: section to the reader of a window that is already open. Returns True when
+        #: a live reader was found and updated, so APPLY can report the voice as
+        #: activated honestly rather than claiming it for a window that is not there.
+        self._live_voice: Callable[[str], bool] | None = None
+
+    def set_live_lookup(self, lookup: Callable[[str], Any] | None) -> None:
+        """Provide a lookup for a character's *currently loaded* mouth, or ``None``.
+
+        The window supplies one so an APPLY can hot-apply the model settings; a
+        caller that has no session leaves it unset and the settings simply take
+        effect when the mouth is next built.
+        """
+        self._live_lookup = lookup
+
+    def set_live_voice(self, sink: Callable[[str], bool] | None) -> None:
+        """Provide a sink that re-applies a character's voice to an open window."""
+        self._live_voice = sink
 
     def _build_audit(self) -> LearningAudit:
         if self._data_root is None:
@@ -202,26 +227,78 @@ class CharacterManagerService:
         """APPLY a draft: validate, save, activate, roll back on failure.
 
         The activation hook applies what can be applied *now* -- the character's
-        personality instruction is re-rendered on the next answer, and the learning
-        settings are already read fresh by the pipeline, so those are named as
-        activated. A model or voice change needs the mouth rebuilt, which this
-        service cannot do for a *live* window, so those are reported as
-        restart-required rather than pretended.
+        personality instruction is re-rendered on the next answer, its learning
+        settings are already read fresh by the pipeline, its Model section is folded
+        onto the mouth that is already loaded (through the ``live_lookup`` the window
+        supplies), and its Voice section is re-applied to an open window's reader
+        (through the ``live_voice`` sink) -- so a temperature or a voice edit takes
+        effect at once. A *model* change still needs the mouth rebuilt, which this
+        service cannot do for a live window, so it is reported as restart-required
+        rather than pretended.
         """
         error = self.validate(config)
         if error is not None:
             return SaveResult(error=error)
 
         def activate(applied: CharacterConfig) -> tuple[str, ...]:
-            # The personality and learning settings take effect immediately: the
-            # mouth re-reads its configuration on every answer and the pipeline
-            # re-reads the settings per record. The model and voice are reloaded by
-            # the caller (the window rebuilds the mouth), so they are named here
-            # only when the caller has done so -- see ``activate_live``.
-            return (SECTION_GENERAL, SECTION_PERSONALITY, SECTION_LEARNING)
+            activated = [SECTION_GENERAL, SECTION_PERSONALITY, SECTION_LEARNING]
+            if self._hot_apply_model(applied):
+                activated.append(SECTION_MODEL)
+            # The voice reaches an open window through the sink the window supplies
+            # (a per-mouth window re-applies it to its reader); a window that is not
+            # open picks it up when it next opens, so it is only named as activated
+            # when a live reader really took it.
+            if self._hot_apply_voice(applied):
+                activated.append(SECTION_VOICE)
+            return tuple(activated)
 
         report = self._registry.apply(config, activate=activate)
         return SaveResult(report=report)
+
+    def _hot_apply_voice(self, config: CharacterConfig) -> bool:
+        """Re-apply ``config``'s Voice section to an open window's reader.
+
+        Returns ``True`` only when a live reader took the change, so APPLY never
+        reports the voice as applied for a window that is not open. Never raises.
+        """
+        if self._live_voice is None:
+            return False
+        try:
+            return bool(self._live_voice(config.owner))
+        except Exception:
+            return False
+
+    def _hot_apply_model(self, config: CharacterConfig) -> bool:
+        """Fold ``config``'s Model section onto the character's loaded mouth.
+
+        Returns ``True`` when a live mouth was found and updated (so the model
+        settings are in force now); ``False`` when nothing is loaded, in which case
+        the settings take effect when the mouth is next built. Never raises: an
+        APPLY must not fail because a mouth refused a setting.
+        """
+        if self._live_lookup is None:
+            return False
+        try:
+            assistant = self._live_lookup(config.owner)
+        except Exception:
+            return False
+        if assistant is None:
+            return False
+        applier = getattr(assistant, "reload_config", None)
+        if callable(applier):
+            try:
+                applier()
+            except Exception:
+                return False
+            return True
+        # A raw mouth (no character wrapper): fold the Model section directly.
+        try:
+            from core.character_engine import apply_model_settings
+
+            apply_model_settings(config.owner, assistant, config)
+        except Exception:
+            return False
+        return True
 
     def reset(self, key: str) -> CharacterConfig:
         """Drop the applied configuration, back to the shipped default."""

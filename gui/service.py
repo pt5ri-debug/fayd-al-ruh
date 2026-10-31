@@ -408,8 +408,14 @@ class ChatService:
         override the mouth is built against the chosen model through
         :func:`ai.mouths.build_mouth`, which resolves the model to its GGUF file
         (or its cloud provider/model) rather than re-guessing it.
+
+        The character's **own** configuration is the second place a model choice
+        lives (the Characters window's Language-model field). A per-window override
+        wins, because it is the more recent, more specific choice; with no override
+        the character's configured key is honoured, so a model chosen there is not
+        saved and ignored.
         """
-        key = self._mouth_models.get(mouth)
+        key = self._mouth_models.get(mouth) or mouths_module.configured_model_key(mouth)
         if not key:
             return default_loader()
         return mouths_module.build_mouth(mouth, model_key=key)

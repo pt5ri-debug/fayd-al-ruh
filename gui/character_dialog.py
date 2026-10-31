@@ -763,12 +763,15 @@ class CharacterManagerDialog:
         if not reader.available():
             self._add_note("No speech engine is installed here, so the voice cannot be tested yet.")
             return
-        voice = draft.voice.voice
         name = draft.general.name
 
         def job() -> str:
-            if voice:
-                reader.set_voice(voice)
+            # Apply the whole Voice section -- the voice, its language, and its
+            # speed/pitch/volume -- so the test plays what APPLY would really use,
+            # not just the voice's timbre.
+            from core.character_engine import apply_character_voice
+
+            apply_character_voice(reader, draft)
             reader.speak(f"This is {name} speaking.")
             return f"Played a test phrase with {reader.describe()}."
 

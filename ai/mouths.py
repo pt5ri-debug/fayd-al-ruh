@@ -139,6 +139,37 @@ def _character_tag(mouth: str, key: str) -> str:
     return key
 
 
+def configured_model_key(mouth: str) -> str:
+    """The model key a character's **own** configuration names for ``mouth``.
+
+    The Characters window's Language-model field is the canonical place a user
+    picks a character's model, while a per-mouth window's picker is a per-window
+    override. This reads the character's saved choice so a loader can honour it
+    when no override is set -- without it, a model chosen in the Characters window
+    would be saved and never used. An empty string means "the mouth's own default",
+    and a non-character mouth (or an unreadable configuration) returns "".
+    """
+    if not is_character_mouth(mouth):
+        return ""
+    try:
+        from core.character_registry import default_registry
+
+        config = default_registry().load(mouth)
+    except (ValueError, OSError):
+        return ""
+    model = getattr(config, "model", None)
+    if model is None or not getattr(model, "active", True):
+        return ""
+    return (getattr(model, "key", "") or "").strip()
+
+
+def is_character_mouth(mouth: str) -> bool:
+    """True when ``mouth`` has a character configuration of its own."""
+    from ai.characters import is_character
+
+    return is_character(mouth)
+
+
 def describe_mouth_model(mouth: str, model_key: str | None) -> str:
     """An honest one-line description of the model a mouth will answer with."""
     choice = model_choice(mouth, model_key)
@@ -152,6 +183,8 @@ def describe_mouth_model(mouth: str, model_key: str | None) -> str:
 __all__ = [
     "MODEL_MOUTHS",
     "build_mouth",
+    "configured_model_key",
     "describe_mouth_model",
+    "is_character_mouth",
     "model_choice",
 ]
