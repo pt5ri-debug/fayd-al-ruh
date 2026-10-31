@@ -654,6 +654,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Autonomous mind: train the model in stages (rollback-safe)", run_cognition, ("train", "--stage", "quick", "--approve")),
     ("Autonomous mind: gradual training (advance one stage at a time)", run_cognition, ("train", "--gradual", "--up-to", "quick", "--approve")),
     ("Autonomous mind: how far gradual training has come", run_cognition, ("progression",)),
+    ("Autonomous mind: evaluate the eight characters", run_cognition, ("characters",)),
     ("Run the evaluation suite", run_evaluation, ()),
     ("Self-check the install", run_selfcheck, ()),
     ("Search for program updates (GitHub)", run_update, ("--apply",)),

@@ -23,6 +23,7 @@ from cli.menu import (
     run_characters,
     run_cloud_chat,
     run_code_studio,
+    run_cognition,
     run_curriculum,
     run_demo,
     run_deps,
@@ -62,6 +63,8 @@ Command = Callable[[Sequence[str]], int]
 #: showing a sentence per row. An action with no entry here keeps its full label.
 SIDEBAR_LABELS: dict[str, str] = {
     "insight": "✨   What the AI can do",
+    "cognition": "Autonomous mind",
+    "cognition-characters": "Evaluate the characters",
     "learn": "Learn from feedback",
     "internet-learner": "Learn from the internet",
     "web": "Ask the web",
@@ -168,7 +171,10 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         "assistant",
         "Assistant",
         "✨",
-        ("insight",),
+        (
+            "insight",
+            "cognition",
+        ),
     ),
     ActionGroup(
         "characters",
@@ -406,6 +412,19 @@ ACTIONS: tuple[GuiAction, ...] = (
         hidden=True,
     ),
     GuiAction("learn", "Continuous learning and regression gate", run_learn, ()),
+    GuiAction(
+        "cognition",
+        "Autonomous mind: proactive thinking, learning, and gradual training",
+        run_cognition,
+        ("status",),
+    ),
+    GuiAction(
+        "cognition-characters",
+        "Autonomous mind: evaluate the eight characters",
+        run_cognition,
+        ("characters",),
+        hidden=True,
+    ),
     GuiAction(
         "insight",
         "Ask the AI: what can it do and what has it learned",
