@@ -225,3 +225,80 @@ def test_characters_refuses_an_unknown_key(tmp_path, monkeypatch, capsys):
 
 def test_characters_is_registered_in_the_menu():
     assert any(entry[2] == ("characters",) for entry in MENU)
+
+
+# -- the new faculties, through the CLI --------------------------------------
+def test_metacognition_reports_the_self_model(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["think", "--ideas", "2"]) == cognition_cli.EXIT_OK
+    capsys.readouterr()
+    assert cognition_cli.main(["metacognition"]) == cognition_cli.EXIT_OK
+    assert capsys.readouterr().out.strip()
+
+
+def test_metacognition_json_is_machine_readable(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["metacognition", "--json"]) == cognition_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert "cycle" in payload
+    assert "strategies" in payload
+
+
+def test_plan_reports_how_the_mind_will_search(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["plan"]) == cognition_cli.EXIT_OK
+    assert "concept(s)" in capsys.readouterr().out
+
+
+def test_plan_json_is_machine_readable(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["plan", "--json"]) == cognition_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["idea_budget"] >= 1
+    assert "focus_topics" in payload
+
+
+def test_consolidate_then_patterns_round_trips(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["consolidate"]) == cognition_cli.EXIT_OK
+    assert "pattern" in capsys.readouterr().out
+    assert cognition_cli.main(["patterns"]) == cognition_cli.EXIT_OK
+    assert capsys.readouterr().out.strip()
+
+
+def test_consolidate_upgrades_a_repeated_experience(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    for _ in range(3):
+        cognition_cli.main(
+            ["experience", "--expect", "acid on tight rock", "--outcome", "permeability improves"]
+        )
+    capsys.readouterr()
+    assert cognition_cli.main(["consolidate", "--json"]) == cognition_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["patterns"]
+    assert payload["upgraded"]
+
+
+def test_review_and_skills_are_honest_when_empty(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["review"]) == cognition_cli.EXIT_OK
+    assert "due" in capsys.readouterr().out
+    assert cognition_cli.main(["skills"]) == cognition_cli.EXIT_OK
+    assert "No skills" in capsys.readouterr().out
+
+
+def test_curriculum_reports_the_training_memory(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["curriculum"]) == cognition_cli.EXIT_OK
+    assert capsys.readouterr().out.strip()
+
+
+def test_autonomous_train_requires_approval(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["train", "--autonomous"]) == cognition_cli.EXIT_GATE
+    assert "governed" in capsys.readouterr().out
+
+
+def test_the_new_commands_are_registered_in_the_menu():
+    for command in ("metacognition", "plan", "consolidate", "patterns", "skills", "review", "curriculum"):
+        assert any(entry[2] == (command,) for entry in MENU), command

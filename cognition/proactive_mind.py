@@ -39,6 +39,10 @@ from cognition.engines.ideas import IdeaEngine, NoveltyTracker
 from cognition.engines.imagination import ImaginationEngine, Scenario
 from cognition.engines.motivation import Drive, MotivationEngine
 from cognition.engines.questions import SelfQuestioningEngine
+from cognition.metacognition import (
+    CyclePlan,
+    MetacognitiveController,
+)
 from cognition.records import Idea, IdeaKind, ThoughtCycle
 from cognition.scheduler import Decision, SchedulerSettings, SchedulerState, ThoughtScheduler
 from cognition.storage import CycleStore, IdeaStore, meta_get, meta_set
@@ -56,9 +60,14 @@ class ProactiveMind:
         cycle_store: CycleStore | None = None,
         scheduler: ThoughtScheduler | None = None,
         novelty: NoveltyTracker | None = None,
+        metacognition: MetacognitiveController | None = None,
     ) -> None:
         self.ontology = ontology
-        self.novelty = novelty or NoveltyTracker()
+        # The mind's self-awareness: which strategies pay off, where it is
+        # stagnating, what is in focus. It owns the durable novelty memory, so a
+        # restarted mind does not re-think its own old thoughts.
+        self.metacognition = metacognition or MetacognitiveController()
+        self.novelty = novelty or self.metacognition.novelty
         self.curiosity = CuriosityEngine(ontology)
         self.association = AssociationEngine(ontology)
         self.ideas = IdeaEngine(ontology, associations=self.association, novelty=self.novelty)
@@ -104,27 +113,57 @@ class ProactiveMind:
         given. Every engine runs in a fixed order, so a cycle is reproducible for
         the same inputs. The cycle is recorded even when it finds little, so the
         UI can always show that the mind ran.
+
+        Before the cycle runs, the **metacognitive controller** plans it from the
+        mind's own history: it leans on the strategies that have actually paid off
+        and, when the last cycles show stagnation, it escalates -- widening the
+        search and raising the novelty floor within hard ceilings. After the cycle
+        it records which strategies paid off and what came into focus, so the next
+        cycle is informed by this one. This is what makes the mind *develop*
+        rather than merely repeat.
         """
         started = _time.monotonic()
         idea_limit = max_ideas if max_ideas is not None else self.scheduler.settings.ideas_per_cycle
+        plan = self.metacognition.plan(
+            cycles=self.cycle_store.all(),
+            ideas_by_id={i.id: i for i in self.idea_store.all()},
+            idea_limit=idea_limit,
+        )
+        idea_limit = plan.idea_budget
         question_limit = max_questions if max_questions is not None else max(1, idea_limit)
 
         gaps = tuple(self.curiosity.discover(beliefs, conflicts=conflicts))
         drives = self.motivation.rank(gaps=gaps, goals=goals, limit=idea_limit * 2)
         questions = self.questions.questions(gaps, limit=question_limit)
 
-        labels = self._concept_labels(gaps)
-        raw_ideas = list(self.ideas.generate(labels=labels, gaps=gaps, limit=idea_limit))
+        labels = self._concept_labels(gaps, limit=plan.concept_budget)
+        # Focus: keep the mind on a line of thought instead of thrashing, and let
+        # the plan's own budget widen it when the mind is escalating.
+        focus_labels = self._focus_labels(plan)
+        search_labels = tuple(dict.fromkeys((*focus_labels, *labels)))
 
-        scenarios = self.imagination.generate(labels=labels, limit=idea_limit)
+        raw_ideas = list(
+            self.ideas.generate(
+                labels=search_labels,
+                gaps=gaps,
+                limit=idea_limit,
+                novelty_floor=plan.novelty_floor,
+                strategy_bias=plan.strategy_bias,
+            )
+        )
+
+        scenarios = self.imagination.generate(labels=search_labels, limit=idea_limit)
         for scenario in scenarios:
             raw_ideas.append(self._scenario_idea(scenario))
 
         reviewed: list[Idea] = []
+        observed: list[tuple[str, Idea, bool]] = []
         for idea in raw_ideas:
             reviewed_idea = self.criticism.review(idea)
+            kept = not reviewed_idea.critique or reviewed_idea.confidence >= idea.confidence
             self.idea_store.add(reviewed_idea)
             self.novelty.remember(reviewed_idea.text)
+            observed.append((idea.engine, reviewed_idea, kept))
             reviewed.append(reviewed_idea)
 
         duration_ms = round((_time.monotonic() - started) * 1000, 3)
@@ -137,10 +176,22 @@ class ProactiveMind:
             duration_ms=duration_ms,
         )
         self.cycle_store.add(cycle)
+        # Learn from the cycle: which strategies paid off, what to hold in focus.
+        self.metacognition.observe_cycle(
+            produced=tuple(observed), topics=tuple(d.topic for d in drives[:3])
+        )
         meta_set("last_cycle", cycle.to_primitive())
+        meta_set("last_plan", plan.describe())
         self.scheduler.record_cycle()
         self._persist_scheduler()
         return cycle
+
+    def plan_next(self) -> CyclePlan:
+        """The metacognitive plan for the next cycle (for the UI and the CLI)."""
+        return self.metacognition.plan(
+            cycles=self.cycle_store.all(),
+            ideas_by_id={i.id: i for i in self.idea_store.all()},
+        )
 
     # -- review helpers -----------------------------------------------------
     def pending_ideas(self, *, limit: int = 20) -> tuple[Idea, ...]:
@@ -172,10 +223,11 @@ class ProactiveMind:
             "last_cycle": None if last is None else last.to_primitive(),
             "interval_seconds": self.scheduler.settings.interval_seconds,
             "ideas_per_cycle": self.scheduler.settings.ideas_per_cycle,
+            "metacognition": self.metacognition.status(),
         }
 
     # -- internals ----------------------------------------------------------
-    def _concept_labels(self, gaps: tuple[object, ...]) -> tuple[str, ...]:
+    def _concept_labels(self, gaps: tuple[object, ...], *, limit: int | None = None) -> tuple[str, ...]:
         """The graph concepts the current gaps name (for recombination)."""
         labels = {c.label for c in self.ontology.concepts.values()}
         found: list[str] = []
@@ -187,7 +239,13 @@ class ProactiveMind:
                 for token in str(topic).replace(" vs ", " ").split():
                     if token in labels:
                         found.append(token)
-        return tuple(dict.fromkeys(found))
+        ordered = tuple(dict.fromkeys(found))
+        return ordered[:limit] if limit is not None else ordered
+
+    def _focus_labels(self, plan: CyclePlan) -> tuple[str, ...]:
+        """The concepts the mind is holding in focus, filtered to real labels."""
+        labels = {c.label for c in self.ontology.concepts.values()}
+        return tuple(t for t in plan.focus_topics if t in labels)
 
     def _scenario_idea(self, scenario: Scenario) -> Idea:
         return Idea(

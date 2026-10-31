@@ -52,6 +52,19 @@ class StubService:
     def prove(self):
         return (OperationReport(ok=True, title="Thinking cycle"),)
 
+    # -- metacognition -----------------------------------------------------
+    def metacognition(self):
+        return OperationReport(
+            ok=True, title="Metacognition — the mind's self-model",
+            lines=("ideas.relation: 2/3 kept, bias 0.62",),
+        )
+
+    def plan_next(self):
+        return OperationReport(
+            ok=True, title="Metacognitive plan for the next cycle",
+            lines=("plan: 6 concept(s), 3 idea(s), novelty floor 0.00",),
+        )
+
     # -- learning ----------------------------------------------------------
     def learn(self, statement, **kwargs):
         self.learned.append(statement)
@@ -64,6 +77,22 @@ class StubService:
 
     def learning_stats(self):
         return "semantic 1, episodic 0"
+
+    # -- consolidation -----------------------------------------------------
+    def consolidate(self):
+        return OperationReport(
+            ok=True, title="Consolidation",
+            lines=("1 pattern(s) extracted", "upgraded to a learned fact: when a then b"),
+        )
+
+    def patterns(self):
+        return ("when a then b (support 2, confidence 1.00)",)
+
+    def review_due(self, *, remembered=True):
+        return OperationReport(ok=True, title="Reviewed 1 item(s)", lines=("[box 1] when a then b",))
+
+    def skills(self):
+        return ("acidise a core: 1/2 (proficiency 50%, 0 step(s))",)
 
     # -- training ----------------------------------------------------------
     def stages(self):
@@ -78,6 +107,15 @@ class StubService:
     def run_gradual(self, *, up_to=None, approved=False, progress=None):
         self.trained.append((getattr(up_to, "value", ""), approved))
         return OperationReport(ok=True, title="gradual complete")
+
+    def run_autonomous(self, *, max_stages=None, approved=False, progress=None):
+        self.trained.append(("autonomous", approved))
+        if not approved:
+            return OperationReport(ok=False, title="Autonomous training is a governed action.")
+        return OperationReport(ok=True, title="Autonomous curriculum", lines=("2 run(s)",))
+
+    def curriculum_memory(self):
+        return ("quick accepted at lr 0.001",)
 
     def progression(self):
         return ProgressionReport(
@@ -155,8 +193,89 @@ def test_window_builds_with_every_sidebar_section() -> None:
     root = tk.Tk()
     try:
         dialog = _dialog(root, StubService())
-        for key in ("mind", "learning", "training", "characters", "indicators", "system"):
+        for key in (
+            "mind", "metacognition", "learning", "consolidation",
+            "training", "characters", "indicators", "system",
+        ):
             assert key in dialog._sidebar_column.sections
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_metacognition_section_shows_the_self_model() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        _drain(root, dialog)
+        dialog._on_metacognition()
+        _drain(root, dialog)
+        assert "self-model" in dialog._cards[-1].get("1.0", "end")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_plan_button_posts_the_next_plan() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        _drain(root, dialog)
+        dialog._on_plan()
+        _drain(root, dialog)
+        assert "plan:" in dialog._cards[-1].get("1.0", "end")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_consolidation_button_posts_a_report() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        _drain(root, dialog)
+        dialog._on_consolidate()
+        _drain(root, dialog)
+        assert "pattern" in dialog._cards[-1].get("1.0", "end")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_patterns_button_lists_what_was_extracted() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        _drain(root, dialog)
+        dialog._on_patterns()
+        _drain(root, dialog)
+        assert "then b" in dialog._cards[-1].get("1.0", "end")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_adaptive_curriculum_button_asks_before_training() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        service = StubService()
+        dialog = _dialog(root, service)
+        _drain(root, dialog)
+        # The confirmation dialog is declined by default in the test harness, so
+        # nothing is trained and the governed action is not run.
+        dialog._confirm = lambda *_a, **_k: False
+        dialog._on_train_autonomous()
+        assert service.trained == []
     finally:
         root.destroy()
 

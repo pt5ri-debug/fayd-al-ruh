@@ -25,7 +25,7 @@ from core.information_gap import InformationGap
 from core.ontology import Ontology
 from core.tokenize import normalize_token
 
-from cognition.engines.ideas import NoveltyTracker
+from cognition.engines.ideas import NoveltyLike, NoveltyTracker
 
 #: The weights of the four factors, summing to 1.0.
 WEIGHTS: dict[str, float] = {
@@ -62,10 +62,10 @@ class MotivationEngine:
         self,
         ontology: Ontology,
         *,
-        novelty: NoveltyTracker | None = None,
+        novelty: NoveltyLike | None = None,
     ) -> None:
         self.ontology = ontology
-        self.novelty = novelty or NoveltyTracker()
+        self.novelty: NoveltyLike = novelty or NoveltyTracker()
         self._labels = {c.label for c in ontology.concepts.values()}
 
     def rank(

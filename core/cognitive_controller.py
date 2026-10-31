@@ -887,3 +887,21 @@ class CognitiveController:
     def cognitive_status(self) -> dict:
         """A readable snapshot of the autonomous layer (for the UI and CLI)."""
         return self.proactive_mind().status()
+
+    def autonomous_curriculum(self):
+        """The adaptive curriculum over the staged trainer (built once)."""
+        curriculum = getattr(self, "_autonomous_curriculum", None)
+        if curriculum is None:
+            from cognition.curriculum import AutonomousCurriculum
+
+            curriculum = AutonomousCurriculum()
+            self._autonomous_curriculum = curriculum
+        return curriculum
+
+    def consolidate_learning(self):
+        """Consolidate the learning system's raw experience into knowledge."""
+        return self.cognitive_learning().consolidate()
+
+    def metacognition_status(self) -> dict:
+        """The mind's model of its own thinking (which strategies pay off)."""
+        return self.proactive_mind().metacognition.status()

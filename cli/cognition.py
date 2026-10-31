@@ -95,6 +95,18 @@ def _parser() -> argparse.ArgumentParser:
 
     sub.add_parser("drives", help="what the mind would pursue next", parents=[common])
 
+    sub.add_parser("metacognition", help="the mind's model of its own thinking", parents=[common])
+    sub.add_parser("plan", help="how the mind intends to search next", parents=[common])
+
+    consolidate = sub.add_parser(
+        "consolidate", help="turn raw experience into durable, reviewed knowledge", parents=[common]
+    )
+    consolidate.add_argument("--review", action="store_true", help="also settle due reviews")
+    sub.add_parser("patterns", help="the regularities the mind has extracted", parents=[common])
+    sub.add_parser("skills", help="the procedures the mind has practised", parents=[common])
+    review = sub.add_parser("review", help="settle the spaced-review items that are due", parents=[common])
+    review.add_argument("--forgot", action="store_true", help="mark them as forgotten instead")
+
     learn = sub.add_parser("learn", help="learn a statement with its source", parents=[common])
     learn.add_argument("statement")
     learn.add_argument("--source", default="user", choices=[k.value for k in SourceKind])
@@ -115,12 +127,15 @@ def _parser() -> argparse.ArgumentParser:
     train = sub.add_parser("train", help="run a staged training round", parents=[common])
     train.add_argument("--stage", choices=[s.value for s in TrainingStage], default="smoke")
     train.add_argument("--gradual", action="store_true", help="advance stage by stage")
+    train.add_argument("--autonomous", action="store_true", help="run the adaptive curriculum")
     train.add_argument("--up-to", choices=[s.value for s in TrainingStage], default=None)
+    train.add_argument("--max-stages", type=int, default=None, help="effort budget for --autonomous")
     train.add_argument("--approve", action="store_true", help="confirm the training run")
 
     sub.add_parser("versions", help="the model version log", parents=[common])
     sub.add_parser("rollback", help="return to the last stable version", parents=[common])
     sub.add_parser("progression", help="how far gradual training has come", parents=[common])
+    sub.add_parser("curriculum", help="the adaptive curriculum's training memory", parents=[common])
 
     evaluate = sub.add_parser(
         "evaluate", help="the ten cognitive indicators", parents=[common]
@@ -325,8 +340,36 @@ def _cmd_train(args: argparse.Namespace) -> int:
         print("Training is a governed action: pass --approve to run it.")
         return EXIT_GATE
     trainer = IncrementalTrainer()
+    if getattr(args, "autonomous", False):
+        from cognition.curriculum import AutonomousCurriculum
+
+        curriculum = AutonomousCurriculum(trainer=trainer)
+        report = curriculum.run(
+            approved=True,
+            max_stages=args.max_stages,
+            progress=lambda m: print(f"  | {m}"),
+        )
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "runs": len(report.outcomes),
+                        "decisions": [
+                            {"action": d.action, "stage": None if d.stage is None else d.stage.value, "reason": d.reason}
+                            for d in report.decisions
+                        ],
+                        "stopped_because": report.stopped_because,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return EXIT_OK
+        print(report.describe())
+        print(trainer.registry.report())
+        return EXIT_OK
     if args.gradual:
-        report = trainer.run_gradual(
+        gradual = trainer.run_gradual(
             up_to=TrainingStage(args.up_to) if args.up_to else None,
             progress=lambda m: print(f"  | {m}"),
         )
@@ -334,15 +377,15 @@ def _cmd_train(args: argparse.Namespace) -> int:
             print(
                 json.dumps(
                     {
-                        "stopped_at": None if report.stopped_at is None else report.stopped_at.value,
-                        "reason": report.reason,
-                        "advanced": [s.value for s in report.advanced()],
+                        "stopped_at": None if gradual.stopped_at is None else gradual.stopped_at.value,
+                        "reason": gradual.reason,
+                        "advanced": [s.value for s in gradual.advanced()],
                     },
                     ensure_ascii=False,
                 )
             )
             return EXIT_OK
-        print(report.describe())
+        print(gradual.describe())
         print(trainer.registry.report())
         return EXIT_OK
     stage = TrainingStage(args.stage)
@@ -523,6 +566,118 @@ def _cmd_characters(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_metacognition(args: argparse.Namespace) -> int:
+    """The mind's model of its own thinking: which strategies pay off."""
+    mind = _mind()
+    if args.json:
+        print(json.dumps(mind.metacognition.status(), ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(mind.metacognition.describe())
+    return EXIT_OK
+
+
+def _cmd_plan(args: argparse.Namespace) -> int:
+    """How the mind intends to search next, and why."""
+    plan = _mind().plan_next()
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "concept_budget": plan.concept_budget,
+                    "idea_budget": plan.idea_budget,
+                    "novelty_floor": plan.novelty_floor,
+                    "strategy_focus": plan.strategy_focus,
+                    "focus_topics": list(plan.focus_topics),
+                    "escalation": None if plan.escalation is None else plan.escalation.describe(),
+                    "stagnation": None if plan.stagnation is None else plan.stagnation.describe(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return EXIT_OK
+    print(plan.describe())
+    return EXIT_OK
+
+
+def _cmd_consolidate(args: argparse.Namespace) -> int:
+    """Turn the learning system's raw experience into durable, reviewed knowledge."""
+    learning = _learning()
+    report = learning.consolidate()
+    if getattr(args, "review", False):
+        learning.consolidator().review_due()
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "patterns": [p.to_primitive() for p in report.patterns],
+                    "upgraded": list(report.upgraded),
+                    "scheduled": report.scheduled,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return EXIT_OK
+    print(report.describe())
+    return EXIT_OK
+
+
+def _cmd_patterns(args: argparse.Namespace) -> int:
+    """The regularities the mind has extracted from its own experience."""
+    patterns = _learning().consolidator().patterns()
+    if args.json:
+        print(json.dumps([p.to_primitive() for p in patterns], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not patterns:
+        print("No patterns consolidated yet; record experiences, then run `consolidate`.")
+        return EXIT_OK
+    for pattern in patterns:
+        print(pattern.describe())
+    return EXIT_OK
+
+
+def _cmd_skills(args: argparse.Namespace) -> int:
+    """The procedures the mind has practised, with their measured proficiency."""
+    skills = _learning().consolidator().skills.skills()
+    if args.json:
+        print(json.dumps([s.to_primitive() for s in skills], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not skills:
+        print("No skills practised yet.")
+        return EXIT_OK
+    for skill in skills:
+        print(skill.describe())
+    return EXIT_OK
+
+
+def _cmd_review(args: argparse.Namespace) -> int:
+    """Settle the spaced-review items that are due."""
+    consolidator = _learning().consolidator()
+    due = consolidator.review_due(remembered=not getattr(args, "forgot", False))
+    if args.json:
+        print(json.dumps([i.to_primitive() for i in due], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not due:
+        print("No knowledge is due for review yet.")
+        return EXIT_OK
+    for item in due:
+        print(item.describe())
+    return EXIT_OK
+
+
+def _cmd_curriculum(args: argparse.Namespace) -> int:
+    """The adaptive curriculum's training memory (what it tried and what happened)."""
+    from cognition.curriculum import TrainingMemory
+
+    memory = TrainingMemory.load()
+    if args.json:
+        print(json.dumps([a.to_primitive() for a in memory.attempts()], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(memory.describe())
+    return EXIT_OK
+
+
 _HANDLERS.update(
     {
         "status": _cmd_status,
@@ -530,6 +685,12 @@ _HANDLERS.update(
         "prove": _cmd_prove,
         "ideas": _cmd_ideas,
         "drives": _cmd_drives,
+        "metacognition": _cmd_metacognition,
+        "plan": _cmd_plan,
+        "consolidate": _cmd_consolidate,
+        "patterns": _cmd_patterns,
+        "skills": _cmd_skills,
+        "review": _cmd_review,
         "learn": _cmd_learn,
         "recall": _cmd_recall,
         "experience": _cmd_experience,
@@ -537,6 +698,7 @@ _HANDLERS.update(
         "versions": _cmd_versions,
         "rollback": _cmd_rollback,
         "progression": _cmd_progression,
+        "curriculum": _cmd_curriculum,
         "evaluate": _cmd_evaluate,
         "teach": _cmd_teach,
         "mode": _cmd_mode,
