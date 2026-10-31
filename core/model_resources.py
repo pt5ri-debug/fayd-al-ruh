@@ -352,7 +352,7 @@ def process_memory_bytes() -> int | None:
     return None
 
 
-def gpu_info(*, runner: Any = None) -> GpuInfo:
+def gpu_info(*, runner: Any = None, sysfs_root: Path | str | None = None) -> GpuInfo:
     """What this machine can report about GPUs, without importing a vendor SDK.
 
     Two lightweight paths and no dependency: ``nvidia-smi`` if the program is on
@@ -366,13 +366,15 @@ def gpu_info(*, runner: Any = None) -> GpuInfo:
     and the two answers are deliberately kept separate.
 
     ``runner`` is injectable (``(command) -> (returncode, stdout)``) so the whole
-    function is tested with no GPU and no subprocess.
+    function is tested with no GPU and no subprocess. ``sysfs_root`` injects the
+    DRM tree the same way, so a test that fakes *both* probes is deterministic on
+    any machine -- including a CI runner that really does expose a ``card0``.
     """
     run = runner or _run_quietly
     info = _gpu_from_nvidia_smi(run)
     if info.available:
         return info
-    linux = _gpu_from_sysfs()
+    linux = _gpu_from_sysfs(sysfs_root)
     if linux.available:
         return linux
     note = ""
@@ -425,15 +427,15 @@ def _gpu_from_nvidia_smi(run: Any) -> GpuInfo:
     )
 
 
-def _gpu_from_sysfs() -> GpuInfo:
+def _gpu_from_sysfs(root: Path | str | None = None) -> GpuInfo:
     """Read the DRM cards Linux exposes, which need no program and no driver SDK."""
-    root = Path("/sys/class/drm")
-    if not root.is_dir():
+    tree = Path(root) if root is not None else Path("/sys/class/drm")
+    if not tree.is_dir():
         return GpuInfo(available=False, note="This platform exposes no DRM GPU entries.")
     devices: list[tuple[str, str, int | None]] = []
     first: tuple[str, str, int | None] | None = None
     try:
-        cards = sorted(root.glob("card[0-9]*"))
+        cards = sorted(tree.glob("card[0-9]*"))
     except OSError:
         return GpuInfo(available=False, note="The DRM entries could not be read.")
     for card in cards:
