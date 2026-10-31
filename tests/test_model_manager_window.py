@@ -16,7 +16,7 @@ from tests.test_gui_design import _display_available, _service
 class StubService:
     """A stand-in service: fixed rows, no registry, no runtime, no model."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         from gui.model_manager import ManagerSnapshot, ModelRow
 
         self.selected = ""
@@ -164,6 +164,66 @@ class StubService:
 
     def register(self, path, **kwargs):
         raise AssertionError("register should not run in this test")
+
+    # -- phases 4-7: the sections the window now draws ---------------------
+
+    def sources(self):
+        return (_FakeSource("url", "Direct download URL", True, ""),)
+
+    def resumable_downloads(self):
+        return ()
+
+    def resources(self):
+        from core.model_resources import READING_MEASURED, SystemResources
+
+        return SystemResources(
+            system="Linux", machine="x86_64", cpu_count=4,
+            total_memory_bytes=16 * 1024**3, available_memory_bytes=12 * 1024**3,
+            memory_reading=READING_MEASURED,
+        )
+
+    def trained_artifacts(self):
+        return (_FakeArtifact(),)
+
+    def search_offers(self, query, **kwargs):
+        return ()
+
+    def download(self, offer, **kwargs):
+        raise AssertionError("download should not run in this test")
+
+    def preflight(self, model_id, **kwargs):
+        from core.model_preflight import PreflightReport
+
+        return PreflightReport(model_id=model_id, runtime="llama.cpp", can_load=True)
+
+    def stop_processes(self):
+        return ()
+
+    def register_trained(self):
+        return ()
+
+
+class _FakeSource:
+    """A stand-in source: a key, a title, and whether it can be used here."""
+
+    def __init__(self, key: str, title: str, available: bool, detail: str) -> None:
+        self.key = key
+        self.title = title
+        self._available = available
+        self._detail = detail
+
+    def available(self):
+        return self._available, self._detail
+
+
+class _FakeArtifact:
+    """A stand-in trained artifact: the shape the section reads."""
+
+    def describe(self) -> str:
+        return "Trained language model: fayd-llm.npz · 842,624 parameters"
+
+    def to_primitive(self):
+        return {"kind": "language-model"}
 
 
 class _FakeSettings:
@@ -449,5 +509,132 @@ def test_the_diagnostics_button_is_enabled_and_wired() -> None:
         dialog = _dialog(root, StubService())
         assert dialog._diagnostics_button.cget("text") == "Run diagnostics"
         assert dialog._diagnostics_button.cget("state") == "normal"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_download_section_lists_the_sources() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        body = dialog._sources_label.cget("text")
+        assert "Direct download URL" in body
+        assert "available" in body
+        assert dialog._search_button.cget("text") == "Search the sources…"
+        assert dialog._download_button.cget("state") == "normal"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_resources_section_shows_this_machine() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        body = dialog._resources_label.cget("text")
+        assert "Linux" in body
+        assert "estimate" in body.lower()
+        assert dialog._preflight_button.cget("text") == "Check the chosen model"
+        assert dialog._stop_button.cget("text") == "Stop model processes"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_trained_section_shows_the_checkpoint() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        body = dialog._trained_label.cget("text")
+        assert "Trained language model" in body
+        assert dialog._trained_button.cget("text") == "Register the trained checkpoint"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_preflight_result_is_shown_in_the_detail() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        service = StubService()
+        dialog = _dialog(root, service)
+        dialog._table.selection_set("m-ready")
+        dialog._on_select_row()
+        dialog._on_preflight()
+        for _ in range(200):
+            dialog._pump_results()
+            if "can load" in dialog._detail_text.get("1.0", "end"):
+                break
+        body = dialog._detail_text.get("1.0", "end")
+        assert "can load" in body
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_stopping_processes_reports_nothing_to_stop() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._on_stop_processes()
+        for _ in range(200):
+            dialog._pump_results()
+            if "stop" in dialog._status_label.cget("text").lower():
+                break
+        assert "Nothing to stop" in dialog._status_label.cget("text")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_registering_the_trained_checkpoint_is_honest_when_absent() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._on_register_trained()
+        for _ in range(200):
+            dialog._pump_results()
+            if "trained" in dialog._status_label.cget("text").lower():
+                break
+        assert "No trained checkpoint" in dialog._status_label.cget("text")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_a_download_with_no_search_result_asks_for_a_search_first() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._on_download()
+        assert "Search the sources first" in dialog._status_label.cget("text")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_resuming_a_download_says_there_is_none() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._on_resume_download()
+        assert "No partial download" in dialog._status_label.cget("text")
     finally:
         root.destroy()

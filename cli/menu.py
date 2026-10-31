@@ -569,6 +569,23 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Model Manager: what the local runtimes can do here", run_models, ("runtimes",)),
     ("Model Manager: scan the project's folders for model files", run_models, ("discover",)),
     ("Model Manager: which models suit a task (chat, petroleum, ...)", run_models, ("select",)),
+    (
+        "Model Manager: rank the models for a task, with the reasons",
+        run_models,
+        ("rank", "chat"),
+    ),
+    ("Model Manager: the trusted model sources (local, URL, Hugging Face)", run_models, ("sources",)),
+    (
+        "Model Manager: this machine's memory and GPU figures",
+        run_models,
+        ("resources",),
+    ),
+    ("Model Manager: the partial downloads that can be resumed", run_models, ("downloads",)),
+    (
+        "Model Manager: the project's own trained language model",
+        run_models,
+        ("trained",),
+    ),
     ("Model Manager: the models loaded right now", run_models, ("active",)),
     (
         "Model Manager: machine, runtimes, active models, and recent errors",

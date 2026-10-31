@@ -160,6 +160,24 @@ class SystemResources:
         lines.append(HONESTY_LINE)
         return "\n".join(lines)
 
+    def to_primitive(self) -> dict[str, Any]:
+        """A deterministic, JSON-safe mapping -- every unknown stays ``None``."""
+        return {
+            "available_memory_bytes": self.available_memory_bytes,
+            "cpu_count": self.cpu_count,
+            "disk_free_bytes": self.disk_free_bytes,
+            "disk_path": self.disk_path,
+            "disk_reading": self.disk_reading,
+            "gpu": self.gpu.to_primitive(),
+            "machine": self.machine,
+            "memory_reading": self.memory_reading,
+            "notes": list(self.notes),
+            "process_memory_bytes": self.process_memory_bytes,
+            "python": self.python,
+            "system": self.system,
+            "total_memory_bytes": self.total_memory_bytes,
+        }
+
 
 def _size(value: int | None) -> str:
     """A readable byte size, or ``unknown`` -- never a zero standing in for one."""

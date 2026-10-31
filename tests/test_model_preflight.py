@@ -12,6 +12,7 @@ signalled.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from core.model_manager import ModelManager
@@ -37,7 +38,6 @@ from core.model_process import (
 from core.model_registry import ModelRecord
 from core.model_resources import (
     READING_MEASURED,
-    READING_UNKNOWN,
     GpuInfo,
     SystemResources,
     describe_reading,
@@ -45,12 +45,11 @@ from core.model_resources import (
     vendor_name,
 )
 
-
 # ------------------------------------------------------------------- helpers
 
 
 def _record(**kwargs) -> ModelRecord:
-    base = {
+    base: dict[str, Any] = {
         "model_id": "m",
         "identity": "test/model",
         "display_name": "Test",
@@ -67,7 +66,7 @@ def _record(**kwargs) -> ModelRecord:
 
 
 def _resources(**kwargs) -> SystemResources:
-    base = {
+    base: dict[str, Any] = {
         "system": "Linux",
         "machine": "x86_64",
         "cpu_count": 8,
@@ -493,7 +492,7 @@ def test_stop_does_not_signal_a_stale_record(tmp_path):
     registry = _registry(tmp_path)
     record = registry.start(["x"])
     # Simulate the pid being reused by another program.
-    registry._identity = lambda pid: "different"  # noqa: SLF001 - the seam under test
+    registry._identity = lambda pid: "different"
     refreshed = registry.refresh(record.process_id)
     assert refreshed.status == STATUS_STALE
     stopped = registry.stop(record.process_id)
@@ -510,7 +509,7 @@ def test_stop_refuses_an_unknown_process_id(tmp_path):
 def test_refresh_marks_a_gone_process_exited(tmp_path):
     registry = _registry(tmp_path)
     record = registry.start(["x"])
-    registry._probe = lambda pid: False  # noqa: SLF001 - the seam under test
+    registry._probe = lambda pid: False
     assert registry.refresh(record.process_id).status == STATUS_EXITED
 
 
@@ -549,7 +548,7 @@ def test_forget_refuses_a_running_process(tmp_path):
 def test_forget_drops_a_gone_process(tmp_path):
     registry = _registry(tmp_path)
     record = registry.start(["x"])
-    registry._probe = lambda pid: False  # noqa: SLF001
+    registry._probe = lambda pid: False
     registry.forget(record.process_id)
     assert registry.find(record.process_id) is None
 
@@ -558,7 +557,7 @@ def test_prune_drops_only_gone_records(tmp_path):
     registry = _registry(tmp_path)
     registry.start(["x"], process_id="live")
     registry.start(["y"], process_id="dead")
-    registry._probe = lambda pid: pid == 4242  # noqa: SLF001
+    registry._probe = lambda pid: pid == 4242
     assert registry.prune() == 0  # both share pid 4242, so both look live
 
 

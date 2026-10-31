@@ -2314,6 +2314,57 @@ Arabic is kept as secondary aliases where useful.
   `cli/__main__.py` as `models`/`model-manager`). Exit codes: `0` success, `2`
   invalid arguments, `3` the model is unknown or not usable, `4` a gate refused
   the operation, `5` an unexpected failure.
+- **Model Manager phases 4-7** extend that subsystem without a second source of
+  truth or a second download path. `core/model_sources.py` is the **trusted
+  source registry** (`LocalFolderSource` for files already here, `UrlSource` for
+  one direct HTTPS URL, `HuggingFaceSource` for the hub) behind a narrow
+  `ModelSource` protocol (`available`/`search`/`resolve`/`describe`), each
+  returning `ModelOffer`s that keep **what the source claims** (`claim`) apart
+  from a **user-pinned digest** (`expected_digest`), so a self-reported hash is
+  never mistaken for a verified one; a `default_sources`/`source_for` pair is the
+  one place the set is declared. `core/model_download.py` is the **download
+  engine** (`DownloadReport`, `resumable_files`, `parse_pinned_digests`): it
+  resumes from the bytes already on disk, writes to a `.part` file and **never
+  promotes a partial to the real name** (a torn download is not a model), needs
+  an explicit `approved=True` (the permission + human-approval gate every other
+  external action uses), and verifies any pinned digest before the rename.
+  `core/model_resources.py` reads the machine's **own** figures (memory, disk,
+  CPU count, and what the system reports about GPUs) with each reading's
+  provenance (`READING_MEASURED`/`READING_OS_ESTIMATE`/`READING_UNKNOWN`), and
+  `core/model_preflight.py` turns them into a `PreflightReport`/`MemoryEstimate`
+  -- an **estimate with a low/high band and its unknowns named**, never a
+  guaranteed measurement -- plus `can_load`/`errors`/`warnings`/`recommendations`
+  and an `ok` alias. `core/model_process.py` is the **process registry**: only
+  pids *this program started* are recorded and only they are ever signalled, so a
+  managed `llama.cpp` server can be listed and stopped safely.
+  `core/model_selection.py` (phase 6) is **task profiles and explainable
+  selection**: `TASK_CAPABILITIES`/`TASK_CONTEXT_PREFERENCE` describe what a task
+  needs, `task_profile` reads it, `rank_for_task` scores each model on named
+  factors (capability, engine, fit, health, preference, task-match) so a choice is
+  *explained* rather than asserted, and `plan_fallback` builds a **bounded**
+  ladder of models to try for a task (and says honestly when there is none).
+  `core/trained_artifacts.py` (phase 7) is the **read-only trained-artifact
+  bridge**: it reads the `.npz` checkpoint's own header (`ast` + `struct`,
+  dependency-free) and the release manifest to describe the project's own trained
+  model -- architecture, parameter count, evaluations -- and registers it as an
+  **ordinary** `ModelRecord`, so it reaches the registry, the ranking, and the
+  window with no second source of truth; it **never trains, evaluates, or writes**
+  a checkpoint. `core/model_manager.py` gains `sources`/`search_offers`/`download`/
+  `resumable_downloads`/`resources`/`memory_estimate`/`preflight`/`processes`/
+  `rank_for_task`/`fallback_plan`/`task_profile`/`trained_artifacts`/
+  `trained_model`/`register_trained` as thin delegations, so the manager stays the
+  one entry point. Both surfaces gained the same reach: `gui/model_manager.py`'s
+  `ModelManagerService` delegates every one of them, the window's sidebar gained
+  **Downloads** (source status, *Search the sources…*, *Download the chosen
+  model…*, *Resume a partial download*), **Resources** (*Check the chosen model*,
+  *Stop model processes*), and **Trained models** (*Register the trained
+  checkpoint*) sections -- all reusing the existing `SidebarColumn`, `_button`,
+  and worker-thread/queue pattern, and a cancelled download trips the engine's own
+  cancel flag -- and `cli/models.py` gained `rank`/`fallback`/`sources`/
+  `search-offers`/`download`/`downloads`/`resources`/`preflight`/`processes`/
+  `stop-processes`/`trained`/`trained-register`, mirrored as menu entries.
+  `tests/test_model_manager_phases.py` pins the service and CLI reach, and
+  `tests/test_model_manager_window.py` pins the three new window sections.
 - `core/language_models.py` — the **one language-model catalog** the whole
   program reads. Before it, each mouth knew only its *own* models
   (`core.ultron.CATALOG`, `core.vision_model.CATALOG`, `core.banner`/

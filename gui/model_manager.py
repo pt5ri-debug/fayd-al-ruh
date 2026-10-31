@@ -414,6 +414,83 @@ class ModelManagerService:
         """The command that fetches a model's weights, or ``""`` when none exists."""
         return self.manager.download_command(model_id)
 
+    # -------------------------------------------------------- selection
+
+    def rank_for_task(self, task: str, *, preferred: str = "") -> tuple[Any, ...]:
+        """Rank the models for a task, with the reasons behind each score."""
+        return self.manager.rank_for_task(
+            task, preferred_model_id=preferred or self._selection
+        )
+
+    def fallback_plan(self, task: str) -> Any:
+        """The bounded ladder of models to try for a task, or why there is none."""
+        return self.manager.fallback_plan(task, preferred_model_id=self._selection)
+
+    # ----------------------------------------------------------- sources
+
+    def sources(self) -> tuple[Any, ...]:
+        """The trusted model sources this build supports."""
+        return self.manager.sources()
+
+    def search_offers(self, query: str, *, source: str = "", limit: int = 10) -> tuple[Any, ...]:
+        """Models matching a query across the sources. Downloads nothing."""
+        return self.manager.search_offers(query, source=source, limit=limit)
+
+    def download(
+        self,
+        offer: Any,
+        *,
+        approved: bool = False,
+        should_cancel: Any = None,
+        on_progress: Any = None,
+        pinned_digests: Any = None,
+    ) -> Any:
+        """Fetch an offer's files. A governed action; the caller grants approval."""
+        return self.manager.download(
+            offer, approved=approved, should_cancel=should_cancel,
+            on_progress=on_progress, pinned_digests=pinned_digests,
+        )
+
+    def resumable_downloads(self) -> tuple[Path, ...]:
+        """The partial downloads a later run could resume."""
+        return self.manager.resumable_downloads()
+
+    # ----------------------------------------------- resources & processes
+
+    def resources(self) -> Any:
+        """This machine's own figures, each ``None`` when the platform cannot say."""
+        return self.manager.resources()
+
+    def preflight(self, model_id: str, *, context_length: int | None = None) -> Any:
+        """Every check that should pass before a model is loaded, as data."""
+        return self.manager.preflight(model_id, context_length=context_length)
+
+    def memory_estimate(self, model_id: str) -> Any:
+        """An estimate of a model's memory need, with its uncertainty stated."""
+        return self.manager.memory_estimate(model_id)
+
+    def processes(self) -> Any:
+        """The model processes this program started."""
+        return self.manager.processes()
+
+    def stop_processes(self) -> tuple[Any, ...]:
+        """Stop every model process this program started."""
+        return self.manager.processes().stop_all()
+
+    # ------------------------------------------------------ trained models
+
+    def trained_artifacts(self) -> tuple[Any, ...]:
+        """The project's own trained artifacts, described read-only."""
+        return self.manager.trained_artifacts()
+
+    def trained_model(self) -> Any:
+        """The project's own trained language model, or ``None``."""
+        return self.manager.trained_model()
+
+    def register_trained(self) -> tuple[Any, ...]:
+        """Register the project's own trained checkpoint as an ordinary record."""
+        return self.manager.register_trained()
+
     # -------------------------------------------------------------- settings
 
     def settings(self, model_id: str) -> Any:

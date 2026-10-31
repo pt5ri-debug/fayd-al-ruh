@@ -31,7 +31,7 @@ import queue
 import threading
 import tkinter as tk
 from collections.abc import Callable
-from tkinter import filedialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any, Literal
 
 from gui.model_manager import (
@@ -88,6 +88,10 @@ class ModelManagerDialog:
         self._rows: list[ModelRow] = []
         self._detail: ModelDetail | None = None
         self._selected_id = ""
+        # The offers a search found, so "Download the chosen model" has something
+        # real to fetch rather than a made-up default.
+        self._offers: tuple[Any, ...] = ()
+        self._download_cancel = threading.Event()
 
         # Worker threads hand results back through a queue the UI thread drains on
         # its own clock: calling `after` from a worker thread races with the main
@@ -208,6 +212,51 @@ class ModelManagerDialog:
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
         )
         self._runtimes_label.pack(fill="x", padx=14, pady=(4, 10))
+
+        downloads = column.add("downloads", "Downloads", icon="⬇")
+        self._sources_label = tk.Label(
+            downloads, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._sources_label.pack(fill="x", padx=14, pady=(4, 4))
+        self._search_button = self._button(
+            downloads, "Search the sources…", self._on_search_offers
+        )
+        self._search_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._download_button = self._button(
+            downloads, "Download the chosen model…", self._on_download
+        )
+        self._download_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._resume_button = self._button(
+            downloads, "Resume a partial download", self._on_resume_download
+        )
+        self._resume_button.pack(fill="x", padx=12, pady=(0, 8))
+
+        resources = column.add("resources", "Resources", icon="🖥")
+        self._resources_label = tk.Label(
+            resources, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._resources_label.pack(fill="x", padx=14, pady=(4, 4))
+        self._preflight_button = self._button(
+            resources, "Check the chosen model", self._on_preflight
+        )
+        self._preflight_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._stop_button = self._button(
+            resources, "Stop model processes", self._on_stop_processes
+        )
+        self._stop_button.pack(fill="x", padx=12, pady=(0, 8))
+
+        trained = column.add("trained", "Trained models", icon="🧠")
+        self._trained_label = tk.Label(
+            trained, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._trained_label.pack(fill="x", padx=14, pady=(4, 4))
+        self._trained_button = self._button(
+            trained, "Register the trained checkpoint", self._on_register_trained
+        )
+        self._trained_button.pack(fill="x", padx=12, pady=(0, 8))
 
         diagnostics = column.add("diagnostics", "Diagnostics", icon="🩺")
         self._diagnostics_button = self._button(
@@ -400,6 +449,212 @@ class ModelManagerDialog:
         self._render_log()
         self._fill_table()
         self._set_status(snapshot.summary())
+        self._refresh_environment()
+
+    def _refresh_environment(self) -> None:
+        """Fill the Downloads / Resources / Trained sections from the live state.
+
+        Each read is independent and best-effort: a source that cannot answer here
+        (no ``huggingface_hub``, no folder) or a machine that cannot report its GPU
+        leaves one honest line, never a blank section and never a failed page.
+        """
+        self._sources_label.configure(text=self._sources_text())
+        self._resources_label.configure(text=self._resources_text())
+        self._trained_label.configure(text=self._trained_text())
+
+    def _sources_text(self) -> str:
+        try:
+            sources = self.service.sources()
+        except Exception as error:
+            return f"Could not read the sources: {error}"
+        if not sources:
+            return "No model source is available in this build."
+        lines = []
+        for source in sources:
+            ok, why = source.available()
+            lines.append(f"{source.title}: {'available' if ok else f'unavailable — {why}'}")
+        try:
+            partials = self.service.resumable_downloads()
+        except Exception:
+            partials = ()
+        if partials:
+            lines.append(f"{len(partials)} partial download(s) can be resumed.")
+        return "\n".join(lines)
+
+    def _resources_text(self) -> str:
+        try:
+            resources = self.service.resources()
+        except Exception as error:
+            return f"Could not read this machine's resources: {error}"
+        if resources is None:
+            return "This machine's resources could not be read."
+        describe = getattr(resources, "describe", None)
+        if callable(describe):
+            return describe()
+        return str(resources)
+
+    def _trained_text(self) -> str:
+        try:
+            artifacts = self.service.trained_artifacts()
+        except Exception as error:
+            return f"Could not read the trained artifacts: {error}"
+        if not artifacts:
+            return "No trained artifact was found in this checkout."
+        return "\n".join(item.describe() for item in artifacts)
+
+    # -- downloads, resources, and trained models -------------------------
+
+    def _on_search_offers(self) -> None:
+        """Search the trusted sources for a model. Downloads nothing."""
+        query = simpledialog.askstring(
+            "Search the model sources",
+            "Search the trusted sources for a model (a name or a topic):",
+            parent=self.window,
+        )
+        if not query:
+            return
+        self._run_background(
+            "Searching the model sources…",
+            lambda: self.service.search_offers(query, limit=20),
+            self._finish_search_offers,
+        )
+
+    def _finish_search_offers(self, offers: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not search the sources: {error}")
+            return
+        offers = tuple(offers or ())
+        self._offers = offers
+        if not offers:
+            self._set_detail("No source offers a model matching that search.")
+            self._set_status("No offer matched.")
+            return
+        lines = ["Model offers found:", ""]
+        for index, offer in enumerate(offers, 1):
+            lines.append(f"{index}. {offer.display_name}  [{offer.source_key}]")
+            lines.append(f"   id: {offer.source_id}")
+            if offer.total_bytes:
+                lines.append(f"   size: {offer.total_bytes} bytes")
+        lines.append("")
+        lines.append("Use “Download the chosen model…” to fetch the first offer.")
+        self._set_detail("\n".join(lines))
+        self._set_status(f"{len(offers)} offer(s) found.")
+
+    def _on_download(self) -> None:
+        """Fetch the first search offer. A governed action, run on a worker thread.
+
+        The download leaves the machine, so it is approved explicitly here -- the
+        user pressing the button *is* the approval -- and the engine's own
+        permission policy still applies underneath.
+        """
+        offers = getattr(self, "_offers", ())
+        if not offers:
+            self._set_status("Search the sources first, then choose a model to download.")
+            return
+        offer = offers[0]
+        if not messagebox.askyesno(
+            "Download a model",
+            f"Download {offer.display_name} from {offer.source_key}?\n\n"
+            "This reaches the network and may fetch several gigabytes.",
+            parent=self.window,
+        ):
+            return
+        self._download_cancel = threading.Event()
+        self._run_background(
+            "Downloading the model…",
+            lambda: self.service.download(
+                offer,
+                approved=True,
+                should_cancel=self._download_cancel.is_set,
+            ),
+            self._finish_download,
+        )
+
+    def _finish_download(self, result: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"The download failed: {error}")
+            return
+        report, entry = result if isinstance(result, tuple) else (result, None)
+        describe = getattr(report, "describe", None)
+        self._set_detail(describe() if callable(describe) else str(report))
+        if entry is not None:
+            self._reload()
+            self._set_status("The model downloaded and was registered.")
+        else:
+            self._set_status("The download did not complete; it can be resumed.")
+
+    def _on_resume_download(self) -> None:
+        """Resume a partial download: re-issue the offer and let the engine resume."""
+        try:
+            partials = self.service.resumable_downloads()
+        except Exception as error:
+            self._set_status(f"Could not read the partial downloads: {error}")
+            return
+        if not partials:
+            self._set_status("No partial download to resume.")
+            return
+        self._set_status(
+            f"{len(partials)} partial download(s) can be resumed; "
+            "search the same model again and download it."
+        )
+        self._set_detail(
+            "Partial downloads that can be resumed:\n"
+            + "\n".join(f"  {path}" for path in partials)
+            + "\n\nSearch the same model again and download it; the engine resumes "
+            "from the bytes already on disk."
+        )
+
+    def _on_preflight(self) -> None:
+        model_id = self._require_selection()
+        if model_id is None:
+            return
+        self._run_background(
+            "Checking whether the model fits this machine…",
+            lambda: self.service.preflight(model_id),
+            self._finish_preflight,
+        )
+
+    def _finish_preflight(self, verdict: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not run the preflight: {error}")
+            return
+        describe = getattr(verdict, "describe", None)
+        self._set_detail(describe() if callable(describe) else str(verdict))
+        ok = bool(getattr(verdict, "ok", False))
+        self._set_status("The model can run here." if ok else "The model cannot run here yet.")
+
+    def _on_stop_processes(self) -> None:
+        self._run_background(
+            "Stopping the model processes…",
+            self.service.stop_processes,
+            self._finish_stop_processes,
+        )
+
+    def _finish_stop_processes(self, stopped: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not stop the processes: {error}")
+            return
+        count = len(tuple(stopped or ()))
+        self._set_status(f"Stopped {count} model process(es)." if count else "Nothing to stop.")
+
+    def _on_register_trained(self) -> None:
+        """Register the project's own trained checkpoint as an ordinary record."""
+        self._run_background(
+            "Registering the trained checkpoint…",
+            self.service.register_trained,
+            self._finish_register_trained,
+        )
+
+    def _finish_register_trained(self, records: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not register the trained checkpoint: {error}")
+            return
+        records = tuple(records or ())
+        if not records:
+            self._set_status("No trained checkpoint is present to register.")
+            return
+        self._reload()
+        self._set_status(f"Registered {len(records)} trained model(s).")
 
     def _dashboard_text(self, snapshot: ManagerSnapshot) -> str:
         """The one-line-per-fact dashboard body: active models, errors, machine.
@@ -798,6 +1053,9 @@ class ModelManagerDialog:
             self._set_status("Nothing is running.")
             return
         self._cancelled = True
+        # A download polls its own cancel flag, so a cancelled download stops at
+        # the next chunk instead of running to completion in the background.
+        self._download_cancel.set()
         self._busy = False
         self._spinner.stop()
         self._spinner.pack_forget()

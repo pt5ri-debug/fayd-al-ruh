@@ -450,6 +450,247 @@ def _cmd_select(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_rank(args: argparse.Namespace) -> int:
+    """Rank the models for a task, with the score *and the reasons* behind it."""
+    mgr = _manager()
+    task = (args.task or "").strip()
+    if task not in TASKS:
+        print(f"Unknown task {task!r}. Known tasks: {', '.join(TASKS)}.", file=sys.stderr)
+        return 2
+    ranked = mgr.rank_for_task(
+        task,
+        preferred_model_id=args.prefer or "",
+        ready_only=not args.all,
+        limit=args.limit,
+    )
+    if args.json:
+        print(
+            json.dumps(
+                {"task": task, "models": [item.to_primitive() for item in ranked]},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if not ranked:
+        print(f"No model can answer the {task!r} task here yet.")
+        return 3
+    print(f"Ranking for the {task!r} task, best first:")
+    for index, item in enumerate(ranked, 1):
+        print(f"  {index}. {item.describe()}")
+    return 0
+
+
+def _cmd_fallback(args: argparse.Namespace) -> int:
+    """The bounded ladder of models to try for a task, or why there is none."""
+    mgr = _manager()
+    task = (args.task or "").strip()
+    plan = mgr.fallback_plan(task, preferred_model_id=args.prefer or "", limit=args.limit)
+    if args.json:
+        print(json.dumps(plan.to_primitive(), ensure_ascii=False, indent=2))
+        return 0 if plan.available else 3
+    print(plan.describe())
+    return 0 if plan.available else 3
+
+
+def _cmd_sources(args: argparse.Namespace) -> int:
+    """The model sources this build supports -- what a download *would* be."""
+    mgr = _manager()
+    sources = mgr.sources()
+    if args.json:
+        payload = []
+        for source in sources:
+            ok, why = source.available()
+            payload.append(
+                {
+                    "available": ok,
+                    "detail": why,
+                    "key": source.key,
+                    "title": source.title,
+                }
+            )
+        print(json.dumps({"sources": payload}, ensure_ascii=False, indent=2))
+        return 0
+    if not sources:
+        print("No model source is available in this build.")
+        return 0
+    print("Model sources:")
+    for source in sources:
+        ok, why = source.available()
+        marker = "available" if ok else f"unavailable — {why}"
+        print(f"  {source.key}: {source.title} [{marker}]")
+    return 0
+
+
+def _cmd_search_offers(args: argparse.Namespace) -> int:
+    """Search the sources for models matching a query. Reaches the network only
+    when a source genuinely needs it, and downloads nothing."""
+    from core.model_sources import describe_claim
+
+    mgr = _manager()
+    offers = mgr.search_offers(args.query, source=args.source or "", limit=args.limit)
+    if args.json:
+        print(
+            json.dumps(
+                {"offers": [offer.to_primitive() for offer in offers]},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0 if offers else 3
+    if not offers:
+        print(f"No model offer matched {args.query!r}.")
+        return 3
+    print(f"{len(offers)} offer(s) matched {args.query!r}:")
+    for offer in offers:
+        print(f"  {offer.source_id}: {offer.display_name}")
+        print(f"      metadata: {describe_claim(offer.claim)}")
+    return 0
+
+
+def _cmd_download(args: argparse.Namespace) -> int:
+    """Fetch a model's files. A governed external action: it needs ``--approve``."""
+    mgr = _manager()
+    offers = mgr.search_offers(args.model, limit=1)
+    if not offers:
+        print(f"No source offers a model matching {args.model!r}.", file=sys.stderr)
+        return 3
+    offer = offers[0]
+    report, entry = mgr.download(
+        offer,
+        approved=args.approve,
+        pinned_digests=args.pinned or None,
+        restart=args.restart,
+    )
+    if args.json:
+        print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))
+    else:
+        print(report.describe())
+    if not report.complete:
+        return 4
+    if entry is not None:
+        print(f"Registered as {entry.model_id}.")
+    return 0
+
+
+def _cmd_downloads(args: argparse.Namespace) -> int:
+    """The partial downloads a later run could resume."""
+    mgr = _manager()
+    partials = mgr.resumable_downloads()
+    if args.json:
+        print(json.dumps({"partials": [str(path) for path in partials]}, indent=2))
+        return 0
+    if not partials:
+        print("No partial download to resume.")
+        return 0
+    print(f"{len(partials)} partial download(s) can be resumed:")
+    for path in partials:
+        print(f"  {path}")
+    return 0
+
+
+def _cmd_resources(args: argparse.Namespace) -> int:
+    """This machine's own figures, each with the provenance of the reading."""
+    mgr = _manager()
+    resources = mgr.resources()
+    if args.json:
+        print(json.dumps(resources.to_primitive(), ensure_ascii=False, indent=2))
+        return 0
+    print(resources.describe())
+    return 0
+
+
+def _cmd_preflight(args: argparse.Namespace) -> int:
+    """Every check that should pass before a model is loaded, as data."""
+    mgr = _manager()
+    verdict = mgr.preflight(args.model, context_length=args.context or None)
+    if args.json:
+        print(json.dumps(verdict.to_primitive(), ensure_ascii=False, indent=2))
+        return 0 if verdict.ok else 3
+    print(verdict.describe())
+    return 0 if verdict.ok else 3
+
+
+def _cmd_processes(args: argparse.Namespace) -> int:
+    """The processes this program started, and whether each is still alive."""
+    mgr = _manager()
+    registry = mgr.processes()
+    records = registry.list() if hasattr(registry, "list") else ()
+    if args.json:
+        print(
+            json.dumps(
+                {"processes": [record.to_primitive() for record in records]},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if not records:
+        print("This program has started no model process.")
+        return 0
+    print(f"{len(records)} model process(es) on record:")
+    for record in records:
+        print(f"  {record.process_id} (pid {record.pid}) — {record.status}")
+    return 0
+
+
+def _cmd_stop_processes(args: argparse.Namespace) -> int:
+    """Stop every process this program started. Only its own pids are ever signalled."""
+    mgr = _manager()
+    stopped = mgr.processes().stop_all()
+    if args.json:
+        print(
+            json.dumps(
+                {"stopped": [record.to_primitive() for record in stopped]},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if not stopped:
+        print("No running model process to stop.")
+        return 0
+    print(f"Stopped {len(stopped)} model process(es).")
+    return 0
+
+
+def _cmd_trained(args: argparse.Namespace) -> int:
+    """The project's own trained artifacts, described read-only."""
+    mgr = _manager()
+    if args.model:
+        model = mgr.trained_model()
+        artifacts = (model,) if model is not None else ()
+    else:
+        artifacts = mgr.trained_artifacts()
+    if args.json:
+        print(
+            json.dumps(
+                {"artifacts": [item.to_primitive() for item in artifacts]},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0 if artifacts else 3
+    if not artifacts:
+        print("No trained artifact was found in this checkout.")
+        return 3
+    for item in artifacts:
+        print(f"  {item.describe()}")
+    return 0
+
+
+def _cmd_trained_register(args: argparse.Namespace) -> int:
+    """Register the project's own trained checkpoint as an ordinary model record."""
+    mgr = _manager()
+    records = mgr.register_trained()
+    if not records:
+        print("No trained checkpoint is present to register.", file=sys.stderr)
+        return 3
+    for record in records:
+        print(f"Registered {record.display_name} ({record.model_id}).")
+    return 0
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     mgr = _manager()
     events = mgr.log_tail(args.limit)
@@ -712,6 +953,72 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     select.add_argument("--json", action="store_true", help="print JSON")
 
+    rank = sub.add_parser("rank", help="rank the models for a task, with the reasons")
+    rank.add_argument("task", help="the task to rank for (chat, code, ...)")
+    rank.add_argument("--prefer", help="the model id the user prefers (a tie-break)")
+    rank.add_argument("--all", action="store_true", help="include models that cannot run yet")
+    rank.add_argument("--limit", type=int, default=0, help="how many to show (0 = all)")
+    rank.add_argument("--json", action="store_true", help="print JSON")
+
+    fallback = sub.add_parser(
+        "fallback", help="the bounded ladder of models to try for a task"
+    )
+    fallback.add_argument("task", help="the task to plan for")
+    fallback.add_argument("--prefer", help="the model id the user prefers")
+    fallback.add_argument("--limit", type=int, default=3, help="how many rungs at most")
+    fallback.add_argument("--json", action="store_true", help="print JSON")
+
+    sources = sub.add_parser("sources", help="the trusted model sources this build supports")
+    sources.add_argument("--json", action="store_true", help="print JSON")
+
+    offers = sub.add_parser(
+        "search-offers", help="search the sources for a model (downloads nothing)"
+    )
+    offers.add_argument("query", help="free text to search for")
+    offers.add_argument("--source", help="restrict to one source key")
+    offers.add_argument("--limit", type=int, default=10, help="how many offers to show")
+    offers.add_argument("--json", action="store_true", help="print JSON")
+
+    download = sub.add_parser(
+        "download", help="fetch a model's files (a governed external action)"
+    )
+    download.add_argument("model", help="the model to fetch (a search query)")
+    download.add_argument("--approve", action="store_true", help="grant the download")
+    download.add_argument("--pinned", action="append", metavar="NAME=DIGEST",
+                          help="a digest the file must match (repeatable)")
+    download.add_argument("--restart", action="store_true", help="discard a partial and restart")
+    download.add_argument("--json", action="store_true", help="print JSON")
+
+    downloads = sub.add_parser("downloads", help="the partial downloads that can be resumed")
+    downloads.add_argument("--json", action="store_true", help="print JSON")
+
+    resources = sub.add_parser("resources", help="this machine's own memory/GPU figures")
+    resources.add_argument("--json", action="store_true", help="print JSON")
+
+    preflight = sub.add_parser(
+        "preflight", help="every check that should pass before a model is loaded"
+    )
+    preflight.add_argument("model", help="the model id")
+    preflight.add_argument("--context", type=int, help="the context length to assume")
+    preflight.add_argument("--json", action="store_true", help="print JSON")
+
+    processes = sub.add_parser("processes", help="the model processes this program started")
+    processes.add_argument("--json", action="store_true", help="print JSON")
+
+    stop_processes = sub.add_parser(
+        "stop-processes", help="stop every model process this program started"
+    )
+    stop_processes.add_argument("--json", action="store_true", help="print JSON")
+
+    trained = sub.add_parser("trained", help="the project's own trained artifacts")
+    trained.add_argument("--model", action="store_true", help="only the language model")
+    trained.add_argument("--json", action="store_true", help="print JSON")
+
+    trained_register = sub.add_parser(
+        "trained-register", help="register the project's own trained checkpoint"
+    )
+    trained_register.add_argument("--json", action="store_true", help="print JSON")
+
     return parser
 
 
@@ -736,6 +1043,18 @@ _HANDLERS = {
     "active": _cmd_active,
     "diagnostics": _cmd_diagnostics,
     "select": _cmd_select,
+    "rank": _cmd_rank,
+    "fallback": _cmd_fallback,
+    "sources": _cmd_sources,
+    "search-offers": _cmd_search_offers,
+    "download": _cmd_download,
+    "downloads": _cmd_downloads,
+    "resources": _cmd_resources,
+    "preflight": _cmd_preflight,
+    "processes": _cmd_processes,
+    "stop-processes": _cmd_stop_processes,
+    "trained": _cmd_trained,
+    "trained-register": _cmd_trained_register,
 }
 
 

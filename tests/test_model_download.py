@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
+from typing import Any
 
 import pytest
 from core.model_download import (
@@ -52,7 +52,6 @@ from core.model_sources import (
     ModelFile,
     ModelOffer,
     SourceError,
-    SourceUnavailable,
     UnknownSource,
     claim_rank,
     default_sources,
@@ -62,7 +61,6 @@ from core.model_sources import (
     source_keys,
     validate_download_url,
 )
-
 
 # ---------------------------------------------------------------- fake transport
 
@@ -245,10 +243,17 @@ def test_huggingface_source_uses_an_injected_client():
 
             class Info:
                 sha = "abc123"
-                siblings = [Sibling()]
-                cardData = {"license": "apache-2.0", "language": ["en"], "pipeline_tag": "text-generation"}
+                siblings = (Sibling(),)
                 gated = False
+                # A class attribute, assigned after the class so no mutable default
+                # sits in the class body (which ruff flags for good reason).
+                cardData: Any = None
 
+            Info.cardData = {
+                "license": "apache-2.0",
+                "language": ["en"],
+                "pipeline_tag": "text-generation",
+            }
             return Info()
 
     source = HuggingFaceSource(client=FakeHub())

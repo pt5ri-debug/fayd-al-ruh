@@ -966,12 +966,12 @@ class ModelManager:
         convenience that records that approval.
         """
         from core.model_download import (
+            STATUS_COMPLETE,
+            STATUS_RESUMED,
             DownloadError,
             DownloadReport,
             DownloadRequest,
             ModelDownloader,
-            STATUS_COMPLETE,
-            STATUS_RESUMED,
             parse_pinned_digests,
         )
 
@@ -1179,6 +1179,94 @@ class ModelManager:
         from core.paths import data_dir
 
         return data_dir() / "model_processes"
+
+    # ------------------------------------------------------ selection
+
+    def rank_for_task(
+        self,
+        task: str,
+        *,
+        profile: Any = None,
+        preferred_model_id: str = "",
+        ready_only: bool = True,
+        limit: int = 0,
+        resources: Any = None,
+    ) -> tuple[Any, ...]:
+        """Rank the models this manager knows against a task, best first.
+
+        Each result carries its score **and the factors behind it**, so a choice can
+        be explained rather than asserted. Only models that can run now are ranked
+        by default, which is what makes the fallback ladder honest.
+        """
+        from core.model_selection import rank_for_task
+
+        return rank_for_task(
+            self, task,
+            profile=profile,
+            preferred_model_id=preferred_model_id,
+            ready_only=ready_only,
+            limit=limit,
+            resources=resources,
+        )
+
+    def fallback_plan(
+        self,
+        task: str,
+        *,
+        preferred_model_id: str = "",
+        limit: int = 3,
+        resources: Any = None,
+    ) -> Any:
+        """A bounded ladder of models to try for a task, and why when there is none."""
+        from core.model_selection import plan_fallback
+
+        return plan_fallback(
+            self, task,
+            preferred_model_id=preferred_model_id,
+            limit=limit,
+            resources=resources,
+        )
+
+    def task_profile(self, task: str) -> Any:
+        """What a task needs from a model, as data."""
+        from core.model_selection import task_profile
+
+        return task_profile(task)
+
+    # -------------------------------------------------- trained models
+
+    def trained_artifacts(self, *, refresh: bool = True) -> tuple[Any, ...]:
+        """The project's own trained artifacts, described read-only.
+
+        With ``refresh`` the committed checkpoint is registered as an ordinary
+        record first, so it reaches the registry, the ranking, and the window with
+        no second source of truth. This **never** trains, evaluates, or writes to a
+        checkpoint -- it reads what the pipeline already wrote.
+        """
+        from core.trained_artifacts import discover_trained_artifacts, register_trained_models
+
+        if refresh:
+            try:
+                register_trained_models(self)
+            except Exception:
+                pass
+        return discover_trained_artifacts()
+
+    def trained_model(self) -> Any:
+        """The trained language model as an artifact, or ``None`` when absent."""
+        from core.trained_artifacts import KIND_LANGUAGE, describe_artifact, trained_checkpoint_path
+
+        path = trained_checkpoint_path()
+        if path is None:
+            return None
+        artifact = describe_artifact(path)
+        return artifact if artifact.kind == KIND_LANGUAGE else None
+
+    def register_trained(self, *, replace_existing: bool = True) -> tuple[ModelRecord, ...]:
+        """Register the project's own trained checkpoint with the registry."""
+        from core.trained_artifacts import register_trained_models
+
+        return register_trained_models(self, replace_existing=replace_existing)
 
     def _fail(self, operation: str, record: ModelRecord, detail: str) -> OperationResult:
         """Record a failure and return it, so no caller has to catch."""

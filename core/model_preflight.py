@@ -266,6 +266,11 @@ class PreflightReport:
     #: True when the only reason a model would not run is that a GPU is absent.
     cpu_fallback: bool = False
 
+    @property
+    def ok(self) -> bool:
+        """An alias for :attr:`can_load`, so a caller can read either name."""
+        return self.can_load
+
     def describe(self) -> str:
         head = "can load" if self.can_load else "cannot load"
         lines = [f"{head} ({self.runtime}) — {self.model_id}"]

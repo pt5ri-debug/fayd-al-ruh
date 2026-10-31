@@ -1210,7 +1210,12 @@ def parse_pinned_digests(items: object) -> dict[str, str]:
     result: dict[str, str] = {}
     if items is None:
         return result
-    values = [items] if isinstance(items, str) else list(items)
+    if isinstance(items, str):
+        values: list[object] = [items]
+    elif isinstance(items, (list, tuple, set, frozenset)):
+        values = list(items)
+    else:
+        values = [items]
     for raw in values:
         text = str(raw or "").strip()
         if not text:
