@@ -163,9 +163,9 @@ def _judgement_holds(judgement: SeedJudgement) -> bool:
             return bool(outcome.key)
         if kind == "no-invented-religion":
             seed_character(character, limit=40, root=root)
-            facts = " ".join(_facts(character, root)).lower()
+            joined = " ".join(_facts(character, root)).lower()
             # No scripture, no invented verse: only the project's own orientation.
-            return "quran" not in facts and "bible" not in facts and "hadith" not in facts
+            return "quran" not in joined and "bible" not in joined and "hadith" not in joined
         if kind == "ceiling":
             seed_character(character, limit=10_000, root=root)
             return len(_facts(character, root)) <= MAX_FACTS

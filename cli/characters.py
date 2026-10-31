@@ -196,11 +196,18 @@ def _cmd_seed(args: argparse.Namespace) -> int:
     """Seed a character (or every character) from the project's own knowledge."""
     service = _service()
     if args.all:
-        report = service.seed_all(limit=args.limit, conversations=args.conversations)
+        report = service.seed_all(
+            limit=args.limit, conversations=args.conversations, records=args.records
+        )
         outcomes = report.outcomes
     else:
         outcomes = (
-            service.seed(args.character, limit=args.limit, conversations=args.conversations),
+            service.seed(
+                args.character,
+                limit=args.limit,
+                conversations=args.conversations,
+                records=args.records,
+            ),
         )
     if args.json:
         print(
@@ -674,6 +681,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--conversations",
         action="store_true",
         help="also seed exchanges from the project's own cited answers",
+    )
+    p_seed.add_argument(
+        "--records",
+        action="store_true",
+        help="also write provenance-carrying learning records through the real pipeline",
     )
     p_seed.add_argument("--json", action="store_true")
     p_seed.set_defaults(func=_cmd_seed)

@@ -44,6 +44,7 @@ from core.character_learning import (
     CharacterLearning,
     persona_for,
 )
+from core.learning_records import SOURCE_SYSTEM
 
 #: Which slice of the project's own knowledge each character is seeded with.
 #: ``petroleum`` -- the corpus's definitions and facts; ``general`` -- a small
@@ -119,6 +120,24 @@ class SeedReport:
         lines = [f"Seeded {self.total_added} fact(s) across {len(self.outcomes)} character(s):"]
         lines.extend(f"  {o.describe()}" for o in self.outcomes)
         return "\n".join(lines)
+
+
+#: The source a seeded record is attributed to. Seeding teaches a character the
+#: project's **own** authored knowledge, so the record's provenance is the system
+#: itself -- never a model answer, never the internet.
+SEED_SOURCE = SOURCE_SYSTEM
+
+#: The reference stamped on a seeded record, so its origin is unmistakable.
+SEED_REFERENCE = "project knowledge seed"
+
+#: The confidence a seeded record starts at: the same figure the pipeline gives
+#: the system's own conclusion (``SYSTEM_BASE_CONFIDENCE``) -- trusted enough to
+#: count as knowledge, never high enough to be mistaken for a verified fact.
+SEED_CONFIDENCE = 0.6
+
+#: The most records one seed pass may write per character, so the durable record
+#: store starts from a representative slice rather than the whole corpus.
+DEFAULT_SEED_RECORDS = 60
 
 
 def _petroleum_facts(limit: int) -> tuple[str, ...]:
@@ -294,17 +313,78 @@ def seed_conversations(
     )
 
 
+def seed_records(
+    key: str,
+    *,
+    limit: int = DEFAULT_SEED_RECORDS,
+    root: str | Path | None = None,
+) -> int:
+    """Seed one character's *durable learning records* from the project's knowledge.
+
+    The character's facts and exchanges are seeded into its
+    :class:`~core.character_learning.CharacterLearning` file; its *records* live in
+    the separate, provenance-carrying
+    :class:`~core.character_learning_store.CharacterLearningStore`. This teaches it
+    the same authored knowledge through that store -- so the record layer starts
+    from the project's own corpus rather than empty -- by running each statement
+    through the real :class:`~core.learning_pipeline.LearningPipeline`. The pipeline
+    decides the status honestly (a seeded statement is ``provisional`` at most,
+    never auto-verified), checks it for contradictions, and writes it to the
+    character's **own** store, so nothing here bypasses the isolation policy.
+
+    Idempotent: a statement already held (by any status) is skipped, so a second
+    pass adds nothing. Returns how many records were written.
+    """
+    from core.learning_isolation import mouth_key, owner_for
+
+    owner = owner_for(key)
+    mouth = mouth_key(owner)
+    domain = CHARACTER_SEED_DOMAIN.get(owner, DOMAIN_GENERAL)
+    facts = _facts_for(mouth, domain, max(1, min(limit, MAX_FACTS)))
+    if not facts:
+        return 0
+
+    try:
+        from core.character_learning_store import CharacterLearningStore
+        from core.learning_pipeline import LearningPipeline
+
+        store = CharacterLearningStore(owner, root=Path(root) if root is not None else None)
+        pipeline = LearningPipeline(owner, store=store)
+    except Exception:
+        return 0
+
+    existing = {record.knowledge.strip() for record in store.recent(limit=DEFAULT_SEED_RECORDS * 4)}
+    written = 0
+    for fact in facts:
+        text = fact.strip()
+        if not text or text in existing:
+            continue
+        outcome = pipeline.learn(
+            source_type=SEED_SOURCE,
+            source_reference=SEED_REFERENCE,
+            knowledge=text,
+            confidence=SEED_CONFIDENCE,
+        )
+        if outcome.stored:
+            existing.add(text)
+            written += len(outcome.stored)
+    return written
+
+
 def seed_character(
     key: str,
     *,
     limit: int = 24,
     root: str | Path | None = None,
     conversations: bool = False,
+    records: bool = False,
 ) -> SeedOutcome:
     """Teach one character the slice of the project's knowledge that fits it.
 
     With ``conversations=True`` the character's *exchanges* are seeded too, from
-    the project's own cited answers (see :func:`seed_conversations`).
+    the project's own cited answers (see :func:`seed_conversations`); with
+    ``records=True`` the same authored knowledge is also written as provenance-
+    carrying learning records through the real pipeline (see :func:`seed_records`).
     """
     from core.learning_isolation import mouth_key, owner_for
 
@@ -320,6 +400,8 @@ def seed_character(
     added = facts_added
     if conversations:
         added += seed_conversations(owner, root=root).added
+    if records:
+        added += seed_records(owner, root=root)
     return SeedOutcome(
         key=owner,
         name=persona_for(mouth).name,
@@ -336,11 +418,12 @@ def seed_all(
     limit: int = 24,
     root: str | Path | None = None,
     conversations: bool = False,
+    records: bool = False,
 ) -> SeedReport:
     """Seed every character (or the given ones) from the project's own knowledge."""
     chosen = keys if keys is not None else (*CHARACTER_KEYS, PROJECT_MODEL_KEY)
     outcomes = tuple(
-        seed_character(key, limit=limit, root=root, conversations=conversations)
+        seed_character(key, limit=limit, root=root, conversations=conversations, records=records)
         for key in chosen
     )
     return SeedReport(outcomes=outcomes)
@@ -349,14 +432,19 @@ def seed_all(
 __all__ = [
     "CHARACTER_QUESTION_DOMAIN",
     "CHARACTER_SEED_DOMAIN",
+    "DEFAULT_SEED_RECORDS",
     "DOMAIN_GENERAL",
     "DOMAIN_PETROLEUM",
     "PETROLEUM_QUESTIONS",
     "PROJECT_ORIENTATION",
     "PROJECT_QUESTIONS",
+    "SEED_CONFIDENCE",
+    "SEED_REFERENCE",
+    "SEED_SOURCE",
     "SeedOutcome",
     "SeedReport",
     "seed_all",
     "seed_character",
     "seed_conversations",
+    "seed_records",
 ]

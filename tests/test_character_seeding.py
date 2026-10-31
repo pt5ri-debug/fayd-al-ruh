@@ -140,6 +140,51 @@ def test_seed_character_with_conversations_adds_both(data_root) -> None:
     assert outcome.added >= len(learning.exchanges())
 
 
+# --- record seeding -------------------------------------------------------
+
+
+def test_seeding_records_writes_provenance_carrying_records(data_root) -> None:
+    from core.character_learning_store import character_store
+
+    written = seeding.seed_records("jarvis", limit=20, root=data_root)
+    assert written > 0
+    store = character_store("jarvis", root=data_root)
+    records = store.recent(limit=200)
+    assert len(records) == written
+    for record in records:
+        assert record.source_type == seeding.SEED_SOURCE
+        assert record.source_reference == seeding.SEED_REFERENCE
+        # A seeded record is trusted enough to count as knowledge, but never
+        # born verified: only an explicit verification may promote it.
+        assert record.learning_status == "provisional"
+        assert record.trusted
+
+
+def test_seeding_records_is_idempotent(data_root) -> None:
+    seeding.seed_records("vision", limit=20, root=data_root)
+    assert seeding.seed_records("vision", limit=20, root=data_root) == 0
+
+
+def test_seeding_records_stays_in_the_character_own_store(data_root) -> None:
+    from core.character_learning_store import character_store, main_model_store
+
+    seeding.seed_records("natasha", limit=20, root=data_root)
+    assert character_store("natasha", root=data_root).stats().total > 0
+    # The private character's seeding never leaks into the main model's store.
+    assert main_model_store(root=data_root).stats().total == 0
+
+
+def test_seed_character_with_records_adds_all_three(data_root) -> None:
+    from core.character_learning_store import character_store
+
+    outcome = seeding.seed_character("vision", limit=20, conversations=True, records=True)
+    learning = CharacterLearning("vision", root=data_root)
+    assert learning.facts()
+    assert learning.exchanges()
+    assert character_store("vision", root=data_root).stats().total > 0
+    assert outcome.added > 0
+
+
 # --- the report -----------------------------------------------------------
 
 

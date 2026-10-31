@@ -428,26 +428,49 @@ class CharacterManagerService:
         used = 0.5 * (facts / MAX_FACTS) + 0.5 * (exchanges / MAX_EXCHANGES)
         return facts, exchanges, round(min(1.0, used), 6)
 
-    def seed(self, key: str, *, limit: int = 24, conversations: bool = False) -> SeedOutcome:
+    def seed(
+        self,
+        key: str,
+        *,
+        limit: int = 24,
+        conversations: bool = False,
+        records: bool = False,
+    ) -> SeedOutcome:
         """Teach a character the slice of the project's own knowledge that fits it.
 
         Delegates to :mod:`core.character_seeding`, which seeds only authored
         knowledge (the petroleum corpus, the project's orientation, the
         character's own persona) and never invents a fact. With
         ``conversations=True`` its *exchanges* are seeded too, from the project's
-        own cited answers.
+        own cited answers; with ``records=True`` the same authored knowledge is
+        written as provenance-carrying learning records through the real pipeline.
         """
         from core.character_seeding import seed_character
 
         return seed_character(
-            owner_for(key), limit=limit, root=self._data_root, conversations=conversations
+            owner_for(key),
+            limit=limit,
+            root=self._data_root,
+            conversations=conversations,
+            records=records,
         )
 
-    def seed_all(self, *, limit: int = 24, conversations: bool = False) -> SeedReport:
+    def seed_all(
+        self,
+        *,
+        limit: int = 24,
+        conversations: bool = False,
+        records: bool = False,
+    ) -> SeedReport:
         """Seed every character from the project's own knowledge (idempotent)."""
         from core.character_seeding import seed_all
 
-        return seed_all(limit=limit, root=self._data_root, conversations=conversations)
+        return seed_all(
+            limit=limit,
+            root=self._data_root,
+            conversations=conversations,
+            records=records,
+        )
 
     def forget_facts(self, key: str, *, confirm: bool = False) -> bool:
         """Forget a character's facts and exchanges; requires ``confirm=True``.
