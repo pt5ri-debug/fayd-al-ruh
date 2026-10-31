@@ -726,6 +726,33 @@ def style_defaults_for(owner: str) -> dict[str, Any]:
     return dict(STYLE_DEFAULTS.get(resolved, {}))
 
 
+#: The voice a character ships with: the engine it *prefers* and a catalog voice
+#: that always resolves, so a character can be read aloud out of the box. The
+#: engine is a **preference**, resolved honestly against what this machine really
+#: has (see :func:`core.character_engine.resolve_character_voice`): a machine
+#: without the preferred engine falls back to the catalog voice rather than going
+#: silent. The choices follow what each character *is* -- Jarvis and the scholar
+#: read with the installed voices, the general and petroleum models prefer a
+#: natural Piper voice, the companion prefers her own local Arabic cloning engine,
+#: and the project's own English model prefers Qwen3-TTS.
+VOICE_DEFAULTS: dict[str, dict[str, str]] = {
+    "jarvis": {"engine": SOURCE_SYSTEM, "voice": "man-1"},
+    "ultron": {"engine": SOURCE_PIPER, "voice": "man-2"},
+    "vision": {"engine": SOURCE_PIPER, "voice": "man-3"},
+    "banner": {"engine": SOURCE_SYSTEM, "voice": "woman-2"},
+    "natasha": {"engine": SOURCE_AUDIOCPP, "voice": "woman-1"},
+    "hakeem": {"engine": SOURCE_SYSTEM, "voice": "man-4"},
+    "cloud": {"engine": SOURCE_SYSTEM, "voice": "woman-3"},
+    MAIN_MODEL_OWNER: {"engine": SOURCE_QWEN, "voice": "woman-4"},
+}
+
+
+def voice_defaults_for(owner: str) -> dict[str, str]:
+    """The shipped voice for ``owner`` (an empty mapping when unknown)."""
+    resolved = owner_for(owner)
+    return dict(VOICE_DEFAULTS.get(resolved, {}))
+
+
 def personality_defaults_for(owner: str) -> dict[str, Any]:
     """The shipped personality dials for ``owner`` (a neutral set when unknown).
 
@@ -775,6 +802,7 @@ def default_config_for(key: str) -> CharacterConfig:
     name = DEFAULT_NAMES.get(owner, persona.name)
     personality = personality_defaults_for(owner)
     style = style_defaults_for(owner)
+    voice = voice_defaults_for(owner)
     return CharacterConfig(
         key=owner,
         owner=owner,
@@ -796,7 +824,10 @@ def default_config_for(key: str) -> CharacterConfig:
             response_length=str(personality.get("response_length", "balanced")),
         ),
         model=ModelConfig(),
-        voice=VoiceConfig(),
+        voice=VoiceConfig(
+            engine=str(voice.get("engine", "")),
+            voice=str(voice.get("voice", "")),
+        ),
         learning=LearningSettings(
             # A private character never shares, whatever the flag says; the default
             # flag is on, and `effective_sharing` reports the truth.

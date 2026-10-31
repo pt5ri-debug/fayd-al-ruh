@@ -599,7 +599,8 @@ def test_a_voice_change_does_not_affect_another_character(data_root: Path) -> No
     registry = CharacterRegistry(data_root=data_root)
     registry.apply(cc.replace_voice(registry.load("natasha"), voice="model:piper:ar_JO-kareem-medium"))
     assert registry.load("natasha").voice.voice == "model:piper:ar_JO-kareem-medium"
-    assert registry.load("hakeem").voice.voice == ""
+    # Hakeem keeps his own shipped voice; Natasha's change never touches it.
+    assert registry.load("hakeem").voice.voice == cc.voice_defaults_for("hakeem")["voice"]
 
 
 def test_an_unsupported_voice_engine_is_rejected(data_root: Path) -> None:

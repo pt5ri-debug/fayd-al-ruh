@@ -61,13 +61,13 @@
   "version": 1,
   "voice": {
     "active": true,
-    "engine": "",
+    "engine": "piper",
     "gender": "",
     "language": "",
     "model_path": "",
     "pitch": 0.0,
     "speed": 1.0,
-    "voice": "",
+    "voice": "man-2",
     "volume": 1.0
   }
 }

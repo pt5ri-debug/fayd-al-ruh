@@ -185,9 +185,20 @@ def test_resolve_character_voice_respects_the_active_flag() -> None:
 
 
 def test_resolve_character_voice_skips_a_blank_choice() -> None:
-    choice = resolve_character_voice(_config_for("ultron"))
+    config = replace_voice(_config_for("ultron"), voice="", engine="")
+    choice = resolve_character_voice(config)
     assert not choice.ok
     assert "no voice is chosen" in choice.reason
+
+
+def test_the_shipped_default_voice_resolves_for_every_character() -> None:
+    """Every character ships a voice that really resolves here, not a blank one."""
+    from core.character_config import owner_names
+
+    for owner in owner_names():
+        choice = resolve_character_voice(_config_for(owner))
+        assert choice.ok, owner
+        assert choice.voice is not None
 
 
 def test_resolve_character_voice_reports_a_missing_local_voice() -> None:
