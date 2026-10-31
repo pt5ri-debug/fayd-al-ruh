@@ -19,6 +19,7 @@ Commands::
     python -m cli cognition rollback               return to the last stable version
     python -m cli cognition progression            how far gradual training has come
     python -m cli cognition evaluate [--compare]   the ten cognitive indicators
+    python -m cli cognition characters [--key K]   evaluate the eight characters
     python -m cli cognition teach "<question>"     one student-first exchange
     python -m cli cognition mode [light|balanced|intensive]  the resource mode
     python -m cli cognition tick                   one background tick
@@ -128,6 +129,11 @@ def _parser() -> argparse.ArgumentParser:
 
     teach = sub.add_parser("teach", help="one student-first exchange", parents=[common])
     teach.add_argument("question")
+
+    characters = sub.add_parser(
+        "characters", help="evaluate the eight characters", parents=[common]
+    )
+    characters.add_argument("--key", default=None, help="evaluate only this character")
 
     mode = sub.add_parser("mode", help="show or set the resource mode", parents=[common])
     mode.add_argument("value", nargs="?", choices=[m.value for m in ResourceMode])
@@ -481,6 +487,42 @@ def _cmd_tick(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_characters(args: argparse.Namespace) -> int:
+    """Evaluate the eight characters from their real configuration and stores."""
+    from gui.character_evaluation import CharacterEvaluator
+
+    evaluator = CharacterEvaluator()
+    if args.key:
+        try:
+            character = evaluator.evaluate_key(args.key)
+        except KeyError:
+            print(f"Refused: {args.key!r} is not a known character.")
+            return EXIT_GATE
+        if args.json:
+            print(json.dumps(character.to_primitive(), ensure_ascii=False, indent=2))
+            return EXIT_OK
+        print(character.describe())
+        print("strengths:")
+        for line in character.strengths or ("(none observed yet)",):
+            print(f"  + {line}")
+        print("shortcomings:")
+        for line in character.shortcomings or ("(none)",):
+            print(f"  - {line}")
+        print("next steps:")
+        for line in character.next_steps or ("(none)",):
+            print(f"  → {line}")
+        return EXIT_OK
+    report = evaluator.evaluate()
+    if args.json:
+        print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(report.describe())
+    for character in report.characters:
+        print()
+        print(character.describe())
+    return EXIT_OK
+
+
 _HANDLERS.update(
     {
         "status": _cmd_status,
@@ -499,6 +541,7 @@ _HANDLERS.update(
         "teach": _cmd_teach,
         "mode": _cmd_mode,
         "tick": _cmd_tick,
+        "characters": _cmd_characters,
     }
 )
 
