@@ -79,9 +79,15 @@ SOURCE_CATALOG = "catalog"
 SOURCE_LOCAL = "local"
 SOURCE_TRAINED = "trained"
 SOURCE_REMOTE = "remote"
+#: A model this program fetched itself, through the Model Manager's downloader.
+#: Distinct from ``remote`` (a model with no local file) and from ``local`` (a file
+#: the user already had): a download carries provenance -- a source, a revision,
+#: and an integrity verdict -- which neither of those has.
+SOURCE_DOWNLOAD = "downloaded"
 SOURCE_UNKNOWN = "unknown"
 KNOWN_SOURCES: tuple[str, ...] = (
-    SOURCE_CATALOG, SOURCE_LOCAL, SOURCE_TRAINED, SOURCE_REMOTE, SOURCE_UNKNOWN,
+    SOURCE_CATALOG, SOURCE_LOCAL, SOURCE_TRAINED, SOURCE_REMOTE, SOURCE_DOWNLOAD,
+    SOURCE_UNKNOWN,
 )
 
 #: A tag is a short, lower-case token; anything else is refused rather than
@@ -1036,6 +1042,7 @@ __all__ = [
     "MAX_TEXT",
     "NAMESPACE",
     "SOURCE_CATALOG",
+    "SOURCE_DOWNLOAD",
     "SOURCE_LOCAL",
     "SOURCE_REMOTE",
     "SOURCE_TRAINED",

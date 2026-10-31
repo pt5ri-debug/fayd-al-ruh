@@ -94,6 +94,17 @@ def models_dir() -> Path:
     return data_dir() / "models"
 
 
+def model_downloads_dir() -> Path:
+    """Where the Model Manager puts models it downloaded (``data/model_downloads``).
+
+    Git-ignored and ``FAYD_DATA_DIR``-aware like every other writable folder. Kept
+    separate from :func:`models_dir` (the engines' own caches) so a downloaded
+    model's partial files, sidecars, and provenance live in one place and can be
+    cleaned up without touching what an engine cached.
+    """
+    return data_dir() / "model_downloads"
+
+
 def ultron_models_dir() -> Path:
     """Where the Ultron general-language models (GGUF files) live.
 
@@ -514,6 +525,7 @@ __all__ = [
     "main_model_learning_dir",
     "model_manager_dir",
     "model_registry_dir",
+    "model_downloads_dir",
     "models_dir",
     "natasha_models_dir",
     "piper_models_dir",

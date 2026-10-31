@@ -44,6 +44,7 @@ from core.model_files import (
 )
 from core.model_log import (
     OP_DISCOVER,
+    OP_DOWNLOAD,
     OP_FAILURE,
     OP_INSPECT,
     OP_LOAD,
@@ -891,6 +892,294 @@ class ModelManager:
                 return str(getattr(model, "download_command", "") or "")
         return ""
 
+    # ------------------------------------------------------- downloading
+
+    def sources(self, *, local_roots: object = None, hub_client: Any = None) -> tuple[Any, ...]:
+        """The model sources this build supports, in a fixed order.
+
+        A source describes what a download *would* be; it never fetches anything.
+        """
+        from core.model_sources import default_sources
+
+        return default_sources(local_roots=local_roots, hub_client=hub_client)
+
+    def source(self, key: str, *, local_roots: object = None, hub_client: Any = None) -> Any:
+        """One source by key, or :class:`core.model_sources.UnknownSource`."""
+        from core.model_sources import source_for
+
+        return source_for(key, local_roots=local_roots, hub_client=hub_client)
+
+    def search_offers(
+        self,
+        query: str,
+        *,
+        source: str = "",
+        limit: int = 10,
+        local_roots: object = None,
+        hub_client: Any = None,
+    ) -> tuple[Any, ...]:
+        """Models matching ``query`` across the sources, best first.
+
+        A source that cannot answer here (no ``huggingface_hub``, no folder) is
+        skipped rather than failing the whole search, so one unavailable source
+        never hides the others. Nothing is downloaded.
+        """
+        sources = (
+            (self.source(source, local_roots=local_roots, hub_client=hub_client),)
+            if source
+            else self.sources(local_roots=local_roots, hub_client=hub_client)
+        )
+        found: list[Any] = []
+        for item in sources:
+            try:
+                ok, _ = item.available()
+                if not ok:
+                    continue
+                found.extend(item.search(query, limit=limit))
+            except Exception:  # a broken source must not blank the search
+                continue
+        return tuple(found[:limit])
+
+    def download(
+        self,
+        offer: Any,
+        *,
+        destination: Path | str | None = None,
+        approved: bool = False,
+        pinned_digests: object = None,
+        restart: bool = False,
+        register: bool = True,
+        should_cancel: Any = None,
+        on_progress: Any = None,
+        permissions: Any = None,
+        approvals: Any = None,
+        transport: Any = None,
+    ) -> tuple[Any, ModelEntry | None]:
+        """Fetch a model's files and register the result.
+
+        Returns ``(report, entry)``. ``entry`` is ``None`` whenever the download did
+        not complete -- a partial download is **never** registered as a model, which
+        is the audit's central rule made structural.
+
+        The download leaves the machine, so it passes the permission policy *and* a
+        human approval before a byte is fetched; ``approved=True`` is the CLI's
+        convenience that records that approval.
+        """
+        from core.model_download import (
+            DownloadError,
+            DownloadReport,
+            DownloadRequest,
+            ModelDownloader,
+            STATUS_COMPLETE,
+            STATUS_RESUMED,
+            parse_pinned_digests,
+        )
+
+        target = Path(destination) if destination is not None else _downloads_dir(self.root)
+        source_id = str(getattr(offer, "source_id", "") or "")
+        files = tuple(getattr(offer, "files", ()) or ())
+        if not files:
+            report = DownloadReport(
+                source_id=source_id,
+                destination=target,
+                detail="This offer names no file to download.",
+            )
+            self.log.append(
+                OP_FAILURE, display_name=str(getattr(offer, "display_name", "")),
+                ok=False, message=f"download: {report.detail}",
+            )
+            return report, None
+
+        try:
+            pinned = parse_pinned_digests(pinned_digests)
+        except DownloadError as error:
+            report = DownloadReport(
+                source_id=source_id, destination=target, detail=str(error)
+            )
+            self.log.append(OP_FAILURE, display_name=source_id, ok=False, message=str(error))
+            return report, None
+
+        request = DownloadRequest(
+            destination=target,
+            files=files,
+            source_id=source_id,
+            pinned_digests=pinned,
+            restart=restart,
+        )
+        downloader = ModelDownloader(
+            transport=transport, approved=approved,
+            permissions=permissions, approvals=approvals,
+        )
+        try:
+            report = downloader.download(
+                request, should_cancel=should_cancel, on_progress=on_progress
+            )
+        except DownloadError as error:
+            # A refusal (the gates, or an invalid request) is not a transfer
+            # outcome, so it is recorded and returned rather than raised.
+            report = DownloadReport(
+                source_id=source_id, destination=target, detail=str(error)
+            )
+            self.log.append(
+                OP_FAILURE, display_name=str(getattr(offer, "display_name", "")),
+                ok=False, message=f"download: {error}",
+            )
+            return report, None
+
+        self.log.append(
+            OP_DOWNLOAD,
+            display_name=str(getattr(offer, "display_name", "") or source_id),
+            ok=report.complete,
+            message=(
+                f"{report.status} {report.bytes_total} byte(s) in {report.seconds:.1f}s"
+                if report.status in (STATUS_COMPLETE, STATUS_RESUMED)
+                else f"{report.status}: {report.detail}"
+            ),
+        )
+
+        if not register or not report.complete:
+            return report, None
+
+        entry = self._register_downloaded(offer, report)
+        return report, entry
+
+    def _register_downloaded(self, offer: Any, report: Any) -> ModelEntry | None:
+        """Register the first promoted file of a completed download.
+
+        The record carries the provenance the audit asks for: the source key, the
+        revision, the license, the digest and how strong its check was, and the
+        fact that this program fetched it. A failure to register is recorded and
+        returns ``None`` rather than raising -- the download itself succeeded, and
+        its files stay on disk.
+        """
+        from core.model_download import FileResult
+        from core.model_registry import SOURCE_DOWNLOAD
+        from core.model_sources import DIGEST_NONE
+
+        promoted = next(
+            (item for item in report.files if isinstance(item, FileResult) and item.ok and item.path),
+            None,
+        )
+        if promoted is None or promoted.path is None:
+            return None
+        license_id = str(getattr(offer, "license", "") or "")
+        revision = str(getattr(offer, "revision", "") or "")
+        source_key = str(getattr(offer, "source_key", "") or "")
+        strength = promoted.digest_strength
+        integrity_note = {
+            DIGEST_NONE: "no expected digest was available; hashed locally only",
+        }.get(strength, f"integrity {strength}")
+        try:
+            return self.register(
+                promoted.path,
+                display_name=str(getattr(offer, "display_name", "") or promoted.filename),
+                source=SOURCE_DOWNLOAD,
+                identity=str(getattr(offer, "source_id", "") or str(promoted.path)),
+                model_format=str(getattr(offer, "model_format", "") or ""),
+                runtime=(getattr(offer, "runtimes", ()) or ("",))[0],
+                license=license_id,
+                version=revision,
+                digest=True,
+                notes=(
+                    f"Downloaded from the {source_key} source"
+                    + (f" at revision {revision}" if revision else "")
+                    + f". {integrity_note}."
+                ),
+                extra={
+                    "download_source": source_key,
+                    "download_revision": revision,
+                    "digest_strength": strength,
+                    "license_url": str(getattr(offer, "license_url", "") or ""),
+                    "source_url": str(getattr(offer, "source_url", "") or ""),
+                },
+            )
+        except (ModelFileError, RegistryError) as error:
+            self.log.append(
+                OP_FAILURE,
+                display_name=str(getattr(offer, "display_name", "")),
+                ok=False,
+                message=f"the download completed but could not be registered: {error}",
+            )
+            return None
+
+    def resumable_downloads(
+        self, *, destination: Path | str | None = None
+    ) -> tuple[Path, ...]:
+        """Partial files a later run could resume, in the download folder."""
+        from core.model_download import resumable_files
+
+        target = Path(destination) if destination is not None else _downloads_dir(self.root)
+        return resumable_files(target)
+
+    # -------------------------------------------------- resources & preflight
+
+    def resources(self, *, disk_path: Path | str | None = None) -> Any:
+        """This machine's own figures, each ``None`` when the platform cannot say."""
+        from core.model_resources import system_resources
+
+        return system_resources(disk_path=disk_path)
+
+    def memory_estimate(
+        self,
+        model_id: str,
+        *,
+        context_length: int | None = None,
+        gpu_layers: int = 0,
+        resources: Any = None,
+    ) -> Any:
+        """An **estimate** of a model's memory need, with its uncertainty stated."""
+        from core.model_preflight import estimate_memory
+
+        record = self.registry.get(model_id)
+        resolved = resources if resources is not None else self.resources()
+        return estimate_memory(
+            record,
+            context_length=context_length,
+            gpu_layers=gpu_layers,
+            gpu=getattr(resolved, "gpu", None),
+        )
+
+    def preflight(
+        self,
+        model_id: str,
+        *,
+        context_length: int | None = None,
+        gpu_layers: int | None = None,
+        resources: Any = None,
+        adapter: Any = None,
+    ) -> Any:
+        """Every check that should pass before a model is loaded, as data."""
+        from core.model_preflight import preflight
+
+        return preflight(
+            self, model_id,
+            context_length=context_length,
+            gpu_layers=gpu_layers,
+            resources=resources,
+            adapter=adapter,
+        )
+
+    # ------------------------------------------------------- processes
+
+    def processes(self, *, registry: Any = None) -> Any:
+        """The processes this program started, for lifecycle management.
+
+        A fresh :class:`core.model_process.ProcessRegistry` reads the durable
+        record, so a process orphaned by a crash is still known. The manager never
+        starts or stops a process on its own -- the adapters and the callers do,
+        through this registry, which is the one place a managed pid is signalled.
+        """
+        from core.model_process import ProcessRegistry
+
+        return registry if registry is not None else ProcessRegistry(self._process_root())
+
+    def _process_root(self) -> Path:
+        if self.root is not None:
+            return Path(self.root) / "model_processes"
+        from core.paths import data_dir
+
+        return data_dir() / "model_processes"
+
     def _fail(self, operation: str, record: ModelRecord, detail: str) -> OperationResult:
         """Record a failure and return it, so no caller has to catch."""
         self.log.append(
@@ -971,6 +1260,15 @@ class ModelManager:
     def log_tail(self, limit: int = 30) -> tuple[ModelEvent, ...]:
         """The most recent operations, newest first."""
         return self.log.tail(limit)
+
+
+def _downloads_dir(root: Path | str | None) -> Path:
+    """The folder a download lands in: the manager's own, or the data folder's."""
+    if root is not None:
+        return Path(root) / "model_downloads"
+    from core.paths import model_downloads_dir
+
+    return model_downloads_dir()
 
 
 def _clean(text: object) -> str:
