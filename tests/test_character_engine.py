@@ -261,8 +261,9 @@ def test_apply_character_voice_sets_voice_language_and_prosody() -> None:
             self.language = None
             self.prosody = None
 
-        def set_voice(self, voice):
-            self.voice = voice
+        def set_voice(self, key):
+            # Like the real TextReader: resolve the key to a Voice object.
+            self.voice = type("V", (), {"key": key})()
 
         def set_prosody(self, prosody):
             self.prosody = prosody
