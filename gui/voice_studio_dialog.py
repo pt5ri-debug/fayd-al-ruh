@@ -49,6 +49,7 @@ from tkinter import filedialog
 from tkinter import font as tkfont
 from typing import Any
 
+from core.answer_provenance import AnswerProvenance
 from core.reading import clip_is_silent
 
 from gui import rich_text
@@ -854,7 +855,27 @@ class VoiceStudioDialog:
         if error is not None:
             self._add_message("note", f"Could not read the document: {error}")
             return
-        self._add_message("note", report.summary())
+        self._add_message(
+            "note", report.summary(), provenance=self._reading_provenance(),
+        )
+
+    def _reading_provenance(self) -> str:
+        """Which speech engine read this, in which voice and mood.
+
+        The studio reads with one engine's own voice and mood, so the line names
+        the engine (the studio's own title), the chosen voice, and the mood in
+        force -- what a listener would otherwise have to remember from the sidebar.
+        """
+        voice = self.service.voice_label(self.service.voice_key())
+        mood = self.service.mood_label(self.service.mood_key())
+        label = f"{self.service.title}: {voice}"
+        if mood:
+            label = f"{label}, mood: {mood}"
+        return AnswerProvenance(
+            model_label=label + ".",
+            mouth="speech",
+            model_key=self.service.voice_key(),
+        ).describe()
 
     def _on_save_speech(self) -> None:
         if self.service.document is None:
@@ -965,7 +986,8 @@ class VoiceStudioDialog:
     # -- transcript -------------------------------------------------------
 
     def _add_message(
-        self, role: str, text: str, *, title: str = "", mono_body: bool = False
+        self, role: str, text: str, *, title: str = "", mono_body: bool = False,
+        provenance: str = "",
     ) -> tk.Text:
         theme = self.theme
         pad = self._column_pad()
@@ -1010,6 +1032,7 @@ class VoiceStudioDialog:
         footer = MessageFooter(
             row, text=strip_markdown(text), widget=widget, theme=theme,
             typography=self._type, on_toggle=self._toggle_footer_reading,
+            provenance=provenance,
         )
         self._footers.append(footer)
         self._scroll_to_bottom()

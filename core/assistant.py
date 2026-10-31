@@ -276,6 +276,20 @@ class GroundedAssistant:
         self.learned = learned
         self._learner: OntologyLearner | None = None
 
+    def describe(self) -> str:
+        """An honest one-line name of what answers: the model, or retrieval alone.
+
+        The grounded mouth is the project's *cited* one, so the line says which
+        model wrote the prose (when one is wired) and that the answer rests on the
+        project's own corpus. With no model it is retrieval only, and it says so
+        rather than naming a model that never ran -- the provenance line a window
+        prints must never claim a model that did not answer.
+        """
+        if self.model is None:
+            return "Jarvis: the project's own knowledge corpus (retrieval, no model)."
+        name = getattr(self.model, "model_name", "") or type(self.model).__name__
+        return f"Jarvis: {name} (grounded on the project's corpus, with citations)."
+
     def ask(
         self,
         question: str,

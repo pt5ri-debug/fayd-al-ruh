@@ -57,6 +57,37 @@ def strip_markdown(text: str) -> str:
     return text
 
 
+def add_provenance_label(
+    parent: tk.Misc,
+    provenance: str,
+    *,
+    theme: Any,
+    typography: Any,
+) -> tk.Label | None:
+    """Paint one dim "what answered / what it rested on" line, or nothing.
+
+    A message's provenance is two short lines (``core.answer_provenance``); this
+    renders them as a single small dim label above the message's controls, in the
+    window's own theme, so a window that does not go through the turn formatter
+    still states the model and the sources. An empty ``provenance`` adds no
+    widget, so a control or a tool run carries no line rather than a blank one.
+    """
+    if not provenance.strip():
+        return None
+    label = tk.Label(
+        parent,
+        text=provenance,
+        bg=theme.base,
+        fg=theme.text_dim,
+        font=typography.font("2xs"),
+        anchor="w",
+        justify="left",
+        wraplength=720,
+    )
+    label.pack(side="top", fill="x", anchor="w")
+    return label
+
+
 class MessageFooter:
     """A message's footer row: a Copy control and a Read aloud / Stop toggle.
 
@@ -66,6 +97,12 @@ class MessageFooter:
     reading control is clicked; the window starts or stops the reading and then
     calls :meth:`set_playing` to paint the right label. ``theme``/``typography``
     style the controls the way every other window does.
+
+    ``provenance`` is the optional "what answered this, and what it rested on"
+    line (``core.answer_provenance``). When given, it is painted as a small dim
+    line above the controls, so a window that does not render its answers through
+    the turn formatter still says which model produced the message and which
+    sources it used -- the same fact every chat window shows, in one place.
 
     The two controls are ``tk.Label``s bound to ``<Button-1>`` with a hover tint,
     exactly like the main window's, so a footer reads the same in every window.
@@ -82,6 +119,7 @@ class MessageFooter:
         on_toggle: Callable[[MessageFooter], None],
         side: Side = "left",
         copy_side: Side | None = None,
+        provenance: str = "",
     ) -> None:
         self.theme = theme
         self.typography = typography
@@ -92,6 +130,10 @@ class MessageFooter:
 
         self.frame = tk.Frame(parent, bg=theme.base)
         self.frame.pack(fill="x", pady=(2, 0))
+
+        self.provenance = add_provenance_label(
+            self.frame, provenance, theme=theme, typography=typography
+        )
 
         self.copy = tk.Label(
             self.frame, text=COPY_LABEL, bg=theme.base, fg=theme.text_dim,
@@ -166,4 +208,11 @@ def _suppress():
     return contextlib.suppress(tk.TclError)
 
 
-__all__ = ["COPY_LABEL", "READ_LABEL", "STOP_LABEL", "MessageFooter", "strip_markdown"]
+__all__ = [
+    "COPY_LABEL",
+    "READ_LABEL",
+    "STOP_LABEL",
+    "MessageFooter",
+    "add_provenance_label",
+    "strip_markdown",
+]

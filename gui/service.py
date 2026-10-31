@@ -70,6 +70,14 @@ class ChatReply:
     hint: str = ""
     is_control: bool = False
     steps: list[dict[str, Any]] = field(default_factory=list)
+    answer_model: str = ""
+    """The readable name of the model that produced this answer, for the window's
+    provenance line (``core.answer_provenance``). Empty for a control or a tool
+    run, so a note carries no model line rather than a guessed one."""
+    provenance: str = ""
+    """The whole provenance block (the answering model, and the sources when the
+    turn renderer did not already draw them). Rendered under the answer so a
+    reader always knows what answered and what it rested on."""
 
 
 @dataclass(frozen=True)
@@ -1324,6 +1332,8 @@ class ChatService:
             mode=self.source,
             hint=hint,
             steps=steps,
+            answer_model=turn.answer_model,
+            provenance=turn.provenance,
         )
 
 
