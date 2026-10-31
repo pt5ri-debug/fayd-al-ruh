@@ -192,6 +192,67 @@ def _cmd_forget_facts(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_seed(args: argparse.Namespace) -> int:
+    """Seed a character (or every character) from the project's own knowledge."""
+    service = _service()
+    if args.all:
+        report = service.seed_all(limit=args.limit, conversations=args.conversations)
+        outcomes = report.outcomes
+    else:
+        outcomes = (
+            service.seed(args.character, limit=args.limit, conversations=args.conversations),
+        )
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "key": o.key,
+                        "name": o.name,
+                        "added": o.added,
+                        "already_known": o.already_known,
+                        "offered": o.offered,
+                        "domain": o.domain,
+                    }
+                    for o in outcomes
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.all:
+        print(report.describe())
+    else:
+        print(outcomes[0].describe())
+    return 0
+
+
+def _cmd_fill(args: argparse.Namespace) -> int:
+    """Show how full each character's memory is (facts, exchanges, ratio)."""
+    service = _service()
+    keys = service.character_keys() if args.all else (args.character,)
+    rows = []
+    for key in keys:
+        facts, exchanges, ratio = service.memory_fill(key)
+        rows.append((key, facts, exchanges, ratio))
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {"key": k, "facts": f, "exchanges": e, "fill": r}
+                    for k, f, e, r in rows
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    for key, facts, exchanges, ratio in rows:
+        print(f"{key}: {facts} fact(s), {exchanges} exchange(s) — {round(ratio * 100)}% full")
+    return 0
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     service = _service()
     record = service.verify(args.character, args.record_id, note=args.note)
@@ -602,6 +663,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_forget.add_argument("character")
     p_forget.add_argument("--confirm", action="store_true")
     p_forget.set_defaults(func=_cmd_forget_facts)
+
+    p_seed = sub.add_parser(
+        "seed", help="teach a character the project's own knowledge (authored facts only)"
+    )
+    p_seed.add_argument("character", nargs="?", default="")
+    p_seed.add_argument("--all", action="store_true", help="seed every character")
+    p_seed.add_argument("--limit", type=int, default=24, help="how many facts to offer")
+    p_seed.add_argument(
+        "--conversations",
+        action="store_true",
+        help="also seed exchanges from the project's own cited answers",
+    )
+    p_seed.add_argument("--json", action="store_true")
+    p_seed.set_defaults(func=_cmd_seed)
+
+    p_fill = sub.add_parser("fill", help="how full each character's memory is")
+    p_fill.add_argument("character", nargs="?", default="")
+    p_fill.add_argument("--all", action="store_true")
+    p_fill.add_argument("--json", action="store_true")
+    p_fill.set_defaults(func=_cmd_fill)
 
     p_verify = sub.add_parser("verify", help="verify one record (supervised)")
     p_verify.add_argument("character")

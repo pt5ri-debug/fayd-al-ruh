@@ -516,6 +516,17 @@ class CharacterManagerDialog:
             font=self._type.font("2xs"), anchor="w", justify="left",
         ).pack(anchor="w", pady=(0, 4))
 
+        # A fill indicator: how much of the character's own memory is in use. It is
+        # read from the character's real facts and exchanges, so it never overstates
+        # what it holds.
+        facts, exchanges, ratio = self.service.memory_fill(self._current)
+        tk.Label(
+            body,
+            text=f"Memory fill: {round(ratio * 100)}% ({facts} fact(s), {exchanges} exchange(s))",
+            bg=self.theme.surface, fg=self.theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w",
+        ).pack(anchor="w", pady=(0, 4))
+
         search_row = tk.Frame(body, bg=self.theme.surface)
         search_row.pack(fill="x", pady=2)
         self._search_var = tk.StringVar(value="")
@@ -549,6 +560,9 @@ class CharacterManagerDialog:
         self._button(remember_row, "Forget all", self._on_forget_facts, small=True).pack(
             side="left", padx=(6, 0)
         )
+        self._button(
+            remember_row, "Seed knowledge", self._on_seed, small=True
+        ).pack(side="left", padx=(6, 0))
         self._show_facts(self.service.facts(self._current))
 
         self._records_host = tk.Frame(body, bg=self.theme.surface)
@@ -600,6 +614,19 @@ class CharacterManagerDialog:
         self.service.forget_facts(self._current, confirm=True)
         self._show_facts(self.service.facts(self._current))
         self._status.configure(text=f"{self._current}'s memory was cleared.")
+
+    def _on_seed(self) -> None:
+        """Seed the character's memory from the project's own authored knowledge."""
+        try:
+            outcome = self.service.seed(self._current, limit=40, conversations=True)
+        except (ValueError, OSError) as error:
+            self._status.configure(text=f"Could not seed: {error}")
+            return
+        self._show_facts(self.service.facts(self._current))
+        added = getattr(outcome, "added", 0)
+        self._status.configure(
+            text=f"{self._current}: +{added} item(s) seeded from the project's knowledge."
+        )
 
     def _show_records(self, records: Any) -> None:
         for child in self._records_host.winfo_children():
