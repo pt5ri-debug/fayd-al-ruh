@@ -5380,3 +5380,48 @@ regression monitor each can refuse a change.
   `tests/test_model_manager_window.py` pins the search box, the state filter, the
   dashboard text, and the diagnostics button, with the stub service extended to
   the same interface.
+
+- Phase 58 — **every answer names the model that produced it and the sources it
+  used**. Every window in the project showed an answer, but none said *which* model
+  produced it or *which* sources it rested on: the per-mouth windows knew their own
+  model, the main window knew its own mouth, and each studio knew its own engine --
+  so a reader had to remember which window they were in to know what they were
+  reading. `core/answer_provenance.py` (new) is the one place that turns those
+  facts into a readable, bilingual line. `describe_answer_model(assistant, *,
+  mouth=, model_key=)` reads the answering assistant's own ``describe()`` first --
+  every mouth already has one, so nothing is duplicated -- and falls back to the
+  shared `core.language_models` catalog for a mouth that cannot describe itself;
+  it never invents a name (an unknown mouth with no description yields the honest
+  ``UNKNOWN_MODEL``, "not named by this surface"). `AnswerProvenance` is the frozen
+  record of one answer (the model, the mouth, the citations, ``used_web``/
+  ``learned``, the language) and `model_line()`/`sources_line()`/``lines()``/
+  ``describe()`` render it. **Honest by construction**: a model-backed answer with
+  no citations says its answer is its own words (never an empty ``Sources:``
+  heading), a retrieval answer that fell back to the extractive path says it rests
+  on the project's own corpus rather than naming a model that never ran, and an
+  Arabic question gets Arabic labels (`detect_language`, the project's own script
+  check). Two `describe()` methods were added so the fact exists to read:
+  `core.assistant.GroundedAssistant.describe` (the model when one wrote the prose,
+  else "the project's own knowledge corpus (retrieval, no model)") and
+  `ai.mind.MindAssistant.describe` (the trained checkpoint's own
+  ``fayd-local-llm:<stem>`` name). Wiring: `ai.chat.ModelSwitcher.__init__` attaches
+  itself to the session (`mode.switcher = self`), `core.jarvis.JarvisMode._provenance`
+  builds the block from the switcher's mouth and the answer's citations and carries
+  it on `JarvisTurn.answer_model`/`.provenance`, and `ai.chat.format_turn`/
+  `turn_payload` render it -- so the **main chat** and every **per-mouth window**
+  get it for free, because they render turns through `format_turn`.
+  `gui.service.ChatReply` gained `answer_model`/`provenance` and `_to_reply` fills
+  them; `gui.message_footer.add_provenance_label(parent, provenance, *, theme,
+  typography)` paints one dim label above a message's controls for the four windows
+  that do **not** go through the turn formatter -- Doc's Studio
+  (`gui/docs_dialog.py`, naming its local vision model and the pages read), Code
+  Studio (`gui/code_studio_dialog.py`, naming the coding model), Presentation
+  Studio (`gui/presentation_dialog.py`, naming its own Qwen3 model or the grounded
+  assistant), and the voice studio (`gui/voice_studio_dialog.py`, naming the voice
+  and mood). The sources line is dropped where the turn renderer already drew its
+  own ``Sources:`` block (`describe(include_sources=False)`), so the citations are
+  never listed twice. Nothing here imports Tk, loads a model, or reaches the
+  network -- it only *names* what already happened.
+  `tests/test_answer_provenance.py` (new) pins the record, the bilingual labels,
+  the honest fallbacks (no description, no citations, retrieval-only), the
+  turn/service wiring, and the footer label; the two Tk tests skip with no display.
