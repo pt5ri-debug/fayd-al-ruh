@@ -27,7 +27,7 @@ fayd-al-ruh = "cli.__main__:main"
 # discovery is scoped explicitly: without this, setuptools' flat-layout guessing
 # either refuses the build ("multiple top-level packages") or sweeps in the
 # tests. `scripts/` has no __init__.py and `main.py` is a demo module.
-include = ["ai*", "cli*", "companion*", "core*", "evaluation*", "gui*", "hakeem*", "ingest*", "ml*", "storage*"]
+include = ["ai*", "cli*", "cognition*", "companion*", "core*", "evaluation*", "gui*", "hakeem*", "ingest*", "ml*", "storage*"]
 exclude = ["tests*", "data*", "docs*", "knowledge*"]
 
 [tool.setuptools]
@@ -230,7 +230,7 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.12"
-files = ["core", "storage", "ai", "evaluation", "ml", "cli", "gui", "scripts", "tests", "ingest", "main.py"]
+files = ["core", "storage", "ai", "evaluation", "ml", "cli", "gui", "scripts", "tests", "ingest", "cognition", "main.py"]
 warn_unused_configs = true
 warn_redundant_casts = true
 no_implicit_optional = true

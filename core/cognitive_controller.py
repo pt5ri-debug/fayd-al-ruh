@@ -843,3 +843,47 @@ class CognitiveController:
             report=report,
             context_id=context.id if context is not None else None,
         )
+
+    # -- Autonomous cognitive layer (cognition/) ---------------------------
+    # The proactive mind, the cognitive learning system, and the staged trainer
+    # are built lazily and share this controller's own ontology and causal graph,
+    # so the autonomous layer reasons over the *same* knowledge the answer path
+    # does -- never a second graph. Nothing here is constructed until it is used,
+    # so a caller that never touches it pays nothing.
+
+    def proactive_mind(self):
+        """The Proactive Mind over this controller's ontology (built once)."""
+        mind = getattr(self, "_proactive_mind", None)
+        if mind is None:
+            from cognition.proactive_mind import ProactiveMind, load_scheduler_state
+            from cognition.scheduler import ThoughtScheduler
+
+            mind = ProactiveMind(
+                self.ontology,
+                causal_graph=self.causal_graph,
+                scheduler=ThoughtScheduler(state=load_scheduler_state()),
+            )
+            self._proactive_mind = mind
+        return mind
+
+    def cognitive_learning(self):
+        """The six-memory cognitive learning system (built once)."""
+        learning = getattr(self, "_cognitive_learning", None)
+        if learning is None:
+            from cognition.learning_system import CognitiveLearningSystem
+
+            learning = CognitiveLearningSystem()
+            self._cognitive_learning = learning
+        return learning
+
+    def think(self, *, goals: tuple[Goal, ...] = (), max_ideas: int | None = None):
+        """Run one proactive thinking cycle and return its record."""
+        return self.proactive_mind().cycle(goals=goals, max_ideas=max_ideas)
+
+    def pending_ideas(self, *, limit: int = 20):
+        """The ideas the mind has produced that are not yet facts."""
+        return self.proactive_mind().pending_ideas(limit=limit)
+
+    def cognitive_status(self) -> dict:
+        """A readable snapshot of the autonomous layer (for the UI and CLI)."""
+        return self.proactive_mind().status()

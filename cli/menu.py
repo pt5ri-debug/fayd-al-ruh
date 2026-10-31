@@ -353,6 +353,11 @@ def run_presentation(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.presentation", argv)
 
 
+def run_cognition(argv: Sequence[str] = ()) -> int:
+    """The autonomous cognitive system: proactive mind, learning, and staged training."""
+    return _run_module("cli.cognition", argv)
+
+
 def run_image(argv: Sequence[str] = ()) -> int:
     """Generate an image from a text prompt (optional, dependency-free backend)."""
     return _run_module("cli.image", argv)
@@ -643,6 +648,12 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         run_release,
         ("--llm-sessions",),
     ),
+    ("Autonomous mind: run one thinking cycle now", run_cognition, ("think",)),
+    ("Autonomous mind: the ideas awaiting review", run_cognition, ("ideas",)),
+    ("Autonomous mind: the ten cognitive indicators", run_cognition, ("evaluate",)),
+    ("Autonomous mind: train the model in stages (rollback-safe)", run_cognition, ("train", "--stage", "quick", "--approve")),
+    ("Autonomous mind: gradual training (advance one stage at a time)", run_cognition, ("train", "--gradual", "--up-to", "quick", "--approve")),
+    ("Autonomous mind: how far gradual training has come", run_cognition, ("progression",)),
     ("Run the evaluation suite", run_evaluation, ()),
     ("Self-check the install", run_selfcheck, ()),
     ("Search for program updates (GitHub)", run_update, ("--apply",)),
@@ -752,6 +763,7 @@ __all__ = [
     "run_choice",
     "run_cloud",
     "run_cloud_chat",
+    "run_cognition",
     "run_curriculum",
     "run_demo",
     "run_deps",
