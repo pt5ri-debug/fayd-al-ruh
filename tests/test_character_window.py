@@ -178,6 +178,33 @@ def test_the_learning_management_section_shows_and_searches_records(data_root) -
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_memory_block_teaches_and_forgets_a_fact(data_root) -> None:
+    """The window's memory block writes a fact into the chosen character."""
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        service = _manager(data_root)
+        dialog = _dialog(root, service)
+        dialog._select("ultron")
+        root.update()
+        dialog._fact_var.set("the field is in the north")
+        dialog._on_remember()
+        root.update()
+        assert service.facts("ultron") == ("the field is in the north",)
+        # A blank fact is refused rather than stored.
+        dialog._fact_var.set("   ")
+        dialog._on_remember()
+        assert service.facts("ultron") == ("the field is in the north",)
+        # Forget all clears it.
+        dialog._on_forget_facts()
+        assert service.facts("ultron") == ()
+    finally:
+        dialog._close()
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_the_main_window_characters_action_opens_the_window(tmp_path) -> None:
     """The sidebar's Characters entry routes to the management window."""
     import tkinter as tk

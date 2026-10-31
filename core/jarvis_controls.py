@@ -36,6 +36,7 @@ class ControlIntent(str, Enum):
     WEB = "web"
     CONFIRM = "confirm"
     CORRECT = "correct"
+    REMEMBER = "remember"
     WHY = "why"
     HELP = "help"
 
@@ -92,6 +93,11 @@ _PHRASES: dict[ControlIntent, tuple[str, ...]] = {
         "help", "commands", "what can you do", "what can you do?", "list commands",
         "مساعدة", "ساعدني", "الأوامر", "الاوامر", "ماذا تستطيع",
     ),
+    ControlIntent.REMEMBER: (
+        "remember that", "remember", "keep in mind that", "keep in mind",
+        "note that", "make a note that", "bear in mind that",
+        "تذكر أن", "تذكر ان", "تذكر", "خُذ في الاعتبار", "خذ في الاعتبار",
+    ),
 }
 
 # Leading fillers are dropped before matching, so "please repeat" and
@@ -119,6 +125,7 @@ class JarvisControl:
     phrase: str
     utterance: str
     correction: str = ""
+    remembered: str = ""
 
 
 class JarvisControls:
@@ -142,6 +149,14 @@ class JarvisControls:
         for intent, phrase in self._phrases:
             if stripped == phrase:
                 return JarvisControl(intent=intent, phrase=phrase, utterance=utterance)
+        remembered = _extract_remembered(utterance)
+        if remembered:
+            return JarvisControl(
+                intent=ControlIntent.REMEMBER,
+                phrase="remember",
+                utterance=utterance,
+                remembered=remembered,
+            )
         correction = _extract_correction(stripped)
         if correction:
             return JarvisControl(
@@ -151,6 +166,42 @@ class JarvisControls:
                 correction=correction,
             )
         return None
+
+
+#: The prefixes that introduce a fact to remember. Only explicit, multi-word cues
+#: are listed: a bare "remember" stays a *control* (it reports how to use it) rather
+#: than being read as a prefix, so "remember when we discussed porosity?" is not
+#: mistaken for a fact to store.
+_REMEMBER_PREFIXES = (
+    "remember that",
+    "keep in mind that",
+    "keep in mind",
+    "note that",
+    "make a note that",
+    "bear in mind that",
+    "تذكر أن",
+    "تذكر ان",
+    "خُذ في الاعتبار",
+    "خذ في الاعتبار",
+)
+
+
+def _extract_remembered(utterance: str) -> str:
+    """Return the fact an utterance asks to remember, in the user's own words.
+
+    The remainder is taken from the **original** utterance (not the normalised
+    form), so the stored fact keeps the user's own wording, capitalisation, and
+    punctuation. Only an explicit cue matches, so an ordinary question is never
+    read as a fact to store.
+    """
+    text = utterance.strip()
+    lowered = text.casefold()
+    for prefix in _REMEMBER_PREFIXES:
+        if lowered.startswith(prefix.casefold()):
+            remainder = text[len(prefix):].lstrip(" \t,،:;-–—")
+            if remainder.strip():
+                return remainder.strip()
+    return ""
 
 
 def _extract_correction(normalized: str) -> str:

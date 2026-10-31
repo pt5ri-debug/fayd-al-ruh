@@ -38,7 +38,8 @@ HELP_TEXT = (
     "'new conversation' to start over, "
     "'save' to persist this session, 'sessions' to list saved ones, 'web on' or "
     "'web off' to toggle internet lookups, 'that's right' to confirm my last "
-    "answer, 'that's wrong, it's ...' to correct it, or 'help' for this list. "
+    "answer, 'that's wrong, it's ...' to correct it, 'remember that ...' to teach "
+    "me a lasting fact, or 'help' for this list. "
     "Anything else, ask me a question or give me a command."
 )
 
@@ -50,7 +51,8 @@ TEXT_HELP_TEXT = (
     "last answer again, 'why' to show how I reached it, 'web on' or 'web off' to "
     "toggle internet lookups, "
     "'that's right' to confirm my last answer, 'that's wrong, it's ...' to correct "
-    "it, or 'quit' to leave. Anything else, ask me a question or give me a command."
+    "it, 'remember that ...' to teach me a lasting fact, or 'quit' to leave. "
+    "Anything else, ask me a question or give me a command."
 )
 
 
@@ -533,6 +535,9 @@ class JarvisMode:
         if intent is ControlIntent.CORRECT:
             response = self._handle_feedback(control.utterance, confirmed=False, correction=control.correction)
             return self._control_turn(utterance, intent, response, self._speak(response, speak))
+        if intent is ControlIntent.REMEMBER:
+            response = self._handle_remember(control.remembered)
+            return self._control_turn(utterance, intent, response, self._speak(response, speak))
         if intent is ControlIntent.WHY:
             if not self._last_reasoning:
                 response = "There is no recent answer to explain yet."
@@ -588,6 +593,29 @@ class JarvisMode:
                 f"statement ({outcome.reason})."
             )
         return "Thank you -- I recorded your feedback."
+
+    def _handle_remember(self, fact: str) -> str:
+        """Teach the answering character one durable fact, and say so honestly.
+
+        The fact is written through the answering assistant's own ``remember_fact``
+        (the character wrapper supplies it, and re-renders its standing instruction
+        so the next reply can use the fact). An assistant without that method -- a
+        plain grounded assistant in a scripted session -- is told so plainly rather
+        than pretending the fact was stored.
+        """
+        text = (fact or "").strip()
+        if not text:
+            return "Tell me what to remember, like 'remember that the field is in the north.'"
+        remember = getattr(self.assistant, "remember_fact", None)
+        if remember is None:
+            return "This session's assistant has no memory to store that in."
+        try:
+            stored = bool(remember(text))
+        except (ValueError, OSError) as error:
+            return f"Could not remember that: {error}"
+        if stored:
+            return f"Remembered: {text}"
+        return "I already had that."
 
     def _handle_web_control(self, control: JarvisControl) -> str:
         """Turn the assistant's internet lookups on or off, honestly.

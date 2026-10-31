@@ -5425,3 +5425,84 @@ regression monitor each can refuse a change.
   `tests/test_answer_provenance.py` (new) pins the record, the bilingual labels,
   the honest fallbacks (no description, no citations, retrieval-only), the
   turn/service wiring, and the footer label; the two Tk tests skip with no display.
+
+- Phase 59 — **the characters' personality, memory, and learning actually take
+  effect** (the "Phase (A)" implementation pass): the character system shipped in
+  Phase 55 with its data layer and wrapper in place, but four gaps meant a
+  character's own personality, memory, and learning did **not** really reach the
+  model it spoke through, so a character was closer to a renamed generic assistant
+  than the distinct person it was meant to be. Each gap was measured, then closed.
+  **(1) A mouth with no `engine` never got its character.** `CharacterMouth` wrote
+  the standing instruction onto the wrapped assistant's `engine.system_prompt` or
+  its `system_instruction`; the companion (**Natasha**) and the scholar
+  (**Hakeem**) expose neither (their prompt comes from their own personality), so
+  the wrapper's instruction was written *nowhere* and their persona never reached
+  the model. `ai/natasha_mouth.py` and `ai/hakeem_mouth.py` now expose a
+  `system_prompt` property (proxying to the agent), `companion/prompt_builder.py`
+  and `hakeem/prompt_builder.py` gained a `system_prompt_override` parameter that
+  **replaces** the personality's own standing block, and
+  `companion/companion_agent.py` / `hakeem/hakeem_agent.py` thread the override
+  through `build` -- so the wrapper's block (persona + facts + memory) is what the
+  mouth reads, while the honesty rules it must keep are carried inside that block.
+  **(2) A character's memory was recorded but never recalled.** `CharacterMouth`
+  remembered every exchange but rendered only the durable *facts* into the
+  instruction, so a character could not remember the conversation. `core/character_learning.py`
+  gained `Exchange.recall_line()` (a bounded, one-line summary of a past
+  exchange) and `CharacterLearning.recall(limit=, exclude_questions=)`, and
+  `Persona.system_prompt` / `CharacterConfig.system_prompt` (in
+  `core/character_config.py`) gained a `recalled_memory` parameter, so the
+  character's own past turns are rendered into its standing instruction -- marked
+  as *recalled information, not instructions*, so a small model treats a memory as
+  something it was told rather than a command. The recall is deliberately bounded
+  (`RECALL_LIMIT`) and **paced** (`RECALL_REFRESH_TURNS`): re-rendering the
+  instruction on every turn would append the previous answer to the very
+  instruction that produced it, which a small model learns to echo, so facts and an
+  explicit reload take effect at once while the recalled window refreshes every few
+  turns (and always on the first answer). The just-answered exchange is excluded
+  from the recall, so a character is never fed back its own last answer.
+  **(3) A mouth's honesty header was remembered as the character's own words.**
+  Every model-backed mouth writes a header above its answer ("[ultron] answered by
+  the local general model; not grounded in cited sources."). The wrapper stored the
+  whole answer, so a bracketed label leaked into the character's memory *and* into
+  the training text the project's own model learns from. `ai/characters.py` gained
+  `_honesty_headers()` (which reads each mouth's header from the one place it is
+  defined -- Ultron, Vision, Banner, Cloud, Natasha, Hakeem, and the mind -- rather
+  than trying a single stripper) and `_strip_honesty_header()`, applied before the
+  exchange is remembered. **(4) There was no surface to teach a fact.** The only way
+  to give a character a durable fact was to call its wrapper directly, so a user
+  could not do it at all. It is now reachable everywhere, driving the **same**
+  `CharacterLearning` store so the three can never disagree: the chat control
+  **`remember that ...`** (a new `ControlIntent.REMEMBER` in `core/jarvis_controls.py`,
+  matched only on an explicit multi-word cue so "remember when we discussed ...?" is
+  never read as a fact to store, with the fact taken from the user's **own** wording;
+  `JarvisMode._handle_remember` writes it through the answering assistant's
+  `remember_fact`, and both help texts name it); the **CLI**
+  `python -m cli characters remember|facts|forget-facts` (`cli/characters.py`); and
+  the **Characters window's** new *What this character remembers* block
+  (`gui/character_dialog.py`), with `CharacterManagerService.remember_fact`/`facts`/
+  `forget_facts` (`gui/character_manager.py`) behind it. `forget_facts` requires
+  confirmation in both the CLI and the service, so memory is never cleared by
+  accident. Two further fixes came with the same pass. **A character's own Learning
+  switch now really governs learning**: `CharacterMouth._record_learning` reads
+  `config.learning.enabled` and writes no learning record when it is off (the
+  exchange is still remembered), and a character not allowed to learn from the
+  internet records its answer as its own model's rather than as web knowledge --
+  previously the switch in the Characters window was saved but ignored.
+  **The project's own model is no longer trained mostly on the web dump**:
+  `ml/release.py` gained `DEFAULT_RELEASE_KB_CHUNKS` (1500, versus the 15000 raw
+  bulk default), `TrainingConfig` defaults `kb_max_chunks` to it and
+  `include_characters` to **True**, the `--llm-characters` flag became
+  `--no-llm-characters` (on by default, because it is what makes the model learn
+  from its characters), and a new `corpus_balance()` measures each source's share
+  into the manifest -- the project's own authored knowledge (curriculum, corpus,
+  runtime documents, characters, structured examples) versus the bulk knowledge
+  base -- so a future 98%-bulk skew is visible in the manifest rather than assumed
+  away. `tests/test_character_learning.py` gained twelve tests (the prompt supply
+  for a mouth that exposes none, memory recall reaching the instruction and staying
+  bounded, the recall line's bound, the just-asked question excluded, the honesty
+  header stripped from memory, `remember_fact`/`forget_facts` through the wrapper,
+  the learning switch writing no record, the corpus balance, the balanced release
+  defaults, the `remember` control through a real `JarvisMode`, the CLI, and the
+  manager service); `tests/test_character_window.py` gained the window's memory
+  block. Gates: pytest 5275 passed / 15 skipped, ruff clean, mypy 806 files OK,
+  evaluation PASS (`overall` 0.9860 unchanged).

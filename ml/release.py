@@ -71,6 +71,17 @@ DEFAULT_LLM_STEPS = 4000
 # The relevance-filtered bulk sample a release trains its language model on.
 DEFAULT_KB_CHUNKS = 15000
 
+#: The balanced knowledge-base sample a *release* trains on.
+#:
+#: The bulk knowledge base is a web-wide corpus (~112k sentences) and the
+#: project's own authored knowledge is a few thousand; left at the raw ratio the
+#: bulk text is 98% of the training corpus and the language model becomes a general
+#: web model rather than the project's own, so its own reasoning, character, and
+#: petroleum frame are drowned out. A release therefore caps the bulk sample at a
+#: size comparable to the authored knowledge (a *sample*, not the whole dump) so
+#: the trained model stays the project's. ``--kb-max-chunks`` still overrides it.
+DEFAULT_RELEASE_KB_CHUNKS = 1500
+
 Manifest = dict[str, Any]
 
 
@@ -88,11 +99,11 @@ class TrainingConfig:
     llm_preset: str = "release-1"
     tokenizer_kind: str = "byte"
     tokenizer_vocab_size: int = 1024
-    kb_max_chunks: int = DEFAULT_KB_CHUNKS
+    kb_max_chunks: int = DEFAULT_RELEASE_KB_CHUNKS
     kb_repeats: int = 1
     include_runtime: bool = True
     include_sessions: bool = False
-    include_characters: bool = False
+    include_characters: bool = True
     include_procedural: bool = True
     max_procedural: int | None = None
     measure_perplexity: bool = False
@@ -146,6 +157,36 @@ def _count_by(documents: list) -> dict[str, int]:
     return counts
 
 
+def corpus_balance(counts: Manifest) -> Manifest:
+    """The share of the training corpus each *source* contributes.
+
+    A language model trained on this project is only the project's if its own
+    authored knowledge (the curriculum, the petroleum corpus, the runtime
+    documents, the characters) is a real share of the text rather than a rounding
+    error beside the bulk knowledge base. This reports each source's share so the
+    skew is *measured* -- and so a future change that re-introduces a 98% bulk share
+    is visible in the manifest rather than assumed away.
+    """
+    owned = (
+        int(counts.get("curriculum_sentences", 0))
+        + int(counts.get("corpus_sentences", 0))
+        + int(counts.get("repository_sentences", 0))
+        + int(counts.get("session_sentences", 0))
+        + int(counts.get("character_learning_sentences", 0))
+        + int(counts.get("structured_examples", 0))
+    )
+    bulk = int(counts.get("knowledge_base_sentences", 0))
+    total = owned + bulk
+    if total <= 0:
+        return {"owned_sentences": 0, "bulk_sentences": 0, "owned_share": 0.0, "bulk_share": 0.0}
+    return {
+        "owned_sentences": owned,
+        "bulk_sentences": bulk,
+        "owned_share": round(owned / total, 6),
+        "bulk_share": round(bulk / total, 6),
+    }
+
+
 def corpus_summary(config: TrainingConfig) -> Manifest:
     """The language-model training text, counted from the generator."""
     text = build_corpus(
@@ -160,7 +201,7 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
     sample = knowledge_sample(
         kb_max_chunks=config.kb_max_chunks, include_runtime=config.include_runtime
     )
-    return {
+    counts: Manifest = {
         "curriculum_sentences": len(curriculum_sentences()),
         "corpus_sentences": len(corpus_sentences()),
         "repository_sentences": len(repository_sentences(include_runtime=config.include_runtime)),
@@ -182,6 +223,8 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
         "tokenizer_vocab_size": config.tokenizer_vocab_size,
         "document_counts": sample.counts,
     }
+    counts["balance"] = corpus_balance(counts)
+    return counts
 
 
 def _base_training(config: TrainingConfig, save_dir: Path, *, verbose: bool = False) -> Manifest:
@@ -500,8 +543,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--kb-max-chunks",
         type=int,
-        default=DEFAULT_KB_CHUNKS,
-        help="relevance-filtered knowledge-base sample size for language training",
+        default=DEFAULT_RELEASE_KB_CHUNKS,
+        help="relevance-filtered knowledge-base sample size for language training "
+        "(default is balanced against the project's own authored knowledge so the "
+        "model stays the project's rather than becoming a general web model)",
     )
     parser.add_argument("--kb-repeats", type=int, default=1)
     parser.add_argument(
@@ -518,10 +563,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--llm-characters",
-        action="store_true",
-        help="also train the language model on the seven characters' own learning "
-        "(their durable facts and the exchanges they took part in); off by default, "
-        "because a character's learning is personal",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="train the language model on the seven characters' own learning (their "
+        "durable facts and the exchanges they took part in); on by default, because "
+        "it is what makes the project's own model learn from its characters -- pass "
+        "--no-llm-characters to exclude it",
     )
     parser.add_argument(
         "--no-procedural",

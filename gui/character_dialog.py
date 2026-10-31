@@ -526,6 +526,31 @@ class CharacterManagerDialog:
         ).pack(side="left", fill="x", expand=True, ipady=3)
         self._button(search_row, "Search", self._on_search, small=True).pack(side="left", padx=(6, 0))
 
+        # What this character *remembers* (the durable facts it carries into its
+        # next answer) -- distinct from the learning records below, which are the
+        # audit trail of what it answered. This is where the user teaches a fact.
+        tk.Label(
+            body, text="What this character remembers", bg=self.theme.surface,
+            fg=self.theme.text_secondary, font=self._type.font("2xs"), anchor="w",
+        ).pack(anchor="w", pady=(2, 0))
+        self._facts_host = tk.Frame(body, bg=self.theme.surface)
+        self._facts_host.pack(fill="x", pady=(0, 2))
+        remember_row = tk.Frame(body, bg=self.theme.surface)
+        remember_row.pack(fill="x", pady=2)
+        self._fact_var = tk.StringVar(value="")
+        tk.Entry(
+            remember_row, textvariable=self._fact_var, bg=self.theme.base,
+            fg=self.theme.foreground, insertbackground=self.theme.foreground, relief="flat",
+            highlightthickness=0, font=self._type.font("body"),
+        ).pack(side="left", fill="x", expand=True, ipady=3)
+        self._button(remember_row, "Remember", self._on_remember, small=True).pack(
+            side="left", padx=(6, 0)
+        )
+        self._button(remember_row, "Forget all", self._on_forget_facts, small=True).pack(
+            side="left", padx=(6, 0)
+        )
+        self._show_facts(self.service.facts(self._current))
+
         self._records_host = tk.Frame(body, bg=self.theme.surface)
         self._records_host.pack(fill="x", pady=(4, 4))
         self._show_records(self.service.records(self._current, limit=20))
@@ -536,6 +561,45 @@ class CharacterManagerDialog:
         self._button(actions, "Reset learning data…", self._on_reset_learning, small=True).pack(
             side="left", padx=(6, 0)
         )
+
+    def _show_facts(self, facts: Any) -> None:
+        for child in self._facts_host.winfo_children():
+            child.destroy()
+        if not facts:
+            tk.Label(
+                self._facts_host, text="Nothing yet — teach it a fact below.", bg=self.theme.surface,
+                fg=self.theme.text_secondary, font=self._type.font("2xs"), anchor="w",
+            ).pack(anchor="w")
+            return
+        for fact in facts:
+            tk.Label(
+                self._facts_host, text=f"- {fact}", bg=self.theme.surface, fg=self.theme.foreground,
+                font=self._type.font("2xs"), anchor="w", justify="left", wraplength=760,
+            ).pack(anchor="w", pady=1)
+
+    def _on_remember(self) -> None:
+        """Teach the chosen character one durable fact."""
+        text = self._fact_var.get().strip()
+        if not text:
+            self._status.configure(text="Type a fact to remember first.")
+            return
+        try:
+            stored = self.service.remember_fact(self._current, text)
+        except (ValueError, OSError) as error:
+            self._status.configure(text=f"Could not remember that: {error}")
+            return
+        self._fact_var.set("")
+        self._show_facts(self.service.facts(self._current))
+        if stored:
+            self._status.configure(text=f"{self._current} will remember that.")
+        else:
+            self._status.configure(text=f"{self._current} already knew that.")
+
+    def _on_forget_facts(self) -> None:
+        """Clear the chosen character's memory (facts and exchanges)."""
+        self.service.forget_facts(self._current, confirm=True)
+        self._show_facts(self.service.facts(self._current))
+        self._status.configure(text=f"{self._current}'s memory was cleared.")
 
     def _show_records(self, records: Any) -> None:
         for child in self._records_host.winfo_children():
