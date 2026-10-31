@@ -2804,6 +2804,51 @@ class FaydGUI:
             on_close=self._forget_characters,
         )
 
+    def _open_cognition(self) -> None:
+        """Open (or focus) the Autonomous Cognitive System window.
+
+        One window drives the proactive mind, cognitive learning, gradual
+        training, the ten indicators, and the evaluation of the eight characters,
+        through a single :class:`gui.cognition.CognitiveService`. One window is
+        kept and reused, so clicking the sidebar entry twice raises the open one.
+        """
+        existing = getattr(self, "_cognition_dialog", None)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:
+                self._cognition_dialog = None
+
+        from gui.cognition_dialog import CognitionDialog
+
+        self._cognition_dialog = CognitionDialog(
+            self.root,
+            self._cognition_service(),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            on_close=self._forget_cognition,
+        )
+
+    def _forget_cognition(self) -> None:
+        self._cognition_dialog = None
+
+    def _cognition_service(self):
+        """The service the cognition window drives.
+
+        A real :class:`gui.cognition.CognitiveService` by default.
+        ``cognition_service_factory`` may be set to build a lighter one, so a test
+        can open the window without a full data directory.
+        """
+        factory = getattr(self, "cognition_service_factory", None)
+        if factory is not None:
+            return factory()
+        from gui.cognition import CognitiveService
+
+        return CognitiveService(data_root=data_dir())
+
     def _character_service(self):
         """The service the Characters window drives.
 
@@ -3326,6 +3371,10 @@ class FaydGUI:
         # The Characters entry opens the character management window.
         if action.key in {"characters", "characters-shareable"}:
             self._open_characters()
+            return
+        # The Autonomous mind entry opens the cognition window.
+        if action.key in {"cognition", "cognition-characters"}:
+            self._open_cognition()
             return
         # The Model Manager entry opens its own window (the listing is long).
         if action.key == "models":

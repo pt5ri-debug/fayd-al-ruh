@@ -190,3 +190,38 @@ def test_experience_records_a_lesson(tmp_path, monkeypatch, capsys):
     )
     assert code == cognition_cli.EXIT_OK
     assert capsys.readouterr().out.strip()
+
+
+def test_characters_evaluates_the_eight(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["characters"]) == cognition_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "Character evaluation" in out
+    assert "8 characters" in out
+
+
+def test_characters_json_is_machine_readable(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["characters", "--json"]) == cognition_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["characters"]) == 8
+    assert "dimension_averages" in payload
+
+
+def test_characters_single_key_reports_its_gaps(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["characters", "--key", "natasha"]) == cognition_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "Natasha" in out
+    assert "shortcomings" in out
+    assert "next steps" in out
+
+
+def test_characters_refuses_an_unknown_key(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["characters", "--key", "nobody"]) == cognition_cli.EXIT_GATE
+    assert "not a known character" in capsys.readouterr().out
+
+
+def test_characters_is_registered_in_the_menu():
+    assert any(entry[2] == ("characters",) for entry in MENU)
