@@ -42,6 +42,7 @@ from pathlib import Path
 from core.character_learning import (
     MAX_EXCHANGES,
     MAX_FACTS,
+    CharacterExchange,
     CharacterLearning,
 )
 from core.learning_isolation import (
@@ -207,16 +208,112 @@ class CharacterMemoryView:
         scored.sort(key=lambda hit: (-hit.score, hit.entry.kind, hit.entry.text))
         return tuple(scored[:limit])
 
-    def fact_decay(self, *, rate: float = 0.01, now: datetime | None = None) -> tuple[tuple[str, float], ...]:
+    def fact_decay(
+        self, *, rate: float = 0.01, now: datetime | None = None
+    ) -> tuple[tuple[str, float], ...]:
         """The character's facts ordered by retention, weakest first.
 
         Uses the project's own :class:`core.memory_decay.MemoryDecay` forgetting
-        curve over a synthetic episode per fact (a fact has no access count of its
-        own, so each is aged from when it was stored when a timestamp is known and
-        from "now" otherwise). The result is a *ranking*, never a deletion: this
-        module never drops a fact.
+        curve over a synthetic episode per fact, aged from the fact's **own**
+        stored timestamp (a fact written before ages were recorded is treated as
+        ageless, so its retention is 1.0 rather than an invented low figure). The
+        result is a *ranking*, never a deletion: this method never drops a fact.
         """
-        return apply_fact_decay(self._learning().facts(), rate=rate, now=now)
+        return apply_fact_decay(self._learning().fact_records(), rate=rate, now=now)
+
+    def recall(self, question: str, *, limit: int = 5) -> tuple[MemorySearchHit, ...]:
+        """The entries most relevant to ``question``, by meaning then by word.
+
+        This is the semantic half of a character's memory: rather than always
+        recalling the *newest* exchanges, a caller can ask "what of what I know
+        bears on this question?" and get the entries the learned space (or a
+        lexical fallback) places closest -- so a relevant old fact can outrank an
+        irrelevant recent one. It is the same scoring :meth:`search` uses, so the
+        two never disagree, and an empty question yields nothing.
+        """
+        if not question.strip():
+            return ()
+        return self.search(question, limit=limit)
+
+    def rank_exchanges(
+        self,
+        question: str,
+        *,
+        limit: int = 5,
+        exclude_questions: tuple[str, ...] = (),
+    ) -> tuple[CharacterExchange, ...]:
+        """The exchanges most relevant to ``question``, most relevant first.
+
+        Scores each exchange (its question and answer together) against the
+        learned space and a lexical fallback, and returns the ``limit`` strongest
+        -- so a character recalls what *bears on the current question* rather than
+        only the most recent turns. An exchange whose question is in
+        ``exclude_questions`` is skipped, exactly as the recency path skips it, so
+        a turn already on screen is never repeated back. Exchanges that match
+        nothing are omitted, and an empty question returns nothing, so a caller
+        can fall back to recency.
+        """
+        if not question.strip() or limit <= 0:
+            return ()
+        excluded = {
+            item.strip().casefold()
+            for item in exclude_questions
+            if item and item.strip()
+        }
+        exchanges = [
+            exchange
+            for exchange in self._learning().exchanges()
+            if exchange.question.strip().casefold() not in excluded
+        ]
+        if not exchanges:
+            return ()
+        space = self._semantic_space()
+        tokens = {t for t in question.lower().split() if len(t) > 2}
+        scored: list[tuple[float, int, CharacterExchange]] = []
+        for index, exchange in enumerate(exchanges):
+            text = f"{exchange.question} {exchange.answer}"
+            lexical = self._lexical_score(text, tokens)
+            semantic = 0.0
+            if space is not None:
+                try:
+                    semantic = float(space.similarity(question, text))
+                except (KeyError, ValueError):
+                    semantic = 0.0
+            score = max(semantic, lexical)
+            if score > 0.0:
+                # Ties break on the later (more recent) exchange, so a relevant
+                # recent turn is preferred to an equally relevant old one.
+                scored.append((score, index, exchange))
+        scored.sort(key=lambda item: (-item[0], -item[1]))
+        return tuple(exchange for _score, _index, exchange in scored[:limit])
+
+    def prune_faded(
+        self,
+        *,
+        floor: float = 0.05,
+        rate: float = 0.01,
+        now: datetime | None = None,
+        apply: bool = False,
+    ) -> tuple[str, ...]:
+        """The facts whose retention has fallen below ``floor``.
+
+        Read-only by default: it *reports* which facts have faded so a caller can
+        review them. With ``apply=True`` it forgets exactly those facts (through
+        :meth:`core.character_learning.CharacterLearning.forget_fact`), so
+        forgetting is explicit and recorded rather than a silent trim. A fact with
+        no recorded age is never pruned -- the module refuses to forget something
+        it cannot date.
+        """
+        aged = [(fact, age) for fact, age in self._learning().fact_records() if age]
+        if not aged:
+            return ()
+        scored = apply_fact_decay(tuple(aged), rate=rate, now=now)
+        faded = tuple(fact for fact, retention in scored if retention < floor)
+        if apply and faded:
+            learning = self._learning()
+            for fact in faded:
+                learning.forget_fact(fact)
+        return faded
 
     # -- internals ----------------------------------------------------------
 
@@ -293,18 +390,23 @@ class CharacterMemoryView:
 
 
 def apply_fact_decay(
-    facts: tuple[str, ...],
+    facts: tuple[str, ...] | tuple[tuple[str, str], ...],
     *,
     rate: float = 0.01,
     now: datetime | None = None,
 ) -> tuple[tuple[str, float], ...]:
     """Order facts by the project's own forgetting curve, weakest first.
 
-    Each fact becomes a synthetic :class:`core.episodic_memory.Episode` with unit
-    importance and zero accesses, and :class:`core.memory_decay.MemoryDecay`
-    scores its retention. Facts are aged from the same reference point, so the
-    ranking is a *stable, deterministic* order (equal facts keep their input
-    order) rather than a random shuffle. Returns ``(fact, retention)`` pairs.
+    Each fact becomes a synthetic :class:`core.episodic_memory.Episode` and
+    :class:`core.memory_decay.MemoryDecay` scores its retention. A fact may be
+    given as a bare string (aged from the reference point, so all such facts tie
+    at full retention) or as ``(fact, age)`` where ``age`` is the ISO timestamp
+    from when it was stored -- in which case it is aged from its **own** timestamp
+    and an older fact genuinely fades below a newer one. A blank or unparseable
+    age is treated as ageless (retention 1.0), never as an invented low figure.
+
+    Returns ``(fact, retention)`` pairs, stably ordered by retention then by the
+    fact's original position, so two facts with equal retention never swap places.
     """
     from core.episodic_memory import Episode
     from core.memory_decay import MemoryDecay
@@ -312,13 +414,26 @@ def apply_fact_decay(
     reference = now or datetime.now(UTC)
     decay = MemoryDecay()
     scored: list[tuple[str, float, int]] = []
-    for index, fact in enumerate(facts):
-        episode = Episode(id=f"fact-{index}", content=fact, importance=1.0, created_at=reference)
+    for index, item in enumerate(facts):
+        fact, age = item if isinstance(item, tuple) else (item, "")
+        created = _parse_age(age) or reference
+        episode = Episode(id=f"fact-{index}", content=fact, importance=1.0, created_at=created)
         scored.append((fact, decay.retention(episode, rate=rate, now=reference), index))
     # A stable sort by retention, then by the fact's original position, so two
     # facts with equal retention never swap places between calls.
     scored.sort(key=lambda item: (item[1], item[2]))
     return tuple((fact, score) for fact, score, _index in scored)
+
+
+def _parse_age(age: str) -> datetime | None:
+    """Parse a stored ISO age, or ``None`` when it is blank or unreadable."""
+    if not age:
+        return None
+    try:
+        parsed = datetime.fromisoformat(age)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def memory_view(key: str, *, root: str | Path | None = None) -> CharacterMemoryView:

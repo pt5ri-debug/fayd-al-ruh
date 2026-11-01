@@ -707,6 +707,34 @@ def default_language_model_key(mouth: str) -> str | None:
     return models[0].key if models else None
 
 
+def ready_language_model_key(mouth: str) -> str | None:
+    """The mouth's **default** model when its weights are on disk, else any ready one.
+
+    The default is preferred so a user who installed the mouth's own model keeps
+    it. When the default is not on disk but *another* model the mouth can run is
+    (for instance a general model in the shared folder), that model is returned:
+    the mouth can really answer with it, so a status line or an evaluation that
+    reported "no model" would be wrong. ``None`` when nothing the mouth can run is
+    on disk -- the honest "this mouth has no weights here".
+    """
+    models = language_models(mouth)
+    if not models:
+        return None
+    default = models[0]
+    if default.available:
+        return default.key
+    for model in models[1:]:
+        if model.available:
+            return model.key
+    return None
+
+
+def ready_language_model(mouth: str) -> LanguageModel | None:
+    """The model :func:`ready_language_model_key` names, or ``None``."""
+    key = ready_language_model_key(mouth)
+    return find_language_model(mouth, key) if key else None
+
+
 def resolve_model_path(mouth: str, key: str | None) -> Path | None:
     """The GGUF file a chosen model resolves to, or ``None`` when there is none.
 
@@ -827,6 +855,8 @@ __all__ = [
     "find_language_model_anywhere",
     "language_models",
     "models_for_choice",
+    "ready_language_model",
+    "ready_language_model_key",
     "reset_catalog_cache",
     "resolve_choice",
     "resolve_model_path",

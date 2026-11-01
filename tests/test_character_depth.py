@@ -96,6 +96,221 @@ def test_fact_decay_ranks_without_deleting():
     assert learning.facts()
 
 
+# -- gradual decay with real fact ages --------------------------------------
+
+
+def test_add_fact_stamps_an_age():
+    learning = CharacterLearning("ultron")
+    learning.add_fact("porosity is the void fraction")
+    records = learning.fact_records()
+    assert len(records) == 1
+    fact, age = records[0]
+    assert fact == "porosity is the void fraction"
+    assert age  # a real ISO timestamp, so decay has a reference point
+
+
+def test_older_fact_fades_below_a_newer_one():
+    from datetime import UTC, datetime, timedelta
+
+    learning = CharacterLearning("ultron")
+    learning.add_fact("old fact")
+    old = (datetime.now(UTC) - timedelta(days=400)).isoformat()
+    learning.record.fact_ages["old fact"] = old
+    learning.add_fact("new fact")
+    ranked = dict(learning.fact_records())
+    assert ranked["old fact"] == old
+
+    scored = dict(apply_fact_decay(learning.fact_records(), rate=0.01))
+    assert scored["old fact"] < scored["new fact"]
+
+
+def test_decay_never_prunes_a_fact_with_no_age():
+    from core.character_memory_view import CharacterMemoryView
+
+    learning = CharacterLearning("ultron")
+    learning.add_fact("ageless fact")
+    # Simulate a record written before ages existed.
+    learning.record.fact_ages.clear()
+    learning._save(merge=False)
+    view = CharacterMemoryView("ultron")
+    assert view.prune_faded(floor=0.9) == ()
+    assert learning.facts() == ("ageless fact",)
+
+
+def test_prune_faded_reports_then_forgets_only_when_asked():
+    from datetime import UTC, datetime, timedelta
+
+    from core.character_memory_view import CharacterMemoryView
+
+    learning = CharacterLearning("ultron")
+    learning.add_fact("stale fact")
+    learning.record.fact_ages["stale fact"] = (
+        datetime.now(UTC) - timedelta(days=400)
+    ).isoformat()
+    learning._save(merge=False)
+    view = CharacterMemoryView("ultron")
+
+    reported = view.prune_faded(floor=0.5)
+    assert reported == ("stale fact",)
+    # Read-only by default: the fact is still there.
+    assert CharacterLearning("ultron").facts() == ("stale fact",)
+
+    applied = view.prune_faded(floor=0.5, apply=True)
+    assert applied == ("stale fact",)
+    assert CharacterLearning("ultron").facts() == ()
+
+
+def test_forget_fact_reports_whether_it_was_there():
+    learning = CharacterLearning("ultron")
+    learning.add_fact("a fact")
+    assert learning.forget_fact("a fact") is True
+    assert learning.forget_fact("a fact") is False
+    assert learning.facts() == ()
+
+
+def test_fact_ages_survive_a_reload():
+    from datetime import UTC, datetime, timedelta
+
+    learning = CharacterLearning("ultron")
+    learning.add_fact("a fact")
+    old = (datetime.now(UTC) - timedelta(days=200)).isoformat()
+    learning.record.fact_ages["a fact"] = old
+    learning._save(merge=False)
+
+    reopened = CharacterLearning("ultron")
+    assert reopened.fact_records() == (("a fact", old),)
+
+
+# -- semantic recall --------------------------------------------------------
+
+
+def test_rank_exchanges_puts_the_relevant_one_first():
+    from core.character_memory_view import CharacterMemoryView
+
+    learning = CharacterLearning("ultron")
+    learning.remember("How do I bake bread?", "Mix flour, water, and yeast.")
+    learning.remember("What is permeability?", "The ability of rock to transmit fluid.")
+    view = CharacterMemoryView("ultron")
+
+    ranked = view.rank_exchanges("tell me about permeability in rock")
+    assert ranked
+    assert ranked[0].question == "What is permeability?"
+
+
+def test_rank_exchanges_skips_the_question_on_screen():
+    from core.character_memory_view import CharacterMemoryView
+
+    learning = CharacterLearning("ultron")
+    learning.remember("What is permeability?", "The ability to transmit fluid.")
+    learning.remember("What is porosity?", "The void fraction.")
+    view = CharacterMemoryView("ultron")
+
+    ranked = view.rank_exchanges(
+        "permeability", exclude_questions=("What is permeability?",)
+    )
+    assert all(exchange.question != "What is permeability?" for exchange in ranked)
+
+
+def test_rank_exchanges_is_empty_for_a_blank_question():
+    from core.character_memory_view import CharacterMemoryView
+
+    learning = CharacterLearning("ultron")
+    learning.remember("q", "a")
+    assert CharacterMemoryView("ultron").rank_exchanges("   ") == ()
+
+
+def test_recall_matches_search():
+    from core.character_memory_view import CharacterMemoryView
+
+    learning = CharacterLearning("ultron")
+    learning.add_fact("porosity is the void fraction")
+    view = CharacterMemoryView("ultron")
+    assert [hit.entry.text for hit in view.recall("porosity")] == [
+        hit.entry.text for hit in view.search("porosity")
+    ]
+
+
+def test_wrapper_uses_relevant_recall_in_the_prompt():
+    from ai.characters import wrap_character
+    from core.character_learning import CharacterLearning as CL
+
+    class _Engine:
+        system_prompt = "BASE"
+
+    class _Mouth:
+        def __init__(self) -> None:
+            self.engine = _Engine()
+
+        def ask(self, question, **_kwargs):
+            class _A:
+                text = "ok"
+
+            return _A()
+
+    CL("ultron").remember("How do I bake bread?", "Mix flour and yeast.")
+    CL("ultron").remember("What is permeability?", "The ability to transmit fluid.")
+    mouth = _Mouth()
+    character = wrap_character("ultron", mouth)
+    # A fresh wrapper renders the standing prompt on its first answer, choosing
+    # the recalled window by relevance to the question asked.
+    character.ask("explain permeability to me")
+    assert "permeability" in mouth.engine.system_prompt.lower()
+
+
+# -- the language-model catalog's ready model -------------------------------
+
+
+def test_ready_model_falls_back_to_any_available_model():
+    from core import language_models as lm
+
+    class _Model:
+        def __init__(self, key, available):
+            self.key = key
+            self.available = available
+
+    models = (_Model("default", False), _Model("shared", True))
+    original = lm.language_models
+    lm.language_models = lambda mouth: models  # type: ignore[assignment]
+    try:
+        assert lm.ready_language_model_key("ultron") == "shared"
+    finally:
+        lm.language_models = original  # type: ignore[assignment]
+
+
+def test_ready_model_prefers_the_default_when_it_is_installed():
+    from core import language_models as lm
+
+    class _Model:
+        def __init__(self, key, available):
+            self.key = key
+            self.available = available
+
+    models = (_Model("default", True), _Model("shared", True))
+    original = lm.language_models
+    lm.language_models = lambda mouth: models  # type: ignore[assignment]
+    try:
+        assert lm.ready_language_model_key("ultron") == "default"
+    finally:
+        lm.language_models = original  # type: ignore[assignment]
+
+
+def test_ready_model_is_none_when_nothing_is_installed():
+    from core import language_models as lm
+
+    class _Model:
+        def __init__(self, key, available):
+            self.key = key
+            self.available = available
+
+    models = (_Model("default", False), _Model("shared", False))
+    original = lm.language_models
+    lm.language_models = lambda mouth: models  # type: ignore[assignment]
+    try:
+        assert lm.ready_language_model_key("ultron") is None
+    finally:
+        lm.language_models = original  # type: ignore[assignment]
+
+
 # -- the consistency check --------------------------------------------------
 
 

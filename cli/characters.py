@@ -278,11 +278,73 @@ def _cmd_memory(args: argparse.Namespace) -> int:
         for hit in hits:
             print(f"  {hit.describe()}")
         return 0
+    if args.recall:
+        exchanges = view.rank_exchanges(args.recall, limit=args.limit)
+        if args.json:
+            print(
+                json.dumps(
+                    [e.to_primitive() for e in exchanges], ensure_ascii=False, indent=2
+                )
+            )
+            return 0
+        if not exchanges:
+            print(f"Nothing in {args.character}'s memory bears on {args.recall!r}.")
+            return 0
+        for exchange in exchanges:
+            print(f"  {exchange.recall_line()}")
+        return 0
+    if args.decay:
+        ranked = view.fact_decay(rate=args.rate)
+        faded = [fact for fact, retention in ranked if retention < args.floor]
+        if args.json:
+            print(
+                json.dumps(
+                    {"ranked": [[f, r] for f, r in ranked], "faded": faded},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        print(f"{args.character}: {len(ranked)} fact(s), {len(faded)} below floor {args.floor}")
+        for fact, retention in ranked[: args.limit]:
+            print(f"  {retention:.4f}  {fact}")
+        return 0
     if args.json:
         stats = view.stats()
         print(json.dumps(stats.__dict__, ensure_ascii=False, indent=2, default=str))
         return 0
     print(view.describe())
+    return 0
+
+
+def _cmd_decay(args: argparse.Namespace) -> int:
+    """Report (or apply) the gradual forgetting of faded character facts."""
+    from core.character_memory_view import CharacterMemoryView
+
+    keys = (args.character,) if args.character else _service().character_keys()
+    rows = []
+    for key in keys:
+        view = CharacterMemoryView(key)
+        faded = view.prune_faded(floor=args.floor, rate=args.rate, apply=args.apply)
+        rows.append((key, faded))
+    if args.json:
+        print(
+            json.dumps(
+                [{"character": k, "faded": list(v), "applied": args.apply} for k, v in rows],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    verb = "forgot" if args.apply else "would forget"
+    total = 0
+    for key, faded in rows:
+        total += len(faded)
+        if faded:
+            print(f"{key}: {verb} {len(faded)} faded fact(s)")
+            for fact in faded[: args.limit]:
+                print(f"  {fact}")
+    print(f"{total} faded fact(s) across {len(rows)} character(s).")
     return 0
 
 
@@ -768,10 +830,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_memory = sub.add_parser("memory", help="the unified view of a character's memory")
     p_memory.add_argument("character")
-    p_memory.add_argument("--search", default="")
+    p_memory.add_argument("--search", default="", help="find entries by meaning then by word")
+    p_memory.add_argument(
+        "--recall", default="", help="rank the exchanges that bear on this question"
+    )
+    p_memory.add_argument(
+        "--decay", action="store_true", help="order facts by the forgetting curve"
+    )
+    p_memory.add_argument("--rate", type=float, default=0.01, help="decay rate for --decay")
+    p_memory.add_argument("--floor", type=float, default=0.05, help="faded-below floor")
     p_memory.add_argument("--limit", type=int, default=5)
     p_memory.add_argument("--json", action="store_true")
     p_memory.set_defaults(func=_cmd_memory)
+
+    p_decay = sub.add_parser(
+        "decay", help="report (or apply) the gradual forgetting of faded facts"
+    )
+    p_decay.add_argument("character", nargs="?", default="")
+    p_decay.add_argument("--apply", action="store_true", help="forget the faded facts")
+    p_decay.add_argument("--rate", type=float, default=0.01)
+    p_decay.add_argument("--floor", type=float, default=0.05)
+    p_decay.add_argument("--limit", type=int, default=10)
+    p_decay.add_argument("--json", action="store_true")
+    p_decay.set_defaults(func=_cmd_decay)
 
     p_consistency = sub.add_parser(
         "consistency", help="is a character's standing configuration consistent?"

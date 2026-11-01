@@ -1902,6 +1902,20 @@ Arabic is kept as secondary aliases where useful.
   empty view rather than crashing, and never write. It is the read side the
   evaluation's *Memory* dimension and the CLI `python -m cli characters memory`
   command both use, so the two can never disagree about how full a character is.
+  **Semantic recall and gradual decay are real, not merely measured.** `recall()`
+  and `rank_exchanges(question, *, exclude_questions=())` order a character's
+  exchanges by **relevance** to a question -- the project's learned
+  `core.embeddings` space, with a whole-word lexical fallback -- so a relevant old
+  turn can outrank an irrelevant recent one; `CharacterMouth.system_prompt(question=)`
+  uses that ranking, so a character recalls what *bears on the question asked* and
+  falls back to recency when nothing matches. `fact_decay()`/`prune_faded(floor=,
+  apply=)` run the project's own `core.memory_decay.MemoryDecay` curve over each
+  fact's **own** stored age (`CharacterRecord.fact_ages`, stamped on `add_fact`,
+  backwards-compatible: a fact with no age is never pruned), so an older fact
+  genuinely fades below a newer one and forgetting is explicit and recorded
+  (`CharacterLearning.forget_fact`), never a silent trim. CLI: `python -m cli
+  characters memory <c> --recall "<q>"|--decay [--rate --floor]` and
+  `python -m cli characters decay [<c>] [--apply]`.
 - `core/character_consistency.py` — the **trait-consistency validator**.
   `check_consistency(config) -> ConsistencyReport` reads a character's editable
   configuration and reports a **contradictory combination before APPLY** -- a high
@@ -2507,7 +2521,11 @@ Arabic is kept as secondary aliases where useful.
   `download_model(mouth, key, approved=, progress=)` is the one dispatcher that
   runs it through the **owning engine's** own approval gate.
   `find_language_model`/`resolve_choice`,
-  `default_language_model_key`, `describe_language_models`, and the mouth
+  `default_language_model_key`, `ready_language_model_key`/`ready_language_model`
+  (the mouth's own default when installed, else any model it can really run -- a
+  general model in the shared folder, say -- so a surface never reports "no model"
+  for a mouth that can answer, and the evaluation's training dimension reads this
+  rather than the default alone), `describe_language_models`, and the mouth
   constants (`MOUTH_SOURCES`/`ULTRON`/`VISION`/`BANNER`/`NATASHA`/`HAKEEM`/
   `CLOUD`/`MODEL`, `MOUTHS`, `GGUF_MOUTHS`, `ENGINE_LABELS`) round it out.
   **Honest by construction**: availability is a real file check (`available` is

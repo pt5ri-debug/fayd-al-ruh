@@ -265,8 +265,10 @@ def test_evaluation_describe_lists_dimensions() -> None:
         assert key.capitalize() in text or key in text.lower()
 
 
-def test_a_healthy_character_reports_no_shortcomings() -> None:
-    # Build a character that scores well on every dimension.
+def test_a_healthy_character_reports_no_shortcomings(tmp_path: Path) -> None:
+    # Build a character that scores well on every dimension. A temporary data
+    # root keeps this hermetic: it must not depend on whether the machine's real
+    # store happens to be seeded.
     import dataclasses
 
     from core.character_config import (
@@ -291,7 +293,8 @@ def test_a_healthy_character_reports_no_shortcomings() -> None:
     )
     registry = StubRegistry(configs={"ultron": config}, customised={"ultron"})
     report = CharacterEvaluator(  # type: ignore[arg-type]
-        data_root=None, registry=registry, catalog=StubCatalog(), model_available=lambda k, c: True
+        data_root=tmp_path, registry=registry, catalog=StubCatalog(),
+        model_available=lambda k, c: True,
     ).evaluate()
     ultron = next(c for c in report.characters if c.key == "ultron")
     assert ultron.dimension("training").score >= 0.9

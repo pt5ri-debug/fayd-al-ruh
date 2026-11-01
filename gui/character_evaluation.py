@@ -331,9 +331,14 @@ class CharacterEvaluator:
 
         The unified language-model catalog is the one source of truth about which
         model a mouth answers with and whether its weights are really on disk, so
-        the evaluation reads it rather than guessing from the configuration. An
-        unknown mouth or a catalog that cannot be built yields the honest
-        ``(False, False, "", "")`` rather than a fabricated model.
+        the evaluation reads it rather than guessing from the configuration. The
+        reported model is the mouth's **ready** model: its own default when that is
+        installed, otherwise any other model the mouth can really run (a general
+        model in the shared folder, say) -- because a mouth that can answer is not
+        honestly reported as having no model. When nothing it can run is on disk,
+        the default is still named (with ``available=False``) so the report says
+        *which* model is missing rather than nothing. An unknown mouth or a catalog
+        that cannot be built yields the honest ``(False, False, "", "")``.
         """
         try:
             catalog = self._catalog
@@ -347,10 +352,19 @@ class CharacterEvaluator:
             model_key = catalog.default_language_model_key(mouth)
             if not model_key:
                 return False, False, "", ""
-            model = catalog.find_language_model(mouth, model_key)
-            title = getattr(model, "title", "") or model_key
+            # A duck-typed catalog (a test stub, or an older surface) may not
+            # implement the ready-model lookup; fall back to the default, so the
+            # report still names a model rather than claiming there is none.
+            ready_lookup = getattr(catalog, "ready_language_model_key", None)
+            ready_key = (ready_lookup(mouth) if callable(ready_lookup) else None) or model_key
+            model = catalog.find_language_model(mouth, ready_key)
+            title = getattr(model, "title", "") or ready_key
             available = bool(getattr(model, "available", False))
-            return True, available, model_key, title
+            if available and ready_key != model_key:
+                default = catalog.find_language_model(mouth, model_key)
+                default_title = getattr(default, "title", "") or model_key
+                title = f"{title} (ready; default {default_title} not installed)"
+            return True, available, ready_key, title
         except Exception:
             return False, False, "", ""
 

@@ -263,13 +263,15 @@ class CharacterMouth:
 
     # ------------------------------------------------------------ personality
 
-    def _apply_instruction(self, *, exclude_questions: tuple[str, ...] = ()) -> None:
+    def _apply_instruction(
+        self, *, exclude_questions: tuple[str, ...] = (), question: str = ""
+    ) -> None:
         """Render the character's instruction (with its facts and memory) into the mouth."""
         # Re-read the record from disk first: a fact the character learned in
         # another instance of the program (or through the CLI) must be in force
         # for this answer, not only the facts this wrapper happened to load.
         self.learning.reload()
-        instruction = self.system_prompt(exclude_questions=exclude_questions)
+        instruction = self.system_prompt(exclude_questions=exclude_questions, question=question)
         engine = getattr(self.assistant, "engine", None)
         if engine is not None and isinstance(self._base_prompt, str):
             engine.system_prompt = f"{instruction}\n\n{self._base_prompt}"
@@ -280,21 +282,40 @@ class CharacterMouth:
         if isinstance(self._base_instruction, str):
             self.assistant.system_instruction = f"{instruction}\n\n{self._base_instruction}"
 
-    def system_prompt(self, *, exclude_questions: tuple[str, ...] = ()) -> str:
+    def system_prompt(
+        self, *, exclude_questions: tuple[str, ...] = (), question: str = ""
+    ) -> str:
         """The character's current standing instruction, for inspection.
 
         Rendered from the editable configuration when one is available, and from
         the character's persona otherwise, so the two always agree by default. The
         character's durable facts and a bounded window of its own past exchanges
         are rendered in, so its memory is in force for the next answer.
+
+        When ``question`` is given the recalled window is chosen by **relevance**
+        to it (the learned semantic space, or a lexical fallback) rather than by
+        recency, so a character recalls what bears on the current question; when
+        it is empty (or nothing matches) the recency window is used, so recall is
+        never empty merely because the space is cold.
         """
         facts = self.learning.facts()
-        recalled = tuple(
-            exchange.recall_line()
-            for exchange in self.learning.recall(
+        recalled_exchanges: tuple[Any, ...] = ()
+        if question.strip():
+            try:
+                from core.character_memory_view import CharacterMemoryView
+
+                recalled_exchanges = CharacterMemoryView(
+                    self.key, root=self._store_root()
+                ).rank_exchanges(
+                    question, limit=RECALL_LIMIT, exclude_questions=exclude_questions
+                )
+            except Exception:
+                recalled_exchanges = ()
+        if not recalled_exchanges:
+            recalled_exchanges = self.learning.recall(
                 limit=RECALL_LIMIT, exclude_questions=exclude_questions
             )
-        )
+        recalled = tuple(exchange.recall_line() for exchange in recalled_exchanges)
         config = self._config
         if config is not None:
             rendered = str(config.system_prompt(learned_facts=facts, recalled_memory=recalled))
@@ -327,7 +348,9 @@ class CharacterMouth:
         """
         refresh = self._turns % RECALL_REFRESH_TURNS == 0
         if refresh:
-            self._apply_instruction(exclude_questions=(self._last_question, question))
+            self._apply_instruction(
+                exclude_questions=(self._last_question, question), question=question
+            )
         else:
             self.learning.reload()
         self._turns += 1
