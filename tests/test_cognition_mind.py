@@ -104,11 +104,33 @@ def test_a_cycle_runs_and_is_recorded(ontology, tmp_path, monkeypatch):
 
 def test_a_cycle_is_reproducible_for_the_same_inputs(ontology, tmp_path, monkeypatch):
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
-    first = ProactiveMind(ontology).cycle(max_ideas=2)
-    second = ProactiveMind(ontology).cycle(max_ideas=2)
+    # With a fresh novelty memory each time, the cycle is a pure function of the
+    # graph: same inputs, same drives. (The durable novelty the mind ships with
+    # is what makes a *restarted* mind differ -- see the test below.)
+    from cognition.engines.ideas import NoveltyTracker
+
+    first = ProactiveMind(ontology, novelty=NoveltyTracker()).cycle(max_ideas=2)
+    second = ProactiveMind(ontology, novelty=NoveltyTracker()).cycle(max_ideas=2)
     # Question ids are generated, but the *drives* a cycle records are deterministic.
     assert first.notes == second.notes
     assert len(first.questions) == len(second.questions)
+
+
+def test_a_restarted_mind_does_not_re_think_its_own_thoughts(ontology, tmp_path, monkeypatch):
+    # The durable novelty memory is the point: a second mind over the same data
+    # directory treats the first mind's ideas as already thought, so it does not
+    # repeat them. This is what the in-RAM tracker could not do.
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    first = ProactiveMind(ontology)
+    first.cycle(max_ideas=3)
+    seen_after_first = first.metacognition.novelty.count()
+    assert seen_after_first >= 1
+    second = ProactiveMind(ontology)
+    assert second.metacognition.novelty.count() == seen_after_first
+    second.cycle(max_ideas=3)
+    # The second mind still runs, and its novelty memory grows from where the
+    # first left off rather than starting empty.
+    assert second.metacognition.novelty.count() >= seen_after_first
 
 
 def test_pending_ideas_are_newest_first(ontology, tmp_path, monkeypatch):

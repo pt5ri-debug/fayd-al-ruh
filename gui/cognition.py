@@ -199,6 +199,23 @@ class CognitiveService:
         """The mind's own snapshot (a plain dict, as the CLI prints it)."""
         return self.mind.status()
 
+    def metacognition(self) -> OperationReport:
+        """The mind's model of its own thinking: which strategies pay off."""
+        return OperationReport(
+            ok=True,
+            title="Metacognition — the mind's self-model",
+            lines=tuple(self.mind.metacognition.describe().splitlines()),
+        )
+
+    def plan_next(self) -> OperationReport:
+        """How the mind intends to search next, and why."""
+        plan = self.mind.plan_next()
+        return OperationReport(
+            ok=True,
+            title="Metacognitive plan for the next cycle",
+            lines=tuple(plan.describe().splitlines()),
+        )
+
     def think(self, *, max_ideas: int | None = None) -> OperationReport:
         """Run one thinking cycle and report it."""
         cycle = self.mind.cycle(max_ideas=max_ideas)
@@ -272,6 +289,39 @@ class CognitiveService:
         """One line summarising what the learning system holds."""
         return self.learning.stats().describe()
 
+    def consolidate(self) -> OperationReport:
+        """Consolidate raw experience into durable, reviewed knowledge."""
+        report = self.learning.consolidate()
+        lines = [f"{len(report.patterns)} pattern(s) extracted"]
+        lines.extend(f"pattern: {p.describe()}" for p in report.patterns)
+        lines.extend(f"upgraded to a learned fact: {statement}" for statement in report.upgraded)
+        lines.append(f"{report.scheduled} item(s) now under spaced review")
+        return OperationReport(ok=True, title="Consolidation", lines=tuple(lines))
+
+    def patterns(self) -> tuple[str, ...]:
+        """The regularities the mind has extracted from its own experience."""
+        return tuple(p.describe() for p in self.learning.consolidator().patterns())
+
+    def review_due(self, *, remembered: bool = True) -> OperationReport:
+        """Settle the spaced-review items that are due."""
+        due = self.learning.consolidator().review_due(remembered=remembered)
+        if not due:
+            return OperationReport(ok=True, title="No knowledge is due for review yet.")
+        return OperationReport(
+            ok=True,
+            title=f"Reviewed {len(due)} item(s)",
+            lines=tuple(item.describe() for item in due),
+        )
+
+    def practise_skill(self, name: str, *, success: bool, steps: tuple[str, ...] = ()) -> OperationReport:
+        """Practise a procedure and record its outcome (skill refinement)."""
+        skill = self.learning.consolidator().practise_skill(name, success=success, steps=steps)
+        return OperationReport(ok=True, title=f"Practised {name}", lines=(skill.describe(),))
+
+    def skills(self) -> tuple[str, ...]:
+        """The procedures the mind has practised, with their proficiency."""
+        return tuple(s.describe() for s in self.learning.consolidator().skills.skills())
+
     # -- staged / gradual training -----------------------------------------
 
     def stages(self) -> tuple[TrainingStage, ...]:
@@ -340,6 +390,49 @@ class CognitiveService:
         )
         nxt = self.trainer.next_stage()
         return ProgressionReport(rows=rows, next_stage=None if nxt is None else nxt.value)
+
+    def run_autonomous(
+        self,
+        *,
+        max_stages: int | None = None,
+        approved: bool = False,
+        progress: Callable[[str], None] | None = None,
+    ) -> OperationReport:
+        """Run the adaptive curriculum: advance, adapt on a plateau, stop itself."""
+        if not approved:
+            return OperationReport(
+                ok=False,
+                title="Autonomous training is a governed action.",
+                detail="Confirm the run to proceed: it advances the stages on its own, "
+                "adjusts the learning rate when a stage plateaus, and stops at an "
+                "explicit effort budget -- adopting a version only through the gate.",
+            )
+        from cognition.curriculum import AutonomousCurriculum
+
+        curriculum = AutonomousCurriculum(trainer=self.trainer)
+        report = curriculum.run(max_stages=max_stages, approved=True, progress=progress)
+        lines = [f"{len(report.outcomes)} run(s)"]
+        lines.extend(d.describe() for d in report.decisions)
+        lines.append(f"stopped: {report.stopped_because}")
+        return OperationReport(
+            ok=any(o.accepted for o in report.outcomes),
+            title="Autonomous curriculum",
+            lines=tuple(lines),
+        )
+
+    def curriculum_memory(self) -> tuple[str, ...]:
+        """The log of training attempts the adaptive policy reads."""
+        from cognition.curriculum import TrainingMemory
+
+        return tuple(a.describe() for a in TrainingMemory.load().attempts())
+
+    def measure_candidate(self) -> OperationReport:
+        """Measure the active candidate across seeds, honestly."""
+        from cognition.curriculum import MultiSeedEvaluator
+        from cognition.versions import candidate_path
+
+        reading = MultiSeedEvaluator().measure(candidate_path(), self.trainer._units())
+        return OperationReport(ok=reading.measured, title=reading.describe())
 
     def versions(self) -> tuple[ModelVersion, ...]:
         return self.registry.versions()

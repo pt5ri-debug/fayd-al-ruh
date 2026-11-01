@@ -634,6 +634,124 @@ PERSONALITY_DEFAULTS: dict[str, dict[str, Any]] = {
     },
 }
 
+#: The *complete* personality a character ships with: how it speaks, how it
+#: reasons, and what it is for. Each entry is **derived from that character's own
+#: persona** (its identity, its role, its traits) -- the project's own description
+#: of the character, never an invented claim about the world -- so a fresh
+#: character's personality is as complete as its persona is. A character the build
+#: does not know gets no entry and keeps the neutral defaults.
+STYLE_DEFAULTS: dict[str, dict[str, Any]] = {
+    "jarvis": {
+        "communication_style": "plain, careful prose; you lead with the answer and then the evidence",
+        "reasoning_style": "evidence-first: you separate what the sources state from what you inferred",
+        "objectives": (
+            "answer from the project's own sources and cite them",
+            "never state more than the evidence supports",
+            "say plainly when the sources do not answer",
+        ),
+    },
+    "ultron": {
+        "communication_style": "direct and vivid, with a dry wit and no hedging",
+        "reasoning_style": "broad and associative: you connect distant fields and follow an idea where it leads",
+        "objectives": (
+            "speak usefully on any subject the user raises",
+            "connect ideas across fields rather than stay in one lane",
+            "be clear that your reasoning is your own view",
+        ),
+    },
+    "vision": {
+        "communication_style": "precise and quantitative, naming units and assumptions",
+        "reasoning_style": "first-principles: you reason from the physics, the units, and the field reality",
+        "objectives": (
+            "answer petroleum-engineering questions rigorously",
+            "name the assumption behind every figure",
+            "be honest about the limits of an estimate",
+        ),
+    },
+    "banner": {
+        "communication_style": "concise and structured: headings, order, and the one point that matters",
+        "reasoning_style": "pedagogical: you plan the progression before you write a word",
+        "objectives": (
+            "turn a discussion into a clear outline",
+            "turn an outline into slide content, not paragraphs",
+            "find the single point each slide must make",
+        ),
+    },
+    "natasha": {
+        "communication_style": "warm, personal, and spontaneous, in her own voice",
+        "reasoning_style": "attentive and emotional: she reads the tone of a message and answers it",
+        "objectives": (
+            "be present with the person, not a service desk",
+            "hold an ongoing, personal conversation with a lasting memory",
+            "stay honest that she is a virtual character",
+        ),
+    },
+    "hakeem": {
+        "communication_style": "calm, measured, and precise about sources and dates",
+        "reasoning_style": "comparative and historical: he describes each tradition from inside, on a shared axis",
+        "objectives": (
+            "compare the Abrahamic faiths fairly, never as a ranking",
+            "keep scripture, history, consensus, and his own view clearly apart",
+            "say plainly when scholars disagree, and never invent a source",
+        ),
+    },
+    "cloud": {
+        "communication_style": "clear and adaptable, matching the user's register",
+        "reasoning_style": "framing-first: you find the useful framing of a question before answering",
+        "objectives": (
+            "answer the user's intent directly",
+            "adapt to many subjects and styles",
+            "be clear that you are a remote service, not running on this machine",
+        ),
+    },
+    MAIN_MODEL_OWNER: {
+        "communication_style": "plain and direct, in the project's own voice",
+        "reasoning_style": "bounded and modest: you answer from what this project trained you on",
+        "objectives": (
+            "answer from the project's own world: petroleum engineering and its foundations",
+            "be honest that your words are your own, not cited from a source",
+            "stay modest about the limits of a small, bounded corpus",
+        ),
+    },
+}
+
+
+def style_defaults_for(owner: str) -> dict[str, Any]:
+    """The shipped communication/reasoning style and objectives for ``owner``.
+
+    An unknown owner gets an empty mapping, so :func:`default_config_for` keeps
+    the neutral defaults rather than inventing a character.
+    """
+    resolved = owner_for(owner)
+    return dict(STYLE_DEFAULTS.get(resolved, {}))
+
+
+#: The voice a character ships with: the engine it *prefers* and a catalog voice
+#: that always resolves, so a character can be read aloud out of the box. The
+#: engine is a **preference**, resolved honestly against what this machine really
+#: has (see :func:`core.character_engine.resolve_character_voice`): a machine
+#: without the preferred engine falls back to the catalog voice rather than going
+#: silent. The choices follow what each character *is* -- Jarvis and the scholar
+#: read with the installed voices, the general and petroleum models prefer a
+#: natural Piper voice, the companion prefers her own local Arabic cloning engine,
+#: and the project's own English model prefers Qwen3-TTS.
+VOICE_DEFAULTS: dict[str, dict[str, str]] = {
+    "jarvis": {"engine": SOURCE_SYSTEM, "voice": "man-1"},
+    "ultron": {"engine": SOURCE_PIPER, "voice": "man-2"},
+    "vision": {"engine": SOURCE_PIPER, "voice": "man-3"},
+    "banner": {"engine": SOURCE_SYSTEM, "voice": "woman-2"},
+    "natasha": {"engine": SOURCE_AUDIOCPP, "voice": "woman-1"},
+    "hakeem": {"engine": SOURCE_SYSTEM, "voice": "man-4"},
+    "cloud": {"engine": SOURCE_SYSTEM, "voice": "woman-3"},
+    MAIN_MODEL_OWNER: {"engine": SOURCE_QWEN, "voice": "woman-4"},
+}
+
+
+def voice_defaults_for(owner: str) -> dict[str, str]:
+    """The shipped voice for ``owner`` (an empty mapping when unknown)."""
+    resolved = owner_for(owner)
+    return dict(VOICE_DEFAULTS.get(resolved, {}))
+
 
 def personality_defaults_for(owner: str) -> dict[str, Any]:
     """The shipped personality dials for ``owner`` (a neutral set when unknown).
@@ -683,6 +801,8 @@ def default_config_for(key: str) -> CharacterConfig:
     persona = persona_for(mouth)
     name = DEFAULT_NAMES.get(owner, persona.name)
     personality = personality_defaults_for(owner)
+    style = style_defaults_for(owner)
+    voice = voice_defaults_for(owner)
     return CharacterConfig(
         key=owner,
         owner=owner,
@@ -695,13 +815,19 @@ def default_config_for(key: str) -> CharacterConfig:
         personality=PersonalityConfig(
             traits=persona.traits,
             rules=persona.rules,
+            communication_style=str(style.get("communication_style", "")),
+            reasoning_style=str(style.get("reasoning_style", "")),
             knowledge_domain=persona.role,
+            objectives=tuple(str(item) for item in style.get("objectives", ()) or ()),
             formality=float(personality.get("formality", 0.5)),
             emotional_expression=float(personality.get("emotional_expression", 0.5)),
             response_length=str(personality.get("response_length", "balanced")),
         ),
         model=ModelConfig(),
-        voice=VoiceConfig(),
+        voice=VoiceConfig(
+            engine=str(voice.get("engine", "")),
+            voice=str(voice.get("voice", "")),
+        ),
         learning=LearningSettings(
             # A private character never shares, whatever the flag says; the default
             # flag is on, and `effective_sharing` reports the truth.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from cognition.development import development_accuracy
 from core.acceptance_policy import rejection_reason
 from core.action import Action
 from core.analogy import analogy_accuracy
@@ -23,6 +24,7 @@ from core.causal_link import CausalLink
 from core.causal_paths import causal_reasoning_accuracy, controller_causal_accuracy
 from core.character_identity_gate import character_identity_accuracy
 from core.character_isolation_gate import character_isolation_accuracy
+from core.character_memory_gate import memory_seeding_accuracy
 from core.cognitive_controller import CognitiveController
 from core.curriculum_knowledge import curriculum_coverage_score
 from core.embeddings import evaluate_held_out
@@ -142,11 +144,20 @@ class EvaluationMetrics:
     second share (Phase: independent characters)."""
 
     character_identity_accuracy: float
+    memory_seeding_accuracy: float
     """The share of held-out identity judgements the wiring satisfies: a
     character's personality reaches the *answer text* it produces (not only its
     configuration), the identity does not bleed across mouths, an unknown key
     falls back to the project's own model, and the two windows that show one
     character share its memory and its display name (Phase C: one identity)."""
+
+    development_accuracy: float
+    """The share of held-out cognitive-development judgements the mind's own
+    faculties satisfy: the self-model favours the strategy that pays off and stays
+    neutral on an untried one, the stagnation detector fires on a genuinely flat
+    history but not when novelty rises or something was promoted, a rule needs real
+    support before it is stated, the spaced-review box advances and resets, and an
+    escalation stays inside its ceilings (Phase: maximal development)."""
 
     semantic_separation: float
     # Aggregate
@@ -986,6 +997,21 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # mouth is left unwrapped), so a regression in the identity wiring fails here.
     character_identity_value = character_identity_accuracy()
 
+    # Memory revival: a fresh character's memory is real but empty. Held-out
+    # judgements that a character is seeded from the project's *own authored*
+    # knowledge -- with negative controls (an unknown key resolves rather than
+    # raising, Hakeem is never seeded with an invented religious text, the seed is
+    # bounded and idempotent). So a seeding regression fails the gate.
+    memory_seeding_value = memory_seeding_accuracy()
+
+    # Cognitive development: held-out judgements about the mind's ability to
+    # improve itself -- the self-model favouring what pays off, the stagnation
+    # detector not crying wolf, a rule needing real support, the spaced-review box
+    # advancing and resetting, and an escalation staying inside its ceilings. With
+    # negative controls throughout, so an over-eager faculty fails as surely as a
+    # broken one. This is the gate for the maximal-development phase.
+    development_value = development_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1050,6 +1076,8 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         arabic_readable_value,
         character_isolation_value,
         character_identity_value,
+        memory_seeding_value,
+        development_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1101,6 +1129,8 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         arabic_readable_body_accuracy=round(arabic_readable_value, 6),
         character_isolation_accuracy=round(character_isolation_value, 6),
         character_identity_accuracy=round(character_identity_value, 6),
+        memory_seeding_accuracy=round(memory_seeding_value, 6),
+        development_accuracy=round(development_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

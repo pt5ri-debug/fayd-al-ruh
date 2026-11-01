@@ -268,9 +268,12 @@ def apply_character_voice(reader: Any, config: Any) -> VoiceChoice:
     voice is reported, and the rest of the section is still applied.
     """
     choice = resolve_character_voice(config)
-    if choice.ok:
+    if choice.ok and choice.voice is not None:
         try:
-            reader.set_voice(choice.voice)
+            # Pass the voice's *key* (``woman-2``, ``system:...``, ``model:...``),
+            # matching the per-window save path, so a reader whose ``set_voice``
+            # keeps the argument verbatim still holds a key rather than an object.
+            reader.set_voice(choice.voice.key)
         except (ValueError, AttributeError):
             choice = VoiceChoice(reason="the reader refused the voice")
     language = voice_language(config)

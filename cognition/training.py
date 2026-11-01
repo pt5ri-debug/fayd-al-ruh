@@ -304,14 +304,25 @@ class IncrementalTrainer:
     def _example_block(self, example: TrainingExample) -> str:
         return f"Question: {example.task.strip()}\nAnswer: {example.answer.strip()}"
 
-    def plan(self, *, stage: TrainingStage = TrainingStage.QUICK) -> TrainingPlan:
-        """Prepare a run: copy the base model once, then describe the work."""
+    def plan(
+        self,
+        *,
+        stage: TrainingStage = TrainingStage.QUICK,
+        settings: StageSettings | None = None,
+    ) -> TrainingPlan:
+        """Prepare a run: copy the base model once, then describe the work.
+
+        ``settings`` overrides the stage's own defaults, so the adaptive
+        curriculum can retry a stage with a gentler learning rate or a longer
+        warmup without inventing a new stage.
+        """
         source = default_checkpoint()
         base = self.registry.ensure_base(source) if source.exists() else base_path()
+        effective = settings or STAGE_SETTINGS[stage]
         dataset = self.build_dataset(stage=stage)
         return TrainingPlan(
             stage=stage,
-            settings=STAGE_SETTINGS[stage],
+            settings=effective,
             examples=self.examples.count(),
             dataset_chars=len(dataset),
             base=base,
@@ -323,10 +334,11 @@ class IncrementalTrainer:
         self,
         *,
         stage: TrainingStage = TrainingStage.QUICK,
+        settings: StageSettings | None = None,
         progress: Callable[[str], None] | None = None,
     ) -> TrainingOutcome:
         """Run one stage: train a candidate, evaluate it, accept or roll back."""
-        plan = self.plan(stage=stage)
+        plan = self.plan(stage=stage, settings=settings)
         note = progress or (lambda _message: None)
 
         if not plan.base.exists():

@@ -41,6 +41,13 @@ NAMESPACE_EXPERIENCES = "cognition/experiences"
 NAMESPACE_EXAMPLES = "cognition/examples"
 NAMESPACE_FACTS = "cognition/facts"
 NAMESPACE_META = "cognition/meta"
+#: The mind's own self-model (which strategies actually pay off), the persistent
+#: novelty memory, and the consolidation/pattern records -- each its own document.
+NAMESPACE_SELF_MODEL = "cognition/self_model"
+NAMESPACE_NOVELTY = "cognition/novelty"
+NAMESPACE_PATTERNS = "cognition/patterns"
+NAMESPACE_REVIEWS = "cognition/reviews"
+NAMESPACE_CURRICULUM = "cognition/curriculum"
 
 #: Bounds, so a long-running background mind stays a fixed size on disk.
 MAX_IDEAS = 500
@@ -287,6 +294,33 @@ def meta_set(key: str, value: object) -> None:
     """Write one small value (last-run time, counters) best-effort."""
     try:
         _store().save(NAMESPACE_META, key, value)
+    except Exception:
+        pass
+
+
+def doc_get(namespace: str, key: str = _KEY, default: object = None) -> object:
+    """Read a whole document from any cognition namespace, best-effort.
+
+    A read-only or missing data folder yields ``default`` rather than raising, so
+    a background mind always starts; the caller decides what a missing document
+    means (usually "start empty").
+    """
+    try:
+        data = _store().load(namespace, key)
+    except Exception:
+        return default
+    return default if data is None else data
+
+
+def doc_set(namespace: str, value: object, key: str = _KEY) -> None:
+    """Write a whole document to any cognition namespace, best-effort.
+
+    The same rule the other stores keep: a read-only data folder must never crash
+    a background cycle, and the in-memory copy the caller holds stays correct for
+    this session.
+    """
+    try:
+        _store().save(namespace, key, value)
     except Exception:
         pass
 

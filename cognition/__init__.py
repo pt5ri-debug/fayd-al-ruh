@@ -9,12 +9,19 @@ an evaluation that shows it did not regress.
 
 * :mod:`cognition.proactive_mind` -- the eight engines composed into one bounded
   thinking cycle (:class:`ProactiveMind`).
+* :mod:`cognition.metacognition` -- the mind's model of its own thinking: which
+  strategies pay off, where it stagnates, and how it escalates
+  (:class:`MetacognitiveController`).
 * :mod:`cognition.learning_system` -- six memories and the learning operations
   over them (:class:`CognitiveLearningSystem`).
+* :mod:`cognition.consolidation` -- turning raw experience into durable, reviewed
+  knowledge (:class:`Consolidator`).
 * :mod:`cognition.teacher_student` -- the student-first exchange that turns a
   teacher's answer into a *qualified* example (:class:`TeacherStudentSystem`).
 * :mod:`cognition.training` -- staged, resumable training with a candidate /
   version / rollback gate (:class:`IncrementalTrainer`).
+* :mod:`cognition.curriculum` -- adaptive gradual training that chooses its own
+  next step and stops itself (:class:`AutonomousCurriculum`).
 * :mod:`cognition.evaluation` -- the ten cognitive indicators and a before/after
   comparison (:class:`CognitiveEvaluator`).
 * :mod:`cognition.runner` -- background operation under three resource modes
@@ -26,6 +33,20 @@ reliability rule (:mod:`cognition.reliability`) are the shared foundation.
 
 from __future__ import annotations
 
+from cognition.consolidation import (
+    ConsolidationReport,
+    Consolidator,
+    Pattern,
+    ReviewSchedule,
+    SkillRegistry,
+)
+from cognition.curriculum import (
+    AdaptivePolicy,
+    AutonomousCurriculum,
+    CurriculumReport,
+    MultiSeedEvaluator,
+    TrainingMemory,
+)
 from cognition.evaluation import (
     INDICATORS,
     LABELS,
@@ -34,6 +55,18 @@ from cognition.evaluation import (
     Comparison,
 )
 from cognition.learning_system import CognitiveLearningSystem, ErrorAnalysis, LearningStats
+from cognition.metacognition import (
+    CyclePlan,
+    Escalation,
+    EscalationPolicy,
+    FocusBuffer,
+    MetacognitiveController,
+    PersistentNovelty,
+    SelfModel,
+    StagnationDetector,
+    StagnationReading,
+    StrategyYield,
+)
 from cognition.proactive_mind import ProactiveMind, load_scheduler_state
 from cognition.records import (
     Experience,
@@ -74,30 +107,49 @@ __all__ = [
     "INDICATORS",
     "LABELS",
     "STAGE_SETTINGS",
+    "AdaptivePolicy",
     "AnswerQuality",
+    "AutonomousCurriculum",
     "CallableBackend",
     "CognitiveEvaluator",
     "CognitiveLearningSystem",
     "CognitiveReport",
     "CognitiveRunner",
     "Comparison",
+    "ConsolidationReport",
+    "Consolidator",
+    "CurriculumReport",
+    "CyclePlan",
     "ErrorAnalysis",
+    "Escalation",
+    "EscalationPolicy",
     "Evaluation",
     "Experience",
+    "FocusBuffer",
     "Idea",
     "IdeaKind",
     "IncrementalTrainer",
     "LearningStats",
+    "MetacognitiveController",
     "ModelBackend",
     "ModelRegistry",
     "ModelVersion",
+    "MultiSeedEvaluator",
+    "Pattern",
+    "PersistentNovelty",
     "ProactiveMind",
     "Reliability",
     "ResourceMode",
+    "ReviewSchedule",
     "SchedulerSettings",
     "SchedulerState",
+    "SelfModel",
+    "SkillRegistry",
     "Source",
     "SourceKind",
+    "StagnationDetector",
+    "StagnationReading",
+    "StrategyYield",
     "StudentProfile",
     "TeacherStudentSystem",
     "TeachingOutcome",
@@ -105,6 +157,7 @@ __all__ = [
     "ThoughtScheduler",
     "TrainingExample",
     "TrainingExampleKind",
+    "TrainingMemory",
     "TrainingOutcome",
     "TrainingPlan",
     "TrainingStage",

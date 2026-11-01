@@ -43,6 +43,7 @@ from core.character_config import (
 )
 from core.character_learning_store import CharacterLearningStore, LearningStats
 from core.character_registry import ApplyReport, CharacterRegistry
+from core.character_seeding import SeedOutcome, SeedReport
 from core.knowledge_sharing import KnowledgeSharing, ShareReport
 from core.learning_audit import LearningAudit
 from core.learning_isolation import (
@@ -412,6 +413,64 @@ class CharacterManagerService:
         from core.character_learning import CharacterLearning
 
         return CharacterLearning(owner_for(key), root=self._data_root).facts()
+
+    def memory_fill(self, key: str) -> tuple[int, int, float]:
+        """How full a character's memory is: ``(facts, exchanges, ratio)``.
+
+        The ratio is the used share of the character's own ceilings, so the window
+        can show a fill indicator without re-deriving the bounds.
+        """
+        from core.character_learning import MAX_EXCHANGES, MAX_FACTS, CharacterLearning
+
+        learning = CharacterLearning(owner_for(key), root=self._data_root)
+        facts = len(learning.facts())
+        exchanges = len(learning.exchanges())
+        used = 0.5 * (facts / MAX_FACTS) + 0.5 * (exchanges / MAX_EXCHANGES)
+        return facts, exchanges, round(min(1.0, used), 6)
+
+    def seed(
+        self,
+        key: str,
+        *,
+        limit: int = 24,
+        conversations: bool = False,
+        records: bool = False,
+    ) -> SeedOutcome:
+        """Teach a character the slice of the project's own knowledge that fits it.
+
+        Delegates to :mod:`core.character_seeding`, which seeds only authored
+        knowledge (the petroleum corpus, the project's orientation, the
+        character's own persona) and never invents a fact. With
+        ``conversations=True`` its *exchanges* are seeded too, from the project's
+        own cited answers; with ``records=True`` the same authored knowledge is
+        written as provenance-carrying learning records through the real pipeline.
+        """
+        from core.character_seeding import seed_character
+
+        return seed_character(
+            owner_for(key),
+            limit=limit,
+            root=self._data_root,
+            conversations=conversations,
+            records=records,
+        )
+
+    def seed_all(
+        self,
+        *,
+        limit: int = 24,
+        conversations: bool = False,
+        records: bool = False,
+    ) -> SeedReport:
+        """Seed every character from the project's own knowledge (idempotent)."""
+        from core.character_seeding import seed_all
+
+        return seed_all(
+            limit=limit,
+            root=self._data_root,
+            conversations=conversations,
+            records=records,
+        )
 
     def forget_facts(self, key: str, *, confirm: bool = False) -> bool:
         """Forget a character's facts and exchanges; requires ``confirm=True``.

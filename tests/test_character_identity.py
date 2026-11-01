@@ -172,6 +172,47 @@ def test_every_character_has_a_distinct_personality_out_of_the_box() -> None:
     assert len(set(dials.values())) >= 6
 
 
+def test_every_character_ships_a_complete_personality() -> None:
+    """Out of the box, a character's style and objectives are defined, not empty.
+
+    Before this, every character shipped with an empty communication style, an
+    empty reasoning style, and no objectives -- a personality half written. The
+    style and objectives are derived from the character's own persona, so a fresh
+    character is as complete as its persona is, and no character is left blank.
+    """
+    from core.character_config import default_config_for
+
+    for owner in (*CHARACTERS, MAIN):
+        personality = default_config_for(owner).personality
+        assert personality.communication_style, owner
+        assert personality.reasoning_style, owner
+        assert personality.objectives, owner
+
+
+def test_the_style_and_objectives_reach_the_instruction() -> None:
+    """The new fields really reach the standing instruction the model reads."""
+    from core.character_config import default_config_for
+
+    prompt = default_config_for("vision").system_prompt()
+    assert "Communication style" in prompt
+    assert "Reasoning style" in prompt
+    assert "objectives" in prompt.lower()
+
+
+def test_every_character_has_a_distinct_style_out_of_the_box() -> None:
+    """The styles make the characters different, not a shared boilerplate."""
+    from core.character_config import default_config_for
+
+    styles = {
+        owner: (
+            default_config_for(owner).personality.communication_style,
+            default_config_for(owner).personality.reasoning_style,
+        )
+        for owner in (*CHARACTERS, MAIN)
+    }
+    assert len(set(styles.values())) == len(styles)
+
+
 def test_the_personality_reaches_the_answer_text(data_root: Path) -> None:
     """A character's identity must reach the *text* it produces, not only a file."""
     from ai.characters import wrap_character

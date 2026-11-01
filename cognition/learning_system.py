@@ -270,5 +270,25 @@ class CognitiveLearningSystem:
             success_rate=self.experiences.success_rate(),
         )
 
+    # -- consolidation ------------------------------------------------------
+    def consolidator(self):
+        """The consolidator over this system's own memories (built once).
+
+        Kept here rather than in a second object so the window, the CLI, and the
+        proactive mind all consolidate the *same* experiences into the *same*
+        patterns -- one source of truth for what the mind has learned.
+        """
+        consolidator = getattr(self, "_consolidator", None)
+        if consolidator is None:
+            from cognition.consolidation import Consolidator
+
+            consolidator = Consolidator(self)
+            self._consolidator = consolidator
+        return consolidator
+
+    def consolidate(self):
+        """Consolidate the raw experiences into durable, reviewed knowledge."""
+        return self.consolidator().consolidate()
+
 
 __all__ = ["CognitiveLearningSystem", "ErrorAnalysis", "LearningStats"]

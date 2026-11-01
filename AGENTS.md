@@ -1819,6 +1819,49 @@ Arabic is kept as secondary aliases where useful.
   Jarvis call `bulk_knowledge_available()` and enable it automatically once the
   index exists. It is *reference material only*: never fed to the acceptance
   policy or belief layers.
+- `cognition/` — the **autonomous cognitive development system**: a proactive mind
+  that runs on the project's *own* graph (never a second graph or database).
+  `cognition/records.py` holds the durable records (`Idea`/`IdeaKind`, the
+  epistemic ladder, `ThoughtCycle`, `Experience`, `TrainingExample`, `Source`);
+  `cognition/engines/` the faculties (curiosity, motivation, ideas, imagination,
+  self-criticism, association, questions); `cognition/proactive_mind.py` the
+  thought cycle that wires them; `cognition/learning_system.py` the cognitive
+  learning system (semantic/episodic memory, facts, skills); `cognition/training.py`
+  the staged, rollback-safe trainer and its version gate;
+  `cognition/evaluation.py` the ten cognitive indicators; `cognition/storage.py`
+  the persistent stores (on `storage.json_store.JsonStore`, no new dependency);
+  `gui/cognition.py` + `gui/cognition_dialog.py` the Tk-free service and its
+  window; `cli/cognition.py` the headless twin. Three faculties make the mind
+  able to **improve itself** (Phase: maximal development), each built on the
+  existing machinery and reachable from the service, the CLI, and the window:
+  `cognition/metacognition.py` is the **self-model** — `SelfModel` records what
+  each strategy produced and how much of it survived criticism and turns that
+  into a bounded bias (`PersistentNovelty` remembers what has been thought across
+  a restart, so novelty is real rather than per-process; `FocusBuffer` keeps a
+  decaying focus; `StagnationDetector` reads a flat, repeating history as
+  stagnation but stays quiet when novelty rises or something was promoted;
+  `EscalationPolicy` widens the search within ceilings; `MetacognitiveController`
+  persists the model and plans each cycle). `cognition/consolidation.py` turns
+  experience into knowledge — `Consolidator` extracts content-addressed `Pattern`s
+  from repeated experience (a rule needs real support before it is stated, and a
+  strong pattern is upgraded into a *learned, unverified* fact), `ReviewSchedule`
+  is spaced repetition (a box advances on recall and resets on a miss), and
+  `SkillRegistry` measures a skill's proficiency rather than guessing it.
+  `cognition/curriculum.py` is the **adaptive curriculum** —
+  `AutonomousCurriculum` chooses the next training stage, raises the stage when a
+  run is accepted, adjusts the learning rate when a stage plateaus, and stops at
+  an explicit effort budget, recording every attempt in `TrainingMemory` (so it is
+  inspectable and resumable); `MultiSeedEvaluator` reports honestly when it cannot
+  measure. `cognition/development.py` is the held-out **gate**
+  (`DEVELOPMENT_JUDGEMENTS` + `development_accuracy`, with negative controls), a
+  metric in `evaluation` — so a self-model that stops favouring what pays off, a
+  detector that cries wolf, or a consolidator that over-generalises fails the
+  build. Wired into `core/cognitive_controller.py` (the controller exposes the
+  metacognition status, the consolidator, and the curriculum), the CLI
+  (`metacognition`, `plan`, `consolidate`, `patterns`, `review`, `skills`,
+  `curriculum`, and `train --autonomous`), and the window's new
+  *Metacognition* and *Consolidation & Review* sections. Nothing here loads a
+  model or reaches the network on import.
 - `core/version.py` is the single source of the version string.
 - `ingest/` — the **local-first ingestion subsystem**: a separate pipeline that
   turns *sources* into the same on-disk knowledge store without ever loading a

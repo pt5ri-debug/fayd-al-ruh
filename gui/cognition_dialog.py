@@ -194,7 +194,9 @@ class CognitionDialog:
         ).pack(side="left", padx=(8, 0))
 
         self._build_mind_section(column)
+        self._build_metacognition_section(column)
         self._build_learning_section(column)
+        self._build_consolidation_section(column)
         self._build_training_section(column)
         self._build_characters_section(column)
         self._build_indicators_section(column)
@@ -212,6 +214,30 @@ class CognitionDialog:
             fill="x", padx=12, pady=(0, 4)
         )
         self._button(section, "Prove the whole loop end to end", self._on_prove).pack(
+            fill="x", padx=12, pady=(0, 10)
+        )
+
+    def _build_metacognition_section(self, column: SidebarColumn) -> None:
+        section = column.add("metacognition", "Metacognition (self-model)", icon="🪞")
+        self._button(section, "Which strategies pay off", self._on_metacognition).pack(
+            fill="x", padx=12, pady=(4, 4)
+        )
+        self._button(section, "How the mind will search next", self._on_plan).pack(
+            fill="x", padx=12, pady=(0, 10)
+        )
+
+    def _build_consolidation_section(self, column: SidebarColumn) -> None:
+        section = column.add("consolidation", "Consolidation & Review", icon="🌙")
+        self._button(section, "Consolidate experience into knowledge", self._on_consolidate).pack(
+            fill="x", padx=12, pady=(4, 4)
+        )
+        self._button(section, "The patterns it has extracted", self._on_patterns).pack(
+            fill="x", padx=12, pady=(0, 4)
+        )
+        self._button(section, "Review what is due", self._on_review).pack(
+            fill="x", padx=12, pady=(0, 4)
+        )
+        self._button(section, "The skills it has practised", self._on_skills).pack(
             fill="x", padx=12, pady=(0, 10)
         )
 
@@ -265,7 +291,13 @@ class CognitionDialog:
         self._button(section, "Advance gradually (asks first)", self._on_train_gradual).pack(
             fill="x", padx=12, pady=(0, 4)
         )
+        self._button(section, "Run the adaptive curriculum (asks first)", self._on_train_autonomous).pack(
+            fill="x", padx=12, pady=(0, 4)
+        )
         self._button(section, "How far training has come", self._on_progression).pack(
+            fill="x", padx=12, pady=(0, 4)
+        )
+        self._button(section, "The adaptive curriculum's memory", self._on_curriculum).pack(
             fill="x", padx=12, pady=(0, 4)
         )
         self._button(section, "The version log", self._on_versions).pack(
@@ -554,6 +586,14 @@ class CognitionDialog:
 
         self._start_work(job, finish)
 
+    # -- metacognition ----------------------------------------------------
+
+    def _on_metacognition(self) -> None:
+        self._start_work(self.service.metacognition, self._finish_report)
+
+    def _on_plan(self) -> None:
+        self._start_work(self.service.plan_next, self._finish_report)
+
     # -- learning ---------------------------------------------------------
 
     def _on_learn(self) -> None:
@@ -592,6 +632,49 @@ class CognitionDialog:
 
         self._start_work(job, finish)
 
+    # -- consolidation ----------------------------------------------------
+
+    def _on_consolidate(self) -> None:
+        self._start_work(self.service.consolidate, self._finish_report)
+
+    def _on_patterns(self) -> None:
+        def job() -> tuple[str, ...]:
+            return self.service.patterns()
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._add_message("error", str(error))
+                return
+            patterns = result
+            if not patterns:
+                self._add_message(
+                    "note",
+                    "No patterns yet. Record experiences, then consolidate.",
+                )
+                return
+            self._report("assistant", "Patterns extracted from experience", tuple(patterns))
+
+        self._start_work(job, finish)
+
+    def _on_review(self) -> None:
+        self._start_work(lambda: self.service.review_due(remembered=True), self._finish_report)
+
+    def _on_skills(self) -> None:
+        def job() -> tuple[str, ...]:
+            return self.service.skills()
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._add_message("error", str(error))
+                return
+            skills = result
+            if not skills:
+                self._add_message("note", "No skills practised yet.")
+                return
+            self._report("assistant", "Practised skills and their proficiency", tuple(skills))
+
+        self._start_work(job, finish)
+
     # -- training ---------------------------------------------------------
 
     def _on_train(self) -> None:
@@ -619,6 +702,35 @@ class CognitionDialog:
         self._start_work(
             lambda: self.service.run_gradual(up_to=up_to, approved=True), self._finish_report
         )
+
+    def _on_train_autonomous(self) -> None:
+        if not self._confirm(
+            "Run the adaptive curriculum?",
+            "This advances the training stages on its own: it raises the stage when a "
+            "run is accepted, changes the learning rate when a stage plateaus, and "
+            "stops at an explicit effort budget. It is rollback-safe: the base model "
+            "is never modified in place, and a version is adopted only through the gate.",
+        ):
+            return
+        self._start_work(
+            lambda: self.service.run_autonomous(approved=True), self._finish_report
+        )
+
+    def _on_curriculum(self) -> None:
+        def job() -> tuple[str, ...]:
+            return self.service.curriculum_memory()
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._add_message("error", str(error))
+                return
+            attempts = result
+            if not attempts:
+                self._add_message("note", "No training attempts recorded yet.")
+                return
+            self._report("assistant", "Adaptive curriculum's training memory", tuple(attempts))
+
+        self._start_work(job, finish)
 
     def _on_progression(self) -> None:
         def job() -> str:

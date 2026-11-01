@@ -16,6 +16,7 @@ on randomness alone" true.
 from __future__ import annotations
 
 from collections import Counter
+from typing import Protocol, runtime_checkable
 
 from core.information_gap import InformationGap
 from core.ontology import Ontology
@@ -26,6 +27,21 @@ from cognition.records import Idea, IdeaKind, Source, SourceKind
 
 #: How far two ideas must differ in wording to count as different.
 _JACCARD_LIMIT = 0.7
+
+
+@runtime_checkable
+class NoveltyLike(Protocol):
+    """The one novelty interface the idea and motivation engines depend on.
+
+    A novelty memory only has to say how new a statement is and remember it, so
+    the in-RAM :class:`NoveltyTracker` and the durable
+    :class:`~cognition.metacognition.PersistentNovelty` are interchangeable --
+    the mind simply hands the engines a durable one.
+    """
+
+    def novelty(self, text: str) -> float: ...
+
+    def remember(self, text: str) -> None: ...
 
 
 class NoveltyTracker:
@@ -73,11 +89,11 @@ class IdeaEngine:
         ontology: Ontology,
         *,
         associations: AssociationEngine | None = None,
-        novelty: NoveltyTracker | None = None,
+        novelty: NoveltyLike | None = None,
     ) -> None:
         self.ontology = ontology
         self.associations = associations or AssociationEngine(ontology)
-        self.novelty = novelty or NoveltyTracker()
+        self.novelty: NoveltyLike = novelty or NoveltyTracker()
 
     def from_relation(self, association: Association) -> Idea | None:
         """State a relation the graph stores, as an idea to examine."""
@@ -134,6 +150,8 @@ class IdeaEngine:
         labels: tuple[str, ...] = (),
         gaps: tuple[InformationGap, ...] = (),
         limit: int = 5,
+        novelty_floor: float = 0.0,
+        strategy_bias: dict[str, float] | None = None,
     ) -> tuple[Idea, ...]:
         """Produce up to ``limit`` ideas, newest-idea-wins, de-duplicated.
 
@@ -141,6 +159,14 @@ class IdeaEngine:
         An idea whose wording is too close to one already produced (Jaccard above
         :data:`_JACCARD_LIMIT`) is dropped, so the output is a set of distinct
         thoughts rather than near-copies.
+
+        Two optional metacognitive controls let the mind steer its own search
+        without changing what it may believe. ``novelty_floor`` drops any idea
+        below it (used when the mind is stagnating and must stop repeating
+        itself), and ``strategy_bias`` re-ranks the candidates by how well the
+        strategy that produced each has actually paid off -- an explicit
+        explore/exploit balance, still fully deterministic. Both default to the
+        old behaviour, so a plain call is unchanged.
         """
         if limit < 1:
             raise ValueError("limit must be at least 1.")
@@ -153,8 +179,20 @@ class IdeaEngine:
         for gap in gaps[:limit]:
             ideas.append(self.from_gap(gap))
 
-        accepted: list[Idea] = []
+        bias = strategy_bias or {}
+        scored: list[tuple[float, Idea]] = []
         for idea in ideas:
+            novelty = self.novelty.novelty(idea.text)
+            if novelty < novelty_floor:
+                continue
+            # A strategy's own payoff, blended with the idea's novelty, decides
+            # the order -- so a proven strategy wins without excluding a new one.
+            weight = bias.get(idea.engine, 0.5)
+            scored.append((round(0.6 * weight + 0.4 * novelty, 6), idea))
+        scored.sort(key=lambda pair: (-pair[0], pair[1].text))
+
+        accepted: list[Idea] = []
+        for _score, idea in scored:
             if self.novelty.novelty(idea.text) < (1.0 - _JACCARD_LIMIT):
                 continue
             self.novelty.remember(idea.text)
@@ -195,4 +233,4 @@ def token_profile(ideas: tuple[Idea, ...]) -> dict[str, int]:
     return dict(counts.most_common(20))
 
 
-__all__ = ["IdeaEngine", "NoveltyTracker", "token_profile"]
+__all__ = ["IdeaEngine", "NoveltyLike", "NoveltyTracker", "token_profile"]
