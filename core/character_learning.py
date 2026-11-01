@@ -397,12 +397,18 @@ class CharacterRecord:
     key: str
     facts: list[str] = field(default_factory=list)
     exchanges: list[CharacterExchange] = field(default_factory=list)
+    #: When each fact was stored, keyed by the fact text. A record written before
+    #: this field existed simply has none, in which case a fact is treated as
+    #: ageless (see :meth:`CharacterLearning.fact_records`), so an upgrade loses
+    #: no fact and a decay reading never invents an age.
+    fact_ages: dict[str, str] = field(default_factory=dict)
 
     def to_primitive(self) -> dict[str, Any]:
         return {
             "key": self.key,
             "facts": list(self.facts),
             "exchanges": [exchange.to_primitive() for exchange in self.exchanges],
+            "fact_ages": dict(self.fact_ages),
         }
 
     @classmethod
@@ -415,7 +421,16 @@ class CharacterRecord:
             for item in data.get("exchanges", ()) or ()
             if isinstance(item, dict)
         ]
-        return cls(key=key, facts=facts, exchanges=exchanges)
+        raw_ages = data.get("fact_ages", {})
+        fact_ages = (
+            {str(k): str(v) for k, v in raw_ages.items()}
+            if isinstance(raw_ages, dict)
+            else {}
+        )
+        # Drop an age whose fact is gone, so the map never outlives its facts.
+        known = set(facts)
+        fact_ages = {k: v for k, v in fact_ages.items() if k in known}
+        return cls(key=key, facts=facts, exchanges=exchanges, fact_ages=fact_ages)
 
 
 class CharacterLearning:
@@ -530,7 +545,15 @@ class CharacterLearning:
         for fact in stored.facts:
             if fact not in self.record.facts:
                 self.record.facts.append(fact)
+            # Keep the stored age for a fact this instance had not seen, so a fact
+            # learned in another window is aged from when *it* was stored.
+            if fact in stored.fact_ages and fact not in self.record.fact_ages:
+                self.record.fact_ages[fact] = stored.fact_ages[fact]
         del self.record.facts[:-MAX_FACTS]
+        known = set(self.record.facts)
+        self.record.fact_ages = {
+            fact: age for fact, age in self.record.fact_ages.items() if fact in known
+        }
         seen = {
             (exchange.question, exchange.answer, exchange.at)
             for exchange in self.record.exchanges
@@ -547,6 +570,29 @@ class CharacterLearning:
     def facts(self) -> tuple[str, ...]:
         """The durable facts the character has been told, oldest first."""
         return tuple(self.record.facts)
+
+    def fact_records(self) -> tuple[tuple[str, str], ...]:
+        """Every fact with its stored age, oldest first.
+
+        The age is the ISO timestamp from when the fact was first stored, or ``""``
+        for a fact written before ages were recorded -- an honest "unknown age"
+        rather than an invented one, which the decay reading treats as ageless.
+        """
+        return tuple((fact, self.record.fact_ages.get(fact, "")) for fact in self.record.facts)
+
+    def forget_fact(self, text: str) -> bool:
+        """Drop one fact (and its age). Returns whether it was there to drop.
+
+        Used by the decay path to prune a fact that has faded past a floor, so
+        forgetting is an explicit, recorded action rather than a silent trim.
+        """
+        value = text.strip()
+        if not value or value not in self.record.facts:
+            return False
+        self.record.facts = [fact for fact in self.record.facts if fact != value]
+        self.record.fact_ages.pop(value, None)
+        self._save(merge=False)
+        return True
 
     def reload(self) -> None:
         """Re-read the record from disk, so another instance's writes are seen.
@@ -616,6 +662,9 @@ class CharacterLearning:
         if value in self.record.facts:
             return False
         self.record.facts.append(value)
+        # Stamp the fact's age so a decay reading has a real reference point; an
+        # older fact keeps its original stamp, so re-telling it never refreshes it.
+        self.record.fact_ages.setdefault(value, datetime.now(UTC).isoformat())
         del self.record.facts[:-MAX_FACTS]
         # Already merged above, so the write must not merge a second time (that
         # would re-append the facts the trim just dropped and shuffle the order).

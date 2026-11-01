@@ -199,3 +199,51 @@ def test_service_shares_one_controller_for_mind_and_learning(controller: object)
     # The mind and the learning system are built over the same controller.
     assert service.mind.ontology is service.controller.ontology
     assert service.learning is service.controller.cognitive_learning()
+
+
+# -- self-study -------------------------------------------------------------
+
+
+def test_question_bank_size_is_deep(controller: object) -> None:
+    assert _service(controller).question_bank_size() >= 200
+
+
+def test_next_questions_are_distinct(controller: object) -> None:
+    questions = _service(controller).next_questions(count=20)
+    assert len(questions) == 20
+    assert len(set(questions)) == 20
+
+
+def test_study_is_refused_without_approval(controller: object) -> None:
+    report = _service(controller).study(count=3, approved=False)
+    assert not report.ok
+
+
+def test_study_streams_turns_and_reports_the_benefit(controller: object, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    service = _service(controller)
+    seen: list[int] = []
+    report = service.study(count=4, on_turn=lambda t: seen.append(t.index), measure_indicators=False)
+    assert report.ok
+    assert seen == [1, 2, 3, 4]
+    assert report.report is not None
+    assert report.report.asked == 4
+    assert len(report.turns) == 4
+
+
+def test_last_study_report_is_none_before_a_session(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    from core.cognitive_controller import CognitiveController
+
+    assert _service(CognitiveController()).last_study_report() is None
+
+
+def test_last_study_report_reads_back_the_persisted_session(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    from core.cognitive_controller import CognitiveController
+
+    service = _service(CognitiveController())
+    service.study(count=3, measure_indicators=False)
+    stored = service.last_study_report()
+    assert stored is not None
+    assert stored.asked == 3

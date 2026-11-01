@@ -103,9 +103,15 @@ class CognitionDialog:
         self._results: queue.Queue[
             tuple[Callable[[Any, Exception | None], None], Any, Exception | None]
         ] = queue.Queue()
+        # The self-study session emits each turn from its worker thread; the UI
+        # thread drains this queue and draws them, so the questions and answers
+        # appear on screen *as they happen* (Tk is not thread-safe).
+        self._turns: queue.Queue[Any] = queue.Queue()
+        self._turn_pump: str | None = None
 
         self._statement_var = tk.StringVar(value="")
         self._command_var = tk.StringVar(value="")
+        self._study_count_var = tk.StringVar(value="200")
 
         self.window = tk.Toplevel(parent)
         self.window.title(f"{TITLE} — Fayd Al-Ruh")
@@ -194,6 +200,7 @@ class CognitionDialog:
         ).pack(side="left", padx=(8, 0))
 
         self._build_mind_section(column)
+        self._build_study_section(column)
         self._build_metacognition_section(column)
         self._build_learning_section(column)
         self._build_consolidation_section(column)
@@ -214,6 +221,44 @@ class CognitionDialog:
             fill="x", padx=12, pady=(0, 4)
         )
         self._button(section, "Prove the whole loop end to end", self._on_prove).pack(
+            fill="x", padx=12, pady=(0, 10)
+        )
+
+    def _build_study_section(self, column: SidebarColumn) -> None:
+        section = column.add("study", "Self-Study (ask & learn)", icon="📖")
+        tk.Label(
+            section,
+            text=(
+                "The mind asks its own questions, reads the project's answer to "
+                "each, and reports how much it gained. Questions never repeat."
+            ),
+            bg=self.theme.surface, fg=self.theme.text_secondary,
+            font=self._type.font("2xs"), justify="left", wraplength=SIDEBAR_WIDTH - 40,
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(2, 6))
+        row = tk.Frame(section, bg=self.theme.surface)
+        row.pack(fill="x", padx=12, pady=(0, 4))
+        tk.Label(
+            row, text="Questions:", bg=self.theme.surface, fg=self.theme.text_secondary,
+            font=self._type.font("2xs"),
+        ).pack(side="left")
+        tk.Entry(
+            row, textvariable=self._study_count_var, width=6, justify="center",
+            bg=self.theme.surface_raised, fg=self.theme.foreground, relief="flat",
+            highlightthickness=0, insertbackground=self.theme.foreground,
+            font=self._type.font("2xs"),
+        ).pack(side="left", padx=(6, 0))
+        self._study_button = self._button(
+            section, "Start asking questions", self._on_study
+        )
+        self._study_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._button(section, "Show the question bank size", self._on_bank_size).pack(
+            fill="x", padx=12, pady=(0, 4)
+        )
+        self._button(section, "Preview the next questions", self._on_next_questions).pack(
+            fill="x", padx=12, pady=(0, 4)
+        )
+        self._button(section, "Last benefit report", self._on_last_report).pack(
             fill="x", padx=12, pady=(0, 10)
         )
 
@@ -540,6 +585,118 @@ class CognitionDialog:
     def _on_think(self) -> None:
         self._start_work(self.service.think, self._finish_report)
 
+    # -- self-study -------------------------------------------------------
+
+    def _on_bank_size(self) -> None:
+        def job() -> int:
+            return self.service.question_bank_size()
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._add_message("error", str(error))
+                return
+            self._add_message(
+                "assistant",
+                f"The mind's question bank holds {result} distinct questions, built "
+                "from the graph's own relations and the project's authored topics.",
+            )
+
+        self._start_work(job, finish)
+
+    def _on_next_questions(self) -> None:
+        def job() -> tuple[str, ...]:
+            return self.service.next_questions(count=20)
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._add_message("error", str(error))
+                return
+            questions = result
+            if not questions:
+                self._add_message("note", "No questions available.")
+                return
+            self._report("assistant", "The next questions the mind would ask", tuple(questions))
+
+        self._start_work(job, finish)
+
+    def _on_last_report(self) -> None:
+        report = self.service.last_study_report()
+        if report is None:
+            self._add_message("note", "No self-study session has been run yet.")
+            return
+        self._add_message("assistant", report.describe())
+
+    def _on_study(self) -> None:
+        """Start a self-study session and stream the questions and answers live."""
+        if self._busy:
+            return
+        try:
+            count = max(1, int(self._study_count_var.get().strip() or "200"))
+        except ValueError:
+            count = 200
+        self._add_message(
+            "user",
+            f"Start asking questions ({count}) — the mind will study its own "
+            "questions and report how much it gained.",
+        )
+        self._study_button.configure(state="disabled")
+        self._start_work(
+            lambda: self.service.study(
+                count=count,
+                on_turn=self._turns.put,
+                measure_indicators=True,
+                approved=True,
+            ),
+            self._finish_study,
+        )
+        self._schedule_turn_pump()
+
+    def _schedule_turn_pump(self) -> None:
+        if self._closed:
+            return
+        self._turn_pump = self.window.after(120, self._pump_turns)
+
+    def _pump_turns(self) -> None:
+        """Draw the questions and answers that arrived since the last pump."""
+        self._turn_pump = None
+        drew = 0
+        while True:
+            try:
+                turn = self._turns.get_nowait()
+            except queue.Empty:
+                break
+            self._add_message(
+                "note" if not turn.answered else "assistant",
+                f"Q{turn.index}: {turn.question}\nA: {turn.answer}",
+            )
+            drew += 1
+            if drew >= 12:  # bounded per pump, so the UI never stalls
+                break
+        if self._busy and not self._closed:
+            self._schedule_turn_pump()
+
+    def _finish_study(self, result: Any, error: Exception | None) -> None:
+        # Drain any remaining turns before the report, so the stream is complete.
+        self._drain_turns()
+        self._study_button.configure(state="normal")
+        if error is not None:
+            self._add_message("error", f"{type(error).__name__}: {error}")
+            return
+        report = result
+        role = "ok" if report.ok else "error"
+        self._report(role, report.title, report.lines)
+
+    def _drain_turns(self) -> None:
+        while True:
+            try:
+                turn = self._turns.get_nowait()
+            except queue.Empty:
+                return
+            self._add_message(
+                "note" if not turn.answered else "assistant",
+                f"Q{turn.index}: {turn.question}\nA: {turn.answer}",
+            )
+
     def _on_ideas(self) -> None:
         def job() -> tuple[Any, ...]:
             return self.service.ideas()
@@ -857,6 +1014,12 @@ class CognitionDialog:
             except tk.TclError:
                 pass
             self._pump_after = None
+        if self._turn_pump is not None:
+            try:
+                self.window.after_cancel(self._turn_pump)
+            except tk.TclError:
+                pass
+            self._turn_pump = None
         try:
             self.window.destroy()
         finally:

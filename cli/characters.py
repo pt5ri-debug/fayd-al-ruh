@@ -238,7 +238,9 @@ def _cmd_seed(args: argparse.Namespace) -> int:
 def _cmd_fill(args: argparse.Namespace) -> int:
     """Show how full each character's memory is (facts, exchanges, ratio)."""
     service = _service()
-    keys = service.character_keys() if args.all else (args.character,)
+    # With no character and no --all, report every character -- the same default
+    # ``list`` uses -- rather than an empty row for the empty key.
+    keys = service.character_keys() if (args.all or not args.character) else (args.character,)
     rows = []
     for key in keys:
         facts, exchanges, ratio = service.memory_fill(key)
@@ -257,6 +259,136 @@ def _cmd_fill(args: argparse.Namespace) -> int:
         return 0
     for key, facts, exchanges, ratio in rows:
         print(f"{key}: {facts} fact(s), {exchanges} exchange(s) — {round(ratio * 100)}% full")
+    return 0
+
+
+def _cmd_memory(args: argparse.Namespace) -> int:
+    """The unified, read-only view of one character's whole memory."""
+    from core.character_memory_view import CharacterMemoryView
+
+    view = CharacterMemoryView(args.character)
+    if args.search:
+        hits = view.search(args.search, limit=args.limit)
+        if args.json:
+            print(json.dumps([h.describe() for h in hits], ensure_ascii=False, indent=2))
+            return 0
+        if not hits:
+            print(f"No memory in {args.character} matches {args.search!r}.")
+            return 0
+        for hit in hits:
+            print(f"  {hit.describe()}")
+        return 0
+    if args.recall:
+        exchanges = view.rank_exchanges(args.recall, limit=args.limit)
+        if args.json:
+            print(
+                json.dumps(
+                    [e.to_primitive() for e in exchanges], ensure_ascii=False, indent=2
+                )
+            )
+            return 0
+        if not exchanges:
+            print(f"Nothing in {args.character}'s memory bears on {args.recall!r}.")
+            return 0
+        for exchange in exchanges:
+            print(f"  {exchange.recall_line()}")
+        return 0
+    if args.decay:
+        ranked = view.fact_decay(rate=args.rate)
+        faded = [fact for fact, retention in ranked if retention < args.floor]
+        if args.json:
+            print(
+                json.dumps(
+                    {"ranked": [[f, r] for f, r in ranked], "faded": faded},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        print(f"{args.character}: {len(ranked)} fact(s), {len(faded)} below floor {args.floor}")
+        for fact, retention in ranked[: args.limit]:
+            print(f"  {retention:.4f}  {fact}")
+        return 0
+    if args.json:
+        stats = view.stats()
+        print(json.dumps(stats.__dict__, ensure_ascii=False, indent=2, default=str))
+        return 0
+    print(view.describe())
+    return 0
+
+
+def _cmd_decay(args: argparse.Namespace) -> int:
+    """Report (or apply) the gradual forgetting of faded character facts."""
+    from core.character_memory_view import CharacterMemoryView
+
+    keys = (args.character,) if args.character else _service().character_keys()
+    rows = []
+    for key in keys:
+        view = CharacterMemoryView(key)
+        faded = view.prune_faded(floor=args.floor, rate=args.rate, apply=args.apply)
+        rows.append((key, faded))
+    if args.json:
+        print(
+            json.dumps(
+                [{"character": k, "faded": list(v), "applied": args.apply} for k, v in rows],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    verb = "forgot" if args.apply else "would forget"
+    total = 0
+    for key, faded in rows:
+        total += len(faded)
+        if faded:
+            print(f"{key}: {verb} {len(faded)} faded fact(s)")
+            for fact in faded[: args.limit]:
+                print(f"  {fact}")
+    print(f"{total} faded fact(s) across {len(rows)} character(s).")
+    return 0
+
+
+def _cmd_consistency(args: argparse.Namespace) -> int:
+    """Report whether each character's standing configuration is consistent."""
+    from core.character_consistency import check_consistency
+    from core.character_registry import default_registry
+
+    registry = default_registry()
+    keys = registry.keys() if (args.all or not args.character) else (args.character,)
+    reports = []
+    for key in keys:
+        report = check_consistency(registry.load(key))
+        reports.append(report)
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "character": r.key,
+                        "consistent": r.ok,
+                        "issues": [w.describe() for w in r.warnings],
+                    }
+                    for r in reports
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    for report in reports:
+        print(report.describe())
+    return 0
+
+
+def _cmd_evaluate(args: argparse.Namespace) -> int:
+    """Score the characters on the four dimensions, honestly."""
+    from gui.character_evaluation import evaluate_characters
+
+    report = evaluate_characters()
+    if args.json:
+        print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))
+        return 0
+    print(report.describe())
     return 0
 
 
@@ -695,6 +827,46 @@ def build_parser() -> argparse.ArgumentParser:
     p_fill.add_argument("--all", action="store_true")
     p_fill.add_argument("--json", action="store_true")
     p_fill.set_defaults(func=_cmd_fill)
+
+    p_memory = sub.add_parser("memory", help="the unified view of a character's memory")
+    p_memory.add_argument("character")
+    p_memory.add_argument("--search", default="", help="find entries by meaning then by word")
+    p_memory.add_argument(
+        "--recall", default="", help="rank the exchanges that bear on this question"
+    )
+    p_memory.add_argument(
+        "--decay", action="store_true", help="order facts by the forgetting curve"
+    )
+    p_memory.add_argument("--rate", type=float, default=0.01, help="decay rate for --decay")
+    p_memory.add_argument("--floor", type=float, default=0.05, help="faded-below floor")
+    p_memory.add_argument("--limit", type=int, default=5)
+    p_memory.add_argument("--json", action="store_true")
+    p_memory.set_defaults(func=_cmd_memory)
+
+    p_decay = sub.add_parser(
+        "decay", help="report (or apply) the gradual forgetting of faded facts"
+    )
+    p_decay.add_argument("character", nargs="?", default="")
+    p_decay.add_argument("--apply", action="store_true", help="forget the faded facts")
+    p_decay.add_argument("--rate", type=float, default=0.01)
+    p_decay.add_argument("--floor", type=float, default=0.05)
+    p_decay.add_argument("--limit", type=int, default=10)
+    p_decay.add_argument("--json", action="store_true")
+    p_decay.set_defaults(func=_cmd_decay)
+
+    p_consistency = sub.add_parser(
+        "consistency", help="is a character's standing configuration consistent?"
+    )
+    p_consistency.add_argument("character", nargs="?", default="")
+    p_consistency.add_argument("--all", action="store_true")
+    p_consistency.add_argument("--json", action="store_true")
+    p_consistency.set_defaults(func=_cmd_consistency)
+
+    p_evaluate = sub.add_parser(
+        "evaluate", help="score the characters on the four dimensions"
+    )
+    p_evaluate.add_argument("--json", action="store_true")
+    p_evaluate.set_defaults(func=_cmd_evaluate)
 
     p_verify = sub.add_parser("verify", help="verify one record (supervised)")
     p_verify.add_argument("character")

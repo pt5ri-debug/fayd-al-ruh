@@ -167,6 +167,39 @@ class StubService:
         self.taught.append(question)
         return OperationReport(ok=True, title=f"taught: {question}")
 
+    # -- self-study --------------------------------------------------------
+    def question_bank_size(self):
+        return 2109
+
+    def next_questions(self, *, count=200):
+        return ("What is porosity?", "Why does waterflood increase recovery?")
+
+    def last_study_report(self):
+        from cognition.study import BenefitReport
+
+        return BenefitReport(asked=200, answered=200, relations_learned=10, facts_gained=200,
+                             associations_gained=0, episodes_gained=200)
+
+    def study(self, *, count=200, on_turn=None, measure_indicators=True, approved=True):
+        from cognition.study import BenefitReport, StudyTurn
+        from gui.cognition import StudyReport
+
+        if not approved:
+            return StudyReport(ok=False, title="Self-study was not approved.")
+        turns = []
+        for index in range(1, min(count, 3) + 1):
+            turn = StudyTurn(index=index, question=f"Question {index}?",
+                             answer=f"Answer {index}.", citations=("doc#1",))
+            turns.append(turn)
+            if on_turn is not None:
+                on_turn(turn)
+        report = BenefitReport(asked=len(turns), answered=len(turns), relations_learned=1,
+                               facts_gained=len(turns), associations_gained=0,
+                               episodes_gained=len(turns))
+        return StudyReport(ok=True, title=f"Self-study finished — asked {len(turns)} question(s)",
+                           lines=tuple(report.describe().splitlines()[1:]),
+                           report=report, turns=tuple(turns))
+
 
 def _dialog(root, service):
     from gui.app import DARK_THEME
@@ -194,7 +227,7 @@ def test_window_builds_with_every_sidebar_section() -> None:
     try:
         dialog = _dialog(root, StubService())
         for key in (
-            "mind", "metacognition", "learning", "consolidation",
+            "mind", "study", "metacognition", "learning", "consolidation",
             "training", "characters", "indicators", "system",
         ):
             assert key in dialog._sidebar_column.sections
@@ -481,4 +514,26 @@ def test_the_cognition_cli_is_registered() -> None:
         a for a in parser._actions if isinstance(a, __import__("argparse")._SubParsersAction)
     )
     assert "characters" in subactions.choices
+    # ... and the self-study commands the Study section drives.
+    assert {"study", "questions", "last-study"} <= set(subactions.choices)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_study_section_streams_questions_and_shows_the_report() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        service = StubService()
+        dialog = _dialog(root, service)
+        _drain(root, dialog)
+        assert int(dialog._study_count_var.get()) > 0
+        dialog._on_study()
+        _drain(root, dialog)
+        # Every streamed turn reached the transcript, and the report is shown.
+        text = "\n".join(card.get("1.0", "end") for card in dialog._cards)
+        assert "Question 1?" in text
+        assert "Answer 1." in text
+    finally:
+        root.destroy()
 

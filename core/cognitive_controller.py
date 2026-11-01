@@ -876,6 +876,58 @@ class CognitiveController:
             self._cognitive_learning = learning
         return learning
 
+    def question_bank(self):
+        """The mind's own question bank over this graph (built once).
+
+        Two hundred distinct, non-repeating questions are drawn from it (see
+        :mod:`cognition.question_bank`), built from the graph's own edges and the
+        project's authored question sets -- so a question always names a relation
+        the graph states or a topic the corpus covers.
+        """
+        bank = getattr(self, "_question_bank", None)
+        if bank is None:
+            from cognition.question_bank import build_bank
+
+            bank = build_bank(self.ontology)
+            self._question_bank = bank
+        return bank
+
+    def next_questions(self, *, count: int = 200, record: bool = False):
+        """The next ``count`` questions the mind has not asked yet.
+
+        Fresh questions are preferred and the batch never repeats within itself;
+        when the bank is exhausted the least-recently-asked are re-offered. With
+        ``record=True`` the returned questions are marked asked, so the next call
+        starts where this one stopped.
+        """
+        from cognition.question_bank import QuestionLog, next_questions
+
+        log = getattr(self, "_question_log", None)
+        if log is None:
+            log = QuestionLog()
+            self._question_log = log
+        return next_questions(self.ontology, count=count, log=log, record=record)
+
+    def study(self, *, count: int = 200, on_turn=None, assistant=None, measure_indicators: bool = True):
+        """Run one self-study session over the project's own knowledge.
+
+        The mind asks ``count`` of its own questions, reads the grounded
+        assistant's cited answer to each, folds what it reads into its memories,
+        and returns a :class:`cognition.study.StudyResult` carrying every turn and
+        a measured benefit report. ``on_turn`` is called with each
+        :class:`cognition.study.StudyTurn` as it is produced, so a surface can
+        stream the questions and answers live.
+        """
+        from cognition.study import StudySession
+
+        session = StudySession(
+            self,
+            assistant=assistant,
+            log=getattr(self, "_question_log", None),
+            measure_indicators=measure_indicators,
+        )
+        return session.run(count=count, on_turn=on_turn)
+
     def think(self, *, goals: tuple[Goal, ...] = (), max_ideas: int | None = None):
         """Run one proactive thinking cycle and return its record."""
         return self.proactive_mind().cycle(goals=goals, max_ideas=max_ideas)

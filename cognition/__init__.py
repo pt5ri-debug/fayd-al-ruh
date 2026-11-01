@@ -68,6 +68,13 @@ from cognition.metacognition import (
     StrategyYield,
 )
 from cognition.proactive_mind import ProactiveMind, load_scheduler_state
+from cognition.question_bank import (
+    DEFAULT_QUESTION_COUNT,
+    BankQuestion,
+    QuestionLog,
+    build_bank,
+    next_questions,
+)
 from cognition.records import (
     Experience,
     Idea,
@@ -85,6 +92,14 @@ from cognition.scheduler import (
     SchedulerSettings,
     SchedulerState,
     ThoughtScheduler,
+)
+from cognition.study import (
+    BenefitReport,
+    StudyResult,
+    StudySession,
+    StudyTurn,
+    last_study_report,
+    study_report,
 )
 from cognition.teacher_student import (
     AnswerQuality,
@@ -104,12 +119,15 @@ from cognition.training import (
 from cognition.versions import Evaluation, ModelRegistry, ModelVersion
 
 __all__ = [
+    "DEFAULT_QUESTION_COUNT",
     "INDICATORS",
     "LABELS",
     "STAGE_SETTINGS",
     "AdaptivePolicy",
     "AnswerQuality",
     "AutonomousCurriculum",
+    "BankQuestion",
+    "BenefitReport",
     "CallableBackend",
     "CognitiveEvaluator",
     "CognitiveLearningSystem",
@@ -138,6 +156,7 @@ __all__ = [
     "Pattern",
     "PersistentNovelty",
     "ProactiveMind",
+    "QuestionLog",
     "Reliability",
     "ResourceMode",
     "ReviewSchedule",
@@ -151,6 +170,9 @@ __all__ = [
     "StagnationReading",
     "StrategyYield",
     "StudentProfile",
+    "StudyResult",
+    "StudySession",
+    "StudyTurn",
     "TeacherStudentSystem",
     "TeachingOutcome",
     "ThoughtCycle",
@@ -161,6 +183,10 @@ __all__ = [
     "TrainingOutcome",
     "TrainingPlan",
     "TrainingStage",
+    "build_bank",
+    "last_study_report",
     "load_scheduler_state",
+    "next_questions",
     "promote",
+    "study_report",
 ]

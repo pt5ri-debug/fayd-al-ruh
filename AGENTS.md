@@ -1862,6 +1862,90 @@ Arabic is kept as secondary aliases where useful.
   `curriculum`, and `train --autonomous`), and the window's new
   *Metacognition* and *Consolidation & Review* sections. Nothing here loads a
   model or reaches the network on import.
+  Two modules make the mind able to **study** rather than merely think:
+  `cognition/question_bank.py` builds a deep, deterministic bank of **distinct**
+  questions from the project's **own** knowledge -- a template per relation type
+  filled from the graph's *own* edges ("What does {a} {relation} {b}?") plus the
+  authored question sets the characters are seeded from -- so the mind can ask
+  **two hundred** questions in one run and never repeat one across runs; a
+  persisted record of what has already been asked (`QuestionLog` under
+  `cognition.storage.NAMESPACE_QUESTIONS`) lets `next_questions` hand back the
+  next *unasked* batch, and nothing is invented (a graph question names an edge
+  the ontology holds, a topic question a topic the corpus states).
+  `cognition/study.py` is the **self-study session**: `StudySession.run` asks
+  `count` of those questions, reads the grounded assistant's cited answer to each,
+  folds a fact and an episode into the cognitive learning system, learns any
+  typed relation the answer states through the *same* bounded learner
+  (`learn_extracted_relations`), and returns a `StudyResult` whose **benefit
+  report** is *measured* -- a `cognition.evaluation.CognitiveReport` before and
+  after, counting the relations learned, facts gained, associations and episodes
+  gained, and the delta on each of the ten indicators -- never asserted.
+  `on_turn` streams each `StudyTurn` as it happens, so a UI shows the questions
+  and answers live. Nothing here widens what the mind may believe: an answer is
+  the grounded assistant's cited reply (or an honest "no evidence"), and a
+  question is never treated as a fact. `core/cognitive_controller.py` exposes
+  `question_bank()`, `next_questions()`, and `study()` as thin delegations, and
+  the service (`gui/cognition.py`'s `CognitiveService.think`/`study`/
+  `last_study_report`/`next_questions`/`question_bank_size`), the CLI
+  (`python -m cli cognition study|questions|last-study`), and the window's
+  *Self-Study (ask & learn)* section all drive the same session -- no surface
+  reimplements it.
+- `core/character_memory_view.py` — the **one read-only view over a character's
+  memory**, so the three stores a character actually has (its own
+  `CharacterLearning` facts and exchanges, its provenance-carrying
+  `CharacterLearningStore` records, and the shared learning pipeline) can be
+  queried together instead of one at a time. `CharacterMemoryView(key)` resolves
+  the owner through `core.learning_isolation` **before** any path, so it honours
+  the isolation policy structurally (Natasha's records are private and the main
+  model's view can never reach them); `entries()`/`stats()`/`search()`/
+  `describe()` read the durable stores, tolerate a corrupt or missing one as an
+  empty view rather than crashing, and never write. It is the read side the
+  evaluation's *Memory* dimension and the CLI `python -m cli characters memory`
+  command both use, so the two can never disagree about how full a character is.
+  **Semantic recall and gradual decay are real, not merely measured.** `recall()`
+  and `rank_exchanges(question, *, exclude_questions=())` order a character's
+  exchanges by **relevance** to a question -- the project's learned
+  `core.embeddings` space, with a whole-word lexical fallback -- so a relevant old
+  turn can outrank an irrelevant recent one; `CharacterMouth.system_prompt(question=)`
+  uses that ranking, so a character recalls what *bears on the question asked* and
+  falls back to recency when nothing matches. `fact_decay()`/`prune_faded(floor=,
+  apply=)` run the project's own `core.memory_decay.MemoryDecay` curve over each
+  fact's **own** stored age (`CharacterRecord.fact_ages`, stamped on `add_fact`,
+  backwards-compatible: a fact with no age is never pruned), so an older fact
+  genuinely fades below a newer one and forgetting is explicit and recorded
+  (`CharacterLearning.forget_fact`), never a silent trim. CLI: `python -m cli
+  characters memory <c> --recall "<q>"|--decay [--rate --floor]` and
+  `python -m cli characters decay [<c>] [--apply]`.
+- `core/character_consistency.py` — the **trait-consistency validator**.
+  `check_consistency(config) -> ConsistencyReport` reads a character's editable
+  configuration and reports a **contradictory combination before APPLY** -- a high
+  formality set against a casual communication style, a "brief" answer length
+  against an objective that asks for depth, a warmth dial that fights a stated
+  rule -- so the Characters window can warn instead of saving a character that
+  argues with itself. `ConsistencyReport` carries every finding with a readable
+  reason and is `ok` only when none is raised; the check is pure and
+  deterministic, invents nothing, and is surfaced by `python -m cli characters
+  consistency`.
+- `core/personality_layer.py` — the **deep personality layer for the four
+  prompt-only mouths** (Ultron, Vision, Banner, Cloud -- the ones with no other
+  dedicated layer: Jarvis has grounding, Natasha the companion package, Hakeem
+  the scholar package). `layer_for(key)` returns a `PersonalityLayer` of named
+  **registers** (a *tone* -- direct, curious, precise, diagnostic, teaching,
+  cautious, and so on, each with an English and Arabic label and its own style
+  instruction) and **initiatives** (a way the mouth may *lead* the conversation),
+  and `style_block()`/`initiative_block()`/`standing_block()` render them as
+  instructions for the standing prompt. The layer is **tone and initiative only**
+  -- every block states that in its own text, so it can never be read as widening
+  what the mouth may claim -- and it is now **in force**, not merely measured:
+  `ai.characters.CharacterMouth.system_prompt` appends the layer's
+  `standing_block()` for exactly the four mouths that have one, so the registers
+  and initiatives reach the model's system prompt on every answer while the
+  mouths with their own layer get no second one. Dependency-free and import-safe.
+- `core/character_seeding.py`'s `PETROLEUM_QUESTIONS`/`PROJECT_QUESTIONS` are the
+  authored question sets a character is seeded from (the project's own cited
+  answers to them become its exchanges), widened to dozens of questions drawn
+  from the corpus's own topics so a seeded character's *memory* is measurably
+  fuller rather than "ready but unused".
 - `core/version.py` is the single source of the version string.
 - `ingest/` — the **local-first ingestion subsystem**: a separate pipeline that
   turns *sources* into the same on-disk knowledge store without ever loading a
@@ -2437,7 +2521,11 @@ Arabic is kept as secondary aliases where useful.
   `download_model(mouth, key, approved=, progress=)` is the one dispatcher that
   runs it through the **owning engine's** own approval gate.
   `find_language_model`/`resolve_choice`,
-  `default_language_model_key`, `describe_language_models`, and the mouth
+  `default_language_model_key`, `ready_language_model_key`/`ready_language_model`
+  (the mouth's own default when installed, else any model it can really run -- a
+  general model in the shared folder, say -- so a surface never reports "no model"
+  for a mouth that can answer, and the evaluation's training dimension reads this
+  rather than the default alone), `describe_language_models`, and the mouth
   constants (`MOUTH_SOURCES`/`ULTRON`/`VISION`/`BANNER`/`NATASHA`/`HAKEEM`/
   `CLOUD`/`MODEL`, `MOUTHS`, `GGUF_MOUTHS`, `ENGINE_LABELS`) round it out.
   **Honest by construction**: availability is a real file check (`available` is
