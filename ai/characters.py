@@ -297,8 +297,21 @@ class CharacterMouth:
         )
         config = self._config
         if config is not None:
-            return str(config.system_prompt(learned_facts=facts, recalled_memory=recalled))
-        return self._persona.system_prompt(learned_facts=facts, recalled_memory=recalled)
+            rendered = str(config.system_prompt(learned_facts=facts, recalled_memory=recalled))
+        else:
+            rendered = self._persona.system_prompt(learned_facts=facts, recalled_memory=recalled)
+        # The four prompt-only mouths (Ultron, Vision, Banner, Cloud) have a
+        # dedicated personality layer -- registers and initiative -- that was only
+        # measured by the evaluation and never reached the prompt. Appending it
+        # here puts it in force for every answer; it states its own limit, so it
+        # never widens what the mouth may claim. The mouths with their own layer
+        # (Jarvis, Natasha, Hakeem, the project model) get no second one.
+        from core.personality_layer import layer_for
+
+        layer = layer_for(self.key)
+        if layer is not None:
+            rendered = f"{rendered}\n\n{layer.standing_block()}"
+        return rendered
 
     # ---------------------------------------------------------------- asking
 

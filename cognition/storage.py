@@ -48,6 +48,10 @@ NAMESPACE_NOVELTY = "cognition/novelty"
 NAMESPACE_PATTERNS = "cognition/patterns"
 NAMESPACE_REVIEWS = "cognition/reviews"
 NAMESPACE_CURRICULUM = "cognition/curriculum"
+#: The questions the mind has already asked, so its bank never repeats one.
+NAMESPACE_QUESTIONS = "cognition/questions"
+#: The self-study sessions the mind has run, so a benefit report is durable.
+NAMESPACE_STUDY = "cognition/study"
 
 #: Bounds, so a long-running background mind stays a fixed size on disk.
 MAX_IDEAS = 500
@@ -337,6 +341,8 @@ __all__ = [
     "MAX_FACTS",
     "MAX_IDEAS",
     "NAMESPACE_FACTS",
+    "NAMESPACE_QUESTIONS",
+    "NAMESPACE_STUDY",
     "CycleStore",
     "ExampleStore",
     "ExperienceStore",

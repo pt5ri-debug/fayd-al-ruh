@@ -31,8 +31,10 @@ from typing import Any
 from cognition.evaluation import INDICATORS, LABELS, CognitiveReport
 from cognition.learning_system import CognitiveLearningSystem
 from cognition.proactive_mind import ProactiveMind
+from cognition.question_bank import DEFAULT_QUESTION_COUNT
 from cognition.records import Source, SourceKind
 from cognition.runner import CognitiveRunner, ResourceMode
+from cognition.study import BenefitReport, StudyTurn
 from cognition.training import STAGE_SETTINGS, IncrementalTrainer, TrainingStage
 from cognition.versions import ModelRegistry, ModelVersion
 
@@ -76,6 +78,21 @@ class OperationReport:
         if self.detail:
             text += f"\n\n{self.detail}"
         return text
+
+
+@dataclass
+class StudyReport:
+    """The result of one self-study session, for the window to show."""
+
+    ok: bool
+    title: str
+    lines: tuple[str, ...] = ()
+    report: BenefitReport | None = None
+    turns: tuple[StudyTurn, ...] = ()
+
+    def describe(self) -> str:
+        body = "\n".join(f"  {line}" for line in self.lines)
+        return f"{self.title}" + (f"\n{body}" if body else "")
 
 
 @dataclass
@@ -511,6 +528,92 @@ class CognitiveService:
         if self._character_evaluator is None:
             self._character_evaluator = CharacterEvaluator(data_root=self._data_root)
         return self._character_evaluator.evaluate()
+
+    # -- self-study: ask the mind's own questions, stream them, report the gain -
+
+    def question_bank_size(self) -> int:
+        """How many distinct questions the mind's bank holds."""
+        return len(self.controller.question_bank())
+
+    def next_questions(self, *, count: int = DEFAULT_QUESTION_COUNT) -> tuple[str, ...]:
+        """A preview of the next questions the mind would ask (without recording)."""
+        return tuple(q.text for q in self.controller.next_questions(count=count, record=False))
+
+    def study(
+        self,
+        *,
+        count: int = DEFAULT_QUESTION_COUNT,
+        on_turn: Callable[[Any], None] | None = None,
+        measure_indicators: bool = True,
+        approved: bool = True,
+    ) -> StudyReport:
+        """Run one self-study session and return a report the window can show.
+
+        The mind asks ``count`` of its own questions, reads the grounded
+        assistant's cited answer to each, learns the relations the answers state,
+        and reports the measured benefit. ``on_turn`` receives each
+        :class:`cognition.study.StudyTurn` as it is produced, so the window can
+        stream the questions and answers live. ``approved`` is the user's explicit
+        consent to run the session (the button click); without it the session is
+        refused, exactly like every other long action here.
+        """
+        if not approved:
+            return StudyReport(
+                ok=False,
+                title="Self-study was not approved.",
+                lines=("Press the button to start the session.",),
+            )
+        result = self.controller.study(
+            count=count,
+            on_turn=on_turn,
+            measure_indicators=measure_indicators,
+        )
+        report: BenefitReport = result.report
+        return StudyReport(
+            ok=True,
+            title=f"Self-study finished — asked {report.asked} question(s)",
+            lines=tuple(report.describe().splitlines()[1:]),
+            report=report,
+            turns=result.turns,
+        )
+
+    def last_study_report(self) -> BenefitReport | None:
+        """The most recent stored benefit report, or ``None`` when none was run."""
+        from cognition.study import last_study_report
+
+        return last_study_report()
+
+    # -- the unified character memory view ----------------------------------
+
+    def memory_view(self, key: str):
+        """The unified, read-only memory view for one character."""
+        from core.character_memory_view import CharacterMemoryView
+
+        return CharacterMemoryView(key, root=self._data_root)
+
+    def memory_stats(self, key: str) -> str:
+        """One readable line describing a character's whole memory."""
+        return self.memory_view(key).describe()
+
+    def memory_search(self, key: str, query: str, *, limit: int = 5) -> tuple[str, ...]:
+        """Search one character's memory, by meaning then by word."""
+        return tuple(hit.describe() for hit in self.memory_view(key).search(query, limit=limit))
+
+    # -- trait consistency ---------------------------------------------------
+
+    def consistency(self, key: str):
+        """The consistency report for one character's standing configuration."""
+        from core.character_consistency import check_consistency
+        from core.character_registry import default_registry
+
+        return check_consistency(default_registry().load(key))
+
+    def consistency_all(self) -> tuple[str, ...]:
+        """One readable line per character's consistency report."""
+        from core.character_registry import default_registry
+
+        registry = default_registry()
+        return tuple(self.consistency(key).describe() for key in registry.keys())
 
     # -- a whole honest demonstration ---------------------------------------
 

@@ -39,6 +39,7 @@ from cognition.learning_system import CognitiveLearningSystem
 from cognition.proactive_mind import ProactiveMind
 from cognition.records import Source, SourceKind
 from cognition.runner import CognitiveRunner, ResourceMode
+from cognition.study import StudyTurn
 from cognition.teacher_student import TeacherStudentSystem
 from cognition.training import STAGE_SETTINGS, IncrementalTrainer, TrainingStage
 from cognition.versions import ModelRegistry
@@ -94,6 +95,20 @@ def _parser() -> argparse.ArgumentParser:
     ideas.add_argument("--limit", type=int, default=20)
 
     sub.add_parser("drives", help="what the mind would pursue next", parents=[common])
+
+    study = sub.add_parser(
+        "study", help="ask the mind's own questions and report the benefit", parents=[common]
+    )
+    study.add_argument("--count", type=int, default=200, help="how many questions to ask")
+    study.add_argument("--no-indicators", action="store_true", help="skip the ten indicators")
+
+    questions = sub.add_parser(
+        "questions", help="the mind's own question bank", parents=[common]
+    )
+    questions.add_argument("--next", type=int, default=0, help="preview the next N questions")
+    questions.add_argument("--record", action="store_true", help="mark them asked")
+
+    sub.add_parser("last-study", help="the last self-study benefit report", parents=[common])
 
     sub.add_parser("metacognition", help="the mind's model of its own thinking", parents=[common])
     sub.add_parser("plan", help="how the mind intends to search next", parents=[common])
@@ -284,6 +299,70 @@ def _cmd_drives(args: argparse.Namespace) -> int:
         return 0
     for drive in drives:
         print(f"  {drive.describe()}")
+    return 0
+
+
+def _cmd_study(args: argparse.Namespace) -> int:
+    from cognition.study import StudySession
+
+    def on_turn(turn: StudyTurn) -> None:
+        if not args.json:
+            print(turn.describe())  # stream the questions and answers as they happen
+
+    session = StudySession(_controller(), measure_indicators=not args.no_indicators)
+    result = session.run(count=args.count, on_turn=on_turn)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "report": result.report.to_primitive(),
+                    "turns": [t.to_primitive() for t in result.turns],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        print()
+        print(result.report.describe())
+    return 0
+
+
+def _cmd_questions(args: argparse.Namespace) -> int:
+    controller = _controller()
+    if args.next > 0:
+        questions = controller.next_questions(count=args.next, record=args.record)
+        if args.json:
+            print(
+                json.dumps(
+                    [{"text": q.text, "topic": q.topic, "kind": q.kind} for q in questions],
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        for question in questions:
+            print(f"  [{question.kind}] {question.text}")
+        return 0
+    bank = controller.question_bank()
+    if args.json:
+        print(json.dumps({"size": len(bank)}, ensure_ascii=False, indent=2))
+    else:
+        print(f"The mind's question bank holds {len(bank)} distinct questions.")
+    return 0
+
+
+def _cmd_last_study(args: argparse.Namespace) -> int:
+    from cognition.study import last_study_report
+
+    report = last_study_report()
+    if report is None:
+        print("No self-study session has been run yet.")
+        return 0
+    if args.json:
+        print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))
+    else:
+        print(report.describe())
     return 0
 
 
@@ -685,6 +764,9 @@ _HANDLERS.update(
         "prove": _cmd_prove,
         "ideas": _cmd_ideas,
         "drives": _cmd_drives,
+        "study": _cmd_study,
+        "questions": _cmd_questions,
+        "last-study": _cmd_last_study,
         "metacognition": _cmd_metacognition,
         "plan": _cmd_plan,
         "consolidate": _cmd_consolidate,

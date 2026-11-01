@@ -146,12 +146,28 @@ def character_depth(key: str) -> tuple[float, tuple[str, ...]]:
         facts.append(f"grounding stack: {present} of {len(modules)} modules importable here")
         if present == len(modules):
             facts.append("citations, the groundedness gate, the reasoning trace, and the knowledge carry")
-    elif key in {"ultron", "vision", "banner"}:
-        score = 0.4
-        facts.append("a language model over a system prompt; no dedicated personality layer")
-    elif key == "cloud":
-        score = 0.2
-        facts.append("a remote model reached over the network; no local layer of its own")
+    elif key in {"ultron", "vision", "banner", "cloud"}:
+        # These mouths have a dedicated layer now (core.personality_layer): a set
+        # of named registers and initiatives, generalised from the companion's own
+        # design. The score is read from the real layer, so it is observed.
+        try:
+            from core.personality_layer import layer_for
+
+            layer = layer_for(key)
+            if layer is None:
+                raise ValueError("no layer")
+            score = round(min(1.0, (len(layer.registers) + len(layer.initiatives)) / 9), 6)
+            facts.append(
+                f"personality layer: {len(layer.registers)} registers, "
+                f"{len(layer.initiatives)} initiatives"
+            )
+            if key == "cloud":
+                facts.append("a remote model reached over the network, with its own layer")
+            else:
+                facts.append("a local language model with its own registers and initiatives")
+        except Exception:
+            score = 0.4
+            facts.append("a language model over a system prompt; no dedicated personality layer")
     elif key == MAIN_MODEL_OWNER:
         score = 0.65
         facts.append("the project's own trained model, with its own corpus and character learning")

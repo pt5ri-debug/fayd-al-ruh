@@ -238,7 +238,9 @@ def _cmd_seed(args: argparse.Namespace) -> int:
 def _cmd_fill(args: argparse.Namespace) -> int:
     """Show how full each character's memory is (facts, exchanges, ratio)."""
     service = _service()
-    keys = service.character_keys() if args.all else (args.character,)
+    # With no character and no --all, report every character -- the same default
+    # ``list`` uses -- rather than an empty row for the empty key.
+    keys = service.character_keys() if (args.all or not args.character) else (args.character,)
     rows = []
     for key in keys:
         facts, exchanges, ratio = service.memory_fill(key)
@@ -257,6 +259,74 @@ def _cmd_fill(args: argparse.Namespace) -> int:
         return 0
     for key, facts, exchanges, ratio in rows:
         print(f"{key}: {facts} fact(s), {exchanges} exchange(s) — {round(ratio * 100)}% full")
+    return 0
+
+
+def _cmd_memory(args: argparse.Namespace) -> int:
+    """The unified, read-only view of one character's whole memory."""
+    from core.character_memory_view import CharacterMemoryView
+
+    view = CharacterMemoryView(args.character)
+    if args.search:
+        hits = view.search(args.search, limit=args.limit)
+        if args.json:
+            print(json.dumps([h.describe() for h in hits], ensure_ascii=False, indent=2))
+            return 0
+        if not hits:
+            print(f"No memory in {args.character} matches {args.search!r}.")
+            return 0
+        for hit in hits:
+            print(f"  {hit.describe()}")
+        return 0
+    if args.json:
+        stats = view.stats()
+        print(json.dumps(stats.__dict__, ensure_ascii=False, indent=2, default=str))
+        return 0
+    print(view.describe())
+    return 0
+
+
+def _cmd_consistency(args: argparse.Namespace) -> int:
+    """Report whether each character's standing configuration is consistent."""
+    from core.character_consistency import check_consistency
+    from core.character_registry import default_registry
+
+    registry = default_registry()
+    keys = registry.keys() if (args.all or not args.character) else (args.character,)
+    reports = []
+    for key in keys:
+        report = check_consistency(registry.load(key))
+        reports.append(report)
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "character": r.key,
+                        "consistent": r.ok,
+                        "issues": [w.describe() for w in r.warnings],
+                    }
+                    for r in reports
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    for report in reports:
+        print(report.describe())
+    return 0
+
+
+def _cmd_evaluate(args: argparse.Namespace) -> int:
+    """Score the characters on the four dimensions, honestly."""
+    from gui.character_evaluation import evaluate_characters
+
+    report = evaluate_characters()
+    if args.json:
+        print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))
+        return 0
+    print(report.describe())
     return 0
 
 
@@ -695,6 +765,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_fill.add_argument("--all", action="store_true")
     p_fill.add_argument("--json", action="store_true")
     p_fill.set_defaults(func=_cmd_fill)
+
+    p_memory = sub.add_parser("memory", help="the unified view of a character's memory")
+    p_memory.add_argument("character")
+    p_memory.add_argument("--search", default="")
+    p_memory.add_argument("--limit", type=int, default=5)
+    p_memory.add_argument("--json", action="store_true")
+    p_memory.set_defaults(func=_cmd_memory)
+
+    p_consistency = sub.add_parser(
+        "consistency", help="is a character's standing configuration consistent?"
+    )
+    p_consistency.add_argument("character", nargs="?", default="")
+    p_consistency.add_argument("--all", action="store_true")
+    p_consistency.add_argument("--json", action="store_true")
+    p_consistency.set_defaults(func=_cmd_consistency)
+
+    p_evaluate = sub.add_parser(
+        "evaluate", help="score the characters on the four dimensions"
+    )
+    p_evaluate.add_argument("--json", action="store_true")
+    p_evaluate.set_defaults(func=_cmd_evaluate)
 
     p_verify = sub.add_parser("verify", help="verify one record (supervised)")
     p_verify.add_argument("character")
