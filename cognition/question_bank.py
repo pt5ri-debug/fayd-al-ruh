@@ -116,6 +116,143 @@ _TARGET_TEMPLATES: tuple[str, ...] = (
     "What should be known about {b}?",
 )
 
+#: Arabic templates for the relation types the graph uses most, so the mind asks
+#: some of its questions in Arabic -- the language the project is Arabic-first for.
+#: Only types named here yield an Arabic question; an unlisted type falls back to
+#: the generic pair below, so no edge is silently dropped and the English bank is
+#: unchanged.
+ARABIC_RELATION_TEMPLATES: dict[str, tuple[str, ...]] = {
+    "is_a": ("ما هو {a}؟", "هل {a} نوع من {b}؟"),
+    "measures": ("كيف يقيس {a} {b}؟", "ما الذي يقيس {b}؟"),
+    "increases": ("كيف يزيد {a} {b}؟", "ما الذي يزيد {b}؟"),
+    "reduces": ("كيف يقلّل {a} {b}؟", "ما الذي يقلّل {b}؟"),
+    "causes": ("كيف يسبب {a} {b}؟", "ما الذي يسبب {b}؟"),
+    "controls": ("كيف يتحكم {a} في {b}؟", "ما الذي يتحكم في {b}؟"),
+    "prevents": ("كيف يمنع {a} {b}؟", "ما الذي يمنع {b}؟"),
+    "affects": ("كيف يؤثر {a} في {b}؟", "ما الذي يؤثر في {b}؟"),
+    "drives": ("كيف يقود {a} إلى {b}؟", "ما الذي يقود إلى {b}؟"),
+    "depends_on": ("على ماذا يعتمد {a}؟", "كيف يعتمد {a} على {b}؟"),
+    "contains": ("ماذا يحتوي {a}؟", "هل {b} جزء من {a}؟"),
+    "requires": ("ماذا يتطلب {a}؟", "ما المطلوب من أجل {b}؟"),
+    "produces": ("ماذا ينتج {a}؟", "من أين يأتي {b}؟"),
+    "enables": ("ماذا يمكّن {a}؟", "ما الذي يجعل {b} ممكنًا؟"),
+    "supports": ("كيف يدعم {a} {b}؟", "ما الذي يدعم {b}؟"),
+    "indicates": ("إلامَ يشير {a}؟", "ما الذي يشير إلى {b}؟"),
+    "maintains": ("كيف يحافظ {a} على {b}؟", "ما الذي يحافظ على {b}؟"),
+    "verifies": ("كيف يتحقق {a} من {b}؟", "ما الذي يتحقق من {b}؟"),
+    "predicts": ("كيف يتنبأ {a} بـ{b}؟", "ما الذي يتنبأ بـ{b}؟"),
+    "implements": ("كيف ينفّذ {a} {b}؟", "ما الذي ينفّذ {b}؟"),
+    "forms": ("كيف يشكّل {a} {b}؟", "ما الذي يشكّل {b}؟"),
+    "has": ("ماذا يمتلك {a}؟", "ما الذي يمتلك {b}؟"),
+    "governs": ("كيف يحكم {a} {b}؟", "ما الذي يحكم {b}؟"),
+    "determines": ("كيف يحدّد {a} {b}؟", "ما الذي يحدّد {b}؟"),
+    "protects": ("كيف يحمي {a} {b}؟", "ما الذي يحمي {b}؟"),
+    "influences": ("كيف يؤثر {a} في {b}؟", "ما الذي يؤثر في {b}؟"),
+    "creates": ("كيف ينشئ {a} {b}؟", "ما الذي ينشئ {b}؟"),
+    "estimates": ("كيف يقدّر {a} {b}؟", "ما الذي يقدّر {b}؟"),
+    "balances": ("كيف يوازن {a} {b}؟", "ما الذي يوازن {b}؟"),
+    "separates": ("كيف يفصل {a} {b}؟", "ما الذي يفصل {b}؟"),
+    "improves": ("كيف يحسّن {a} {b}؟", "ما الذي يحسّن {b}؟"),
+    "uses": ("كيف يستخدم {a} {b}؟", "ما الذي يستخدم {b}؟"),
+    "defines": ("كيف يعرّف {a} {b}؟", "ما الذي يعرّف {b}؟"),
+    "provides": ("ماذا يوفّر {a}؟", "ما الذي يوفّر {b}؟"),
+    "has_property": ("ما خصائص {a}؟", "ما خصائص {b}؟"),
+    "seals": ("كيف يسدّ {a} {b}؟", "ما الذي يسدّ {b}؟"),
+    "connects": ("كيف يربط {a} بـ{b}؟", "ما الذي يربط {b}؟"),
+    "generates": ("ماذا يولّد {a}؟", "ما الذي يولّد {b}؟"),
+    "threatens": ("كيف يهدّد {a} {b}؟", "ما الذي يهدّد {b}؟"),
+    "hosts": ("ماذا يحتضن {a}؟", "أين يوجد {b}؟"),
+    "used_in": ("أين يُستخدم {a}؟", "ما الذي يُستخدم فيه {b}؟"),
+    "part_of": ("هل {a} جزء من {b}؟", "ما الذي يكون {b} جزءًا منه؟"),
+    "describes": ("كيف يصف {a} {b}؟", "ما الذي يصف {b}؟"),
+    "identifies": ("كيف يحدّد {a} {b}؟", "ما الذي يحدّد {b}؟"),
+    "manages": ("كيف يدير {a} {b}؟", "ما الذي يدير {b}؟"),
+    "limits": ("كيف يحدّ {a} {b}؟", "ما الذي يحدّ {b}؟"),
+    "exists_in": ("أين يوجد {a}؟", "ما الذي يوجد في {b}؟"),
+    "drills": ("كيف يحفر {a} {b}؟", "ما الذي يحفر {b}؟"),
+    "evaluates": ("كيف يقيّم {a} {b}؟", "ما الذي يقيّم {b}؟"),
+    "stabilizes": ("كيف يثبّت {a} {b}؟", "ما الذي يثبّت {b}؟"),
+    "processes": ("كيف يعالج {a} {b}؟", "ما الذي يعالج {b}؟"),
+    "transports": ("كيف ينقل {a} {b}؟", "ما الذي ينقل {b}؟"),
+    "stores": ("ماذا يخزّن {a}؟", "ما الذي يخزّن {b}؟"),
+    "mitigates": ("كيف يخفّف {a} {b}؟", "ما الذي يخفّف {b}؟"),
+    "guides": ("كيف يوجّه {a} {b}؟", "ما الذي يوجّه {b}؟"),
+    "builds": ("ماذا يبني {a}؟", "ما الذي يبني {b}؟"),
+}
+
+#: The generic Arabic pair for a relation type with no template of its own, so
+#: every stated edge contributes at least one Arabic question. The relation word
+#: is left out on purpose (the Arabic relation vocabulary is not one-to-one with
+#: the seeds'), so the question names the two concepts rather than guessing a verb.
+ARABIC_GENERIC_TEMPLATES: tuple[str, ...] = (
+    "ما العلاقة بين {a} و{b}؟",
+)
+
+#: Arabic questions that use only the source, for an edge whose target is a value.
+ARABIC_SOURCE_TEMPLATES: tuple[str, ...] = (
+    "ما هو {a}؟",
+    "ما دور {a}؟",
+)
+
+#: Arabic questions that use only the target.
+ARABIC_TARGET_TEMPLATES: tuple[str, ...] = (
+    "ما هو {b}؟",
+    "ما الذي يحدّد {b}؟",
+)
+
+#: How many Arabic graph questions one bank may hold. Bounded so the Arabic
+#: addition widens the bank without swamping it, and deterministic (edges are
+#: taken in the graph's own order) so the same graph yields the same bank.
+MAX_ARABIC_GRAPH_QUESTIONS = 1000
+
+
+def _arabic_graph_questions(ontology) -> list[BankQuestion]:
+    """Questions about the graph's stated edges, asked in Arabic.
+
+    Bounded by :data:`MAX_ARABIC_GRAPH_QUESTIONS` and built from the same edges as
+    the English questions, so an Arabic question always names a relation the graph
+    really states. A type with no template of its own uses the generic pair, so no
+    edge is silently dropped.
+    """
+    from core.arabic_prose import arabic_label
+
+    questions: list[BankQuestion] = []
+    seen: set[str] = set()
+    for relation in ontology.relations.values():
+        if len(questions) >= MAX_ARABIC_GRAPH_QUESTIONS:
+            break
+        source = getattr(relation, "source_id", "") or getattr(relation, "source", "")
+        target = getattr(relation, "target_id", "") or getattr(relation, "target", "")
+        rtype = str(getattr(relation, "relation_type", "") or getattr(relation, "type", ""))
+        a = arabic_label(_label_of(ontology, source), ontology)
+        b = arabic_label(_label_of(ontology, target), ontology)
+        if not a:
+            continue
+        templates = ARABIC_RELATION_TEMPLATES.get(rtype) or ARABIC_GENERIC_TEMPLATES
+        for template in templates:
+            if "{b}" in template and not b:
+                continue
+            text = template.format(a=a, b=b)
+            key = question_key(text)
+            if key in seen:
+                continue
+            seen.add(key)
+            questions.append(BankQuestion(text=text, topic=a, kind="graph"))
+        for template in ARABIC_SOURCE_TEMPLATES:
+            text = template.format(a=a)
+            key = question_key(text)
+            if key not in seen:
+                seen.add(key)
+                questions.append(BankQuestion(text=text, topic=a, kind="graph"))
+        if b:
+            for template in ARABIC_TARGET_TEMPLATES:
+                text = template.format(b=b)
+                key = question_key(text)
+                if key not in seen:
+                    seen.add(key)
+                    questions.append(BankQuestion(text=text, topic=b, kind="graph"))
+    return questions
+
 
 def _graph_questions(ontology) -> list[BankQuestion]:
     """Questions built from the graph's own stated edges.
@@ -189,12 +326,17 @@ def build_bank(ontology) -> tuple[BankQuestion, ...]:
     """The whole question bank for an ontology, ordered and de-duplicated.
 
     Topic questions come first (they are authored and always valid), then the
-    graph questions, each group ordered by a stable key so the same ontology
-    yields the same bank every time.
+    English graph questions, then the Arabic graph questions, each group ordered by
+    a stable key so the same ontology yields the same bank every time.
     """
     topics = _topic_questions()
     graph = _graph_questions(ontology)
-    ordered = sorted(topics, key=lambda q: q.text) + sorted(graph, key=lambda q: (q.topic, q.text))
+    arabic = _arabic_graph_questions(ontology)
+    ordered = (
+        sorted(topics, key=lambda q: q.text)
+        + sorted(graph, key=lambda q: (q.topic, q.text))
+        + sorted(arabic, key=lambda q: (q.topic, q.text))
+    )
     seen: set[str] = set()
     unique: list[BankQuestion] = []
     for question in ordered:

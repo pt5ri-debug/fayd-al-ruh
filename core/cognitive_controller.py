@@ -957,3 +957,43 @@ class CognitiveController:
     def metacognition_status(self) -> dict:
         """The mind's model of its own thinking (which strategies pay off)."""
         return self.proactive_mind().metacognition.status()
+
+    # -- widening the mind's reach (knowledge depth) -----------------------
+    # The cognition layer's "maximal knowledge" half: measure how much of the
+    # project's own knowledge the graph holds, harvest typed relations from text
+    # the project has ingested, and bridge disciplines. Every one of these reads
+    # this controller's own ontology -- never a second graph -- and the only
+    # writing path goes through the same bounded learner every other write uses.
+
+    def knowledge_depth(self):
+        """How much of the project's own knowledge the graph actually holds."""
+        from cognition.knowledge_depth import knowledge_depth
+
+        return knowledge_depth(self.ontology)
+
+    def harvest_relations(self, *, limit: int | None = None, write: bool = False, store=None, on_progress=None):
+        """Read typed relations from ingested text and (optionally) learn them.
+
+        Delegates to :func:`cognition.knowledge_depth.harvest_relations`, so the
+        extraction is the project's own pattern matcher and the write is bounded by
+        the learner's ceiling. ``write=False`` is a preview.
+        """
+        from cognition.knowledge_depth import harvest_relations
+
+        return harvest_relations(
+            self, limit=limit, write=write, store=store, on_progress=on_progress
+        )
+
+    def discipline_bridges(self, *, source: str = "", target: str = "", max_hops: int = 3, limit: int = 5):
+        """Shortest typed chains between one discipline's concepts and another's."""
+        from cognition.knowledge_depth import discipline_bridges
+
+        return discipline_bridges(
+            self.ontology, source=source, target=target, max_hops=max_hops, limit=limit
+        )
+
+    def arabic_reach(self):
+        """How far the project reaches in Arabic, over the graph and the bank."""
+        from cognition.knowledge_depth import arabic_reach
+
+        return arabic_reach(self.ontology, bank=self.question_bank())

@@ -5755,3 +5755,75 @@ regression monitor each can refuse a change.
   differing dimensions, the same-character case, the table, the ranking, an edit
   changing the score) plus the CLI. Gates: ruff clean, mypy 812 files OK, evaluation
   PASS (`overall` 0.9860 → 0.9863), pytest green.
+
+- Phase 62 — **the autonomous cognitive system reaches its widest knowledge, and
+  every control is explained before it is pressed**: three changes to the
+  cognition layer, each measured rather than asserted. **(1) A catalogue, so the
+  window and the CLI cannot describe a control differently.** The autonomous mind
+  grew to forty-odd controls over eleven sidebar sections, and a reader could not
+  tell what a button would do before pressing it -- "Consolidate experience into
+  knowledge" and "the patterns it has extracted" looked equally weighted though
+  one *writes* durable knowledge and the other only *reads*. `core/cognition_catalog.py`
+  (new) is the one source of truth: a `Capability` per control carrying its title,
+  a one-sentence summary, what it *returns*, whether it is **governed** (asks for
+  confirmation and/or writes), the exact headless CLI command, and the same text
+  in Arabic (`CATEGORY_TITLES`/`CATEGORY_ARABIC`/`CATEGORY_SUMMARIES`/
+  `CATEGORY_SUMMARIES_AR`). The window's `_cap_button` draws every button's label,
+  a one-line hint under it, and a hover `Tooltip` with the full description *from
+  the catalogue*, and `_section_note` draws each section's bilingual description,
+  so no surface invents its own wording. `python -m cli cognition catalog
+  [--json]` prints the same table, and `catalog_accuracy` is the held-out gate: it
+  runs ten real checks over the shipped catalogue (keys unique; every entry
+  explained and bilingual; a governed action names its confirmation; no read-only
+  action asks for approval; every CLI command resolves against the *real* argparse
+  subcommands; every section described in both languages; every window button has
+  an entry and every entry has a button) -- so a control that stopped being
+  explained, a governed action that dropped `--approve`, or a window button and a
+  catalogue entry drifting apart all lower the metric. **(2) The mind's reach is
+  measured, widened, and bridged.** `cognition/knowledge_depth.py` (new) is the
+  "maximal knowledge" half: `knowledge_depth(ontology)` returns a `DepthReport`
+  (concepts, relations, isolated concepts, Arabic-alias coverage, per-discipline /
+  per-course / per-corpus `Coverage`, average degree, connectivity) that *reads*
+  the seeds and the graph and invents nothing -- and `weak_spots()` distinguishes
+  a genuine gap (`incomplete`) from a small-but-complete area (`sparse`, e.g. well
+  testing's two relations) so the list never cries wolf. `harvest_relations`
+  reads typed relations out of the bulk knowledge base with the *same* pattern
+  matcher the answer path uses and folds each accepted one through the bounded
+  `OntologyLearner` (preview by default, write only with `write=True`, never
+  overriding a seeded relation); `discipline_bridges` walks the *shortest* typed
+  chain between one discipline's concepts and another's (read-only, a real walked
+  path, `()` when nothing connects); `arabic_reach` reports how far the project
+  reaches in Arabic (aliases present, questions of the bank in Arabic, labels
+  still without a term). `knowledge_depth_accuracy` is the held-out gate, with
+  negative controls: the counts exact on a hand-built graph, connectivity
+  counting only participants (0.0 on an empty one), a harvest previewing without
+  writing, a bridge a real two-hop path while an unconnected pair yields nothing,
+  and an unaliased Arabic label *reported* rather than counted. **(3) Arabic-first
+  for real, measured.** The question bank was English-only for the graph's edges;
+  `cognition/question_bank.py` gained Arabic templates for **fifty-six** of the
+  graph's relation types plus a **generic pair** (`ما العلاقة بين {a} و{b}؟`) so
+  no edge is silently dropped, a target-only template, and a raised bound
+  (`MAX_ARABIC_GRAPH_QUESTIONS` 300 → 1000): the bank grew from 2411 to **3110**
+  questions with **1001 in Arabic (32%**, up from 13%). Reach is now reported
+  rather than assumed, and a label with no alias is *reported* not hidden.
+  Wired: `core/cognitive_controller.py` exposes `knowledge_depth`,
+  `harvest_relations`, `discipline_bridges`, and `arabic_reach` as thin
+  delegations; `gui/cognition.py`'s `CognitiveService` gains `depth`/`coverage`/
+  `harvest` (governed when it writes)/`bridges`/`arabic`/`catalog`/`capability`;
+  the window gained a **Knowledge Depth (widest reach)** sidebar section with a
+  note and five explained buttons, and the CLI gained `depth`/`coverage`/`harvest`/
+  `bridges`/`arabic`/`catalog` (all `--json`-capable), mirrored as menu entries.
+  Two related fixes landed with it: `rollback` is now **governed** (it needs
+  `--approve`) but honest -- a no-op reporting the base model when no accepted
+  version exists -- and `_course_label` reads `core.curriculum_knowledge`'s real
+  `course_labels()` accessor instead of the private `COURSES`. Both new metrics
+  enter `evaluation`'s `overall` (`cognition_catalog_accuracy`,
+  `knowledge_depth_accuracy`, both 1.0000; overall 0.9869 → 0.9875).
+  `tests/test_cognition_catalog.py` (new, 22 tests) pins the catalogue and its
+  gate; `tests/test_knowledge_depth.py` (new, 22 tests) pins the depth engine, the
+  harvest, the bridges, the Arabic reach, and the gate; `tests/test_cognition_integration.py`
+  gained the CLI commands (including the honest governed `rollback`);
+  `tests/test_cognition_window.py` gained the depth/coverage/catalog buttons and
+  the "every button comes from the catalogue" check; `tests/test_study_session.py`
+  gained the Arabic-bank tests. Gates: ruff clean, mypy 863 files OK, evaluation
+  PASS (`overall` 0.9875), pytest green.
