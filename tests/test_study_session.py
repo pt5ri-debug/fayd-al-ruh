@@ -199,3 +199,44 @@ def test_controller_exposes_the_bank_and_study(controller):
     assert len(questions) == 3
     result = controller.study(count=2, measure_indicators=False)
     assert result.report.asked == 2
+
+
+# -- the Arabic half of the bank --------------------------------------------
+
+
+def test_the_bank_asks_a_real_share_of_its_questions_in_arabic(controller):
+    """The project is Arabic-first, so the bank is not English-only."""
+    from core.voices import detect_language
+
+    bank = build_bank(controller.ontology)
+    arabic = [q for q in bank if detect_language(q.text) == "ar"]
+    assert len(arabic) >= 200
+    assert len(arabic) / len(bank) >= 0.2
+
+
+def test_an_arabic_graph_question_names_the_graphs_own_concepts(controller):
+    from core.arabic_prose import arabic_label
+    from core.voices import detect_language
+
+    bank = build_bank(controller.ontology)
+    arabic = [q for q in bank if q.kind == "graph" and detect_language(q.text) == "ar"]
+    assert arabic
+    labels = {arabic_label(c.label, controller.ontology) for c in controller.ontology.concepts.values()}
+    assert any(q.topic in labels for q in arabic)
+
+
+def test_every_stated_edge_contributes_at_least_one_arabic_question(controller):
+    """No relation type is silently dropped: an unknown one uses the generic pair."""
+    from cognition.question_bank import (
+        ARABIC_GENERIC_TEMPLATES,
+        ARABIC_RELATION_TEMPLATES,
+        _arabic_graph_questions,
+    )
+
+    questions = _arabic_graph_questions(controller.ontology)
+    assert len(questions) == len({q.key for q in questions})
+    assert len(questions) >= 400
+    # The templates the code actually uses cover the graph's frequent types and
+    # fall back to a generic pair, so no edge is lost.
+    assert ARABIC_GENERIC_TEMPLATES
+    assert {"is_a", "measures", "increases"} <= set(ARABIC_RELATION_TEMPLATES)

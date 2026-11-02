@@ -72,6 +72,8 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("character_identity_accuracy", True, label="Character identity accuracy (held-out: a character's personality reaches its answer text, and the two windows share one memory and one name)"),
     MetricSpec("memory_seeding_accuracy", True, label="Memory seeding accuracy (held-out: a character is seeded from the project's own authored knowledge, bounded and idempotent, with no invented fact)"),
     MetricSpec("development_accuracy", True, label="Cognitive development accuracy (held-out: the mind's self-model, stagnation detector, consolidation, spaced review, and bounded escalation behave as claimed)"),
+    MetricSpec("cognition_catalog_accuracy", True, label="Cognition catalogue accuracy (held-out: every control is explained, a governed action names its confirmation, every CLI command resolves, and the window and catalogue cannot drift)"),
+    MetricSpec("knowledge_depth_accuracy", True, label="Knowledge depth accuracy (held-out: the graph's reach is measured honestly, the harvest writes only through the bounded learner, and a bridge is a real walked path)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )

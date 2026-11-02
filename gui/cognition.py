@@ -11,6 +11,11 @@ in either front end. It wraps the objects that already exist:
   the version log, and the rollback gate;
 * :class:`cognition.evaluation.CognitiveEvaluator` -- the ten indicators;
 * :class:`cognition.teacher_student.TeacherStudentSystem` -- the student-first exchange;
+* :class:`cognition.knowledge_depth` -- how much of the project's knowledge the
+  graph holds, harvesting typed relations from ingested text, and discipline
+  bridges (the mind's *reach*);
+* :class:`core.cognition_catalog` -- the one place every control's purpose is
+  written down, so the window can explain each button before it is pressed;
 * :class:`gui.character_evaluation.CharacterEvaluator` -- the eight characters.
 
 Everything is exercised headless: no display, no model, and no network. The
@@ -29,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from cognition.evaluation import INDICATORS, LABELS, CognitiveReport
+from cognition.knowledge_depth import DEFAULT_HARVEST_LIMIT
 from cognition.learning_system import CognitiveLearningSystem
 from cognition.proactive_mind import ProactiveMind
 from cognition.question_bank import DEFAULT_QUESTION_COUNT
@@ -614,6 +620,92 @@ class CognitiveService:
 
         registry = default_registry()
         return tuple(self.consistency(key).describe() for key in registry.keys())
+
+    # -- knowledge depth: widening the mind's reach -------------------------
+
+    def depth(self) -> OperationReport:
+        """How much of the project's own knowledge the graph actually holds."""
+        report = self.controller.knowledge_depth()
+        return OperationReport(
+            ok=True,
+            title="Knowledge depth",
+            lines=tuple(report.describe().splitlines()[1:]),
+            detail="\n".join(report.weak_spots()),
+        )
+
+    def coverage(self) -> tuple[str, ...]:
+        """One readable line per discipline and per course the graph covers."""
+        report = self.controller.knowledge_depth()
+        lines = ["Disciplines:"]
+        lines.extend(f"  {c.describe()}" for c in report.disciplines)
+        lines.append("Courses:")
+        lines.extend(f"  {c.describe()}" for c in report.courses)
+        lines.append(f"connectivity: {report.connectivity:.0%}   isolated: {report.isolated}")
+        return tuple(lines)
+
+    def harvest(
+        self,
+        *,
+        limit: int | None = DEFAULT_HARVEST_LIMIT,
+        write: bool = False,
+        approved: bool = False,
+        on_progress: Callable[[int], None] | None = None,
+    ) -> OperationReport:
+        """Read typed relations from the ingested text, previewing or writing.
+
+        Writing is a governed action: it changes the graph, so it is refused unless
+        ``approved`` is true (the window asks first; the CLI passes ``--write``).
+        """
+        if write and not approved:
+            return OperationReport(
+                ok=False,
+                title="Harvesting is a governed action when it writes.",
+                detail="Confirm the write to fold the relations into the graph, or run "
+                "it without --write to preview first.",
+            )
+        report = self.controller.harvest_relations(
+            limit=limit, write=write, on_progress=on_progress
+        )
+        return OperationReport(
+            ok=True,
+            title="Relation harvest",
+            lines=tuple(report.describe().splitlines()[1:]),
+        )
+
+    def bridges(
+        self, *, source: str = "", target: str = "", max_hops: int = 3, limit: int = 5
+    ) -> tuple[str, ...]:
+        """The chains that connect one discipline's concepts to another's."""
+        found = self.controller.discipline_bridges(
+            source=source, target=target, max_hops=max_hops, limit=limit
+        )
+        return tuple(bridge.describe() for bridge in found)
+
+    def arabic(self) -> OperationReport:
+        """How far the project reaches in Arabic."""
+        reach = self.controller.arabic_reach()
+        return OperationReport(
+            ok=True,
+            title="Arabic reach",
+            lines=tuple(reach.describe().splitlines()[1:]),
+        )
+
+    # -- the capability catalogue (what each control does) -------------------
+
+    def catalog(self, language: str = "en") -> tuple[str, ...]:
+        """The whole capability catalogue as readable lines (English or Arabic)."""
+        from core.cognition_catalog import catalog_lines
+
+        return catalog_lines(language=language)
+
+    def capability(self, key: str, language: str = "en") -> str:
+        """One capability's description, or an honest note when it is unknown."""
+        from core.cognition_catalog import capability
+
+        cap = capability(key)
+        if cap is None:
+            return f"No catalogue entry for '{key}'."
+        return cap.describe(language=language)
 
     # -- a whole honest demonstration ---------------------------------------
 

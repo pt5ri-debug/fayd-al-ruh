@@ -41,12 +41,18 @@ from collections.abc import Callable
 from typing import Any
 
 from cognition.evaluation import INDICATORS, LABELS
+from cognition.knowledge_depth import DEFAULT_HARVEST_LIMIT
 from cognition.runner import ResourceMode
 from cognition.training import TrainingStage
+from core.cognition_catalog import (
+    CATEGORY_SUMMARIES,
+    CATEGORY_SUMMARIES_AR,
+    capability,
+)
 
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.character_evaluation import DIMENSION_TITLES, EvaluationReport
-from gui.chat_composer import ChatComposer
+from gui.chat_composer import ChatComposer, Tooltip
 from gui.cognition import CognitiveService, OperationReport
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
@@ -176,6 +182,66 @@ class CognitionDialog:
             anchor="w",
         )
 
+    # -- explaining a control before it is pressed -------------------------
+
+    def _hint(self, parent: tk.Misc, text: str) -> tk.Label:
+        """A one-line note under a control, so its purpose is readable at rest."""
+        label = tk.Label(
+            parent, text=text, bg=self.theme.surface, fg=self.theme.text_dim,
+            font=self._type.font("2xs"), justify="left", anchor="w",
+            wraplength=SIDEBAR_WIDTH - 48,
+        )
+        label.pack(fill="x", padx=(20, 12), pady=(0, 6))
+        return label
+
+    def _section_note(self, section: tk.Frame, category: str) -> None:
+        """The one-sentence description of a whole section, drawn under its title.
+
+        Both languages are shown: the English summary a reader already knows, and
+        the Arabic one beside it, so the panel is usable whichever language the
+        reader prefers. A section with no declared summary draws nothing.
+        """
+        english = CATEGORY_SUMMARIES.get(category, "")
+        arabic = CATEGORY_SUMMARIES_AR.get(category, "")
+        if english:
+            tk.Label(
+                section, text=english, bg=self.theme.surface, fg=self.theme.text_secondary,
+                font=self._type.font("2xs"), justify="left", anchor="w",
+                wraplength=SIDEBAR_WIDTH - 40,
+            ).pack(fill="x", padx=12, pady=(2, 2))
+        if arabic:
+            tk.Label(
+                section, text=arabic, bg=self.theme.surface, fg=self.theme.text_dim,
+                font=self._type.font("2xs"), justify="right", anchor="e",
+                wraplength=SIDEBAR_WIDTH - 40,
+            ).pack(fill="x", padx=12, pady=(0, 6))
+
+    def _cap_button(self, section: tk.Frame, key: str, command: Any) -> tk.Button:
+        """A button whose label, hint, and tooltip all come from the catalogue.
+
+        The catalogue (:mod:`core.cognition_catalog`) is the single source of
+        truth, so the window can never describe a control differently from the CLI
+        or the docs -- and the hover tooltip carries the full description,
+        including what the action returns and the headless command that runs it.
+        """
+        cap = capability(key)
+        text = cap.title if cap is not None else key
+        button = self._button(section, text, command)
+        button.pack(fill="x", padx=12, pady=(4, 0))
+        if cap is not None:
+            hint = cap.summary.split(". ")[0]
+            if not hint.endswith("."):
+                hint += "."
+            self._hint(section, hint)
+            governed = "  (asks first)" if cap.governed else ""
+            Tooltip(
+                button,
+                f"{cap.title}{governed}\n{cap.summary}\n\nReturns: {cap.outcome}\n{cap.cli}",
+                self.theme,
+                self._type,
+            )
+        return button
+
     def _build_sidebar(self, parent: tk.Frame) -> None:
         column = SidebarColumn(
             parent, theme=self.theme, typography=self._type, width=SIDEBAR_WIDTH,
@@ -199,8 +265,22 @@ class CognitionDialog:
             font=self._type.font("body", weight="bold"),
         ).pack(side="left", padx=(8, 0))
 
+        # A short instruction so a first-time reader knows the panel explains
+        # itself: every button has a note under it and a full tooltip on hover.
+        tk.Label(
+            column.body,
+            text=(
+                "Every button is explained: a note under it says what it does, and "
+                "hovering shows what it returns and the exact command it runs. The "
+                "button labelled \"What does each item do?\" prints the whole list."
+            ),
+            bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
+            justify="left", anchor="w", wraplength=SIDEBAR_WIDTH - 40,
+        ).pack(fill="x", padx=14, pady=(0, 8))
+
         self._build_mind_section(column)
         self._build_study_section(column)
+        self._build_depth_section(column)
         self._build_metacognition_section(column)
         self._build_learning_section(column)
         self._build_consolidation_section(column)
@@ -211,36 +291,20 @@ class CognitionDialog:
 
     def _build_mind_section(self, column: SidebarColumn) -> None:
         section = column.add("mind", "Proactive Mind", icon="🧠")
-        self._button(section, "Run a thinking cycle", self._on_think).pack(
-            fill="x", padx=12, pady=(4, 4)
-        )
-        self._button(section, "Show the ideas awaiting review", self._on_ideas).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "What the mind would pursue next", self._on_drives).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "Prove the whole loop end to end", self._on_prove).pack(
-            fill="x", padx=12, pady=(0, 10)
-        )
+        self._section_note(section, "mind")
+        self._cap_button(section, "think", self._on_think)
+        self._cap_button(section, "ideas", self._on_ideas)
+        self._cap_button(section, "drives", self._on_drives)
+        self._cap_button(section, "prove", self._on_prove)
 
     def _build_study_section(self, column: SidebarColumn) -> None:
         section = column.add("study", "Self-Study (ask & learn)", icon="📖")
-        tk.Label(
-            section,
-            text=(
-                "The mind asks its own questions, reads the project's answer to "
-                "each, and reports how much it gained. Questions never repeat."
-            ),
-            bg=self.theme.surface, fg=self.theme.text_secondary,
-            font=self._type.font("2xs"), justify="left", wraplength=SIDEBAR_WIDTH - 40,
-            anchor="w",
-        ).pack(fill="x", padx=12, pady=(2, 6))
+        self._section_note(section, "study")
         row = tk.Frame(section, bg=self.theme.surface)
-        row.pack(fill="x", padx=12, pady=(0, 4))
+        row.pack(fill="x", padx=12, pady=(2, 0))
         tk.Label(
-            row, text="Questions:", bg=self.theme.surface, fg=self.theme.text_secondary,
-            font=self._type.font("2xs"),
+            row, text="Questions per session:", bg=self.theme.surface,
+            fg=self.theme.text_secondary, font=self._type.font("2xs"),
         ).pack(side="left")
         tk.Entry(
             row, textvariable=self._study_count_var, width=6, justify="center",
@@ -248,50 +312,42 @@ class CognitionDialog:
             highlightthickness=0, insertbackground=self.theme.foreground,
             font=self._type.font("2xs"),
         ).pack(side="left", padx=(6, 0))
-        self._study_button = self._button(
-            section, "Start asking questions", self._on_study
-        )
-        self._study_button.pack(fill="x", padx=12, pady=(0, 4))
-        self._button(section, "Show the question bank size", self._on_bank_size).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "Preview the next questions", self._on_next_questions).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "Last benefit report", self._on_last_report).pack(
-            fill="x", padx=12, pady=(0, 10)
-        )
+        self._hint(section, "How many questions one session asks (200 by default).")
+        self._study_button = self._cap_button(section, "study", self._on_study)
+        self._cap_button(section, "bank_size", self._on_bank_size)
+        self._cap_button(section, "next_questions", self._on_next_questions)
+        self._cap_button(section, "last_report", self._on_last_report)
+
+    def _build_depth_section(self, column: SidebarColumn) -> None:
+        section = column.add("depth", "Knowledge Depth (widest reach)", icon="🌐")
+        self._section_note(section, "depth")
+        self._cap_button(section, "depth", self._on_depth)
+        self._cap_button(section, "coverage", self._on_coverage)
+        self._cap_button(section, "harvest", self._on_harvest)
+        self._cap_button(section, "bridges", self._on_bridges)
+        self._cap_button(section, "arabic", self._on_arabic)
 
     def _build_metacognition_section(self, column: SidebarColumn) -> None:
         section = column.add("metacognition", "Metacognition (self-model)", icon="🪞")
-        self._button(section, "Which strategies pay off", self._on_metacognition).pack(
-            fill="x", padx=12, pady=(4, 4)
-        )
-        self._button(section, "How the mind will search next", self._on_plan).pack(
-            fill="x", padx=12, pady=(0, 10)
-        )
+        self._section_note(section, "metacognition")
+        self._cap_button(section, "metacognition", self._on_metacognition)
+        self._cap_button(section, "plan", self._on_plan)
 
     def _build_consolidation_section(self, column: SidebarColumn) -> None:
         section = column.add("consolidation", "Consolidation & Review", icon="🌙")
-        self._button(section, "Consolidate experience into knowledge", self._on_consolidate).pack(
-            fill="x", padx=12, pady=(4, 4)
-        )
-        self._button(section, "The patterns it has extracted", self._on_patterns).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "Review what is due", self._on_review).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "The skills it has practised", self._on_skills).pack(
-            fill="x", padx=12, pady=(0, 10)
-        )
+        self._section_note(section, "consolidation")
+        self._cap_button(section, "consolidate", self._on_consolidate)
+        self._cap_button(section, "patterns", self._on_patterns)
+        self._cap_button(section, "review", self._on_review)
+        self._cap_button(section, "skills", self._on_skills)
 
     def _build_learning_section(self, column: SidebarColumn) -> None:
         section = column.add("learning", "Cognitive Learning", icon="📚")
+        self._section_note(section, "learning")
         wrap = tk.Frame(section, bg=self.theme.surface)
-        wrap.pack(fill="x", padx=12, pady=(4, 4))
+        wrap.pack(fill="x", padx=12, pady=(4, 0))
         tk.Label(
-            wrap, text="Statement to learn", bg=self.theme.surface,
+            wrap, text="Statement to learn or to recall by", bg=self.theme.surface,
             fg=self.theme.text_secondary, font=self._type.font("2xs"), anchor="w",
         ).pack(fill="x")
         entry = tk.Entry(
@@ -302,21 +358,16 @@ class CognitionDialog:
         )
         entry.pack(fill="x", ipady=4, pady=(2, 4))
         entry.bind("<Return>", lambda _e: self._on_learn())
-        self._button(section, "Learn this statement", self._on_learn).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "Recall from every memory", self._on_recall).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "What the learning system holds", self._on_learning_stats).pack(
-            fill="x", padx=12, pady=(0, 10)
-        )
+        self._cap_button(section, "learn", self._on_learn)
+        self._cap_button(section, "recall", self._on_recall)
+        self._cap_button(section, "learning_stats", self._on_learning_stats)
 
     def _build_training_section(self, column: SidebarColumn) -> None:
         section = column.add("training", "Gradual Training", icon="🎓")
+        self._section_note(section, "training")
         theme = self.theme
         row = tk.Frame(section, bg=theme.surface)
-        row.pack(fill="x", padx=12, pady=(4, 2))
+        row.pack(fill="x", padx=12, pady=(4, 0))
         tk.Label(
             row, text="Stage", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.font("2xs"), anchor="w",
@@ -329,46 +380,34 @@ class CognitionDialog:
         )
         stage_menu["menu"].configure(bg=theme.surface, fg=theme.foreground)
         stage_menu.pack(side="right")
-
-        self._button(section, "Run one stage (asks first)", self._on_train).pack(
-            fill="x", padx=12, pady=(2, 4)
+        self._hint(
+            section,
+            "smoke (seconds) < quick (a minute) < standard (minutes) < full (long).",
         )
-        self._button(section, "Advance gradually (asks first)", self._on_train_gradual).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "Run the adaptive curriculum (asks first)", self._on_train_autonomous).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "How far training has come", self._on_progression).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "The adaptive curriculum's memory", self._on_curriculum).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "The version log", self._on_versions).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "Roll back to the last stable version", self._on_rollback).pack(
-            fill="x", padx=12, pady=(0, 10)
-        )
+        self._cap_button(section, "train", self._on_train)
+        self._cap_button(section, "train_gradual", self._on_train_gradual)
+        self._cap_button(section, "train_autonomous", self._on_train_autonomous)
+        self._cap_button(section, "progression", self._on_progression)
+        self._cap_button(section, "curriculum", self._on_curriculum)
+        self._cap_button(section, "versions", self._on_versions)
+        self._cap_button(section, "rollback", self._on_rollback)
 
     def _build_characters_section(self, column: SidebarColumn) -> None:
         section = column.add("characters", "Character Evaluation", icon="🧑")
-        self._button(section, "Evaluate all eight characters", self._on_characters).pack(
-            fill="x", padx=12, pady=(4, 10)
-        )
+        self._section_note(section, "characters")
+        self._cap_button(section, "characters", self._on_characters)
 
     def _build_indicators_section(self, column: SidebarColumn) -> None:
         section = column.add("indicators", "Cognitive Indicators", icon="📊")
-        self._button(section, "Measure the ten indicators", self._on_evaluate).pack(
-            fill="x", padx=12, pady=(4, 10)
-        )
+        self._section_note(section, "indicators")
+        self._cap_button(section, "evaluate", self._on_evaluate)
 
     def _build_system_section(self, column: SidebarColumn) -> None:
         section = column.add("system", "Resource Mode", icon="⚙")
+        self._section_note(section, "system")
         theme = self.theme
         row = tk.Frame(section, bg=theme.surface)
-        row.pack(fill="x", padx=12, pady=(4, 4))
+        row.pack(fill="x", padx=12, pady=(4, 0))
         self._mode_var = tk.StringVar(value=self.service.mode().value)
         mode_menu = tk.OptionMenu(row, self._mode_var, *[m.value for m in ResourceMode])
         mode_menu.configure(
@@ -377,12 +416,10 @@ class CognitionDialog:
         )
         mode_menu["menu"].configure(bg=theme.surface, fg=theme.foreground)
         mode_menu.pack(fill="x")
-        self._button(section, "Apply the resource mode", self._on_mode).pack(
-            fill="x", padx=12, pady=(0, 4)
-        )
-        self._button(section, "Run one background tick", self._on_tick).pack(
-            fill="x", padx=12, pady=(0, 10)
-        )
+        self._hint(section, "light < balanced < intensive (more cycles, never unbounded).")
+        self._cap_button(section, "mode", self._on_mode)
+        self._cap_button(section, "tick", self._on_tick)
+        self._cap_button(section, "catalog", self._on_catalog)
 
     def _build_conversation(self, parent: tk.Frame) -> None:
         theme = self.theme
@@ -421,6 +458,14 @@ class CognitionDialog:
         self._command_entry = composer.entry
         self._command_button = self._button(composer.right_tools, "Run", self._on_command)
         composer.add_tool(self._command_button)
+        cap = capability("command")
+        if cap is not None:
+            Tooltip(
+                self._command_button,
+                f"{cap.title}\n{cap.summary}\n\nReturns: {cap.outcome}\n{cap.cli}",
+                self.theme,
+                self._type,
+            )
 
     # -- layout helpers ---------------------------------------------------
 
@@ -576,6 +621,79 @@ class CognitionDialog:
                 f"• interval: {status.get('interval_seconds', '?')}s, "
                 f"{status.get('ideas_per_cycle', '?')} idea(s) per cycle\n"
                 f"• paused: {status.get('paused', False)}",
+            )
+
+        self._start_work(job, finish)
+
+    # -- knowledge depth --------------------------------------------------
+
+    def _on_depth(self) -> None:
+        self._start_work(self.service.depth, self._finish_report)
+
+    def _on_coverage(self) -> None:
+        def job() -> tuple[str, ...]:
+            return self.service.coverage()
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._add_message("error", str(error))
+                return
+            self._report("assistant", "Coverage by discipline and course", tuple(result))
+
+        self._start_work(job, finish)
+
+    def _on_harvest(self) -> None:
+        if not self._confirm(
+            "Harvest relations from the ingested text?",
+            "This reads typed relations from the bulk knowledge base (the files you "
+            "imported) and folds them into the graph through the bounded learner. "
+            "Nothing overrides a seeded relation, and both endpoints must already be "
+            "known concepts. Continue?",
+        ):
+            return
+        self._start_work(
+            lambda: self.service.harvest(
+                limit=DEFAULT_HARVEST_LIMIT, write=True, approved=True
+            ),
+            self._finish_report,
+        )
+
+    def _on_bridges(self) -> None:
+        def job() -> tuple[str, ...]:
+            return self.service.bridges(limit=6)
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._add_message("error", str(error))
+                return
+            bridges = result
+            if not bridges:
+                self._add_message(
+                    "note",
+                    "No bridge found within the hop bound: the two disciplines the "
+                    "graph connects first are not linked by a short chain.",
+                )
+                return
+            self._report("assistant", "Bridges between disciplines", tuple(bridges))
+
+        self._start_work(job, finish)
+
+    def _on_arabic(self) -> None:
+        self._start_work(self.service.arabic, self._finish_report)
+
+    # -- the capability catalogue -----------------------------------------
+
+    def _on_catalog(self) -> None:
+        def job() -> tuple[str, ...]:
+            return self.service.catalog()
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._add_message("error", str(error))
+                return
+            self._add_message(
+                "assistant",
+                "What each item in this window does\n\n" + "\n".join(result),
             )
 
         self._start_work(job, finish)

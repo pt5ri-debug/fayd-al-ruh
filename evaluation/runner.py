@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from cognition.development import development_accuracy
+from cognition.knowledge_depth import knowledge_depth_accuracy
 from core.acceptance_policy import rejection_reason
 from core.action import Action
 from core.analogy import analogy_accuracy
@@ -25,6 +26,7 @@ from core.causal_paths import causal_reasoning_accuracy, controller_causal_accur
 from core.character_identity_gate import character_identity_accuracy
 from core.character_isolation_gate import character_isolation_accuracy
 from core.character_memory_gate import memory_seeding_accuracy
+from core.cognition_catalog import catalog_accuracy
 from core.cognitive_controller import CognitiveController
 from core.curriculum_knowledge import curriculum_coverage_score
 from core.embeddings import evaluate_held_out
@@ -158,6 +160,21 @@ class EvaluationMetrics:
     history but not when novelty rises or something was promoted, a rule needs real
     support before it is stated, the spaced-review box advances and resets, and an
     escalation stays inside its ceilings (Phase: maximal development)."""
+
+    cognition_catalog_accuracy: float
+    """The share of held-out catalogue judgements satisfied: every control the
+    window draws has a catalogue entry, every entry has a window control, a
+    governed action names its confirmation in the CLI, every CLI command resolves
+    to a real cognition subcommand, and every section is described in both
+    languages (Phase: clearer GUI -- one source of truth for every control)."""
+
+    knowledge_depth_accuracy: float
+    """The share of held-out knowledge-depth judgements satisfied: the graph's
+    reach is measured exactly, connectivity counts only concepts that participate,
+    a harvest previews without writing and writes only through the bounded
+    learner, a bridge is a real walked path (and an unconnected pair yields
+    nothing), and an Arabic label with no alias is reported rather than counted
+    (Phase: widest knowledge reach)."""
 
     semantic_separation: float
     # Aggregate
@@ -1012,6 +1029,21 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # broken one. This is the gate for the maximal-development phase.
     development_value = development_accuracy()
 
+    # Cognition catalogue: every control the window draws must be explained (title,
+    # summary, outcome, and an Arabic twin), every entry must have a window control,
+    # and a governed action must name its confirmation in the CLI -- so the window
+    # and the catalogue can never drift and a reader always knows what a control
+    # does before pressing it. Held-out, with the CLI subcommands read from the real
+    # parser, so a control that stopped being explained fails here.
+    catalog_value = catalog_accuracy()
+
+    # Knowledge depth: held-out judgements about how far the graph reaches and how
+    # it is widened -- the coverage count exact, connectivity counting only
+    # participants, a harvest previewing without writing, a bridge a real walked
+    # path (and an unconnected pair yielding nothing), and an unaliased Arabic
+    # label reported rather than counted. With negative controls throughout.
+    depth_value = knowledge_depth_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1078,6 +1110,8 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         character_identity_value,
         memory_seeding_value,
         development_value,
+        catalog_value,
+        depth_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1131,6 +1165,8 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         character_identity_accuracy=round(character_identity_value, 6),
         memory_seeding_accuracy=round(memory_seeding_value, 6),
         development_accuracy=round(development_value, 6),
+        cognition_catalog_accuracy=round(catalog_value, 6),
+        knowledge_depth_accuracy=round(depth_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

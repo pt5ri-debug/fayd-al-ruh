@@ -167,6 +167,40 @@ class StubService:
         self.taught.append(question)
         return OperationReport(ok=True, title=f"taught: {question}")
 
+    # -- knowledge depth ---------------------------------------------------
+    def depth(self):
+        return OperationReport(
+            ok=True, title="Knowledge depth",
+            lines=("concepts: 495   relations: 474", "connectivity: 92%"),
+            detail="39 concept(s) have no relation at all",
+        )
+
+    def coverage(self):
+        return ("Disciplines:", "  Reservoir Engineering: 5/5 concept(s)")
+
+    def harvest(self, *, limit=500, write=False, approved=False, on_progress=None):
+        if write and not approved:
+            return OperationReport(ok=False, title="Harvesting is a governed action when it writes.")
+        return OperationReport(
+            ok=True, title="Relation harvest",
+            lines=("relations read: 12", "added to the graph: 4"),
+        )
+
+    def bridges(self, *, source="", target="", max_hops=3, limit=5):
+        return ("porosity -> drilling (2 hop(s), confidence 0.36)\n    porosity —increases→ permeability",)
+
+    def arabic(self):
+        return OperationReport(
+            ok=True, title="Arabic reach",
+            lines=("concepts with an Arabic alias: 495/495 (100%)",),
+        )
+
+    def catalog(self, language="en"):
+        return ("Proactive Mind", "  Run a thinking cycle  [read-only]", "")
+
+    def capability(self, key, language="en"):
+        return f"{key}: what it does"
+
     # -- self-study --------------------------------------------------------
     def question_bank_size(self):
         return 2109
@@ -227,7 +261,7 @@ def test_window_builds_with_every_sidebar_section() -> None:
     try:
         dialog = _dialog(root, StubService())
         for key in (
-            "mind", "study", "metacognition", "learning", "consolidation",
+            "mind", "study", "depth", "metacognition", "learning", "consolidation",
             "training", "characters", "indicators", "system",
         ):
             assert key in dialog._sidebar_column.sections
@@ -534,6 +568,81 @@ def test_the_study_section_streams_questions_and_shows_the_report() -> None:
         text = "\n".join(card.get("1.0", "end") for card in dialog._cards)
         assert "Question 1?" in text
         assert "Answer 1." in text
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_depth_section_measures_the_graphs_reach() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        _drain(root, dialog)
+        dialog._on_depth()
+        _drain(root, dialog)
+        text = "\n".join(card.get("1.0", "end") for card in dialog._cards)
+        assert "concepts: 495" in text
+        assert "connectivity" in text
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_coverage_button_lists_disciplines_and_courses() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        _drain(root, dialog)
+        dialog._on_coverage()
+        _drain(root, dialog)
+        text = "\n".join(card.get("1.0", "end") for card in dialog._cards)
+        assert "Disciplines:" in text
+        assert "Reservoir Engineering" in text
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_catalog_button_lists_every_control() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        _drain(root, dialog)
+        dialog._on_catalog()
+        _drain(root, dialog)
+        text = "\n".join(card.get("1.0", "end") for card in dialog._cards)
+        assert "Proactive Mind" in text
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_every_sidebar_button_comes_from_the_catalogue() -> None:
+    import tkinter as tk
+
+    from core.cognition_catalog import CAPABILITY_INDEX, capability
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        assert dialog._sidebar_column.sections
+        # Every capability the window declares is a real catalogue entry, so a
+        # button can never be drawn without an explanation beside it.
+        for key in (
+            "think", "ideas", "drives", "prove", "study", "depth", "coverage",
+            "harvest", "bridges", "arabic", "catalog", "command",
+        ):
+            cap = capability(key)
+            assert cap is not None, key
+            assert cap.title and cap.summary and cap.outcome
+            assert cap.arabic_title and cap.arabic_summary
+        assert set(CAPABILITY_INDEX) >= {"depth", "coverage", "harvest", "bridges", "arabic", "catalog"}
     finally:
         root.destroy()
 

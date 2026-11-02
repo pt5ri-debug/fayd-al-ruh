@@ -302,3 +302,110 @@ def test_autonomous_train_requires_approval(tmp_path, monkeypatch, capsys):
 def test_the_new_commands_are_registered_in_the_menu():
     for command in ("metacognition", "plan", "consolidate", "patterns", "skills", "review", "curriculum"):
         assert any(entry[2] == (command,) for entry in MENU), command
+
+
+# -- knowledge depth (the widest reach) -------------------------------------
+
+
+def test_depth_reports_the_graphs_reach(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["depth"]) == cognition_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "concept" in out
+    assert "connectivity" in out
+
+
+def test_depth_json_carries_the_counts(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["depth", "--json"]) == cognition_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["concepts"] > 0
+    assert payload["relations"] > 0
+    assert 0.0 <= payload["connectivity"] <= 1.0
+
+
+def test_coverage_lists_disciplines_and_courses(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["coverage"]) == cognition_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "Disciplines:" in out
+    assert "Courses:" in out
+
+
+def test_arabic_reach_is_measured(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["arabic"]) == cognition_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "Arabic alias" in out
+    assert "questions of the bank in Arabic" in out
+
+
+def test_harvest_previews_without_writing(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["harvest", "--limit", "5"]) == cognition_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "chunk" in out.lower()
+
+
+def test_harvest_refuses_to_write_without_approval(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    code = cognition_cli.main(["harvest", "--write", "--limit", "5"])
+    assert code == cognition_cli.EXIT_GATE
+    assert "governed" in capsys.readouterr().out.lower()
+
+
+def test_bridges_are_readable(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["bridges", "--from", "reservoir", "--to", "drilling"]) == cognition_cli.EXIT_OK
+    assert capsys.readouterr().out.strip()
+
+
+def test_catalog_lists_every_control_with_its_command(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["catalog"]) == cognition_cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "Proactive Mind" in out
+    assert "command: python -m cli cognition" in out
+    assert "[governed]" in out
+
+
+def test_catalog_json_is_machine_readable(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["catalog", "--json"]) == cognition_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload
+    keys = {entry["key"] for entry in payload}
+    assert {"think", "study", "depth", "harvest", "rollback", "catalog"} <= keys
+    for entry in payload:
+        assert entry["title"] and entry["summary"] and entry["outcome"]
+        assert entry["arabic_title"] and entry["arabic_summary"]
+
+
+def test_rollback_is_refused_without_approval_when_a_version_exists(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    from cognition.versions import ModelRegistry, ModelVersion
+
+    registry = ModelRegistry()
+    version = registry.record(
+        ModelVersion(
+            number=1,
+            path=str(tmp_path / "model.npz"),
+            parent=0,
+            dataset="test",
+            examples=1,
+            steps=1,
+            accepted=True,
+            reason="test",
+        )
+    )
+    assert registry.accepted_versions()
+    code = cognition_cli.main(["rollback"])
+    assert code == cognition_cli.EXIT_GATE
+    assert "governed" in capsys.readouterr().out.lower()
+    assert cognition_cli.main(["rollback", "--approve"]) == cognition_cli.EXIT_OK
+    assert f"v{version.number}" in capsys.readouterr().out
+
+
+def test_the_depth_commands_are_registered_in_the_menu():
+    for command in ("depth", "coverage", "harvest", "bridges", "arabic", "catalog"):
+        assert any(entry[2] == (command,) for entry in MENU), command

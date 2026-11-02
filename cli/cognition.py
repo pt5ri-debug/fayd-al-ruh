@@ -101,6 +101,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     study.add_argument("--count", type=int, default=200, help="how many questions to ask")
     study.add_argument("--no-indicators", action="store_true", help="skip the ten indicators")
+    study.add_argument("--approve", action="store_true", help="confirm the session (it learns)")
 
     questions = sub.add_parser(
         "questions", help="the mind's own question bank", parents=[common]
@@ -148,7 +149,8 @@ def _parser() -> argparse.ArgumentParser:
     train.add_argument("--approve", action="store_true", help="confirm the training run")
 
     sub.add_parser("versions", help="the model version log", parents=[common])
-    sub.add_parser("rollback", help="return to the last stable version", parents=[common])
+    rollback = sub.add_parser("rollback", help="return to the last stable version", parents=[common])
+    rollback.add_argument("--approve", action="store_true", help="confirm the rollback")
     sub.add_parser("progression", help="how far gradual training has come", parents=[common])
     sub.add_parser("curriculum", help="the adaptive curriculum's training memory", parents=[common])
 
@@ -169,6 +171,33 @@ def _parser() -> argparse.ArgumentParser:
     mode.add_argument("value", nargs="?", choices=[m.value for m in ResourceMode])
 
     sub.add_parser("tick", help="one background tick (runs a cycle if due)", parents=[common])
+
+    # -- widening the mind's reach (knowledge depth) ----------------------
+    sub.add_parser(
+        "depth", help="how much of the project's knowledge the graph holds", parents=[common]
+    )
+    sub.add_parser(
+        "coverage", help="one line per discipline and per course", parents=[common]
+    )
+    harvest = sub.add_parser(
+        "harvest", help="read typed relations from the ingested text", parents=[common]
+    )
+    harvest.add_argument("--limit", type=int, default=500, help="how many chunks to read")
+    harvest.add_argument("--write", action="store_true", help="fold them into the graph")
+    harvest.add_argument("--approve", action="store_true", help="confirm the write")
+
+    bridges = sub.add_parser(
+        "bridges", help="chains that connect one discipline to another", parents=[common]
+    )
+    bridges.add_argument("--from", dest="source", default="", help="source discipline key")
+    bridges.add_argument("--to", dest="target", default="", help="target discipline key")
+    bridges.add_argument("--max-hops", type=int, default=3, help="how far to search")
+    bridges.add_argument("--limit", type=int, default=5, help="how many bridges to show")
+
+    sub.add_parser("arabic", help="how far the project reaches in Arabic", parents=[common])
+    sub.add_parser(
+        "catalog", help="what every cognition control does, and its command", parents=[common]
+    )
 
     return parser
 
@@ -517,12 +546,25 @@ def _cmd_progression(args: argparse.Namespace) -> int:
 
 
 def _cmd_rollback(args: argparse.Namespace) -> int:
-    stable = ModelRegistry().rollback()
+    """Return to the last accepted version.
+
+    A real rollback changes which model is active, so it is governed and needs
+    ``--approve``; when there is no accepted version to return to, the command is a
+    no-op that reports the base model honestly and needs no confirmation.
+    """
+    registry = ModelRegistry()
+    if not registry.accepted_versions():
+        print("No accepted version to roll back to; the base model is in use.")
+        return EXIT_OK
+    if not args.approve:
+        print("Refused: returning to a previous version is a governed action -- pass --approve.")
+        return EXIT_GATE
+    stable = registry.rollback()
     if stable is None:
         print("No accepted version to roll back to; the base model is in use.")
-        return 0
+        return EXIT_OK
     print(f"Rolled back to v{stable.number}.")
-    return 0
+    return EXIT_OK
 
 
 def _cmd_evaluate(args: argparse.Namespace) -> int:
@@ -757,6 +799,133 @@ def _cmd_curriculum(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_depth(args: argparse.Namespace) -> int:
+    """How much of the project's own knowledge the graph actually holds."""
+    report = _controller().knowledge_depth()
+    if args.json:
+        print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(report.describe())
+    return EXIT_OK
+
+
+def _cmd_coverage(args: argparse.Namespace) -> int:
+    """One line per discipline and per course, with the graph's connectivity."""
+    report = _controller().knowledge_depth()
+    if args.json:
+        print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print("Disciplines:")
+    for coverage in report.disciplines:
+        print(f"  {coverage.describe()}")
+    print("Courses:")
+    for coverage in report.courses:
+        print(f"  {coverage.describe()}")
+    print(
+        f"connectivity: {report.connectivity:.0%}   isolated: {report.isolated}   "
+        f"average degree: {report.average_degree:.2f}"
+    )
+    return EXIT_OK
+
+
+def _cmd_harvest(args: argparse.Namespace) -> int:
+    """Read typed relations from the ingested text, previewing or writing.
+
+    Writing changes the graph, so it is a governed action: it needs ``--approve``
+    (the same convention ``train`` uses). Without ``--write`` the run is a preview
+    that touches nothing.
+    """
+    if args.write and not args.approve:
+        print("Refused: writing to the graph is a governed action -- pass --approve.")
+        return EXIT_GATE
+
+    def on_progress(index: int) -> None:
+        if not args.json and index % 100 == 0:
+            print(f"  ... read {index} chunk(s)", flush=True)
+
+    report = _controller().harvest_relations(
+        limit=args.limit, write=args.write, on_progress=on_progress
+    )
+    if args.json:
+        print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(report.describe())
+    return EXIT_OK
+
+
+def _cmd_bridges(args: argparse.Namespace) -> int:
+    """The shortest typed chains between one discipline's concepts and another's."""
+    bridges = _controller().discipline_bridges(
+        source=args.source or "", target=args.target or "", max_hops=args.max_hops, limit=args.limit
+    )
+    if args.json:
+        payload = [
+            {
+                "source": b.source_label,
+                "target": b.target_label,
+                "hops": b.hops,
+                "confidence": b.confidence,
+                "steps": list(b.steps),
+            }
+            for b in bridges
+        ]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not bridges:
+        print("No bridge found within the hop bound.")
+        return EXIT_OK
+    for bridge in bridges:
+        print(bridge.describe())
+    return EXIT_OK
+
+
+def _cmd_arabic(args: argparse.Namespace) -> int:
+    """How far the project reaches in Arabic, over the graph and the bank."""
+    reach = _controller().arabic_reach()
+    if args.json:
+        print(json.dumps(reach.to_primitive(), ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(reach.describe())
+    return EXIT_OK
+
+
+def _cmd_catalog(args: argparse.Namespace) -> int:
+    """What every cognition control does, with its headless command."""
+    from core.cognition_catalog import CAPABILITIES, capability_groups
+
+    if args.json:
+        payload = [
+            {
+                "key": cap.key,
+                "category": cap.category,
+                "title": cap.title,
+                "summary": cap.summary,
+                "outcome": cap.outcome,
+                "governed": cap.governed,
+                "cli": cap.cli,
+                "arabic_title": cap.arabic_title,
+                "arabic_summary": cap.arabic_summary,
+            }
+            for cap in CAPABILITIES
+        ]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    from core.cognition_catalog import CATEGORY_TITLES
+
+    for category, caps in capability_groups():
+        if not caps:
+            continue
+        print(CATEGORY_TITLES.get(category, category))
+        for cap in caps:
+            kind = "governed" if cap.governed else "read-only"
+            print(f"  {cap.title}  [{kind}]")
+            print(f"    what: {cap.summary}")
+            print(f"    returns: {cap.outcome}")
+            print(f"    command: {cap.cli}")
+        print()
+    return EXIT_OK
+
+
 _HANDLERS.update(
     {
         "status": _cmd_status,
@@ -786,6 +955,12 @@ _HANDLERS.update(
         "mode": _cmd_mode,
         "tick": _cmd_tick,
         "characters": _cmd_characters,
+        "depth": _cmd_depth,
+        "coverage": _cmd_coverage,
+        "harvest": _cmd_harvest,
+        "bridges": _cmd_bridges,
+        "arabic": _cmd_arabic,
+        "catalog": _cmd_catalog,
     }
 )
 
