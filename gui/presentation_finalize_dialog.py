@@ -45,6 +45,7 @@ from core.presentation import (
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.dialog_base import ThemedDialog
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
@@ -63,7 +64,7 @@ _COLUMN_MAX = 860
 _MAX_BUBBLE_LINES = 40
 
 
-class PresentationFinalizeDialog:
+class PresentationFinalizeDialog(ThemedDialog):
     """Polish an approved deck and export it, in the chat window's own style."""
 
     def __init__(
@@ -111,7 +112,10 @@ class PresentationFinalizeDialog:
         self.window.minsize(940, 620)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self._add_message("note", SUBTITLE, title="Final review")
         self.refresh()
 

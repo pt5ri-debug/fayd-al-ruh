@@ -155,105 +155,21 @@ _SIDEBAR_WIDTH = 288
 _RAIL_WIDTH = 0
 
 
-@dataclass(frozen=True)
-class Theme:
-    """One appearance: every colour the window draws with.
-
-    Field names follow OpenHands' semantic tokens (``surface``, ``tertiary``,
-    ``border_subtle`` …) so the mapping back to the web UI stays obvious.
-    """
-
-    name: str
-    # Surfaces, from deepest to most raised.
-    surface_deep: str      # context menus, deep insets
-    base: str              # app shell background
-    surface: str           # cards, composer, sidebar
-    surface_raised: str    # hover/selected tint inside a panel
-    # Text, from most to least prominent.
-    contrast: str          # strongest contrast (assistant text, titles)
-    foreground: str        # primary readable text
-    text_secondary: str    # secondary text
-    text_dim: str          # placeholders, very muted labels
-    # Lines and state.
-    border: str            # standard 1px stroke
-    border_subtle: str     # within-panel separators, list dividers
-    primary: str           # gold accent — send button, brand, focus
-    primary_foreground: str  # text/icon on the primary fill
-    interactive_hover: str   # hover on the base surface
-    interactive_active: str  # selected/active on the base surface
-    user_bubble: str       # user message fill
-    user_bubble_fg: str    # user message text
-    code_bg: str           # fenced/inline code background
-    code_fg: str           # fenced code text
-    quote_bar: str         # blockquote accent
-    titlebar: str          # every window's title bar (a dark grey band)
-    titlebar_edge: str     # the hairline under a window's title bar
-    success: str
-    danger: str
-    disabled: str
-
-
-DARK_THEME = Theme(
-    name="dark",
-    surface_deep="#05070A",     # cool-grey-975
-    base="#0B0E14",             # cool-grey-950
-    surface="#21252F",          # cool-grey-925
-    surface_raised="#2C313F",   # cool-grey-900
-    contrast="#F7F9FC",         # cool-grey-50
-    foreground="#C3CDDC",       # cool-grey-300
-    text_secondary="#A3B0C4",   # cool-grey-400
-    text_dim="#7E8A9E",         # cool-grey-500
-    border="#4B5468",           # cool-grey-700
-    border_subtle="#383F50",    # cool-grey-800
-    primary="#C9B974",          # gold
-    primary_foreground="#0B0E14",
-    interactive_hover="#2C313F",  # cool-grey-900
-    interactive_active="#383F50",  # cool-grey-800
-    user_bubble="#2C313F",        # cool-grey-900, like OpenHands' bg-tertiary
-    user_bubble_fg="#C3CDDC",
-    code_bg="#151A24",            # a touch deeper than the base
-    code_fg="#DCE3EE",
-    quote_bar="#4B5468",
-    titlebar="#181C25",         # a dark grey band, a step above the base
-    titlebar_edge="#2C313F",    # cool-grey-900, the hairline under it
-    success="#A5E75E",
-    danger="#E76A5E",
-    disabled="#383F50",
+#: The project's themes live in :mod:`gui.themes` (tkinter-free data), so the
+#: catalogue can be inspected and tested with no display. They are re-exported
+#: here so every existing caller -- the dialogs and the tests -- keeps importing
+#: ``Theme``/``DARK_THEME``/``LIGHT_THEME``/``THEMES`` from this module unchanged.
+from gui.themes import (  # noqa: E402  (imported beside the widgets it serves)
+    DARK_THEME,
+    LIGHT_THEME,
+    THEMES,
+    Theme,
+    find_theme,
+    load_theme_name,
+    save_theme_name,
+    theme_names,
+    theme_summaries,
 )
-
-LIGHT_THEME = Theme(
-    name="light",
-    surface_deep="#EEF2F7",     # cool-grey-100
-    base="#F7F9FC",             # cool-grey-50
-    surface="#FFFFFF",
-    surface_raised="#EEF2F7",   # cool-grey-100
-    contrast="#0B0E14",         # cool-grey-950
-    foreground="#2C313F",       # cool-grey-900
-    text_secondary="#4B5468",   # cool-grey-700
-    text_dim="#7E8A9E",         # cool-grey-500
-    border="#DCE3EE",           # cool-grey-200
-    border_subtle="#EEF2F7",    # cool-grey-100
-    primary="#8A6E1F",          # darkened gold, AA on the light base
-    primary_foreground="#FFFFFF",
-    interactive_hover="#EEF2F7",  # cool-grey-100
-    interactive_active="#DCE3EE",  # cool-grey-200
-    user_bubble="#EEF2F7",        # cool-grey-100
-    user_bubble_fg="#0B0E14",
-    code_bg="#F0F3F8",
-    code_fg="#1B2029",
-    quote_bar="#C4CEDD",
-    titlebar="#DCE3EE",         # a light grey band in the light appearance
-    titlebar_edge="#C4CEDD",    # the hairline under it
-    success="#3F7D1E",
-    danger="#C0473C",
-    disabled="#DCE3EE",
-)
-
-THEMES = {theme.name: theme for theme in (DARK_THEME, LIGHT_THEME)}
-
-#: The window's saved appearance lives in the user's data directory.
-_THEME_NAMESPACE = "gui"
-_THEME_KEY = "appearance"
 
 # A paragraph-cap for a single message; longer notes scroll inside their card.
 _MAX_BUBBLE_LINES = 40
@@ -277,27 +193,10 @@ def _pick_mono() -> str:
     return for_root(None).mono_family
 
 
-def load_theme_name() -> str:
-    """The saved theme name, defaulting to dark; never raises on a bad store."""
-    from storage.json_store import JsonStore
-
-    try:
-        saved = JsonStore(data_dir()).load(_THEME_NAMESPACE, _THEME_KEY)
-    except Exception:  # a broken store must not stop the window opening
-        return DARK_THEME.name
-    name = saved.get("theme") if isinstance(saved, dict) else None
-    return name if name in THEMES else DARK_THEME.name
-
-
-def save_theme_name(name: str) -> None:
-    """Persist the chosen theme; a store error is recorded, not fatal."""
-    from storage.json_store import JsonStore
-
-    if name not in THEMES:
-        return
-    with best_effort("save the theme"):
-        JsonStore(data_dir()).save(_THEME_NAMESPACE, _THEME_KEY, {"theme": name})
-
+#: The app's own JsonStore namespace, shared by the reading voice, the
+#: auto-speak flag, and the sidebar-section state. The saved *theme* lives under
+#: the same namespace in :mod:`gui.themes`, so one switch keeps them together.
+_THEME_NAMESPACE = "gui"
 
 _VOICE_KEY = "reading_voice"
 _SPEAK_KEY = "auto_speak"
@@ -527,6 +426,7 @@ class FaydGUI:
         self._auto_hidden = False
         self._settings_open = False
         self._voices_open = False
+        self._themes_open = False
         # The sidebar's collapsible sections: which are open, and the widget for
         # each, so a toggle can persist the choice and a rebuild can restore it.
         # The state is stored under the service's own data root, so the window and
@@ -550,7 +450,7 @@ class FaydGUI:
         self._history_query = tk.StringVar()
 
         # The theme is read from the user's saved preference unless one was passed
-        # in; both toggle later through _toggle_theme.
+        # in; it changes later through _apply_theme.
         name = theme if theme in THEMES else load_theme_name()
         self._theme = THEMES[name]
 
@@ -740,6 +640,18 @@ class FaydGUI:
         self._voices_panel.pack(fill="x")
         self._voices_open = voices.is_open
 
+        # 2b. Themes: every appearance the project ships, in one place. This is
+        # the *one* home for the theme choice (the Settings section no longer
+        # repeats it, just as it no longer repeats the voice list). Its list is
+        # (re)built when the section is opened, so the current theme is always
+        # marked and a switch is one click.
+        themes = self._add_section(
+            panel, key="themes", title="Themes", icon="🎨", default_open=False
+        )
+        self._themes_panel = tk.Frame(themes.body, bg=self._theme.surface)
+        self._themes_panel.pack(fill="x")
+        self._themes_open = themes.is_open
+
         # 3. The answering-assistant actions, grouped by theme. Each group is its
         # own section, so the column is a handful of readable headers instead of
         # one long list of buttons. The buttons are built now (so a search or a
@@ -783,6 +695,25 @@ class FaydGUI:
         if self._is_compact():
             sidebar.pack_forget()
             self._sidebar_visible = False
+
+        self._build_open_sections()
+
+    def _build_open_sections(self) -> None:
+        """Fill the panels a section holds, for any section open at build time.
+
+        A section restored open (from the saved layout) or left open across a
+        theme rebuild draws its header immediately but its contents only when it
+        is opened; this fills those contents, so an open *Reading Voice*,
+        *Themes*, or *Settings* section is never blank after a launch or a
+        rebuild.
+        """
+        if self._section_states.get("themes") and getattr(self, "_themes_panel", None) is not None:
+            self._build_themes_panel(self._themes_panel)
+        if self._section_states.get("voices"):
+            self._rebuild_voice_section()
+        if self._section_states.get("settings") and not self._settings_built:
+            self._build_settings_panel(self._settings_panel)
+            self._settings_built = True
 
     def _add_section(
         self,
@@ -833,6 +764,12 @@ class FaydGUI:
             # to an empty panel.
             if is_open:
                 self._rebuild_voice_section()
+        elif key == "themes":
+            self._themes_open = is_open
+            # The theme list is (re)built on every open, so the current theme is
+            # always the one marked -- a rebuild can have changed it since.
+            if is_open:
+                self._build_themes_panel(self._themes_panel)
         elif key == "settings":
             self._settings_open = is_open
             # The settings contents are built on first open (they touch the cloud
@@ -886,11 +823,80 @@ class FaydGUI:
     # ------------------------------------------------------------- appearance
 
     def _toggle_theme(self) -> str:
-        """Switch between dark and light, persist the choice, and rebuild."""
-        self._theme = LIGHT_THEME if self._theme.name == "dark" else DARK_THEME
-        save_theme_name(self._theme.name)
+        """Switch between the two OpenHands appearances (dark ⇄ light).
+
+        Kept for the header's ☾/☀ control and the keyboard path; the sidebar's
+        Themes section offers the full catalogue through :meth:`_apply_theme`.
+        """
+        target = "light" if self._theme.name == "dark" else "dark"
+        return self._apply_theme(target)
+
+    def _apply_theme(self, name: str) -> str:
+        """Switch the whole program to the theme ``name``, in every open window.
+
+        The choice is persisted, the main window is rebuilt for the new palette
+        (keeping the transcript), and every open dialog is restyled in place
+        through :meth:`gui.dialog_base.ThemedDialog.retheme`, so a window opened
+        before the switch changes with it rather than staying in the old colours
+        until it is closed and reopened.
+        """
+        chosen = find_theme(name)
+        if chosen is None or chosen.name == self._theme.name:
+            return "break"
+        self._theme = chosen
+        save_theme_name(chosen.name)
         self._rebuild_preserving_transcript()
+        self._retheme_dialogs(chosen)
         return "break"
+
+    def _retheme_dialogs(self, theme: Theme) -> None:
+        """Restyle every dialog this window has open, best-effort.
+
+        Each dialog was built with the old palette and holds its own widgets, so
+        it is asked to rebuild in place. A dialog that predates the mixin (or is
+        mid-close) is skipped rather than crashing the switch, and any failure is
+        recorded so a real bug leaves a trace.
+        """
+        for dialog in self._open_dialogs():
+            retheme = getattr(dialog, "retheme", None)
+            if not callable(retheme):
+                continue
+            with best_effort(f"re-theme the {type(dialog).__name__}"):
+                retheme(theme)
+
+    def _open_dialogs(self) -> list[Any]:
+        """Every dialog window this window currently holds open.
+
+        The single-window dialogs live on named attributes; the per-mouth chat
+        and per-engine voice windows live in two dictionaries. A window that has
+        been closed has already cleared its attribute, so what is returned is the
+        set of live dialogs, and a dead one that slipped through is filtered out
+        by the caller's ``retheme`` guard.
+        """
+        dialogs: list[Any] = []
+        for attr in (
+            "_import_dialog",
+            "_sql_import_dialog",
+            "_characters_dialog",
+            "_cognition_dialog",
+            "_model_manager_dialog",
+            "_image_gen_dialog",
+            "_image_edit_dialog",
+            "_presentation_dialog",
+            "_presentation_course_dialog",
+            "_presentation_finalize_dialog",
+            "_docs_studio_dialog",
+            "_scene_studio_dialog",
+            "_code_studio_dialog",
+        ):
+            dialog = getattr(self, attr, None)
+            if dialog is not None:
+                dialogs.append(dialog)
+        for mapping_attr in ("_model_chat_dialogs", "_voice_studio_dialogs"):
+            mapping = getattr(self, mapping_attr, None)
+            if isinstance(mapping, dict):
+                dialogs.extend(mapping.values())
+        return dialogs
 
     def _rebuild_preserving_transcript(self) -> None:
         transcript = self._snapshot_transcript()
@@ -1058,19 +1064,50 @@ class FaydGUI:
             panel, "⌫   Clear transcript", self._clear_transcript, small=True
         ).pack(fill="x", padx=12, pady=(2, 0))
 
-        # Appearance: one switch, with the same one-line note the old Appearance
-        # block carried, kept inside Settings so the sidebar has a single home for
-        # every preference.
-        row = tk.Frame(panel, bg=self._theme.surface)
-        row.pack(fill="x", padx=12, pady=(10, 2))
-        right = "light mode  ☀" if self._theme.name == "dark" else "dark mode  ☾"
-        self._sidebar_button(row, right, self._toggle_theme, small=True).pack(
-            fill="x", pady=(0, 4)
+    def _build_themes_panel(self, panel: tk.Misc) -> None:
+        """Build (or rebuild) the Themes section: one clickable row per theme.
+
+        Every shipped appearance is listed with a small colour swatch, its name,
+        and a one-line description; the theme in force is marked with a dot. The
+        panel is rebuilt on every open, so the mark always matches the current
+        choice even after a switch made elsewhere (the header's ☾/☀ control).
+        """
+        if panel is None:
+            return
+        for child in panel.winfo_children():
+            child.destroy()
+        for name, summary in theme_summaries():
+            self._theme_row(panel, name, summary)
+
+    def _theme_row(self, panel: tk.Misc, name: str, summary: str) -> None:
+        """One theme row: a swatch, the name, its description, and the mark."""
+        theme = find_theme(name)
+        if theme is None:
+            return
+        current = name == self._theme.name
+        row = tk.Frame(panel, bg=self._theme.surface, cursor="hand2")
+        row.pack(fill="x", padx=12, pady=1)
+
+        swatch = tk.Canvas(
+            row, width=18, height=18, bg=self._theme.surface, highlightthickness=0, cursor="hand2"
         )
-        tk.Label(
-            row, text="Theme and mode are saved for next launch.", bg=self._theme.surface,
-            fg=self._theme.text_dim, font=self._type.font("2xs"), anchor="w", padx=12,
-        ).pack(fill="x")
+        swatch.create_oval(1, 1, 17, 17, fill=theme.base, outline=theme.primary, width=2)
+        swatch.pack(side="left", padx=(4, 8), pady=4)
+
+        label = tk.Label(
+            row, text=("● " if current else "○ ") + name, bg=self._theme.surface,
+            fg=self._theme.primary if current else self._theme.foreground,
+            font=self._type.font("2xs", weight="bold" if current else "normal"),
+            anchor="w", cursor="hand2",
+        )
+        label.pack(side="left", fill="x", expand=True)
+
+        def choose(_event: tk.Event | None = None, key: str = name) -> None:
+            self._apply_theme(key)
+
+        for widget in (row, swatch, label):
+            widget.bind("<Button-1>", choose)
+        _Tooltip(row, summary or name, self._theme, self._type)
 
     def _build_cloud_provider_picker(self, panel: tk.Misc) -> None:
         """The Cloud provider picker: choose Gemini *or* Groq (or any provider).
@@ -1362,6 +1399,18 @@ class FaydGUI:
             activeforeground=self._theme.foreground, font=self._type.font("xs"),
             anchor="w", padx=6, highlightthickness=0, bd=0, cursor="hand2",
         ).pack(fill="x", padx=indent, pady=0)
+
+    def _toggle_themes(self) -> None:
+        """Ensure the sidebar's **Themes** section is open, and fill it.
+
+        The section header owns the real open/close click; this is the
+        programmatic "show the themes" entry point, so it is idempotent and the
+        list is (re)built each time, so the theme in force is always the one
+        marked. It is the one place an appearance is chosen from the full
+        catalogue (the header's ☾/☀ control toggles dark ⇄ light).
+        """
+        self._open_section("themes")
+        self._build_themes_panel(self._themes_panel)
 
     def _toggle_voices(self) -> None:
         """Ensure the sidebar's **Reading Voice** section is open, and fill it.
@@ -3666,11 +3715,20 @@ def main(argv: list[str] | None = None) -> int:
 # re-exported for the dialogs and the tests, which build on the window's own
 # widget vocabulary; they are defined once in :mod:`gui.chat_composer`.
 __all__ = [
+    "DARK_THEME",
+    "LIGHT_THEME",
     "RADIUS_LARGE",
     "RADIUS_SMALL",
     "SEND_BUTTON_SIZE",
+    "THEMES",
     "CircleButton",
     "FaydGUI",
     "RoundedBox",
+    "Theme",
+    "find_theme",
+    "load_theme_name",
     "main",
+    "save_theme_name",
+    "theme_names",
+    "theme_summaries",
 ]

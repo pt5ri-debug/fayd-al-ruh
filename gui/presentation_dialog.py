@@ -54,6 +54,7 @@ from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.dialog_base import ThemedDialog
 from gui.message_footer import add_provenance_label
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
@@ -92,7 +93,7 @@ STEPS: tuple[tuple[str, str], ...] = (
 )
 
 
-class PresentationDialog:
+class PresentationDialog(ThemedDialog):
     """A window that builds a PowerPoint deck from a discussion, slide by slide."""
 
     def __init__(
@@ -166,7 +167,10 @@ class PresentationDialog:
         self.window.minsize(940, 620)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self._open_first_project()
 
     # -- layout -----------------------------------------------------------
@@ -839,7 +843,12 @@ class PresentationDialog:
         self._refresh_projects()
         projects = self.service.list_projects()
         if projects:
-            self._select_project(projects[0].project_id)
+            # Keep the project already open when it still exists, so a re-theme
+            # does not jump the Studio back to the first one.
+            if any(project.project_id == self._project_id for project in projects):
+                self._select_project(self._project_id)
+            else:
+                self._select_project(projects[0].project_id)
         else:
             self._add_message(
                 "note",

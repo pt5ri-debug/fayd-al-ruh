@@ -54,6 +54,7 @@ from core.learning_isolation import MAIN_MODEL_OWNER, is_private
 
 from gui.app import RoundedBox
 from gui.character_manager import CharacterManagerService
+from gui.dialog_base import ThemedDialog
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import fit_geometry, install_window_controls
@@ -70,7 +71,7 @@ MIN_WIDTH = 980
 MIN_HEIGHT = 640
 
 
-class CharacterManagerDialog:
+class CharacterManagerDialog(ThemedDialog):
     """The Characters window: pick a character, edit it, APPLY."""
 
     def __init__(
@@ -108,8 +109,17 @@ class CharacterManagerDialog:
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
 
-        self._build()
-        self._select(self.service.keys()[0])
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
+        # Keep the character already shown when it still exists, so a re-theme
+        # does not jump the editor back to the first one; open the first on the
+        # window's own first build.
+        keys = list(self.service.keys())
+        chosen = self._current if self._current in keys else (keys[0] if keys else "")
+        if chosen:
+            self._select(chosen)
 
     # -- layout -----------------------------------------------------------
 

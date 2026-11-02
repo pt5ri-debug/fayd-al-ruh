@@ -31,6 +31,7 @@ from core.imagegen_diffusion import DEFAULT_PRESET, PRESETS
 from core.optional_deps import FEATURE_IMAGE, pip_install_command
 
 from gui.chat_composer import ChatComposer
+from gui.dialog_base import ThemedDialog
 from gui.image_preview import load_scaled
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
@@ -60,7 +61,7 @@ SECTION_PAD = 20
 PREVIEW_PAD = 12
 
 
-class ImageGenDialog:
+class ImageGenDialog(ThemedDialog):
     """A window that renders a text prompt to an image file."""
 
     def __init__(
@@ -100,7 +101,7 @@ class ImageGenDialog:
         self.window.minsize(820, 560)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
-        self._build()
+        self._themed_build()
 
     # -- layout -----------------------------------------------------------
 

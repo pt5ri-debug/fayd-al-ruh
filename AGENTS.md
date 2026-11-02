@@ -2286,13 +2286,54 @@ Arabic is kept as secondary aliases where useful.
   is how a row can still overflow after it has been "wrapped". A compact window
   therefore wraps rather than cutting a model off the end of the row, because a
   chip the user cannot reach is a model the user cannot pick.
+- `gui/themes.py` — the **appearance catalogue**, tkinter-free so it can be
+  inspected and tested with no display. A `Theme` is one complete palette named
+  after OpenHands' semantic tokens; **eight** ship — the two OpenHands
+  appearances (`DARK_THEME`/`LIGHT_THEME`) plus `MIDNIGHT_THEME`, `NORD_THEME`,
+  `SOLARIZED_THEME`, `SEPIA_THEME`, `OCEAN_THEME`, and `HIGH_CONTRAST_THEME` —
+  and `THEMES`/`theme_names`/`theme_summaries`/`find_theme`/`default_theme` are
+  the one catalogue every surface reads. `validate_theme` reports a palette with
+  a missing token (which would leave a widget painted with a stale colour) and
+  `contrast_ratio` is a WCAG contrast check, so the module's own tests prove each
+  theme is complete and legible (body text ≥ 4.5:1 on the base, and a button's
+  label on its accent fill). `load_theme_name`/`save_theme_name` persist the
+  choice under `gui`/`appearance` and fall back to *dark* on a missing or broken
+  store, so the window always opens. `gui/app.py` re-exports the whole set, so
+  every existing caller and test keeps importing `Theme`/`DARK_THEME`/`THEMES`
+  from there unchanged.
+- `gui/dialog_base.py` — **live re-theming for the dialogs**. The main window
+  can be rebuilt for a new palette in one call, but the fifteen dialogs build
+  their widgets once in `__init__`, so before this a theme chosen while a Studio
+  was open left that window in the old colours until it was closed and reopened.
+  `ThemedDialog` is the mixin that closes it: a dialog calls `_themed_build()`
+  instead of `self._build()` and moves its post-build work into `_after_build`
+  (run after every build, so it must be idempotent — a refresh, never a state
+  change). `retheme(theme)` rebuilds the window in place: it records the messages
+  a dialog shows by wrapping `_add_message`, snapshots each *plain* row's live
+  text (a Markdown row is replayed from its source, because reading a rendered
+  `Text` back would lose the headings and lists), destroys the window's children,
+  rebuilds, and replays only the messages the user's own actions added — the
+  window's own opening content is redrawn by the build itself. The service, the
+  selected item, and the composer's text live on the instance and survive. It
+  imports no `gui.app`, so a dialog builds on it without a circular import.
 - `gui/app.py` — a professional desktop front end styled after the **OpenHands
   chat UI**: the same cool-grey token scale (base `cool-grey-950`, surface
   `cool-grey-925`, raised `cool-grey-900`), the gold primary accent, and
-  HeroUI's small/large radii, defined once as the `Theme` dataclass
-  (`DARK_THEME`/`LIGHT_THEME`) and mapped back to OpenHands' semantic names
+  HeroUI's small/large radii, with the `Theme` dataclass and its eight palettes
+  re-exported from `gui.themes` and mapped back to OpenHands' semantic names
   (`surface`, `foreground`, `text_dim`, `border_subtle`, `interactive_hover`
-  …). `RoundedBox` paints a rounded-rectangle surface (Tk has no corner radius)
+  …). The theme choice has its **own sidebar section** (`Themes`, `_themes_panel`,
+  built/refreshed by `_build_themes_panel`/`_theme_row` with a colour swatch and
+  a dot on the theme in force, and opened programmatically by `_toggle_themes`);
+  `_apply_theme(name)` persists the choice, rebuilds the main window, and calls
+  `_retheme_dialogs`, which walks every dialog this window holds open
+  (`_open_dialogs` covers the named single-window dialogs plus the two per-mouth
+  mappings) and calls each one's `retheme`, best-effort, so one switch restyles
+  every window at once. `_toggle_theme` (the header's ☾/☀ control) still toggles
+  dark ⇄ light through `_apply_theme`. `_build_open_sections` fills a section
+  that is open at build time (so a restored-open or rebuilt-open *Reading Voice*,
+  *Themes*, or *Settings* section is never blank). `RoundedBox` paints a
+  rounded-rectangle surface (Tk has no corner radius)
   and hosts real widgets, used for the rounded composer card and the right-side
   user bubbles. The transcript reads as a centred column (`_COLUMN_MAX`, with
   `_column_pad` recentring it on resize): user messages are small rounded
@@ -2303,11 +2344,16 @@ Arabic is kept as secondary aliases where useful.
   window is rebuilt for the new palette with the transcript preserved), a
   collapsible sidebar drawn as a short list of **collapsible sections** rather
   than one flat column (brand + version, a filled **New chat** button, a search
-  box, then *Chats* grouped by date, *Reading Voice*, one section per answering-
-  assistant action group, and *Settings* with the **Cloud provider**/**Model**
-  dropdowns and the appearance switch; the sandbox-tools
+  box, then *Chats* grouped by date, *Reading Voice*, ***Themes***, one section
+  per answering-assistant action group, and *Settings* with the **Cloud
+  provider**/**Model** dropdowns; the appearance switch is no longer inside
+  Settings -- the *Themes* section is its one home; the sandbox-tools
   list and the answering-mouth radios are deliberately *not* in the sidebar --
-  the header's model selector is the one visible mouth switch). The *Reading
+  the header's model selector is the one visible mouth switch). The *Themes*
+  section is (re)built every time it is opened, so the theme in force is always
+  the one marked; a row is a colour swatch, the name, and a one-line
+  description, and a click restyles every open window (the main window rebuilt,
+  each dialog re-themed in place). The *Reading
   Voice* list is built the moment the section is **opened** -- including by a
   plain header click, not only by the programmatic entry point -- so it never
   opens empty, and it shows every voice the machine really has, grouped under the
@@ -2315,7 +2361,8 @@ Arabic is kept as secondary aliases where useful.
   and the synthetic catalog), with an honest note for any source that contributed
   none; choosing one applies it at once and persists the key. The *Settings*
   section likewise builds its contents on first open (a header click or the
-  programmatic entry point). The sidebar sits behind a
+  programmatic entry point). `_build_open_sections` fills any of the three that
+  is open when the window is built, so a rebuilt-open section is never blank. The sidebar sits behind a
   scrollbar that
   appears only when the content overflows, a title bar showing the project's one
   model by name (the header's top-left control is a plain **button** naming
@@ -5838,3 +5885,53 @@ regression monitor each can refuse a change.
   the "every button comes from the catalogue" check; `tests/test_study_session.py`
   gained the Arabic-bank tests. Gates: ruff clean, mypy 863 files OK, evaluation
   PASS (`overall` 0.9875), pytest green.
+
+- Phase 63 — **appearance themes for every window, chosen from their own sidebar
+  entry**. The window could switch between exactly two appearances (dark and
+  light) through a row buried inside the *Settings* section, and a switch only
+  restyled the **main window**: the fifteen dialogs build their widgets once in
+  `__init__`, so a theme chosen while a Studio was open left that window in the
+  old colours until it was closed and reopened. Three pieces close both gaps.
+  `gui/themes.py` (new, tkinter-free) is the one **appearance catalogue**: a
+  `Theme` is a complete palette named after OpenHands' semantic tokens, and
+  **eight** ship — the two OpenHands appearances (`DARK_THEME`/`LIGHT_THEME`)
+  plus `MIDNIGHT_THEME`, `NORD_THEME`, `SOLARIZED_THEME`, `SEPIA_THEME`,
+  `OCEAN_THEME`, and `HIGH_CONTRAST_THEME`. `THEMES`/`theme_names`/
+  `theme_summaries`/`find_theme`/`default_theme` are the one catalogue every
+  surface reads; `validate_theme` reports a palette with a missing token (which
+  would leave a widget painted with a stale colour) and `contrast_ratio` is a
+  WCAG check, so the module's own tests prove each theme is complete and legible
+  (body text ≥ 4.5:1 on the base, a button's label on its accent fill) — which is
+  how *sepia*'s accent was caught at 4.24:1 and darkened to 4.5+. `load_theme_name`/
+  `save_theme_name` persist the choice under `gui`/`appearance` and fall back to
+  *dark* on a missing or broken store. `gui/dialog_base.py` (new) is the
+  **live-re-theming mixin**, `ThemedDialog`: a dialog calls `_themed_build()`
+  instead of `self._build()` and moves its post-build work into `_after_build`
+  (run after every build, so it is idempotent — a refresh, never a state change);
+  `retheme(theme)` records the messages a dialog shows by wrapping
+  `_add_message`, snapshots each *plain* row's live text (a Markdown row is
+  replayed from its source, because reading a rendered `Text` back would lose its
+  headings and lists), destroys the window's children, rebuilds, and replays only
+  the messages the user's own actions added — the window's own opening content is
+  redrawn by the build. All fifteen dialogs adopt it (their post-build work moved
+  into `_after_build`, and the two that jump the selection to the first item —
+  the Characters window and the Presentation Studio — now keep the current one).
+  `gui/app.py` re-exports the whole catalogue (so every existing caller and test
+  imports `Theme`/`DARK_THEME`/`THEMES` unchanged), the theme choice gets its
+  **own sidebar section** (`Themes`, with a colour swatch, a one-line description,
+  and a dot on the theme in force; rebuilt every time it is opened, so the mark is
+  always current), the appearance row is removed from *Settings*, `_apply_theme`
+  persists the choice and rebuilds the main window, `_retheme_dialogs`/
+  `_open_dialogs` walk every dialog the window holds open and re-theme it in place
+  (best-effort, so a dialog that predates the mixin or is mid-close is skipped,
+  not a crash), `_toggle_theme` keeps the header's ☾/☀ dark ⇄ light behaviour,
+  and `_build_open_sections` fills a section that is open when the window is built
+  (so a rebuilt-open *Reading Voice*/*Themes*/*Settings* section is never blank).
+  `tests/test_themes.py` (new, 16 tests) pins the catalogue (the eight themes, the
+  completeness, the WCAG contrast of the body text and the accent label, the
+  summaries, the round-trip and the broken-store fallback) and the live feature
+  (the main window re-themes every open dialog, an unknown/current theme is a
+  no-op, the header toggle still works, the sidebar has a *Themes* section of its
+  own, opening it lists every theme with the current one marked, a click applies
+  it, a real dialog rebuilds in place, and the mixin preserves the messages a user
+  was reading). Gates: ruff clean, mypy 866 files OK, pytest green.

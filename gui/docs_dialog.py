@@ -44,6 +44,7 @@ from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.dialog_base import ThemedDialog
 from gui.docs_studio import DocsStudioService, picker_filetypes
 from gui.image_preview import load_scaled
 from gui.message_footer import add_provenance_label
@@ -78,7 +79,7 @@ _COLUMN_MAX = 860
 _MAX_BUBBLE_LINES = 40
 
 
-class DocsDialog:
+class DocsDialog(ThemedDialog):
     """A window that loads documents and answers questions about them."""
 
     def __init__(
@@ -125,7 +126,10 @@ class DocsDialog:
         self.window.minsize(960, 640)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self._refresh_model_note()
 
     # -- layout -----------------------------------------------------------

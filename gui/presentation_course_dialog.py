@@ -34,6 +34,7 @@ from typing import Any
 
 from core.presentation_courses import CourseDetail, CourseMatch
 
+from gui.dialog_base import ThemedDialog
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import install_window_controls
@@ -49,7 +50,7 @@ SUBTITLE = (
 _COLUMN_MAX = 860
 
 
-class PresentationCourseDialog:
+class PresentationCourseDialog(ThemedDialog):
     """Show the curriculum course the deck is about, and what it still lacks."""
 
     def __init__(
@@ -90,7 +91,10 @@ class PresentationCourseDialog:
         self.window.minsize(860, 560)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self.refresh()
 
     # -- layout -----------------------------------------------------------
