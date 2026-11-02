@@ -104,6 +104,8 @@ class PresentationDialog(ThemedDialog):
         theme: Any,
         font: str,
         mono: str,
+        overrides: object | None = None,
+        list_overrides: object | None = None,
         on_close: Callable[[], None] | None = None,
         on_open_final_editor: Callable[[], None] | None = None,
         model_status: Any = None,
@@ -114,7 +116,12 @@ class PresentationDialog(ThemedDialog):
         self.theme = theme
         self.font = font
         self.mono = mono
-        self._type = resolve(parent, ui_family=font, mono_family=mono)
+        self._type = resolve(parent, ui_family=font, mono_family=mono, overrides=overrides)
+        self._overrides = overrides
+        self._list_overrides = list_overrides
+        self._list_type = resolve(
+            parent, ui_family=font, mono_family=mono, overrides=list_overrides
+        )
         self._on_close = on_close
         # Called when "Approve the content" opens the final-editing window. The
         # chat window owns that window's lifetime, so this dialog only asks for it.
@@ -254,7 +261,7 @@ class PresentationDialog(ThemedDialog):
         self._project_list = tk.Listbox(
             projects, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
-            font=self._type.font("xs"), height=5, activestyle="none",
+            font=self._list_type.font("xs"), height=5, activestyle="none",
         )
         self._project_list.pack(fill="x", padx=14, pady=(4, 6))
         self._project_list.bind("<<ListboxSelect>>", self._on_project_select)
@@ -309,7 +316,7 @@ class PresentationDialog(ThemedDialog):
         self._slide_list = tk.Listbox(
             slides, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
-            font=self._type.font("xs"), height=6, activestyle="none",
+            font=self._list_type.font("xs"), height=6, activestyle="none",
         )
         self._slide_list.pack(fill="both", expand=True, padx=14, pady=(0, 6))
         self._slide_list.bind("<<ListboxSelect>>", self._on_slide_select)
@@ -319,7 +326,7 @@ class PresentationDialog(ThemedDialog):
         theme_row.pack(fill="x", padx=14, pady=(4, 6))
         tk.Label(
             theme_row, text="Theme", bg=theme.surface, fg=theme.text_dim,
-            font=self._type.font("2xs"),
+            font=self._list_type.font("2xs"),
         ).pack(anchor="w")
         self._theme_choice = tk.StringVar(value="professional")
         theme_picker = ttk.Combobox(

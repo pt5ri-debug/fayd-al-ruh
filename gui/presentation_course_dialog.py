@@ -63,6 +63,8 @@ class PresentationCourseDialog(ThemedDialog):
         theme: Any,
         font: str,
         mono: str,
+        overrides: object | None = None,
+        list_overrides: object | None = None,
         on_close: Callable[[], None] | None = None,
         on_use_concepts: Callable[[str], None] | None = None,
         on_open_slide: Callable[[int], None] | None = None,
@@ -71,7 +73,12 @@ class PresentationCourseDialog(ThemedDialog):
         self.theme = theme
         self.font = font
         self.mono = mono
-        self._type = resolve(parent, ui_family=font, mono_family=mono)
+        self._type = resolve(parent, ui_family=font, mono_family=mono, overrides=overrides)
+        self._overrides = overrides
+        self._list_overrides = list_overrides
+        self._list_type = resolve(
+            parent, ui_family=font, mono_family=mono, overrides=list_overrides
+        )
         self._on_close = on_close
         # Hand the chosen text back to the Studio's own question box; the window
         # never drafts or edits on its own, so the user stays in control.
@@ -167,7 +174,7 @@ class PresentationCourseDialog(ThemedDialog):
         self._match_list = tk.Listbox(
             matches, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
-            font=self._type.font("xs"), height=6, activestyle="none",
+            font=self._list_type.font("xs"), height=6, activestyle="none",
         )
         self._match_list.pack(fill="x", padx=14, pady=(4, 6))
         self._match_list.bind("<<ListboxSelect>>", self._on_match_select)
@@ -176,7 +183,7 @@ class PresentationCourseDialog(ThemedDialog):
         self._concept_list = tk.Listbox(
             concepts, bg=theme.base, fg=theme.foreground, selectbackground=theme.primary,
             selectforeground=theme.primary_foreground, relief="flat", highlightthickness=0,
-            font=self._type.font("xs"), height=12, activestyle="none",
+            font=self._list_type.font("xs"), height=12, activestyle="none",
         )
         self._concept_list.pack(fill="both", expand=True, padx=14, pady=(4, 6))
         self._concept_list.bind("<<ListboxSelect>>", self._on_concept_select)

@@ -93,13 +93,20 @@ class CodeStudioDialog(ThemedDialog):
         theme: Any,
         font: str,
         mono: str,
+        overrides: object | None = None,
+        list_overrides: object | None = None,
         on_close: Callable[[], None] | None = None,
     ) -> None:
         self.service = service
         self.theme = theme
         self.font = font
         self.mono = mono
-        self._type = resolve(parent, ui_family=font, mono_family=mono)
+        self._type = resolve(parent, ui_family=font, mono_family=mono, overrides=overrides)
+        self._overrides = overrides
+        self._list_overrides = list_overrides
+        self._list_type = resolve(
+            parent, ui_family=font, mono_family=mono, overrides=list_overrides
+        )
         self._on_close = on_close
         self._busy = False
         self._closed = False
@@ -238,14 +245,14 @@ class CodeStudioDialog(ThemedDialog):
         self._workspace_list = tk.Listbox(
             sidebar, bg=self.theme.base, fg=self.theme.foreground, selectbackground=self.theme.primary,
             selectforeground=self.theme.primary_foreground, relief="flat", highlightthickness=0,
-            font=self._type.font("xs"), height=6, activestyle="none",
+            font=self._list_type.font("xs"), height=6, activestyle="none",
         )
         self._workspace_list.pack(fill="x", padx=14, pady=(4, 6))
         self._workspace_list.bind("<<ListboxSelect>>", self._on_workspace_select)
 
         tk.Label(
             sidebar, text="Workspaces are named for you, in order (PR1, PR2, …).",
-            bg=self.theme.surface, fg=self.theme.text_secondary, font=self._type.font("2xs"),
+            bg=self.theme.surface, fg=self.theme.text_secondary, font=self._list_type.font("2xs"),
             anchor="w", justify="left", wraplength=248,
         ).pack(fill="x", padx=14, pady=(0, 4))
         row = tk.Frame(sidebar, bg=self.theme.surface)
@@ -263,7 +270,7 @@ class CodeStudioDialog(ThemedDialog):
         self._file_list = tk.Listbox(
             files, bg=self.theme.base, fg=self.theme.foreground, selectbackground=self.theme.primary,
             selectforeground=self.theme.primary_foreground, relief="flat", highlightthickness=0,
-            font=self._type.mono("2xs"), height=8, activestyle="none",
+            font=self._list_type.mono("2xs"), height=8, activestyle="none",
         )
         self._file_list.pack(fill="both", expand=True, padx=14, pady=(4, 6))
         self._file_list.bind("<<ListboxSelect>>", self._on_file_select)

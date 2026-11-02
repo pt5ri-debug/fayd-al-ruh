@@ -51,7 +51,7 @@ class LineSpacing(NamedTuple):
 
 def body_spacing(typography: Typography) -> LineSpacing:
     """The widget-level line rhythm for a Markdown body (see :class:`LineSpacing`)."""
-    metrics = typography.block_metrics("body", gap_px=1)
+    metrics = typography.block_metrics_full("body", gap_px=1)
     return LineSpacing(spacing1=metrics.spacing1, spacing3=metrics.spacing3)
 
 
@@ -59,6 +59,26 @@ def apply_body_spacing(widget: tk.Text, typography: Typography) -> None:
     """Give ``widget`` the body line rhythm, so blank separator lines have height."""
     spacing = body_spacing(typography)
     widget.configure(spacing1=spacing.spacing1, spacing3=spacing.spacing3)
+
+
+#: The tag :func:`apply_alignment` uses for a widget that holds plain text (a user
+#: bubble), where no Markdown block tag carries the paragraph alignment.
+ALIGN_TAG = "chat_align"
+
+
+def apply_alignment(widget: tk.Text, typography: Typography) -> None:
+    """Apply the scope's paragraph alignment to ``widget``'s whole content.
+
+    Tk's ``Text`` has no ``-justify`` *widget* option (only a tag has one), so a
+    plain-text widget -- the user's own bubble, which is inserted without the
+    Markdown block tags -- gets the alignment through a tag over its whole range.
+    A left alignment is Tk's own default, so nothing is added for it.
+    """
+    justify = typography.justify()
+    if justify == "left":
+        return
+    widget.tag_configure(ALIGN_TAG, justify=justify)
+    widget.tag_add(ALIGN_TAG, "1.0", "end")
 
 
 def configure_markdown_tags(widget: tk.Text, *, theme: Any, typography: Typography) -> None:
@@ -71,9 +91,9 @@ def configure_markdown_tags(widget: tk.Text, *, theme: Any, typography: Typograp
     """
     t = typography
     # p: py-1.5 leading-6 (paragraph.tsx).
-    body = t.block_metrics("body", gap_px=1)
+    body = t.block_metrics_full("body", gap_px=1)
     widget.tag_configure(
-        PARAGRAPH_TAG, font=t.font("body"),
+        PARAGRAPH_TAG, font=t.font("body"), justify=t.justify(),
         spacing1=body.spacing1, spacing2=body.spacing2, spacing3=body.spacing3,
     )
     # h1: text-xl leading-7, mt-4 mb-3; h2: text-lg leading-6, mt-4 mb-2.5;
@@ -81,30 +101,30 @@ def configure_markdown_tags(widget: tk.Text, *, theme: Any, typography: Typograp
     # weight is bold.
     h1 = t.block_metrics("heading1", gap_px=14)
     widget.tag_configure(
-        HEADING1_TAG, font=t.font("heading1"), foreground=theme.contrast,
+        HEADING1_TAG, font=t.font("heading1"), foreground=theme.contrast, justify=t.justify(),
         spacing1=h1.spacing1, spacing2=h1.spacing2, spacing3=h1.spacing3,
     )
     h2 = t.block_metrics("heading2", gap_px=13)
     widget.tag_configure(
-        HEADING2_TAG, font=t.font("heading2"), foreground=theme.contrast,
+        HEADING2_TAG, font=t.font("heading2"), foreground=theme.contrast, justify=t.justify(),
         spacing1=h2.spacing1, spacing2=h2.spacing2, spacing3=h2.spacing3,
     )
     h3 = t.block_metrics("heading3", gap_px=10)
     widget.tag_configure(
-        HEADING3_TAG, font=t.font("heading3"), foreground=theme.contrast,
+        HEADING3_TAG, font=t.font("heading3"), foreground=theme.contrast, justify=t.justify(),
         spacing1=h3.spacing1, spacing2=h3.spacing2, spacing3=h3.spacing3,
     )
     # ul/ol: my-2 leading-6, li py-0.5 (list.tsx).
     li = t.block_metrics("body", gap_px=2)
     widget.tag_configure(
-        BULLET_TAG, font=t.font("body"), lmargin1=16, lmargin2=30,
+        BULLET_TAG, font=t.font("body"), lmargin1=16, lmargin2=30, justify=t.justify(),
         spacing1=li.spacing1, spacing2=li.spacing2, spacing3=li.spacing3,
     )
     # blockquote: my-2, italic, muted, with the 4px accent bar (blockquote.tsx).
     quote = t.block_metrics("body", gap_px=8)
     widget.tag_configure(
         QUOTE_TAG, font=t.font("body", slant="italic"), lmargin1=16, lmargin2=16,
-        foreground=theme.text_secondary, background=theme.surface_raised,
+        foreground=theme.text_secondary, background=theme.surface_raised, justify=t.justify(),
         spacing1=quote.spacing1, spacing2=quote.spacing2, spacing3=quote.spacing3,
     )
     code = t.block_metrics("code", gap_px=2)
