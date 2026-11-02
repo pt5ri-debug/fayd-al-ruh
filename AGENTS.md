@@ -139,7 +139,18 @@ Arabic is kept as secondary aliases where useful.
   it is by the merge, so it no longer refuses one (a blanket "local changes"
   refusal turned a harmless scratch edit into a dead end). git's own `--ff-only`
   is the backstop and aborts with no partial application, so a failed merge leaves
-  the tree untouched. It reports when a commit touches the committed training
+  the tree untouched. A **shallow clone** (`git clone --depth 1`, which is how
+  this checkout was made) keeps no intermediate history, so git cannot find a
+  merge base: `rev-list --left-right --count` then wrongly reports the branch as
+  both ahead and behind, `merge --ff-only` aborts with "refusing to merge
+  unrelated histories", and a healthy update was refused with a misleading
+  "local commit(s) not on the remote" note. `_ensure_history` deepens the fetch
+  (`git fetch --deepen`, bounded by `_DEEPEN_STEP`/`_MAX_DEEPEN_STEPS`) before
+  the comparison and again before the merge, restoring the common ancestry so the
+  update applies; `UpdateStatus.shallow` records the clone depth and
+  `shared_history` is `False` only for a genuinely disjoint history (a rewritten
+  remote), which is reported honestly instead of as a divergence. It reports when
+  a commit touches the committed training
   files, but never copies or moves the user's own data in `data/` — a
   fast-forward cannot touch the git-ignored folder, so it is left as it is. It is
   a thin wrapper over the project's own `git`, carries no extra dependency, strips

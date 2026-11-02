@@ -40,6 +40,15 @@ LEARNED_PATH_PREFIXES = ("ml/artifacts/", "ml/llm/checkpoints/")
 
 _GIT_TIMEOUT = 60.0
 
+#: A shallow clone keeps only the fetched tip, so it has no intermediate history:
+#: ``rev-list --left-right --count`` cannot find a merge base and reports the
+#: branch as *both* ahead and behind, and ``merge --ff-only`` then aborts with
+#: "refusing to merge unrelated histories". Deepening the fetch restores the
+#: common ancestry. The step is bounded so an ordinary update walks only a few
+#: commits, and only a checkout that stays disjoint is deepened all the way.
+_DEEPEN_STEP = 50
+_MAX_DEEPEN_STEPS = 20
+
 
 @dataclass(frozen=True)
 class GitCommand:
@@ -78,6 +87,8 @@ class UpdateStatus:
     changed_files: tuple[str, ...] = ()
     conflicting_files: tuple[str, ...] = ()
     commands: list[GitCommand] | None = None
+    shallow: bool = False
+    shared_history: bool = True
 
     @property
     def learned_files_changed(self) -> tuple[str, ...]:
@@ -99,6 +110,11 @@ class UpdateStatus:
             return (
                 f"Updated to {self.latest_revision} "
                 f"({len(self.changed_files)} file(s) changed)."
+            )
+        if not self.shared_history:
+            return (
+                f"This checkout shares no history with {self.branch}; "
+                "reinstall or clone the repository again."
             )
         if not self.available:
             return f"Already up to date at {self.current_revision} ({self.current_version})."
@@ -193,6 +209,49 @@ def _parse_ahead_behind(counts: str) -> tuple[int, int]:
     return behind, ahead
 
 
+def _is_shallow(root: Path) -> bool:
+    """True when ``root`` is a shallow clone with an incomplete history."""
+    probe = _run_git(root, "rev-parse", "--is-shallow-repository")
+    return probe.ok and probe.stdout.strip() == "true"
+
+
+def _has_common_ancestor(root: Path, ref: str) -> bool:
+    """True when ``HEAD`` and ``ref`` share history git can walk between."""
+    return _run_git(root, "merge-base", "HEAD", ref).ok
+
+
+def _ensure_history(
+    root: Path, ref: str, commands: list[GitCommand]
+) -> bool:
+    """Deepen a shallow clone until ``HEAD`` and ``ref`` share an ancestor.
+
+    A shallow checkout cannot compare itself with the remote: without the
+    intermediate commits ``merge-base`` fails, so ``rev-list --left-right
+    --count`` reports the branch as both ahead and behind and ``merge --ff-only``
+    refuses with "unrelated histories". Deepening the fetch restores the common
+    ancestry. Returns ``True`` once a merge base exists (or the history was
+    already complete and connected), and ``False`` if the two remain disjoint --
+    the caller then reports that honestly rather than pretending the branch is
+    ahead.
+    """
+    if _has_common_ancestor(root, ref):
+        return True
+    if not _is_shallow(root):
+        # A complete history with no shared ancestor is genuinely disjoint (the
+        # remote was rewritten); deepening cannot help, so say so.
+        return False
+    for _ in range(_MAX_DEEPEN_STEPS):
+        deepen = _run_git(root, "fetch", f"--deepen={_DEEPEN_STEP}", "origin")
+        commands.append(deepen)
+        if not deepen.ok:
+            return False
+        if _has_common_ancestor(root, ref):
+            return True
+        if not _is_shallow(root):
+            return False
+    return _has_common_ancestor(root, ref)
+
+
 def check_for_updates(repository_url: str = DEFAULT_REPOSITORY_URL, *, root: Path | None = None) -> UpdateStatus:
     """Fetch remote metadata and report whether an update is available.
 
@@ -252,9 +311,21 @@ def check_for_updates(repository_url: str = DEFAULT_REPOSITORY_URL, *, root: Pat
     if not current.ok:
         raise UpdateError(f"`origin/{branch}` does not exist on the remote.")
 
+    # A shallow clone has no intermediate history, so the comparison below and the
+    # fast-forward both need the common ancestry restored first. Deepen the fetch
+    # before reading the ahead/behind counts, or a healthy update would be reported
+    # as a non-fast-forward.
+    shallow = _is_shallow(root)
+    shared_history = _ensure_history(root, f"origin/{branch}", commands)
+
     counts = _run_git(root, "rev-list", "--left-right", "--count", f"HEAD...origin/{branch}")
     commands.append(counts)
     behind, ahead = _parse_ahead_behind(counts.stdout) if counts.ok else (0, 0)
+    if not shared_history:
+        # Without a common ancestor the counts are meaningless (git reports the
+        # branch as both ahead and behind), so never present them as a real
+        # divergence -- say the histories are disjoint instead.
+        ahead = 0
 
     changed = _run_git(root, "diff", "--name-only", f"HEAD..origin/{branch}")
     commands.append(changed)
@@ -270,8 +341,18 @@ def check_for_updates(repository_url: str = DEFAULT_REPOSITORY_URL, *, root: Pat
         locally_changed = {line for line in modified.stdout.splitlines() if line.strip()}
         conflicts = tuple(name for name in changed_files if name in locally_changed)
 
+    if not shared_history:
+        reason = (
+            "This checkout shares no history with the remote branch, so it cannot "
+            "be fast-forwarded in place; reinstall or clone the repository again."
+        )
+    elif behind > 0:
+        reason = ""
+    else:
+        reason = "The checkout already matches the remote branch."
+
     return UpdateStatus(
-        available=behind > 0,
+        available=behind > 0 and shared_history,
         current_version=__version__,
         current_revision=_run_git(root, "rev-parse", "--short", "HEAD").stdout,
         latest_revision=current.stdout,
@@ -280,11 +361,13 @@ def check_for_updates(repository_url: str = DEFAULT_REPOSITORY_URL, *, root: Pat
         ahead=ahead,
         dirty=dirty,
         repository_url=origin_url,
-        reason="" if behind > 0 else "The checkout already matches the remote branch.",
+        reason=reason,
         head_branch=head_branch,
         changed_files=changed_files,
         conflicting_files=conflicts,
         commands=commands,
+        shallow=shallow,
+        shared_history=shared_history,
     )
 
 
@@ -389,6 +472,11 @@ def apply_update(
         )
         return status
 
+    # A shallow clone cannot be fast-forwarded until the common ancestry is
+    # restored, even when the status was produced elsewhere; deepen here too so a
+    # caller that hands in its own status is still safe.
+    _ensure_history(root, f"origin/{status.branch}", commands)
+
     merge = _run_git(root, "merge", "--ff-only", f"origin/{status.branch}")
     commands.append(merge)
     status.commands = commands
@@ -421,6 +509,8 @@ def format_status(status: UpdateStatus, *, verbose: bool = False) -> str:
     ]
     if status.head_branch and status.head_branch != status.branch:
         lines.append(f"  checked out    : {status.head_branch} (not the compared branch)")
+    if status.shallow:
+        lines.append("  clone depth    : shallow (history deepened to compare)")
     if status.behind:
         lines.append(f"  commits behind : {status.behind}")
     if status.ahead:
