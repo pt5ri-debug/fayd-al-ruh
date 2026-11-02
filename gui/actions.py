@@ -18,6 +18,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from cli.menu import (
+    run_ask_teacher,
     run_audio_speech,
     run_banner_chat,
     run_characters,
@@ -65,6 +66,7 @@ SIDEBAR_LABELS: dict[str, str] = {
     "insight": "✨   What the AI can do",
     "cognition": "Autonomous mind",
     "cognition-characters": "Evaluate the characters",
+    "ask-teacher": "🎓   Learn from a teacher",
     "learn": "Learn from feedback",
     "internet-learner": "Learn from the internet",
     "web": "Ask the web",
@@ -174,6 +176,7 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         (
             "insight",
             "cognition",
+            "ask-teacher",
         ),
     ),
     ActionGroup(
@@ -424,6 +427,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         run_cognition,
         ("characters",),
         hidden=True,
+    ),
+    GuiAction(
+        "ask-teacher",
+        "Learn from a teacher: Fayd Al-Ruh asks the linked model endless new questions",
+        run_ask_teacher,
+        ("status",),
     ),
     GuiAction(
         "insight",

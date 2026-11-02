@@ -7,6 +7,7 @@ available, exactly like ``tests/test_gui.py``.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
@@ -1679,5 +1680,101 @@ def test_window_model_row_wraps_so_no_model_is_cut_off(tmp_path) -> None:
                 (key for key, _n, _h in chips_spec), chips, strict=True
             ):
                 assert chip.canvas.winfo_ismapped(), (width, key)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_sidebar_has_the_learn_from_a_teacher_entry(tmp_path) -> None:
+    """The sidebar carries the endless learner-asks-teacher toggle."""
+    import tkinter as tk
+
+    from gui.actions import action_by_key
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        action = action_by_key("ask-teacher")
+        assert action is not None and action.hidden is False
+        # The window holds the button, so it can mark the running state.
+        assert app._ask_teacher_button is not None
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_ask_teacher_toggles_the_loop_and_streams_turns(tmp_path) -> None:
+    """A press starts the loop, a second press stops it, and turns reach the chat."""
+    import threading
+    import tkinter as tk
+
+    from cognition.asking import AskingTurn
+    from gui.app import FaydGUI
+
+    class _Loop:
+        """A stand-in loop: it emits one turn and waits to be stopped."""
+
+        def __init__(self, on_turn) -> None:
+            self._on_turn = on_turn
+            self.stopped = False
+            self._done = threading.Event()
+
+        def run(self, *, count=None) -> None:
+            self._on_turn(
+                AskingTurn(
+                    index=1,
+                    question="What is porosity?",
+                    answer="porosity increases permeability.",
+                    teacher_name="linked-teacher",
+                    qualified=True,
+                    reason="verified",
+                )
+            )
+            # A real loop runs until stopped; block (without touching Tk, which is
+            # not thread-safe) so the second press is what ends it.
+            self._done.wait(timeout=5.0)
+
+        def stop(self) -> None:
+            self.stopped = True
+            self._done.set()
+
+    root = tk.Tk()
+    try:
+        service = _service(tmp_path)
+        built: list[_Loop] = []
+
+        def _build_asking_loop(*, on_turn=None, count=None):
+            loop = _Loop(on_turn)
+            built.append(loop)
+            return loop
+
+        service.asking_loop_available = lambda: True  # type: ignore[method-assign]
+        service.asking_teacher_name = lambda: "linked-teacher"  # type: ignore[method-assign]
+        service.build_asking_loop = _build_asking_loop  # type: ignore[method-assign]
+        app = FaydGUI(root, service=service)
+        root.update()
+        before = len(app._rows)
+
+        app._toggle_asking()
+        assert app._asking_active is True
+        assert built and app._asking_loop is built[0]
+        # The worker thread emits the turn through the queue; drain it as the
+        # window's pump would (calling the drain directly keeps the test prompt).
+        deadline = time.monotonic() + 5.0
+        while len(app._rows) < before + 2 and time.monotonic() < deadline:
+            root.update()
+            app._drain_asking()
+            time.sleep(0.01)
+        # The question and the teacher's answer are two new chat rows.
+        assert len(app._rows) >= before + 2
+        bodies = [entry.body for entry in app._rows]
+        assert any("What is porosity?" in body for body in bodies)
+        assert any("porosity increases permeability." in body for body in bodies)
+
+        app._toggle_asking()
+        assert app._asking_active is False
+        assert built[0].stopped is True
     finally:
         root.destroy()

@@ -410,6 +410,11 @@ def run_relations(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.relations", argv)
 
 
+def run_ask_teacher(argv: Sequence[str] = ()) -> int:
+    """Fayd Al-Ruh the learner asks Fayd Al-Ruh the teacher, endlessly."""
+    return _run_module("cli.asking", argv)
+
+
 def run_deps(argv: Sequence[str] = ()) -> int:
     """Show or install the optional PDF/OCR features (``python -m cli deps``)."""
     return _run_module("cli.deps", argv)
@@ -671,6 +676,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Autonomous mind: how far it reaches in Arabic", run_cognition, ("arabic",)),
     ("Autonomous mind: what every control does (the catalogue)", run_cognition, ("catalog",)),
     ("Autonomous mind: evaluate the eight characters", run_cognition, ("characters",)),
+    (
+        "Fayd Al-Ruh learns: ask the linked teacher model endless new questions",
+        run_ask_teacher,
+        ("status",),
+    ),
     ("Run the evaluation suite", run_evaluation, ()),
     ("Self-check the install", run_selfcheck, ()),
     ("Search for program updates (GitHub)", run_update, ("--apply",)),
@@ -773,6 +783,7 @@ __all__ = [
     "missing_dependency_message",
     "run_agent",
     "run_analogy",
+    "run_ask_teacher",
     "run_banner",
     "run_banner_chat",
     "run_characters",

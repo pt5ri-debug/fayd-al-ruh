@@ -997,3 +997,56 @@ class CognitiveController:
         from cognition.knowledge_depth import arabic_reach
 
         return arabic_reach(self.ontology, bank=self.question_bank())
+
+    def asking_loop(
+        self,
+        *,
+        student=None,
+        teacher=None,
+        count: int | None = None,
+        on_turn=None,
+        learn_relations: bool = True,
+    ):
+        """The learner-asks-the-teacher loop over this controller's own knowledge.
+
+        **Fayd Al-Ruh the learner** invents a question, the linked model -- **Fayd
+        Al-Ruh the teacher** -- answers it, the answer is verified against *this*
+        controller's graph and folded into *this* controller's cognitive learning,
+        and the loop continues with a different question until the caller stops it
+        or ``count`` is reached. The loop is built over the controller's own
+        ontology, learning system, and bounded relation learner, so it can never
+        create a second graph or a second memory.
+
+        ``student`` and ``teacher`` are :class:`cognition.teacher_student.ModelBackend`
+        s; the defaults are the project's own trained model (the learner) and a
+        real local model (the teacher). A caller with its own mouths passes
+        :class:`cognition.backends.AssistantBackend` wrappers instead.
+        """
+        from cognition.asking import AskingLoop
+        from cognition.backends import build_backends
+        from cognition.question_bank import QuestionLog
+
+        if student is None or teacher is None:
+            default_student, default_teacher = build_backends()
+            student = student or default_student
+            teacher = teacher or default_teacher
+        if teacher is None:
+            raise ValueError(
+                "No teacher model is available. Install one (see `python -m cli models`)."
+            )
+        # A durable log of what has been asked, so the loop does not repeat a
+        # question across runs either (created once, like next_questions' own).
+        log = getattr(self, "_question_log", None)
+        if log is None:
+            log = QuestionLog()
+            self._question_log = log
+        return AskingLoop(
+            student,
+            teacher,
+            ontology=self.ontology,
+            learning=self.cognitive_learning(),
+            learn_relations=self.learn_extracted_relations if learn_relations else None,
+            questions=self.question_bank(),
+            log=log,
+            on_turn=on_turn,
+        )

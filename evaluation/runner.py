@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from cognition.asking import asking_loop_accuracy
 from cognition.development import development_accuracy
 from cognition.knowledge_depth import knowledge_depth_accuracy
 from core.acceptance_policy import rejection_reason
@@ -175,6 +176,15 @@ class EvaluationMetrics:
     learner, a bridge is a real walked path (and an unconnected pair yields
     nothing), and an Arabic label with no alias is reported rather than counted
     (Phase: widest knowledge reach)."""
+
+    asking_loop_accuracy: float
+    """The share of held-out asking-loop judgements satisfied: the learner asks and
+    the **teacher** always answers (the learner never answers its own question), no
+    question repeats within a run, asking the loop to stop ends it early, only an
+    answer the graph corroborates becomes a qualified example, an empty answer is
+    reported rather than hidden, a spent question source ends the run, and a
+    qualified answer reaches the learner's own fact store (the learner-asks-teacher
+    loop)."""
 
     semantic_separation: float
     # Aggregate
@@ -1044,6 +1054,14 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # label reported rather than counted. With negative controls throughout.
     depth_value = knowledge_depth_accuracy()
 
+    # The learner-asks-teacher loop: held-out judgements about the endless question
+    # loop -- the teacher always answers (the learner never answers its own
+    # question), no question repeats, a stop takes effect, only a verified answer
+    # qualifies, an empty answer is honest, a spent source ends the run, and a
+    # qualified answer reaches the learner's own fact store. With negative
+    # controls throughout.
+    asking_value = asking_loop_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1112,6 +1130,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         development_value,
         catalog_value,
         depth_value,
+        asking_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1167,6 +1186,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         development_accuracy=round(development_value, 6),
         cognition_catalog_accuracy=round(catalog_value, 6),
         knowledge_depth_accuracy=round(depth_value, 6),
+        asking_loop_accuracy=round(asking_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

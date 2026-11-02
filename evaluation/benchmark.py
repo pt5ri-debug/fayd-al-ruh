@@ -74,6 +74,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("development_accuracy", True, label="Cognitive development accuracy (held-out: the mind's self-model, stagnation detector, consolidation, spaced review, and bounded escalation behave as claimed)"),
     MetricSpec("cognition_catalog_accuracy", True, label="Cognition catalogue accuracy (held-out: every control is explained, a governed action names its confirmation, every CLI command resolves, and the window and catalogue cannot drift)"),
     MetricSpec("knowledge_depth_accuracy", True, label="Knowledge depth accuracy (held-out: the graph's reach is measured honestly, the harvest writes only through the bounded learner, and a bridge is a real walked path)"),
+    MetricSpec("asking_loop_accuracy", True, label="Asking loop accuracy (held-out: the learner asks, the teacher always answers, no question repeats, a stop takes effect, and only a verified answer qualifies)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )
