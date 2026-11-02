@@ -55,6 +55,7 @@ from core.reading import clip_is_silent
 from gui import rich_text
 from gui.app import RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.dialog_base import ThemedDialog
 from gui.image_preview import load_scaled
 from gui.message_footer import MessageFooter, strip_markdown
 from gui.sidebar import SidebarColumn
@@ -79,7 +80,7 @@ MIN_WIDTH = 940
 MIN_HEIGHT = 620
 
 
-class VoiceStudioDialog:
+class VoiceStudioDialog(ThemedDialog):
     """One speech engine's own window: its logo, its voice, its mood, its document."""
 
     def __init__(
@@ -125,7 +126,10 @@ class VoiceStudioDialog:
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
 
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self._refresh_identity()
         self._refresh_voice_status()
         self._refresh_mood_status()

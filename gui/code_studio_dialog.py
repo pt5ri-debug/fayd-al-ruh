@@ -47,6 +47,7 @@ from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.dialog_base import ThemedDialog
 from gui.message_footer import add_provenance_label
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
@@ -81,7 +82,7 @@ HONESTY_LINE = (
 DEFAULT_MODEL_NOTE = f"Coding model: qwen2.5-coder:7b (Ollama). If it is missing: {PULL_HINT}"
 
 
-class CodeStudioDialog:
+class CodeStudioDialog(ThemedDialog):
     """A window for editing, testing, and merging changes to the project."""
 
     def __init__(
@@ -137,7 +138,10 @@ class CodeStudioDialog:
         self.window.minsize(900, 600)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self.refresh()
         self._ensure_workspace()
 

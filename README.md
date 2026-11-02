@@ -1357,10 +1357,23 @@ The window is a thin shell over the same code the CLI already runs:
   the dependency-free renderer in `gui/markdown.py`.
 - The **sidebar** carries the logo, **New chat**, a **search** box, the saved
   conversations grouped by date (*Today* / *Yesterday* / *Previous 7 days* /
-  *Previous 30 days* / *Older*) and a **Settings** panel with the **Cloud
-  provider**/**Model** dropdowns, **Save conversation**, and the **Actions** list.
+  *Previous 30 days* / *Older*), the **Reading Voice** and **Themes** panels,
+  and a **Settings** panel with the **Cloud provider**/**Model** dropdowns,
+  **Save conversation**, and the **Actions** list.
   The sidebar collapses to a drawer on a narrow (mobile-sized) window and is
   restored when the window widens.
+- **Appearance themes** are chosen from their own **Themes** entry in the
+  sidebar (a separate collapsible section, not a row inside Settings). Eight
+  complete palettes ship — the two OpenHands appearances (*dark*, *light*) plus
+  *midnight*, *nord*, *solarized*, *sepia*, *ocean*, and *high-contrast* — each
+  a full set of tokens, so switching never leaves a widget painted with a stale
+  colour. The catalogue lives in the tkinter-free `gui/themes.py`; the window
+  re-exports it for the dialogs and the tests. The theme in force is marked with
+  a dot, the choice is saved, and **every open window restyles at once** — the
+  main window is rebuilt for the new palette (keeping the transcript) and each
+  dialog rebuilds in place through `gui/dialog_base.py`'s `ThemedDialog`, which
+  replays the messages the window was showing. The header's ☾/☀ control still
+  toggles dark ⇄ light.
 - The sidebar's **Actions** buttons and the **Saved chats** list call the
   `cli.menu` `run_*` functions the numbered menu calls. The **Actions** section
   mirrors numbered CLI items **6 through 12** — learn, insight, Internet learner,

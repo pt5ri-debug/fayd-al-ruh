@@ -34,6 +34,7 @@ from collections.abc import Callable
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any, Literal
 
+from gui.dialog_base import ThemedDialog
 from gui.model_manager import (
     ManagerSnapshot,
     ModelDetail,
@@ -62,7 +63,7 @@ HONESTY_LINE = (
 #: window's, so a wide screen does not stretch a paragraph across it.
 _COLUMN_MAX = 880
 
-class ModelManagerDialog:
+class ModelManagerDialog(ThemedDialog):
     """A window listing, inspecting, and running the project's language models."""
 
     def __init__(
@@ -107,7 +108,10 @@ class ModelManagerDialog:
         self.window.minsize(940, 620)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self._reload()
 
     # -- layout -----------------------------------------------------------

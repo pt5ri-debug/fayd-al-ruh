@@ -32,6 +32,7 @@ from typing import Any, Literal
 
 from core import optional_deps
 
+from gui.dialog_base import ThemedDialog
 from gui.import_center import (
     SUPPORTED_SUFFIXES,
     UNSUPPORTED_SUFFIXES,
@@ -59,7 +60,7 @@ UNSUPPORTED_LINE = (
 )
 
 
-class ImportCenterDialog:
+class ImportCenterDialog(ThemedDialog):
     """A modal-ish window that imports files and folders into the knowledge base."""
 
     def __init__(
@@ -93,7 +94,10 @@ class ImportCenterDialog:
         self.window.minsize(560, 480)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self.refresh_jobs()
 
     # -- layout -----------------------------------------------------------

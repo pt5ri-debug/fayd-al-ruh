@@ -36,6 +36,7 @@ from core.imagegen_diffusion import DEFAULT_EDIT_PRESET, EDIT_PRESETS
 from core.optional_deps import FEATURE_IMAGE, pip_install_command
 
 from gui.chat_composer import ChatComposer
+from gui.dialog_base import ThemedDialog
 from gui.image_edit import (
     BACKEND_DETERMINISTIC,
     BACKEND_LEARNED,
@@ -80,7 +81,7 @@ SECTION_PAD = 20
 PREVIEW_PAD = 12
 
 
-class ImageEditDialog:
+class ImageEditDialog(ThemedDialog):
     """A window that edits an uploaded image from a written instruction."""
 
     def __init__(
@@ -120,7 +121,7 @@ class ImageEditDialog:
         self.window.minsize(820, 600)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
-        self._build()
+        self._themed_build()
 
     # -- layout -----------------------------------------------------------
 

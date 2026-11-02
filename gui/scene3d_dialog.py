@@ -42,6 +42,7 @@ from core.scene3d_io import SceneIOError
 
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.dialog_base import ThemedDialog
 from gui.image_preview import load_scaled
 from gui.scene3d import (
     HONESTY_LINE,
@@ -78,7 +79,7 @@ VIEWPORT_WIDTH = 640
 VIEWPORT_HEIGHT = 460
 
 
-class SceneStudioDialog:
+class SceneStudioDialog(ThemedDialog):
     """A window that builds, poses, and renders a local 3D scene."""
 
     def __init__(
@@ -120,7 +121,10 @@ class SceneStudioDialog:
         self.window.minsize(1040, 660)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self._refresh_all()
         self._add_message("note", HONESTY_LINE)
         self.window.after(120, self._render_viewport)

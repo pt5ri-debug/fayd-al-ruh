@@ -29,6 +29,7 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Any, Literal
 
+from gui.dialog_base import ThemedDialog
 from gui.sql_import import (
     DATABASE_TYPES,
     DEFAULT_BATCH_SIZE,
@@ -59,7 +60,7 @@ EXCLUSION_NOTE = (
 )
 
 
-class SqlImportDialog:
+class SqlImportDialog(ThemedDialog):
     """A modal-ish window that imports a SQLite database into the knowledge base."""
 
     def __init__(
@@ -97,7 +98,10 @@ class SqlImportDialog:
         self.window.minsize(640, 540)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self.refresh_jobs()
 
     # -- layout -----------------------------------------------------------

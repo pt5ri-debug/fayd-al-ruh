@@ -54,6 +54,7 @@ from gui.app import RADIUS_LARGE, RoundedBox
 from gui.character_evaluation import DIMENSION_TITLES, EvaluationReport
 from gui.chat_composer import ChatComposer, Tooltip
 from gui.cognition import CognitiveService, OperationReport
+from gui.dialog_base import ThemedDialog
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.window_controls import fit_geometry, install_window_controls
@@ -83,7 +84,7 @@ _COLUMN_MAX = 880
 _MAX_CARD_HEIGHT = 420
 
 
-class CognitionDialog:
+class CognitionDialog(ThemedDialog):
     """The one window for the autonomous cognitive system."""
 
     def __init__(
@@ -127,7 +128,10 @@ class CognitionDialog:
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
 
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self._refresh_overview()
 
     def _initial_geometry(self) -> str:

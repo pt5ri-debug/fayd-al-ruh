@@ -41,6 +41,7 @@ from gui import markdown as md
 from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
+from gui.dialog_base import ThemedDialog
 from gui.image_preview import load_scaled
 from gui.message_footer import MessageFooter, strip_markdown
 from gui.model_chat import ModelChatService, mouth_title
@@ -68,7 +69,7 @@ MIN_WIDTH = 920
 MIN_HEIGHT = 620
 
 
-class ModelChatDialog:
+class ModelChatDialog(ThemedDialog):
     """One mouth's own window: its logo, its voice, its model, and its chat."""
 
     def __init__(
@@ -117,7 +118,10 @@ class ModelChatDialog:
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
 
-        self._build()
+        self._themed_build()
+
+    def _after_build(self) -> None:
+        """Run the window's post-build work (first build, and after a re-theme)."""
         self._refresh_identity()
         self._refresh_voice_status()
         self._refresh_model_status()
