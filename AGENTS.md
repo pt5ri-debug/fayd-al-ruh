@@ -2217,7 +2217,36 @@ Arabic is kept as secondary aliases where useful.
   `-linespacing`. `resolve`/`for_root` build one for a display and fall back to
   the 96-dpi reference with no display, so it is testable headless. Tk's weight
   is only normal/bold, so OpenHands' `font-medium` headings are drawn bold; size
-  and line-height match the web exactly.
+  and line-height match the web exactly. A **user profile** may override any of
+  it: `Typography` carries `size_scale`, `line_spacing`, `bold_body`/`italic_body`,
+  `alignment`, and `space_before`/`space_after`, and `with_overrides(profile)`
+  folds a :mod:`gui.typography_settings` profile onto the scale (an empty field
+  means "keep the project's own", so an untouched profile is exactly the shipped
+  look); `resolve(..., overrides=)` is the one place a window builds its scale,
+  `justify()` normalises the alignment to what Tk can draw, and
+  `block_metrics_full` adds the paragraph space to the web rhythm. The body
+  size is derived from the *unrounded* body points, so asking for 16 pt really
+  gives 16 (14 px at 1.333 scaling is 10.5 points, and rounding that first would
+  turn a request of 16 into 17).
+- `gui/typography_settings.py` — the **Word-like font and paragraph settings**,
+  tkinter-free so a profile can be built, validated, and tested with no display.
+  A `TypographyProfile` (family, mono family, size in points, bold, italic, and a
+  `ParagraphStyle` of alignment / line spacing / space before / space after) is
+  saved per **scope** through `JsonStore` (`gui`/`typography`); `SCOPES` names the
+  three -- `SCOPE_WINDOWS` (every dialog and the sidebar), `SCOPE_LISTS` (the list
+  boxes inside the dialogs), and `SCOPE_CHAT` (the conversation bubbles and the
+  message box) -- and `SCOPE_CONTROLS`/`scope_shows` declare which controls each
+  one can really honour (a ``Listbox`` draws a font but has no paragraph
+  controls, so the *Window lists* block shows only the font ones rather than a
+  control that would do nothing). Every setter returns a new, validated profile
+  (`with_family`/`with_size`/`with_bold`/`with_italic`/`with_paragraph`/`reset`),
+  a hand-edited value is clamped (`MIN`/`MAX_SIZE_PT`, `MIN`/`MAX_LINE_SPACING`,
+  `MAX_SPACE_PX`), a malformed or unreadable store reads as the project's own
+  rather than crashing a window, and `describe()` is the status line. The
+  presets are Word's own (`FONT_SIZES`, `LINE_SPACINGS`, `SPACE_STEPS`,
+  `ALIGNMENTS` -- Tk draws left/center/right but has no full justification, and
+  `ALIGNMENT_NOTE`/`LISTS_NOTE` say so). `available_families` is the only
+  display-aware helper.
 - `gui/rich_text.py` — the shared Markdown **painter**. `insert_markdown(widget,
   text, theme=, typography=)` creates the tags (`configure_markdown_tags`:
   paragraph/heading1/heading2/heading3/bullet/quote/code/table/rule/bold/
@@ -2225,10 +2254,14 @@ Arabic is kept as secondary aliases where useful.
   spacing) and paints every `StyledLine`, including the inline bold/inline-code
   spans and the code token colours. `body_spacing`/`apply_body_spacing` give the
   widget itself the body rhythm, so the *blank* line between two Markdown
-  paragraphs has height (it belongs to no block tag). `gui/app.py` and
-  `gui/code_studio_dialog.py` both call it, so every window draws Markdown with
-  the one scale and the one palette; the painting logic used to be duplicated in
-  both.
+  paragraphs has height (it belongs to no block tag). The paragraph tags carry
+  the scope's own alignment and space, and `apply_alignment` gives a widget that
+  holds *plain* text (a user bubble, which is inserted without the Markdown
+  blocks) the same alignment through the `ALIGN_TAG` over its whole content --
+  Tk's ``Text`` has no ``-justify`` *widget* option, only a tag has one.
+  `gui/app.py` and `gui/code_studio_dialog.py` both call it, so every window draws
+  Markdown with the one scale and the one palette; the painting logic used to be
+  duplicated in both.
 - `gui/chat_composer.py` — the shared **chat composer**, the sibling of
   `gui/rich_text.py` for the *input* side: one wide, generously rounded dark card
   every chat-style screen builds instead of growing its own panel, so the window
@@ -2313,7 +2346,11 @@ Arabic is kept as secondary aliases where useful.
   text (a Markdown row is replayed from its source, because reading a rendered
   `Text` back would lose the headings and lists), destroys the window's children,
   rebuilds, and replays only the messages the user's own actions added — the
-  window's own opening content is redrawn by the build itself. The service, the
+  window's own opening content is redrawn by the build itself. `retype(overrides,
+  list_overrides)` is the sibling for a font/paragraph change: it re-resolves
+  `_type` (and the `_list_type` a dialog with list boxes also keeps) and rebuilds
+  the same way, so a dialog the user has open picks up the new settings without
+  being closed. The service, the
   selected item, and the composer's text live on the instance and survive. It
   imports no `gui.app`, so a dialog builds on it without a circular import.
 - `gui/app.py` — a professional desktop front end styled after the **OpenHands
@@ -2330,9 +2367,21 @@ Arabic is kept as secondary aliases where useful.
   (`_open_dialogs` covers the named single-window dialogs plus the two per-mouth
   mappings) and calls each one's `retheme`, best-effort, so one switch restyles
   every window at once. `_toggle_theme` (the header's ☾/☀ control) still toggles
-  dark ⇄ light through `_apply_theme`. `_build_open_sections` fills a section
+  dark ⇄ light through `_apply_theme`. Directly **below** *Themes* sits the
+  **Fonts & paragraphs** section (key `fonts`, `_fonts_panel`, `_toggle_fonts`),
+  which builds one Word-like block per scope from `gui.typography_settings` --
+  the font family (the families this machine really has, via `available_families`),
+  the size, the Bold/Italic toggles, the paragraph alignment, the line spacing,
+  and the space before/after, plus a Reset for that scope -- and every control
+  writes the scope's own profile and re-applies at once
+  (`_set_font_family`/`_set_font_size`/`_toggle_font_style`/`_set_alignment`/
+  `_set_line_spacing`/`_set_space`/`_reset_scope`, all through `_update_profile`,
+  which persists, rebuilds the three scales, and re-types every open dialog when
+  the change touches *windows* or *lists*). The chat scope drives `_chat_type`,
+  used by the bubbles and the composer, so a chat-only change never touches the
+  windows scale. `_build_open_sections` fills a section
   that is open at build time (so a restored-open or rebuilt-open *Reading Voice*,
-  *Themes*, or *Settings* section is never blank). `RoundedBox` paints a
+  *Themes*, *Fonts & paragraphs*, or *Settings* section is never blank). `RoundedBox` paints a
   rounded-rectangle surface (Tk has no corner radius)
   and hosts real widgets, used for the rounded composer card and the right-side
   user bubbles. The transcript reads as a centred column (`_COLUMN_MAX`, with
@@ -5935,3 +5984,62 @@ regression monitor each can refuse a change.
   own, opening it lists every theme with the current one marked, a click applies
   it, a real dialog rebuilds in place, and the mixin preserves the messages a user
   was reading). Gates: ruff clean, mypy 866 files OK, pytest green.
+
+- Phase 64 — **Word-like font and paragraph settings, in a sidebar section of their
+  own below *Themes***. The window shipped one type scale (`gui/typography.py`)
+  and eight appearance themes, but the *text* itself was fixed: a user could change
+  every colour and not one letter's family, size, weight, alignment, or spacing.
+  This phase adds the settings a word processor has, in the one place the project
+  puts appearance — a **Fonts & paragraphs** collapsible section directly below
+  *Themes*, opened by a header click or programmatically (`_toggle_fonts`) and
+  filled by `_build_fonts_panel`/`_font_scope_block`. `gui/typography_settings.py`
+  (new, tkinter-free) is the model: a `TypographyProfile` (font family, mono
+  family, size in points, bold, italic, and a `ParagraphStyle` of alignment / line
+  spacing / space before / space after), saved **per scope** through `JsonStore`
+  (`gui`/`typography`) so a choice survives a restart, with every setter returning
+  a new validated profile, a hand-edited value **clamped** rather than trusted
+  (`MIN`/`MAX_SIZE_PT`, `MIN`/`MAX_LINE_SPACING`, `MAX_SPACE_PX`), and a malformed
+  or unreadable store reading as the project's own rather than crashing a window.
+  Three scopes, because the interface has three kinds of text that are tuned
+  differently: `SCOPE_WINDOWS` (every dialog and the sidebar), `SCOPE_LISTS` (the
+  list boxes inside the dialogs), and `SCOPE_CHAT` (the conversation bubbles and
+  the message box) — and `SCOPE_CONTROLS`/`scope_shows` declare which controls
+  each one can **really** honour, so a ``Listbox`` (which draws a font but has no
+  paragraph controls) is offered only the font ones rather than a control that
+  would do nothing. `gui/typography.py` gained the override machinery:
+  `Typography` now carries `size_scale`, `line_spacing`, `bold_body`/`italic_body`,
+  `alignment`, and `space_before`/`space_after`; `with_overrides(profile)` folds a
+  profile onto the scale (an empty field means "keep the project's own", so an
+  untouched profile is byte-identical to the shipped look); `resolve(...,
+  overrides=)` is the one place a window builds its scale; `justify()` normalises
+  the alignment to what Tk can draw; and `block_metrics_full` adds the paragraph
+  space to the web rhythm. One real accuracy bug was fixed here: the body size was
+  derived from the *rounded* body points, so asking for 16 pt came back as 17 (14
+  px at 1.333 scaling is 10.5 points, and rounding that first inflated the ratio);
+  it is now computed from the unrounded value, so a requested size is the size
+  drawn. `gui/rich_text.py` applies the alignment and the paragraph space on the
+  Markdown tags and gained `apply_alignment`, which gives a widget holding *plain*
+  text (a user bubble, inserted without the Markdown blocks) the same alignment
+  through an `ALIGN_TAG` over its whole content — because Tk's ``Text`` has no
+  ``-justify`` *widget* option, only a tag has one (the first attempt passed it to
+  the constructor and failed with ``unknown option "-justify"``). `gui/dialog_base.py`
+  gained `retype(overrides, list_overrides)`, the sibling of `retheme`: it
+  re-resolves `_type` (and the `_list_type` a dialog with list boxes also keeps)
+  and rebuilds in place, so a dialog the user has open picks up the new settings
+  without being closed; all fifteen dialogs gained `list_overrides` and point their
+  list boxes at `_list_type`, and `gui/app.py` passes both profiles at every
+  construction. Honest by construction: Tk cannot draw full justification, so
+  `ALIGNMENTS` offers only left/center/right and `ALIGNMENT_NOTE`/`LISTS_NOTE` say
+  what is missing rather than hiding it. `tests/test_typography_settings.py` (new,
+  36 tests) pins the scopes and their control sets, the profile (defaults, the
+  round trip, the clamping, the malformed value, the setters, `describe`), the
+  persistence (per-scope isolation, the broken store, an unknown scope), the fold
+  onto the scale (the family, the exact requested size, the explicit-weight rule,
+  the undrawable alignment, the untouched scale), the window feature (the section
+  below *Themes*, a block per scope, the two scopes not disturbing each other, the
+  lists scale, persistence across a rebuild, Reset, the B/I toggles, a change
+  re-typing every open dialog while a chat-only change does not, the transcript
+  surviving a change, and the alignment reaching both the user bubble and the
+  Markdown paragraphs), and a real dialog re-typing in place with its list box
+  drawing the lists scale. Gates: ruff clean, mypy 872 files OK, evaluation PASS
+  (`overall` 0.9877 unchanged), pytest 5822 passed / 15 skipped.

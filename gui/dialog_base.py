@@ -157,6 +157,43 @@ class ThemedDialog:
         if getattr(theme, "name", None) == getattr(self.theme, "name", None):
             return
         self.theme = theme
+        self.window.configure(bg=theme.base)
+        self._rebuild_keeping_messages()
+
+    def retype(self, overrides: Any = None, list_overrides: Any = None) -> None:
+        """Rebuild this window with new typography profiles, keeping its messages.
+
+        The window's interface font comes from ``overrides`` and its list boxes'
+        font from ``list_overrides``; a change to either is applied the same way a
+        theme change is, by rebuilding in place and replaying the messages the
+        user's own actions added. A window that never resolves a scale (or that
+        has no ``_type``) is left alone.
+        """
+        if not hasattr(self, "_type"):
+            return
+        self._overrides = overrides
+        if list_overrides is not None or hasattr(self, "_list_type"):
+            self._list_overrides = list_overrides
+        self._refresh_type()
+        self._rebuild_keeping_messages()
+
+    def _refresh_type(self) -> None:
+        """Recompute ``self._type`` (and the list scale) from the window's profiles."""
+        from gui.typography import resolve
+
+        font = getattr(self, "font", "") or None
+        mono = getattr(self, "mono", "") or None
+        self._type = resolve(
+            self.window, ui_family=font, mono_family=mono, overrides=getattr(self, "_overrides", None)
+        )
+        if hasattr(self, "_list_type"):
+            self._list_type = resolve(
+                self.window, ui_family=font, mono_family=mono,
+                overrides=getattr(self, "_list_overrides", None),
+            )
+
+    def _rebuild_keeping_messages(self) -> None:
+        """Destroy the window's body and rebuild it, replaying user messages."""
         carried: list[_Message] = []
         if self._recorder_installed:
             self._snapshot_messages()
@@ -171,7 +208,6 @@ class ThemedDialog:
         self._replaying = True
         try:
             self._destroy_body()
-            self.window.configure(bg=theme.base)
             self._build()
             self._after_build()
             for message in carried:

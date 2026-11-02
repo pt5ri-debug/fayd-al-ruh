@@ -80,13 +80,20 @@ class ModelChatDialog(ThemedDialog):
         theme: Any,
         font: str,
         mono: str,
+        overrides: object | None = None,
+        list_overrides: object | None = None,
         on_close: Callable[[], None] | None = None,
     ) -> None:
         self.service = service
         self.theme = theme
         self.font = font
         self.mono = mono
-        self._type = resolve(parent, ui_family=font, mono_family=mono)
+        self._type = resolve(parent, ui_family=font, mono_family=mono, overrides=overrides)
+        self._overrides = overrides
+        self._list_overrides = list_overrides
+        self._list_type = resolve(
+            parent, ui_family=font, mono_family=mono, overrides=list_overrides
+        )
         self._on_close = on_close
         self._closed = False
         self._busy = False
@@ -402,7 +409,7 @@ class ModelChatDialog(ThemedDialog):
         self._model_list = tk.Listbox(
             holder, bg=theme.base, fg=theme.foreground, relief="flat",
             highlightthickness=0, borderwidth=0, selectbackground=theme.interactive_active,
-            selectforeground=theme.contrast, font=self._type.font("xs"), activestyle="none",
+            selectforeground=theme.contrast, font=self._list_type.font("xs"), activestyle="none",
             exportselection=False, height=8, width=32,
         )
         self._model_list.pack(fill="both", expand=True)

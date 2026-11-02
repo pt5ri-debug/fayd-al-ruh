@@ -76,6 +76,29 @@ from gui.options import build_parser
 from gui.service import ChatReply, ChatService
 from gui.sidebar import SidebarSection
 from gui.typography import Typography, for_root
+from gui.typography_settings import (
+    ALIGNMENT_GLYPHS,
+    ALIGNMENT_LABELS,
+    ALIGNMENT_NOTE,
+    ALIGNMENTS,
+    FONT_SIZES,
+    LINE_SPACING_LABELS,
+    LINE_SPACINGS,
+    LISTS_NOTE,
+    SCOPE_CHAT,
+    SCOPE_LABELS,
+    SCOPE_LISTS,
+    SCOPE_SUMMARIES,
+    SCOPE_WINDOWS,
+    SCOPES,
+    SPACE_STEPS,
+    ParagraphStyle,
+    TypographyProfile,
+    available_families,
+    load_profiles,
+    save_profiles,
+    scope_shows,
+)
 from gui.window_controls import install_window_controls
 
 #: The answering mouths the header's model selector offers, in order. The label
@@ -434,10 +457,23 @@ class FaydGUI:
         self._pending: list[str] = []
         self._last_render = 0.0
         self._rows: list[_Row] = []
-        # One type scale for the whole window (OpenHands' sizes, DPI-corrected).
-        self._type: Typography = for_root(root)
+        # The user's own font/paragraph settings, one profile per scope: the
+        # *windows* scale is the interface (sidebar, menus, dialogs), the *chat*
+        # scale is the conversation (message bubbles and the composer). Both are
+        # built from the same OpenHands scale, so an untouched profile is exactly
+        # the shipped look. See :mod:`gui.typography_settings`.
+        self._profiles: dict[str, TypographyProfile] = load_profiles()
+        self._base_type: Typography = for_root(root)
+        self._type: Typography = self._base_type.with_overrides(self._profiles[SCOPE_WINDOWS])
+        self._chat_type: Typography = self._base_type.with_overrides(self._profiles[SCOPE_CHAT])
+        self._lists_type: Typography = self._base_type.with_overrides(self._profiles[SCOPE_LISTS])
         self._font = self._type.ui_family
         self._mono = self._type.mono_family
+        # The Fonts & paragraphs panel's live variables, so a rebuild can restore
+        # each menu to the setting in force (keyed by scope, and by scope+field).
+        self._font_family_vars: dict[str, tk.StringVar] = {}
+        self._font_size_vars: dict[str, tk.StringVar] = {}
+        self._font_space_vars: dict[tuple[str, str], tk.StringVar] = {}
         self._thinking: tk.Label | None = None
         self._thinking_row: tk.Widget | None = None
         self._thinking_phase = 0
@@ -683,6 +719,18 @@ class FaydGUI:
         self._themes_panel.pack(fill="x")
         self._themes_open = themes.is_open
 
+        # 2c. Fonts & paragraphs: the Word-like font/paragraph settings, one set
+        # for the windows/menus, one for the dialogs' list boxes, and one for the
+        # chat area, so each is tuned on its own. Placed directly below *Themes*,
+        # because both are appearance. Its contents are (re)built when the section
+        # is opened, so the controls always show what is in force.
+        fonts = self._add_section(
+            panel, key="fonts", title="Fonts & paragraphs", icon="🅰", default_open=False
+        )
+        self._fonts_panel = tk.Frame(fonts.body, bg=self._theme.surface)
+        self._fonts_panel.pack(fill="x")
+        self._fonts_open = fonts.is_open
+
         # 3. The answering-assistant actions, grouped by theme. Each group is its
         # own section, so the column is a handful of readable headers instead of
         # one long list of buttons. The buttons are built now (so a search or a
@@ -738,11 +786,13 @@ class FaydGUI:
         A section restored open (from the saved layout) or left open across a
         theme rebuild draws its header immediately but its contents only when it
         is opened; this fills those contents, so an open *Reading Voice*,
-        *Themes*, or *Settings* section is never blank after a launch or a
-        rebuild.
+        *Themes*, *Fonts & paragraphs*, or *Settings* section is never blank after
+        a launch or a rebuild.
         """
         if self._section_states.get("themes") and getattr(self, "_themes_panel", None) is not None:
             self._build_themes_panel(self._themes_panel)
+        if self._section_states.get("fonts") and getattr(self, "_fonts_panel", None) is not None:
+            self._build_fonts_panel(self._fonts_panel)
         if self._section_states.get("voices"):
             self._rebuild_voice_section()
         if self._section_states.get("settings") and not self._settings_built:
@@ -804,6 +854,12 @@ class FaydGUI:
             # always the one marked -- a rebuild can have changed it since.
             if is_open:
                 self._build_themes_panel(self._themes_panel)
+        elif key == "fonts":
+            self._fonts_open = is_open
+            # The font/paragraph controls are (re)built on every open, so they
+            # always show the settings currently in force.
+            if is_open:
+                self._build_fonts_panel(self._fonts_panel)
         elif key == "settings":
             self._settings_open = is_open
             # The settings contents are built on first open (they touch the cloud
@@ -897,6 +953,23 @@ class FaydGUI:
                 continue
             with best_effort(f"re-theme the {type(dialog).__name__}"):
                 retheme(theme)
+
+    def _retype_dialogs(self) -> None:
+        """Rebuild every open dialog with the *windows* font profile, best-effort.
+
+        A font/paragraph change must reach the dialogs too, not only the main
+        window: each open window is asked to rebuild with the new scale (its
+        transcript preserved), and one that predates the mixin is skipped rather
+        than crashing the change.
+        """
+        overrides = self._profiles[SCOPE_WINDOWS]
+        list_overrides = self._profiles[SCOPE_LISTS]
+        for dialog in self._open_dialogs():
+            retype = getattr(dialog, "retype", None)
+            if not callable(retype):
+                continue
+            with best_effort(f"re-type the {type(dialog).__name__}"):
+                retype(overrides, list_overrides)
 
     def _open_dialogs(self) -> list[Any]:
         """Every dialog window this window currently holds open.
@@ -1142,6 +1215,295 @@ class FaydGUI:
         for widget in (row, swatch, label):
             widget.bind("<Button-1>", choose)
         _Tooltip(row, summary or name, self._theme, self._type)
+
+    # ------------------------------------------------- font & paragraph settings
+
+    def _build_fonts_panel(self, panel: tk.Misc) -> None:
+        """Build (or rebuild) the *Fonts & paragraphs* section.
+
+        Three independent blocks -- *Windows & menus*, *Window lists*, and *Chat
+        area* -- each with the Word-like controls it can really honour: the font
+        family, the font size, Bold/Italic, the paragraph alignment, the line
+        spacing, and the space before/after a paragraph, plus a Reset. A ``Listbox``
+        has no paragraph controls, so the *Window lists* block shows only the font
+        ones. Every control writes to that scope's own
+        :class:`gui.typography_settings.TypographyProfile` and re-applies at once,
+        so the change is visible the moment it is made; the scopes never disturb
+        each other.
+        """
+        if panel is None:
+            return
+        for child in panel.winfo_children():
+            child.destroy()
+        for scope in SCOPES:
+            self._font_scope_block(panel, scope)
+
+    def _font_scope_block(self, parent: tk.Misc, scope: str) -> None:
+        """One scope's controls, under its own heading and status line."""
+        profile = self._profiles[scope]
+        block = tk.Frame(parent, bg=self._theme.surface)
+        block.pack(fill="x", padx=10, pady=(6, 2))
+        tk.Label(
+            block, text=SCOPE_LABELS[scope], bg=self._theme.surface, fg=self._theme.foreground,
+            font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x")
+        tk.Label(
+            block, text=SCOPE_SUMMARIES[scope], bg=self._theme.surface, fg=self._theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=232,
+        ).pack(fill="x")
+        tk.Label(
+            block, text=profile.describe(), bg=self._theme.surface, fg=self._theme.primary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=232,
+        ).pack(fill="x", pady=(1, 3))
+
+        self._font_family_row(block, scope, profile)
+        self._font_size_row(block, scope, profile)
+        if scope_shows(scope, "align"):
+            self._font_alignment_row(block, scope, profile)
+        if scope_shows(scope, "line_spacing"):
+            self._font_line_spacing_row(block, scope, profile)
+        if scope_shows(scope, "space"):
+            self._font_space_row(block, scope, profile)
+        tk.Label(
+            block, text=ALIGNMENT_NOTE if scope_shows(scope, "align") else LISTS_NOTE,
+            bg=self._theme.surface, fg=self._theme.text_dim, font=self._type.font("2xs"),
+            anchor="w", justify="left", wraplength=232,
+        ).pack(fill="x", pady=(1, 0))
+        self._sidebar_button(
+            block, "↺   Reset this scope", partial(self._reset_scope, scope), small=True
+        ).pack(fill="x", pady=(4, 2))
+
+    def _font_family_row(
+        self, parent: tk.Misc, scope: str, profile: TypographyProfile
+    ) -> None:
+        """The font family menu for one scope (the project's stacks first)."""
+        row = tk.Frame(parent, bg=self._theme.surface)
+        row.pack(fill="x", pady=1)
+        tk.Label(
+            row, text="Font", bg=self._theme.surface, fg=self._theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", width=9,
+        ).pack(side="left")
+        choices = available_families(self.root)
+        current = profile.family or self._type.ui_family
+        var = tk.StringVar(value=current)
+        self._font_family_vars[scope] = var
+        menu = tk.OptionMenu(row, var, *choices, command=partial(self._set_font_family, scope))
+        menu.configure(
+            bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("2xs"),
+            activebackground=self._theme.interactive_hover, activeforeground=self._theme.foreground,
+            highlightthickness=0, bd=0, relief="flat", cursor="hand2", anchor="w",
+        )
+        menu["menu"].configure(bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("2xs"))
+        menu.pack(side="left", fill="x", expand=True)
+
+    def _font_size_row(
+        self, parent: tk.Misc, scope: str, profile: TypographyProfile
+    ) -> None:
+        """The font-size menu plus the Bold and Italic toggles."""
+        row = tk.Frame(parent, bg=self._theme.surface)
+        row.pack(fill="x", pady=1)
+        tk.Label(
+            row, text="Size", bg=self._theme.surface, fg=self._theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", width=9,
+        ).pack(side="left")
+        current = str(profile.size_pt) if profile.size_pt else "Default"
+        var = tk.StringVar(value=current)
+        self._font_size_vars[scope] = var
+        menu = tk.OptionMenu(
+            row, var, "Default", *[str(size) for size in FONT_SIZES],
+            command=partial(self._set_font_size, scope),
+        )
+        menu.configure(
+            bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("2xs"),
+            activebackground=self._theme.interactive_hover, activeforeground=self._theme.foreground,
+            highlightthickness=0, bd=0, relief="flat", cursor="hand2", anchor="w",
+        )
+        menu["menu"].configure(bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("2xs"))
+        menu.pack(side="left")
+        for label, attr, on in (("B", "bold", profile.bold), ("I", "italic", profile.italic)):
+            toggle = tk.Label(
+                row, text=label, bg=self._theme.primary if on else self._theme.surface_raised,
+                fg=self._theme.primary_foreground if on else self._theme.foreground,
+                font=self._type.font("2xs", weight="bold" if label == "B" else "normal",
+                                     slant=None if label == "B" else "italic"),
+                padx=7, pady=2, cursor="hand2",
+            )
+            toggle.pack(side="left", padx=(6, 0))
+            toggle.bind("<Button-1>", partial(self._click_style, scope, attr, not on))
+
+    def _font_alignment_row(
+        self, parent: tk.Misc, scope: str, profile: TypographyProfile
+    ) -> None:
+        """The paragraph-alignment buttons (Word's alignment group)."""
+        row = tk.Frame(parent, bg=self._theme.surface)
+        row.pack(fill="x", pady=1)
+        tk.Label(
+            row, text="Align", bg=self._theme.surface, fg=self._theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", width=9,
+        ).pack(side="left")
+        for alignment in ALIGNMENTS:
+            on = profile.paragraph.alignment == alignment
+            button = tk.Label(
+                row, text=ALIGNMENT_GLYPHS[alignment],
+                bg=self._theme.primary if on else self._theme.surface_raised,
+                fg=self._theme.primary_foreground if on else self._theme.foreground,
+                font=self._type.font("2xs"), padx=8, pady=2, cursor="hand2",
+            )
+            button.pack(side="left", padx=(4, 0))
+            _Tooltip(button, ALIGNMENT_LABELS[alignment], self._theme, self._type)
+            button.bind("<Button-1>", partial(self._click_alignment, scope, alignment))
+
+    def _font_line_spacing_row(
+        self, parent: tk.Misc, scope: str, profile: TypographyProfile
+    ) -> None:
+        """The line-spacing buttons (Word's line-spacing menu)."""
+        row = tk.Frame(parent, bg=self._theme.surface)
+        row.pack(fill="x", pady=1)
+        tk.Label(
+            row, text="Spacing", bg=self._theme.surface, fg=self._theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", width=9,
+        ).pack(side="left")
+        for spacing in LINE_SPACINGS:
+            on = abs(profile.paragraph.line_spacing - spacing) < 1e-6
+            button = tk.Label(
+                row, text=LINE_SPACING_LABELS[spacing],
+                bg=self._theme.primary if on else self._theme.surface_raised,
+                fg=self._theme.primary_foreground if on else self._theme.foreground,
+                font=self._type.font("2xs"), padx=6, pady=2, cursor="hand2",
+            )
+            button.pack(side="left", padx=(4, 0))
+            button.bind("<Button-1>", partial(self._click_spacing, scope, spacing))
+
+    def _font_space_row(
+        self, parent: tk.Misc, scope: str, profile: TypographyProfile
+    ) -> None:
+        """The space-before / space-after paragraph menus."""
+        row = tk.Frame(parent, bg=self._theme.surface)
+        row.pack(fill="x", pady=1)
+        tk.Label(
+            row, text="Space", bg=self._theme.surface, fg=self._theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", width=9,
+        ).pack(side="left")
+        for label, attr, value in (
+            ("Before", "space_before", profile.paragraph.space_before),
+            ("After", "space_after", profile.paragraph.space_after),
+        ):
+            tk.Label(
+                row, text=label, bg=self._theme.surface, fg=self._theme.text_dim,
+                font=self._type.font("2xs"),
+            ).pack(side="left", padx=(4, 2))
+            var = tk.StringVar(value=str(value))
+            self._font_space_vars[(scope, attr)] = var
+            menu = tk.OptionMenu(
+                row, var, *[str(step) for step in SPACE_STEPS],
+                command=partial(self._set_space, scope, attr),
+            )
+            menu.configure(
+                bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("2xs"),
+                activebackground=self._theme.interactive_hover, activeforeground=self._theme.foreground,
+                highlightthickness=0, bd=0, relief="flat", cursor="hand2",
+            )
+            menu["menu"].configure(bg=self._theme.surface, fg=self._theme.foreground, font=self._type.font("2xs"))
+            menu.pack(side="left", padx=(0, 4))
+
+    # -- the font/paragraph actions ---------------------------------------
+
+    def _set_font_family(self, scope: str, family: str) -> None:
+        self._update_profile(scope, self._profiles[scope].with_family(family))
+
+    def _set_font_size(self, scope: str, choice: str) -> None:
+        size = 0 if choice == "Default" else int(choice)
+        self._update_profile(scope, self._profiles[scope].with_size(size))
+
+    def _toggle_font_style(self, scope: str, attr: str, value: bool) -> None:
+        profile = self._profiles[scope]
+        if attr == "bold":
+            self._update_profile(scope, profile.with_bold(value))
+        else:
+            self._update_profile(scope, profile.with_italic(value))
+
+    def _click_alignment(self, scope: str, alignment: str, _event: object = None) -> None:
+        """A click on an alignment button (Tk passes the event; it is ignored)."""
+        self._set_alignment(scope, alignment)
+
+    def _click_spacing(self, scope: str, spacing: float, _event: object = None) -> None:
+        """A click on a line-spacing button."""
+        self._set_line_spacing(scope, spacing)
+
+    def _click_style(self, scope: str, attr: str, value: bool, _event: object = None) -> None:
+        """A click on the Bold / Italic toggle."""
+        self._toggle_font_style(scope, attr, value)
+
+    def _set_alignment(self, scope: str, alignment: str) -> None:
+        profile = self._profiles[scope]
+        paragraph = profile.paragraph
+        self._update_profile(
+            scope,
+            profile.with_paragraph(
+                ParagraphStyle(
+                    alignment=alignment, line_spacing=paragraph.line_spacing,
+                    space_before=paragraph.space_before, space_after=paragraph.space_after,
+                )
+            ),
+        )
+
+    def _set_line_spacing(self, scope: str, spacing: float) -> None:
+        profile = self._profiles[scope]
+        paragraph = profile.paragraph
+        self._update_profile(
+            scope,
+            profile.with_paragraph(
+                ParagraphStyle(
+                    alignment=paragraph.alignment, line_spacing=spacing,
+                    space_before=paragraph.space_before, space_after=paragraph.space_after,
+                )
+            ),
+        )
+
+    def _set_space(self, scope: str, attr: str, choice: str) -> None:
+        profile = self._profiles[scope]
+        paragraph = profile.paragraph
+        before = paragraph.space_before
+        after = paragraph.space_after
+        if attr == "space_before":
+            before = int(choice)
+        else:
+            after = int(choice)
+        self._update_profile(
+            scope,
+            profile.with_paragraph(
+                ParagraphStyle(
+                    alignment=paragraph.alignment, line_spacing=paragraph.line_spacing,
+                    space_before=before, space_after=after,
+                )
+            ),
+        )
+
+    def _reset_scope(self, scope: str) -> None:
+        self._update_profile(scope, self._profiles[scope].reset())
+
+    def _update_profile(self, scope: str, profile: TypographyProfile) -> None:
+        """Apply one scope's new profile: save it, rebuild, and re-theme dialogs.
+
+        The choice is persisted first, then the window is rebuilt for the new
+        scale (keeping the transcript), then every open dialog is asked to rebuild
+        with the new *windows* and *lists* scales -- so a change is visible
+        everywhere at once, exactly like a theme switch.
+        """
+        self._profiles[scope] = profile
+        save_profiles(self._profiles)
+        self._base_type = for_root(self.root)
+        self._type = self._base_type.with_overrides(self._profiles[SCOPE_WINDOWS])
+        self._chat_type = self._base_type.with_overrides(self._profiles[SCOPE_CHAT])
+        self._lists_type = self._base_type.with_overrides(self._profiles[SCOPE_LISTS])
+        self._font = self._type.ui_family
+        self._mono = self._type.mono_family
+        self._rebuild_preserving_transcript()
+        # The *windows* and *lists* scopes reach the dialogs; a chat-only change
+        # leaves them exactly as they are (rebuilding every open window for nothing
+        # would be wasted work and would reset each one's scroll position).
+        if scope in (SCOPE_WINDOWS, SCOPE_LISTS):
+            self._retype_dialogs()
 
     def _build_cloud_provider_picker(self, panel: tk.Misc) -> None:
         """The Cloud provider picker: choose Gemini *or* Groq (or any provider).
@@ -1446,6 +1808,16 @@ class FaydGUI:
         self._open_section("themes")
         self._build_themes_panel(self._themes_panel)
 
+    def _toggle_fonts(self) -> None:
+        """Ensure the sidebar's **Fonts & paragraphs** section is open, and fill it.
+
+        The section header owns the real open/close click; this is the
+        programmatic "show the font settings" entry point, so it is idempotent and
+        the controls are (re)built each time, so they always show what is in force.
+        """
+        self._open_section("fonts")
+        self._build_fonts_panel(self._fonts_panel)
+
     def _toggle_voices(self) -> None:
         """Ensure the sidebar's **Reading Voice** section is open, and fill it.
 
@@ -1624,8 +1996,8 @@ class FaydGUI:
         width a bubble reserves matches the text it will hold.
         """
         return (
-            tkfont.Font(font=self._type.font("body")),
-            tkfont.Font(font=self._type.mono("code")),
+            tkfont.Font(font=self._chat_type.font("body")),
+            tkfont.Font(font=self._chat_type.mono("code")),
         )
 
     def _available_column(self) -> int:
@@ -1731,9 +2103,10 @@ class FaydGUI:
             widget = tk.Text(
                 card.inner, height=1, wrap="word", relief="flat", borderwidth=0,
                 highlightthickness=0, bg=self._theme.user_bubble, fg=self._theme.user_bubble_fg,
-                font=self._type.font("body"), padx=14, pady=8, cursor="xterm", takefocus=1, width=0,
+                font=self._chat_type.font("body"), padx=14, pady=8, cursor="xterm", takefocus=1, width=0,
             )
             widget.insert("1.0", text)
+            rich_text.apply_alignment(widget, self._chat_type)
             self._make_read_only(widget)
             widget.pack(fill="both", expand=True)
             card.configure(width=self._bubble_card_width(text))
@@ -1755,10 +2128,10 @@ class FaydGUI:
 
             widget = tk.Text(
                 row, height=1, wrap="word", relief="flat", borderwidth=0,
-                highlightthickness=0, bg=bg, fg=fg, font=self._type.font("body"),
+                highlightthickness=0, bg=bg, fg=fg, font=self._chat_type.font("body"),
                 padx=(6 if role != "note" else 0), pady=0, cursor="xterm", takefocus=1,
             )
-            rich_text.apply_body_spacing(widget, self._type)
+            rich_text.apply_body_spacing(widget, self._chat_type)
             body = f"{text}\n\n{extra}" if extra else text
             self._insert_rich(widget, body)
             self._make_read_only(widget)
@@ -2086,7 +2459,7 @@ class FaydGUI:
 
     def _insert_rich(self, widget: tk.Text, text: str) -> None:
         """Render Markdown into a message's Text widget (shared renderer)."""
-        rich_text.insert_markdown(widget, text, theme=self._theme, typography=self._type)
+        rich_text.insert_markdown(widget, text, theme=self._theme, typography=self._chat_type)
 
     def _avatar(self, parent: tk.Misc) -> None:
         """A small gold disc with the brand letter, beside an assistant message."""
@@ -2305,7 +2678,7 @@ class FaydGUI:
         # the panel's widgets, so the send handler, the microphone flow, and the
         # tests all keep working unchanged.
         self._composer = ChatComposer(
-            composer, theme=self._theme, typography=self._type,
+            composer, theme=self._theme, typography=self._chat_type,
             placeholder=self.COMPOSER_PLACEHOLDER, on_submit=self._on_send,
             outer_bg=self._theme.base, with_model_bar=True,
         )
@@ -2737,6 +3110,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=lambda: setattr(self, "_import_dialog", None),
         )
 
@@ -2750,6 +3125,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=lambda: setattr(self, "_sql_import_dialog", None),
         )
 
@@ -2782,6 +3159,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=partial(self._forget_model_chat, mouth),
         )
 
@@ -2835,6 +3214,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=partial(self._forget_voice_studio, source),
         )
 
@@ -2884,6 +3265,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=self._forget_characters,
         )
 
@@ -2912,6 +3295,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=self._forget_cognition,
         )
 
@@ -3032,6 +3417,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=self._forget_model_manager,
         )
 
@@ -3063,6 +3450,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=lambda: setattr(self, "_image_gen_dialog", None),
         )
 
@@ -3076,6 +3465,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=lambda: setattr(self, "_image_edit_dialog", None),
         )
 
@@ -3099,6 +3490,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=lambda: setattr(self, "_presentation_dialog", None),
             on_open_final_editor=self._open_presentation_finalize,
             model_status=self.service.presentation_model_status,
@@ -3129,6 +3522,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=lambda: setattr(self, "_presentation_course_dialog", None),
             on_use_concepts=self._use_presentation_course_concepts,
             on_open_slide=self._reveal_presentation_slide,
@@ -3173,6 +3568,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=lambda: setattr(self, "_presentation_finalize_dialog", None),
             on_edit=self._refresh_presentation_dialog,
         )
@@ -3212,6 +3609,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=lambda: setattr(self, "_docs_studio_dialog", None),
         )
 
@@ -3236,6 +3635,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=lambda: setattr(self, "_scene_studio_dialog", None),
         )
 
@@ -3262,6 +3663,8 @@ class FaydGUI:
             theme=self._theme,
             font=self._font,
             mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
             on_close=lambda: setattr(self, "_code_studio_dialog", None),
         )
 

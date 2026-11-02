@@ -39,7 +39,8 @@ Nothing here draws anything, so it is testable without a display.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Literal
 
 # ------------------------------------------------------------ the font stacks
 #
@@ -188,25 +189,98 @@ class Typography:
     ui_family: str
     mono_family: str
     scaling: float
+    #: A multiplier on every size from the scale, so a user can make the whole
+    #: window's text larger or smaller without touching the scale itself. 1.0 is
+    #: OpenHands' own size; a Word-like "font size" is this ratio applied to the
+    #: body step (see :mod:`gui.typography_settings`).
+    size_scale: float = 1.0
+    #: A multiplier on the emulated leading between wrapped lines (the web
+    #: ``leading-*``), so a user can ask for Word's 1.0/1.5/double line spacing
+    #: without changing the type scale itself. 1.0 keeps OpenHands' own leading.
+    line_spacing: float = 1.0
+    #: Whether the scope's *body* text is drawn bold / italic (Word's B / I for
+    #: the whole document). A role that is already bold stays bold; an explicit
+    #: ``weight=``/``slant=`` on a call still wins, so a caller can always ask
+    #: for a specific style.
+    bold_body: bool = False
+    italic_body: bool = False
+    #: The paragraph alignment every body block is drawn with (Word's paragraph
+    #: alignment): ``left`` (the project's own), ``center``, or ``right``.
+    alignment: str = "left"
+    #: Extra pixels above / below every body block (Word's "space before/after
+    #: paragraph"), added to the block's own OpenHands margin.
+    space_before: int = 0
+    space_after: int = 0
 
     # --- sizes ------------------------------------------------------------
 
     def points(self, role: str) -> int:
         """The Tk point size for ``role`` (falls back to ``body``)."""
         step = SCALE.get(role, SCALE["body"])
-        return to_points(step.size, self.scaling)
+        return to_points(step.size * self.size_scale, self.scaling)
 
     def size_px(self, role: str) -> float:
         """The web pixel size for ``role`` (falls back to ``body``)."""
-        return SCALE.get(role, SCALE["body"]).size
+        return SCALE.get(role, SCALE["body"]).size * self.size_scale
 
     def leading_px(self, role: str) -> float:
         """The web pixel line-height for ``role`` (falls back to ``body``)."""
-        return SCALE.get(role, SCALE["body"]).leading
+        return SCALE.get(role, SCALE["body"]).leading * self.size_scale
 
     def px(self, pixels: float) -> int:
         """A raw pixel size (e.g. a one-off) as a Tk point size."""
         return to_points(pixels, self.scaling)
+
+    def with_overrides(self, profile: object) -> Typography:
+        """A copy of this scale with a user profile's own choices folded in.
+
+        ``profile`` is duck-typed (:class:`gui.typography_settings.TypographyProfile`):
+        a non-empty ``family``/``mono_family`` replaces the resolved family, a
+        positive ``size_pt`` sets the body size (and every other role scales with
+        it), and ``bold``/``italic``/``paragraph.line_spacing`` reach the body
+        weight, slant, and leading. An empty field means "keep the project's
+        own", so a profile that never touched the font leaves the scale exactly
+        as it was.
+        """
+        family = getattr(profile, "family", "") or ""
+        mono = getattr(profile, "mono_family", "") or ""
+        size_pt = int(getattr(profile, "size_pt", 0) or 0)
+        paragraph = getattr(profile, "paragraph", None)
+        line_spacing = float(getattr(paragraph, "line_spacing", 1.0) or 1.0)
+        if line_spacing <= 0:
+            line_spacing = 1.0
+        alignment = str(getattr(paragraph, "alignment", "left") or "left")
+        if alignment not in ("left", "center", "right"):
+            alignment = "left"
+        return replace(
+            self,
+            ui_family=family or self.ui_family,
+            mono_family=mono or self.mono_family,
+            size_scale=self._scale_for_size(size_pt),
+            line_spacing=line_spacing,
+            bold_body=bool(getattr(profile, "bold", False)),
+            italic_body=bool(getattr(profile, "italic", False)),
+            alignment=alignment,
+            space_before=max(0, int(getattr(paragraph, "space_before", 0) or 0)),
+            space_after=max(0, int(getattr(paragraph, "space_after", 0) or 0)),
+        )
+
+    def _scale_for_size(self, size_pt: int) -> float:
+        """The multiplier that makes the body step render at ``size_pt`` points.
+
+        Word's "font size" is the point size of the body text, so the ratio is
+        the requested points over the points the body already draws at -- computed
+        from the *unrounded* body points, so ``points("body")`` comes back exactly
+        as asked rather than a point off (14 px at 1.333 scaling is 10.5 points,
+        and rounding that first would turn a request of 16 into 17). A zero
+        request keeps 1.0 (the project's own size).
+        """
+        if size_pt <= 0:
+            return 1.0
+        base_points = SCALE["body"].size / self.scaling
+        if base_points <= 0:
+            return 1.0
+        return size_pt / base_points
 
     # --- font tuples ------------------------------------------------------
 
@@ -219,11 +293,17 @@ class Typography:
         normal elsewhere); pass ``weight="bold"`` for an emphasis label or
         ``weight="normal"`` to override a role's default. ``slant="italic"``
         adds the italic style Tk takes as a further tuple element.
+
+        When a user's own profile asked for bold/italic body text, it is folded
+        in here -- but a caller that passes ``weight=``/``slant=`` explicitly
+        still wins, so a window can always ask for a specific style (a heading
+        stays bold, a muted caption stays normal).
         """
-        resolved = weight
-        if resolved is None:
-            resolved = "bold" if role in _BOLD_ROLES else "normal"
-        styles = [resolved] if resolved != "normal" else []
+        if weight is None:
+            weight = "bold" if (role in _BOLD_ROLES or self.bold_body) else "normal"
+        if slant is None and self.italic_body:
+            slant = "italic"
+        styles = [weight] if weight != "normal" else []
         if slant is not None:
             styles.append(slant)
         return (self.ui_family, self.points(role), *styles)
@@ -234,6 +314,14 @@ class Typography:
             return (self.mono_family, self.points(role))
         return (self.mono_family, self.points(role), weight)
 
+    def justify(self) -> Literal["left", "center", "right"]:
+        """The Tk ``justify`` value for body text (the user's paragraph alignment)."""
+        if self.alignment == "center":
+            return "center"
+        if self.alignment == "right":
+            return "right"
+        return "left"
+
     # --- line and block spacing ------------------------------------------
 
     def block_metrics(self, role: str, *, gap_px: float = 0.0) -> BlockMetrics:
@@ -242,12 +330,30 @@ class Typography:
         ``gap_px`` is extra space above and below the block (OpenHands'
         ``mt-*``/``mb-*``/``py-*``); the natural line height is whatever the
         family draws at that point size, so ``spacing2`` is the *difference*
-        the web leading asks for and never negative.
+        the web leading asks for and never negative. ``line_spacing`` multiplies
+        the web leading before the difference is taken, so a user's own line
+        spacing (Word's 1.0/1.5/double) widens the wrapped lines of a paragraph.
         """
         step = SCALE.get(role, SCALE["body"])
-        leading = max(0, round(step.leading - self.natural_line_px(role)))
+        leading = max(0, round(step.leading * self.line_spacing - self.natural_line_px(role)))
         gap = self.px(gap_px)
         return BlockMetrics(spacing1=gap, spacing2=leading, spacing3=gap)
+
+    def block_metrics_full(self, role: str, *, gap_px: float = 0.0) -> BlockMetrics:
+        """Like :meth:`block_metrics`, but honouring a differing before/after.
+
+        Word's "space before" and "space after" are independent, so this returns
+        each block's own ``spacing1``/``spacing3``; :meth:`block_metrics` is the
+        symmetric shortcut the shared renderer uses for a uniform gap.
+        """
+        step = SCALE.get(role, SCALE["body"])
+        leading = max(0, round(step.leading * self.line_spacing - self.natural_line_px(role)))
+        base = self.px(gap_px)
+        return BlockMetrics(
+            spacing1=base + self.space_before,
+            spacing2=leading,
+            spacing3=base + self.space_after,
+        )
 
     def natural_line_px(self, role: str) -> float:
         """The family's own line height, in pixels, for ``role``.
@@ -263,19 +369,28 @@ def resolve(
     *,
     ui_family: str | None = None,
     mono_family: str | None = None,
+    overrides: object | None = None,
 ) -> Typography:
     """Build a :class:`Typography`, honouring explicit family names.
 
     A dialog receives the window's chosen families as strings, so passing them
     here keeps a dialog on the very same families as the window that opened it,
     while the *sizes* still come from the one shared scale.
+
+    ``overrides`` is an optional :class:`gui.typography_settings.TypographyProfile`
+    (duck-typed: it only needs ``family``/``mono_family``/``size_scale``), so a
+    user's own font choices reach every widget built through this scale without
+    this module importing the settings layer.
     """
     available = _families(root)
-    return Typography(
+    base = Typography(
         ui_family=ui_family or pick_family(UI_FONT_STACK, available, _TK_UI_FALLBACK),
         mono_family=mono_family or pick_family(MONO_FONT_STACK, available, _TK_MONO_FALLBACK),
         scaling=_tk_scaling(root),
     )
+    if overrides is None:
+        return base
+    return base.with_overrides(overrides)
 
 
 def for_root(root: object | None) -> Typography:

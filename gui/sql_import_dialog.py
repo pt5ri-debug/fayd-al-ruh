@@ -71,6 +71,8 @@ class SqlImportDialog(ThemedDialog):
         theme: Any,
         font: str,
         mono: str,
+        overrides: object | None = None,
+        list_overrides: object | None = None,
         on_close: Callable[[], None] | None = None,
     ) -> None:
         self.service = service
@@ -78,7 +80,12 @@ class SqlImportDialog(ThemedDialog):
         self.theme = theme
         self.font = font
         self.mono = mono
-        self._type = resolve(parent, ui_family=font, mono_family=mono)
+        self._type = resolve(parent, ui_family=font, mono_family=mono, overrides=overrides)
+        self._overrides = overrides
+        self._list_overrides = list_overrides
+        self._list_type = resolve(
+            parent, ui_family=font, mono_family=mono, overrides=list_overrides
+        )
         self._on_close = on_close
         self._busy = False
         self._cancel = threading.Event()
