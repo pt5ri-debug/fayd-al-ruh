@@ -307,6 +307,8 @@ def run_update(argv: Sequence[str] = ()) -> int:
                     "behind": status.behind,
                     "ahead": status.ahead,
                     "local_changes": status.dirty,
+                    "shallow_clone": status.shallow,
+                    "shared_history": status.shared_history,
                     "repository": status.repository_url,
                     "changed_files": list(status.changed_files),
                     "training_files_changed": list(status.learned_files_changed),

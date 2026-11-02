@@ -316,3 +316,86 @@ def test_check_report_never_prints_a_token() -> None:
     )
     assert "ghp_SECRET" not in message
     assert "example.com" not in message
+
+
+def _shallow_clone_at(tmp_path: Path, origin: Path, ref: str) -> Path:
+    """A shallow clone whose HEAD is ``ref`` and which keeps no intermediate history.
+
+    This is the state ``git clone --depth 1`` plus a shallow fetch and reset
+    produces: the tip commit is present but the commits between it and the remote
+    are absent, so git cannot find a merge base with the remote on its own.
+    """
+    installed = tmp_path / "shallow"
+    _git(tmp_path, "clone", "--depth", "1", f"file://{origin}", str(installed))
+    _git(installed, "fetch", "--depth", "1", "origin", ref)
+    _git(installed, "reset", "--hard", "FETCH_HEAD")
+    return installed
+
+
+def test_shallow_clone_is_updated_not_refused(tmp_path: Path) -> None:
+    """A shallow clone must be compared correctly, not misreported as "ahead".
+
+    Without the intermediate history git cannot find a merge base, so
+    ``rev-list --left-right --count`` wrongly reports the branch as both ahead and
+    behind and ``merge --ff-only`` aborts with "refusing to merge unrelated
+    histories". The updater deepens the fetch first, so a healthy update applies.
+    """
+    origin = tmp_path / "origin.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(origin))
+    seed = tmp_path / "seed"
+    _git(tmp_path, "clone", str(origin), str(seed))
+    (seed / "app.txt").write_text("v1\n", encoding="utf-8")
+    _commit(seed, "first")
+    _git(seed, "push", "-u", "origin", "main")
+    older = _git(seed, "rev-parse", "HEAD").stdout.strip()
+    (seed / "app.txt").write_text("v2\n", encoding="utf-8")
+    (seed / "new_module.py").write_text("x = 1\n", encoding="utf-8")
+    _commit(seed, "second")
+    _git(seed, "push", "origin", "main")
+
+    installed = _shallow_clone_at(tmp_path, origin, older)
+    assert _git(installed, "rev-parse", "--is-shallow-repository").stdout.strip() == "true"
+
+    status = check_for_updates(f"file://{origin}", root=installed)
+    assert status.available is True
+    assert status.behind >= 1
+    assert status.ahead == 0
+    assert status.shared_history is True
+    assert status.shallow is True
+
+    applied = apply_update(f"file://{origin}", root=installed)
+    assert applied.applied is True
+    assert (installed / "new_module.py").read_text(encoding="utf-8") == "x = 1\n"
+
+
+def test_disjoint_history_is_reported_honestly(tmp_path: Path) -> None:
+    """A rewritten remote (no shared ancestor) must not be shown as "ahead".
+
+    git reports such a branch as both ahead and behind; the updater detects the
+    missing merge base and says the histories are disjoint instead of pretending
+    there is local work to preserve.
+    """
+    origin = tmp_path / "origin.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(origin))
+    seed = tmp_path / "seed"
+    _git(tmp_path, "clone", str(origin), str(seed))
+    (seed / "origin.txt").write_text("remote\n", encoding="utf-8")
+    _commit(seed, "remote root")
+    _git(seed, "push", "-u", "origin", "main")
+
+    installed = tmp_path / "installed"
+    _git(tmp_path, "init", "-b", "main", str(installed))
+    _git(installed, "remote", "add", "origin", f"file://{origin}")
+    (installed / "local.txt").write_text("local\n", encoding="utf-8")
+    _commit(installed, "local root")
+    _git(installed, "fetch", "origin")
+
+    status = check_for_updates(f"file://{origin}", root=installed)
+    assert status.shared_history is False
+    assert status.available is False
+    assert status.ahead == 0
+    assert "shares no history" in status.summary()
+
+    applied = apply_update(f"file://{origin}", root=installed)
+    assert applied.applied is False
+    assert (installed / "local.txt").read_text(encoding="utf-8") == "local\n"
