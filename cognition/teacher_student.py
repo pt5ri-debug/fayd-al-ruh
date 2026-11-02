@@ -172,6 +172,35 @@ class TeacherStudentSystem:
             return True, reliability.score, f"names known concepts: {', '.join(sorted(named)[:3])}"
         return False, 0.4, "names no concept the graph knows"
 
+    def record_answer(
+        self, question: str, answer: str, *, teacher_name: str = "teacher"
+    ) -> TrainingExample:
+        """Verify a teacher's answer and store it as a training example.
+
+        This is the answer-verification half of the exchange, split out so a
+        caller that already holds the teacher's answer -- the continuous
+        learner-asks-teacher loop (:mod:`cognition.asking`), where the learner
+        asks rather than answers -- can qualify and store it without running a
+        student-first exchange. The rule is the same one :meth:`teach` applies: an
+        answer becomes a *qualified* example only when the graph corroborates it
+        **and** its confidence clears ``min_confidence``; a rejected answer is
+        still stored, with the reason, so a rejection is auditable.
+        """
+        verified, confidence, reason = self.verify(question, answer)
+        qualified = verified and confidence >= self.min_confidence
+        example = TrainingExample(
+            task=question,
+            answer=answer,
+            kind=TrainingExampleKind.ANSWER,
+            source=Source(SourceKind.TEACHER, teacher_name or "teacher", reliability=0.55),
+            verified=verified,
+            confidence=round(confidence, 6),
+            qualified=qualified,
+            reason=reason if qualified else f"rejected: {reason}",
+        )
+        self.examples.add(example)
+        return example
+
     # -- the exchange -------------------------------------------------------
     def teach(self, question: str, *, force_teacher: bool = False) -> TeachingOutcome:
         """Run one student-first exchange and record the outcome.
@@ -206,19 +235,7 @@ class TeacherStudentSystem:
 
         teacher_answer = self._answer(self.teacher, question)
         comparison = self._compare(student_answer, teacher_answer)
-        verified, confidence, reason = self.verify(question, teacher_answer)
-        qualified = verified and confidence >= self.min_confidence
-        example = TrainingExample(
-            task=question,
-            answer=teacher_answer,
-            kind=TrainingExampleKind.ANSWER,
-            source=Source(SourceKind.TEACHER, self.teacher.name, reliability=0.55),
-            verified=verified,
-            confidence=round(confidence, 6),
-            qualified=qualified,
-            reason=reason if qualified else f"rejected: {reason}",
-        )
-        self.examples.add(example)
+        example = self.record_answer(question, teacher_answer)
         notes.append(f"comparison: {comparison}")
         return TeachingOutcome(
             question=question,

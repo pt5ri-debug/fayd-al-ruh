@@ -25,8 +25,6 @@ from pathlib import Path
 
 from core.paths import default_checkpoint
 
-from cognition.teacher_student import ModelBackend
-
 
 class FaydStudentBackend:
     """The project's own trained model, as a :class:`ModelBackend`."""
@@ -61,6 +59,28 @@ class FaydStudentBackend:
 
         response = model.generate(
             _request(render_prompt(question))
+        )
+        return response.text.strip()
+
+    def propose_question(self, topic: str) -> str:
+        """Ask the project's own model to *invent* a question about ``topic``.
+
+        This is what makes the learner invent its own questions rather than only
+        draw them from the bank: the model is given the question-asking frame and
+        its first line is taken as the proposal (see
+        :meth:`cognition.asking.AskingLoop._invent_from_model`). An empty model or
+        a proposal that names nothing the graph knows is refused there, so the
+        loop falls back to the bank and the combinatorial inventor.
+        """
+        from cognition.asking import QUESTION_PROMPT
+
+        model = self._load()
+        if model is None:
+            return ""
+        from ai.mind import render_prompt
+
+        response = model.generate(
+            _request(render_prompt(QUESTION_PROMPT.format(topic=topic or "petroleum engineering")))
         )
         return response.text.strip()
 
@@ -162,14 +182,77 @@ class LocalTeacherBackend:
         return "teacher: no local model reachable"
 
 
-def build_backends() -> tuple[ModelBackend, ModelBackend | None]:
+def build_backends() -> tuple[FaydStudentBackend, LocalTeacherBackend | None]:
     """The default student and teacher backends for this machine."""
     student = FaydStudentBackend()
     teacher = LocalTeacherBackend()
     return student, (teacher if teacher.available() else None)
 
 
+class AssistantBackend:
+    """Adapt any project *mouth* (an assistant with ``ask``) into a backend.
+
+    The answering mouths -- Ultron, Vision, Banner, Cloud, Natasha, Hakeem, the
+    grounded sources, the in-project mind -- all expose ``ask(question)`` and
+    return an :class:`~core.assistant.AssistantAnswer`. This adapter is the one
+    place that turns one into the :class:`ModelBackend` the asking loop and the
+    teacher-student system speak, so **the linked model that answers is whichever
+    mouth the caller chose**, with no second code path.
+
+    ``can_propose`` marks whether the mouth's model is the *learner's* own model
+    (it may be asked to invent a question) or a teacher's (it only answers). The
+    loop asks the student's model to invent questions only when the backend says
+    it can, so a teacher mouth is never asked to invent the question it answers.
+    """
+
+    def __init__(self, assistant, *, name: str = "", can_propose: bool = False) -> None:
+        self._assistant = assistant
+        self.name = name or str(getattr(assistant, "name", "")) or "mouth"
+        self.can_propose = bool(can_propose)
+
+    def available(self) -> bool:
+        try:
+            return bool(self._assistant is not None and getattr(self._assistant, "available", True))
+        except Exception:
+            return self._assistant is not None
+
+    def answer(self, question: str) -> str:
+        """The mouth's own answer text, through its ``ask`` interface."""
+        ask = getattr(self._assistant, "ask", None)
+        if not callable(ask):
+            return ""
+        answer = ask(question)
+        if answer is None:
+            return ""
+        text = getattr(answer, "text", None)
+        if text is None:
+            return str(answer).strip()
+        return str(text).strip()
+
+    def propose_question(self, topic: str) -> str:
+        """Ask the mouth's own model to invent a question about ``topic``.
+
+        Only a learner's own model implements this; a teacher backend does not, so
+        the loop's :meth:`AskingLoop._invent_from_model` finds no proposal and
+        falls back to the bank and the combinatorial inventor instead.
+        """
+        from cognition.asking import QUESTION_PROMPT
+
+        ask = getattr(self._assistant, "ask", None)
+        if not callable(ask):
+            return ""
+        answer = ask(QUESTION_PROMPT.format(topic=topic or "petroleum engineering"))
+        text = getattr(answer, "text", None)
+        return (str(text) if text is not None else str(answer)).strip()
+
+    def describe(self) -> str:
+        role = "learner" if self.can_propose else "teacher"
+        state = "ready" if self.available() else "unavailable"
+        return f"{self.name} ({role}, {state})"
+
+
 __all__ = [
+    "AssistantBackend",
     "FaydStudentBackend",
     "LocalTeacherBackend",
     "build_backends",

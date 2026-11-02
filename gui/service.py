@@ -696,6 +696,102 @@ class ChatService:
             return "Internet lookups are on: weak answers are searched, compared, and learned."
         return "Internet lookups are off: answers come only from what the project already knows."
 
+    # ------------------------------------------------- the learner-asks-teacher loop
+
+    def _asking_controller(self):
+        """The controller the asking loop reasons over (one per service)."""
+        controller = getattr(self, "_asking_controller_cache", None)
+        if controller is None:
+            from core.cognitive_controller import CognitiveController
+
+            controller = CognitiveController()
+            self._asking_controller_cache = controller
+        return controller
+
+    def asking_teacher_name(self) -> str:
+        """Which model answers the learner's questions, honestly named."""
+        try:
+            return self._asking_teacher_backend().name
+        except Exception:
+            return ""
+
+    def _asking_teacher_backend(self):
+        """The linked teacher: the live answering mouth, else the best local model.
+
+        The teacher is **always** the linked model, never the learner: the mouth
+        currently answering the chat is used when it is a real model mouth, so a
+        user who chose Ultron gets Ultron answering; the grounded sources mouth
+        and the in-project mind are not model teachers, so they fall back to the
+        project's own local teacher backend.
+        """
+        from cognition.backends import AssistantBackend
+
+        mouth = self.switcher.mouth
+        loaders = {
+            chat_module.MOUTH_ULTRON: lambda: self.switcher.ultron,
+            chat_module.MOUTH_VISION: lambda: self.switcher.vision,
+            chat_module.MOUTH_BANNER: lambda: self.switcher.banner,
+            chat_module.MOUTH_CLOUD: lambda: self.switcher.cloud,
+            chat_module.MOUTH_NATASHA: lambda: self.switcher.natasha,
+            chat_module.MOUTH_HAKEEM: lambda: self.switcher.hakeem,
+        }
+        loader = loaders.get(mouth)
+        if loader is not None:
+            try:
+                assistant = loader()
+            except Exception:
+                assistant = None
+            if assistant is not None:
+                return AssistantBackend(assistant, name=mouth, can_propose=False)
+        from cognition.backends import LocalTeacherBackend
+
+        return LocalTeacherBackend()
+
+    def asking_loop_available(self) -> bool:
+        """True when a teacher model can answer here (the sidebar entry's gate)."""
+        try:
+            return bool(self._asking_teacher_backend().available())
+        except Exception:
+            return False
+
+    def build_asking_loop(self, *, on_turn=None, count: int | None = None):
+        """Build the learner-asks-teacher loop over the project's own knowledge.
+
+        **Fayd Al-Ruh the learner** invents each question and the **linked model**
+        answers it; the answer is verified against the project's graph and folded
+        into the learner's cognitive learning. ``on_turn`` receives each
+        :class:`cognition.asking.AskingTurn` as it is produced, so the window can
+        show the question and answer live. Raises ``ValueError`` when no teacher
+        model can answer, so the caller reports the real next step.
+        """
+        from cognition.backends import FaydStudentBackend
+
+        teacher = self._asking_teacher_backend()
+        if not teacher.available():
+            raise ValueError(
+                "No teacher model is available. Open a model window (Ultron, Vision, "
+                "Banner, Natasha, Hakeem) or download a local model first."
+            )
+        controller = self._asking_controller()
+        return controller.asking_loop(
+            student=FaydStudentBackend(),
+            teacher=teacher,
+            count=count,
+            on_turn=on_turn,
+        )
+
+    def ask_teacher_status(self) -> str:
+        """An honest one-line status for the sidebar entry and its tooltip."""
+        if not self.asking_loop_available():
+            return (
+                "The learner needs a teacher model: open a model window or download "
+                "a local model, then try again."
+            )
+        return (
+            f"The learner will ask {self.asking_teacher_name()} endless new questions "
+            "and learn from every answer."
+        )
+
     def ask(self, message: str) -> ChatReply:
         """Handle one user message and return the rendered reply."""
         turn = self.mode.handle(message, require_wake=False, speak=False)

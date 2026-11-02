@@ -368,6 +368,27 @@ class _Transcript:
     text: str
 
 
+@dataclass(frozen=True)
+class _AskingTurn:
+    """One finished question-and-answer the asking loop hands to the UI thread."""
+
+    turn: Any
+
+
+@dataclass(frozen=True)
+class _AskingError:
+    """The asking loop ended with an error, named so the chat can show it."""
+
+    message: str
+
+
+@dataclass(frozen=True)
+class _AskingDone:
+    """The asking loop finished (or was stopped), carrying its own report."""
+
+    report: Any
+
+
 class FaydGUI:
     """The application window and its wiring to :class:`ChatService`."""
 
@@ -480,6 +501,15 @@ class FaydGUI:
         self._mic_button: tk.Button | None = None
         self._listening = False
 
+        # The learner-asks-teacher loop: when running, a daemon thread asks the
+        # linked model endless new questions and hands each exchange back through
+        # this queue (Tk is not thread-safe), which _pump renders into the chat.
+        self._asking_loop: Any = None
+        self._asking_active = False
+        self._asking_queue: queue.Queue[Any] = queue.Queue()
+        self._ask_teacher_button: tk.Label | None = None
+        self._ask_teacher_label = "🎓   Learn from a teacher"
+
         # The transcript is selectable and copyable; Delete clears it, Ctrl+C
         # copies the selection, Ctrl+A selects the whole transcript, and a
         # right-click offers the same as a menu.
@@ -509,7 +539,8 @@ class FaydGUI:
         root.bind("<Configure>", self._on_root_configure)
 
     def _on_close(self) -> None:
-        """Stop any reading or recording before the window is destroyed."""
+        """Stop any reading, recording, or asking loop before the window dies."""
+        self._stop_asking()
         self._stop_speaking()
         self._cancel_recording()
         self.root.destroy()
@@ -674,6 +705,9 @@ class FaydGUI:
                 # so the complete explanation is still one hover away.
                 if action.sidebar_label != action.label:
                     _Tooltip(button, action.label, self._theme, self._type)
+                if action.key == "ask-teacher":
+                    self._ask_teacher_button = button
+                    self._ask_teacher_label = action.sidebar_label
                 self._action_buttons.append(button)
 
         # 4. Settings: the cloud provider/model pickers and the appearance toggle.
@@ -3425,6 +3459,11 @@ class FaydGUI:
         if action.key in {"cognition", "cognition-characters"}:
             self._open_cognition()
             return
+        # The learner-asks-teacher entry toggles the endless asking loop: the
+        # first press starts it, a second press stops it.
+        if action.key == "ask-teacher":
+            self._toggle_asking()
+            return
         # The Model Manager entry opens its own window (the listing is long).
         if action.key == "models":
             self._open_model_manager()
@@ -3480,6 +3519,108 @@ class FaydGUI:
             action.command(argv)
         output = buffer.getvalue().strip()
         return output or f"{action.label} finished."
+
+    # ----------------------------------------- learner-asks-teacher (endless) loop
+
+    def _toggle_asking(self) -> None:
+        """Start the endless asking loop, or stop it if it is already running."""
+        if self._asking_active:
+            self._stop_asking()
+            return
+        self._start_asking()
+
+    def _start_asking(self) -> None:
+        """Ask the linked teacher model endless new questions, learning from each.
+
+        The loop runs on a daemon thread (a long run must never freeze the window)
+        and streams every question and answer into the transcript through a queue
+        the UI thread drains. A second press on the sidebar entry stops it.
+        """
+        if self._asking_active:
+            return
+        if not self.service.asking_loop_available():
+            self._add_bubble("note", self.service.ask_teacher_status())
+            return
+        loop = self.service.build_asking_loop(
+            on_turn=lambda turn: self._asking_queue.put(_AskingTurn(turn))
+        )
+        self._asking_loop = loop
+        self._asking_active = True
+        self._refresh_ask_teacher_button()
+        teacher = self.service.asking_teacher_name() or "the linked model"
+        self._add_bubble(
+            "note",
+            f"Fayd Al-Ruh is learning: it will ask {teacher} endless new questions "
+            "and learn from every answer. Press the sidebar entry again to stop.",
+        )
+
+        def run() -> None:
+            try:
+                report = loop.run()
+            except Exception as error:  # surfaced in the transcript, never crashes Tk
+                self._asking_queue.put(_AskingError(f"{type(error).__name__}: {error}"))
+                return
+            self._asking_queue.put(_AskingDone(report))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _stop_asking(self) -> None:
+        """Stop the asking loop; the running thread ends at its next turn.
+
+        The button flips back at once for immediate feedback; the loop's own
+        measured report arrives through the queue and is shown then, so the stop
+        message and the summary are never duplicated.
+        """
+        loop = self._asking_loop
+        if loop is not None:
+            loop.stop()
+        self._asking_loop = None
+        self._asking_active = False
+        self._refresh_ask_teacher_button()
+
+    def _drain_asking(self) -> None:
+        """Render each finished exchange into the chat (on the Tk thread)."""
+        while True:
+            try:
+                item = self._asking_queue.get_nowait()
+            except queue.Empty:
+                return
+            if isinstance(item, _AskingTurn):
+                self._render_asking_turn(item.turn)
+            elif isinstance(item, _AskingError):
+                self._add_bubble("note", f"The asking loop stopped: {item.message}")
+                self._asking_active = False
+                self._asking_loop = None
+                self._refresh_ask_teacher_button()
+            elif isinstance(item, _AskingDone):
+                self._asking_active = False
+                self._asking_loop = None
+                self._add_bubble("note", item.report.describe())
+                self._refresh_ask_teacher_button()
+
+    def _render_asking_turn(self, turn) -> None:
+        """Show one question and its teacher's answer as two chat rows."""
+        self._add_bubble("user", turn.question)
+        if turn.error:
+            self._add_bubble("note", f"(the teacher gave no answer: {turn.error})")
+            return
+        verdict = "qualified" if turn.qualified else "kept (unverified)"
+        answer = f"{turn.answer}\n\n_Answered by {turn.teacher_name} · {verdict} · {turn.reason}_"
+        self._add_bubble("assistant", answer)
+
+    def _refresh_ask_teacher_button(self) -> None:
+        """Mark the sidebar entry while the loop runs, and rest it when stopped."""
+        button = self._ask_teacher_button
+        if button is None:
+            return
+        try:
+            button.configure(
+                text="■  Stop learning from the teacher"
+                if self._asking_active
+                else self._ask_teacher_label
+            )
+        except tk.TclError:
+            pass
 
     def _append_progress_line(self, text: str) -> None:
         self._pending.append(text)
@@ -3562,6 +3703,7 @@ class FaydGUI:
         self._drain_lines(cap=500)
         self._flush_progress()
         self._drain_speech()
+        self._drain_asking()
         try:
             kind, payload = self._results.get_nowait()
         except queue.Empty:
