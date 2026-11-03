@@ -84,6 +84,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("hypothesis_accuracy", True, label="Hypothesis accuracy (held-out: candidate hypotheses are generated only from what the graph licenses, ranked, with a contested candidate reported and an unknown question yielding none)"),
     MetricSpec("tool_selection_accuracy", True, label="Tool selection accuracy (held-out: a bounded chooser picks only tools the sandbox allow-list permits, and refuses a mutating tool in a read-only sandbox)"),
     MetricSpec("personality_agents_accuracy", True, label="Personality agents accuracy (held-out: seven independent personalities as agents -- capability ceilings enforced, a configuration cannot widen them, independent working contexts, memory isolation with Natasha refused, the router honest about no-suitable-personality, bounded delegation, conflicts preserved not voted away, and Natasha excluded from the aggregated training dataset)"),
+    MetricSpec("training_accuracy", True, label="Training accuracy (held-out Phase 6: dataset validation/provenance/versioning/splitting, the Natasha exclusion for the project model's aggregate, model compatibility -- a GGUF is not a training base and QLoRA needs a CUDA GPU, config validation, the training job life cycle, the base model provably unchanged, and controlled promotion plus rollback)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )

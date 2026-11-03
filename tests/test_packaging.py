@@ -85,6 +85,7 @@ def test_every_optional_import_is_ignored_for_type_checking():
         "core/imagegen_diffusion.py",
         "core/ultron.py",
         "core/pdf_extract.py",
+        "ml/training/adapters.py",
     ]
     missing: set[str] = set()
     for relative in optional_modules:

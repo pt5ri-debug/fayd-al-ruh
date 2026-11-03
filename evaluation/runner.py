@@ -54,6 +54,7 @@ from core.relation_polarity import polarity_accuracy
 from core.state import State
 from core.tool_agent import tool_selection_accuracy
 from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
+from ml.training.gate import training_accuracy
 
 from evaluation.metrics import (
     CalibrationBin,
@@ -253,6 +254,14 @@ class EvaluationMetrics:
     memory and learning scope -- with Natasha's memory and learning isolated, the
     router honest about when no personality is suitable, delegation bounded by
     depth and budget, and conflicts preserved rather than voted away (Phase 5)."""
+
+    training_accuracy: float
+    """The share of held-out Phase-6 training judgements satisfied: dataset
+    validation, provenance, versioning, and splitting; the Natasha exclusion for the
+    project model's aggregate; model compatibility (a GGUF is not a training base,
+    QLoRA needs a CUDA GPU); config validation; the training job life cycle; the
+    base model provably unchanged by a run; and controlled promotion plus rollback
+    -- each on the real implementation, with negative controls (Phase 6)."""
 
     knowledge_validation_accuracy: float
     """The share of held-out cognitive-core judgements satisfied: the event bus
@@ -1183,6 +1192,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     hypothesis_value = hypothesis_accuracy()
     tool_selection_value = tool_selection_accuracy()
     personality_agents_value = personality_agents_accuracy()
+    training_value = training_accuracy()
 
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
@@ -1262,6 +1272,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         hypothesis_value,
         tool_selection_value,
         personality_agents_value,
+        training_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1327,6 +1338,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         hypothesis_accuracy=round(hypothesis_value, 6),
         tool_selection_accuracy=round(tool_selection_value, 6),
         personality_agents_accuracy=round(personality_agents_value, 6),
+        training_accuracy=round(training_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

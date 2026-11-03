@@ -1,0 +1,19 @@
+# Optional training runtime for Phase 6 (LoRA / PEFT over a Hugging Face model).
+#
+# The project's own numpy transformer trains with **no** extra (see
+# ml/training/adapters.py::NumpyLoRAAdapter) -- this file is only needed for the
+# `lora_transformers` / `qlora` methods, which fine-tune a *safetensors* base
+# model rather than a GGUF inference file.
+#
+# CPU wheels are chosen on purpose: the stated hardware (AMD Radeon R7 M360,
+# Intel HD 520) has no modern CUDA/ROCm support, so no CUDA packages are pulled.
+# To use a CUDA GPU instead, install the CUDA build of torch from
+# https://pytorch.org first, then install the rest of this file.
+#
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.2
+transformers>=4.40
+peft>=0.10
+accelerate>=0.30
+safetensors>=0.4
+datasets>=2.18

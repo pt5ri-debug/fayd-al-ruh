@@ -450,6 +450,36 @@ def model_manager_dir() -> Path:
     return data_dir() / "model_manager"
 
 
+def training_dir() -> Path:
+    """The root of everything Phase 6 writes (``data/training``).
+
+    Git-ignored and ``FAYD_DATA_DIR``-aware like every other writable folder, so a
+    dataset snapshot, a training run record, or a LoRA adapter never dirties the
+    working tree and no machine-specific path is ever baked into the code.
+    """
+    return data_dir() / "training"
+
+
+def training_datasets_dir() -> Path:
+    """Where versioned dataset snapshots and their manifests live."""
+    return training_dir() / "datasets"
+
+
+def training_runs_dir() -> Path:
+    """Where one directory per training run is written."""
+    return training_dir() / "runs"
+
+
+def training_adapters_dir() -> Path:
+    """Where a trained LoRA/PEFT adapter is stored (never the base weights)."""
+    return training_dir() / "adapters"
+
+
+def training_registry_dir() -> Path:
+    """Where the training model/adapter registry records live."""
+    return training_dir() / "registry"
+
+
 def ensure_data_layout() -> None:
     """One-time upgrade step: gather pre-existing source data under ``data/``.
 
@@ -547,6 +577,11 @@ __all__ = [
     "shared_models_dir",
     "studio_dir",
     "studio_workspaces_dir",
+    "training_adapters_dir",
+    "training_datasets_dir",
+    "training_dir",
+    "training_registry_dir",
+    "training_runs_dir",
     "ultron_models_dir",
     "vision_models_dir",
 ]

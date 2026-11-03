@@ -181,6 +181,21 @@ docs = [
     "pypdfium2>=4.0",
     "Pillow>=10.0",
 ]
+# Controlled model-weight training (Phase 6) is a separate optional extra. The
+# project's own numpy transformer trains with **no** extra; this extra adds the
+# Hugging Face `transformers`/`peft` path for fine-tuning a *safetensors* base
+# model (a GGUF inference file is never a training base). CPU wheels are chosen
+# on purpose -- the stated AMD/Intel GPUs have no modern CUDA/ROCm support, so
+# QLoRA is refused by name rather than attempted. Never required by the base
+# install, and the imports are lazy.
+training = [
+    "torch>=2.2",
+    "transformers>=4.40",
+    "peft>=0.10",
+    "accelerate>=0.30",
+    "safetensors>=0.4",
+    "datasets>=2.18",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -288,4 +303,12 @@ ignore_missing_imports = true
 # dotted module against the pattern, not its top-level parent).
 [[tool.mypy.overrides]]
 module = ["piper.*"]
+ignore_missing_imports = true
+
+# Controlled model-weight training is an optional extra
+# (``pip install .[training]``); ``ml/training/adapters.py`` imports
+# torch/transformers/peft/datasets lazily, so a base install must still
+# type-check. torch ships its own stubs; the rest have none.
+[[tool.mypy.overrides]]
+module = ["peft", "transformers"]
 ignore_missing_imports = true

@@ -59,6 +59,7 @@ FEATURE_QWEN_TTS = "qwen-tts"
 FEATURE_PIPER = "piper"
 FEATURE_AUDIOCPP = "audio.cpp"
 FEATURE_DOCS = "docs"
+FEATURE_TRAINING = "training"
 
 
 @dataclass(frozen=True)
@@ -332,6 +333,23 @@ FEATURES: dict[str, OptionalFeature] = {
             "into the data/docs folder."
         ),
         system_missing_note="no `.gguf` vision model file is present yet.",
+    ),
+    FEATURE_TRAINING: OptionalFeature(
+        key=FEATURE_TRAINING,
+        title="Model training (LoRA / PEFT)",
+        summary=(
+            "Fine-tune a local model with a parameter-efficient adapter. The "
+            "in-project transformer trains with no extra; this extra adds the "
+            "Hugging Face `transformers`/`peft` path for a safetensors base model."
+        ),
+        requirements_file="requirements-training.txt",
+        import_names=("torch", "transformers", "peft"),
+        system_note=(
+            "QLoRA additionally needs a CUDA-capable GPU (bitsandbytes); the stated "
+            "AMD/Intel GPUs do not support modern CUDA/ROCm acceleration, so CPU LoRA "
+            "is the supported path here."
+        ),
+        system_missing_note="the optional training runtime is not installed.",
     ),
 }
 

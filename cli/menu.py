@@ -425,6 +425,11 @@ def run_agents(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.agents", argv)
 
 
+def run_train(argv: Sequence[str] = ()) -> int:
+    """Controlled model-weight training (Phase 6): datasets, LoRA, promotion."""
+    return _run_module("cli.train", argv)
+
+
 def run_ask_teacher(argv: Sequence[str] = ()) -> int:
     """Fayd Al-Ruh the learner asks Fayd Al-Ruh the teacher, endlessly."""
     return _run_module("cli.asking", argv)
@@ -637,6 +642,10 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Agents: the seven personalities as independent agents (Phase 5)", run_agents, ("list",)),
     ("Agents: which personality should answer a question, and why", run_agents, ("route", "how do I measure porosity?")),
     ("Agents: the memory and learning isolation policy", run_agents, ("isolation",)),
+    ("Training: the controlled model-weight training status (Phase 6)", run_train, ("status",)),
+    ("Training: is this model trainable here? (compatibility)", run_train, ("compat",)),
+    ("Training: the pre-training feasibility report (no run)", run_train, ("feasibility",)),
+    ("Training: the Phase-6 held-out gate report", run_train, ("gate",)),
     ("Learning: what the system has learned, and how to teach it", run_learning, ("status",)),
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~4 GB)", run_image, ("download", "--approve")),
@@ -841,6 +850,7 @@ __all__ = [
     "run_scene3d",
     "run_selfcheck",
     "run_shared_models",
+    "run_train",
     "run_ultron",
     "run_ultron_chat",
     "run_update",
