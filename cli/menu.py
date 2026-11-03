@@ -420,6 +420,11 @@ def run_reasoning(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.reasoning", argv)
 
 
+def run_agents(argv: Sequence[str] = ()) -> int:
+    """The seven personalities as independent agents in one system (Phase 5)."""
+    return _run_module("cli.agents", argv)
+
+
 def run_ask_teacher(argv: Sequence[str] = ()) -> int:
     """Fayd Al-Ruh the learner asks Fayd Al-Ruh the teacher, endlessly."""
     return _run_module("cli.asking", argv)
@@ -629,6 +634,9 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Semantic space: what a word is used with (learned, local)", run_embeddings, ("status",)),
     ("Extract typed relations from text (preview, then learn)", run_relations, ("read", "Porosity increases permeability.")),
     ("Reasoning: decompose a question and route each part to its engine", run_reasoning, ("reason", "how do I measure porosity?")),
+    ("Agents: the seven personalities as independent agents (Phase 5)", run_agents, ("list",)),
+    ("Agents: which personality should answer a question, and why", run_agents, ("route", "how do I measure porosity?")),
+    ("Agents: the memory and learning isolation policy", run_agents, ("isolation",)),
     ("Learning: what the system has learned, and how to teach it", run_learning, ("status",)),
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~4 GB)", run_image, ("download", "--approve")),
@@ -794,6 +802,7 @@ __all__ = [
     "menu_loop",
     "missing_dependency_message",
     "run_agent",
+    "run_agents",
     "run_analogy",
     "run_ask_teacher",
     "run_banner",

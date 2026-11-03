@@ -6174,3 +6174,65 @@ regression monitor each can refuse a change.
   pipelines, the coordinator, the evaluation, the controller wiring, the gate, and
   the CLI, and `tests/test_cognition_window.py` pins the window's new section and
   its governed rollback. Gates: ruff clean, mypy OK, evaluation PASS, pytest green.
+
+- Phase 5 — **the seven personalities as independent cognitive agents in one shared
+  system**: a personality used to be a *character* (a persona, a configuration, a
+  learning record, and a mouth) with no single object owning its identity,
+  capabilities, working context, goals, memory access, and learning scope
+  together, and nothing that could route a request to the right personality,
+  delegate between them, or resolve their disagreements. `core/agents/` adds that
+  framework, **additively** and over the existing character system (which is
+  reused, never replaced). `registry.py` is the **personality registry**: one
+  `PersonalityProfile` per owner (identity, role, specialisation, style, model,
+  capabilities, memory scope, learning scope, privacy, configuration version),
+  resolving either vocabulary (`sources`/`jarvis`, `model`/`fayd_al_ruh`) to one
+  profile and an unknown key to the project's own model -- never a made-up
+  personality. `capabilities.py` is the **capability model**: a closed
+  `AgentCapability` vocabulary, a per-owner **hard ceiling** (`capability_ceiling`),
+  an effective set that is always `requested ∩ ceiling` (so a configuration
+  **cannot widen it**), a `CapabilityGateway` that decides and audits every request,
+  and `CapabilityDenied` on the strict path; `SEARCH`/`WRITE_FILES` are refused by
+  default. `memory_access.py` is the **memory access layer**: a personality reads
+  its **own** memory, the project's model reads a **shareable** character's, and a
+  character may **never** read another's (nor the model read Natasha's) -- the guard
+  runs **before any path is resolved** and a refusal raises `LearningAccessError`.
+  `learning_scope.py` is the **learning scope**: who a personality may learn from,
+  who may **contribute** to the aggregated dataset, and who is **excluded**
+  (Natasha); `aggregated_dataset_owners()` is the one function the corpus reads and
+  `aggregated_dataset_is_clean()` proves no private owner is present.
+  `context.py` is the **independent working context** (one bounded, owner-scoped
+  turn log per personality); `goals.py` is the **goal/task manager** (a parent/child
+  task tree, a depth bound, and the `TaskStatus` lifecycle
+  `pending → running → succeeded/failed/refused/timed_out/cancelled`); `runtime.py`
+  is the **agent runtime** (build a task, check capabilities, request a governor
+  grant, run an injected executor, enforce a timeout and a cancellation token,
+  validate the result -- a successful-but-empty answer is invalid -- record the
+  task, and publish lifecycle events); `routing.py` is the **task router**
+  (classify into a `TaskType`, score each suitable personality on **named factors**,
+  keep the choice across a follow-up turn, honour a manual override while refusing
+  a **non-character** one, and be **honest** when none is suitable);
+  `collaboration.py` is **bounded collaboration** (a depth bound, a per-collaboration
+  budget, a character-only target rule, and a provenance-carrying result);
+  `conflict.py` is **conflict resolution** (compare the positions, **preserve** the
+  disagreement by default, and let an opt-in `evidence` policy select only a
+  **clearly stronger** case -- never a near-tie); `communication.py` is the
+  **message bus**; `monitoring.py` is the **measured activity** (a refusal counted
+  as a refusal, not a failure); and `system.py` is the **unifying facade** that
+  composes them all over one shared configuration, so the CLI, the tests, and any
+  GUI drive the same system. **The Natasha guarantee** is enforced at three levels:
+  her **ceiling** omits `CONTRIBUTE_TRAINING`, her **scope** is non-contributing,
+  and the **corpus** (`core/character_learning.training_keys()`, fixed here -- it
+  excludes her, `character_learning_units` now defaults to it, and `persona_for` was
+  corrected to key by the **mouth** vocabulary) never reads her records. The
+  held-out gate `personality_agents_accuracy` (`core/agents/gate.py`, 42
+  judgements with **negative controls**) runs the **real** wiring and is **proven to
+  discriminate** (1.0 shipped, 0.0 empty, < 1.0 when a guard is removed), a metric
+  in `evaluation` (`overall` 0.9895 → 0.9897). `cli/agents.py` is the headless twin
+  (`python -m cli agents list|show|capabilities|route|run|collaborate|conflicts|
+  monitoring|isolation`), mirrored as three menu entries.
+  `tests/test_agents_phase5.py` (92 tests) and `tests/test_agents_cli_phase5.py`
+  (19 tests) pin the registry, capabilities, runtime, context, goals, memory access,
+  learning scope, the Natasha guarantee, routing, collaboration, conflict
+  resolution, communication, monitoring, the composed system, and the gate. Docs:
+  `docs/agents/MULTI_AGENT_ARCHITECTURE.md`, `docs/agents/AGENT_ISOLATION.md`,
+  `docs/agents/AGENT_RUNTIME.md`.

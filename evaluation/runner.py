@@ -7,6 +7,7 @@ from cognition.development import development_accuracy
 from cognition.knowledge_depth import knowledge_depth_accuracy
 from core.acceptance_policy import rejection_reason
 from core.action import Action
+from core.agents.gate import personality_agents_accuracy
 from core.analogy import analogy_accuracy
 from core.answer_analogy import analogy_answer_accuracy
 from core.answer_audit import (
@@ -244,6 +245,14 @@ class EvaluationMetrics:
     """The share of held-out tool-selection judgements satisfied: a bounded chooser
     picks only tools the sandbox allow-list permits and refuses a mutating tool in a
     read-only sandbox -- the model proposes, the sandbox disposes (Phase 4)."""
+
+    personality_agents_accuracy: float
+    """The share of held-out personality-agent judgements satisfied: the seven
+    personalities are independent agents -- each with its own identity, capabilities
+    (bounded by a hard ceiling a configuration cannot widen), working context,
+    memory and learning scope -- with Natasha's memory and learning isolated, the
+    router honest about when no personality is suitable, delegation bounded by
+    depth and budget, and conflicts preserved rather than voted away (Phase 5)."""
 
     knowledge_validation_accuracy: float
     """The share of held-out cognitive-core judgements satisfied: the event bus
@@ -1173,6 +1182,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     facade_value = facade_accuracy()
     hypothesis_value = hypothesis_accuracy()
     tool_selection_value = tool_selection_accuracy()
+    personality_agents_value = personality_agents_accuracy()
 
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
@@ -1251,6 +1261,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         facade_value,
         hypothesis_value,
         tool_selection_value,
+        personality_agents_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1315,6 +1326,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         reasoning_facade_accuracy=round(facade_value, 6),
         hypothesis_accuracy=round(hypothesis_value, 6),
         tool_selection_accuracy=round(tool_selection_value, 6),
+        personality_agents_accuracy=round(personality_agents_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

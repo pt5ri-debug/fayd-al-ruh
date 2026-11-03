@@ -409,17 +409,40 @@ def test_switcher_wraps_a_model_mouth_and_records_its_exchange(data_root) -> Non
 
 
 def test_record_written_by_one_run_trains_the_model_in_the_next(data_root) -> None:
-    """The whole bridge: a character learns, and the corpus picks it up."""
+    """The whole bridge: a **shareable** character learns, and the corpus picks it up."""
     from ai.characters import wrap_character
     from ml.llm import corpus
 
     mouth = _FakeMouth()
-    character = wrap_character("natasha", mouth, root=data_root)
+    character = wrap_character("ultron", mouth, root=data_root)
     character.ask("how are you?")
 
     text = corpus.build_corpus(include_characters=True)
-    assert "Natasha was asked: how are you?" in text
-    assert "Natasha answered: an answer" in text
+    assert "Ultron was asked: how are you?" in text
+    assert "Ultron answered: an answer" in text
+
+
+def test_private_character_learning_never_enters_the_training_corpus(data_root) -> None:
+    """Natasha's private learning is excluded from the aggregated corpus (Phase 5).
+
+    The task requires that the private character's learning never reach the
+    primary model's training dataset. This pins the exclusion through the **whole**
+    corpus bridge, not only the sentence helper.
+    """
+    from ai.characters import wrap_character
+    from ml.llm import corpus
+
+    mouth = _FakeMouth()
+    natasha = wrap_character("natasha", mouth, root=data_root)
+    natasha.ask("a private question")
+
+    text = corpus.build_corpus(include_characters=True)
+    assert "Natasha was asked: a private question" not in text
+    assert "Natasha answered" not in text
+    # And the sentence helper, asked for the aggregated set, omits her too.
+    sentences = cl.character_learning_sentences(root=data_root)
+    assert not any("Natasha" in sentence for sentence in sentences)
+    assert "natasha" not in cl.training_keys()
 
 
 def test_project_model_persona_is_used_by_the_switcher(data_root) -> None:

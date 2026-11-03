@@ -725,6 +725,21 @@ class CharacterLearning:
 
 # ------------------------------------------------------- the corpus bridge
 
+def training_keys() -> tuple[str, ...]:
+    """The characters whose learning may enter an **aggregated** training set.
+
+    The project's isolation policy is the authority: every character except the
+    private one (Natasha). This is the one place the exclusion is expressed, so
+    the corpus bridge and any other aggregated dataset ask it rather than
+    remembering the rule -- before this, ``character_learning_sentences()``
+    defaulted to **all** characters and Natasha's private learning reached the
+    main model's training text, which the task forbids.
+    """
+    from core.learning_isolation import CHARACTER_OWNERS, PRIVATE_OWNERS
+
+    return tuple(key for key in CHARACTER_OWNERS if key not in PRIVATE_OWNERS)
+
+
 def character_learning_sentences(
     keys: tuple[str, ...] | None = None,
     *,
@@ -735,16 +750,23 @@ def character_learning_sentences(
     Each durable fact becomes a sentence about what a character knows, and each
     exchange becomes a question/answer pair, so the **Fayd Al-Ruh model** trains
     on the same learning its characters gathered -- the bridge the task asks for.
-    Off by default in :func:`ml.llm.corpus.build_corpus` (a transcript is
-    personal), and de-duplicated so the same fact never trains twice.
+
+    The default set is :func:`training_keys` -- the **shareable** characters only.
+    Natasha is private and is **never** included unless a caller explicitly names
+    her key in ``keys`` (which the aggregated training path never does), so the
+    primary model's dataset excludes her by construction. Off by default in
+    :func:`ml.llm.corpus.build_corpus` (a transcript is personal), and
+    de-duplicated so the same fact never trains twice.
     """
     from collections import OrderedDict
 
-    chosen = tuple(CHARACTER_KEYS) if keys is None else tuple(keys)
+    from core.learning_isolation import mouth_key
+
+    chosen = training_keys() if keys is None else tuple(keys)
     spoken: list[str] = []
     for key in chosen:
         learning = CharacterLearning(key, root=root)
-        persona = persona_for(key)
+        persona = persona_for(mouth_key(learning.owner))
         for fact in learning.facts():
             spoken.append(f"{persona.name} learned that {fact}.")
         for exchange in learning.exchanges():
@@ -764,13 +786,17 @@ def character_learning_units(
 
     One document per character that has anything to say, so a document-level
     train/test split never puts a character's learning on both sides of the line.
-    A character with an empty record contributes nothing.
+    A character with an empty record contributes nothing. The default set is the
+    shareable characters (:func:`training_keys`), so Natasha's private learning is
+    never a unit of an aggregated dataset.
     """
-    chosen = tuple(CHARACTER_KEYS) if keys is None else tuple(keys)
+    from core.learning_isolation import mouth_key
+
+    chosen = training_keys() if keys is None else tuple(keys)
     units: list[str] = []
     for key in chosen:
         learning = CharacterLearning(key, root=root)
-        persona = persona_for(key)
+        persona = persona_for(mouth_key(learning.owner))
         parts: list[str] = []
         parts.extend(f"{persona.name} learned that {fact}." for fact in learning.facts())
         for exchange in learning.exchanges():
@@ -784,10 +810,10 @@ def character_learning_units(
 
 
 def character_learning_available(*, root: str | Path | None = None) -> bool:
-    """True when at least one character has a non-empty learning record."""
+    """True when at least one shareable character has a non-empty learning record."""
     return any(
         (learning := CharacterLearning(key, root=root)).facts() or learning.exchanges()
-        for key in CHARACTER_KEYS
+        for key in training_keys()
     )
 
 
@@ -807,4 +833,5 @@ __all__ = [
     "character_learning_units",
     "describe_characters",
     "persona_for",
+    "training_keys",
 ]
