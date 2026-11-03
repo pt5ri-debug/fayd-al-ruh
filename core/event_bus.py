@@ -264,6 +264,9 @@ EVENT_CONFLICT_DETECTED = "conflict.detected"
 EVENT_RESOURCE_DEFERRED = "resource.deferred"
 EVENT_MODEL_LOADED = "model.loaded"
 EVENT_MODEL_UNLOADED = "model.unloaded"
+EVENT_MEMORY_STORED = "memory.stored"
+EVENT_MEMORY_CONSOLIDATED = "memory.consolidated"
+EVENT_MEMORY_ARCHIVED = "memory.archived"
 
 EVENT_NAMES: tuple[str, ...] = (
     EVENT_CYCLE_STARTED,
@@ -276,6 +279,9 @@ EVENT_NAMES: tuple[str, ...] = (
     EVENT_RESOURCE_DEFERRED,
     EVENT_MODEL_LOADED,
     EVENT_MODEL_UNLOADED,
+    EVENT_MEMORY_STORED,
+    EVENT_MEMORY_CONSOLIDATED,
+    EVENT_MEMORY_ARCHIVED,
 )
 """Every lifecycle event the core declares, so a reader sees the vocabulary."""
 
@@ -294,6 +300,9 @@ __all__ = [
     "EVENT_CYCLE_STARTED",
     "EVENT_KNOWLEDGE_INTEGRATED",
     "EVENT_KNOWLEDGE_REJECTED",
+    "EVENT_MEMORY_ARCHIVED",
+    "EVENT_MEMORY_CONSOLIDATED",
+    "EVENT_MEMORY_STORED",
     "EVENT_MODEL_LOADED",
     "EVENT_MODEL_UNLOADED",
     "EVENT_NAMES",

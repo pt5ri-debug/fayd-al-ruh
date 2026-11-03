@@ -44,6 +44,8 @@ from core.event_bus import (
     EVENT_CYCLE_STARTED,
     EVENT_KNOWLEDGE_INTEGRATED,
     EVENT_KNOWLEDGE_REJECTED,
+    EVENT_MEMORY_CONSOLIDATED,
+    EVENT_MEMORY_STORED,
     EVENT_RELATION_LEARNED,
     EVENT_RESOURCE_DEFERRED,
     default_bus,
@@ -66,8 +68,11 @@ from core.language_reasoner import LanguageReasoner
 from core.learner import Learner, LearningCycle
 from core.learning_metrics import LearningMetrics
 from core.llm_reasoner import LLMReasoner, ModelAnalysis
+from core.long_term_memory import LongTermMemory
 from core.meaning_model import MeaningModel
 from core.memory import CognitiveMemory, MemoryRecall
+from core.memory_record import MemoryKind, MemoryRecord
+from core.memory_retrieval import MemoryRetriever
 from core.metacognition import Metacognition, MetacognitiveReport
 from core.model_interface import CognitiveModel, ModelRequest, ModelResponse
 from core.observation import Observation
@@ -132,6 +137,8 @@ class CognitiveController:
         memory: CognitiveMemory | None = None,
         state: CognitiveState | None = None,
         history: StateHistory | None = None,
+        *,
+        long_term_memory: LongTermMemory | None = None,
     ) -> None:
 
         self.graph = (
@@ -238,6 +245,25 @@ class CognitiveController:
             validator=self.knowledge_validator,
             on_event=self._on_integration,
         )
+
+        # Phase 2: the durable long-term memory. It is optional -- a controller
+        # built without one behaves exactly as before -- and when present it is
+        # the four-category memory (working, episodic, semantic, procedural) over
+        # one SQLite store, read through the one retrieval interface. The memory
+        # is *linked* to the Phase-1 core, never a competing graph: a semantic
+        # memory references the core's entities/relations/evidence.
+        self.long_term_memory = long_term_memory
+        self.memory_retriever = (
+            MemoryRetriever(long_term_memory, graph=self.graph)
+            if long_term_memory is not None
+            else None
+        )
+
+    def _publish_memory(self, name: str, payload: dict) -> None:
+        """Publish a memory lifecycle event, if the core has an event bus."""
+        events = getattr(self, "events", None)
+        if events is not None:
+            events.publish(name, payload, source="memory")
 
     def reason(
         self,
@@ -1146,6 +1172,104 @@ class CognitiveController:
             "resources": self.resource_governor.snapshot(),
             "graph": self.knowledge_query.statistics(),
             "integrator": self.knowledge_integrator.describe(),
+        }
+
+    # -- Phase 2: the long-term memory -------------------------------------
+
+    def remember(
+        self,
+        content: str,
+        *,
+        kind: MemoryKind | str = MemoryKind.EPISODIC,
+        summary: str = "",
+        source: str = "system",
+        source_reference: str = "",
+        confidence: float = 0.5,
+        importance: float = 0.5,
+        entities: tuple[str, ...] = (),
+        relations: tuple[tuple[str, str, str], ...] = (),
+        evidence_ids: tuple[str, ...] = (),
+        task_refs: tuple[str, ...] = (),
+        tags: tuple[str, ...] = (),
+        metadata: dict | None = None,
+    ) -> MemoryRecord | None:
+        """Capture one memory into the durable long-term memory.
+
+        Returns ``None`` when no long-term memory is attached (a controller built
+        without one behaves exactly as before), so a caller can call it
+        unconditionally. The capture is published on the event bus, so an
+        observer sees every memory without being called.
+        """
+        if self.long_term_memory is None:
+            return None
+        record = self.long_term_memory.capture(
+            content,
+            kind=kind,
+            summary=summary,
+            source=source,
+            source_reference=source_reference,
+            confidence=confidence,
+            importance=importance,
+            entities=entities,
+            relations=relations,
+            evidence_ids=evidence_ids,
+            task_refs=task_refs,
+            tags=tags,
+            metadata=metadata,
+        )
+        self._publish_memory(
+            EVENT_MEMORY_STORED,
+            {"record_id": record.record_id, "kind": record.kind.value, "source": record.source},
+        )
+        return record
+
+    def recall(
+        self,
+        query: str,
+        *,
+        kinds: tuple[MemoryKind | str, ...] | None = None,
+        limit: int = 20,
+        include_archived: bool = False,
+    ):
+        """Retrieve the memories most relevant to ``query``.
+
+        Returns an empty report when no long-term memory is attached, so the
+        method is safe to call on any controller.
+        """
+        if self.memory_retriever is None:
+            from core.memory_retrieval import RetrievalReport
+
+            return RetrievalReport(query=query)
+        return self.memory_retriever.retrieve(
+            query, kinds=kinds, limit=limit, include_archived=include_archived
+        )
+
+    def consolidate_memory(self, *, minimum_importance: float = 0.5):
+        """Promote the working memory worth keeping into episodic memory."""
+        if self.long_term_memory is None:
+            from core.long_term_memory import PromotionReport
+
+            return PromotionReport()
+        report = self.long_term_memory.promote_working(minimum_importance=minimum_importance)
+        if report.changed:
+            self._publish_memory(
+                EVENT_MEMORY_CONSOLIDATED,
+                {"promoted": list(report.promoted)},
+            )
+        return report
+
+    def long_term_memory_status(self) -> dict:
+        """A snapshot of the long-term memory, or an honest "not attached"."""
+        if self.long_term_memory is None:
+            return {"attached": False, "reason": "no long-term memory is attached."}
+        status = self.long_term_memory.status()
+        return {
+            "attached": True,
+            "owner": status.owner,
+            "counts": status.counts,
+            "working": status.working,
+            "archived": status.archived,
+            "schema_version": status.schema_version,
         }
 
     def _on_resource_decision(self, decision) -> None:

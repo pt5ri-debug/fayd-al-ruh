@@ -69,6 +69,14 @@ refused by the validation service; no reasoning result changes.
 
 ## Phase 2 — Long-Term Memory Architecture
 
+> **Status: ✅ DELIVERED** (2026-11-03, branch `feature/phase-2-memory`). See
+> `docs/architecture/PHASE_2_IMPLEMENTATION_REPORT.md`. Six new modules
+> (`core/memory_record.py`, `core/memory_db.py`, `core/long_term_memory.py`,
+> `core/memory_retrieval.py`, `core/memory_management.py`, `core/memory_gate.py`),
+> two extended (`memory_consolidator`, `memory_retriever`), the controller wired
+> with an optional `long_term_memory=`, and the held-out metric
+> `memory_architecture_accuracy` = **1.0000**. Overall 0.9880 → 0.9882.
+
 **Goal:** make episodic and semantic memory durable, consolidating, and
 conflict-checked across sessions — the four-memory model the task requires.
 
