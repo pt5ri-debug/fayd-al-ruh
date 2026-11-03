@@ -151,6 +151,30 @@ Phase 1's `KnowledgeValidator` already uses.)
 
 ---
 
+## 3b. Learning ✅ CLOSED (Phase 3)
+
+Phase 3 unified the two symbolic learning paths behind one governed pipeline.
+Before it, knowledge learning (`learning_pipeline`, `continuous_learning`,
+`knowledge_update`), experience learning (`cognition/learning_system`), feedback,
+and pattern/procedure extraction each lived in a different place with no single
+entry point, no durable audit trail, and no versioned procedures. Phase 3 adds:
+
+- `core/learning_events.py` — one auditable record per learning act;
+- `core/learning_store.py` — the durable, versioned, transactional store (one per
+  owner) with **append-only** rollback;
+- `core/knowledge_learning.py`, `core/experience_learning.py`,
+  `core/feedback_processing.py`, `core/pattern_learning.py` — the four pipelines,
+  each reusing the Phase-1 core and the Phase-2 memory;
+- `core/learning_coordinator.py` — the one governed entry point, structurally
+  isolated per personality (Natasha excluded from the main model's dataset);
+- `core/learning_evaluation.py` — the **measured** learning delta;
+- `core/learning_gate.py` — the held-out gate `learning_accuracy` (22 judgements,
+  with negative controls).
+
+No model weight is touched. See `docs/architecture/PHASE_3_IMPLEMENTATION_REPORT.md`.
+
+---
+
 ## 4. Offline guarantees
 
 ### G-8 · Offline operation is not enforced or tested — **P0**
@@ -334,6 +358,9 @@ modify model weights).
 | G-2 | No LoRA/PEFT | P0 | new `core/finetune.py` + `ml/lora/` |
 | G-4 | No event bus | P0 | new `core/event_bus.py` |
 | G-6 | Memory not durable | P0 | ✅ closed (Phase 2: `memory_db`+`long_term_memory`) |
+| G-L1 | Two symbolic learning paths, no one governed pipeline | P0 | ✅ closed (Phase 3: `learning_coordinator`) |
+| G-L2 | No durable, versioned learning audit trail | P0 | ✅ closed (Phase 3: `learning_store`+`learning_events`) |
+| G-L3 | No measured learning evaluation / held-out gate | P0 | ✅ closed (Phase 3: `learning_evaluation`+`learning_gate`) |
 | G-8 | Offline not enforced/tested | P0 | new test + hard-off switch |
 | G-9 | Self-improvement not automated | P0 | new `core/self_improvement_loop.py` |
 | G-16 | No offline/recovery/backup tests | P0 | new tests |

@@ -124,6 +124,12 @@ class CognitionDialog(ThemedDialog):
         self._turn_pump: str | None = None
 
         self._statement_var = tk.StringVar(value="")
+        self._learn_knowledge_var = tk.StringVar(value="")
+        self._learn_goal_var = tk.StringVar(value="")
+        self._learn_outcome_var = tk.StringVar(value="")
+        self._learn_feedback_kind_var = tk.StringVar(value="correct")
+        self._learn_feedback_var = tk.StringVar(value="")
+        self._learn_version_var = tk.StringVar(value="1")
         self._command_var = tk.StringVar(value="")
         self._study_count_var = tk.StringVar(value="200")
 
@@ -294,6 +300,7 @@ class CognitionDialog(ThemedDialog):
         self._build_depth_section(column)
         self._build_metacognition_section(column)
         self._build_learning_section(column)
+        self._build_learning_p3_section(column)
         self._build_consolidation_section(column)
         self._build_training_section(column)
         self._build_characters_section(column)
@@ -372,6 +379,90 @@ class CognitionDialog(ThemedDialog):
         self._cap_button(section, "learn", self._on_learn)
         self._cap_button(section, "recall", self._on_recall)
         self._cap_button(section, "learning_stats", self._on_learning_stats)
+
+    def _build_learning_p3_section(self, column: SidebarColumn) -> None:
+        section = column.add("learning3", "Learning & Experience", icon="🧠")
+        self._section_note(section, "learning3")
+        wrap = tk.Frame(section, bg=self.theme.surface)
+        wrap.pack(fill="x", padx=12, pady=(4, 0))
+        tk.Label(
+            wrap, text="Statement to learn as knowledge", bg=self.theme.surface,
+            fg=self.theme.text_secondary, font=self._type.font("2xs"), anchor="w",
+        ).pack(fill="x")
+        entry = tk.Entry(
+            wrap, textvariable=self._learn_knowledge_var, bg=self.theme.base,
+            fg=self.theme.foreground, relief="flat", highlightthickness=1,
+            highlightbackground=self.theme.border_subtle, highlightcolor=self.theme.primary,
+            insertbackground=self.theme.foreground, font=self._type.font("xs"),
+        )
+        entry.pack(fill="x", ipady=4, pady=(2, 4))
+        entry.bind("<Return>", lambda _e: self._on_learn_knowledge())
+        self._cap_button(section, "learn_knowledge", self._on_learn_knowledge)
+
+        exp = tk.Frame(section, bg=self.theme.surface)
+        exp.pack(fill="x", padx=12, pady=(6, 0))
+        tk.Label(
+            exp, text="Goal and outcome of an experience", bg=self.theme.surface,
+            fg=self.theme.text_secondary, font=self._type.font("2xs"), anchor="w",
+        ).pack(fill="x")
+        tk.Entry(
+            exp, textvariable=self._learn_goal_var, bg=self.theme.base,
+            fg=self.theme.foreground, relief="flat", highlightthickness=1,
+            highlightbackground=self.theme.border_subtle, highlightcolor=self.theme.primary,
+            insertbackground=self.theme.foreground, font=self._type.font("xs"),
+        ).pack(fill="x", ipady=4, pady=(2, 2))
+        tk.Entry(
+            exp, textvariable=self._learn_outcome_var, bg=self.theme.base,
+            fg=self.theme.foreground, relief="flat", highlightthickness=1,
+            highlightbackground=self.theme.border_subtle, highlightcolor=self.theme.primary,
+            insertbackground=self.theme.foreground, font=self._type.font("xs"),
+        ).pack(fill="x", ipady=4, pady=(0, 4))
+        self._cap_button(section, "learn_experience", self._on_learn_experience)
+
+        fb = tk.Frame(section, bg=self.theme.surface)
+        fb.pack(fill="x", padx=12, pady=(6, 0))
+        tk.Label(
+            fb, text="Feedback on an answer", bg=self.theme.surface,
+            fg=self.theme.text_secondary, font=self._type.font("2xs"), anchor="w",
+        ).pack(fill="x")
+        kinds = (
+            "correct", "incorrect", "missing", "preferred",
+            "rejected", "correction", "task_success", "task_failure",
+        )
+        self._learn_feedback_kind_var = tk.StringVar(value=kinds[0])
+        kind_menu = tk.OptionMenu(fb, self._learn_feedback_kind_var, *kinds)
+        kind_menu.configure(
+            bg=self.theme.surface_raised, fg=self.theme.foreground, relief="flat",
+            highlightthickness=0, font=self._type.font("2xs"),
+            activebackground=self.theme.interactive_active,
+        )
+        kind_menu["menu"].configure(bg=self.theme.surface, fg=self.theme.foreground)
+        kind_menu.pack(fill="x", pady=(2, 2))
+        tk.Entry(
+            fb, textvariable=self._learn_feedback_var, bg=self.theme.base,
+            fg=self.theme.foreground, relief="flat", highlightthickness=1,
+            highlightbackground=self.theme.border_subtle, highlightcolor=self.theme.primary,
+            insertbackground=self.theme.foreground, font=self._type.font("xs"),
+        ).pack(fill="x", ipady=4, pady=(0, 4))
+        self._cap_button(section, "learn_feedback", self._on_learn_feedback)
+
+        self._cap_button(section, "learn_procedures", self._on_learn_procedures)
+        self._cap_button(section, "learn_status", self._on_learn_status)
+        self._cap_button(section, "learn_history", self._on_learn_history)
+
+        ver = tk.Frame(section, bg=self.theme.surface)
+        ver.pack(fill="x", padx=12, pady=(6, 0))
+        tk.Label(
+            ver, text="Version to roll back to", bg=self.theme.surface,
+            fg=self.theme.text_secondary, font=self._type.font("2xs"), anchor="w",
+        ).pack(side="left")
+        tk.Entry(
+            ver, textvariable=self._learn_version_var, width=5, bg=self.theme.base,
+            fg=self.theme.foreground, relief="flat", highlightthickness=1,
+            highlightbackground=self.theme.border_subtle, highlightcolor=self.theme.primary,
+            insertbackground=self.theme.foreground, font=self._type.font("xs"),
+        ).pack(side="right")
+        self._cap_button(section, "learn_rollback", self._on_learn_rollback)
 
     def _build_training_section(self, column: SidebarColumn) -> None:
         section = column.add("training", "Gradual Training", icon="🎓")
@@ -917,6 +1008,70 @@ class CognitionDialog(ThemedDialog):
             self._add_message("assistant", f"Learning system: {result}")
 
         self._start_work(job, finish)
+
+    # -- Phase 3: governed learning & experience --------------------------
+
+    def _on_learn_knowledge(self) -> None:
+        text = self._learn_knowledge_var.get().strip()
+        if not text:
+            self._add_message("error", "Type a statement to learn as knowledge first.")
+            return
+        self._add_message("user", f"learn knowledge: {text}")
+        self._learn_knowledge_var.set("")
+        self._start_work(lambda: self.service.learn_knowledge(text), self._finish_report)
+
+    def _on_learn_experience(self) -> None:
+        goal = self._learn_goal_var.get().strip()
+        outcome = self._learn_outcome_var.get().strip()
+        if not goal or not outcome:
+            self._add_message("error", "Type both a goal and an outcome first.")
+            return
+        self._add_message("user", f"experience: {goal} -> {outcome}")
+        self._learn_goal_var.set("")
+        self._learn_outcome_var.set("")
+        self._start_work(
+            lambda: self.service.record_experience(goal=goal, outcome=outcome),
+            self._finish_report,
+        )
+
+    def _on_learn_feedback(self) -> None:
+        kind = self._learn_feedback_kind_var.get()
+        subject = self._learn_feedback_var.get().strip()
+        if not subject:
+            self._add_message("error", "Type what the feedback is about first.")
+            return
+        self._add_message("user", f"feedback ({kind}): {subject}")
+        self._learn_feedback_var.set("")
+        self._start_work(
+            lambda: self.service.record_feedback(kind, subject), self._finish_report
+        )
+
+    def _on_learn_procedures(self) -> None:
+        self._start_work(self.service.extract_procedures, self._finish_report)
+
+    def _on_learn_status(self) -> None:
+        self._start_work(self.service.learning_status, self._finish_report)
+
+    def _on_learn_history(self) -> None:
+        self._start_work(self.service.learning_history, self._finish_report)
+
+    def _on_learn_rollback(self) -> None:
+        raw = self._learn_version_var.get().strip()
+        try:
+            version = int(raw)
+        except ValueError:
+            self._add_message("error", f"'{raw}' is not a version number.")
+            return
+        if not self._confirm(
+            f"Roll the learning back to version {version}?",
+            "This marks the learning events at or after that version as rolled back "
+            "and returns the store to it. The reversal is append-only, so nothing is "
+            "deleted and the audit trail survives. Continue?",
+        ):
+            return
+        self._start_work(
+            lambda: self.service.rollback_learning(version), self._finish_report
+        )
 
     # -- consolidation ----------------------------------------------------
 

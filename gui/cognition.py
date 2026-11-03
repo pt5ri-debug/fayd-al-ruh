@@ -189,6 +189,7 @@ class CognitiveService:
         self._trainer = trainer
         self._evaluator = evaluator
         self._character_evaluator = character_evaluator
+        self._learning_coordinator = None
 
     # -- lazily built engines ----------------------------------------------
 
@@ -215,6 +216,74 @@ class CognitiveService:
     @property
     def registry(self) -> ModelRegistry:
         return self.trainer.registry
+
+    # -- Phase 3: cognitive and experience-based learning -------------------
+
+    @property
+    def learning_coordinator(self):
+        """The Phase-3 learning coordinator over this controller's own knowledge."""
+        if self._learning_coordinator is None:
+            self._learning_coordinator = self.controller.learning()
+        return self._learning_coordinator
+
+    def learn_knowledge(self, text: str, *, source: str = "user", confidence: float = 0.6) -> OperationReport:
+        """Learn one knowledge item through the governed Phase-3 pipeline."""
+        result = self.learning_coordinator.learn_knowledge(
+            text, source=source, confidence=confidence
+        )
+        verdict = "integrated" if result.changed else "not integrated (no supported claim)"
+        return OperationReport(ok=True, title=result.describe(), lines=(verdict,))
+
+    def record_experience(
+        self, *, goal: str, outcome: str, success: bool = True, approach: str = ""
+    ) -> OperationReport:
+        """Capture one experience and the lesson it supports."""
+        from core.experience_learning import experience_from_result
+
+        experience = experience_from_result(
+            goal, outcome, success=success, approach=approach, importance=0.6
+        )
+        result = self.learning_coordinator.learn_experience(experience)
+        lines = [result.describe()]
+        if result.lesson is not None:
+            lines.append(f"lesson: {result.lesson.describe()}")
+        return OperationReport(ok=True, title=f"Experience: {goal}", lines=tuple(lines))
+
+    def record_feedback(self, kind: str, subject: str, **kwargs: Any) -> OperationReport:
+        """Process one feedback record."""
+        outcome = self.learning_coordinator.record_feedback(kind, subject, **kwargs)
+        return OperationReport(ok=True, title=outcome.describe(), lines=(outcome.reason,))
+
+    def extract_procedures(self) -> OperationReport:
+        """Extract versioned procedures from the stored experiences."""
+        report = self.learning_coordinator.extract_patterns()
+        lines = tuple(report.promoted) or ("no procedure reached the support threshold yet.",)
+        return OperationReport(ok=True, title=report.describe(), lines=lines)
+
+    def learning_status(self) -> OperationReport:
+        """A snapshot of the Phase-3 learning system."""
+        status = self.learning_coordinator.status()
+        return OperationReport(ok=True, title=status.describe(), lines=tuple(sorted(status.counts)))
+
+    def learning_metrics(self) -> OperationReport:
+        """The measured learning metrics (never asserted)."""
+        from core.learning_evaluation import learning_metrics
+
+        metrics = learning_metrics(self.learning_coordinator)
+        lines = tuple(f"{name}: {value:g}" for name, value in sorted(metrics.items()))
+        return OperationReport(ok=True, title="Learning metrics", lines=lines)
+
+    def learning_history(self, *, limit: int = 20) -> OperationReport:
+        """The learning audit trail, newest first."""
+        events = self.learning_coordinator.history(limit=limit)
+        lines = tuple(event.describe() for event in events) or ("no learning events recorded yet.",)
+        return OperationReport(ok=True, title="Learning history", lines=lines)
+
+    def rollback_learning(self, version: int) -> OperationReport:
+        """Restore an earlier learning version (the audit trail is kept)."""
+        reversals = self.learning_coordinator.rollback(version)
+        lines = (f"rolled back {len(reversals)} event(s); the audit trail is kept.",)
+        return OperationReport(ok=bool(reversals), title=f"Rollback to version {version}", lines=lines)
 
     # -- proactive mind -----------------------------------------------------
 

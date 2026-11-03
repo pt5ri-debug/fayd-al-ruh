@@ -41,6 +41,7 @@ CATEGORY_CHARACTERS = "characters"
 CATEGORY_INDICATORS = "indicators"
 CATEGORY_SYSTEM = "system"
 CATEGORY_COMPOSER = "composer"
+CATEGORY_LEARNING_P3 = "learning3"
 
 CATEGORIES: tuple[str, ...] = (
     CATEGORY_MIND,
@@ -48,6 +49,7 @@ CATEGORIES: tuple[str, ...] = (
     CATEGORY_DEPTH,
     CATEGORY_METACOGNITION,
     CATEGORY_LEARNING,
+    CATEGORY_LEARNING_P3,
     CATEGORY_CONSOLIDATION,
     CATEGORY_TRAINING,
     CATEGORY_CHARACTERS,
@@ -56,6 +58,15 @@ CATEGORIES: tuple[str, ...] = (
     CATEGORY_COMPOSER,
 )
 
+#: The CLI module that owns each command, and the factory that builds its
+#: argument parser. ``catalog_accuracy`` imports each lazily and resolves every
+#: capability's command against the **real** subcommands, so a CLI string that no
+#: longer parses fails the gate.
+_CLI_PARSERS: dict[str, str] = {
+    "cognition": "_parser",
+    "learning": "_build_parser",
+}
+
 #: The readable name of each section, so a surface never invents one.
 CATEGORY_TITLES: dict[str, str] = {
     CATEGORY_MIND: "Proactive Mind",
@@ -63,6 +74,7 @@ CATEGORY_TITLES: dict[str, str] = {
     CATEGORY_DEPTH: "Knowledge Depth (widest reach)",
     CATEGORY_METACOGNITION: "Metacognition (self-model)",
     CATEGORY_LEARNING: "Cognitive Learning",
+    CATEGORY_LEARNING_P3: "Learning & Experience (governed)",
     CATEGORY_CONSOLIDATION: "Consolidation & Review",
     CATEGORY_TRAINING: "Gradual Training",
     CATEGORY_CHARACTERS: "Character Evaluation",
@@ -78,6 +90,7 @@ CATEGORY_ARABIC: dict[str, str] = {
     CATEGORY_DEPTH: "عمق المعرفة (أوسع مدى)",
     CATEGORY_METACOGNITION: "التفكير الفوقي (نموذج الذات)",
     CATEGORY_LEARNING: "التعلّم الإدراكي",
+    CATEGORY_LEARNING_P3: "التعلّم والخبرة (مُحكَم)",
     CATEGORY_CONSOLIDATION: "الترسيخ والمراجعة",
     CATEGORY_TRAINING: "التدريب المتدرّج",
     CATEGORY_CHARACTERS: "تقييم الشخصيات",
@@ -100,6 +113,10 @@ CATEGORY_SUMMARIES: dict[str, str] = {
     "pay off, where it stagnates, and how it will search next.",
     CATEGORY_LEARNING: "Six memories and the operations over them: learn a fact, "
     "recall from every memory, and record an experience with its outcome.",
+    CATEGORY_LEARNING_P3: "The governed Phase-3 learning pipeline: learn a fact from "
+    "text into the knowledge graph, record an experience and its lesson, give "
+    "feedback, extract a versioned procedure, and roll back — each with a durable, "
+    "auditable event and no model weight touched.",
     CATEGORY_CONSOLIDATION: "Turn raw experience into durable, reviewed knowledge: "
     "extract patterns, review what is due, and track practised skills.",
     CATEGORY_TRAINING: "Staged, rollback-safe training of the project's own model, "
@@ -125,6 +142,9 @@ CATEGORY_SUMMARIES_AR: dict[str, str] = {
     "وكيف سيبحث في المرة القادمة.",
     CATEGORY_LEARNING: "ستّ ذاكرات وعملياتها: تعلّم حقيقة، واسترجع من كل ذاكرة، "
     "وسجّل تجربة بنتيجتها.",
+    CATEGORY_LEARNING_P3: "مسار التعلّم المُحكَم (المرحلة 3): تعلّم حقيقة من نصّ في "
+    "رسم المعرفة، وسجّل تجربة ودرسها، وأعطِ تغذية راجعة، واستخرج إجراءً مُصدَّرًا، "
+    "واردد التراجع — كلٌّ بحدث دائم قابل للتدقيق ودون لمس أي وزن للنموذج.",
     CATEGORY_CONSOLIDATION: "تحويل الخبرة الخام إلى معرفة دائمة مراجَعة: استخراج "
     "الأنماط، ومراجعة المستحق، وتتبّع المهارات المتدرَّب عليها.",
     CATEGORY_TRAINING: "تدريب مرحلي آمن التراجع لنموذج المشروع، بمنهج تكيّفي يختار "
@@ -461,6 +481,121 @@ CAPABILITIES: tuple[Capability, ...] = (
         arabic_summary="سطر واحد يلخّص أعداد نظام التعلّم الدائمة، لترى امتلاء كل ذاكرة "
         "بنظرة.",
         category=CATEGORY_LEARNING,
+    ),
+    # -- Phase 3: governed learning & experience ---------------------------
+    Capability(
+        key="learn_knowledge",
+        title="Learn knowledge from text",
+        summary="Reads typed relations out of a sentence with the real pattern "
+        "matcher and folds each accepted claim into the knowledge graph through the "
+        "Phase-1 validator and transactional integrator. A claim with no evidence is "
+        "never integrated, a duplicate reinforces without a second edge, and a "
+        "contradiction is preserved rather than resolved.",
+        outcome="How many claims were read and integrated, with the duplicates, "
+        "conflicts, and rejections named — never a claim the sources do not support.",
+        governed=False,
+        cli='python -m cli learning knowledge "porosity increases permeability"',
+        arabic_title="تعلّم معرفة من نصّ",
+        arabic_summary="يقرأ العلاقات المصنّفة من جملة بالمطابق النمطي الحقيقي، ويطوي كل "
+        "ادّعاء مقبول في رسم المعرفة عبر مدقّق المرحلة الأولى ومدموجها المعاملاتي. لا "
+        "يُدمج ادّعاء بلا دليل، والتكرار يعزّز دون حافة ثانية، والتناقض يُحفظ لا يُحلّ.",
+        category=CATEGORY_LEARNING_P3,
+        writes=True,
+    ),
+    Capability(
+        key="learn_experience",
+        title="Record an experience and its lesson",
+        summary="Captures a task's goal, approach, and outcome as an episodic memory, "
+        "compares the intended result with the actual one, and promotes a lesson to a "
+        "procedure only when it has real support — a single success never promotes.",
+        outcome="The captured experience and the lesson it supports, with the "
+        "support it needs before it becomes a trusted procedure.",
+        governed=False,
+        cli='python -m cli learning experience "raise permeability" "acid worked" --success',
+        arabic_title="سجّل تجربة ودرسها",
+        arabic_summary="يلتقط هدف مهمة ومنهجها ونتيجتها كذاكرة عرضية، ويقارن النتيجة "
+        "المرجوة بالواقعة، ولا يرقّي درسًا إلى إجراء إلا بدعم حقيقي — فنجاح واحد لا يرقّي.",
+        category=CATEGORY_LEARNING_P3,
+        writes=True,
+    ),
+    Capability(
+        key="learn_feedback",
+        title="Give feedback on an answer",
+        summary="Turns a stated reaction — correct, incorrect, missing, preferred, "
+        "rejected, a correction, or a task success or failure — into a governed "
+        "learning signal. Silence is never approval, and one record never overrides "
+        "reliable evidence.",
+        outcome="The stored signal with its weight and provenance, correctable and "
+        "retractable afterwards.",
+        governed=False,
+        cli="python -m cli learning feedback correct answer-1",
+        arabic_title="أعطِ تغذية راجعة عن إجابة",
+        arabic_summary="يحوّل ردّ فعل مصرّحًا به — صحيح أو خاطئ أو ناقص أو مفضّل أو مرفوض "
+        "أو تصحيحًا أو نجاح مهمة أو فشلها — إلى إشارة تعلّم مُحكَمة. الصمت ليس موافقة، "
+        "وسجلٌّ واحد لا يتجاوز دليلًا موثوقًا.",
+        category=CATEGORY_LEARNING_P3,
+        writes=True,
+    ),
+    Capability(
+        key="learn_procedures",
+        title="Extract versioned procedures",
+        summary="Reads the durable episodic memories and folds recurring approaches "
+        "into versioned procedures, counting supporting and contradicting experiences "
+        "separately and recording each one's applicability conditions and failure "
+        "modes — a weak pattern is never promoted to a trusted procedure.",
+        outcome="How many procedures were found, promoted, or updated, each at its "
+        "own version with its support and its known failure modes.",
+        governed=False,
+        cli="python -m cli learning patterns",
+        arabic_title="استخرج إجراءات مُصدَّرة",
+        arabic_summary="يقرأ الذاكرات العرضية الدائمة ويطوي المناهج المتكرّرة في إجراءات "
+        "مُصدَّرة، مع عدّ الدعم والتضادّ منفصلين وتسجيل شروط الانطباق وأنماط الفشل — "
+        "ولا يُرقّى نمط ضعيف إلى إجراء موثوق.",
+        category=CATEGORY_LEARNING_P3,
+        writes=True,
+    ),
+    Capability(
+        key="learn_status",
+        title="What the Phase-3 learning holds",
+        summary="One snapshot of the governed learning system: how many knowledge, "
+        "experience, and feedback events it has, its procedures and trusted "
+        "procedures, its lessons, and the version in force.",
+        outcome="The durable counts and the current version, read from the store.",
+        governed=False,
+        cli="python -m cli learning status",
+        arabic_title="ما يحمله تعلّم المرحلة 3",
+        arabic_summary="لقطة واحدة لنظام التعلّم المُحكَم: كم حدث معرفة وخبرة وتغذية "
+        "راجعة لديه، وإجراءاته وإجراءاته الموثوقة ودروسه، والإصدار السارى.",
+        category=CATEGORY_LEARNING_P3,
+    ),
+    Capability(
+        key="learn_history",
+        title="The learning audit trail",
+        summary="Reads the append-only audit trail, newest first: every knowledge, "
+        "experience, feedback, and pattern event with its owner, source, outcome, and "
+        "whether it was applied.",
+        outcome="The recent learning events, each with its outcome and provenance.",
+        governed=False,
+        cli="python -m cli learning history --limit 20",
+        arabic_title="سجلّ تدقيق التعلّم",
+        arabic_summary="يقرأ سجلّ التدقيق الإضافي، الأحدث أولًا: كل حدث معرفة وخبرة "
+        "وتغذية راجعة ونمط مع مالكه ومصدره ونتيجته وهل طُبّق.",
+        category=CATEGORY_LEARNING_P3,
+    ),
+    Capability(
+        key="learn_rollback",
+        title="Roll the learning back a version",
+        summary="Marks the learning events at or after a version as rolled back and "
+        "returns the store to that version. The reversal is append-only, so nothing "
+        "is deleted and the whole audit trail survives.",
+        outcome="How many events were rolled back; the trail is kept.",
+        governed=True,
+        cli="python -m cli learning rollback 1 --approve",
+        arabic_title="اردد التعلّم إلى إصدار سابق",
+        arabic_summary="يوسم أحداث التعلّم عند إصدار ما أو بعده بأنها مردودة ويعيد المخزن "
+        "إلى ذلك الإصدار. والردّ إضافي بحت، فلا يُحذف شيء ويبقى سجلّ التدقيق كاملًا.",
+        category=CATEGORY_LEARNING_P3,
+        writes=True,
     ),
     # -- consolidation -----------------------------------------------------
     Capability(
@@ -853,6 +988,13 @@ WINDOW_BUTTONS: frozenset[str] = frozenset(
         "learn",
         "recall",
         "learning_stats",
+        "learn_knowledge",
+        "learn_experience",
+        "learn_feedback",
+        "learn_procedures",
+        "learn_status",
+        "learn_history",
+        "learn_rollback",
         "train",
         "train_gradual",
         "train_autonomous",
@@ -870,18 +1012,18 @@ WINDOW_BUTTONS: frozenset[str] = frozenset(
 )
 
 
-def _cli_subcommands() -> frozenset[str]:
-    """The real subcommands of ``python -m cli cognition``.
+def _cli_subcommands(module: str = "cognition") -> frozenset[str]:
+    """The real subcommands of ``python -m cli <module>``.
 
     The CLI module is imported lazily so this catalogue stays importable from the
     window and from a test without pulling the CLI in at module load.
     """
     try:
         import argparse
+        import importlib
 
-        from cli.cognition import _parser
-
-        parser = _parser()
+        cli_module = importlib.import_module(f"cli.{module}")
+        parser = getattr(cli_module, _CLI_PARSERS[module])()
         for action in parser._actions:
             if isinstance(action, argparse._SubParsersAction):
                 return frozenset(str(choice) for choice in action.choices)
@@ -890,14 +1032,18 @@ def _cli_subcommands() -> frozenset[str]:
     return frozenset()
 
 
-def _command_token(cli: str) -> str:
-    """The subcommand named in a CLI string (``python -m cli cognition think``)."""
+def _command_parts(cli: str) -> tuple[str, str]:
+    """The module and subcommand named in a CLI string.
+
+    ``python -m cli cognition think`` -> ``("cognition", "think")``;
+    ``python -m cli learning knowledge "..."`` -> ``("learning", "knowledge")``.
+    """
     parts = cli.split()
-    if "cognition" in parts:
-        index = parts.index("cognition")
-        if index + 1 < len(parts):
-            return parts[index + 1]
-    return parts[-1] if parts else ""
+    if "cli" in parts:
+        index = parts.index("cli")
+        if index + 2 < len(parts):
+            return parts[index + 1], parts[index + 2]
+    return "", ""
 
 
 def catalog_accuracy(judgements: tuple[CatalogJudgement, ...] = CATALOG_JUDGEMENTS) -> float:
@@ -956,11 +1102,17 @@ def _read_only_has_no_approve() -> bool:
 
 
 def _cli_resolves() -> bool:
-    subcommands = _cli_subcommands()
-    if not subcommands:
-        # The CLI module could not be imported here; do not claim a pass.
+    if not _CLI_PARSERS:
         return False
-    return all(_command_token(cap.cli) in subcommands for cap in CAPABILITIES)
+    modules = {_command_parts(cap.cli)[0] for cap in CAPABILITIES}
+    available = {module: _cli_subcommands(module) for module in modules if module}
+    if not available or any(not subs for subs in available.values()):
+        # A CLI module could not be imported here; do not claim a pass.
+        return False
+    return all(
+        _command_parts(cap.cli)[1] in available.get(_command_parts(cap.cli)[0], frozenset())
+        for cap in CAPABILITIES
+    )
 
 
 def _categories_declared() -> bool:

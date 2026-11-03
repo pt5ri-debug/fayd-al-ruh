@@ -6097,3 +6097,80 @@ regression monitor each can refuse a change.
   the database, the four categories, the lifecycle, retrieval, management,
   isolation, the controller wiring, and the gate. Gates: ruff clean, mypy 899 files
   OK, evaluation PASS, pytest green.
+
+- Phase 3 — **cognitive and experience-based learning, unified behind one governed
+  pipeline** (`docs/architecture/PHASE_3_IMPLEMENTATION_REPORT.md`). The project
+  could learn a *fact* (`core/learning_pipeline.py`, `continuous_learning`,
+  `knowledge_update`) and learn a *lesson* from experience
+  (`cognition/learning_system`), but the two paths were separate, there was no
+  single governed entry point, no durable audit trail, and no versioned
+  procedures -- and nothing **measured** whether learning improved anything. Nine
+  new core modules close it, all additive, and **no model weight is touched**
+  (that is Phase 6). `core/learning_events.py` is the one record contract:
+  `LearningEvent` carries a monotonic id, timestamp, **kind**
+  (knowledge/experience/feedback/pattern/procedure/rollback), **source** +
+  reference, the **target** acted on, a change summary, **before/after**
+  references, the **outcome** (accepted/rejected/deferred/conflicted/superseded/
+  rolled back), whether it was **applied**, an optional **evaluation** and
+  **version**, and the **owner** -- so isolation is structural and every act is
+  auditable. `core/learning_store.py` is the durable store (standard library
+  `sqlite3`, one file per owner): an append-only audit trail, a monotonic version
+  counter, **append-only rollback** (events at/after a version are marked
+  `rolled_back`, never deleted, so the trail survives), transactional writes,
+  versioned `LearnedProcedure` records, and corrupt-row tolerance.
+  `core/knowledge_learning.py` is the knowledge path: receive an item → identify
+  provenance → extract claims (through the real `RelationExtractor`) → find
+  duplicates → weigh evidence → detect contradictions → integrate what is
+  accepted into the Phase-1 graph **transactionally** (reusing `KnowledgeValidator`
+  and `KnowledgeIntegrator`) → preserve what is disputed → record the event. A
+  claim with **no** evidence is never integrated; a duplicate **reinforces**
+  (no second edge); a contradiction is **preserved**, never resolved.
+  `core/experience_learning.py` is the experience path: capture a task's goal,
+  approach, outcome, errors, and provenance as an **episodic** memory (Phase 2);
+  compare intended vs actual; and promote a lesson to a **procedural** memory only
+  when it has real support -- a single success never promotes.
+  `core/feedback_processing.py` turns a stated reaction (correct/incorrect/
+  missing/preferred/rejected/correction/task-success/task-failure) into a governed
+  signal, with **correction** and **retraction**; **silence is not approval** (a
+  blank reaction raises), and one record never overrides reliable evidence.
+  `core/pattern_learning.py` reads the durable episodic memories, counts
+  supporting **and** contradicting experiences **separately**, records
+  applicability conditions and failure modes, and versions the procedure -- never
+  promoting a weak pattern. `core/learning_coordinator.py` is the one governed
+  entry point: `learn_knowledge`/`learn_claim`/`learn_experience`/
+  `record_feedback`/`extract_patterns`/`status`/`history`/`rollback` plus the
+  controlled `learn_from` sharing interface -- **isolated per personality** (a
+  coordinator is built for one owner and asserts it before resolving any path;
+  `learn_from` refuses Natasha for the main model, and `dataset_owners` always
+  excludes her). `core/learning_evaluation.py` is the measurement: snapshot → run
+  an action → snapshot again → report the **measured** delta and a named metric
+  set (a zero delta is reported as zero; a fall is a regression).
+  `core/learning_gate.py` is the held-out gate `learning_accuracy` (22
+  judgements with **negative controls**: an unsupported claim not integrated, a
+  single success not promoting a procedure, one voice not overriding evidence,
+  silence refused, Natasha's learning excluded, no model weight touched), a metric
+  in `evaluation` (overall 0.988212 → 0.988444). Extended:
+  `core/cognitive_controller.py` gains a **lazy** `learning()` coordinator that
+  reuses the controller's own graph/ontology/learner/memory, plus
+  `learn_knowledge`/`learn_claim`/`learn_experience`/`record_feedback`/
+  `extract_learning_patterns`/`learning_status` and a `learning.recorded` event
+  (a controller that never learns behaves exactly as before); `gui/cognition.py`'s
+  `CognitiveService` gains the same eight operations, so the cognition window and
+  the CLI share one learning system; and `cli/learning.py` is the headless twin
+  (`python -m cli learning status|knowledge|experience|feedback|patterns|history|
+  metrics|evaluate|rollback`, wired in `cli/menu.py` and `cli/__main__.py` as the
+  `learning` command). The cognition window gained a **Learning & Experience**
+  sidebar section (`gui/cognition_dialog.py`, key `learning3`) exposing all seven
+  Phase-3 controls through the same catalogue-driven buttons, notes, and tooltips
+  as every other control, with the governed *Roll the learning back a version*
+  asking for confirmation first; `core/cognition_catalog.py` gained seven
+  bilingual entries and a new section, and its gate now resolves a capability's
+  command against the **real** subcommands of whichever CLI module it names
+  (`cli.cognition` *or* `cli.learning`), so a `cli learning …` string is checked as
+  strictly as a `cli cognition …` one; and `cli/learning.py`'s `rollback` is now
+  genuinely governed (refused without `--approve`, exit `4`).
+  `tests/test_learning_phase3.py` (79 tests) and
+  `tests/test_learning_cli.py` (16 tests) pin the record, the store, the four
+  pipelines, the coordinator, the evaluation, the controller wiring, the gate, and
+  the CLI, and `tests/test_cognition_window.py` pins the window's new section and
+  its governed rollback. Gates: ruff clean, mypy OK, evaluation PASS, pytest green.

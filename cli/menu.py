@@ -410,6 +410,11 @@ def run_relations(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.relations", argv)
 
 
+def run_learning(argv: Sequence[str] = ()) -> int:
+    """Cognitive and experience-based learning (Phase 3): learn, measure, roll back."""
+    return _run_module("cli.learning", argv)
+
+
 def run_ask_teacher(argv: Sequence[str] = ()) -> int:
     """Fayd Al-Ruh the learner asks Fayd Al-Ruh the teacher, endlessly."""
     return _run_module("cli.asking", argv)
@@ -618,6 +623,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Reason by analogy: what a concept is structurally like", run_analogy, ("like", "porosity")),
     ("Semantic space: what a word is used with (learned, local)", run_embeddings, ("status",)),
     ("Extract typed relations from text (preview, then learn)", run_relations, ("read", "Porosity increases permeability.")),
+    ("Learning: what the system has learned, and how to teach it", run_learning, ("status",)),
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~4 GB)", run_image, ("download", "--approve")),
     ("Install optional PDF/OCR/image support", run_deps, ()),
@@ -806,6 +812,7 @@ __all__ = [
     "run_internet_learner",
     "run_jarvis",
     "run_learn",
+    "run_learning",
     "run_llm",
     "run_mind_chat",
     "run_ml",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from core.action import Action
 from core.analogy import Analogy, AnalogyEngine
@@ -258,6 +259,15 @@ class CognitiveController:
             if long_term_memory is not None
             else None
         )
+
+        # Phase 3: cognitive and experience-based learning. Built lazily through a
+        # property, so a controller that never learns pays nothing and every
+        # existing caller is unchanged. The pipelines reuse the Phase-1 core (the
+        # validator and the transactional integrator) and the Phase-2 memory (an
+        # experience is an episodic memory), never a competing store.
+        self._learning_coordinator: Any = None
+        self._learning_store: Any = None
+        self._learning_data_root: str | None = None
 
     def _publish_memory(self, name: str, payload: dict) -> None:
         """Publish a memory lifecycle event, if the core has an event bus."""
@@ -1271,6 +1281,95 @@ class CognitiveController:
             "archived": status.archived,
             "schema_version": status.schema_version,
         }
+
+    # -- Phase 3: cognitive and experience-based learning ------------------
+
+    def learning(
+        self,
+        *,
+        data_root: str | None = None,
+        store=None,
+    ):
+        """This controller's learning coordinator (built once, lazily).
+
+        The coordinator reuses this controller's own graph, ontology, learner,
+        validator, integrator, and long-term memory, so learning acts on the
+        **same** knowledge the rest of the architecture reads -- never a second
+        graph. ``data_root``/``store`` are the test seam: a test passes a temporary
+        folder so no real data is touched.
+        """
+        if self._learning_coordinator is None:
+            from core.learning_coordinator import LearningCoordinator
+
+            self._learning_coordinator = LearningCoordinator(
+                "fayd_al_ruh",
+                graph=self.graph,
+                ontology=self.ontology,
+                learner=self.ontology_learner,
+                memory=self.long_term_memory,
+                store=store or self._learning_store,
+                data_root=data_root or self._learning_data_root,
+            )
+        return self._learning_coordinator
+
+    def learn_knowledge(self, text: str, *, source: str = "system", source_reference: str = "", confidence: float = 0.5):
+        """Learn a knowledge item through the Phase-1 core (validate, then store)."""
+        result = self.learning().learn_knowledge(
+            text, source=source, source_reference=source_reference, confidence=confidence
+        )
+        self._publish_learning(result)
+        return result
+
+    def learn_claim(self, claim: KnowledgeClaim, *, source: str | None = None, source_reference: str = ""):
+        """Learn one structured claim through the one controlled path."""
+        result = self.learning().learn_claim(claim, source=source, source_reference=source_reference)
+        self._publish_learning(result)
+        return result
+
+    def learn_experience(self, experience):
+        """Capture and evaluate one experience through the Phase-2 memory."""
+        result = self.learning().learn_experience(experience)
+        self._publish_learning(result)
+        return result
+
+    def record_feedback(self, kind: str, subject: str, **kwargs):
+        """Process one feedback record (explicit or inferred)."""
+        return self.learning().record_feedback(kind, subject, **kwargs)
+
+    def extract_learning_patterns(self, *, limit: int = 500):
+        """Extract versioned procedures from the stored experiences."""
+        result = self.learning().extract_patterns(limit=limit)
+        if result.changed:
+            self._publish_learning(result)
+        return result
+
+    def learning_status(self) -> dict:
+        """A snapshot of the Phase-3 learning system, or an honest "not built"."""
+        if self._learning_coordinator is None:
+            return {"built": False, "reason": "no learning coordinator has been used yet."}
+        status = self._learning_coordinator.status()
+        return {
+            "built": True,
+            "owner": status.owner,
+            "events": status.events,
+            "counts": status.counts,
+            "procedures": status.procedures,
+            "trusted_procedures": status.trusted_procedures,
+            "lessons": status.lessons,
+            "feedback": status.feedback,
+            "version": status.version,
+        }
+
+    def _publish_learning(self, result) -> None:
+        """Forward a learning act onto the event bus, so it is observable."""
+        events = getattr(self, "events", None)
+        if events is None:
+            return
+        for event in getattr(result, "events", ()):
+            events.publish(
+                "learning.recorded",
+                {"kind": event.kind, "target": event.target, "outcome": event.outcome},
+            )
 
     def _on_resource_decision(self, decision) -> None:
         """Forward a *deferral* onto the event bus, so a wait is visible."""
