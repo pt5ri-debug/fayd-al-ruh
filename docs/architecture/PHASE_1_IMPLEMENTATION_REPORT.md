@@ -100,9 +100,13 @@ New test files (all passing):
 > (`quiet_start_hour=1`, `quiet_end_hour=6`), so the four scheduler/runner tests
 > that assert `due().allowed` failed on the *time of day*, not on the code. This
 > was confirmed by stashing the Phase-1 changes and reproducing the same two
-> failures on a clean tree. It is a pre-existing, time-dependent flake; a run
-> outside 01:00–06:00 UTC passes. Recorded here so it is not mistaken for a
-> Phase-1 regression.
+> failures on a clean tree. It is a pre-existing, time-dependent flake.
+>
+> **Fixed in this phase** (a test-only change): the four affected tests
+> (`test_cognition_mind.py`'s two scheduler tests and
+> `test_cognition_development.py`'s two runner tests) now disable the quiet
+> window explicitly — they test the loop, not the clock — so they pass at any
+> hour and CI can no longer fail on the time of day. No production code changed.
 
 ### New evaluation metric
 
