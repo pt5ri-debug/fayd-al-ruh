@@ -29,6 +29,7 @@ from core.character_isolation_gate import character_isolation_accuracy
 from core.character_memory_gate import memory_seeding_accuracy
 from core.cognition_catalog import catalog_accuracy
 from core.cognitive_controller import CognitiveController
+from core.cognitive_core_gate import knowledge_validation_accuracy
 from core.curriculum_knowledge import curriculum_coverage_score
 from core.embeddings import evaluate_held_out
 from core.evidence import Evidence
@@ -178,6 +179,23 @@ class EvaluationMetrics:
     (Phase: widest knowledge reach)."""
 
     asking_loop_accuracy: float
+    """The share of held-out asking-loop judgements satisfied: the learner asks and
+    the **teacher** always answers (the learner never answers its own question), no
+    question repeats within a run, asking the loop to stop ends it early, only an
+    answer the graph corroborates becomes a qualified example, an empty answer is
+    reported rather than hidden, a spent question source ends the run, and a
+    qualified answer reaches the learner's own fact store (the learner-asks-teacher
+    loop)."""
+
+    knowledge_validation_accuracy: float
+    """The share of held-out cognitive-core judgements satisfied: the event bus
+    delivers in order, isolates a raising subscriber, and drops the oldest from a
+    bounded queue; the governor defers a request over its budget and one whose need
+    cannot be judged; the validator never calls an unsupported claim knowledge and
+    reports an opposing relation as a contradiction while an opposite-*direction*
+    claim is not one; the integrator writes, refuses, preserves a conflict, and
+    rolls back exactly; and the query engine finds the shortest chain with its
+    product confidence (Phase 1: cognitive core enhancement)."""
     """The share of held-out asking-loop judgements satisfied: the learner asks and
     the **teacher** always answers (the learner never answers its own question), no
     question repeats within a run, asking the loop to stop ends it early, only an
@@ -1062,6 +1080,12 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # controls throughout.
     asking_value = asking_loop_accuracy()
 
+    # The Phase-1 cognitive core: held-out judgements about the event bus, the
+    # resource governor, the knowledge validator, the transactional integrator,
+    # and the query engine, each run against the real service with negative
+    # controls, so a core regression fails here even when its unit tests pass.
+    core_value = knowledge_validation_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1131,6 +1155,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         catalog_value,
         depth_value,
         asking_value,
+        core_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1187,6 +1212,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         cognition_catalog_accuracy=round(catalog_value, 6),
         knowledge_depth_accuracy=round(depth_value, 6),
         asking_loop_accuracy=round(asking_value, 6),
+        knowledge_validation_accuracy=round(core_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

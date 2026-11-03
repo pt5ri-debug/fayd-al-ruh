@@ -37,7 +37,18 @@ from core.curriculum_knowledge import seed_curriculum
 from core.decision_engine import DecisionEngine
 from core.decision_trace import DecisionTrace
 from core.domain_knowledge import domain_summary, seed_ontology
+from core.entity_manager import EntityManager
 from core.evaluation_suite import EvaluationSuite, QualityAssessment
+from core.event_bus import (
+    EVENT_CYCLE_FINISHED,
+    EVENT_CYCLE_STARTED,
+    EVENT_KNOWLEDGE_INTEGRATED,
+    EVENT_KNOWLEDGE_REJECTED,
+    EVENT_RELATION_LEARNED,
+    EVENT_RESOURCE_DEFERRED,
+    default_bus,
+)
+from core.evidence_manager import EvidenceManager
 from core.evidence_processor import EvidencePolarity
 from core.experiment import Experiment
 from core.experiment_result import ExperimentResult
@@ -47,7 +58,10 @@ from core.explanation_engine import ExplanationEngine
 from core.goal import Goal, PlanStep
 from core.introspection import BeliefExplanation, Introspection
 from core.knowledge_graph import KnowledgeGraph
+from core.knowledge_integration import KnowledgeIntegrator
+from core.knowledge_query import KnowledgeQueryEngine
 from core.knowledge_store import KnowledgeStore
+from core.knowledge_validation import KnowledgeClaim, KnowledgeValidator, ValidationResult
 from core.language_reasoner import LanguageReasoner
 from core.learner import Learner, LearningCycle
 from core.learning_metrics import LearningMetrics
@@ -77,7 +91,9 @@ from core.relation_extraction import (
     RelationExtractor,
     extract_from_store,
 )
+from core.relation_manager import RelationManager
 from core.relation_polarity import PolarityConflict, find_polarity_conflicts
+from core.resource_governor import ResourceGovernor
 from core.retention_policy import RetentionPolicy
 from core.safe_learning import LearningSandbox
 from core.self_learning import SelfLearning, SelfLearningReport
@@ -198,6 +214,30 @@ class CognitiveController:
         self.learning_sandbox = LearningSandbox()
         self.contexts = ContextRegistry()
         self.provenance = ProvenanceLedger()
+
+        # Phase 1 -- the cognitive core's own services. The event bus makes the
+        # core observable without putting a decision on the bus (events are
+        # notifications, never control flow); the governor arbitrates scarce
+        # resources from the machine's real figures; the validation/integration
+        # pair is the one controlled path from a proposed claim to a graph write;
+        # the query engine is the one read surface over the graph; and the three
+        # managers own the entity/relation/evidence lifecycle.
+        self.events = default_bus()
+        self.resource_governor = ResourceGovernor(on_decision=self._on_resource_decision)
+        self.entity_manager = EntityManager(self.graph)
+        self.relation_manager = RelationManager(self.graph)
+        self.evidence_manager = EvidenceManager(self.graph)
+        self.knowledge_query = KnowledgeQueryEngine(self.graph)
+        self.knowledge_validator = KnowledgeValidator(
+            known_relations=set(self.ontology.relations) if self.ontology.relations else None,
+            ontology=self.ontology,
+        )
+        self.knowledge_integrator = KnowledgeIntegrator(
+            ontology=self.ontology,
+            learner=self.ontology_learner,
+            validator=self.knowledge_validator,
+            on_event=self._on_integration,
+        )
 
     def reason(
         self,
@@ -679,6 +719,10 @@ class CognitiveController:
         polarity: EvidencePolarity,
     ) -> CognitiveCycleResult:
 
+        self.events.publish(
+            EVENT_CYCLE_STARTED,
+            {"observation": observation.id, "belief": belief.id},
+        )
         loop_result = self.loop.observe(
             observation=observation,
             belief=belief,
@@ -776,13 +820,18 @@ class CognitiveController:
             evaluation=evaluation,
         )
 
-        return CognitiveCycleResult(
+        result = CognitiveCycleResult(
             loop_result=loop_result,
             metrics=metrics,
             evaluation=evaluation,
             report=report,
             context_id=context.id,
         )
+        self.events.publish(
+            EVENT_CYCLE_FINISHED,
+            {"observation": observation.id, "belief": belief.id, "context": context.id},
+        )
+        return result
 
     def evaluate_prediction(
         self,
@@ -1050,3 +1099,67 @@ class CognitiveController:
             log=log,
             on_turn=on_turn,
         )
+
+    # -- Phase 1: the cognitive core's services ----------------------------
+
+    def integrate_knowledge(self, claim: KnowledgeClaim):
+        """Validate and store one claim through the one controlled path.
+
+        This is the public face of :class:`~core.knowledge_integration.KnowledgeIntegrator`:
+        the claim is validated (structure, semantics, evidence, contradiction,
+        temporal), and -- only if it is *storable* -- written into the graph
+        transactionally. A rejected or unsupported claim is reported, never
+        stored; a conflicting claim is stored **beside** the one it opposes, with
+        the conflict reported. The controller publishes the outcome on its event
+        bus, so an observer sees every integration without being called.
+        """
+        record = self.knowledge_integrator.integrate(claim, self.graph)
+        if record.stored:
+            self.events.publish(
+                EVENT_KNOWLEDGE_INTEGRATED,
+                {
+                    "claim": record.claim,
+                    "relation": record.relation_id,
+                    "verdict": record.verdict,
+                    "conflict": record.conflict,
+                },
+            )
+        else:
+            self.events.publish(
+                EVENT_KNOWLEDGE_REJECTED,
+                {"claim": record.claim, "verdict": record.verdict, "error": record.error},
+            )
+        return record
+
+    def validate_claim(self, claim: KnowledgeClaim) -> ValidationResult:
+        """Validate a claim **without writing it** -- the read-only half."""
+        return self.knowledge_validator.validate(claim, graph=self.graph)
+
+    def query(self) -> KnowledgeQueryEngine:
+        """The read surface over the graph (entity, relation, path, evidence)."""
+        return self.knowledge_query
+
+    def cognitive_core_status(self) -> dict:
+        """A snapshot of the Phase-1 core: events, resources, and graph counts."""
+        return {
+            "events": self.events.describe(),
+            "resources": self.resource_governor.snapshot(),
+            "graph": self.knowledge_query.statistics(),
+            "integrator": self.knowledge_integrator.describe(),
+        }
+
+    def _on_resource_decision(self, decision) -> None:
+        """Forward a *deferral* onto the event bus, so a wait is visible."""
+        if not decision.granted:
+            self.events.publish(
+                EVENT_RESOURCE_DEFERRED,
+                {"label": decision.label, "reason": decision.reason.value, "detail": decision.detail},
+            )
+
+    def _on_integration(self, record) -> None:
+        """Forward a learned relation onto the event bus (a knowledge event)."""
+        if record.stored and record.relation_id:
+            self.events.publish(
+                EVENT_RELATION_LEARNED,
+                {"claim": record.claim, "relation": record.relation_id},
+            )
