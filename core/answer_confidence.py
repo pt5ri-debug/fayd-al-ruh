@@ -57,18 +57,28 @@ class AnswerConfidence:
     final: float
     """The confidence the answer carries, after support is added and conflict removed."""
 
+    path_uncertainty: float = 0.0
+    """How much a multi-hop chain weakens its own corroboration (``1 - product``).
+
+    A chain's confidence is the **product** of its steps, so a two-hop chain of two
+    0.7 edges corroborates at ``0.49``, not ``0.7``. This term records that
+    discount explicitly -- ``0.0`` when no path was walked, or when a path is a
+    single confident edge -- so a reader can see that the support rests on a
+    *chain* rather than a fact.
+    """
+
     reasons: tuple[str, ...] = field(default_factory=tuple)
     """One readable line per term that actually moved the number, for the record."""
 
     def __post_init__(self) -> None:
-        for name in ("evidence", "graph_support", "conflict_penalty", "final"):
+        for name in ("evidence", "graph_support", "conflict_penalty", "path_uncertainty", "final"):
             value = getattr(self, name)
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"{name} must be between 0 and 1.")
 
     def describe(self) -> str:
         """The confidence with its terms, e.g. ``0.72 (evidence 0.65 + support 0.20 - conflict 0.10)``."""
-        if self.graph_support == 0.0 and self.conflict_penalty == 0.0:
+        if self.graph_support == 0.0 and self.conflict_penalty == 0.0 and self.path_uncertainty == 0.0:
             return f"{self.final:.2f} (from the retrieved evidence alone)"
         return f"{self.final:.2f} (" + "; ".join(self.reasons) + ")"
 
@@ -91,19 +101,52 @@ def _strongest_support(
     inferences: Iterable[object],
     connections: Iterable[object],
     causal_paths: Iterable[object],
-) -> float:
-    """The single strongest confidence among the graph-derived signals.
+) -> tuple[float, float]:
+    """The strongest graph-derived signal and its multi-hop discount.
 
-    The **maximum**, not the sum: three weak derivations of the same fact are one
-    piece of support, not three. A signal with no usable confidence is skipped.
+    Returns ``(support, path_uncertainty)``. The support is the **maximum** of the
+    three signal groups, not the sum: three weak derivations of the same fact are
+    one piece of support, not three. A signal with no usable confidence is skipped.
+
+    ``path_uncertainty`` is the discount a *multi-hop* signal carries: a chain's
+    confidence is already the product of its steps, so a walked connection that
+    spans more than one hop is recorded as weaker than a single stored edge. A
+    one-hop (or hop-less) signal contributes no discount, so an ordinary fact is
+    not penalised for being a fact.
     """
     best = 0.0
+    discount = 0.0
     for group in (inferences, connections, causal_paths):
         for item in group:
             value = getattr(item, "confidence", None)
-            if isinstance(value, (int, float)) and 0.0 <= value <= 1.0:
-                best = max(best, float(value))
-    return best
+            if not isinstance(value, (int, float)) or not 0.0 <= value <= 1.0:
+                continue
+            if float(value) > best:
+                best = float(value)
+                discount = _hop_discount(item, best)
+            elif float(value) == best:
+                # A tie keeps the larger discount, so a chain is never masked by a
+                # same-confidence single edge.
+                discount = max(discount, _hop_discount(item, best))
+    return best, round(discount, 6)
+
+
+def _hop_discount(item: object, confidence: float) -> float:
+    """How much a walked signal's hops weaken it, as ``1 - product``.
+
+    A signal reports its hops through a ``hops`` attribute (``ConceptConnection``
+    and ``CausalExplanation`` both do). One hop -- or no hops attribute at all --
+    means the corroboration is a stored fact, so nothing is discounted. More than
+    one hop means the chain's *product* confidence is what it really corroborates
+    at; the difference from the reported confidence is the discount, which is what
+    the answer-confidence breakdown shows.
+    """
+    hops = getattr(item, "hops", None)
+    if not isinstance(hops, int) or hops <= 1:
+        return 0.0
+    # The reported confidence of a walked chain is already the product of its
+    # steps; the discount is how far that falls short of a single confident edge.
+    return round(max(0.0, 1.0 - float(confidence)), 6)
 
 
 def _conflict_severity(conflicts: Iterable[object]) -> float:
@@ -141,7 +184,7 @@ def answer_confidence(
     reasons that moved them.
     """
     evidence = evidence_confidence(passages)
-    support = _strongest_support(inferences, connections, causal_paths)
+    support, path_uncertainty = _strongest_support(inferences, connections, causal_paths)
     severity = _conflict_severity(conflicts)
 
     reasons: list[str] = []
@@ -154,6 +197,10 @@ def answer_confidence(
         # rounds to 0.00 is noise in the record, not a reason.
         if round(added, 2) > 0:
             reasons.append(f"evidence {evidence:.2f} + graph support {added:.2f}")
+        if path_uncertainty > 0.0:
+            # The support rests on a *chain*; say so, so the reader knows the
+            # corroboration is weaker than a single stored edge of the same score.
+            reasons.append(f"walked path uncertainty {path_uncertainty:.2f}")
 
     penalty = 0.0
     if severity > 0.0:
@@ -170,6 +217,7 @@ def answer_confidence(
         evidence=round(evidence, 6),
         graph_support=round(support, 6),
         conflict_penalty=round(penalty, 6),
+        path_uncertainty=round(path_uncertainty, 6),
         final=round(value, 6),
         reasons=tuple(reasons),
     )

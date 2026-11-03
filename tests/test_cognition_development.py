@@ -346,6 +346,12 @@ def test_comparison_reports_a_change_per_indicator(ontology, tmp_path, monkeypat
 
 
 # -- the runner -------------------------------------------------------------
+def _no_quiet_window(runner: CognitiveRunner) -> None:
+    """Disable the quiet window: these tests are about the loop, not the clock."""
+    runner.mind.scheduler.settings.quiet_start_hour = None
+    runner.mind.scheduler.settings.quiet_end_hour = None
+
+
 def test_runner_persists_the_resource_mode(ontology, tmp_path, monkeypatch):
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
     from cognition.proactive_mind import ProactiveMind
@@ -365,6 +371,7 @@ def test_runner_tick_runs_a_cycle_when_due(ontology, tmp_path, monkeypatch):
         mode=ResourceMode.LIGHT,
         load_reader=lambda: MachineLoad(cpu_load=0.1, free_memory_fraction=0.9),
     )
+    _no_quiet_window(runner)
     cycle = runner.tick()
     assert cycle is not None
     assert runner.decision() is not None
@@ -393,6 +400,7 @@ def test_runner_stop_and_start(ontology, tmp_path, monkeypatch):
         ProactiveMind(ontology),
         load_reader=lambda: MachineLoad(cpu_load=0.1, free_memory_fraction=0.9),
     )
+    _no_quiet_window(runner)
     runner.stop()
     assert runner.tick() is None
     runner.start()
