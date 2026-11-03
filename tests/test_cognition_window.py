@@ -27,6 +27,9 @@ class StubService:
         self.taught: list[str] = []
         self.trained: list[tuple[str, bool]] = []
         self.mode_set: list[str] = []
+        self.experiences: list[tuple[str, str]] = []
+        self.feedback: list[tuple[str, str]] = []
+        self.rolled_back: list[int] = []
 
     # -- proactive mind ----------------------------------------------------
     def status(self):
@@ -77,6 +80,32 @@ class StubService:
 
     def learning_stats(self):
         return "semantic 1, episodic 0"
+
+    # -- Phase 3: governed learning & experience ---------------------------
+    def learn_knowledge(self, text, **kwargs):
+        self.learned.append(text)
+        return OperationReport(ok=True, title=f"Learned: {text}", lines=("integrated",))
+
+    def record_experience(self, *, goal, outcome, success=True, approach=""):
+        self.experiences.append((goal, outcome))
+        return OperationReport(ok=True, title=f"Experience: {goal}", lines=("captured",))
+
+    def record_feedback(self, kind, subject, **kwargs):
+        self.feedback.append((kind, subject))
+        return OperationReport(ok=True, title=f"Feedback: {kind}", lines=("stored",))
+
+    def extract_procedures(self):
+        return OperationReport(ok=True, title="Pattern extraction", lines=("no procedure promoted",))
+
+    def learning_status(self):
+        return OperationReport(ok=True, title="Learning status", lines=("knowledge_events: 1",))
+
+    def learning_history(self, *, limit=20):
+        return OperationReport(ok=True, title="Learning history", lines=("v1 knowledge integrated",))
+
+    def rollback_learning(self, version):
+        self.rolled_back.append(version)
+        return OperationReport(ok=True, title=f"Rollback to version {version}", lines=("rolled back 1 event(s)",))
 
     # -- consolidation -----------------------------------------------------
     def consolidate(self):
@@ -261,8 +290,8 @@ def test_window_builds_with_every_sidebar_section() -> None:
     try:
         dialog = _dialog(root, StubService())
         for key in (
-            "mind", "study", "depth", "metacognition", "learning", "consolidation",
-            "training", "characters", "indicators", "system",
+            "mind", "study", "depth", "metacognition", "learning", "learning3",
+            "consolidation", "training", "characters", "indicators", "system",
         ):
             assert key in dialog._sidebar_column.sections
     finally:
@@ -637,12 +666,93 @@ def test_every_sidebar_button_comes_from_the_catalogue() -> None:
         for key in (
             "think", "ideas", "drives", "prove", "study", "depth", "coverage",
             "harvest", "bridges", "arabic", "catalog", "command",
+            "learn_knowledge", "learn_experience", "learn_feedback",
+            "learn_procedures", "learn_status", "learn_history", "learn_rollback",
         ):
             cap = capability(key)
             assert cap is not None, key
             assert cap.title and cap.summary and cap.outcome
             assert cap.arabic_title and cap.arabic_summary
         assert set(CAPABILITY_INDEX) >= {"depth", "coverage", "harvest", "bridges", "arabic", "catalog"}
+        assert set(CAPABILITY_INDEX) >= {
+            "learn_knowledge", "learn_experience", "learn_feedback",
+            "learn_procedures", "learn_status", "learn_history", "learn_rollback",
+        }
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_phase3_learning_section_teaches_knowledge() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    service = StubService()
+    try:
+        dialog = _dialog(root, service)
+        _drain(root, dialog)
+        dialog._learn_knowledge_var.set("porosity increases permeability")
+        dialog._on_learn_knowledge()
+        _drain(root, dialog)
+        assert service.learned == ["porosity increases permeability"]
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_phase3_learning_section_captures_an_experience() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    service = StubService()
+    try:
+        dialog = _dialog(root, service)
+        _drain(root, dialog)
+        dialog._learn_goal_var.set("raise permeability")
+        dialog._learn_outcome_var.set("acid stimulation worked")
+        dialog._on_learn_experience()
+        _drain(root, dialog)
+        assert service.experiences == [("raise permeability", "acid stimulation worked")]
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_phase3_rollback_asks_before_rolling_back() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    service = StubService()
+    try:
+        dialog = _dialog(root, service)
+        _drain(root, dialog)
+        dialog._learn_version_var.set("1")
+        # _confirm is stubbed to False, so a governed rollback never runs silently.
+        dialog._confirm = lambda *_a, **_k: False  # type: ignore[assignment]
+        dialog._on_learn_rollback()
+        assert service.rolled_back == []
+        dialog._confirm = lambda *_a, **_k: True  # type: ignore[assignment]
+        dialog._on_learn_rollback()
+        _drain(root, dialog)
+        assert service.rolled_back == [1]
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_phase3_feedback_is_processed() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    service = StubService()
+    try:
+        dialog = _dialog(root, service)
+        _drain(root, dialog)
+        dialog._learn_feedback_kind_var.set("correction")
+        dialog._learn_feedback_var.set("answer-1")
+        dialog._on_learn_feedback()
+        _drain(root, dialog)
+        assert service.feedback == [("correction", "answer-1")]
     finally:
         root.destroy()
 

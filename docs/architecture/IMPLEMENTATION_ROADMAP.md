@@ -126,6 +126,17 @@ next; a contradiction is reported; a corrupt store never crashes a session;
 
 ## Phase 3 — Cognitive and Experience-Based Learning
 
+> **Status: ✅ DELIVERED** (2026-11-02, branch `feature/phase-3-learning`). See
+> `docs/architecture/PHASE_3_IMPLEMENTATION_REPORT.md`. Nine new core modules
+> (`core/learning_events.py`, `core/learning_store.py`,
+> `core/knowledge_learning.py`, `core/experience_learning.py`,
+> `core/feedback_processing.py`, `core/pattern_learning.py`,
+> `core/learning_coordinator.py`, `core/learning_evaluation.py`,
+> `core/learning_gate.py`) plus a CLI twin (`cli/learning.py`), the controller
+> wired with a lazy `learning()` coordinator, and the held-out metric
+> `learning_accuracy` = **1.0000** (22 judgements, with negative controls).
+> Overall 0.988212 → 0.988444. No model weight is touched.
+
 **Goal:** unify the two symbolic learning paths behind one governed pipeline and
 make consolidation/review durable, **without** touching model weights (that is
 Phase 6).

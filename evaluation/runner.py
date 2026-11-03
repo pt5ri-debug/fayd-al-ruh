@@ -36,6 +36,7 @@ from core.evidence import Evidence
 from core.goal import Goal
 from core.grounding import grounding_accuracy
 from core.knowledge_carry import knowledge_carry_accuracy
+from core.learning_gate import learning_accuracy
 from core.memory_gate import memory_architecture_accuracy
 from core.observation import Observation
 from core.reasoning_report import reasoning_trace_accuracy
@@ -197,6 +198,17 @@ class EvaluationMetrics:
     signals separately, consolidation promotes and skips, Natasha's memory is
     unreadable by anyone else, and retrieval similarity is never the record's own
     confidence."""
+
+    learning_accuracy: float
+    """The share of held-out learning judgements the Phase-3 pipelines satisfy: an
+    evidenced claim is integrated while an unsupported one is not, provenance is
+    preserved, a duplicate reinforces without a second edge, a contradiction is
+    preserved rather than resolved, an experience survives a restart and its lesson
+    is rebuilt, a single success never promotes a procedure (nor does a failure),
+    one feedback record never overrides evidence, an inferred signal is bounded
+    below an explicit one, silence is refused, feedback is correctable, versions
+    advance and roll back while the audit trail survives, and Natasha's learning is
+    excluded from the main model's dataset."""
 
     knowledge_validation_accuracy: float
     """The share of held-out cognitive-core judgements satisfied: the event bus
@@ -1104,6 +1116,15 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # regression fails here even when its unit tests pass.
     memory_value = memory_architecture_accuracy()
 
+    # Cognitive and experience-based learning (Phase 3): the knowledge pipeline,
+    # the experience pipeline, the feedback processor, the pattern learner, and the
+    # per-personality isolation. Held-out judgements run against the real pipelines
+    # with negative controls (an unsupported claim not integrated, a single success
+    # not promoting a procedure, one voice not overriding evidence, Natasha's
+    # learning excluded), so a learning regression fails here even when its unit
+    # tests pass.
+    learning_value = learning_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1175,6 +1196,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         asking_value,
         core_value,
         memory_value,
+        learning_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1233,6 +1255,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         asking_loop_accuracy=round(asking_value, 6),
         knowledge_validation_accuracy=round(core_value, 6),
         memory_architecture_accuracy=round(memory_value, 6),
+        learning_accuracy=round(learning_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

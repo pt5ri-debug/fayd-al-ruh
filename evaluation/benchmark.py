@@ -77,6 +77,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("asking_loop_accuracy", True, label="Asking loop accuracy (held-out: the learner asks, the teacher always answers, no question repeats, a stop takes effect, and only a verified answer qualifies)"),
     MetricSpec("knowledge_validation_accuracy", True, label="Knowledge validation accuracy (held-out: the event bus, resource governor, validator, transactional integrator, and query engine behave as claimed)"),
     MetricSpec("memory_architecture_accuracy", True, label="Memory architecture accuracy (held-out: durable persistence, correction keeps history, archive not delete, backup/restore with a refused bad backup, corrupt-row tolerance, transaction rollback, temporal validity, explainable ranking, consolidation, and personality isolation)"),
+    MetricSpec("learning_accuracy", True, label="Learning accuracy (held-out: evidenced claim integrated but unsupported refused, provenance preserved, duplicate reinforces, contradiction preserved, experience persists and its lesson rebuilt, a single success never promotes, feedback never overrides evidence, inferred bounded below explicit, silence refused, correction supported, versioning and rollback, and Natasha's learning excluded)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )
