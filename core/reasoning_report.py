@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from core.answer_analogy import AnswerAnalogy
 from core.answer_belief import AnswerBelief
@@ -40,6 +41,10 @@ from core.relation_consistency import RelationConflict
 from core.relation_facts import RelationFact
 from core.relation_inference import InferredRelation
 
+if TYPE_CHECKING:
+    from core.conclusion_verification import VerificationResult
+    from core.problem_decomposition import ProblemDecomposition
+
 #: The label for each step, so every surface names a step the same way.
 SOURCE_EVIDENCE = "Retrieved evidence"
 SOURCE_STORED = "Stored in the knowledge graph"
@@ -53,11 +58,14 @@ SOURCE_CAUSAL = "Directed causal paths the graph states"
 SOURCE_TEMPORAL = "The timeline the conversation holds (ordered by the temporal reasoner)"
 SOURCE_CONFLICTS = "Contradictions the graph holds"
 SOURCE_CONFIDENCE = "How the confidence was reached"
+SOURCE_DECOMPOSITION = "How the question was decomposed (reasoning units)"
+SOURCE_VERIFICATION = "How the conclusion was verified"
 
 #: The order the steps are shown in: what was read first, then what was derived,
 #: then the weighing. Fixed, so the same answer always renders the same trace.
 STEP_ORDER: tuple[str, ...] = (
     SOURCE_EVIDENCE,
+    SOURCE_DECOMPOSITION,
     SOURCE_STORED,
     SOURCE_PLAN,
     SOURCE_DECISION,
@@ -67,6 +75,7 @@ STEP_ORDER: tuple[str, ...] = (
     SOURCE_CONNECTIONS,
     SOURCE_CAUSAL,
     SOURCE_TEMPORAL,
+    SOURCE_VERIFICATION,
     SOURCE_CONFLICTS,
     SOURCE_CONFIDENCE,
 )
@@ -202,6 +211,24 @@ def _temporal_lines(temporal: AnswerTemporal | None) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def _decomposition_lines(decomposition: ProblemDecomposition | None) -> tuple[str, ...]:
+    """The decomposition as trace lines, or ``()`` when none was made."""
+    if decomposition is None:
+        return ()
+    lines = [f"objective: {decomposition.objective}"]
+    lines.extend(f"part {index + 1}: {part.describe()}" for index, part in enumerate(decomposition.parts))
+    if decomposition.unknown:
+        lines.extend(f"unknown: {line}" for line in decomposition.unknown)
+    return tuple(lines)
+
+
+def _verification_lines(verification: VerificationResult | None) -> tuple[str, ...]:
+    """The verification as trace lines, or ``()`` when none was made."""
+    if verification is None:
+        return ()
+    return (verification.describe(),)
+
+
 def reasoning_report(
     question: str,
     *,
@@ -217,6 +244,8 @@ def reasoning_report(
     temporal: AnswerTemporal | None = None,
     conflicts: Iterable[RelationConflict] = (),
     confidence: AnswerConfidence | None = None,
+    decomposition: ProblemDecomposition | None = None,
+    verification: VerificationResult | None = None,
 ) -> ReasoningReport:
     """Assemble the ordered reasoning trace for one answer from its own data.
 
@@ -226,6 +255,9 @@ def reasoning_report(
     """
     steps = (
         ReasoningStep(SOURCE_EVIDENCE, _evidence_lines(passages)),
+        ReasoningStep(
+            SOURCE_DECOMPOSITION, _decomposition_lines(decomposition), derived=True
+        ),
         ReasoningStep(SOURCE_STORED, tuple(fact.describe() for fact in relation_facts)),
         ReasoningStep(
             SOURCE_PLAN, _plan_lines(plan), derived=True
@@ -251,6 +283,9 @@ def reasoning_report(
             SOURCE_CAUSAL, tuple(item.describe() for item in causal_paths), derived=True
         ),
         ReasoningStep(SOURCE_TEMPORAL, _temporal_lines(temporal), derived=True),
+        ReasoningStep(
+            SOURCE_VERIFICATION, _verification_lines(verification), derived=True
+        ),
         ReasoningStep(SOURCE_CONFLICTS, tuple(item.describe() for item in conflicts)),
         ReasoningStep(SOURCE_CONFIDENCE, _confidence_lines(confidence)),
     )
@@ -345,6 +380,20 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
         "a conversation ordered by the temporal reasoner is a derivation",
     ),
     TraceJudgement(
+        "one decomposition",
+        (SOURCE_DECOMPOSITION,),
+        0,
+        1,
+        "a question broken into reasoning units is a derivation",
+    ),
+    TraceJudgement(
+        "one verification",
+        (SOURCE_VERIFICATION,),
+        0,
+        1,
+        "a conclusion checked against the graph is a derivation",
+    ),
+    TraceJudgement(
         "evidence and a causal path",
         (SOURCE_EVIDENCE, SOURCE_CAUSAL),
         1,
@@ -355,6 +404,7 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
         "the full trace",
         (
             SOURCE_EVIDENCE,
+            SOURCE_DECOMPOSITION,
             SOURCE_STORED,
             SOURCE_PLAN,
             SOURCE_DECISION,
@@ -364,12 +414,13 @@ TRACE_JUDGEMENTS: tuple[TraceJudgement, ...] = (
             SOURCE_CONNECTIONS,
             SOURCE_CAUSAL,
             SOURCE_TEMPORAL,
+            SOURCE_VERIFICATION,
             SOURCE_CONFLICTS,
             SOURCE_CONFIDENCE,
         ),
         4,
-        8,
-        "every step filled, four stored and eight derived",
+        10,
+        "every step filled, four stored and ten derived",
     ),
 )
 
@@ -388,6 +439,8 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
     temporal: AnswerTemporal | None = None
     conflicts: tuple[RelationConflict, ...] = ()
     confidence: AnswerConfidence | None = None
+    decomposition: ProblemDecomposition | None = None
+    verification: VerificationResult | None = None
     if SOURCE_EVIDENCE in judgement.filled:
         passages = (
             RetrievedPassage(
@@ -474,6 +527,27 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
         )
     if SOURCE_CONFLICTS in judgement.filled:
         conflicts = (RelationConflict("a", "increases", "b", "reduces", 0.7),)
+    if SOURCE_DECOMPOSITION in judgement.filled:
+        from core.problem_decomposition import ProblemDecomposition, QuestionPart
+
+        decomposition = ProblemDecomposition(
+            question="judgement",
+            main="judgement",
+            objective="state what the graph holds",
+            parts=(QuestionPart(text="what is a?", kind="lookup", entities=("a",), known=True),),
+        )
+    if SOURCE_VERIFICATION in judgement.filled:
+        from core.conclusion_verification import (
+            STATUS_SUPPORTED,
+            VerificationResult,
+        )
+
+        verification = VerificationResult(
+            conclusion="a —increases→ b",
+            status=STATUS_SUPPORTED,
+            confidence=0.6,
+            reasons=("the graph stores this relation (confidence 0.60)",),
+        )
     if SOURCE_CONFIDENCE in judgement.filled:
         confidence = AnswerConfidence(
             evidence=0.8,
@@ -496,6 +570,8 @@ def _judgement_report(judgement: TraceJudgement) -> ReasoningReport:
         temporal=temporal,
         conflicts=conflicts,
         confidence=confidence,
+        decomposition=decomposition,
+        verification=verification,
     )
 
 
@@ -542,11 +618,13 @@ __all__ = [
     "SOURCE_CONFLICTS",
     "SOURCE_CONNECTIONS",
     "SOURCE_DECISION",
+    "SOURCE_DECOMPOSITION",
     "SOURCE_EVIDENCE",
     "SOURCE_INFERRED",
     "SOURCE_PLAN",
     "SOURCE_STORED",
     "SOURCE_TEMPORAL",
+    "SOURCE_VERIFICATION",
     "STEP_ORDER",
     "TRACE_JUDGEMENTS",
     "ReasoningReport",
