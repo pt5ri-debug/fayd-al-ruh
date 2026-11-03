@@ -57,13 +57,23 @@ class EvidenceKind(str, Enum):
 
 
 class AcquisitionMethod(str, Enum):
-    """How an evidence item was obtained -- a closed vocabulary."""
+    """How an evidence item was obtained -- a closed vocabulary.
+
+    The last three are the perception methods (Phase 7): an OCR reading of a
+    picture, a speech-to-text transcript, and a model-generated description. They
+    are kept distinct from ``ingest`` (a document's own text layer) because the
+    project's honesty rule treats a machine's reading of a picture or a voice --
+    and above all a model's interpretation -- as weaker than stated text.
+    """
 
     MANUAL = "manual"
     INGEST = "ingest"
     WEB = "web"
     INFERENCE = "inference"
     SYSTEM = "system"
+    OCR = "ocr"
+    SPEECH = "speech"
+    MODEL = "model"
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,11 @@ from cli.__main__ import main as cli_main
 
 
 def test_run_choice_rejects_out_of_range_and_non_numeric(capsys) -> None:
-    assert menu.run_choice("99") == 1
+    # The out-of-range value is derived from the live menu, so adding a menu
+    # entry (which is normal) never turns a real in-range choice into a false
+    # "out of range" expectation.
+    too_high = str(len(menu.visible_menu()) + 1)
+    assert menu.run_choice(too_high) == 1
     assert menu.run_choice("abc") == 1
     out = capsys.readouterr().out
     assert "out of range" in out

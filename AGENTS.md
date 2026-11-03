@@ -6271,3 +6271,52 @@ regression monitor each can refuse a change.
   [--approve]|rollback|gate` (`cli/train.py`). Nothing here needs the network;
   the in-process path needs no extra. Docs:
   `docs/architecture/PHASE_6_IMPLEMENTATION_REPORT.md`.
+
+- Phase 7 (roadmap) — **local multimodal perception**: route perception
+  (documents, images, audio, speech) into the **same evidence pipeline as text**,
+  so a perceived artifact becomes `Evidence`/`Document` with one provenance path
+  and is never a verified fact. The new `perception/` package is a thin layer over
+  the readers/engines the project already has -- never a second implementation --
+  and importing it loads no model and no third-party package the base install
+  lacks (`perception/__init__.py`). Its sixteen modules: `schema.py` is the one
+  normalized result shape (`PerceptionResult`/`Segment`/`SourceType`/
+  `ContentType`/`ExtractionMethod`/`PerceptionStatus`/`PerceptionWarning`);
+  `limits.py` the validated, bounded `PerceptionLimits` + `CancelToken` +
+  `temp_workspace` + `PerceptionTimeout`; `detector.py` file type detection
+  (suffix **and** magic-byte sniff) and integrity validation; `router.py` the
+  single routing decision; `documents.py`/`pdf.py`/`ocr.py`/`images.py`/
+  `audio.py`/`speech.py` the pipelines; `metadata.py` text-free metadata;
+  `normalize.py` content normalization (reusing `core.text_normalize`);
+  `validator.py` the result validator + `perception_status()`; `provenance.py` the
+  provenance manager over `core.provenance`; `models.py` the Model Manager
+  integration; and `coordinator.py` the one public entry point (`perceive`:
+  route → run → validate → attach provenance). A PDF is classified `text` /
+  `scanned` / `mixed` and **OCR runs only on low-text pages** (a page with real
+  text is never replaced); a legacy `.doc`/`.rtf` is *unsupported* with a "save as
+  .docx" hint; nothing is silently dropped (a skipped/capped/failed page is a
+  warning and the status is `PARTIAL`/`FAILED`/`UNSUPPORTED`).
+  `core/perception_bridge.py` is the module the phase exists for:
+  `to_documents` (citable `core.documents.Document`s chunked with the project's
+  own `chunk_text`), `to_evidence` (one `core.evidence.Evidence` per
+  content-bearing segment, provenance in `data`), `candidate_claims` (the
+  project's own `RelationExtractor`, each claim carrying the result's evidence,
+  **submitted for validation** -- never stored directly), `PerceptionBridge.ingest`
+  (submits to every wired target and returns a `BridgeOutcome`), and
+  `evidence_strength` (native > OCR > ASR > model, the honesty rule made
+  explicit). `core/evidence_manager.py`'s `AcquisitionMethod` gains `OCR`,
+  `SPEECH`, and `MODEL`, so a machine's reading of a picture or a voice is kept
+  distinct from a document's own text layer. Section 7's transcript correction is
+  `perception/speech.py`'s `TranscriptCorrection` + `correct_transcript` -- a
+  **new** record traceable to the original audio (its result id and reference),
+  never a mutation, and a blank correction is refused. `core/perception_gate.py`
+  is the held-out gate (29 judgements with negative controls) wired into
+  `evaluation` as `perception_bridge_accuracy` (1.0000; `overall` 0.9898 →
+  0.9900). Headless twin: `python -m cli perception
+  status|detect|read|classify|ocr|describe|audio|speak|ingest|ingest-text`
+  (`cli/perception.py`, alias `perceive`, five menu entries). Nothing here reaches
+  the network at runtime (the only `urllib` reference is a `file://` URI built
+  with `Path.as_uri()`), and no perception model is mandatory: the vision model
+  and a real STT/TTS engine each report their own real next step when absent
+  (`python -m cli perception status`). Tests:
+  `tests/test_perception_phase7.py` (64 tests). Docs: `docs/perception/` (11
+  files) and `docs/architecture/PHASE_7_IMPLEMENTATION_REPORT.md`.

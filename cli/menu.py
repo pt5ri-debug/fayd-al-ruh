@@ -440,6 +440,11 @@ def run_deps(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.deps", argv)
 
 
+def run_perception(argv: Sequence[str] = ()) -> int:
+    """Local multimodal perception: documents, images, audio, and speech (Phase 7)."""
+    return _run_module("cli.perception", argv)
+
+
 def run_curriculum(argv: Sequence[str] = ()) -> int:
     """Show the seeded petroleum-engineering curriculum and its coverage."""
     if argv:
@@ -650,6 +655,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~4 GB)", run_image, ("download", "--approve")),
     ("Install optional PDF/OCR/image support", run_deps, ()),
+    ("Perception: what this build can read (documents, images, audio, speech)", run_perception, ("status",)),
+    ("Perception: read a document, PDF, Word, or text file locally", run_perception, ("read",)),
+    ("Perception: OCR an image, or describe it with the local vision model", run_perception, ("ocr",)),
+    ("Perception: read audio and transcribe it with a local speech engine", run_perception, ("audio",)),
+    ("Perception: read a file and submit it to the Cognitive Core", run_perception, ("ingest",)),
     ("Show the ingestion status (store + ledger)", run_ingest, ("stats",)),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--resume", "--episodes", "60")),
@@ -842,6 +852,7 @@ __all__ = [
     "run_ml",
     "run_model_chat",
     "run_models",
+    "run_perception",
     "run_petroleum",
     "run_presentation",
     "run_reasoning",
