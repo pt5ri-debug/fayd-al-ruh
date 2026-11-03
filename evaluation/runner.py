@@ -42,6 +42,7 @@ from core.knowledge_carry import knowledge_carry_accuracy
 from core.learning_gate import learning_accuracy
 from core.memory_gate import memory_architecture_accuracy
 from core.observation import Observation
+from core.perception_gate import perception_bridge_accuracy
 from core.problem_decomposition import decomposition_accuracy
 from core.reasoning_api import facade_accuracy
 from core.reasoning_report import reasoning_trace_accuracy
@@ -262,6 +263,15 @@ class EvaluationMetrics:
     QLoRA needs a CUDA GPU); config validation; the training job life cycle; the
     base model provably unchanged by a run; and controlled promotion plus rollback
     -- each on the real implementation, with negative controls (Phase 6)."""
+
+    perception_bridge_accuracy: float
+    """The share of held-out Phase-7 perception judgements satisfied: a document,
+    PDF, image, or audio source is read into the one normalized result shape with
+    its provenance; a perceived artifact becomes a citable Document and evidence on
+    the answer path; a model-generated description is labelled as a reading and its
+    evidence is weaker than a stated fact's; an unsupported claim is never stored;
+    and an unreadable, unsupported, or cancelled source is refused rather than
+    guessed at -- each on the real implementation, with negative controls."""
 
     knowledge_validation_accuracy: float
     """The share of held-out cognitive-core judgements satisfied: the event bus
@@ -1194,6 +1204,14 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     personality_agents_value = personality_agents_accuracy()
     training_value = training_accuracy()
 
+    # Perception (Phase 7): a perceived artifact must reach the answer path as
+    # *evidence* with its provenance, never as a verified fact. Held-out judgements
+    # over the real detector, pipelines, schema, validator, and bridge -- with
+    # negative controls (a model description is weaker than a stated fact and never
+    # native text, an unsupported claim is never stored, an unreadable/unsupported/
+    # cancelled source is refused), so a regression in perception fails here.
+    perception_value = perception_bridge_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1273,6 +1291,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         tool_selection_value,
         personality_agents_value,
         training_value,
+        perception_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1339,6 +1358,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         tool_selection_accuracy=round(tool_selection_value, 6),
         personality_agents_accuracy=round(personality_agents_value, 6),
         training_accuracy=round(training_value, 6),
+        perception_bridge_accuracy=round(perception_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )
