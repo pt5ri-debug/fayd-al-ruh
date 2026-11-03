@@ -22,6 +22,11 @@ from core.ontology import Ontology
 from core.petroleum_corpus import seed_petroleum_corpus
 
 
+def _any_hour() -> SchedulerSettings:
+    """Scheduler settings with no quiet window, so a test is time-of-day free."""
+    return SchedulerSettings(quiet_start_hour=None, quiet_end_hour=None)
+
+
 @pytest.fixture(scope="module")
 def ontology() -> Ontology:
     graph = Ontology()
@@ -152,7 +157,9 @@ def test_status_reports_honestly(ontology, tmp_path, monkeypatch):
 # -- the scheduler ----------------------------------------------------------
 def test_scheduler_is_due_when_never_run(tmp_path, monkeypatch):
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
-    scheduler = ThoughtScheduler()
+    # The quiet window is a *time-of-day* rule, so it is disabled here: this test
+    # is about "a scheduler that has never run is due", not about the wall clock.
+    scheduler = ThoughtScheduler(settings=_any_hour())
     assert scheduler.due().allowed
 
 
@@ -166,7 +173,7 @@ def test_scheduler_defers_under_load(tmp_path, monkeypatch):
 
 def test_scheduler_pause_and_resume(tmp_path, monkeypatch):
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
-    scheduler = ThoughtScheduler()
+    scheduler = ThoughtScheduler(settings=_any_hour())
     scheduler.pause()
     assert not scheduler.due().allowed
     scheduler.resume()
