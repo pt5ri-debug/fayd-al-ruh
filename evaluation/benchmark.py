@@ -83,6 +83,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("reasoning_facade_accuracy", True, label="Reasoning facade accuracy (held-out: the one reasoning API routes a question to the engine its kind warrants and returns the engine's own object, with negative controls)"),
     MetricSpec("hypothesis_accuracy", True, label="Hypothesis accuracy (held-out: candidate hypotheses are generated only from what the graph licenses, ranked, with a contested candidate reported and an unknown question yielding none)"),
     MetricSpec("tool_selection_accuracy", True, label="Tool selection accuracy (held-out: a bounded chooser picks only tools the sandbox allow-list permits, and refuses a mutating tool in a read-only sandbox)"),
+    MetricSpec("personality_agents_accuracy", True, label="Personality agents accuracy (held-out: seven independent personalities as agents -- capability ceilings enforced, a configuration cannot widen them, independent working contexts, memory isolation with Natasha refused, the router honest about no-suitable-personality, bounded delegation, conflicts preserved not voted away, and Natasha excluded from the aggregated training dataset)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )
