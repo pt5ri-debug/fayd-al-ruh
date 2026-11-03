@@ -59,6 +59,17 @@ python -m evaluation       overall 0.987721, 55 metrics
 - **Hardware:** the target machine's GPUs (Radeon R7 M360, Intel HD 520) cannot
   be used; plan for CPU inference, one large model at a time on 16 GB.
 
+## Delivered phases (post-Phase 0)
+
+Each delivered phase has its own implementation report beside these documents:
+
+- `PHASE_1_IMPLEMENTATION_REPORT.md` — cognitive core enhancement (events,
+  resource governor, validation service, uncertainty).
+- `PHASE_2_IMPLEMENTATION_REPORT.md` — long-term memory architecture.
+- `PHASE_3_IMPLEMENTATION_REPORT.md` — cognitive and experience-based learning.
+- `PHASE_6_IMPLEMENTATION_REPORT.md` — **controlled model-weight training**
+  (`ml/training/`, `cli/train.py`; metric `training_accuracy` = 1.0000).
+
 ## First task for Phase 1
 
 > Implement `core/event_bus.py` and publish the controller's lifecycle events

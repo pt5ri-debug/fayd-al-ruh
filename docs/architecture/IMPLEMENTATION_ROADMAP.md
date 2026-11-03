@@ -268,6 +268,16 @@ record, a training history, and an enforced permission set; isolation unchanged.
 
 ## Phase 6 — Controlled Model Weight Training
 
+> **Status: ✅ DELIVERED** (2026-11-03, branch `feature/phase6-training-pipeline`).
+> See `docs/architecture/PHASE_6_IMPLEMENTATION_REPORT.md`. The metric
+> `training_accuracy` (10 held-out judgements) is 1.0000; `overall` 0.9898.
+> Delivered as `ml/training/` (config, compatibility, resources, adapters,
+> datasets, isolation, trainer, evaluation, registry, coordinator, gate),
+> `cli/train.py`, and `ModelManager.training_adapters()`. The in-process numpy
+> LoRA path needs **no** extra; the transformers/QLoRA path is the optional
+> `[training]` extra and is refused by name where the hardware does not support
+> it. The base model is provably never modified.
+
 **Goal:** the largest gap — parameter-efficient fine-tuning (LoRA/QLoRA) of a
 local model, behind the existing version/rollback gate, plus the repair of the
 in-project LLM.

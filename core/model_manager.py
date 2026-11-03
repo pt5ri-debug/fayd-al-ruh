@@ -1307,6 +1307,69 @@ class ModelManager:
                 continue
         return tuple(active)
 
+    def training_adapters(self) -> tuple[Any, ...]:
+        """The Phase-6 training adapters this project has produced.
+
+        A **view** over :class:`ml.training.registry.TrainingRegistry`, never a
+        second store: the Model Manager lists a trained adapter beside the base
+        models, so a caller has one place to ask. An absent training registry
+        yields ``()`` rather than raising.
+        """
+        try:
+            from ml.training.registry import TrainingRegistry
+
+            return TrainingRegistry(self.root).adapters()
+        except Exception:  # pragma: no cover - defensive
+            return ()
+
+    def active_training_adapter(self) -> Any:
+        """The training adapter currently promoted to active, or ``None``.
+
+        ``None`` means the base models are in use -- which is the honest answer on
+        a fresh install and after a rollback, not an error.
+        """
+        try:
+            from ml.training.registry import TrainingRegistry
+
+            return TrainingRegistry(self.root).active()
+        except Exception:  # pragma: no cover - defensive
+            return None
+
+    def activate_training_adapter(self, adapter_id: str) -> Any:
+        """Make a promoted adapter the active one; returns its record.
+
+        Only an **accepted** adapter may be activated: a candidate whose evaluation
+        did not pass is refused here, so activation can never bypass the gate.
+        """
+        from ml.training.registry import STATUS_ACCEPTED, TrainingRegistry
+
+        registry = TrainingRegistry(self.root)
+        record = registry.get(adapter_id)
+        if record is None:
+            raise KeyError(f"No training adapter {adapter_id!r} is registered.")
+        if record.status != STATUS_ACCEPTED:
+            raise PermissionError(
+                f"The adapter {adapter_id!r} is {record.status}; only an accepted "
+                "adapter may be activated."
+            )
+        registry.set_active(adapter_id)
+        return record
+
+    def deactivate_training_adapter(self) -> None:
+        """Return the base models to use (no adapter active). The history stays."""
+        from ml.training.registry import TrainingRegistry
+
+        TrainingRegistry(self.root).clear_active()
+
+    def training_adapter_report(self) -> str:
+        """A readable block naming the active adapter and what is available."""
+        from ml.training.registry import TrainingRegistry
+
+        try:
+            return TrainingRegistry(self.root).report()
+        except Exception:  # pragma: no cover - defensive
+            return "Training adapters are unavailable on this install."
+
     def diagnostics(self) -> DiagnosticsReport:
         """Everything a diagnostics surface shows, in one honest read.
 

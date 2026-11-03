@@ -6236,3 +6236,38 @@ regression monitor each can refuse a change.
   resolution, communication, monitoring, the composed system, and the gate. Docs:
   `docs/agents/MULTI_AGENT_ARCHITECTURE.md`, `docs/agents/AGENT_ISOLATION.md`,
   `docs/agents/AGENT_RUNTIME.md`.
+
+- Phase 6 (roadmap) — **controlled model-weight training**: `ml/training/` is the
+  safe, reproducible, local fine-tuning pipeline, and the *only* path that may
+  touch weights -- and it only ever produces an **adapter**, never a base.
+  `config.py` is a validated, bounded `TrainingConfig` with presets;
+  `compatibility.py` answers which methods a given model/runtime/hardware
+  **really** supports (a live in-project transformer trains in process; a **GGUF
+  is refused by name** as a training base; **QLoRA is refused** without a CUDA GPU,
+  and this machine's AMD/Intel GPUs have none); `resources.py` estimates the
+  memory need and reads the disk honestly; `adapters.py` is the LoRA backend --
+  `NumpyLoRAAdapter` freezes the base and keeps its own `A`/`B`, restoring the
+  exact pre-add values so the base is **bit-for-bit** unchanged, and
+  `PeftAdapterBackend` is the optional `[training]` transformers path;
+  `datasets.py` builds a governed, validated, versioned, provenance-carrying
+  dataset (`TrainingExample`/`DatasetBuilder`/`DatasetValidator`, deterministic
+  splits, duplicate/leak/quality checks) and `aggregate_examples` is the one
+  authorised aggregate; `isolation.py` re-derives the membership from the
+  examples and enforces the **Natasha exclusion** (a hand-built aggregate
+  containing her is refused); `trainer.py` records each run (software, hardware,
+  metrics, base-preservation proof, cancellation, failure -- a cancelled or
+  failed run writes no adapter); `evaluation.py` measures held-out and decides
+  acceptance (`min_improvement`/`max_regression`); `registry.py` keeps the
+  adapter history with `PromotionManager` (**never automatic**) and
+  `RollbackManager` (**restores without deleting history**); `coordinator.py` is
+  the one governed entry point (`feasibility`/`prepare_dataset`/`start`/
+  `evaluate`/`promote`/`rollback`); and `gate.py` is the held-out gate (10
+  judgements with negative controls) wired into `evaluation` as
+  `training_accuracy` (1.0000). `core/model_manager.py` gains
+  `training_adapters()`/`active_training_adapter()`/`activate_training_adapter()`
+  as a **view** over that registry (only an *accepted* adapter may be activated).
+  Headless twin: `python -m cli train status|compat|presets|feasibility|
+  build-dataset|datasets|validate|run [--approve]|runs|evaluate|adapters|promote
+  [--approve]|rollback|gate` (`cli/train.py`). Nothing here needs the network;
+  the in-process path needs no extra. Docs:
+  `docs/architecture/PHASE_6_IMPLEMENTATION_REPORT.md`.
