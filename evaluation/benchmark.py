@@ -78,6 +78,11 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("knowledge_validation_accuracy", True, label="Knowledge validation accuracy (held-out: the event bus, resource governor, validator, transactional integrator, and query engine behave as claimed)"),
     MetricSpec("memory_architecture_accuracy", True, label="Memory architecture accuracy (held-out: durable persistence, correction keeps history, archive not delete, backup/restore with a refused bad backup, corrupt-row tolerance, transaction rollback, temporal validity, explainable ranking, consolidation, and personality isolation)"),
     MetricSpec("learning_accuracy", True, label="Learning accuracy (held-out: evidenced claim integrated but unsupported refused, provenance preserved, duplicate reinforces, contradiction preserved, experience persists and its lesson rebuilt, a single success never promotes, feedback never overrides evidence, inferred bounded below explicit, silence refused, correction supported, versioning and rollback, and Natasha's learning excluded)"),
+    MetricSpec("problem_decomposition_accuracy", True, label="Problem decomposition accuracy (held-out: a question is broken into the reasoning units it warrants, with negative controls for a single-clause and an empty question)"),
+    MetricSpec("conclusion_verification_accuracy", True, label="Conclusion verification accuracy (held-out: a conclusion is verified as supported/contradicted/partially supported/insufficient/unverified, with negative controls)"),
+    MetricSpec("reasoning_facade_accuracy", True, label="Reasoning facade accuracy (held-out: the one reasoning API routes a question to the engine its kind warrants and returns the engine's own object, with negative controls)"),
+    MetricSpec("hypothesis_accuracy", True, label="Hypothesis accuracy (held-out: candidate hypotheses are generated only from what the graph licenses, ranked, with a contested candidate reported and an unknown question yielding none)"),
+    MetricSpec("tool_selection_accuracy", True, label="Tool selection accuracy (held-out: a bounded chooser picks only tools the sandbox allow-list permits, and refuses a mutating tool in a read-only sandbox)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )

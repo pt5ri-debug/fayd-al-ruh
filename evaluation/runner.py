@@ -30,15 +30,19 @@ from core.character_memory_gate import memory_seeding_accuracy
 from core.cognition_catalog import catalog_accuracy
 from core.cognitive_controller import CognitiveController
 from core.cognitive_core_gate import knowledge_validation_accuracy
+from core.conclusion_verification import verification_accuracy
 from core.curriculum_knowledge import curriculum_coverage_score
 from core.embeddings import evaluate_held_out
 from core.evidence import Evidence
 from core.goal import Goal
 from core.grounding import grounding_accuracy
+from core.hypothesis_reasoning import hypothesis_accuracy
 from core.knowledge_carry import knowledge_carry_accuracy
 from core.learning_gate import learning_accuracy
 from core.memory_gate import memory_architecture_accuracy
 from core.observation import Observation
+from core.problem_decomposition import decomposition_accuracy
+from core.reasoning_api import facade_accuracy
 from core.reasoning_report import reasoning_trace_accuracy
 from core.relation_connections import connection_reasoning_accuracy
 from core.relation_consistency import consistency_accuracy
@@ -47,6 +51,7 @@ from core.relation_inference import inference_accuracy
 from core.relation_paths import connection_accuracy
 from core.relation_polarity import polarity_accuracy
 from core.state import State
+from core.tool_agent import tool_selection_accuracy
 from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
 
 from evaluation.metrics import (
@@ -209,6 +214,36 @@ class EvaluationMetrics:
     below an explicit one, silence is refused, feedback is correctable, versions
     advance and roll back while the audit trail survives, and Natasha's learning is
     excluded from the main model's dataset."""
+
+    problem_decomposition_accuracy: float
+    """The share of held-out decomposition judgements satisfied: a question is broken
+    into the reasoning units it warrants, with negative controls (a single-clause
+    question stays one part, a noun conjunction is not split, an empty question
+    decomposes to nothing, and a multi-clause question is read as the parts its
+    kinds warrant) (Phase 4: reasoning and inference)."""
+
+    conclusion_verification_accuracy: float
+    """The share of held-out conclusion-verification judgements satisfied: a
+    conclusion is verified against the graph as supported / contradicted / partially
+    supported / insufficient-information / unverified, with negative controls, so a
+    verifier that over-claims or under-claims fails (Phase 4)."""
+
+    reasoning_facade_accuracy: float
+    """The share of held-out facade judgements satisfied: the one reasoning API
+    routes a question to the engine its kind warrants and returns the engine's own
+    object, with negative controls (a definitional or unrelated question must not
+    produce a plan/decision/verdict/comparison/hypothesis) (Phase 4)."""
+
+    hypothesis_accuracy: float
+    """The share of held-out hypothesis judgements satisfied: candidate hypotheses
+    are generated only from what the graph licenses (a stored relation, an
+    entailment, a walked chain, a causal path, or a decision option), ranked, with a
+    contested candidate reported and an unknown question yielding none (Phase 4)."""
+
+    tool_selection_accuracy: float
+    """The share of held-out tool-selection judgements satisfied: a bounded chooser
+    picks only tools the sandbox allow-list permits and refuses a mutating tool in a
+    read-only sandbox -- the model proposes, the sandbox disposes (Phase 4)."""
 
     knowledge_validation_accuracy: float
     """The share of held-out cognitive-core judgements satisfied: the event bus
@@ -1125,6 +1160,20 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # tests pass.
     learning_value = learning_accuracy()
 
+    # Reasoning and inference (Phase 4): held-out judgements for the one reasoning
+    # facade, the problem decomposer, the conclusion verifier, the bounded tool
+    # chooser, and hypothesis generation -- each with negative controls (a
+    # definitional/unrelated question must earn no plan/decision/verdict/comparison/
+    # hypothesis, a single-clause question must not be split, an unknown question
+    # must yield no candidate, and a mutating tool must be refused in a read-only
+    # sandbox). Each runs the *real* engine, so a regression that stopped reaching
+    # the engine fails here even while the unit tests that pinned the good case pass.
+    decomposition_value = decomposition_accuracy()
+    verification_value = verification_accuracy()
+    facade_value = facade_accuracy()
+    hypothesis_value = hypothesis_accuracy()
+    tool_selection_value = tool_selection_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1197,6 +1246,11 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         core_value,
         memory_value,
         learning_value,
+        decomposition_value,
+        verification_value,
+        facade_value,
+        hypothesis_value,
+        tool_selection_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1256,6 +1310,11 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         knowledge_validation_accuracy=round(core_value, 6),
         memory_architecture_accuracy=round(memory_value, 6),
         learning_accuracy=round(learning_value, 6),
+        problem_decomposition_accuracy=round(decomposition_value, 6),
+        conclusion_verification_accuracy=round(verification_value, 6),
+        reasoning_facade_accuracy=round(facade_value, 6),
+        hypothesis_accuracy=round(hypothesis_value, 6),
+        tool_selection_accuracy=round(tool_selection_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

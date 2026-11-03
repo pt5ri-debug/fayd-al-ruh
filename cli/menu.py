@@ -415,6 +415,11 @@ def run_learning(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.learning", argv)
 
 
+def run_reasoning(argv: Sequence[str] = ()) -> int:
+    """The reasoning and inference engine (Phase 4): decompose, reason, verify."""
+    return _run_module("cli.reasoning", argv)
+
+
 def run_ask_teacher(argv: Sequence[str] = ()) -> int:
     """Fayd Al-Ruh the learner asks Fayd Al-Ruh the teacher, endlessly."""
     return _run_module("cli.asking", argv)
@@ -623,6 +628,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Reason by analogy: what a concept is structurally like", run_analogy, ("like", "porosity")),
     ("Semantic space: what a word is used with (learned, local)", run_embeddings, ("status",)),
     ("Extract typed relations from text (preview, then learn)", run_relations, ("read", "Porosity increases permeability.")),
+    ("Reasoning: decompose a question and route each part to its engine", run_reasoning, ("reason", "how do I measure porosity?")),
     ("Learning: what the system has learned, and how to teach it", run_learning, ("status",)),
     ("Generate an image from text", run_image, ("backends",)),
     ("Download the learned image model (optional, ~4 GB)", run_image, ("download", "--approve")),
@@ -820,6 +826,7 @@ __all__ = [
     "run_models",
     "run_petroleum",
     "run_presentation",
+    "run_reasoning",
     "run_relations",
     "run_release",
     "run_scene3d",
