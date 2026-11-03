@@ -36,6 +36,7 @@ from core.evidence import Evidence
 from core.goal import Goal
 from core.grounding import grounding_accuracy
 from core.knowledge_carry import knowledge_carry_accuracy
+from core.memory_gate import memory_architecture_accuracy
 from core.observation import Observation
 from core.reasoning_report import reasoning_trace_accuracy
 from core.relation_connections import connection_reasoning_accuracy
@@ -186,6 +187,16 @@ class EvaluationMetrics:
     reported rather than hidden, a spent question source ends the run, and a
     qualified answer reaches the learner's own fact store (the learner-asks-teacher
     loop)."""
+
+    memory_architecture_accuracy: float
+    """The share of held-out long-term-memory judgements the Phase-2 store
+    satisfies: a record survives a restart with its provenance, a correction keeps
+    the old record beside the new one, archive is not delete, a backup restores
+    while a corrupt one is refused, a corrupt row is skipped not raised, a
+    failed batch rolls back, a validity window is honoured, ranking reports its
+    signals separately, consolidation promotes and skips, Natasha's memory is
+    unreadable by anyone else, and retrieval similarity is never the record's own
+    confidence."""
 
     knowledge_validation_accuracy: float
     """The share of held-out cognitive-core judgements satisfied: the event bus
@@ -1086,6 +1097,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # controls, so a core regression fails here even when its unit tests pass.
     core_value = knowledge_validation_accuracy()
 
+    # Long-term memory (Phase 2): the durable four-category memory over one
+    # SQLite store. Held-out judgements run against the real store with negative
+    # controls (a corrupt backup refused, a corrupt row tolerated, Natasha's
+    # memory unreadable, consolidation not promoting a trivial item), so a memory
+    # regression fails here even when its unit tests pass.
+    memory_value = memory_architecture_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1156,6 +1174,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         depth_value,
         asking_value,
         core_value,
+        memory_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1213,6 +1232,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         knowledge_depth_accuracy=round(depth_value, 6),
         asking_loop_accuracy=round(asking_value, 6),
         knowledge_validation_accuracy=round(core_value, 6),
+        memory_architecture_accuracy=round(memory_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

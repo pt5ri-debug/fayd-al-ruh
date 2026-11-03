@@ -355,6 +355,18 @@ def learning_root_dir() -> Path:
     return data_dir() / "learning"
 
 
+def memory_root_dir() -> Path:
+    """The root of the durable long-term memory stores (``data/memory``).
+
+    Phase 2 keeps each personality's memory database in its own folder under
+    this root -- ``data/memory/<owner>/memory.sqlite3`` -- so the memory is
+    git-ignored, local-only, and as isolated as the learning stores. The path is
+    resolved by :mod:`core.learning_isolation` in the memory registry, so this
+    helper only names the root; it is provided for documentation and tooling.
+    """
+    return data_dir() / "memory"
+
+
 def main_model_learning_dir() -> Path:
     """The **project model's** own independent learning directory.
 
@@ -523,6 +535,7 @@ __all__ = [
     "learning_audit_dir",
     "learning_root_dir",
     "main_model_learning_dir",
+    "memory_root_dir",
     "model_downloads_dir",
     "model_manager_dir",
     "model_registry_dir",

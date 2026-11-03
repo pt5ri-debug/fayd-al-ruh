@@ -6043,3 +6043,57 @@ regression monitor each can refuse a change.
   Markdown paragraphs), and a real dialog re-typing in place with its list box
   drawing the lists scale. Gates: ruff clean, mypy 872 files OK, evaluation PASS
   (`overall` 0.9877 unchanged), pytest 5822 passed / 15 skipped.
+
+- Phase 2 — **long-term memory is durable, four-category, and isolated per
+  personality** (the memory half of the roadmap; `docs/architecture/
+  PHASE_2_IMPLEMENTATION_REPORT.md`). The project's memory modules
+  (`core/memory.py`, `working_memory`, `episodic_memory`, `semantic_memory`,
+  `procedural_memory`, `memory_retriever`, `memory_consolidator`) were in-process
+  dicts, so an experience was lost at process exit unless a caller snapshotted the
+  graph by hand. Six new modules close it, all additive. `core/memory_record.py`
+  is the one record contract: `MemoryRecord` carries content, **provenance**
+  (`source`/`source_reference`), **confidence**, **verification** (a fresh record
+  is `unverified` and only an explicit act trusts it), **temporal validity**
+  (`valid_from`/`valid_until`), access counts, supersession links, and links to the
+  Cognitive Core (`entities`/`relations`/`evidence_ids`); a correction is a *new*
+  record via `supersede()` -- never a mutation -- so the original is preserved.
+  `core/memory_db.py` is the durable SQLite store (standard library only):
+  transactional writes, a **schema version** with a migration path (a database from
+  a newer build is refused), bounded paged reads, **corrupt-row tolerance** (a bad
+  row is skipped and counted, never raised), and backup/restore through SQLite's
+  own online-backup API -- `restore` integrity-checks the candidate first and keeps
+  the current file as `<name>.pre-restore`, so a bad backup cannot destroy a good
+  database. `core/long_term_memory.py` is the four-category engine: a bounded
+  `WorkingMemoryStore` (runtime state, deliberately not persisted) plus the durable
+  episodic/semantic/procedural records over one database, with the full lifecycle
+  (capture → normalise → assign a category → link → persist → index → retrieve →
+  consolidate → archive). **Semantic memory references the Phase-1 Cognitive Core,
+  never a competing graph.** `core/memory_retrieval.py` is the one retrieval
+  interface with an **explainable** ranking: six separate signals (relevance,
+  semantic, recency, frequency, importance, source quality) and a documented
+  weighted sum, and retrieval similarity is **never** reported as factual
+  confidence (they are separate fields). There is no feedback loop -- a retrieval
+  bumps a record's access count once -- and a rarely retrieved memory is never
+  deleted (the store only ever archives, on an explicit call).
+  `core/memory_management.py` is the management surface (inspect, search, correct,
+  supersede, verify, archive, find duplicates, export, back up, restore; the only
+  destructive operation, `reset`, needs `confirmed=True`) plus
+  `PersonalityMemoryRegistry`, which gives each personality its **own** database
+  under `data/memory/<owner>/` (`core.paths.memory_root_dir`, git-ignored) and
+  consults `core.learning_isolation` **before** it resolves a path -- so Natasha's
+  memory is refused to the main model and to every other personality, structurally.
+  `core/memory_gate.py` is the held-out gate (`memory_architecture_accuracy`, 12
+  judgements with **negative controls**: a corrupt backup refused, a corrupt row
+  tolerated, consolidation *not* promoting a trivial item, Natasha's memory
+  unreadable, retrieval similarity *not* the confidence), a metric in
+  `evaluation` (overall 0.9880 → 0.9882). Extended: `core/memory_consolidator.py`'s
+  `consolidate(..., durable=...)` writes a promoted working item into the durable
+  store; `core/memory_retriever.py`'s `retrieve(..., durable=...)` reads durable
+  episodic records as a fourth source; `core/event_bus.py` gained `memory.stored`/
+  `memory.consolidated`/`memory.archived`; and `core/cognitive_controller.py`
+  accepts an optional `long_term_memory=` and exposes `remember`/`recall`/
+  `consolidate_memory`/`long_term_memory_status` (a controller without one behaves
+  exactly as before). `tests/test_long_term_memory.py` (58 tests) pins the record,
+  the database, the four categories, the lifecycle, retrieval, management,
+  isolation, the controller wiring, and the gate. Gates: ruff clean, mypy 899 files
+  OK, evaluation PASS, pytest green.

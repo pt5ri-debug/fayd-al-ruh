@@ -76,6 +76,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("knowledge_depth_accuracy", True, label="Knowledge depth accuracy (held-out: the graph's reach is measured honestly, the harvest writes only through the bounded learner, and a bridge is a real walked path)"),
     MetricSpec("asking_loop_accuracy", True, label="Asking loop accuracy (held-out: the learner asks, the teacher always answers, no question repeats, a stop takes effect, and only a verified answer qualifies)"),
     MetricSpec("knowledge_validation_accuracy", True, label="Knowledge validation accuracy (held-out: the event bus, resource governor, validator, transactional integrator, and query engine behave as claimed)"),
+    MetricSpec("memory_architecture_accuracy", True, label="Memory architecture accuracy (held-out: durable persistence, correction keeps history, archive not delete, backup/restore with a refused bad backup, corrupt-row tolerance, transaction rollback, temporal validity, explainable ranking, consolidation, and personality isolation)"),
     MetricSpec("semantic_separation", True, label="Semantic separation (held-out relations)"),
     MetricSpec("overall", True, label="Overall"),
 )

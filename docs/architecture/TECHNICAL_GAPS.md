@@ -112,7 +112,7 @@ rewrite the scheduler.
 
 ## 3. Memory
 
-### G-6 · Working and episodic memory are in-process only — **P0**
+### G-6 · Working and episodic memory are in-process only — **P0** ✅ CLOSED (Phase 2)
 
 **Evidence:** `core/working_memory.WorkingMemory` and
 `core/episodic_memory.EpisodicMemory` hold plain dicts; `CognitiveMemory` stores
@@ -124,11 +124,16 @@ by id in memory. Only `core/knowledge_carry.py` persists anything across session
 procedural). Today an experience is lost at process exit unless a caller
 snapshots.
 
-**Fix:** **EXTEND** — a durable store (SQLite, reusing `storage/sqlite_store.py`)
-for episodic and semantic items, with `memory_consolidator` writing into it and
-`memory_retriever` reading from it. `knowledge_carry` already proves the pattern.
+**Fix (delivered):** `core/memory_db.py` (durable SQLite, schema-versioned,
+transactional, corrupt-row-tolerant, backup/restore) beneath
+`core/long_term_memory.py` (the four categories + the full lifecycle),
+`core/memory_retrieval.py` (explainable ranking), `core/memory_management.py`
+(management + per-personality isolation), and `core/memory_gate.py` (the held-out
+gate). `memory_consolidator` writes into the durable store and `memory_retriever`
+reads from it; the controller accepts an optional `long_term_memory=`.
+See `docs/architecture/PHASE_2_IMPLEMENTATION_REPORT.md`.
 
-### G-7 · No conflict resolution across the memory kinds — **P1**
+### G-7 · No conflict resolution across the memory kinds — **P1** ✅ CLOSED (Phase 2)
 
 **Evidence:** `core/conflict_resolver.py` exists for beliefs;
 `memory_consolidator.py` promotes working→episodic without a cross-kind conflict
@@ -136,7 +141,13 @@ rule.
 
 **Impact:** a new episode can silently contradict a stored semantic fact.
 
-**Fix:** **EXTEND** `conflict_resolver` to the memory stores.
+**Fix (delivered):** a correction is a **new** record via
+`MemoryRecord.supersede()` / `LongTermMemory.correct()` -- the old record is kept
+and marked `superseded` with a pointer to its replacement, so a contradiction is
+*reported*, never silently merged. `MemoryManager.duplicates()` surfaces duplicate
+groups for review without merging them, and `provenance()` walks the supersession
+chain. (Belief-level contradiction detection remains in `conflict_resolver`, which
+Phase 1's `KnowledgeValidator` already uses.)
 
 ---
 
@@ -322,12 +333,12 @@ modify model weights).
 | G-1 | In-project LLM unusable | P0 | extend `ml/llm` |
 | G-2 | No LoRA/PEFT | P0 | new `core/finetune.py` + `ml/lora/` |
 | G-4 | No event bus | P0 | new `core/event_bus.py` |
-| G-6 | Memory not durable | P0 | extend memory + storage |
+| G-6 | Memory not durable | P0 | ✅ closed (Phase 2: `memory_db`+`long_term_memory`) |
 | G-8 | Offline not enforced/tested | P0 | new test + hard-off switch |
 | G-9 | Self-improvement not automated | P0 | new `core/self_improvement_loop.py` |
 | G-16 | No offline/recovery/backup tests | P0 | new tests |
 | G-5 | No resource governor/scheduler | P1 | extend `model_resources`+`scheduler` |
-| G-7 | No cross-kind memory conflict rule | P1 | extend `conflict_resolver` |
+| G-7 | No cross-kind memory conflict rule | P1 | ✅ closed (Phase 2: supersession keeps history) |
 | G-11 | Uncertainty not propagated to answer | P1 | extend `answer_confidence` |
 | G-12 | Tool selection declared, not chosen | P1 | extend `tool_agent` |
 | G-14 | No per-personality training records | P1 | extend `versions`+`character_learning` |
