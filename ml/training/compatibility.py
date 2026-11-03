@@ -141,12 +141,39 @@ def _training_extra_available() -> bool:
 
 
 def _gpu_available() -> bool:
+    """Whether the machine reports *any* GPU (informational only).
+
+    This is deliberately **not** the QLoRA question: a GPU the system exposes is
+    not necessarily a GPU that can run 4-bit training. QLoRA goes through
+    ``bitsandbytes`` and a CUDA build of ``torch``, so :func:`_cuda_available` is
+    what decides it.
+    """
     try:
         from core.model_resources import system_resources
 
         gpu = system_resources().gpu
         return bool(getattr(gpu, "available", False))
     except Exception:  # pragma: no cover - defensive
+        return False
+
+
+def _cuda_available() -> bool:
+    """Whether a CUDA runtime is usable here, which is what QLoRA really needs.
+
+    ``torch.cuda.is_available()`` is the authoritative answer (it is the exact
+    runtime bitsandbytes drives). It is checked only when ``torch`` is importable
+    -- on a base install there is no CUDA path at all, so the answer is ``False``
+    rather than a guess. A *device the system merely reports* (an AMD/Intel GPU, a
+    DRM ``card0``) is **not** CUDA, which is precisely the distinction the QLoRA
+    refusal must make.
+    """
+    try:
+        import torch  # type: ignore[import-not-found]
+    except Exception:
+        return False
+    try:
+        return bool(torch.cuda.is_available())
+    except Exception:  # pragma: no cover - a broken build must not crash
         return False
 
 
@@ -233,22 +260,30 @@ def validate_compatibility(record: Any, *, method: str = "") -> CompatibilityVer
         transformers_reason = "the extra is installed and the weights are usable"
 
     # -- method 3: QLoRA --------------------------------------------------
-    gpu = _gpu_available()
+    # QLoRA needs a *CUDA* runtime, not merely a device the system reports: an
+    # AMD/Intel GPU (or a bare DRM card) is not something bitsandbytes can use.
+    cuda = _cuda_available()
     qlora_ok = False
     qlora_reason = ""
     qlora_next = ""
-    if not gpu:
-        qlora_reason = (
-            "no CUDA-capable GPU is reported; the stated AMD/Intel GPUs do not "
-            "support modern CUDA/ROCm acceleration"
-        )
+    if not cuda:
+        if _gpu_available():
+            qlora_reason = (
+                "a GPU is present but no CUDA-capable device is reported; QLoRA "
+                "needs a CUDA GPU, which the stated AMD/Intel GPUs do not provide"
+            )
+        else:
+            qlora_reason = (
+                "no CUDA-capable GPU is reported; the stated AMD/Intel GPUs do not "
+                "support modern CUDA/ROCm acceleration"
+            )
         qlora_next = "train on a machine with a CUDA GPU, or use CPU LoRA"
     elif not extra:
         qlora_reason = "QLoRA needs the [training] extra (torch/transformers/peft/bitsandbytes)"
         qlora_next = "python -m pip install -r requirements-training.txt"
     else:
         qlora_ok = True
-        qlora_reason = "a GPU and the extra are present"
+        qlora_reason = "a CUDA GPU and the extra are present"
 
     methods = (
         MethodSupport(METHOD_LORA_INPROCESS, inprocess_ok, inprocess_reason, inprocess_next),

@@ -192,9 +192,33 @@ def test_qlora_needs_a_cuda_gpu(model):
     verdict = validate_compatibility(model)
     support = verdict.support_for(METHOD_QLORA)
     assert support is not None
-    # This environment has no CUDA GPU, so QLoRA must be refused honestly.
+    # This environment has no usable CUDA runtime, so QLoRA must be refused
+    # honestly -- and the reason must name the missing CUDA path.
     if not support.supported:
-        assert "GPU" in support.reason or "CUDA" in support.reason
+        assert "CUDA" in support.reason or "GPU" in support.reason
+
+
+def test_qlora_is_refused_when_a_gpu_is_reported_but_cuda_is_not(monkeypatch):
+    """A GPU the *system* reports is not a CUDA GPU -- the exact CI-runner case."""
+    from ml.training import compatibility as compat
+
+    monkeypatch.setattr(compat, "_gpu_available", lambda: True)
+    monkeypatch.setattr(compat, "_cuda_available", lambda: False)
+    verdict = compat.validate_compatibility(model)
+    support = verdict.support_for(METHOD_QLORA)
+    assert support is not None and not support.supported
+    assert "CUDA" in support.reason
+    assert "GPU is present" in support.reason
+
+
+def test_qlora_is_accepted_only_with_cuda_and_the_extra(model, monkeypatch):
+    from ml.training import compatibility as compat
+
+    monkeypatch.setattr(compat, "_cuda_available", lambda: True)
+    monkeypatch.setattr(compat, "_training_extra_available", lambda: True)
+    verdict = compat.validate_compatibility(model)
+    support = verdict.support_for(METHOD_QLORA)
+    assert support is not None and support.supported
 
 
 def test_transformers_method_reports_the_extra(model):
