@@ -445,6 +445,11 @@ def run_perception(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.perception", argv)
 
 
+def run_autonomy(argv: Sequence[str] = ()) -> int:
+    """Autonomous planning and task execution (Phase 8)."""
+    return _run_module("cli.autonomy", argv)
+
+
 def run_curriculum(argv: Sequence[str] = ()) -> int:
     """Show the seeded petroleum-engineering curriculum and its coverage."""
     if argv:
@@ -660,6 +665,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Perception: OCR an image, or describe it with the local vision model", run_perception, ("ocr",)),
     ("Perception: read audio and transcribe it with a local speech engine", run_perception, ("audio",)),
     ("Perception: read a file and submit it to the Cognitive Core", run_perception, ("ingest",)),
+    ("Autonomy: plan a goal into a validated task plan", run_autonomy, ("plan",)),
+    ("Autonomy: run a goal under the permission and approval gate", run_autonomy, ("run",)),
+    ("Autonomy: list the tools the planner may choose", run_autonomy, ("tools",)),
+    ("Autonomy: the execution audit trail", run_autonomy, ("history",)),
+    ("Autonomy: the held-out planning/execution gate", run_autonomy, ("gate",)),
     ("Show the ingestion status (store + ledger)", run_ingest, ("stats",)),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--resume", "--episodes", "60")),
@@ -824,6 +834,7 @@ __all__ = [
     "run_agents",
     "run_analogy",
     "run_ask_teacher",
+    "run_autonomy",
     "run_banner",
     "run_banner_chat",
     "run_characters",

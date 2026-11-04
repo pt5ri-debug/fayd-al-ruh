@@ -28,8 +28,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from core.tools import ToolResult, ToolSandbox
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, no runtime import cycle
+    from core.planning.plan import TaskPlan
 
 Planner = Callable[[str], "ToolPlan"]
 
@@ -107,6 +111,46 @@ class ToolAgent:
                 stopped_early = index < len(plan.calls) - 1
                 break
         return AgentRun(goal=plan.goal, steps=tuple(steps), stopped_early=stopped_early)
+
+    def run_task_plan(
+        self,
+        task_plan: TaskPlan,
+        *,
+        on_step: Callable[[Any], None] | None = None,
+    ) -> AgentRun:
+        """Run a :class:`core.planning.plan.TaskPlan` through the sandbox.
+
+        This is the Phase-8 bridge: a structured, dependency-ordered plan is
+        replayed as the agent's own tool calls, each task's ``tool`` and
+        ``arguments`` becoming a :class:`ToolCall`, in dependency order (the
+        planner has already ordered it). Every step is recorded, and each step's
+        outcome is handed to ``on_step`` so a caller can persist it as an
+        experience. The run stops at the first failed step when ``stop_on_error``
+        is set, exactly as :meth:`run` does -- so a tool the sandbox refuses is
+        reported, never skipped silently.
+        """
+        calls: list[ToolCall] = []
+        reasons: list[str] = []
+        for task in task_plan.tasks:
+            if not task.tool:
+                continue
+            calls.append(ToolCall(task.tool, dict(task.arguments)))
+            reasons.append(task.description)
+        if not calls:
+            return AgentRun(goal=task_plan.goal_id, steps=(), stopped_early=False)
+
+        steps: list[PlanStep] = []
+        stopped_early = False
+        for index, call in enumerate(calls):
+            result = self.sandbox.run(call.tool, **call.arguments)
+            step = PlanStep(call, result, reasons[index])
+            steps.append(step)
+            if on_step is not None:
+                on_step(step)
+            if not result.ok and self.stop_on_error:
+                stopped_early = index < len(calls) - 1
+                break
+        return AgentRun(goal=task_plan.goal_id, steps=tuple(steps), stopped_early=stopped_early)
 
 
 def plan_from_calls(goal: str, calls: Iterable[ToolCall], reasons: Iterable[str] = ()) -> ToolPlan:

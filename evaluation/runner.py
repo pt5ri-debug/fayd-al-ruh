@@ -43,6 +43,7 @@ from core.learning_gate import learning_accuracy
 from core.memory_gate import memory_architecture_accuracy
 from core.observation import Observation
 from core.perception_gate import perception_bridge_accuracy
+from core.planning_gate import task_execution_accuracy
 from core.problem_decomposition import decomposition_accuracy
 from core.reasoning_api import facade_accuracy
 from core.reasoning_report import reasoning_trace_accuracy
@@ -272,6 +273,17 @@ class EvaluationMetrics:
     evidence is weaker than a stated fact's; an unsupported claim is never stored;
     and an unreadable, unsupported, or cancelled source is refused rather than
     guessed at -- each on the real implementation, with negative controls."""
+
+    task_execution_accuracy: float
+    """The share of held-out Phase-8 planning/execution judgements satisfied: a
+    goal is decomposed into tasks each bound to a permitted tool; the plan is
+    validated before it runs; it executes under a permission and approval gate;
+    the outcome is verified against the goal's own criteria; and a failure is
+    recovered from safely -- with negative controls (a suggested goal does not
+    authorize, an action outside the allow-list is refused, a high-risk action
+    needs approval, an irreversible failure is not retried, a tool's success is
+    not the goal's, an invalid plan is never executed, a failure is never
+    hidden), each on the real implementation."""
 
     knowledge_validation_accuracy: float
     """The share of held-out cognitive-core judgements satisfied: the event bus
@@ -1212,6 +1224,17 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # cancelled source is refused), so a regression in perception fails here.
     perception_value = perception_bridge_accuracy()
 
+    # Planning and execution (Phase 8): a goal becomes a validated plan whose tasks
+    # are bound to permitted tools, run under the permission/approval gate, verified
+    # against the goal's own criteria, and recovered from safely. Held-out
+    # judgements over the real planner, engine, permission manager, verifier, and
+    # recovery manager -- with negative controls (a suggested goal does not
+    # authorize, an action outside the allow-list is refused, a high-risk action
+    # needs approval, an irreversible failure is not retried, a tool's success is
+    # not the goal's, an invalid plan is never executed, a failure is never hidden),
+    # so a regression in autonomy fails here.
+    planning_value = task_execution_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1292,6 +1315,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         personality_agents_value,
         training_value,
         perception_value,
+        planning_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1359,6 +1383,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         personality_agents_accuracy=round(personality_agents_value, 6),
         training_accuracy=round(training_value, 6),
         perception_bridge_accuracy=round(perception_value, 6),
+        task_execution_accuracy=round(planning_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )
