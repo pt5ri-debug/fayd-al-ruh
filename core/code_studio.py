@@ -29,7 +29,7 @@ import json
 import os
 import shutil
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC
 from pathlib import Path
@@ -698,14 +698,18 @@ class CodeStudio:
         command: Sequence[str] | None = None,
         *,
         timeout: float = 900.0,
+        env: Mapping[str, str] | None = None,
     ) -> CheckResult:
         """Run the project's checks inside the workspace.
 
         The default is the project's own test command, run *in the workspace* so a
         failing change is caught before it can reach ``main``. The result is
-        recorded on the workspace, so the window can gate Merge on it.
+        recorded on the workspace, so the window can gate Merge on it. ``env``
+        overrides the process environment (the self-improvement sandbox passes a
+        throwaway data root here, so a check cannot write to real state).
         """
         argv = tuple(command) if command else ("python", "-m", "pytest", "-q")
+        process_env = dict(env) if env is not None else _noninteractive_env()
         try:
             completed = subprocess.run(
                 argv,
@@ -713,7 +717,7 @@ class CodeStudio:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env=_noninteractive_env(),
+                env=process_env,
             )
             result = CheckResult(
                 command=argv,

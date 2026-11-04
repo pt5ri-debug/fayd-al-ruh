@@ -6380,3 +6380,75 @@ regression monitor each can refuse a change.
   `autonomy`/`autonomous`, five menu entries). CPU-first, offline, no model, no
   network. Tests: `tests/test_autonomy.py` (86 tests). Docs:
   `docs/architecture/PHASE_8_IMPLEMENTATION_REPORT.md`.
+
+- Phase 9 (roadmap) — **controlled self-improvement**: an automated, **human-gated**
+  loop for the project itself — monitor → detect → propose → isolated test →
+  measure → accept/reject → deploy → roll back — that never widens its own
+  authority. It **reuses** the existing infrastructure rather than competing with
+  it and adds nothing that can bypass a gate. The one facade is
+  `core/improvement/loop.py`'s `ImprovementLoop` (reached through
+  `core.self_improvement.improvement_loop(root, state_root=…)` and
+  `SelfImprovement().loop(...)`, whose `requires_human_review=True` behaviour is
+  unchanged); the loop only *orders* the pieces. `core/improvement/metrics.py` is
+  the structured metric vocabulary (26 metrics in `METRIC_CATALOGUE`, each with a
+  component, kind, direction, unit, and tolerance; a `MetricSample` carries a
+  timestamp and a `Provenance` of `measured`/`estimated`/`reported`, so a
+  measurement is never confused with an estimate) and `monitor.py` is the collector
+  (`PerformanceMonitor` with a bounded ring, configurable via `MonitorConfig`,
+  `attach`ing to the event bus, and `sample_resources` reading the machine's own
+  figures with an honest `None` where the platform cannot report one);
+  `health.py` reports a status that is `UNKNOWN` — never "healthy" — when there is
+  nothing to read. `weakness.py` turns measurements and reported failures into
+  evidence-backed `Weakness` findings (id, kind, evidence, component, frequency,
+  severity, confidence always `< 1.0`, impact, suggested investigation, related
+  metrics) under two honesty rules: a **single failure is never a weakness**
+  (`minimum_frequency` default 2) and **correlation is never stated as a cause**.
+  `proposals.py` generates structured `ImprovementProposal`s (all 14 phase fields
+  plus `source_weakness_id`, so a proposal is traceable to the finding it answers;
+  a kind with no planner yields *no* proposal) and `prioritization.py` ranks them
+  on nine **named** factors with documented weights, honouring a user override and
+  never pre-empting user-requested work. `sandbox.py` is the experiment isolation:
+  a **git worktree** (reusing `core/code_studio.py`, whose `run_checks` gained
+  `command`/`timeout`/`env`) on its own branch, a throwaway `FAYD_DATA_DIR` (so a
+  candidate's writes cannot reach real learned data), confinement that refuses an
+  escape or a forbidden file (`.git`, `pyproject.toml`, `requirements.txt`,
+  `.github`), bounded `SandboxLimits`, and cleanup that removes the worktree.
+  `experiments.py` runs one `CandidateChange` through the project's checks and an
+  injected `runner` seam; `regression.py` compares against the project's own
+  `evaluation/baseline.json` using the evaluation suite's metric specs; and
+  `evaluation.py` runs the ten-step comparison, marking a run with no metrics
+  **inconclusive** (never a pass) and confirming its verdict with the Phase-6
+  acceptance rule (`cognition.versions.ModelRegistry.should_accept`, whose
+  `rollback()` now returns the last accepted version). `approval.py` is the human
+  decision — it **refuses an approver named `improvement-loop`**, binds an
+  approval to one proposal, and supports reject. `deployment.py` refuses in a
+  deliberate order so a refusal can never have a side effect: a sensitive touch
+  (`model_weights`/`training_dataset`/`security`/`permissions`, in
+  `REFUSED_TOUCHES`) is refused and routed to the Phase-6 training governance or
+  the security controls; approval is checked before anything is read or written; a
+  `source_code` change returns `MANUAL_MERGE_REQUIRED` (the human merges it through
+  the Code Studio); a configuration change is applied only after a backup, with a
+  version. `rollback.py` restores only the files a deployment changed, from that
+  deployment's own backup, verifies its own restore, and **preserves** the
+  deployment and rollback in the append-only history. `history.py` is that audit
+  trail (no `delete`, no `edit`). `gate.py` is the held-out gate
+  `self_improvement_loop_accuracy` — 43 judgements run against the **real** code,
+  with **negative controls** (a single failure is not a weakness, a regression or
+  an unmeasured run is not an improvement, an escape or a protected file is
+  refused, an unapproved or sensitive change is refused, the loop cannot approve
+  its own change, no forbidden operation is exposed) — wired into `evaluation` as a
+  metric that enters `overall` (0.9902 → 0.9903). The ten `FORBIDDEN_OPERATIONS`
+  are enforced **structurally** (the loop has no method with any of those names)
+  and `assert_secure()` checks seven live invariants, so a regression that widened
+  the loop's authority fails there rather than passing silently. Personality
+  isolation (`core/learning_isolation.py`) and Natasha's training-data exclusion
+  (`core/character_learning.training_keys()`) are read and preserved. Headless
+  twin: `python -m cli improve status|metrics|monitor|health|detect|propose|
+  experiment|approve|reject|deploy|rollback|history|security|gate`
+  (`cli/improve.py`, aliases `improve`/`self-improvement`/`self_improvement`,
+  seven menu entries; `experiment` and `deploy` need `--approve`), mirrored as four
+  **read-only** GUI actions in the sidebar's *System* group (the mutating commands
+  are CLI-only so the confirmation is explicit). CPU-first, offline, no model, no
+  network. Tests: `tests/test_self_improvement_phase9.py` (72 tests) and
+  `tests/test_improve_cli.py` (12 tests). Docs: `docs/self_improvement/` (11 files)
+  and `docs/architecture/PHASE_9_IMPLEMENTATION_REPORT.md`.

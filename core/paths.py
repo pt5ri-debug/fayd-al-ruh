@@ -417,6 +417,33 @@ def studio_workspaces_dir() -> Path:
     return studio_dir() / "workspaces"
 
 
+def self_improvement_dir() -> Path:
+    """Where the controlled self-improvement loop keeps its own state.
+
+    Everything the loop produces lives under this git-ignored folder: the
+    metric samples, the weakness and proposal records, the experiment and
+    deployment history, the approval decisions, and the audit log. Nothing here
+    is committed, and nothing here is a production source, model weight, or
+    dataset -- the loop only *records* what it observed and proposed.
+    """
+    return data_dir() / "self_improvement"
+
+
+def self_improvement_metrics_dir() -> Path:
+    """Where the performance monitor's bounded metric samples are stored."""
+    return self_improvement_dir() / "metrics"
+
+
+def self_improvement_experiments_dir() -> Path:
+    """Where one folder per experiment (its sandbox artifacts) is kept."""
+    return self_improvement_dir() / "experiments"
+
+
+def self_improvement_backups_dir() -> Path:
+    """Where a pre-deployment checkpoint/backup of tracked state is written."""
+    return self_improvement_dir() / "backups"
+
+
 def bundled_artifacts_dir() -> Path:
     """Read-only artifacts inside the code or bundle, used as a fallback."""
     return bundle_root() / "ml" / "artifacts"
@@ -574,6 +601,10 @@ __all__ = [
     "piper_models_dir",
     "presentation_models_dir",
     "qwen_speech_models_dir",
+    "self_improvement_backups_dir",
+    "self_improvement_dir",
+    "self_improvement_experiments_dir",
+    "self_improvement_metrics_dir",
     "shared_models_dir",
     "studio_dir",
     "studio_workspaces_dir",

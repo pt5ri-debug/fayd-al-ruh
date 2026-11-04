@@ -38,6 +38,7 @@ from core.evidence import Evidence
 from core.goal import Goal
 from core.grounding import grounding_accuracy
 from core.hypothesis_reasoning import hypothesis_accuracy
+from core.improvement.gate import self_improvement_loop_accuracy
 from core.knowledge_carry import knowledge_carry_accuracy
 from core.learning_gate import learning_accuracy
 from core.memory_gate import memory_architecture_accuracy
@@ -284,6 +285,23 @@ class EvaluationMetrics:
     needs approval, an irreversible failure is not retried, a tool's success is
     not the goal's, an invalid plan is never executed, a failure is never
     hidden), each on the real implementation."""
+
+    self_improvement_loop_accuracy: float
+    """The share of held-out Phase-9 self-improvement judgements satisfied: the
+    monitor records structured, provenance-carrying, bounded metrics; a repeated
+    failure raises a weakness while a single one does not; a weakness carries its
+    evidence, component, frequency, and confidence without claiming a cause; a
+    proposal carries every field the phase lists and names the finding it answers;
+    a priority is explained by named factors and the user's override is honoured;
+    a candidate runs in an isolated git worktree with a throwaway data root and a
+    protected path is refused; an improvement is confirmed by the project's own
+    acceptance rule while a regression is rejected and a metric-less run is
+    inconclusive; a change needs a human approval the loop cannot grant itself and
+    the approval is bound to one proposal; a deployment is versioned, backed up,
+    refuses a weight/dataset/security change, and never applies a source change
+    automatically; a rollback restores and verifies without deleting history; and
+    the audit log is append-only with no forbidden self-modification operation
+    exposed -- each on the real implementation, with negative controls."""
 
     knowledge_validation_accuracy: float
     """The share of held-out cognitive-core judgements satisfied: the event bus
@@ -1235,6 +1253,19 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # so a regression in autonomy fails here.
     planning_value = task_execution_accuracy()
 
+    # Controlled self-improvement (Phase 9): the human-gated loop -- monitor,
+    # detect, propose, isolate, measure, accept/reject, deploy, roll back. Held-out
+    # judgements over the real monitor, detector, proposal generator, prioritizer,
+    # sandbox, experiment manager, evaluator, approval manager, deployment
+    # coordinator, rollback manager, and history -- with negative controls (a
+    # single failure raises nothing, a candidate that regresses is rejected, a
+    # protected path is refused, an unapproved deployment is refused, a sensitive
+    # change is refused, a source change is never automatic, the audit log is
+    # append-only, no forbidden self-modification operation is exposed, and
+    # Natasha stays out of the aggregated training data), so a regression in
+    # self-improvement fails here.
+    self_improvement_value = self_improvement_loop_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1316,6 +1347,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         training_value,
         perception_value,
         planning_value,
+        self_improvement_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1384,6 +1416,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         training_accuracy=round(training_value, 6),
         perception_bridge_accuracy=round(perception_value, 6),
         task_execution_accuracy=round(planning_value, 6),
+        self_improvement_loop_accuracy=round(self_improvement_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )
