@@ -197,6 +197,14 @@ class CharacterMouth:
         # back to the model that produced it).
         self._turns = 0
         self._last_question = ""
+        # The character's own knowledge corpus (built from free sources under
+        # data/characters/<owner>/knowledge_base). Retrieval runs first, and the
+        # passages are injected into the standing instruction so the model answers
+        # from them in the character's voice. Absent by default, so a character
+        # with no corpus behaves exactly as before.
+        self._knowledge: Any = None
+        self._knowledge_root = root
+        self._build_knowledge()
         self._engine_report = EngineSettingsReport(mouth=key)
         self._apply_instruction()
         # The character's Model section (temperature, top-p, context, output cap)
@@ -228,6 +236,20 @@ class CharacterMouth:
             self._pipeline = LearningPipeline(self.key, store=store, config=self._config)
         except (ValueError, OSError):
             self._pipeline = None
+
+    def _build_knowledge(self) -> None:
+        """Build this character's own knowledge corpus reader (never raising).
+
+        A character with no corpus (the default) simply has no reader, so its
+        answers are unchanged. Isolation is structural: the reader resolves the
+        folder from the character's own owner key.
+        """
+        try:
+            from core.character_knowledge import CharacterKnowledge
+
+            self._knowledge = CharacterKnowledge(self.key, root=self._knowledge_root)
+        except (ValueError, OSError):
+            self._knowledge = None
 
     def _store_root(self) -> Any:
         """The data root the learning store should use (a test's, or the default)."""
@@ -271,7 +293,16 @@ class CharacterMouth:
         # another instance of the program (or through the CLI) must be in force
         # for this answer, not only the facts this wrapper happened to load.
         self.learning.reload()
-        instruction = self.system_prompt(exclude_questions=exclude_questions, question=question)
+        self._instruction_base = self.system_prompt(
+            exclude_questions=exclude_questions, question=question
+        )
+        self._write_prompt()
+
+    def _write_prompt(self, knowledge: str = "") -> None:
+        """Write the character instruction (plus any knowledge block) to the mouth."""
+        instruction = self._instruction_base
+        if knowledge.strip():
+            instruction = f"{instruction}\n\n{knowledge}"
         engine = getattr(self.assistant, "engine", None)
         if engine is not None and isinstance(self._base_prompt, str):
             engine.system_prompt = f"{instruction}\n\n{self._base_prompt}"
@@ -282,8 +313,34 @@ class CharacterMouth:
         if isinstance(self._base_instruction, str):
             self.assistant.system_instruction = f"{instruction}\n\n{self._base_instruction}"
 
+    def _refresh_knowledge(self, question: str) -> str:
+        """Retrieve this character's own corpus for ``question`` and inject it.
+
+        Retrieval runs on **every** turn (unlike the paced memory recall), because
+        the passages are question-specific: the block a character answers from must
+        match the question being asked now. It returns the block, so a caller (or a
+        test) can inspect what was retrieved.
+        """
+        knowledge = ""
+        if self._knowledge is not None:
+            try:
+                knowledge = self._knowledge.reference_block(question)
+            except Exception:
+                knowledge = ""
+        self._write_prompt(knowledge)
+        return knowledge
+
+    @property
+    def knowledge(self) -> Any:
+        """This character's own knowledge corpus reader (or ``None``)."""
+        return self._knowledge
+
     def system_prompt(
-        self, *, exclude_questions: tuple[str, ...] = (), question: str = ""
+        self,
+        *,
+        exclude_questions: tuple[str, ...] = (),
+        question: str = "",
+        knowledge: str = "",
     ) -> str:
         """The character's current standing instruction, for inspection.
 
@@ -332,6 +389,13 @@ class CharacterMouth:
         layer = layer_for(self.key)
         if layer is not None:
             rendered = f"{rendered}\n\n{layer.standing_block()}"
+        # The character's own knowledge corpus is retrieved *first* and placed
+        # after the standing character (and after any knowledge it already holds),
+        # so the model answers from the retrieved material in its own voice. It is
+        # reference, not an instruction -- the block says so -- and it is empty
+        # when nothing matches, so a corpus that cannot help adds no noise.
+        if knowledge.strip():
+            rendered = f"{rendered}\n\n{knowledge}"
         return rendered
 
     # ---------------------------------------------------------------- asking
@@ -353,6 +417,12 @@ class CharacterMouth:
             )
         else:
             self.learning.reload()
+        # Retrieval runs before the answer: the character's own corpus is queried
+        # for *this* question and the passages are injected into the standing
+        # instruction, so the model answers from them in its own voice. The
+        # question-specific block is refreshed on every turn, independently of the
+        # paced memory recall above.
+        self._refresh_knowledge(question)
         self._turns += 1
         self._last_question = question
         answer = self.assistant.ask(question, **kwargs)

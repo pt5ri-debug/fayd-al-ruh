@@ -124,6 +124,40 @@ def _cmd_reset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_knowledge(args: argparse.Namespace) -> int:
+    """Show or query a character's own knowledge corpus (read-only, offline)."""
+    from core.character_knowledge import CharacterKnowledge
+    from core.learning_isolation import LearningAccessError, owner_for
+
+    try:
+        owner = owner_for(args.character)
+        knowledge = CharacterKnowledge(owner)
+    except LearningAccessError as error:
+        return _fail(str(error), 3)
+    if args.query is None:
+        stats = knowledge.stats()
+        if args.json:
+            print(json.dumps(stats, ensure_ascii=False, indent=2))
+            return 0
+        print(knowledge.describe())
+        if stats.get("present"):
+            print(f"  dir      : {stats['dir']}")
+            print(f"  source   : {stats.get('source') or '(mixed)'}   lang: {stats.get('lang') or '(mixed)'}")
+            print(f"  articles : {stats.get('articles')}   indexed: {stats.get('indexed')}")
+        return 0
+    hits = knowledge.retrieve(args.query, limit=args.limit)
+    if args.json:
+        print(json.dumps([hit.__dict__ for hit in hits], ensure_ascii=False, indent=2))
+        return 0
+    if not hits:
+        print(f"No passage in {owner}'s corpus matches {args.query!r}.")
+        return 0
+    for hit in hits:
+        print(f"[{hit.score:.3f}] {hit.title} ({hit.source})")
+        print(f"    {' '.join(hit.text.split())[:300]}")
+    return 0
+
+
 def _cmd_stats(args: argparse.Namespace) -> int:
     service = _service()
     stats = service.stats(args.character)
@@ -775,6 +809,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats.add_argument("character")
     p_stats.add_argument("--json", action="store_true")
     p_stats.set_defaults(func=_cmd_stats)
+
+    p_knowledge = sub.add_parser(
+        "knowledge", help="a character's own knowledge corpus (status, or search it)"
+    )
+    p_knowledge.add_argument("character")
+    p_knowledge.add_argument("query", nargs="?", default=None)
+    p_knowledge.add_argument("--limit", type=int, default=4)
+    p_knowledge.add_argument("--json", action="store_true")
+    p_knowledge.set_defaults(func=_cmd_knowledge)
 
     p_records = sub.add_parser("records", help="a character's learning records")
     p_records.add_argument("character")
