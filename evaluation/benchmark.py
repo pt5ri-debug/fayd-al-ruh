@@ -70,6 +70,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("arabic_readable_body_accuracy", True, label="Arabic readable body accuracy (held-out: no identifier leaks into an Arabic body)"),
     MetricSpec("character_isolation_accuracy", True, label="Character isolation and sharing accuracy (held-out isolation/sharing judgements)"),
     MetricSpec("character_identity_accuracy", True, label="Character identity accuracy (held-out: a character's personality reaches its answer text, and the two windows share one memory and one name)"),
+    MetricSpec("character_knowledge_accuracy", True, label="Character knowledge accuracy (held-out: a character reads only its own corpus, the block is labelled and bounded, an absent corpus is honest, the mouth injects what it retrieved, and reading opens no socket)"),
     MetricSpec("memory_seeding_accuracy", True, label="Memory seeding accuracy (held-out: a character is seeded from the project's own authored knowledge, bounded and idempotent, with no invented fact)"),
     MetricSpec("development_accuracy", True, label="Cognitive development accuracy (held-out: the mind's self-model, stagnation detector, consolidation, spaced review, and bounded escalation behave as claimed)"),
     MetricSpec("cognition_catalog_accuracy", True, label="Cognition catalogue accuracy (held-out: every control is explained, a governed action names its confirmation, every CLI command resolves, and the window and catalogue cannot drift)"),
