@@ -281,3 +281,30 @@ def test_cli_romance_seed_is_selected_per_source(tmp_path, monkeypatch):
 
     assert captured["categories"] == ROMANCE_CATEGORIES_AR
     assert captured["source_tag"] == "wikipedia:ar"
+
+
+def test_store_dir_is_accepted_before_and_after_the_subcommand(tmp_path):
+    # Regression: `--store-dir` used to be a *top-level only* option, so the
+    # natural `knowledge build --store-dir X` failed with "unrecognized
+    # arguments". It must parse in both positions, for every subcommand.
+    from cli.knowledge import _build_parser
+
+    parser = _build_parser()
+    after = parser.parse_args(["build", "--store-dir", str(tmp_path), "--target-mb", "1"])
+    before = parser.parse_args(["--store-dir", str(tmp_path), "build", "--target-mb", "1"])
+    assert after.store_dir == str(tmp_path)
+    assert before.store_dir == str(tmp_path)
+
+    for sub in ("stats", "build-index"):
+        assert parser.parse_args([sub, "--store-dir", str(tmp_path)]).store_dir == str(tmp_path)
+        assert parser.parse_args(["--store-dir", str(tmp_path), sub]).store_dir == str(tmp_path)
+    assert (
+        parser.parse_args(["search", "--store-dir", str(tmp_path), "porosity"]).store_dir
+        == str(tmp_path)
+    )
+
+
+def test_store_dir_defaults_to_none_when_not_given(tmp_path):
+    from cli.knowledge import _build_parser
+
+    assert _build_parser().parse_args(["build", "--target-mb", "1"]).store_dir is None

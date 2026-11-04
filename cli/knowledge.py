@@ -34,6 +34,21 @@ from core.knowledge_index import KnowledgeTextIndex, build_index
 from core.rag import BulkCorpusRetriever
 
 
+def _add_store_dir(parser: argparse.ArgumentParser) -> None:
+    """Add ``--store-dir`` to a subparser.
+
+    ``default=argparse.SUPPRESS`` is deliberate: the option is also on the top-level
+    parser, so a value given *before* the subcommand must survive. Suppressing the
+    default means the subparser only sets ``store_dir`` when the flag is actually
+    passed here, so ``build --store-dir X`` and ``--store-dir X build`` both work.
+    """
+    parser.add_argument(
+        "--store-dir",
+        default=argparse.SUPPRESS,
+        help="Knowledge-base folder (default: <data>/knowledge_base).",
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="knowledge", description=__doc__)
     parser.add_argument(
@@ -44,6 +59,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     build = sub.add_parser("build", help="Fetch and store chunks until the target size.")
+    _add_store_dir(build)
     build.add_argument("--target-mb", type=float, default=DEFAULT_TARGET_MB)
     build.add_argument("--max-articles", type=int, default=None)
     build.add_argument(
@@ -75,13 +91,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     build.add_argument("--subcat-limit", type=int, default=DEFAULT_SUBCAT_LIMIT)
 
-    sub.add_parser("stats", help="Show the store size and chunk count.")
-    sub.add_parser(
+    stats = sub.add_parser("stats", help="Show the store size and chunk count.")
+    _add_store_dir(stats)
+    index_parser = sub.add_parser(
         "build-index",
         help="Build the fast full-text index (run after `build`).",
     )
+    _add_store_dir(index_parser)
 
     search = sub.add_parser("search", help="Search a built store (offline).")
+    _add_store_dir(search)
     search.add_argument("query")
     search.add_argument("--limit", type=int, default=5)
     return parser
