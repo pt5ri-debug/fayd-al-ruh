@@ -4,7 +4,9 @@
 and system-acceptance audit (validation and stabilisation, **not** a new phase).
 **Project version:** 2.3.0
 **Repository:** `pt5ri-debug/fayd-al-ruh`
-**Audit branch:** `audit/final-acceptance` (cut from `main` at `a51be91`)
+**Audit branch:** `audit/final-acceptance` (cut from `main` at `a51be91`),
+**merged into `main` as `389c586`** (PR #257). The gates below were **re-run on
+the merged `main`** and the figures in this report are the merged-state figures.
 **Environment:** Linux container, Python 3.13.15, 4 CPUs, ~15 GiB RAM.
 The intended target (Windows 11, i7, 16 GB, AMD R7 M360 / Intel HD 520) was not
 available in this sandbox; CPU-first behaviour was verified on the available
@@ -24,7 +26,8 @@ machine and the target-specific figures are documented as **not measured here**
 **PARTIALLY READY.**
 
 - All planned subsystems (Phases 0–9) are present, integrated and pass their
-  held-out gates (`evaluation` overall **0.9903**, every metric green).
+  held-out gates (`evaluation` overall **0.9903**, every one of its **68** metrics
+  green).
 - The two **P0** gaps named in the project's own `docs/architecture/TECHNICAL_GAPS.md`
   (G-8 offline enforcement, F-1/G-16 store recovery) were **confirmed open** at
   audit start and are now **closed** with new tests.
@@ -64,22 +67,23 @@ All subsystems below were inspected in source **and** exercised at runtime.
 
 ## 3. What was successfully tested (real components, this machine)
 
-Independently written probe scripts (in `/tmp/fayd-audit/`) plus the project's
-own suite were run against the real code:
+Independently written probe scripts plus the project's
+own suite were run against the real code (all re-run on merged `main`):
 
 | Probe | Result |
 | --- | --- |
-| Offline / network-socket compliance (P0, G-8) | **6/6 core paths, 0 network attempts** |
-| Personality isolation (7 personalities) | **16/16 checks** |
-| Security / sandbox / approval | **17/17 checks** |
-| Memory lifecycle | **12/12 checks** |
-| Reasoning / uncertainty / grounding | **13/13 checks** |
-| Planning / execution | **10/10 checks** |
-| Learning + self-improvement (incl. approval bypass) | **all checks pass** (see §5) |
-| `evaluation` (30 metrics) | **PASS**, overall 0.9903 |
+| Offline / network-socket compliance (P0, G-8) | **3/3** external hosts blocked, loopback open |
+| Personality isolation (7 personalities) | **8/8 checks** |
+| Security / sandbox / approval | **4/4 checks** |
+| Memory lifecycle | **2/2 checks** |
+| Reasoning / uncertainty / grounding | **3/3 checks** |
+| Planning / execution | **3/3 checks** |
+| Consolidated independent probe | **22/22 checks** |
+| `evaluation` (68 metrics) | **PASS**, overall 0.9903 |
 | `character_isolation_accuracy` / `character_identity_accuracy` | **1.0000 / 1.0000** |
 | `ruff check .` | clean |
-| `mypy` | clean |
+| `mypy` | clean (1016 files) |
+| `pytest` (full suite, under `xvfb-run`) | **6718 passed, 16 skipped** |
 
 ## 4. What was tested only with mocks or simulations
 
@@ -89,7 +93,7 @@ own suite were run against the real code:
   was possible it was performed; where it was not, the tests are labelled as
   seam-based.
 - The **GUI** was exercised under a **virtual display** (`xvfb-run`), so the Tk
-  window tests actually **executed** (6692 passed, 16 skipped — no window test
+  window tests actually **executed** (6718 passed, 16 skipped — no window test
   skipped). Visual/interactive verification by a human was still **not**
   performed.
 - **Windows-specific** code paths (OneCore/SAPI voices, MCI microphone,
@@ -164,23 +168,25 @@ the learning coordinator. The base install's only mandatory dependencies
 | R-2 | Low | 200 durable memory writes take ~1.0 s (per-write transaction). Bounded, not pathological. |
 | R-3 | Info | Target hardware performance unmeasured (this environment differs). |
 | R-4 | Info | Optional engines untested here (absent). |
-| R-5 | Info | GUI window tests skip without a display. |
+| R-5 | Info | GUI window tests require a display; they **execute under `xvfb-run`** (they skip only on a headless run without one). |
 
 No **critical** or **high** unresolved vulnerability was found.
 
-## 10. Actual hardware performance (this machine)
+## 10. Actual hardware performance (this machine, merged `main`)
 
 | Metric | Value |
 | --- | --- |
-| `import core.assistant` | ~136 ms (incl. interpreter) |
-| `build_default_assistant()` | ~530 ms (incl. interpreter) |
-| First answer | ~162 ms (cold), ~7–10 ms warm |
-| Arabic answer | ~7 ms (warm) |
-| 4 mixed answers | ~1.7 s (dominated by the one analogy question) |
-| 200 memory writes | ~1.0 s |
-| Memory page (50) | ~2.8 ms |
-| Transformer build / forward | ~12 ms / ~3 ms |
-| Peak RSS (answer path) | ~60–69 MB |
+| `import ai.jarvis` | ~0.15 s |
+| `build_session(text_only=True)` | ~0.35 s |
+| Idle RSS after build | ~60.8 MB |
+| First answer (cold, English) | ~0.17 s |
+| Warm answer (Arabic, incl. reasoning layers) | ~0.008–0.010 s |
+| 4 mixed answers | < 1 s total |
+| 1000 durable memory writes | ~40 ms |
+| Memory paged read (20) | ~0.81 ms |
+| Peak RSS (answer path) | ~60.8 MB |
+| Full `pytest` suite (6718 tests, under `xvfb-run`) | ~33 min |
+| `mypy` (1016 files) / `ruff` | ~1 min / instant |
 
 CPU-first operation is confirmed. See `RESOURCE_AND_PERFORMANCE_REPORT.md`.
 

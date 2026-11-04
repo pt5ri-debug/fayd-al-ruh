@@ -2,6 +2,12 @@
 
 **Status: PARTIALLY READY.**
 
+**Merged-state re-verification:** the acceptance gates were re-run on the merged
+`main` (`389c586`, PR #257) — `evaluation` PASS (overall 0.9903, 68/68 metrics),
+`ruff` clean, `mypy` clean (1016 files), full `pytest` under `xvfb-run`
+**6718 passed / 16 skipped**, and an independent 22-probe consolidated check
+**22/22**. The verdict is unchanged.
+
 ---
 
 ## 1. Acceptance criteria — scored
@@ -54,7 +60,7 @@ acceptance gate, and no data-integrity defect.
 - [x] Security audit (no critical/high)
 - [x] Personality isolation (7/7, Natasha excluded)
 - [x] Backup/restore verified
-- [x] Full suite run under a display (`xvfb-run`): 6692 passed, 16 skipped
+- [x] Full suite run under a display (`xvfb-run`): 6718 passed, 16 skipped
 - [ ] Target-hardware performance recorded *(pending the Windows target)*
 - [ ] Optional engines verified offline *(pending their installation)*
 - [ ] Human visual/interactive GUI verification on a real desktop *(pending)*

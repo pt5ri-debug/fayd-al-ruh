@@ -2,7 +2,8 @@
 
 **Method:** targeted recovery tests on **isolated copies** under a temporary
 directory (never the user's only copy of real data), plus the new
-`tests/test_store_recovery.py` (9 tests) and the project's own recovery suites.
+`tests/test_store_recovery.py` (**9 tests**) and the project's own recovery
+suites. Re-run on merged `main` (`389c586`).
 
 ---
 

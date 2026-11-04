@@ -1,7 +1,7 @@
 # Resource and Performance Report
 
 **Environment actually measured:** Linux container, Python 3.13.15, 4 CPUs,
-~15 GiB RAM.
+~15 GiB RAM. Figures **re-measured on merged `main` (`389c586`)**.
 **Intended target (not available here):** Windows 11, Intel Core i7, 16 GB RAM,
 AMD Radeon R7 M360 2 GB, Intel HD Graphics 520 1 GB.
 
@@ -11,24 +11,24 @@ AMD Radeon R7 M360 2 GB, Intel HD Graphics 520 1 GB.
 
 ---
 
-## 1. Measured figures (audit machine)
+## 1. Measured figures (audit machine, merged `main`)
 
 | Metric | Value | Notes |
 | --- | --- | --- |
-| `import core.assistant` | ~136 ms | incl. interpreter start |
-| `build_default_assistant()` | ~530 ms | incl. interpreter start; seeds + retriever index |
-| Idle RSS after build | ~23–60 MB | `ru_maxrss` after building the assistant |
-| Peak RSS (answer path + transformer) | ~69 MB | whole probe process |
-| First answer | ~162 ms | cold |
-| Warm answer (definitional) | ~7–10 ms | e.g. "what is permeability?" |
-| Arabic answer | ~7 ms | warm |
-| Analogy answer | ~1.7 s | bounded structure-mapping search (~200k states) |
-| 4 mixed answers | ~1.7 s | dominated by the single analogy question |
-| 200 durable memory writes | ~1.0 s | ~5 ms each (per-write transaction) |
-| Memory page (50) | ~2.8 ms | SQLite |
-| Transformer build (small preset) | ~12 ms | `TransformerConfig.preset("small")` |
-| Transformer forward (1×16) | ~3 ms | manual backprop implementation |
-| `ruff check .` / `mypy` | clean | static gates |
+| `import ai.jarvis` | ~0.15 s | incl. interpreter start |
+| `build_session(text_only=True)` | ~0.35 s | seeds + retriever index |
+| Idle RSS after build | ~60.8 MB | `ru_maxrss` |
+| First answer (cold, English) | ~0.17 s | "what is porosity?" |
+| Warm answer (Arabic, all reasoning layers) | ~0.008–0.010 s | e.g. "هل التحميض يزيد النفاذية؟" |
+| 4 mixed answers | < 1 s total | warm |
+| Arabic answer share (body) | ~30–35 % | Arabic question → Arabic body |
+| 1000 durable memory writes | ~40 ms | `MemoryDatabase.save_many` |
+| Memory paged read (20) | ~0.81 ms | SQLite |
+| Memory integrity check | `(True, 'ok')` | |
+| Peak RSS (answer path) | ~60.8 MB | whole probe process |
+| Full `pytest` suite | 6718 passed, 16 skipped, ~33 min | under `xvfb-run` |
+| `mypy` | clean, 1016 files | static gate |
+| `ruff check .` | clean | static gate |
 
 ## 2. Model loading / unloading
 
@@ -67,6 +67,7 @@ on the target and record the real numbers.
 
 ## 6. Acceptance
 
-Resource usage is **acceptable** for the target class: a few hundred milliseconds
-to start, tens of MB idle, single-digit-ms warm answers, and a bounded ~1.7 s
-worst case (one analogy). The one slow path (R-1) is documented, not hidden.
+Resource usage is **acceptable** for the target class: sub-second startup, ~61 MB
+idle, single-digit-millisecond warm answers (including the Arabic path with all
+reasoning layers), and microsecond-scale SQLite access. The one slow path (R-1,
+the bounded analogy search) is documented, not hidden.

@@ -1,14 +1,15 @@
 # End-to-End Test Results
 
-**Audit revision:** 2.3.0, branch `audit/final-acceptance`.
-**Method:** independent probe scripts (`/tmp/fayd-audit/*.py`) plus the project's
+**Audit revision:** 2.3.0, merged into `main` as `389c586` (PR #257). The suite
+and probes below were **re-run on the merged `main`**.
+**Method:** independent probe scripts plus the project's
 own `pytest` suite and `python -m evaluation`, run against the **real** code on
 this machine. No probe used a mock for the behaviour under test; where a project
 test uses an injected runner seam it is labelled as such.
 
-> Environment note: the suite was run **without a display**, so Tk window tests
-> are **skipped**, not passed. Optional engines (OCR, Piper, Qwen, diffusion)
-> are absent here, so tests over them skip.
+> Environment note: the suite was run **under `xvfb-run`** (a virtual display), so
+> the Tk window tests **executed** rather than skipped. Optional engines (OCR,
+> Piper, Qwen, diffusion) are absent here, so tests over them skip.
 
 ---
 
@@ -120,17 +121,15 @@ change** (`approver == requested_by` is refused).
 | Unit/integration/regression | `python -m pytest -q` | run to completion (see §"Suite run") |
 | Lint | `python -m ruff check .` | clean |
 | Types | `python -m mypy` | clean |
-| Evaluation | `python -m evaluation` | **PASS**, overall 0.9903, 30/30 metrics green |
+| Evaluation | `python -m evaluation` | **PASS**, overall 0.9903, 68/68 metrics green |
 
 ### Suite run
 
 `xvfb-run -a python -m pytest -q` (a display so window tests execute):
 
-**6692 passed, 16 skipped in 1944.86s (0:32:24).** Full-suite collection is
-**6734 tests**; the 26 tests added by this audit (`tests/test_offline.py` 17 +
-`tests/test_store_recovery.py` 9) pass in isolation and are collected by the
-suite. The 16 skips are all **optional engines absent** or **a real server not
-running** — never a hidden failure:
+**6718 passed, 16 skipped in 1986.79s (0:33:06).** Full-suite collection is
+**6734 tests**. The 16 skips are all **optional engines absent** or **a real
+server not running** — never a hidden failure:
 
 | Skipped because | Files |
 | --- | --- |
