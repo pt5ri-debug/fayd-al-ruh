@@ -33,8 +33,9 @@ import re
 import time
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from core.documents import Document
 
@@ -567,13 +568,102 @@ class GutenbergFetcher:
         return out
 
 
+class _HtmlTextExtractor(HTMLParser):
+    """Turn rendered MediaWiki HTML into plain text (standard library only).
+
+    Wikisource does not install the TextExtracts extension, so ``prop=extracts``
+    returns an empty string there; the rendered HTML from ``action=parse`` is the
+    reliable source. This drops ``script``/``style`` and page chrome, keeps the
+    reading text, and turns block boundaries into newlines so the text chunker
+    sees paragraphs rather than one long line.
+
+    A per-element stack records whether an element's subtree is skipped, so a
+    skipped wrapper (a ``<div class="noprint">`` around a table of contents)
+    never swallows the page and always unwinds at its own end tag.
+    """
+
+    _SKIP: ClassVar[set[str]] = {"script", "style", "head", "title"}
+    _CHROME: ClassVar[set[str]] = {
+        "noprint", "mw-editsection", "mw-jump-link", "toc",
+        "mw-hidden-catlinks", "catlinks", "printfooter", "mw-empty-elt",
+        "sistersitebox", "side-box", "metadata", "navbox",
+    }
+    _BLOCK: ClassVar[set[str]] = {
+        "p", "div", "br", "li", "tr", "td", "th", "table", "section", "article",
+        "blockquote", "dd", "dt", "ul", "ol", "dl", "h1", "h2", "h3", "h4", "h5", "h6",
+    }
+    _VOID: ClassVar[set[str]] = {
+        "br", "hr", "img", "input", "meta", "link", "area", "base", "col",
+        "embed", "source", "track", "wbr",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._stack: list[bool] = []
+
+    def _skipping(self) -> bool:
+        return self._stack[-1] if self._stack else False
+
+    def _is_chrome(self, tag: str, attrs: list[tuple[str, str | None]]) -> bool:
+        if tag in self._SKIP or tag in self._CHROME:
+            return True
+        for name, value in attrs:
+            value = value or ""
+            if name == "class" and any(c in value.split() for c in self._CHROME):
+                return True
+            if name == "id" and value in self._CHROME:
+                return True
+        return False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        parent = self._skipping()
+        if tag in self._VOID:
+            if tag in self._BLOCK and not parent:
+                self._parts.append("\n")
+            return
+        self._stack.append(parent or self._is_chrome(tag, attrs))
+        if tag in self._BLOCK and not parent:
+            self._parts.append("\n")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._BLOCK and not self._skipping():
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._VOID:
+            return
+        if self._stack:
+            self._stack.pop()
+        if tag in self._BLOCK and not self._skipping():
+            self._parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self._skipping():
+            self._parts.append(data)
+
+    def text(self) -> str:
+        return "".join(self._parts)
+
+
+def html_to_text(markup: str) -> str:
+    """Plain text from rendered MediaWiki HTML, with blank lines collapsed."""
+    parser = _HtmlTextExtractor()
+    parser.feed(markup)
+    parser.close()
+    lines = [" ".join(line.split()) for line in parser.text().splitlines()]
+    return "\n".join(line for line in lines if line).strip()
+
+
 class WikisourceFetcher(WikipediaFetcher):
     """Fetches public-domain / CC-BY-SA literary text from Wikisource.
 
-    Wikisource shares Wikipedia's MediaWiki API, so this is the same fetcher
-    pointed at a different edition and using ``prop=extracts`` (rendered plain
-    text) instead of raw wikitext -- a page there is the work itself, not an
-    article about it.
+    Wikisource shares Wikipedia's MediaWiki API, but it does **not** run the
+    TextExtracts extension, so ``prop=extracts`` returns an empty string for every
+    page there (the bug this fetcher used to have: it stored nothing). A page on
+    Wikisource *is* the work itself, so the rendered HTML from ``action=parse`` is
+    fetched instead and reduced to plain text -- the reliable, universally
+    available path.
     """
 
     source = "wikisource"
@@ -594,10 +684,11 @@ class WikisourceFetcher(WikipediaFetcher):
         self.api, self.base_url = WIKISOURCE_LANGS[lang]
 
     def extracts(self, titles: Sequence[str]) -> list[tuple[str, str]]:
-        """Return ``(title, plain_text)`` for many pages per request.
+        """Return ``(title, plain_text)`` for many pages, one request each.
 
-        Uses ``prop=extracts`` with ``explaintext`` (the rendered work), which
-        returns one page per request, so the batch is walked page by page.
+        Uses ``action=parse`` (rendered HTML reduced to text), because
+        ``prop=extracts`` is unavailable on Wikisource. A page that renders to
+        nothing is skipped, so an empty page never becomes an empty chunk.
         """
         out: list[tuple[str, str]] = []
         for title in titles:
@@ -606,20 +697,20 @@ class WikisourceFetcher(WikipediaFetcher):
             try:
                 payload = self._get(
                     {
-                        "action": "query",
-                        "prop": "extracts",
-                        "explaintext": "1",
-                        "titles": title,
+                        "action": "parse",
+                        "page": title,
+                        "prop": "text",
                         "formatversion": "2",
                         "redirects": "1",
                     }
                 )
             except Exception:  # pragma: no cover - network path
                 continue
-            for page in payload.get("query", {}).get("pages", []):
-                text = " ".join((page.get("extract") or "").split())
-                if text:
-                    out.append((page.get("title", title), text))
+            parsed = payload.get("parse", {})
+            markup = parsed.get("text") or ""
+            text = " ".join(html_to_text(markup).split())
+            if text:
+                out.append((parsed.get("title", title), text))
         return out
 
 
@@ -1010,5 +1101,6 @@ __all__ = [
     "chunk_text",
     "clean_wikitext",
     "default_knowledge_base_dir",
+    "html_to_text",
     "iter_local_documents",
 ]

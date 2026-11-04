@@ -151,32 +151,74 @@ def test_gutenberg_fetcher_declares_its_source_and_license():
 
 
 class _WikisourceSession:
-    def __init__(self, *, text: str = _ARTICLE) -> None:
-        self.text = text
+    """A fake Wikisource API that answers ``action=parse`` with rendered HTML.
+
+    Wikisource does not install the TextExtracts extension, so the real endpoint
+    returns an empty ``extract`` for ``prop=extracts``; the fetcher therefore uses
+    ``action=parse``. The fixture models that: it returns rendered HTML for the
+    parse call and an *empty* extract for the (broken) extracts call, so a
+    regression to the old path is caught.
+    """
+
+    def __init__(self, *, html: str = f"<div><p>{_ARTICLE}</p></div>") -> None:
+        self.html = html
         self.urls: list[str] = []
+        self.actions: list[str] = []
 
     def get(self, url: str, *, params: dict | None = None, timeout: float = 0.0) -> _Response:
         self.urls.append(url)
         params = params or {}
+        self.actions.append(str(params.get("action", "")))
         if params.get("list") == "categorymembers":
             return _Response(
                 payload={"query": {"categorymembers": [{"title": "Category:Love poetry"}]}}
             )
-        if params.get("prop") == "extracts":
+        if params.get("action") == "parse":
             return _Response(
-                payload={"query": {"pages": [{"title": params.get("titles"), "extract": self.text}]}}
+                payload={"parse": {"title": params.get("page"), "text": self.html}}
+            )
+        if params.get("prop") == "extracts":
+            # The real Wikisource returns an empty extract here -- the bug.
+            return _Response(
+                payload={"query": {"pages": [{"title": params.get("titles"), "extract": ""}]}}
             )
         return _Response(payload={})
 
 
-def test_wikisource_fetcher_points_at_wikisource():
+def test_wikisource_fetcher_uses_the_parse_endpoint():
     session = _WikisourceSession()
     fetch = WikisourceFetcher(lang="en", session=session)
     assert fetch.api == "https://en.wikisource.org/w/api.php"
     assert fetch.source == "wikisource"
     extracts = fetch.extracts(["The Bad wife"])
     assert extracts and extracts[0][0] == "The Bad wife"
+    assert extracts[0][1]  # real text, not the empty prop=extracts response
     assert session.urls and "wikisource.org" in session.urls[0]
+    # The empty-extract path is never used.
+    assert "parse" in session.actions
+    assert "extracts" not in "".join(a for a in session.actions if a)
+
+
+def test_wikisource_html_is_reduced_to_reading_text():
+    from core.knowledge_base import html_to_text
+
+    html = (
+        '<div class="mw-parser-output"><style>.x{color:red}</style>'
+        '<div class="noprint">Table of contents</div>'
+        "<p>First line.</p><p>Second line.</p>"
+        '<div class="noprint">navigation</div></div>'
+    )
+    text = html_to_text(html)
+    assert "First line." in text and "Second line." in text
+    assert "color:red" not in text  # style dropped
+    assert "Table of contents" not in text  # chrome dropped
+    assert "navigation" not in text
+
+
+def test_wikisource_fetcher_skips_a_page_that_renders_to_nothing():
+    session = _WikisourceSession(html="<div><style>.a{}</style></div>")
+    fetch = WikisourceFetcher(lang="en", session=session)
+    assert fetch.extracts(["Empty"]) == []
 
 
 def test_wikisource_fetcher_rejects_an_unknown_language():

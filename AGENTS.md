@@ -370,7 +370,12 @@ Arabic is kept as secondary aliases where useful.
   `WikisourceFetcher` ar/en, each writing a `source_tag`) build a bulk corpus
   **per character** under the git-ignored `data/characters/<owner>/knowledge_base`
   (`character_knowledge_dir(owner, root=)`, resolved through the isolation policy
-  so a character reaches **only** its own folder). `CharacterKnowledge(owner)` is
+  so a character reaches **only** its own folder). `root` is the **data root** --
+  the same folder `CharacterLearning` takes -- so the corpus lives under
+  `<root>/characters/<owner>/knowledge_base`, beside the character's learning
+  record; a mismatch there is silent (the corpus is looked for in the wrong
+  folder and never reaches the model), so the two conventions are pinned together
+  by `test_knowledge_root_matches_the_learning_root_convention`. `CharacterKnowledge(owner)` is
   the read side: `available`/`stats()`/`describe()` report the real corpus
   (size, chunk and article counts, source, language, whether the FTS index
   exists), `retrieve(question)` runs the offline path (the SQLite FTS index when
@@ -1856,13 +1861,24 @@ Arabic is kept as secondary aliases where useful.
   pages (`load_scaled`: Pillow when present for an exact resize, Tk `subsample`
   otherwise).
 - `core/knowledge_base.py` — the **bulk knowledge base**: a keyless
-  `WikipediaFetcher` (batched MediaWiki API, `Retry-After`-aware), `chunk_text`,
-  and a sharded JSONL `KnowledgeBaseStore`. `build_knowledge_base(store_dir,
+  `WikipediaFetcher` (batched MediaWiki API, `Retry-After`-aware), a
+  `GutenbergFetcher` (public-domain literary text), and a `WikisourceFetcher`
+  (public-domain / CC-BY-SA works), plus `chunk_text` and a sharded JSONL
+  `KnowledgeBaseStore`. `build_knowledge_base(store_dir,
   target_mb=...)` walks seed categories **recursively through subcategories**
   (`depth=2`), de-dupes titles, and stores until the byte target, resumably via
-  `checkpoint.json`. Lives under the data directory (`data/knowledge_base`,
+  `checkpoint.json`. Several sources can be built into **one** store: the shards
+  append (`next_shard_index`), and `source_tag` namespaces the checkpoint's
+  finished-category keys so a shared category name never marks another source's
+  work done. **Wikisource does not run the TextExtracts extension**, so
+  `prop=extracts` returns an empty string there and the old fetcher stored
+  nothing; `WikisourceFetcher.extracts` now reads `action=parse` (rendered HTML,
+  reduced to plain text by `html_to_text`, a stdlib `HTMLParser` that drops
+  `script`/`style` and page chrome) — the universally available path. Lives under
+  the data directory (`data/knowledge_base`,
   git-ignored), built on demand — never committed. CLI:
-  `python -m cli knowledge build|build-index|stats|search` (`cli/knowledge.py`).
+  `python -m cli knowledge build|build-index|stats|search` (`cli/knowledge.py`;
+  `--store-dir` is accepted **before or after** the subcommand).
 - `core/knowledge_index.py` — a SQLite **FTS5** index (stdlib, no new dependency)
   over the shards, built once with `build-index` (~5 s for 81k chunks). Turns a
   query from a ~35 s streaming scan into milliseconds. `KnowledgeTextIndex` owns
