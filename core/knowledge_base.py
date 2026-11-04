@@ -45,6 +45,20 @@ WIKI_USER_AGENT = (
 WIKI_LICENSE = "CC BY-SA 4.0 (Wikipedia)"
 WIKI_BASE_URL = "https://en.wikipedia.org/wiki/"
 
+#: Wikipedia editions the fetcher can read. A character's own corpus may be
+#: Arabic as well as English, so the language is a parameter rather than a
+#: constant -- ``en`` and ``ar`` are the two the project uses.
+WIKI_LANGS: dict[str, tuple[str, str]] = {
+    "en": ("https://en.wikipedia.org/w/api.php", "https://en.wikipedia.org/wiki/"),
+    "ar": ("https://ar.wikipedia.org/w/api.php", "https://ar.wikipedia.org/wiki/"),
+}
+
+#: Wikisource editions the literary fetcher can read (same MediaWiki shape).
+WIKISOURCE_LANGS: dict[str, tuple[str, str]] = {
+    "en": ("https://en.wikisource.org/w/api.php", "https://en.wikisource.org/wiki/"),
+    "ar": ("https://ar.wikisource.org/w/api.php", "https://ar.wikisource.org/wiki/"),
+}
+
 # A broad seed across the fields a petroleum mind reasons with and around.
 # Titles are Wikipedia category names; each expands to its members.
 DEFAULT_CATEGORIES: tuple[str, ...] = (
@@ -88,6 +102,53 @@ DEFAULT_CATEGORIES: tuple[str, ...] = (
     "Climate change",
     "Earth sciences",
     "Metallurgy",
+)
+
+#: A romantic / emotional seed for a companion's own corpus. Wikipedia category
+#: names (English edition) that the project has verified resolve to articles.
+ROMANCE_CATEGORIES_EN: tuple[str, ...] = (
+    "Love",
+    "Emotion",
+    "Emotions",
+    "Interpersonal relationships",
+    "Interpersonal attraction",
+    "Sexual attraction",
+    "Human sexuality",
+    "Erotic literature",
+    "Poetry",
+    "Romance novel",
+    "Marriage",
+    "Affection",
+    "Seduction",
+    "Courtship",
+)
+
+#: The same seed on the Arabic edition, whose category names differ.
+ROMANCE_CATEGORIES_AR: tuple[str, ...] = (
+    "حب",
+    "عاطفة",
+    "مشاعر",
+    "رومانسية",
+    "علاقات شخصية",
+    "جنس",
+    "أدب عربي",
+    "شعر عربي",
+)
+
+#: Public-domain literary queries for Project Gutenberg (a search, not a
+#: category): romance, love poetry, and erotic literature.
+ROMANCE_GUTENBERG_QUERIES: tuple[str, ...] = (
+    "romance",
+    "love poetry",
+    "erotic literature",
+    "courtship",
+)
+
+#: Wikisource category names carrying the works themselves (love poetry, etc.).
+ROMANCE_WIKISOURCE_CATEGORIES_EN: tuple[str, ...] = (
+    "Love poetry",
+    "Erotica",
+    "Erotic literature",
 )
 
 # Defaults tuned for a small, fast, and polite build.
@@ -252,14 +313,26 @@ def _safe_filename(name: str) -> str:
 
 
 class WikipediaFetcher:
-    """Fetches article full text from Wikipedia's MediaWiki API (keyless).
+    """Fetches article full text from a Wikipedia edition (keyless).
 
     One instance reuses a ``requests`` session. It is intentionally small: it
     resolves a category to article titles and resolves titles to plain-text
-    extracts, nothing more.
+    extracts, nothing more. ``lang`` selects the edition (``en`` default,
+    ``ar`` for Arabic), so the same class serves an English or an Arabic
+    character corpus.
     """
 
-    def __init__(self, *, timeout: float = 30.0, session: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        timeout: float = 30.0,
+        session: Any | None = None,
+        lang: str = "en",
+    ) -> None:
+        if lang not in WIKI_LANGS:
+            raise ValueError(f"Unknown Wikipedia language {lang!r}; known: {sorted(WIKI_LANGS)}.")
+        self.lang = lang
+        self.api, self.base_url = WIKI_LANGS[lang]
         self.timeout = timeout
         if session is not None:
             self._session = session
@@ -275,7 +348,7 @@ class WikipediaFetcher:
         params = {**params, "format": "json", "maxlag": "5"}
         delay = 1.0
         for _attempt in range(retries):
-            response = self._session.get(WIKI_API, params=params, timeout=self.timeout)
+            response = self._session.get(self.api, params=params, timeout=self.timeout)
             if response.status_code in (429, 503):
                 # Wikipedia rate-limits bursts; honour Retry-After, then back off.
                 retry_after = response.headers.get("Retry-After")
@@ -372,6 +445,184 @@ class WikipediaFetcher:
         return out
 
 
+class GutenbergFetcher:
+    """Fetches public-domain literary works from Project Gutenberg (keyless).
+
+    This is the project's source of *literary* text -- romance, love poetry, and
+    erotic literature that has entered the public domain. Every work is offered
+    by Gutenberg under its own licence (public domain in the US, or a Gutenberg
+    licence), which the chunk records. Unlike Wikipedia, a "category" here is a
+    **search query** (``romance``, ``love poetry``, ``erotic``), and a "title" is
+    a Gutenberg book id -- so the same build pipeline works unchanged.
+
+    The catalogue is read through Gutenberg's own search page (``gutendex.com``
+    is often unreachable), and a book's text through its plain-text cache
+    (``/cache/epub/<id>/pg<id>.txt``), both parsed with the standard library.
+    """
+
+    #: Marker the pipeline reads to cite this source honestly.
+    source = "gutenberg"
+    license = "Public domain (Project Gutenberg)"
+    base_url = "https://www.gutenberg.org/ebooks/"
+    lang = "en"
+
+    #: A search page lists book ids in ``/ebooks/<id>`` links.
+    _ID_RE = re.compile(r"/ebooks/(\d+)")
+    _TITLE_RE = re.compile(r'<span class="title">\s*([^<]+?)\s*</span>', re.IGNORECASE)
+    #: Gutenberg's own navigation links share the ``/ebooks/`` shape; these words
+    #: are never a book title, so they are dropped rather than stored as one.
+    _NAV_TITLES = frozenset({"authors", "subjects", "titles", "bookshelves", "recently added", "search"})
+    #: Gutenberg wraps a text between START/END markers; keep only what is inside.
+    _START_RE = re.compile(r"\*\*\*\s*START OF (?:THE|THIS) PROJECT GUTENBERG.*?\*\*\*", re.IGNORECASE | re.DOTALL)
+    _END_RE = re.compile(r"\*\*\*\s*END OF (?:THE|THIS) PROJECT GUTENBERG.*?\*\*\*", re.IGNORECASE | re.DOTALL)
+
+    def __init__(
+        self,
+        *,
+        timeout: float = 60.0,
+        session: Any | None = None,
+        max_books_per_query: int = 40,
+    ) -> None:
+        self.timeout = timeout
+        self.max_books_per_query = max_books_per_query
+        if session is not None:
+            self._session = session
+        else:  # pragma: no cover - network path
+            import requests
+
+            self._session = requests.Session()
+            self._session.headers.update({"User-Agent": WIKI_USER_AGENT})
+
+    def subcategories(self, category: str, *, limit: int = 500) -> list[str]:
+        """No subcategory walk: a query already names its own subject."""
+        return []
+
+    def category_titles(self, category: str, *, limit: int | None = None) -> list[str]:
+        """Book ids matching the search query ``category`` (``id::title``)."""
+        found: list[str] = []
+        seen: set[str] = set()
+        for page in range(1, 6):
+            try:
+                response = self._session.get(
+                    "https://www.gutenberg.org/ebooks/search/",
+                    params={"query": category, "page": page},
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+            except Exception:  # pragma: no cover - network path
+                break
+            html = response.text
+            ids = self._ID_RE.findall(html)
+            titles = self._TITLE_RE.findall(html)
+            if not ids:
+                break
+            for position, book_id in enumerate(ids):
+                if book_id in seen:
+                    continue
+                seen.add(book_id)
+                title = titles[position] if position < len(titles) else f"gutenberg {book_id}"
+                if title.strip().casefold() in self._NAV_TITLES:
+                    continue
+                found.append(f"{book_id}::{title}")
+                if limit is not None and len(found) >= limit:
+                    return found
+                if len(found) >= self.max_books_per_query:
+                    return found
+        return found
+
+    def _book_text(self, book_id: str) -> str:  # pragma: no cover - network
+        for suffix in (".txt.utf-8", ".txt"):
+            try:
+                response = self._session.get(
+                    f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}{suffix}",
+                    timeout=self.timeout,
+                )
+                if response.status_code != 200:
+                    continue
+                text = response.text
+            except Exception:
+                continue
+            return self._strip_boilerplate(text)
+        return ""
+
+    @classmethod
+    def _strip_boilerplate(cls, text: str) -> str:
+        """Drop the Gutenberg header/footer, keeping the work itself."""
+        start = cls._START_RE.search(text)
+        if start:
+            text = text[start.end():]
+        end = cls._END_RE.search(text)
+        if end:
+            text = text[: end.start()]
+        return " ".join(text.split())
+
+    def extracts(self, titles: Sequence[str]) -> list[tuple[str, str]]:
+        """Return ``(title, text)`` for the books named by ``id::title``."""
+        out: list[tuple[str, str]] = []
+        for token in titles:
+            book_id, _, title = token.partition("::")
+            text = self._book_text(book_id)
+            if text:
+                out.append((title or f"gutenberg {book_id}", text))
+        return out
+
+
+class WikisourceFetcher(WikipediaFetcher):
+    """Fetches public-domain / CC-BY-SA literary text from Wikisource.
+
+    Wikisource shares Wikipedia's MediaWiki API, so this is the same fetcher
+    pointed at a different edition and using ``prop=extracts`` (rendered plain
+    text) instead of raw wikitext -- a page there is the work itself, not an
+    article about it.
+    """
+
+    source = "wikisource"
+    license = "Public domain / CC BY-SA 4.0 (Wikisource)"
+
+    def __init__(
+        self,
+        *,
+        timeout: float = 30.0,
+        session: Any | None = None,
+        lang: str = "en",
+    ) -> None:
+        if lang not in WIKISOURCE_LANGS:
+            raise ValueError(f"Unknown Wikisource language {lang!r}.")
+        # Bypass WikipediaFetcher's language table; set the edition directly.
+        super().__init__(timeout=timeout, session=session, lang="en")
+        self.lang = lang
+        self.api, self.base_url = WIKISOURCE_LANGS[lang]
+
+    def extracts(self, titles: Sequence[str]) -> list[tuple[str, str]]:
+        """Return ``(title, plain_text)`` for many pages per request.
+
+        Uses ``prop=extracts`` with ``explaintext`` (the rendered work), which
+        returns one page per request, so the batch is walked page by page.
+        """
+        out: list[tuple[str, str]] = []
+        for title in titles:
+            if not title:
+                continue
+            try:
+                payload = self._get(
+                    {
+                        "action": "query",
+                        "prop": "extracts",
+                        "explaintext": "1",
+                        "titles": title,
+                        "formatversion": "2",
+                        "redirects": "1",
+                    }
+                )
+            except Exception:  # pragma: no cover - network path
+                continue
+            for page in payload.get("query", {}).get("pages", []):
+                text = " ".join((page.get("extract") or "").split())
+                if text:
+                    out.append((page.get("title", title), text))
+        return out
+
+
 def _category_queue(
     fetch: Any,
     categories: Sequence[str],
@@ -406,6 +657,17 @@ def _category_queue(
         queue.extend((child, level + 1) for child in children)
 
 
+def _tagged(source_tag: str, category: str) -> str:
+    """Namespace a category key by its source, but keep the plain key untagged.
+
+    With no tag the key is exactly the category, so a store built before this
+    change still resumes correctly; with a tag, two sources that share a category
+    name (``Love`` on Wikipedia and a ``Love`` Gutenberg query) never mark each
+    other done.
+    """
+    return f"{source_tag}\u0000{category}" if source_tag else category
+
+
 def build_knowledge_base(
     store_dir: str | Path,
     *,
@@ -421,6 +683,7 @@ def build_knowledge_base(
     subcat_limit: int = DEFAULT_SUBCAT_LIMIT,
     max_articles: int | None = None,
     progress: Any | None = None,
+    source_tag: str = "",
 ) -> dict[str, Any]:
     """Fetch, chunk, and store a bulk knowledge base until ``target_mb`` is met.
 
@@ -430,6 +693,11 @@ def build_knowledge_base(
     shards already written are kept. Passing an explicit ``fetcher`` (any object
     with ``subcategories`` / ``category_titles`` / ``extracts``) makes the whole
     build offline and testable.
+
+    ``source_tag`` namespaces the checkpoint's finished-category keys, so several
+    sources (Wikipedia, Gutenberg, Wikisource) can be built into one store
+    without a shared category name marking another source's work as done. The tag
+    never reaches the fetcher or the chunk's own ``category``.
     """
     store = KnowledgeBaseStore(store_dir)
     store.ensure()
@@ -443,6 +711,12 @@ def build_knowledge_base(
     shard_index = int(checkpoint.get("shard_index", store.next_shard_index()))
 
     fetch = fetcher if fetcher is not None else WikipediaFetcher()
+    # The fetcher names its own edition and source, so an Arabic or a Gutenberg
+    # fetcher is cited correctly rather than labelled "wikipedia/en".
+    base_url = getattr(fetch, "base_url", WIKI_BASE_URL)
+    source_label = getattr(fetch, "source", "wikipedia")
+    lang = getattr(fetch, "lang", "en")
+    license_label = getattr(fetch, "license", WIKI_LICENSE)
     stop = False
 
     def save() -> None:
@@ -462,7 +736,7 @@ def build_knowledge_base(
     ):
         if stop:
             break
-        if category in done_categories:
+        if _tagged(source_tag, category) in done_categories:
             continue
         try:
             titles = fetch.category_titles(category)
@@ -487,15 +761,16 @@ def build_knowledge_base(
                 seen_titles.add(title)
                 if len(text) < min_chunk:
                     continue
-                url = WIKI_BASE_URL + title.replace(" ", "_")
+                url = base_url + title.replace(" ", "_")
                 for n, piece in enumerate(chunk_text(text, chunk_chars=chunk_chars, overlap=overlap, min_chunk=min_chunk)):
                     chunks.append(
                         KnowledgeChunk(
                             chunk_id=f"kb:{_safe_filename(title)}:{n}",
                             title=title,
                             text=piece,
-                            source="wikipedia",
+                            source=source_label,
                             url=url,
+                            license=license_label,
                             category=category,
                         )
                     )
@@ -515,12 +790,13 @@ def build_knowledge_base(
                 break
             if sleep:
                 time.sleep(sleep)
-        done_categories.add(category)
+        done_categories.add(_tagged(source_tag, category))
         save()
 
     manifest = {
-        "source": "wikipedia",
-        "license": WIKI_LICENSE,
+        "source": source_label,
+        "lang": lang,
+        "license": license_label,
         "target_mb": target_mb,
         "total_bytes": total_bytes,
         "total_mb": round(total_bytes / 1024 / 1024, 2),
@@ -717,12 +993,19 @@ __all__ = [
     "DEFAULT_OVERLAP",
     "DEFAULT_SUBCAT_LIMIT",
     "DEFAULT_TARGET_MB",
+    "ROMANCE_CATEGORIES_AR",
+    "ROMANCE_CATEGORIES_EN",
+    "ROMANCE_GUTENBERG_QUERIES",
+    "ROMANCE_WIKISOURCE_CATEGORIES_EN",
     "WIKI_API",
+    "WIKI_LANGS",
     "WIKI_LICENSE",
     "WIKI_USER_AGENT",
+    "GutenbergFetcher",
     "KnowledgeBaseStore",
     "KnowledgeChunk",
     "WikipediaFetcher",
+    "WikisourceFetcher",
     "build_knowledge_base",
     "chunk_text",
     "clean_wikitext",

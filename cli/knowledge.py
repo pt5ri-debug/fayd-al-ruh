@@ -1,12 +1,17 @@
 """CLI for the bulk knowledge base: build it, inspect it, search it.
 
     python -m cli knowledge build --target-mb 100
+    python -m cli knowledge build --source gutenberg --romance --target-mb 50
+    python -m cli knowledge build --source wikipedia-ar --romance --target-mb 20
     python -m cli knowledge stats
     python -m cli knowledge search "hydraulic fracturing"
 
 The store lives under the writable data directory (``data/knowledge_base`` by
 default, overridable with ``FAYD_DATA_DIR``) and is git-ignored. Building needs
-network access to Wikipedia; searching a built store is offline.
+network access to the chosen source (Wikipedia, Project Gutenberg, or
+Wikisource); searching a built store is offline. ``--source`` selects the
+connector and ``--romance`` selects the built-in romantic/emotional seed, so a
+character's own corpus can be built from free, licensed sources.
 """
 
 from __future__ import annotations
@@ -48,6 +53,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Category to include (repeatable; default: the broad seed).",
     )
+    build.add_argument(
+        "--source",
+        choices=("wikipedia", "wikipedia-ar", "gutenberg", "wikisource", "wikisource-ar"),
+        default="wikipedia",
+        help="Which source to fetch from (default: English Wikipedia).",
+    )
+    build.add_argument(
+        "--romance",
+        action="store_true",
+        help="Use the built-in romantic/emotional seed instead of the broad one.",
+    )
     build.add_argument("--batch", type=int, default=50)
     build.add_argument("--chunk-chars", type=int, default=1200)
     build.add_argument("--overlap", type=int, default=150)
@@ -79,19 +95,62 @@ def _resolve_dir(value: str | None):
     return default_knowledge_base_dir()
 
 
+def _make_fetcher(source: str):
+    """Build the connector ``--source`` names (network lives only here)."""
+    from core.knowledge_base import (
+        GutenbergFetcher,
+        WikipediaFetcher,
+        WikisourceFetcher,
+    )
+
+    if source == "wikipedia":
+        return WikipediaFetcher(lang="en"), "wikipedia:en"
+    if source == "wikipedia-ar":
+        return WikipediaFetcher(lang="ar"), "wikipedia:ar"
+    if source == "gutenberg":
+        return GutenbergFetcher(), "gutenberg"
+    if source == "wikisource":
+        return WikisourceFetcher(lang="en"), "wikisource:en"
+    if source == "wikisource-ar":
+        return WikisourceFetcher(lang="ar"), "wikisource:ar"
+    raise ValueError(f"Unknown source {source!r}.")
+
+
 def run_build(args: argparse.Namespace) -> int:
+    from core.knowledge_base import (
+        ROMANCE_CATEGORIES_AR,
+        ROMANCE_CATEGORIES_EN,
+        ROMANCE_GUTENBERG_QUERIES,
+        ROMANCE_WIKISOURCE_CATEGORIES_EN,
+    )
+
     store_dir = _resolve_dir(args.store_dir)
-    categories = tuple(args.categories) if args.categories else DEFAULT_CATEGORIES
+    fetcher, source_tag = _make_fetcher(args.source)
+    if args.categories:
+        categories = tuple(args.categories)
+    elif args.romance:
+        if args.source == "wikipedia-ar":
+            categories = ROMANCE_CATEGORIES_AR
+        elif args.source == "gutenberg":
+            categories = ROMANCE_GUTENBERG_QUERIES
+        elif args.source.startswith("wikisource"):
+            categories = ROMANCE_WIKISOURCE_CATEGORIES_EN
+        else:
+            categories = ROMANCE_CATEGORIES_EN
+    else:
+        categories = DEFAULT_CATEGORIES
 
     def progress(message: str) -> None:
         print(message, flush=True)
 
     print(f"Building knowledge base in {store_dir}")
-    print(f"Target: {args.target_mb:.0f} MB across {len(categories)} categories")
+    print(f"Source: {args.source}   Target: {args.target_mb:.0f} MB across {len(categories)} categories")
     manifest = build_knowledge_base(
         store_dir,
         target_mb=args.target_mb,
         categories=categories,
+        fetcher=fetcher,
+        source_tag=source_tag,
         batch=args.batch,
         chunk_chars=args.chunk_chars,
         overlap=args.overlap,
