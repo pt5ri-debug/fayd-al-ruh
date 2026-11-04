@@ -303,6 +303,29 @@ class ModelRegistry:
         self.set_active(stable.number)
         return stable
 
+    def should_accept_improvement(
+        self,
+        deltas: tuple[Evaluation, ...],
+        *,
+        max_regression: float = 0.02,
+        min_improvement: float = 0.0,
+    ) -> tuple[bool, str]:
+        """The acceptance rule, reused by the self-improvement loop (Phase 9).
+
+        A candidate change is accepted only when no metric regresses past
+        ``max_regression`` and at least one improves past ``min_improvement`` --
+        exactly the rule :meth:`should_accept` applies to a training run, so the
+        loop and the model gate cannot disagree about what "an improvement" is.
+        The candidate's measured deltas are converted to :class:`Evaluation`
+        records (a positive delta always means an improvement) and handed to the
+        same rule.
+        """
+        return self.should_accept(
+            deltas,
+            max_regression=max_regression,
+            min_improvement=min_improvement,
+        )
+
     def report(self) -> str:
         """A readable summary of the version log."""
         versions = self.versions()

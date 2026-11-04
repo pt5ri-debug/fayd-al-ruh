@@ -450,6 +450,11 @@ def run_autonomy(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.autonomy", argv)
 
 
+def run_improve(argv: Sequence[str] = ()) -> int:
+    """Controlled self-improvement (Phase 9): monitor, propose, isolate, approve."""
+    return _run_module("cli.improve", argv)
+
+
 def run_curriculum(argv: Sequence[str] = ()) -> int:
     """Show the seeded petroleum-engineering curriculum and its coverage."""
     if argv:
@@ -670,6 +675,13 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Autonomy: list the tools the planner may choose", run_autonomy, ("tools",)),
     ("Autonomy: the execution audit trail", run_autonomy, ("history",)),
     ("Autonomy: the held-out planning/execution gate", run_autonomy, ("gate",)),
+    ("Self-improvement: what the loop can do, and its security invariants", run_improve, ("status",)),
+    ("Self-improvement: the metric catalogue it monitors", run_improve, ("metrics",)),
+    ("Self-improvement: the system health report", run_improve, ("health",)),
+    ("Self-improvement: detect weaknesses from the metrics", run_improve, ("detect",)),
+    ("Self-improvement: generate and rank improvement proposals", run_improve, ("propose",)),
+    ("Self-improvement: the security invariants, checked live", run_improve, ("security",)),
+    ("Self-improvement: the held-out self-improvement gate", run_improve, ("gate",)),
     ("Show the ingestion status (store + ledger)", run_ingest, ("stats",)),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--resume", "--episodes", "60")),
@@ -853,6 +865,7 @@ __all__ = [
     "run_hakeem",
     "run_hakeem_chat",
     "run_import_center",
+    "run_improve",
     "run_insight",
     "run_internet_learner",
     "run_jarvis",
