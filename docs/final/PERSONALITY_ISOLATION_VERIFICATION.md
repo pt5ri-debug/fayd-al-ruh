@@ -1,8 +1,8 @@
 # Personality Isolation Verification
 
-**Method:** an independent probe (`/tmp/fayd-audit/isolation_probe.py`, **16/16
-checks**) over the **real** `core.learning_isolation` policy, plus the project's
-own held-out gates `character_isolation_accuracy` (**1.0000**, 19 judgements) and
+**Method:** an independent probe over the **real** `core.learning_isolation`
+policy (re-run on merged `main`, `389c586`: 8 isolation checks, all PASS), plus
+the project's own held-out gates `character_isolation_accuracy` (**1.0000**) and
 `character_identity_accuracy` (**1.0000**).
 
 ---

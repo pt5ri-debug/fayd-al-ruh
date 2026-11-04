@@ -1,9 +1,9 @@
 # Security and Privacy Audit
 
-**Method:** an independent probe (`/tmp/fayd-audit/security_probe.py`) over the
-**real** sandbox, permission and approval code, plus targeted checks of the
-self-improvement deployment gate and prompt-injection handling. No security
-control was weakened to make any test pass.
+**Method:** an independent probe over the **real** sandbox, permission and
+approval code (re-run on merged `main`, `389c586`: 4/4 sandbox checks PASS), plus
+targeted checks of the self-improvement deployment gate and prompt-injection
+handling. No security control was weakened to make any test pass.
 
 ---
 
@@ -12,14 +12,14 @@ control was weakened to make any test pass.
 | Area | Result |
 | --- | --- |
 | File-access boundaries | PASS |
-| Directory-traversal protection | PASS (17/17 probe checks) |
+| Directory-traversal protection | PASS (`Path '../../etc/passwd' escapes the sandbox root.`) |
 | Tool-permission enforcement | PASS |
 | High-risk operation approvals | PASS |
 | Prompt injection through imported documents | PASS (content is data, never a command) |
 | Untrusted-content handling | PASS |
 | Unauthorized data export | PASS (deny-by-default external capability) |
 | Secret / credential handling | PASS (never written to disk or a log; redacted) |
-| Personality memory isolation | PASS (16/16; structural, before any path) |
+| Personality memory isolation | PASS (structural, before any path) |
 | Database integrity | PASS |
 | Backup protection | PASS (a bad backup is refused; good copy preserved) |
 | Audit-log integrity | PASS (append-only) |
@@ -28,13 +28,15 @@ control was weakened to make any test pass.
 
 **No unresolved critical or high vulnerability was found.**
 
-## 2. Sandbox and file boundaries (probe: 17/17)
+## 2. Sandbox and file boundaries (probe: 4/4 on merged `main`)
 
-- A read-only sandbox **refuses** a write.
-- A writable sandbox writes inside its root.
-- Traversal is refused for `../escape.txt`, `..\escape.txt`, `/etc/passwd`,
-  `a/../../b.txt`, and a **symlink escape** (`link/passwd` → `/etc`).
-- An unknown tool is refused by the allow-list.
+- A read-only sandbox **refuses** a write (`Tool 'write_file' mutates and the
+  sandbox is read-only.`).
+- An unknown tool is refused by the allow-list (`Unknown tool 'nonexistent_tool'.`).
+- Traversal is refused (`Path '../../etc/passwd' escapes the sandbox root.`), and
+  the project's own tests additionally cover `..\escape.txt`, `a/../../b.txt`, and
+  a **symlink escape** (`link/passwd` → `/etc`).
+- An in-root read is permitted.
 - An external capability is **denied by default**; an unapproved action becomes
   allowed only after explicit approval.
 - The suffix policy refuses `.exe`; a large read is bounded.

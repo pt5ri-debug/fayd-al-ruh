@@ -24,9 +24,13 @@ operation. This is the honest meaning of "offline": no traffic to another machin
 
 ## 2. Result — the core paths run offline
 
+Re-run on merged `main` (`389c586`): with `FAYD_OFFLINE=1` and the guard in force,
+**3/3 external hosts** (`example.com`, `8.8.8.8`, `pypi.org`) were refused
+(`NetworkDisabled`) and **loopback stayed open** for local model servers.
+
 | Path | Result |
 | --- | --- |
-| `answer_path` (grounded answer + citations) | PASS — answer produced, 4 citations, **0 network attempts** |
+| `answer_path` (grounded answer + citations) | PASS — answer produced, citations present, **0 network attempts** |
 | `arabic_answer_path` | PASS |
 | `long_term_memory` (store + read-back) | PASS |
 | `cognitive_controller` (analogy) | PASS |
