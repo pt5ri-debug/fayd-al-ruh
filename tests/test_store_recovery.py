@@ -28,33 +28,31 @@ from core.long_term_memory import LongTermMemory
 from core.memory_db import MemoryDatabaseError
 
 
-def _record(**overrides) -> LearningRecord:
-    base = {
-        "record_id": "rec-1",
-        "owner": "ultron",
-        "source_type": "user",
-        "source_reference": "doc-1",
-        "question": "what is porosity?",
-        "answer": "the void space in a rock",
-        "knowledge": "porosity is the void space in a rock",
-        "verification": "provisional",
-    }
-    base.update(overrides)
-    return LearningRecord(**base)
+def _record(
+    *, owner: str = "ultron", knowledge: str = "porosity is the void space in a rock"
+) -> LearningRecord:
+    return LearningRecord(
+        record_id="rec-1",
+        owner=owner,
+        source_type="user",
+        source_reference="doc-1",
+        question="what is porosity?",
+        answer="the void space in a rock",
+        knowledge=knowledge,
+        verification="provisional",
+    )
 
 
-def _event(**overrides) -> LearningEvent:
-    base = {
-        "owner": "fayd_al_ruh",
-        "kind": KIND_KNOWLEDGE,
-        "source": SOURCE_DOCUMENT,
-        "source_reference": "doc-1",
-        "target": "porosity measures permeability",
-        "outcome": OUTCOME_ACCEPTED,
-        "applied": True,
-    }
-    base.update(overrides)
-    return LearningEvent(**base)
+def _event(*, target: str = "porosity measures permeability") -> LearningEvent:
+    return LearningEvent(
+        kind=KIND_KNOWLEDGE,
+        target=target,
+        owner="fayd_al_ruh",
+        source=SOURCE_DOCUMENT,
+        source_reference="doc-1",
+        outcome=OUTCOME_ACCEPTED,
+        applied=True,
+    )
 
 
 # ---------------------------------------------------------- learning store
