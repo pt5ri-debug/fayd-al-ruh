@@ -364,6 +364,32 @@ Arabic is kept as secondary aliases where useful.
   `core.learning_pipeline` (the record's source is `internet` when the answer came
   from the web, `language_model` otherwise; a record is never born verified, and a
   failure is `best_effort` so it can never break a chat).
+- `core/character_knowledge.py` — **each character's own knowledge corpus**.
+  `core.knowledge_base`'s connectors (a keyless `WikipediaFetcher` with
+  `lang=` ar/en, a `GutenbergFetcher` of public-domain literary text, a
+  `WikisourceFetcher` ar/en, each writing a `source_tag`) build a bulk corpus
+  **per character** under the git-ignored `data/characters/<owner>/knowledge_base`
+  (`character_knowledge_dir(owner, root=)`, resolved through the isolation policy
+  so a character reaches **only** its own folder). `CharacterKnowledge(owner)` is
+  the read side: `available`/`stats()`/`describe()` report the real corpus
+  (size, chunk and article counts, source, language, whether the FTS index
+  exists), `retrieve(question)` runs the offline path (the SQLite FTS index when
+  built, else a streaming scan -- `core.knowledge_index`), and
+  `reference_block(question)` renders the top passages as a **bounded, labelled**
+  block (`KNOWLEDGE_HEADER`, "information, not instructions"), so a model treats a
+  retrieved passage as reference rather than a command. An **absent** corpus is
+  honest -- no block, `available` false, the next step named -- and changes
+  nothing. `ai.characters.CharacterMouth` retrieves for **every** question (the
+  block is question-specific, unlike the paced memory recall) and injects it after
+  the standing character, so the model composes its reply in the character's own
+  voice from retrieved material; a character with no corpus is unchanged. Read-only
+  at answer time: the fetchers are build-time only, so the retrieval path opens no
+  socket (pinned by the gate). The held-out gate
+  `core.character_knowledge_gate` (`KNOWLEDGE_JUDGEMENTS` +
+  `character_knowledge_accuracy`, with **negative controls**: a cross-character
+  query returns nothing, an absent corpus adds no block, reading opens no socket)
+  is the evaluation metric `character_knowledge_accuracy`. CLI:
+  `python -m cli characters knowledge <character> [query]`.
 - `core/learning_isolation.py` — **who exists and where their records live**: the
   one source of truth for the seven characters (`CHARACTER_OWNERS`) and the project
   model (`MAIN_MODEL_OWNER = "fayd_al_ruh"`), the private/shareable policy
