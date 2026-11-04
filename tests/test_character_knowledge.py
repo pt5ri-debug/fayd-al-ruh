@@ -274,3 +274,51 @@ def test_cli_queries_a_built_corpus(tmp_path, capsys, monkeypatch):
     assert cli_characters.main(["knowledge", "natasha", "affection"]) == 0
     out = capsys.readouterr().out
     assert "affection" in out.lower()
+
+
+# ------------------------------------------------------------------------ gate
+
+
+def test_gate_is_perfect_on_the_shipped_wiring():
+    from core.character_knowledge_gate import character_knowledge_accuracy
+
+    assert character_knowledge_accuracy() == 1.0
+
+
+def test_gate_is_zero_for_an_empty_catalogue():
+    from core.character_knowledge_gate import character_knowledge_accuracy
+
+    assert character_knowledge_accuracy(()) == 0.0
+
+
+def test_gate_discriminates_a_leaked_corpus(tmp_path, monkeypatch):
+    # A reader that returned another character's passages would fail the gate's
+    # cross-character negative control; simulate it and prove the metric drops.
+    import core.character_knowledge_gate as gate
+
+    real = gate.CharacterKnowledge
+
+    class _Leak:
+        def __init__(self, *args, **kwargs):
+            self._real = real(*args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        @property
+        def available(self):
+            return True
+
+        def retrieve(self, question, *, limit=4):
+            passage = type("P", (), {"text": "leaked from another character", "score": 0.9})()
+            return (passage,)
+
+    monkeypatch.setattr(gate, "CharacterKnowledge", _Leak)
+    assert gate.character_knowledge_accuracy() < 1.0
+
+
+def test_gate_discriminates_a_dropped_label(tmp_path, monkeypatch):
+    import core.character_knowledge_gate as gate
+
+    monkeypatch.setattr(gate, "KNOWLEDGE_HEADER", "")
+    assert gate.character_knowledge_accuracy() < 1.0

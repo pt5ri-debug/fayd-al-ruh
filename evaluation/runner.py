@@ -27,6 +27,7 @@ from core.causal_link import CausalLink
 from core.causal_paths import causal_reasoning_accuracy, controller_causal_accuracy
 from core.character_identity_gate import character_identity_accuracy
 from core.character_isolation_gate import character_isolation_accuracy
+from core.character_knowledge_gate import character_knowledge_accuracy
 from core.character_memory_gate import memory_seeding_accuracy
 from core.cognition_catalog import catalog_accuracy
 from core.cognitive_controller import CognitiveController
@@ -160,6 +161,13 @@ class EvaluationMetrics:
     second share (Phase: independent characters)."""
 
     character_identity_accuracy: float
+    character_knowledge_accuracy: float
+    """The share of held-out character-knowledge judgements satisfied: a
+    character reads only its own corpus, the reference block is labelled and
+    bounded, an absent corpus is honest and changes nothing, the mouth injects
+    what it retrieved, and reading a corpus opens no socket (Phase: the
+    connectors + the per-character knowledge loader)."""
+
     memory_seeding_accuracy: float
     """The share of held-out identity judgements the wiring satisfies: a
     character's personality reaches the *answer text* it produces (not only its
@@ -1158,6 +1166,14 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # mouth is left unwrapped), so a regression in the identity wiring fails here.
     character_identity_value = character_identity_accuracy()
 
+    # The per-character knowledge corpus: a character reads only its own built
+    # corpus, the retrieved block is labelled and bounded, an absent corpus is
+    # honest and changes nothing, the mouth injects what it retrieved, and reading
+    # opens no socket. Held-out judgements with negative controls (a
+    # cross-character query returns nothing, an absent corpus adds no block), so a
+    # regression that leaked a corpus or reached the network fails here.
+    character_knowledge_value = character_knowledge_accuracy()
+
     # Memory revival: a fresh character's memory is real but empty. Held-out
     # judgements that a character is seeded from the project's *own authored*
     # knowledge -- with negative controls (an unknown key resolves rather than
@@ -1330,6 +1346,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         arabic_readable_value,
         character_isolation_value,
         character_identity_value,
+        character_knowledge_value,
         memory_seeding_value,
         development_value,
         catalog_value,
@@ -1399,6 +1416,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         arabic_readable_body_accuracy=round(arabic_readable_value, 6),
         character_isolation_accuracy=round(character_isolation_value, 6),
         character_identity_accuracy=round(character_identity_value, 6),
+        character_knowledge_accuracy=round(character_knowledge_value, 6),
         memory_seeding_accuracy=round(memory_seeding_value, 6),
         development_accuracy=round(development_value, 6),
         cognition_catalog_accuracy=round(catalog_value, 6),

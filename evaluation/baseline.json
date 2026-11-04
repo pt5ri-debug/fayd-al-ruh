@@ -62,6 +62,7 @@
     "causal_reasoning_accuracy": 1.0,
     "character_identity_accuracy": 1.0,
     "character_isolation_accuracy": 1.0,
+    "character_knowledge_accuracy": 1.0,
     "cognition_catalog_accuracy": 1.0,
     "conclusion_verification_accuracy": 1.0,
     "connection_accuracy": 1.0,
