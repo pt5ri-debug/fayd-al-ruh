@@ -83,7 +83,7 @@
     "learning_accuracy": 1.0,
     "memory_architecture_accuracy": 1.0,
     "memory_seeding_accuracy": 1.0,
-    "overall": 0.990011,
+    "overall": 0.990177,
     "perception_bridge_accuracy": 1.0,
     "personality_agents_accuracy": 1.0,
     "petroleum_causal_accuracy": 1.0,
@@ -109,6 +109,7 @@
     "retrieval_accuracy": 1.0,
     "retrieval_mrr": 1.0,
     "semantic_separation": 0.542689,
+    "task_execution_accuracy": 1.0,
     "temporal_accuracy": 1.0,
     "tool_selection_accuracy": 1.0,
     "training_accuracy": 1.0

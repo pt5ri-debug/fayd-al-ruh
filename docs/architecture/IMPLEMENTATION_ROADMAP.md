@@ -384,6 +384,10 @@ with citations to the transcription; nothing perceived is stored as verified.
 
 ## Phase 8 — Autonomous Planning and Task Execution
 
+> **Status: ✅ DELIVERED** (2026-11-04, branch `feature/phase-8-autonomous-planning`).
+> See `docs/architecture/PHASE_8_IMPLEMENTATION_REPORT.md`. Held-out gate
+> `task_execution_accuracy` 1.0000 (37 judgements); `overall` 0.9900 → 0.9902.
+
 **Goal:** persist goals, decompose and execute tasks under the existing sandbox,
 record the experience, and evaluate the result — the full H block of the target.
 

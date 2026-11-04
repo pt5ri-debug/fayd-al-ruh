@@ -6320,3 +6320,63 @@ regression monitor each can refuse a change.
   (`python -m cli perception status`). Tests:
   `tests/test_perception_phase7.py` (64 tests). Docs: `docs/perception/` (11
   files) and `docs/architecture/PHASE_7_IMPLEMENTATION_REPORT.md`.
+
+- Phase 8 (roadmap) — **autonomous planning and task execution**: interpret a
+  goal, decompose it into tasks, build and **validate** a plan, select a
+  permitted tool (and optionally an agent) per task, execute the permitted
+  actions under the existing sandbox, monitor progress, verify the outcome
+  against the **goal's own** criteria, recover from failure, revise the plan,
+  and record the experience — all without ever widening the system's authority
+  and without ever reporting a tool's success as the goal's success. Two new
+  packages extend the architecture; nothing existing is replaced.
+  `core/planning/` is the goal→plan half: `goals.py` (`Goal`, `GoalKind`,
+  `GoalStatus`, `VerificationCriteria`, `GoalManager` — a goal's durability and
+  the **authorization rule**: only a user goal or a subgoal of one authorizes
+  execution, a *suggested* goal never does); `tasks.py` (`Task`, `TaskState` —
+  one unit of work with preconditions, inputs, outputs, dependencies, tool,
+  arguments, resources, permissions, success criteria, and failure handling,
+  each a sequence of **immutable versions**); `tools.py` (`ToolDescriptor`,
+  `ToolCatalogue`, `ToolSelection`, `RiskCategory`, `select_tool` — the
+  centralized registry over the sandbox and its deterministic, explainable,
+  allow-list-bounded selection); `decomposition.py` (`DecompositionEngine` — the
+  rule-driven goal→tasks engine, **bounded** by `MAX_TASKS` and `MAX_DEPTH`,
+  which never emits a task with no tool); `dependencies.py`
+  (`DependencyGraph`/`DependencyError` — the DAG, topological order, and the
+  sequential/independent/parallelizable classification); `plan.py` (`TaskPlan`,
+  `PlanStatus`, `PlanValidation`, `validate_plan`); `coordinator.py`
+  (`PlanningCoordinator`, `default_planner` — decompose → select → validate →
+  plan, plus **replanning** and persistence); `storage.py` (`GoalStore`,
+  `PlanStore` — durable JSON, corrupt-document tolerant).
+  `core/execution/` is the plan→verified-outcome half: `engine.py`
+  (`ExecutionEngine`/`TaskExecution`/`ExecutionReport` — dependency-ordered
+  scheduling, argument validation, `{task_id}` output chaining, bounded retries,
+  cooperative cancellation, and an injected `runner` seam); `permissions.py`
+  (`PermissionManager`/`PermissionRecord`/`ActionCategory` — the permission and
+  approval gate over the sandbox allow-list, the human-approval gate, and an
+  agent's capability ceiling); `verification.py` (`OutcomeVerifier`/`Outcome`/
+  `VerificationResult` — verify the **goal's** criteria, never merely a tool's
+  success); `recovery.py` (`RecoveryManager`/`RecoveryDecision`/`Checkpoint` —
+  bounded, **safety-aware** recovery that never retries an irreversible action,
+  plus checkpoint/resume); `history.py` (`ExecutionHistory`/`ExecutionEntry`/
+  `redact` — the append-only, credential-redacting audit log); `monitor.py`
+  (`ExecutionMonitor` — live progress/ETA); `coordinator.py`
+  (`ExecutionCoordinator`/`ExecutionResult`/`default_executor` — plan → execute
+  → verify → recover → record the experience). `core/plan_evaluator.py` is
+  extended with `OutcomeEvaluation`, `evaluate_outcome` (reads the run's own
+  verification, duck-typed), and `record_experience`, so the outcome feeds the
+  Phase-3 `LearningCoordinator` — a lesson is learned the same way every other
+  lesson is, never by fine-tuning and never as a trusted fact. `core/goal.py`
+  gains the status vocabulary (`PLANNING`/`PARTIAL`/`FAILED`/`CANCELLED`, a
+  `terminal` property, `with_status`, and primitive serialization) and a durable
+  `GoalStore`; `core/planner.py` gains plan persistence; `core/tool_agent.py`
+  gains running a chosen plan through the sandbox and recording each step.
+  Authority is never widened: only an authorized goal runs, only a permitted
+  tool runs, a risky action needs a live approval, an agent cannot exceed its
+  ceiling, and a tool's success is not the goal's — each pinned by a **negative
+  control**. `core/planning_gate.py` is the held-out gate (37 judgements)
+  wired into `evaluation` as `task_execution_accuracy` (1.0000; `overall`
+  0.9900 → 0.9902). Headless twin: `python -m cli autonomy
+  plan|run|tools|goals|show|history|gate` (`cli/autonomy.py`, aliases
+  `autonomy`/`autonomous`, five menu entries). CPU-first, offline, no model, no
+  network. Tests: `tests/test_autonomy.py` (86 tests). Docs:
+  `docs/architecture/PHASE_8_IMPLEMENTATION_REPORT.md`.
