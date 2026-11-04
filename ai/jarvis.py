@@ -279,6 +279,9 @@ def run_loop(mode: JarvisMode, *, as_json: bool, require_wake: bool, speak: bool
 
 
 def main(argv: list[str] | None = None) -> int:
+    from core.offline import ensure_offline
+
+    ensure_offline()
     parser = argparse.ArgumentParser(description="Jarvis mode: listen, understand, act, speak.")
     parser.add_argument("utterance", nargs="*", help="one request; omit to enter the interactive loop")
     parser.add_argument(

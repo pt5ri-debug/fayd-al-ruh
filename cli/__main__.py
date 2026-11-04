@@ -273,6 +273,11 @@ def _use_utf8_console() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     _use_utf8_console()
+    # Fully-local operation: with FAYD_OFFLINE=1 set, block every network entry
+    # point before anything else runs, so a governed egress cannot open a socket.
+    from core.offline import ensure_offline
+
+    ensure_offline()
     # First run after an upgrade: pull any pre-existing in-repo training under
     # the git-ignored data folder, so it survives and never dirties the tree.
     from core.paths import ensure_data_layout

@@ -669,6 +669,9 @@ def run_loop(mode, *, as_json: bool, autosave: bool = False, switcher=None) -> i
 
 
 def main(argv: list[str] | None = None) -> int:
+    from core.offline import ensure_offline
+
+    ensure_offline()
     parser = argparse.ArgumentParser(
         prog="chat",
         description="Talk with the project's AI in text (like Jarvis, without voice).",

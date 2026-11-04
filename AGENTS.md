@@ -120,7 +120,25 @@ Arabic is kept as secondary aliases where useful.
   (the language GGUF *and* its `mmproj` projector), and   `docs_pages_dir()`
   (`data/docs/pages`) holds the page images it rasterises from a scanned PDF --
   a reproducible cache, so both are git-ignored.
-  `core/version.py` — the single version string; `core/best_effort.py` — the one
+  `core/version.py` — the single version string; `core/offline.py` — the one
+  place that **enforces** fully-local operation. Every network egress is already
+  gated and off by default (web search, downloads, the bulk build, the update
+  check, the Cloud mouth), but nothing *enforced* it; `core.offline.install_guard`
+  (called by `ensure_offline()` at the program entry points -- `cli/__main__.py`,
+  `ai/chat.py`, `ai/jarvis.py`, `gui/app.py`) blocks every connection to an
+  **external** host when `FAYD_OFFLINE=1`, so an unintended egress fails loudly
+  with `NetworkDisabled` instead of silently succeeding. **Loopback stays open**:
+  a local model server (Ollama, the audio.cpp resident server) is part of local
+  operation, so `localhost`/`127.0.0.0/8`/`::1` are permitted and only traffic
+  that would leave the machine is refused -- the honest meaning of "offline". It
+  is reversible (`uninstall_guard`), dependency-free, and the base install is
+  untouched; `describe()` names whether it is in force. `tests/test_offline.py`
+  pins the switch, the guard (blocks external socket/`getaddrinfo`/
+  `create_connection`/`urlopen`/`requests`; allows loopback), reversibility, and
+  the real local paths under the guard; `tests/test_store_recovery.py` pins the
+  store-recovery behaviour (corrupt-tail tolerance, newer-schema refusal,
+  backup/restore, a bad backup refused with the good DB preserved, append-only
+  rollback). `core/best_effort.py` — the one
   place a deliberate "must not fail the caller" operation lives
   (`best_effort(what)`, `swallowed_errors()`, `clear_swallowed()`). Swallowing an
   error is *correct* for a cosmetic preference written to a read-only folder, an

@@ -4196,6 +4196,9 @@ class FaydGUI:
 
 def main(argv: list[str] | None = None) -> int:
     """Launch the GUI. Returns a non-zero code when no display is available."""
+    from core.offline import ensure_offline
+
+    ensure_offline()
     args = build_parser().parse_args(argv)
     try:
         root = tk.Tk()
