@@ -983,6 +983,7 @@ class FaydGUI:
         dialogs: list[Any] = []
         for attr in (
             "_import_dialog",
+            "_kb_manager_dialog",
             "_sql_import_dialog",
             "_characters_dialog",
             "_cognition_dialog",
@@ -3115,6 +3116,32 @@ class FaydGUI:
             on_close=lambda: setattr(self, "_import_dialog", None),
         )
 
+    def _open_kb_manager(self) -> None:
+        """Open the Knowledge Base Manager, which fills a character's own corpus."""
+        from gui.kb_manager import KnowledgeBaseManagerService
+        from gui.kb_manager_dialog import KnowledgeBaseManagerDialog
+
+        # One window is kept and reused: a second press raises the open one.
+        existing = getattr(self, "_kb_manager_dialog", None)
+        if existing is not None:
+            try:
+                existing.window.lift()
+                existing.window.focus_set()
+                return
+            except Exception:
+                self._kb_manager_dialog = None
+        service = KnowledgeBaseManagerService(data_root=self.service.data_root)
+        self._kb_manager_dialog = KnowledgeBaseManagerDialog(
+            self.root,
+            service,
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
+            on_close=lambda: setattr(self, "_kb_manager_dialog", None),
+        )
+
     def _open_sql_import(self) -> None:
         """Open the SQL Database Import screen as a separate window."""
         from gui.sql_import_dialog import SqlImportDialog
@@ -3853,6 +3880,11 @@ class FaydGUI:
         # running the headless prompt (which has no terminal to read from here).
         if action.key == "import-center":
             self._open_import_center()
+            return
+        # The Knowledge Base Manager has its own window too (it targets one
+        # character's own corpus, with a web path and a paste box).
+        if action.key == "kb-manager":
+            self._open_kb_manager()
             return
         # The Characters entry opens the character management window.
         if action.key in {"characters", "characters-shareable"}:

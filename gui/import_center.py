@@ -41,11 +41,13 @@ import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from core.knowledge_base import KnowledgeBaseStore, default_knowledge_base_dir
 from core.paths import data_dir
 from core.pdf_ocr import PageOcrEngine
 from ingest.dedup import DedupLedger
+from ingest.hashing import content_hash
 from ingest.jobs import DONE, FAILED, RUNNING, JobState, JobStore
 from ingest.metadata import DocumentMetadataStore, metadata_path
 from ingest.pipeline import IngestionPipeline, ingest_jobs_dir, ledger_path
@@ -208,6 +210,7 @@ class KnowledgeImporter:
         retries: int = 2,
         allow_web: bool = False,
         ocr_engine: PageOcrEngine | None = None,
+        web_opener: Any = None,
     ) -> None:
         self.store_dir = Path(store_dir) if store_dir is not None else default_knowledge_base_dir()
         self.recursive = recursive
@@ -221,7 +224,9 @@ class KnowledgeImporter:
         self.overlap = overlap
         self.retries = retries
         self.allow_web = allow_web
-        self._registry = build_default_registry(allow_web=allow_web, ocr_engine=ocr_engine)
+        self._registry = build_default_registry(
+            allow_web=allow_web, ocr_engine=ocr_engine, web_opener=web_opener
+        )
 
     # -- stores -----------------------------------------------------------
 
@@ -319,6 +324,62 @@ class KnowledgeImporter:
             )
             report.outcomes.append(outcome)
             self._merge(report, outcome)
+        report.duration_seconds = time.monotonic() - started
+        return report
+
+    def import_url(
+        self,
+        url: str,
+        *,
+        progress: ProgressCallback | None = None,
+    ) -> ImportOutcome:
+        """Fetch one web page's **whole text** and import it.
+
+        The web connector is registered because this importer was built with
+        ``allow_web=True``; the source sets ``authorized=True`` so the connector
+        accepts the host (the *user* already approved the web path at the window,
+        which is the human-approval gate the CLI applies with ``--approve``).
+        """
+        spec = SourceSpec(
+            url,
+            options={
+                "authorized": "true",
+                "title": url,
+                "normalize": "true",
+            },
+        )
+        return self._import_one(spec, root=None, progress=progress)
+
+    def import_text(
+        self,
+        text: str,
+        *,
+        title: str = "",
+        progress: ProgressCallback | None = None,
+    ) -> ImportReport:
+        """Import text supplied directly (a paste), with no file and no URL.
+
+        The text is content-addressed, so pasting the same text twice is one
+        source rather than two -- exactly like re-importing an unchanged file.
+        An empty paste is reported as a failed outcome rather than silently
+        ignored, so the window can say why nothing was added.
+        """
+        report = ImportReport()
+        started = time.monotonic()
+        label = (title or "").strip() or "Pasted text"
+        if not text.strip():
+            report.outcomes.append(
+                ImportOutcome(source=label, ok=False, message="Nothing to import: the text is empty.")
+            )
+            report.duration_seconds = time.monotonic() - started
+            return report
+        options = self._options()
+        options["text"] = text
+        options["title"] = label
+        spec = SourceSpec(f"text:{content_hash(text)[:16]}", options=options)
+        outcome = self._import_one(spec, root=None, progress=progress)
+        report.outcomes.append(outcome)
+        self._merge(report, outcome)
         report.duration_seconds = time.monotonic() - started
         return report
 

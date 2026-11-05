@@ -345,6 +345,11 @@ def run_import_center(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.import_center", argv)
 
 
+def run_kb_manager(argv: Sequence[str] = ()) -> int:
+    """Fill one character's own knowledge base (the Knowledge Base Manager)."""
+    return _run_module("cli.kb_manager", argv)
+
+
 def run_code_studio(argv: Sequence[str] = ()) -> int:
     """Edit, test, and merge the project's own code in isolated workspaces."""
     return _run_module("cli.studio", argv)
@@ -601,6 +606,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Show the bulk knowledge base status", run_knowledge, ("stats",)),
     ("Ingest sources: files, SQL, authorized web", run_ingest, ("list-connectors",)),
     ("Import files and folders (Knowledge Import Center)", run_import_center, ("interactive",)),
+    (
+        "Knowledge Base Manager: fill one character's own knowledge base",
+        run_kb_manager,
+        ("characters",),
+    ),
     ("Code Studio: edit and merge the project's own code", run_code_studio, ("status",)),
     ("Presentation Studio: build a PowerPoint deck from a discussion", run_presentation, ("list",)),
     ("Doc's Studio: read any document (incl. scanned) with the local vision model", run_docs, ("status",)),
@@ -869,6 +879,7 @@ __all__ = [
     "run_insight",
     "run_internet_learner",
     "run_jarvis",
+    "run_kb_manager",
     "run_learn",
     "run_learning",
     "run_llm",

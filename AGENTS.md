@@ -2076,6 +2076,43 @@ Arabic is kept as secondary aliases where useful.
   `python -m cli ingest add|list-connectors|
   stats|build-index|search|delete|jobs` (`cli/ingest.py`); the two knowledge
   actions mirror into the GUI sidebar.
+- `gui/kb_manager.py` / `gui/kb_manager_dialog.py` / `cli/kb_manager.py` — the
+  **Knowledge Base Manager**: the one place that fills **one character's own**
+  knowledge corpus (the ``data/characters/<owner>/knowledge_base`` folder
+  :mod:`core.character_knowledge` reads), through the *same* ingestion pipeline
+  the Import Center uses. The Tk-free service `KnowledgeBaseManagerService`
+  (`characters`/`set_character`/`import_files`/`import_folder`/`import_text`/
+  `search_web`/`discover_site`/`walk_board`/`import_urls`/`fetch_and_import`/
+  `stats`/`describe`/`build_index`) resolves the target through
+  `core.character_identity` and `character_knowledge_dir`, so a source always
+  lands in the selected character's own corpus and isolation holds structurally;
+  the web path runs only through the project's permission **and** human-approval
+  gates (denied by default -- `set_web_approval` is the window's single switch),
+  and ``WEB_OFF_REASON`` is the honest refusal a caller sees before approval.
+  ``walk_board`` is the *site* case: it walks a listing's own pagination pages
+  (through :func:`ingest.discovery.fetch_board`) and returns every story link,
+  bounded by pages and links and narrowable with ``match`` (``/threads/``); with
+  ``descend=True`` it instead walks a **category** *and its sub-forums* (through
+  :func:`ingest.discovery.crawl_forum`, bounded by ``max_boards``), because a
+  category page holds a few threads and links the boards where the bulk of the
+  stories live -- so "all the stories in this category" is one bounded action
+  rather than a hand-assembled list of boards. ``ingest.discovery`` gains
+  ``is_board``/``board_links``/``crawl_forum`` (a board is exactly
+  ``/forums/<slug>.<id>/``; a child is walked, never returned as a story; a
+  ``fetch_board`` may be handed the already-read ``first_html`` so a board's own
+  page is not read twice). The window (`gui/kb_manager_dialog.py`, Tk, imported
+  lazily) is built like
+  every other window (the same ``Theme``/``RoundedBox``/``gui.rich_text``/worker
+  thread pattern) with a **character selector**, a **file/folder import** block, a
+  **governed web** block (search, fetch a page, walk a board with a page count, a
+  link filter, and an *Also enter sub-forums* toggle), a **paste** box, and a
+  corpus status line; the CLI
+  (`python -m cli kb characters|status|add-files|add-folder|paste|search|fetch|
+  board|index`, aliases ``kb``/``kb-manager``, ``--json``/``--data-root`` before or
+  after the subcommand, ``board --descend --boards N`` for the category walk)
+  drives the *same* service, so the window and the CLI share
+  one set of characters and one governed web path. Reachable from the sidebar's
+  **Knowledge Base Manager** action (`gui.actions`).
 - `gui/import_center.py` — the **Knowledge Import Center** engine: the
   user-facing front end over `ingest/`, shared by the window's ＋ control and the
   CLI. `KnowledgeImporter` (`import_files`, `import_folder(recursive=, job_id=)`,
