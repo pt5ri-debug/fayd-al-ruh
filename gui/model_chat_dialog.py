@@ -37,8 +37,8 @@ from typing import Any
 
 from core.reading import clip_is_silent
 
+from gui import clipboard, rich_text
 from gui import markdown as md
-from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
 from gui.dialog_base import ThemedDialog
@@ -849,15 +849,8 @@ class ModelChatDialog(ThemedDialog):
 
     @staticmethod
     def _make_read_only(widget: tk.Text) -> None:
-        def block(event: tk.Event) -> str:
-            if int(event.state) & 0x0004 or int(event.state) & 0x0008:
-                return ""
-            if event.keysym in {"Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next"}:
-                return ""
-            return "break"
-
-        for sequence in ("<Key>", "<<Paste>>", "<<Cut>>", "<<Clear>>"):
-            widget.bind(sequence, block)
+        """Read-only but still selectable and copyable, like a chat message."""
+        clipboard.make_read_only(widget)
 
     def _on_bubble_wheel(self, event: tk.Event) -> str:
         widget = event.widget

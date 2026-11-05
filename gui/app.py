@@ -53,7 +53,7 @@ from core.voices import (
 )
 from hakeem.hakeem_agent import HakeemError
 
-from gui import chat_composer, rich_text
+from gui import chat_composer, clipboard, rich_text
 from gui import markdown as md
 from gui.actions import GuiAction, grouped_visible_actions
 from gui.attachments import Attachment, AttachmentNotice
@@ -546,25 +546,13 @@ class FaydGUI:
         self._ask_teacher_button: tk.Label | None = None
         self._ask_teacher_label = "🎓   Learn from a teacher"
 
-        # The transcript is selectable and copyable; Delete clears it, Ctrl+C
-        # copies the selection, Ctrl+A selects the whole transcript, and a
-        # right-click offers the same as a menu.
-        root.bind("<Control-c>", self._on_copy)
-        root.bind("<Control-C>", self._on_copy)
-        root.bind("<Control-a>", self._on_select_all)
-        root.bind("<Control-A>", self._on_select_all)
-        root.bind("<Delete>", self._on_clear_transcript)
-        root.bind("<Button-3>", self._on_right_click)
+        # Every text field in every window gets copy, cut, paste, and select-all
+        # from one installation (see :mod:`gui.clipboard`); the transcript-wide
+        # actions -- copy the whole conversation, clear it -- hang off the same
+        # right-click menu, so a right-click never opens two competing menus.
+        clipboard.install_app_clipboard(root, extras=self._transcript_menu_extras)
         root.bind("<Control-n>", self._on_new_chat)
         root.bind("<Control-s>", self._on_save)
-        self._clipboard_menu = tk.Menu(root, tearoff=0)
-        self._clipboard_menu.add_command(label="Copy", command=self._on_copy)
-        self._clipboard_menu.add_command(
-            label="Copy conversation", command=self._on_copy_conversation
-        )
-        self._clipboard_menu.add_command(label="Select all", command=self._on_select_all)
-        self._clipboard_menu.add_separator()
-        self._clipboard_menu.add_command(label="Clear transcript", command=self._clear_transcript)
 
         root.title("Fayd Al-Ruh")
         root.geometry("1180x780")
@@ -2495,18 +2483,9 @@ class FaydGUI:
     def _copy_widget(self, widget: tk.Text) -> None:
         self._copy_text(widget.get("1.0", "end-1c"))
 
-    @staticmethod
-    def _make_read_only(widget: tk.Text) -> None:
-        """Keep a Text editable-looking but read-only, yet still selectable/copyable."""
-        def block(event: tk.Event) -> str:
-            if int(event.state) & 0x0004 or int(event.state) & 0x0008:  # Control / Command
-                return ""
-            if event.keysym in {"Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next"}:
-                return ""
-            return "break"
-
-        for sequence in ("<Key>", "<<Paste>>", "<<Cut>>", "<<Clear>>"):
-            widget.bind(sequence, block)
+    def _make_read_only(self, widget: tk.Text) -> None:
+        """Keep a message selectable and copyable while refusing every edit."""
+        clipboard.make_read_only(widget)
 
     def _on_bubble_wheel(self, event: tk.Event) -> str:
         widget = event.widget
@@ -2532,11 +2511,20 @@ class FaydGUI:
             empty.destroy()
             self._empty = None
 
-    def _on_right_click(self, event: tk.Event) -> None:
-        try:
-            self._clipboard_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            self._clipboard_menu.grab_release()
+    def _transcript_menu_extras(
+        self, widget: tk.Text | None
+    ) -> list[tuple[str, Callable[[], None]]]:
+        """The transcript-wide entries the shared right-click menu adds.
+
+        The four clipboard actions come from :mod:`gui.clipboard`; these are the
+        extra two that only make sense over the transcript -- copy the whole
+        conversation and clear it -- so a right-click anywhere still offers them
+        without a second menu competing for the event.
+        """
+        return [
+            ("Copy conversation", self._on_copy_conversation),
+            ("Clear transcript", self._clear_transcript),
+        ]
 
     def _copy_text(self, text: str) -> None:
         if not text:
@@ -2545,44 +2533,8 @@ class FaydGUI:
         self.root.clipboard_append(text)
         self.root.update_idletasks()
 
-    def _selected_text(self) -> str:
-        widget = self.root.focus_get()
-        if isinstance(widget, tk.Text):
-            try:
-                if widget.tag_ranges("sel"):
-                    return widget.get("sel.first", "sel.last")
-            except tk.TclError:
-                pass
-        for entry in self._rows:
-            try:
-                if entry.widget.tag_ranges("sel"):
-                    return entry.widget.get("sel.first", "sel.last")
-            except tk.TclError:
-                continue
-        return ""
-
-    def _on_copy(self, _event: tk.Event | None = None) -> str:
-        selection = self._selected_text()
-        if not selection:
-            return ""
-        self._copy_text(selection)
-        return "break"
-
     def _on_copy_conversation(self) -> None:
         self._copy_text("\n\n".join(self._bubble_texts()))
-
-    def _on_select_all(self, _event: tk.Event | None = None) -> str:
-        if self.root.focus_get() is self._entry:
-            return ""
-        for entry in self._rows:
-            entry.widget.tag_add("sel", "1.0", "end-1c")
-        return "break"
-
-    def _on_clear_transcript(self, _event: tk.Event | None = None) -> str:
-        if self.root.focus_get() is self._entry:
-            return ""
-        self._clear_transcript()
-        return "break"
 
     def _clear_transcript(self) -> None:
         for entry in list(self._rows):

@@ -634,9 +634,11 @@ def test_window_bubbles_are_selectable_and_copyable() -> None:
         app._add_bubble("assistant", "porosity is the fraction of pore space")
         root.update()
         bubble = app._bubbles[-1]
-        # The text is selectable, so a copy can pick it up.
+        # The text is selectable, so a real Ctrl+C picks it up.
+        bubble.focus_force()
+        root.update()
         bubble.tag_add("sel", "1.0", "end-1c")
-        app._on_copy()
+        bubble.event_generate("<Control-Key-c>", when="now")
         root.update()
         assert "porosity" in root.clipboard_get()
         # With no selection, Ctrl+C must not clobber the clipboard.
@@ -644,7 +646,7 @@ def test_window_bubbles_are_selectable_and_copyable() -> None:
         root.clipboard_clear()
         root.clipboard_append("keep me")
         root.update()
-        app._on_copy()
+        bubble.event_generate("<Control-Key-c>", when="now")
         root.update()
         assert root.clipboard_get() == "keep me"
         # The context menu can copy the whole conversation, then clear it.
