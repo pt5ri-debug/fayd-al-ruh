@@ -49,6 +49,7 @@ from ml.knowledge_corpus import (
 from ml.llm.__main__ import train_and_save
 from ml.llm.corpus import (
     build_corpus,
+    character_knowledge_sentences,
     character_learning_sentences,
     corpus_sentences,
     corpus_units,
@@ -104,6 +105,8 @@ class TrainingConfig:
     include_runtime: bool = True
     include_sessions: bool = False
     include_characters: bool = True
+    include_character_knowledge: bool = False
+    character_knowledge_chunks: int = 2000
     include_procedural: bool = True
     max_procedural: int | None = None
     measure_perplexity: bool = False
@@ -173,6 +176,7 @@ def corpus_balance(counts: Manifest) -> Manifest:
         + int(counts.get("repository_sentences", 0))
         + int(counts.get("session_sentences", 0))
         + int(counts.get("character_learning_sentences", 0))
+        + int(counts.get("character_knowledge_sentences", 0))
         + int(counts.get("structured_examples", 0))
     )
     bulk = int(counts.get("knowledge_base_sentences", 0))
@@ -197,6 +201,8 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
         include_runtime=config.include_runtime,
         include_sessions=config.include_sessions,
         include_characters=config.include_characters,
+        include_character_knowledge=config.include_character_knowledge,
+        character_knowledge_chunks=config.character_knowledge_chunks,
     )
     sample = knowledge_sample(
         kb_max_chunks=config.kb_max_chunks, include_runtime=config.include_runtime
@@ -209,6 +215,11 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
         "character_learning_sentences": (
             len(character_learning_sentences()) if config.include_characters else 0
         ),
+        "character_knowledge_sentences": (
+            len(character_knowledge_sentences(max_chunks=config.character_knowledge_chunks))
+            if config.include_character_knowledge
+            else 0
+        ),
         "knowledge_base_sentences": len(knowledge_base_sentences(kb_max_chunks=config.kb_max_chunks)),
         "structured_examples": len(structured_examples()),
         "characters": len(text),
@@ -218,6 +229,8 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
         "include_runtime": config.include_runtime,
         "include_sessions": config.include_sessions,
         "include_characters": config.include_characters,
+        "include_character_knowledge": config.include_character_knowledge,
+        "character_knowledge_chunks": config.character_knowledge_chunks,
         "structured_repeats": config.llm_structured_repeats,
         "tokenizer_kind": config.tokenizer_kind,
         "tokenizer_vocab_size": config.tokenizer_vocab_size,
@@ -292,6 +305,8 @@ def describe_checkpoint(
     model: TransformerLM | None = None,
     include_sessions: bool = False,
     include_characters: bool = False,
+    include_character_knowledge: bool = False,
+    character_knowledge_chunks: int = 2000,
 ) -> Manifest:
     """Describe a saved language-model checkpoint for the manifest.
 
@@ -331,7 +346,12 @@ def describe_checkpoint(
         }
     if measure_perplexity and model is not None:
         split = document_split(
-            corpus_units(include_sessions=include_sessions, include_characters=include_characters),
+            corpus_units(
+                include_sessions=include_sessions,
+                include_characters=include_characters,
+                include_character_knowledge=include_character_knowledge,
+                character_knowledge_chunks=character_knowledge_chunks,
+            ),
             val_fraction=0.1,
             test_fraction=0.1,
             seed=seed,
@@ -387,6 +407,8 @@ def train_release(
             "include_runtime": config.include_runtime,
             "include_sessions": config.include_sessions,
             "include_characters": config.include_characters,
+            "include_character_knowledge": config.include_character_knowledge,
+            "character_knowledge_chunks": config.character_knowledge_chunks,
             "include_procedural": config.include_procedural,
             "max_procedural": config.max_procedural,
             "resume": config.resume,
@@ -432,6 +454,8 @@ def train_release(
         include_runtime=config.include_runtime,
         include_sessions=config.include_sessions,
         include_characters=config.include_characters,
+        include_character_knowledge=config.include_character_knowledge,
+        character_knowledge_chunks=config.character_knowledge_chunks,
         preset=config.llm_preset,
         resume=config.resume,
         shard_count=config.shard_count,
@@ -448,6 +472,8 @@ def train_release(
         model=model,
         include_sessions=config.include_sessions,
         include_characters=config.include_characters,
+        include_character_knowledge=config.include_character_knowledge,
+        character_knowledge_chunks=config.character_knowledge_chunks,
         resumed=continued,
     )
     if config.shard_count > 0:
@@ -571,6 +597,21 @@ def main(argv: list[str] | None = None) -> int:
         "--no-llm-characters to exclude it",
     )
     parser.add_argument(
+        "--llm-character-corpus",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="also train the language model on the characters' own knowledge corpora "
+        "(the bulk corpus built under data/characters/<owner>/knowledge_base); off by "
+        "default, and only a character whose Knowledge section switched training on "
+        "(and that is not private) contributes",
+    )
+    parser.add_argument(
+        "--character-corpus-chunks",
+        type=int,
+        default=2000,
+        help="how many chunks of each opted-in character's corpus to train on",
+    )
+    parser.add_argument(
         "--no-procedural",
         action="store_true",
         help="skip the procedural tasks derived from the corpus",
@@ -617,6 +658,8 @@ def main(argv: list[str] | None = None) -> int:
         include_runtime=not args.no_runtime_docs,
         include_sessions=args.llm_sessions,
         include_characters=args.llm_characters,
+        include_character_knowledge=args.llm_character_corpus,
+        character_knowledge_chunks=args.character_corpus_chunks,
         include_procedural=not args.no_procedural,
         measure_perplexity=args.measure_perplexity,
         resume=args.resume,
@@ -643,6 +686,10 @@ def main(argv: list[str] | None = None) -> int:
                 "kb_max_chunks": config.kb_max_chunks,
                 "kb_repeats": config.kb_repeats,
                 "include_runtime": config.include_runtime,
+                "include_sessions": config.include_sessions,
+                "include_characters": config.include_characters,
+                "include_character_knowledge": config.include_character_knowledge,
+                "character_knowledge_chunks": config.character_knowledge_chunks,
                 "include_procedural": config.include_procedural,
                 "max_procedural": config.max_procedural,
                 "resume": config.resume,
@@ -660,6 +707,10 @@ def main(argv: list[str] | None = None) -> int:
                 tokenizer_kind=config.tokenizer_kind,
                 measure_perplexity=args.measure_perplexity,
                 seed=config.seed,
+                include_sessions=config.include_sessions,
+                include_characters=config.include_characters,
+                include_character_knowledge=config.include_character_knowledge,
+                character_knowledge_chunks=config.character_knowledge_chunks,
                 resumed=config.resume,
             ),
             "artifacts": {

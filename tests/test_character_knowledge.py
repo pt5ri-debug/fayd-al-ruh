@@ -9,6 +9,7 @@ directly.
 from __future__ import annotations
 
 import pytest
+from core import character_config as cc
 from core.character_knowledge import (
     KNOWLEDGE_HEADER,
     KNOWLEDGE_LIMIT,
@@ -122,8 +123,11 @@ def test_reference_block_elides_a_long_passage(tmp_path):
     knowledge = CharacterKnowledge("natasha", root=tmp_path, retriever=retriever)
     block = knowledge.reference_block("anything")
     assert "..." in block
-    # The header plus a bounded passage, never the whole 2500-char text.
-    assert len(block) < 1200
+    # The header plus a bounded passage, never the whole 2500-char text. The bound
+    # is the reader's own resolved passage limit, so raising the limit is not a
+    # test failure -- only failing to elide is.
+    assert len(block) < len(KNOWLEDGE_HEADER) + knowledge.passage_chars + 100
+    assert len(block) < len("word " * 500)
 
 
 def test_retrieve_respects_the_limit(tmp_path):
@@ -131,6 +135,91 @@ def test_retrieve_respects_the_limit(tmp_path):
     knowledge = CharacterKnowledge("natasha", root=tmp_path, retriever=_FakeRetriever(passages))
     assert len(knowledge.retrieve("x", limit=2)) == 2
     assert len(knowledge.retrieve("x")) == KNOWLEDGE_LIMIT
+
+
+# ----------------------------------------------------- injection dials
+
+
+def test_the_shipped_limits_are_raised_and_bounded():
+    from core.character_knowledge import (
+        KNOWLEDGE_MAX_CHARS,
+        KNOWLEDGE_PASSAGE_CHARS,
+        LIMIT_RANGE,
+        MAX_CHARS_RANGE,
+        PASSAGE_CHARS_RANGE,
+    )
+
+    # The task asked for more knowledge in the prompt, so the shipped defaults are
+    # above the old 4 passages / 4000 chars, and still inside their bounds.
+    assert KNOWLEDGE_LIMIT >= 6
+    assert KNOWLEDGE_MAX_CHARS >= 8000
+    assert LIMIT_RANGE[0] <= KNOWLEDGE_LIMIT <= LIMIT_RANGE[1]
+    assert MAX_CHARS_RANGE[0] <= KNOWLEDGE_MAX_CHARS <= MAX_CHARS_RANGE[1]
+    assert PASSAGE_CHARS_RANGE[0] <= KNOWLEDGE_PASSAGE_CHARS <= PASSAGE_CHARS_RANGE[1]
+
+
+def test_resolve_limits_prefers_the_explicit_argument(tmp_path):
+    from core.character_knowledge import resolve_knowledge_limits
+
+    assert resolve_knowledge_limits(limit=9, max_chars=1234, passage_chars=321) == (9, 1234, 321)
+
+
+def test_resolve_limits_reads_the_env_then_the_default(monkeypatch):
+    from core.character_knowledge import (
+        ENV_KNOWLEDGE_LIMIT,
+        ENV_KNOWLEDGE_MAX_CHARS,
+        ENV_KNOWLEDGE_PASSAGE_CHARS,
+        KNOWLEDGE_LIMIT,
+        resolve_knowledge_limits,
+    )
+
+    monkeypatch.setenv(ENV_KNOWLEDGE_LIMIT, "12")
+    monkeypatch.setenv(ENV_KNOWLEDGE_MAX_CHARS, "20000")
+    monkeypatch.setenv(ENV_KNOWLEDGE_PASSAGE_CHARS, "500")
+    limit, max_chars, passage = resolve_knowledge_limits()
+    assert (limit, max_chars, passage) == (12, 20000, 500)
+    # A bad value is ignored rather than breaking retrieval.
+    monkeypatch.setenv(ENV_KNOWLEDGE_LIMIT, "not-a-number")
+    assert resolve_knowledge_limits()[0] == KNOWLEDGE_LIMIT
+
+
+def test_resolve_limits_clamps_an_out_of_range_value():
+    from core.character_knowledge import LIMIT_RANGE, MAX_CHARS_RANGE, resolve_knowledge_limits
+
+    limit, max_chars, _passage = resolve_knowledge_limits(limit=10_000, max_chars=1)
+    assert limit == LIMIT_RANGE[1]
+    assert max_chars == MAX_CHARS_RANGE[0]
+
+
+def test_a_reader_honours_its_own_limits(tmp_path):
+    """A CharacterKnowledge built with limits uses them, not the module defaults."""
+    passages = [_Passage(str(i), f"T{i}", "text") for i in range(10)]
+    knowledge = CharacterKnowledge(
+        "natasha", root=tmp_path, retriever=_FakeRetriever(passages), limit=3
+    )
+    assert len(knowledge.retrieve("x")) == 3
+    assert len(knowledge.retrieve("x", limit=7)) == 7
+
+
+def test_the_block_respects_the_configured_max_chars(tmp_path):
+    retriever = _FakeRetriever([_Passage("1", "A", "x" * 5000)])
+    knowledge = CharacterKnowledge(
+        "natasha", root=tmp_path, retriever=retriever, max_chars=2000, passage_chars=2000
+    )
+    block = knowledge.reference_block("anything")
+    assert block
+    assert len(block) <= 2000
+
+
+def test_the_block_elides_at_the_configured_passage_size(tmp_path):
+    retriever = _FakeRetriever([_Passage("1", "A", "word " * 2000)])
+    knowledge = CharacterKnowledge(
+        "natasha", root=tmp_path, retriever=retriever, max_chars=8000, passage_chars=300
+    )
+    block = knowledge.reference_block("anything")
+    assert "..." in block
+    # The single passage is cut at ~300 chars, not carried whole.
+    assert len(block) < len(KNOWLEDGE_HEADER) + 400
 
 
 def test_available_is_true_with_an_injected_retriever(tmp_path):
@@ -261,6 +350,51 @@ def test_mouth_refreshes_knowledge_for_each_question(tmp_path):
     mouth._refresh_knowledge("second question")
     assert "Agape" in assistant.engine.system_prompt
     assert "Eros" not in assistant.engine.system_prompt
+
+
+def test_mouth_builds_its_reader_from_the_characters_knowledge_section(tmp_path, monkeypatch):
+    """The reader's limits come from the character's own configuration."""
+    from ai.characters import CharacterMouth
+    from core import character_registry as registry_mod
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path / "data"))
+    registry = registry_mod.CharacterRegistry()
+    config = registry.load("natasha")
+    config = registry.save(cc.replace_knowledge(config, limit=11, max_chars=9000, passage_chars=700))
+    assistant = _FakeAssistant()
+    mouth = CharacterMouth("natasha", assistant, root=tmp_path, registry=registry)
+    assert mouth.knowledge is not None
+    assert mouth.knowledge.limit == 11
+    assert mouth.knowledge.max_chars == 9000
+    assert mouth.knowledge.passage_chars == 700
+
+
+def test_reload_config_rebuilds_the_reader_with_the_new_limits(tmp_path, monkeypatch):
+    """An APPLY (a saved Knowledge section) reaches the next answer."""
+    from ai.characters import CharacterMouth
+    from core import character_registry as registry_mod
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path / "data"))
+    registry = registry_mod.CharacterRegistry()
+    assistant = _FakeAssistant()
+    mouth = CharacterMouth("natasha", assistant, root=tmp_path, registry=registry)
+    assert mouth.knowledge.limit == cc.default_config_for("natasha").knowledge.limit
+    registry.save(
+        cc.replace_knowledge(registry.load("natasha"), limit=9, max_chars=7000, passage_chars=600)
+    )
+    mouth.reload_config()
+    assert mouth.knowledge.limit == 9
+    assert mouth.knowledge.max_chars == 7000
+    assert mouth.knowledge.passage_chars == 600
+
+
+def test_a_private_characters_config_cannot_enable_corpus_training():
+    from core.character_config import default_config_for, replace_knowledge
+
+    natasha = replace_knowledge(default_config_for("natasha"), train_on_corpus=True)
+    assert natasha.effective_training is False
+    jarvis = replace_knowledge(default_config_for("jarvis"), train_on_corpus=True)
+    assert jarvis.effective_training is True
 
 
 # ------------------------------------------------------------------------ CLI

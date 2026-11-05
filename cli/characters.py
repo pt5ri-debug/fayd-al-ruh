@@ -38,6 +38,7 @@ from core.character_config import (
     CharacterConfig,
     ConfigError,
     GeneralConfig,
+    KnowledgeConfig,
     LearningSettings,
     ModelConfig,
     PersonalityConfig,
@@ -131,7 +132,13 @@ def _cmd_knowledge(args: argparse.Namespace) -> int:
 
     try:
         owner = owner_for(args.character)
-        knowledge = CharacterKnowledge(owner)
+        config = _service().config(args.character)
+        knowledge = CharacterKnowledge(
+            owner,
+            limit=config.knowledge.limit,
+            max_chars=config.knowledge.max_chars,
+            passage_chars=config.knowledge.passage_chars,
+        )
     except LearningAccessError as error:
         return _fail(str(error), 3)
     if args.query is None:
@@ -144,6 +151,11 @@ def _cmd_knowledge(args: argparse.Namespace) -> int:
             print(f"  dir      : {stats['dir']}")
             print(f"  source   : {stats.get('source') or '(mixed)'}   lang: {stats.get('lang') or '(mixed)'}")
             print(f"  articles : {stats.get('articles')}   indexed: {stats.get('indexed')}")
+        print(
+            f"  injection: up to {config.knowledge.limit} passages, "
+            f"{config.knowledge.max_chars} chars, {config.knowledge.passage_chars}/passage"
+        )
+        print(f"  training : {'on' if config.effective_training else 'off'}")
         return 0
     hits = knowledge.retrieve(args.query, limit=args.limit)
     if args.json:
@@ -738,6 +750,23 @@ def _edit_section(config: CharacterConfig, args: argparse.Namespace) -> Characte
         learning = replace(learning, share_with_main_model=args.share)
         changed = True
 
+    knowledge: KnowledgeConfig = config.knowledge
+    if args.knowledge_limit is not None:
+        knowledge = replace(knowledge, limit=args.knowledge_limit)
+        changed = True
+    if args.knowledge_max_chars is not None:
+        knowledge = replace(knowledge, max_chars=args.knowledge_max_chars)
+        changed = True
+    if args.knowledge_passage_chars is not None:
+        knowledge = replace(knowledge, passage_chars=args.knowledge_passage_chars)
+        changed = True
+    if args.train_on_corpus is not None:
+        knowledge = replace(knowledge, train_on_corpus=args.train_on_corpus)
+        changed = True
+    if args.train_chunks is not None:
+        knowledge = replace(knowledge, train_max_chunks=args.train_chunks)
+        changed = True
+
     if not changed:
         raise ConfigError("general", "", "nothing was given to change.")
     return replace(
@@ -747,6 +776,7 @@ def _edit_section(config: CharacterConfig, args: argparse.Namespace) -> Characte
         model=model,
         voice=voice,
         learning=learning,
+        knowledge=knowledge,
     )
 
 
@@ -799,6 +829,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_set.add_argument("--confidence-threshold", type=float, dest="confidence_threshold")
     p_set.add_argument("--share", type=_boolean, default=None)
+    p_set.add_argument(
+        "--knowledge-limit",
+        type=int,
+        default=None,
+        dest="knowledge_limit",
+        help="how many passages of the character's own corpus to inject per answer",
+    )
+    p_set.add_argument(
+        "--knowledge-max-chars",
+        type=int,
+        default=None,
+        dest="knowledge_max_chars",
+        help="the most characters the injected knowledge block may carry",
+    )
+    p_set.add_argument(
+        "--knowledge-passage-chars",
+        type=int,
+        default=None,
+        dest="knowledge_passage_chars",
+        help="the most characters one injected passage contributes",
+    )
+    p_set.add_argument(
+        "--train-on-corpus",
+        type=_boolean,
+        default=None,
+        dest="train_on_corpus",
+        help="whether the character's own corpus may enter the training text "
+        "(refused for a private character)",
+    )
+    p_set.add_argument(
+        "--train-chunks",
+        type=int,
+        default=None,
+        dest="train_chunks",
+        help="how many chunks of the character's corpus to train on when enabled",
+    )
     p_set.set_defaults(func=_cmd_set)
 
     p_reset = sub.add_parser("reset", help="back to the shipped default")

@@ -6,6 +6,13 @@
     "role": "the remote model reached over the network"
   },
   "key": "cloud",
+  "knowledge": {
+    "limit": 6,
+    "max_chars": 8000,
+    "passage_chars": 1200,
+    "train_max_chunks": 2000,
+    "train_on_corpus": false
+  },
   "learning": {
     "confidence_threshold": 0.4,
     "enabled": true,

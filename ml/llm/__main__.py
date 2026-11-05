@@ -97,6 +97,8 @@ def train_and_save(
     include_runtime: bool = True,
     include_sessions: bool = False,
     include_characters: bool = False,
+    include_character_knowledge: bool = False,
+    character_knowledge_chunks: int = 2000,
     learning_rate: float = 3e-3,
     warmup: int | None = None,
     max_grad_norm: float = 1.0,
@@ -108,7 +110,12 @@ def train_and_save(
     shard_count: int = 0,
     schedule_path_arg: Path | None = None,
 ) -> TransformerLM:
-    units = corpus_units(include_sessions=include_sessions, include_characters=include_characters)
+    units = corpus_units(
+        include_sessions=include_sessions,
+        include_characters=include_characters,
+        include_character_knowledge=include_character_knowledge,
+        character_knowledge_chunks=character_knowledge_chunks,
+    )
     split = document_split(units, val_fraction=0.1, test_fraction=0.1, seed=seed)
     held_out = set(split.validation) | set(split.test)
     plan = ShardPlan(shard_count) if shard_count > 0 else None
@@ -150,6 +157,8 @@ def train_and_save(
         include_runtime=include_runtime,
         include_sessions=include_sessions,
         include_characters=include_characters,
+        include_character_knowledge=include_character_knowledge,
+        character_knowledge_chunks=character_knowledge_chunks,
         exclude=held_out,
         include=set(shard) if shard is not None else None,
     )
@@ -279,6 +288,23 @@ def main(argv: list[str] | None = None) -> int:
         "character's learning is personal.",
     )
     parser.add_argument(
+        "--llm-character-corpus",
+        action="store_true",
+        dest="llm_character_corpus",
+        help="Also train on the characters' own knowledge corpora (the bulk corpus "
+        "built under data/characters/<owner>/knowledge_base). Only a character whose "
+        "Knowledge section switched training on, and that is not private, "
+        "contributes. Off by default.",
+    )
+    parser.add_argument(
+        "--character-corpus-chunks",
+        type=int,
+        default=2000,
+        dest="character_corpus_chunks",
+        help="How many chunks of each opted-in character's corpus to train on "
+        "(bounded, so a large corpus cannot swamp the corpus).",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Continue training from the checkpoint at --checkpoint (and its "
@@ -327,6 +353,8 @@ def main(argv: list[str] | None = None) -> int:
         include_runtime=not args.no_runtime_docs,
         include_sessions=args.llm_sessions,
         include_characters=args.llm_characters,
+        include_character_knowledge=args.llm_character_corpus,
+        character_knowledge_chunks=args.character_corpus_chunks,
         resume=args.resume,
         shard_count=args.llm_shards,
         progress_every=args.progress_every,

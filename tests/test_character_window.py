@@ -60,7 +60,7 @@ def test_window_lists_every_character_and_opens_a_settings_page(data_root) -> No
         # Every section is present on the page.
         assert set(dialog._vars)  # the editor built real variables
         for key in ("general.name", "personality.traits", "model.key", "voice.voice",
-                    "learning.enabled"):
+                    "learning.enabled", "knowledge.limit", "knowledge.train_on_corpus"):
             assert key in dialog._vars
     finally:
         dialog._close()

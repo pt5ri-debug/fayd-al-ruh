@@ -319,6 +319,7 @@ class CharacterManagerDialog(ThemedDialog):
         self._build_model(config)
         self._build_voice(config)
         self._build_learning(config)
+        self._build_knowledge(config)
         self._build_management()
 
     def _section(self, title: str) -> tk.Frame:
@@ -525,8 +526,58 @@ class CharacterManagerDialog(ThemedDialog):
                 learning.share_with_main_model,
             )
 
+    def _build_knowledge(self, config: CharacterConfig) -> None:
+        body = self._section("F. Knowledge corpus")
+        knowledge = config.knowledge
+        self._entry(
+            body, "Passages per answer", "knowledge.limit", str(knowledge.limit)
+        )
+        self._entry(
+            body, "Max block characters", "knowledge.max_chars", str(knowledge.max_chars)
+        )
+        self._entry(
+            body, "Max characters per passage", "knowledge.passage_chars",
+            str(knowledge.passage_chars),
+        )
+        self._check(
+            body, "Train the project model on this corpus", "knowledge.train_on_corpus",
+            knowledge.train_on_corpus,
+        )
+        self._entry(
+            body, "Training chunks", "knowledge.train_max_chunks",
+            str(knowledge.train_max_chunks),
+        )
+        # Say honestly what the switch really does here, so a saved-but-ineffective
+        # setting is never mistaken for one in force.
+        if is_private(self._current):
+            note = (
+                f"    {self._current} is private: the corpus is never trained on, "
+                "whatever the switch says."
+            )
+        else:
+            state = "on" if config.effective_training else "off"
+            note = (
+                f"    Training is {state}. Build the corpus in the Knowledge Base "
+                "Manager, then run the release with --llm-character-corpus."
+            )
+        tk.Label(
+            body, text=note, bg=self.theme.surface, fg=self.theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=680,
+        ).pack(anchor="w", pady=(2, 0))
+        stats = self.service.knowledge_stats(self._current)
+        tk.Label(
+            body,
+            text=(
+                f"    corpus: {stats.get('chunks', 0)} chunk(s), "
+                f"{stats.get('articles', 0)} article(s), "
+                f"{'indexed' if stats.get('indexed') else 'not indexed'}"
+            ),
+            bg=self.theme.surface, fg=self.theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w",
+        ).pack(anchor="w")
+
     def _build_management(self) -> None:
-        body = self._section("F. Memory and learning management")
+        body = self._section("G. Memory and learning management")
         stats = self.service.stats(self._current)
         tk.Label(
             body, text=stats.summary(), bg=self.theme.surface, fg=self.theme.foreground,
@@ -736,6 +787,16 @@ class CharacterManagerDialog(ThemedDialog):
                 else config.learning.share_with_main_model
             ),
         )
+        knowledge = replace(
+            config.knowledge,
+            limit=int(_number(text("knowledge.limit"), "passages per answer")),
+            max_chars=int(_number(text("knowledge.max_chars"), "max block characters")),
+            passage_chars=int(
+                _number(text("knowledge.passage_chars"), "max characters per passage")
+            ),
+            train_on_corpus=bool(v["knowledge.train_on_corpus"].get()),
+            train_max_chunks=int(_number(text("knowledge.train_max_chunks"), "training chunks")),
+        )
         return replace(
             config,
             general=general,
@@ -743,6 +804,7 @@ class CharacterManagerDialog(ThemedDialog):
             model=model,
             voice=voice,
             learning=learning,
+            knowledge=knowledge,
         )
 
     # -- actions ----------------------------------------------------------
