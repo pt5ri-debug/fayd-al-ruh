@@ -255,7 +255,21 @@ _VOCALIZED: tuple[str, ...] = (
 )
 
 #: The lexicon, keyed by the bare skeleton of each vocalized word.
-LEXICON: dict[str, str] = {strip_diacritics(word): word for word in _VOCALIZED}
+#:
+#: **First entry wins.** A handful of words share a skeleton but carry a different
+#: vocalization (``مِنْ`` the preposition vs ``مَنْ`` the interrogative, ``كُلّ`` vs
+#: ``كُلِّ``, ``سِجِلّ`` vs ``سَجْل``). A plain dict comprehension would let the last
+#: one silently overwrite the earlier, so the order of :data:`_VOCALIZED` is the
+#: decision: the form listed first is the default. This keeps the pass deterministic
+#: and stops a later addition from quietly changing an earlier word's vowels.
+def _build_lexicon(words: tuple[str, ...]) -> dict[str, str]:
+    table: dict[str, str] = {}
+    for word in words:
+        table.setdefault(strip_diacritics(word), word)
+    return table
+
+
+LEXICON: dict[str, str] = _build_lexicon(_VOCALIZED)
 
 
 # --------------------------------------------------------------------------- #

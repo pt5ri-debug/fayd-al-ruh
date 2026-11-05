@@ -507,3 +507,14 @@ def test_a_typo_in_the_environment_is_ignored(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FAYD_TASHKEEL", "maybe")
     monkeypatch.setenv("FAYD_TASHKEEL_MODE", "loud")
     assert resolve_tashkeel() == (False, TASHKEEL_FORMAL)
+
+
+def test_a_homograph_keeps_its_first_curated_form() -> None:
+    """``مِنْ`` (the preposition) must not be clobbered by ``مَنْ`` (the interrogative).
+
+    The two share a skeleton; a plain dict comprehension over the lexicon let the
+    later entry silently win, so the preposition came out as ``مَنْ``. The lexicon
+    is now first-wins, and this pins the fix.
+    """
+    assert diacritize("من") == "مِنْ"
+    assert diacritize("من فضلك").startswith("مِنْ")
