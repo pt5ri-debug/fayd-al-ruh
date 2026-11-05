@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from ingest.errors import ConnectorError
@@ -91,7 +91,7 @@ def _suffix(uri: str) -> str:
 
 
 def build_default_registry(
-    *, allow_web: bool = False, ocr_engine: PageOcrEngine | None = None
+    *, allow_web: bool = False, ocr_engine: PageOcrEngine | None = None, web_opener: Any = None
 ) -> ConnectorRegistry:
     """The registry the CLI and pipeline use by default.
 
@@ -100,14 +100,20 @@ def build_default_registry(
     resolve a URL -- the deny-by-default posture the project uses elsewhere.
     ``ocr_engine``, when given, is the per-page engine the file connector uses for
     scanned PDFs (a test double, or a caller-supplied engine); the default engine
-    is built lazily only when OCR is actually enabled.
+    is built lazily only when OCR is actually enabled. ``web_opener``, when given,
+    is the fetch the web connector uses (a test double, or a caller-supplied
+    opener), so a governed fetch can be exercised without real network access.
     """
     from ingest.connectors.files import FileConnector
     from ingest.connectors.sql import SqlConnector
     from ingest.connectors.sqlite import SqliteConnector
+    from ingest.connectors.text import TextConnector
 
     registry = ConnectorRegistry()
     registry.register(FileConnector(ocr_engine=ocr_engine))
+    # Direct text (a paste, an editor) is local and needs no network, so it is
+    # always available; it resolves only by its own ``text:`` scheme.
+    registry.register(TextConnector())
     # SQLite has its own standard-library connector; it is registered before the
     # DB-API one so ``sqlite://`` resolves to it, while ``sql`` keeps the
     # optional driver schemes (PostgreSQL/MySQL).
@@ -116,7 +122,7 @@ def build_default_registry(
     if allow_web:
         from ingest.connectors.web import WebConnector
 
-        registry.register(WebConnector())
+        registry.register(WebConnector(opener=web_opener))
     return registry
 
 
