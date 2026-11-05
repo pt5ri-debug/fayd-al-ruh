@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from core.coder_model import CoderMessage, CoderUnavailable
+from core.text_polish import polish_answer
 
 from companion.config import CompanionConfig
 from companion.conversation_manager import ConversationManager, SessionInfo
@@ -55,7 +56,6 @@ from companion.model import (
 )
 from companion.moods import EmotionalStateEngine, MoodState
 from companion.personality import NAME, NatashaPersonality, PersonalitySettings, PersonalityStore
-from companion.polish import polish_report
 from companion.prompt_builder import PromptBuilder
 from companion.relationship_manager import EventCandidate, RelationshipEvent, RelationshipManager
 from companion.relationship_memory import (
@@ -443,7 +443,10 @@ class CompanionAgent:
         # The linguistic polisher repairs the model's typography (spacing,
         # punctuation, sentence case) in the language of the reply. It never adds,
         # removes, or reorders a word, so what is stored is still the model's own.
-        polish_result = polish_report(reply_text, language=reply_language)
+        # It runs through the *universal* entry point, so an Arabic reply is fully
+        # vocalized exactly when the user turned tashkeel on -- the same setting
+        # every other character honours.
+        polish_result = polish_answer(reply_text, language=reply_language)
         reply_text = polish_result.text
 
         # Measure her own reply against what she had already said (an honest

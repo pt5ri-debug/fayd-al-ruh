@@ -46,6 +46,7 @@ from core.memory_gate import memory_architecture_accuracy
 from core.observation import Observation
 from core.perception_gate import perception_bridge_accuracy
 from core.planning_gate import task_execution_accuracy
+from core.polish_gate import polish_accuracy
 from core.problem_decomposition import decomposition_accuracy
 from core.reasoning_api import facade_accuracy
 from core.reasoning_report import reasoning_trace_accuracy
@@ -159,6 +160,14 @@ class EvaluationMetrics:
     backend satisfies: a cross-character read refused, the main model kept out of
     Natasha's store, provenance carried onto its own copy, no duplicate on a
     second share (Phase: independent characters)."""
+
+    polish_accuracy: float
+    """The share of held-out linguistic-polish judgements satisfied: an Arabic
+    reply is vocalized only when asked (and English never is), a Latin identifier,
+    a decimal, and a range survive untouched, the typography is repaired in both
+    languages, a second pass changes nothing, no word is added or removed, the
+    colloquial mode drops the case endings, and every answer is polished on the
+    real Jarvis path (Phase: the universal linguistic polish)."""
 
     character_identity_accuracy: float
     character_knowledge_accuracy: float
@@ -1166,6 +1175,14 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # mouth is left unwrapped), so a regression in the identity wiring fails here.
     character_identity_value = character_identity_accuracy()
 
+    # The universal linguistic polish: every character's answer passes through one
+    # shared polisher that can fully vocalize an Arabic reply (tashkeel). Held-out
+    # judgements with negative controls (English is never vocalized, an
+    # already-vocalized reply is not double-marked, a Latin identifier/decimal/range
+    # survives untouched, no word is added or removed), and a wiring judgement that
+    # runs a *real* JarvisMode so a regression that dropped the call fails here.
+    polish_value = polish_accuracy()
+
     # The per-character knowledge corpus: a character reads only its own built
     # corpus, the retrieved block is labelled and bounded, an absent corpus is
     # honest and changes nothing, the mouth injects what it retrieved, and reading
@@ -1346,6 +1363,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         arabic_readable_value,
         character_isolation_value,
         character_identity_value,
+        polish_value,
         character_knowledge_value,
         memory_seeding_value,
         development_value,
@@ -1416,6 +1434,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         arabic_readable_body_accuracy=round(arabic_readable_value, 6),
         character_isolation_accuracy=round(character_isolation_value, 6),
         character_identity_accuracy=round(character_identity_value, 6),
+        polish_accuracy=round(polish_value, 6),
         character_knowledge_accuracy=round(character_knowledge_value, 6),
         memory_seeding_accuracy=round(memory_seeding_value, 6),
         development_accuracy=round(development_value, 6),

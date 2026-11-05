@@ -37,7 +37,9 @@ HELP_TEXT = (
     "on, 'repeat' to hear the last answer again, 'why' to hear how I reached it, "
     "'new conversation' to start over, "
     "'save' to persist this session, 'sessions' to list saved ones, 'web on' or "
-    "'web off' to toggle internet lookups, 'that's right' to confirm my last "
+    "'web off' to toggle internet lookups, 'tashkeel on'/'tashkeel off' to fully "
+    "vocalize Arabic answers (or 'tashkeel colloquial' for the spoken form), "
+    "'that's right' to confirm my last "
     "answer, 'that's wrong, it's ...' to correct it, 'remember that ...' to teach "
     "me a lasting fact, or 'help' for this list. "
     "Anything else, ask me a question or give me a command."
@@ -49,7 +51,8 @@ TEXT_HELP_TEXT = (
     "Conversation controls: type 'new conversation' to start over, 'save' to "
     "persist this session, 'sessions' to list saved ones, 'repeat' to show the "
     "last answer again, 'why' to show how I reached it, 'web on' or 'web off' to "
-    "toggle internet lookups, "
+    "toggle internet lookups, 'tashkeel on'/'tashkeel off' to fully vocalize "
+    "Arabic answers (or 'tashkeel colloquial' for the spoken form), "
     "'that's right' to confirm my last answer, 'that's wrong, it's ...' to correct "
     "it, 'remember that ...' to teach me a lasting fact, or 'quit' to leave. "
     "Anything else, ask me a question or give me a command."
@@ -261,6 +264,7 @@ class JarvisMode:
         help_text: str = HELP_TEXT,
         on_preference=None,
         web_verifier_factory=None,
+        polish: bool = True,
     ) -> None:
         self.assistant = assistant
         self.router = router
@@ -277,6 +281,10 @@ class JarvisMode:
         #: Called with ``(name, value)`` when a conversation control changes a
         #: preference, so ``web on`` is remembered across sessions.
         self._on_preference = on_preference
+        #: Whether every answer is run through the shared linguistic polisher
+        #: (:mod:`core.text_polish`), so a reply from *any* character reads cleanly.
+        #: On by default; a caller that wants the raw mouth output can turn it off.
+        self.polish = polish
         #: The :class:`~ai.chat.ModelSwitcher` driving this session, when one is
         #: attached (the GUI and CLI attach theirs). It is how the answer's
         #: provenance names the *selected* mouth's model rather than only whatever
@@ -380,6 +388,18 @@ class JarvisMode:
         response = answer.text
         used_web = bool(getattr(answer, "used_web", False))
         learned = bool(getattr(answer, "learned", False))
+        # The answer passes through the shared linguistic polisher, so a reply from
+        # *any* character -- not only the companion -- reads cleanly, and an Arabic
+        # reply is fully vocalized when the user asked for it. The reasoning
+        # *layers* (facts, plan, verdict, ...) are rendered below from the answer
+        # object and are left alone: they are data, and their exact form is pinned
+        # by tests, so polishing is applied to the answer body and the lead only.
+        lead = getattr(getattr(answer, "lead", None), "describe", lambda: "")()
+        if self.polish:
+            polished = self._polish(answer.text, text)
+            response = polished
+            if lead:
+                lead = self._polish(lead, text)
         if used_web or learned:
             response = f"{response}\n\n{_web_note(used_web, learned)}"
         facts = tuple(
@@ -412,7 +432,6 @@ class JarvisMode:
         belief = _belief_lines(getattr(answer, "belief", None))
         temporal = _temporal_lines(getattr(answer, "temporal", None))
         analogy = _analogy_lines(getattr(answer, "analogy", None))
-        lead = getattr(getattr(answer, "lead", None), "describe", lambda: "")()
         report = getattr(answer, "confidence_report", None)
         confidence_note = report.describe() if report is not None else ""
         trace = getattr(answer, "reasoning", None)
@@ -451,6 +470,60 @@ class JarvisMode:
             used_web=used_web,
             learned=learned,
         )
+
+    def _polish(self, text: str, question: str) -> str:
+        """Run one answer body through the shared linguistic polisher.
+
+        The language is the *question's* own language (the answer is expected to
+        match it), and the tashkeel setting is the saved preference. The polish is
+        presentation-only and idempotent; a failure here is best-effort, so a
+        problem in the polisher can never break an answer -- the raw text is kept.
+        """
+        if not text.strip():
+            return text
+        with best_effort("polish the answer"):
+            from companion.language import detect_language_of
+
+            from core.text_polish import polish_answer
+
+            language = detect_language_of(question, default="ar")
+            return polish_answer(text, language=language).text
+        return text
+
+    def _handle_tashkeel_control(self, control: JarvisControl) -> str:
+        """Turn full Arabic vocalization on or off, and choose its form.
+
+        The choice is persisted when a preference hook is wired, so ``tashkeel on``
+        survives a restart. ``tashkeel colloquial`` switches to the spoken form
+        (lexical vowels only); ``tashkeel formal`` back to the classical one.
+        """
+        tokens = control.phrase.split()
+        if "colloquial" in tokens or control.phrase in {"تشكيل عامي"}:
+            self._set_tashkeel(True, "colloquial")
+            return "Tashkeel on (colloquial): Arabic answers will carry the spoken vowels, no case endings."
+        if "formal" in tokens or control.phrase in {"تشكيل فصيح"}:
+            self._set_tashkeel(True, "formal")
+            return "Tashkeel on (formal): Arabic answers will be fully vocalized, with case endings."
+        if "off" in tokens or control.phrase in {"بدون تشكيل", "أزل التشكيل"}:
+            self._set_tashkeel(False, None)
+            return "Tashkeel off: Arabic answers will be written without vowel marks."
+        # A bare ``tashkeel``/``vocalize`` toggles the current setting.
+        from core.text_polish import resolve_tashkeel
+
+        enabled, mode = resolve_tashkeel()
+        self._set_tashkeel(not enabled, mode)
+        if enabled:
+            return "Tashkeel off: Arabic answers will be written without vowel marks."
+        return f"Tashkeel on ({mode}): Arabic answers will be fully vocalized."
+
+    def _set_tashkeel(self, enabled: bool, mode: str | None) -> None:
+        """Persist a tashkeel choice through the preference hook, best-effort."""
+        if self._on_preference is None:
+            return
+        with best_effort("persist the tashkeel preference"):
+            self._on_preference("tashkeel", enabled)
+            if mode is not None:
+                self._on_preference("tashkeel_mode", mode)
 
     def _provenance(
         self,
@@ -528,6 +601,9 @@ class JarvisMode:
             return self._control_turn(utterance, intent, response, self._speak(response, speak))
         if intent is ControlIntent.WEB:
             response = self._handle_web_control(control)
+            return self._control_turn(utterance, intent, response, self._speak(response, speak))
+        if intent is ControlIntent.TASHKEEL:
+            response = self._handle_tashkeel_control(control)
             return self._control_turn(utterance, intent, response, self._speak(response, speak))
         if intent is ControlIntent.CONFIRM:
             response = self._handle_feedback(control.utterance, confirmed=True)

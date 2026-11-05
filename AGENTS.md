@@ -6600,3 +6600,64 @@ regression monitor each can refuse a change.
   test_character_knowledge.py` pins the dials, the resolution order, the clamping,
   and the per-reader limits; `tests/test_character_system.py` pins the CLI. Gates:
   ruff clean, mypy 1027 files OK, evaluation PASS, pytest green.
+
+- Phase (E) — **a universal linguistic polish, and full Arabic vocalization, for
+  every character**. The project answers through seven characters (Jarvis, Ultron,
+  Vision, Banner, Natasha, Hakeem, Cloud) and its own trained model, and each reply
+  went straight to the reader -- so the same small-model scars (a space before a
+  full stop, a missing space after a comma, a lowercase sentence opening, doubled
+  punctuation, an Arabic sentence punctuated with ASCII `?`) appeared in every mouth
+  but the companion's: only Natasha (and, later, Hakeem) ran the companion's
+  polisher. `core/text_polish.py` (new) is now the **one** entry point every answer
+  shares. `polish_answer(text, *, language=, tashkeel=, tashkeel_mode=)` returns a
+  `PolishReport` (the text, the language, the changes, and the vocalization mode)
+  and reuses `companion.polish`'s rules, so the typography lives in one auditable
+  place; `polish_text` is the text alone and `tashkeel_text` the direct doorway to
+  the vocalizer. The wiring is `core.jarvis.JarvisMode.handle`, the one choke point
+  the GUI, the CLI, and every mouth pass through: the answer **body** and the
+  **lead** are polished (the reasoning layers are data and are left alone), the
+  language is the *question's* own, and the polish is `best_effort` -- a problem in
+  it can never break an answer. `JarvisMode(polish=True)` is the default, so the
+  polish is on for every session, and a caller that wants the raw mouth output can
+  turn it off. The companion and the scholar now call the *same* entry point
+  (`companion/companion_agent.py`, `hakeem/hakeem_agent.py`), so an Arabic reply is
+  fully vocalized exactly when the user turned tashkeel on, whichever character
+  answered. **Full Arabic vocalization** is `core/arabic_tashkeel.py` (new): a
+  deterministic, dependency-free diacritizer with three honest layers -- a curated
+  **lexicon** of the words the project itself writes (its function words, its
+  petroleum vocabulary, and its glossary terms) with their correct vocalization; a
+  set of **certain pattern rules** for a word the lexicon does not hold (the
+  definite article's moon/sun letter, a long vowel after its short vowel, the tāʾ
+  marbūṭa and the alif maqṣūra); and a bounded **case-ending pass** (a real, if
+  simplified, grammar: nominative by default, genitive after a preposition,
+  accusative after `إنّ` and its sisters, jussive after `لم`). Two modes: `formal`
+  (فصحى, case endings included) and `colloquial` (عامية, the lexical and pattern
+  vowels only). It is honest by construction: nothing is invented for a word the
+  project did not write (the word keeps whatever marks *are* certain and the report
+  **counts** it, so coverage is measured rather than trusted), a wrong vowel mark is
+  worse than none (a rule is never a guess), English and every non-Arabic token are
+  returned byte-identical, and it is idempotent (the existing marks are stripped and
+  re-derived, so a second pass is a no-op). **The choice is a saved preference**:
+  `PreferenceRecord.tashkeel`/`tashkeel_mode` (off by default, so a bare answer
+  stays the project's output), flipped by the new `tashkeel on`/`tashkeel off`/
+  `tashkeel colloquial` conversation control (`core/jarvis_controls.ControlIntent.
+  TASHKEEL`, matched exactly, with Arabic cues, so a real question is never
+  hijacked) and persisted through the same `on_preference` hook the `web` control
+  uses; a headless run can override it for one process with `FAYD_TASHKEEL`/
+  `FAYD_TASHKEEL_MODE` (the precedence is argument → environment → saved →
+  default). The CLI is `python -m cli polish ["text"] [--tashkeel] [--tashkeel-mode
+  formal|colloquial] [--quiet]` and `python -m cli tashkeel ["text"] [--mode] 
+  [--status]` (`cli/text_polish.py`, the headless twin), mirrored as the menu entry
+  *Polish a reply and fully vocalize Arabic*. The held-out gate is
+  `core/polish_gate.py`'s `polish_accuracy`: a catalogue of hand-written judgements
+  run against the **real** entry points with **negative controls** (Arabic is
+  vocalized only when asked and English never, an already-vocalized reply is not
+  double-marked, a Latin identifier/decimal/range survives untouched, a clean
+  sentence is left as it is, no word is added or removed, the colloquial mode drops
+  the case endings), plus a **wiring** judgement that runs a real `JarvisMode` so a
+  regression that dropped the call fails here -- it enters `evaluation`'s `overall`
+  (1.0000; overall 0.9903 → 0.9906). `tests/test_text_polish.py` (39 tests),
+  `tests/test_text_polish_cli.py` (9 tests), and `tests/test_polish_gate.py` (10
+  tests) pin the vocalizer, the polisher, the preference, the conversation control,
+  the companion/scholar wiring, the environment overrides, the CLI, and the gate.
+  Gates: ruff clean, mypy 1036 files OK, evaluation PASS, pytest 6614 passed.

@@ -36,8 +36,8 @@ from companion.database import CompanionDatabase
 from companion.emotion_state import DialogueEmotion, DialogueEmotionTracker
 from companion.language import last_user_text, resolve_reply_language
 from companion.memory_manager import MemoryCandidate, MemoryManager
-from companion.polish import polish_report
 from core.coder_model import CoderMessage, CoderUnavailable
+from core.text_polish import polish_answer
 
 from hakeem.config import HakeemConfig
 from hakeem.model import (
@@ -279,7 +279,9 @@ class HakeemAgent:
         reply_text = strip_thinking(reply_text or "")
         if not reply_text:
             raise HakeemError("The model returned an empty reply.")
-        polish_result = polish_report(reply_text, language=reply_language)
+        # The universal polisher: the same typography rules every character uses,
+        # plus full Arabic vocalization when the user turned tashkeel on.
+        polish_result = polish_answer(reply_text, language=reply_language)
         reply_text = polish_result.text
 
         assistant = self.conversations.append(conversation_id, "assistant", reply_text)
