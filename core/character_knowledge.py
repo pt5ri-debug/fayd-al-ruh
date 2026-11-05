@@ -66,12 +66,16 @@ def character_knowledge_dir(owner: str, *, root: Path | str | None = None) -> Pa
     """The knowledge-corpus folder for ``owner``.
 
     Resolved from the owner key so isolation holds: a caller passes a character,
-    not a path. ``root`` (a test's data folder) keeps the same layout beneath it.
+    not a path. ``root`` is the **data root** -- the same folder
+    :class:`core.character_learning.CharacterLearning` takes -- so the corpus
+    lives under ``<root>/characters/<owner>/knowledge_base``, exactly where the
+    learning record lives. ``root=None`` uses the project's own
+    :func:`core.paths.characters_dir` (``data/characters``).
     """
     resolved = owner_for(owner)
     if not is_owner(resolved):
         raise LearningAccessError(f"{owner!r} is not a known character.")
-    base = Path(root) if root is not None else characters_dir()
+    base = (Path(root) / "characters") if root is not None else characters_dir()
     return base / resolved / "knowledge_base"
 
 

@@ -43,7 +43,7 @@ class _FakeRetriever:
 
 def test_knowledge_dir_is_owner_scoped_and_under_characters(tmp_path):
     d = character_knowledge_dir("natasha", root=tmp_path)
-    assert d == tmp_path / "natasha" / "knowledge_base"
+    assert d == tmp_path / "characters" / "natasha" / "knowledge_base"
     # Either vocabulary resolves to the same folder.
     assert character_knowledge_dir("jarvis", root=tmp_path) == character_knowledge_dir(
         "sources", root=tmp_path
@@ -59,8 +59,27 @@ def test_a_character_only_ever_reaches_its_own_folder(tmp_path):
     natasha = CharacterKnowledge("natasha", root=tmp_path)
     hakeem = CharacterKnowledge("hakeem", root=tmp_path)
     assert natasha.dir != hakeem.dir
-    assert natasha.dir == tmp_path / "natasha" / "knowledge_base"
-    assert hakeem.dir == tmp_path / "hakeem" / "knowledge_base"
+    assert natasha.dir == tmp_path / "characters" / "natasha" / "knowledge_base"
+    assert hakeem.dir == tmp_path / "characters" / "hakeem" / "knowledge_base"
+
+
+def test_knowledge_root_matches_the_learning_root_convention(tmp_path):
+    """The corpus lives beside the learning record, under one shared data root.
+
+    A mouth is built with a single ``root`` (the GUI's ``data_root``); the
+    learning store reads ``<root>/characters/learning`` and the knowledge loader
+    must read ``<root>/characters/<owner>/knowledge_base`` -- the same
+    ``characters`` folder. If the two conventions drift, a built corpus is looked
+    for in the wrong place and silently never reaches the model (the bug this
+    pins).
+    """
+    from core.character_learning import CharacterLearning
+
+    learning = CharacterLearning("natasha", root=tmp_path, in_memory=False)
+    assert learning.root == tmp_path / "characters" / "learning"
+    corpus = character_knowledge_dir("natasha", root=tmp_path)
+    assert corpus == tmp_path / "characters" / "natasha" / "knowledge_base"
+    assert corpus.parent.parent == learning.root.parent == tmp_path / "characters"
 
 
 # --------------------------------------------------------------------- reading
@@ -140,7 +159,7 @@ class _FakeFetcher:
 
 
 def test_reads_a_real_built_store(tmp_path):
-    store_dir = tmp_path / "natasha" / "knowledge_base"
+    store_dir = tmp_path / "characters" / "natasha" / "knowledge_base"
     build_knowledge_base(
         store_dir,
         target_mb=1,
@@ -159,7 +178,7 @@ def test_reads_a_real_built_store(tmp_path):
 
 
 def test_reading_a_store_touches_no_network(tmp_path, monkeypatch):
-    store_dir = tmp_path / "natasha" / "knowledge_base"
+    store_dir = tmp_path / "characters" / "natasha" / "knowledge_base"
     build_knowledge_base(
         store_dir, target_mb=1, categories=["Love"], fetcher=_FakeFetcher(), batch=5, sleep=0
     )
@@ -197,7 +216,7 @@ class _FakeAssistant:
 def test_mouth_injects_its_own_corpus_into_the_prompt(tmp_path):
     from ai.characters import CharacterMouth
 
-    store_dir = tmp_path / "natasha" / "knowledge_base"
+    store_dir = tmp_path / "characters" / "natasha" / "knowledge_base"
     build_knowledge_base(
         store_dir, target_mb=1, categories=["Love"], fetcher=_FakeFetcher(), batch=5, sleep=0
     )
@@ -266,7 +285,7 @@ def test_cli_rejects_an_unknown_character(capsys):
 def test_cli_queries_a_built_corpus(tmp_path, capsys, monkeypatch):
     from cli import characters as cli_characters
 
-    store_dir = tmp_path / "natasha" / "knowledge_base"
+    store_dir = tmp_path / "characters" / "natasha" / "knowledge_base"
     build_knowledge_base(
         store_dir, target_mb=1, categories=["Love"], fetcher=_FakeFetcher(), batch=5, sleep=0
     )

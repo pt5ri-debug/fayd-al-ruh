@@ -124,7 +124,10 @@ def _judgement_holds(judgement: KnowledgeJudgement) -> bool:
         with _temp_root() as root:
             natasha_dir = character_knowledge_dir("natasha", root=root)
             hakeem_dir = character_knowledge_dir("hakeem", root=root)
-            return natasha_dir != hakeem_dir and natasha_dir == root / "natasha" / "knowledge_base"
+            return (
+                natasha_dir != hakeem_dir
+                and natasha_dir == root / "characters" / "natasha" / "knowledge_base"
+            )
 
     if kind == "cross-refused":
         # A corpus is built for natasha only; hakeem's reader must find nothing,
