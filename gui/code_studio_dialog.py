@@ -43,8 +43,8 @@ from typing import Any, Literal
 from core.answer_provenance import AnswerProvenance
 from core.coder_model import DEFAULT_CODER_MODEL, PULL_HINT
 
+from gui import clipboard, rich_text
 from gui import markdown as md
-from gui import rich_text
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer
 from gui.dialog_base import ThemedDialog
@@ -478,16 +478,7 @@ class CodeStudioDialog(ThemedDialog):
     @staticmethod
     def _make_read_only(widget: tk.Text) -> None:
         """Read-only but still selectable and copyable, like a chat message."""
-
-        def block(event: tk.Event) -> str:
-            if int(event.state) & 0x0004 or int(event.state) & 0x0008:
-                return ""
-            if event.keysym in {"Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next"}:
-                return ""
-            return "break"
-
-        for sequence in ("<Key>", "<<Paste>>", "<<Cut>>", "<<Clear>>"):
-            widget.bind(sequence, block)
+        clipboard.make_read_only(widget)
 
     def _on_bubble_wheel(self, event: tk.Event) -> str:
         widget = event.widget

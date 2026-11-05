@@ -31,6 +31,8 @@ import tkinter as tk
 from dataclasses import dataclass, field
 from typing import Any
 
+from gui import clipboard
+
 
 @dataclass
 class _Message:
@@ -120,6 +122,9 @@ class ThemedDialog:
         if callable(getattr(self, "_add_message", None)):
             self._install_recorder()
         self._build()
+        # Copy, cut, paste, and select-all work in every field of this window
+        # (and every other one), through the one installation on the shared root.
+        clipboard.install_app_clipboard(self.window)
         self._after_build()
         # Everything drawn so far is the window's own opening content; it is
         # recreated by every build, so it is *not* replayed on a re-theme.

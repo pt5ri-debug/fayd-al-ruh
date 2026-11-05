@@ -32,7 +32,7 @@ from functools import partial
 from tkinter import filedialog
 from typing import Any
 
-from gui import rich_text
+from gui import clipboard, rich_text
 from gui.chat_composer import ChatComposer
 from gui.dialog_base import ThemedDialog
 from gui.kb_manager import KnowledgeBaseManagerService, WebFetchReport
@@ -419,8 +419,8 @@ class KnowledgeBaseManagerDialog(ThemedDialog):
         rich_text.insert_markdown(widget, text, theme=self.theme, typography=self._type)
 
     def _make_read_only(self, widget: tk.Text) -> None:
-        widget.configure(state="disabled")
-        widget.bind("<Key>", lambda _e: "break")
+        """Read-only but still selectable and copyable, like a chat message."""
+        clipboard.make_read_only(widget)
 
     def _fit_height(self, widget: tk.Text) -> None:
         try:
