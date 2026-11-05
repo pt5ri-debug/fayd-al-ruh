@@ -405,6 +405,23 @@ def run_analogy(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.analogy", argv)
 
 
+def run_polish(argv: Sequence[str] = ()) -> int:
+    """Polish text with the project's shared rules and (optionally) vocalize Arabic.
+
+    A bare ``python -m cli polish "..."`` is the ``polish`` subcommand, so the
+    text does not have to be preceded by a subcommand name.
+    """
+    args = list(argv)
+    if not args or args[0] not in {"polish", "tashkeel"}:
+        args = ["polish", *args]
+    return _run_module("cli.text_polish", args)
+
+
+def run_tashkeel(argv: Sequence[str] = ()) -> int:
+    """Fully vocalize Arabic text (the ``tashkeel`` CLI alias)."""
+    return _run_module("cli.text_polish", ["tashkeel", *argv])
+
+
 def run_embeddings(argv: Sequence[str] = ()) -> int:
     """Inspect or train the project's learned distributional semantic space."""
     return _run_module("cli.embeddings", argv)
@@ -661,6 +678,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         ("moods",),
     ),
     ("Reason by analogy: what a concept is structurally like", run_analogy, ("like", "porosity")),
+    (
+        "Polish a reply and fully vocalize Arabic (tashkeel, formal or colloquial)",
+        run_polish,
+        ("polish", "--tashkeel", "المسامية في الصخر , وهي مهمة ؟"),
+    ),
     ("Semantic space: what a word is used with (learned, local)", run_embeddings, ("status",)),
     ("Extract typed relations from text (preview, then learn)", run_relations, ("read", "Porosity increases permeability.")),
     ("Reasoning: decompose a question and route each part to its engine", run_reasoning, ("reason", "how do I measure porosity?")),
@@ -889,6 +911,7 @@ __all__ = [
     "run_models",
     "run_perception",
     "run_petroleum",
+    "run_polish",
     "run_presentation",
     "run_reasoning",
     "run_relations",
@@ -896,6 +919,7 @@ __all__ = [
     "run_scene3d",
     "run_selfcheck",
     "run_shared_models",
+    "run_tashkeel",
     "run_train",
     "run_ultron",
     "run_ultron_chat",

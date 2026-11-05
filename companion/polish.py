@@ -1,4 +1,4 @@
-"""Natasha's linguistic polisher: make a reply read cleanly, in either language.
+"""The project's linguistic polisher: make any reply read cleanly, in either language.
 
 A small model leaves small typographic scars -- a space before a full stop, a
 missing space after a comma, a lowercase sentence opening, doubled punctuation, an
@@ -20,6 +20,18 @@ What it is:
 Two languages, two rule sets: :func:`polish_arabic` and :func:`polish_english`.
 :func:`polish` picks one from the text itself (or takes the language the caller
 already decided), so the agent never polishes Arabic with English rules.
+
+**Universal reach and full vocalization.** The rules are shared by every answering
+character, not only the companion: the Jarvis pipeline calls :func:`polish_report`
+on each answer (``core.text_polish`` is the one entry point, ``core.jarvis`` the
+wiring), so a reply from Ultron, Vision, Banner, Cloud, Hakeem, the project's own
+model, or the grounded sources mouth is polished exactly as Natasha's is. An
+Arabic reply may also be **fully vocalized** (tashkeel) through
+:mod:`core.arabic_tashkeel`: pass ``tashkeel=True`` for the classical rules
+(``"formal"``, case endings included) or ``tashkeel_mode="colloquial"`` for the
+spoken form (lexical vowels only, no إعراب). Vocalization is applied *after* the
+typographic rules, is idempotent, and never touches a Latin identifier, a number,
+or a formula.
 """
 
 from __future__ import annotations
@@ -53,6 +65,13 @@ _ARABIC_LETTER = re.compile(r"[\u0600-\u06ff]")
 _ARABIC_MARKS_MAP = {",": "\u060c", ";": "\u061b", "?": "\u061f"}
 
 
+#: The tashkeel modes accepted by the polisher. ``"formal"`` applies the classical
+#: rules (case endings included); ``"colloquial"`` the spoken form (no إعراب).
+TASHKEEL_FORMAL = "formal"
+TASHKEEL_COLLOQUIAL = "colloquial"
+TASHKEEL_MODES = (TASHKEEL_FORMAL, TASHKEEL_COLLOQUIAL)
+
+
 @dataclass(frozen=True)
 class PolishResult:
     """The polished text, the language used, and the changes that were made."""
@@ -60,10 +79,17 @@ class PolishResult:
     text: str
     language: str
     changes: tuple[str, ...] = field(default_factory=tuple)
+    tashkeel_mode: str = ""
+    """The vocalization mode applied, or ``""`` when the text was not vocalized."""
 
     @property
     def changed(self) -> bool:
         return bool(self.changes)
+
+    @property
+    def diacritized(self) -> bool:
+        """Whether this pass fully vocalized an Arabic reply."""
+        return bool(self.tashkeel_mode)
 
 
 def _collapse_spaces(text: str) -> str:
@@ -240,8 +266,16 @@ def polish_english(text: str) -> PolishResult:
     )
 
 
-def polish_arabic(text: str) -> PolishResult:
-    """Polish an Arabic reply: spacing, punctuation, and Arabic punctuation marks."""
+def polish_arabic(text: str, *, tashkeel: bool = False, tashkeel_mode: str = TASHKEEL_FORMAL) -> PolishResult:
+    """Polish an Arabic reply: spacing, punctuation, and Arabic punctuation marks.
+
+    With ``tashkeel=True`` the typographically-clean reply is then **fully
+    vocalized** through :mod:`core.arabic_tashkeel` -- the classical rules when
+    ``tashkeel_mode`` is ``"formal"`` (case endings included), the spoken form when
+    it is ``"colloquial"`` (lexical vowels only). Vocalization is applied last, so
+    the punctuation and spacing rules see the bare letters they expect, and it is
+    idempotent, so a second polish of an already-vocalized reply is a no-op.
+    """
     shield = _Shield(text)
     cleaned, changes = _spacing_cleanup(shield.text)
     if _ARABIC_LETTER.search(cleaned) and any(c in _ARABIC_MARKS_MAP for c in cleaned):
@@ -252,31 +286,63 @@ def polish_arabic(text: str) -> PolishResult:
     finished, added = _ensure_terminal(cleaned)
     if added:
         changes.append("closed the final sentence")
+    restored = shield.restore(finished)
+    mode = ""
+    if tashkeel and restored.strip():
+        if tashkeel_mode not in TASHKEEL_MODES:
+            raise ValueError(f"Unknown tashkeel mode: {tashkeel_mode!r}")
+        from core.arabic_tashkeel import diacritize_report
+
+        report = diacritize_report(restored, mode=tashkeel_mode)
+        if report.changed:
+            changes.append(f"vocalized the Arabic text ({tashkeel_mode})")
+        restored = report.text
+        mode = tashkeel_mode
     return PolishResult(
-        text=shield.restore(finished), language=ARABIC, changes=tuple(changes)
+        text=restored, language=ARABIC, changes=tuple(changes), tashkeel_mode=mode
     )
 
 
-def polish_report(text: str, *, language: str | None = None) -> PolishResult:
+def polish_report(
+    text: str,
+    *,
+    language: str | None = None,
+    tashkeel: bool = False,
+    tashkeel_mode: str = TASHKEEL_FORMAL,
+) -> PolishResult:
     """Polish ``text`` and report the language and every change that was made.
 
     ``language`` may be supplied when the caller has already decided it (the agent
     does, from the user's own message); otherwise it is detected from the text.
+    ``tashkeel`` asks for the Arabic reply to be fully vocalized (see
+    :func:`polish_arabic`); it has no effect on an English reply, so it is safe to
+    pass on every answer.
     """
     if not text or not text.strip():
         return PolishResult(text=text, language=language or ARABIC)
     chosen = language or detect_language_of(text, default=ARABIC)
     if chosen == ENGLISH:
         return polish_english(text)
-    return polish_arabic(text)
+    return polish_arabic(text, tashkeel=tashkeel, tashkeel_mode=tashkeel_mode)
 
 
-def polish(text: str, *, language: str | None = None) -> str:
+def polish(
+    text: str,
+    *,
+    language: str | None = None,
+    tashkeel: bool = False,
+    tashkeel_mode: str = TASHKEEL_FORMAL,
+) -> str:
     """The polished text alone, for callers that do not need the report."""
-    return polish_report(text, language=language).text
+    return polish_report(
+        text, language=language, tashkeel=tashkeel, tashkeel_mode=tashkeel_mode
+    ).text
 
 
 __all__ = [
+    "TASHKEEL_COLLOQUIAL",
+    "TASHKEEL_FORMAL",
+    "TASHKEEL_MODES",
     "PolishResult",
     "polish",
     "polish_arabic",

@@ -34,6 +34,7 @@ class ControlIntent(str, Enum):
     SAVE = "save"
     SESSIONS = "sessions"
     WEB = "web"
+    TASHKEEL = "tashkeel"
     CONFIRM = "confirm"
     CORRECT = "correct"
     REMEMBER = "remember"
@@ -74,6 +75,13 @@ _PHRASES: dict[ControlIntent, tuple[str, ...]] = {
         "web", "web on", "web off", "use the web", "use the internet", "go online",
         "online", "offline", "search the web", "internet on", "internet off",
         "البحث في الإنترنت", "استخدم الإنترنت", "الإنترنت", "اتصل بالإنترنت",
+    ),
+    ControlIntent.TASHKEEL: (
+        "tashkeel", "tashkeel on", "tashkeel off", "vocalize", "vocalize on",
+        "vocalize off", "add tashkeel", "remove tashkeel", "tashkeel formal",
+        "tashkeel colloquial", "formal tashkeel", "colloquial tashkeel",
+        "تشكيل", "التشكيل", "شكّل", "شكل", "شكّل النص", "بدون تشكيل", "أضف التشكيل",
+        "أزل التشكيل", "تشكيل فصيح", "تشكيل عامي", "التشكيل الكامل",
     ),
     ControlIntent.CONFIRM: (
         "that's right", "thats right", "that is right", "that's correct", "thats correct",

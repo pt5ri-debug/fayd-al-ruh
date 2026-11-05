@@ -21,6 +21,10 @@ _KEY = "preferences"
 
 SUPPORTED_LANGUAGES = ("en", "ar")
 
+#: The vocalization forms a preference may name, mirroring
+#: :data:`core.text_polish.TASHKEEL_MODES` (imported lazily to avoid a cycle).
+TASHKEEL_MODES = ("formal", "colloquial")
+
 
 @dataclass(frozen=True)
 class PreferenceRecord:
@@ -34,12 +38,21 @@ class PreferenceRecord:
     #: machine and costs a network round trip, so it is an explicit opt-in, and the
     #: ``web on``/``web off`` control flips this and persists it.
     web: bool = False
+    #: Whether every answer's Arabic is fully vocalized (tashkeel). Off by default,
+    #: so a bare, undiacritized answer stays the project's output until the user
+    #: asks otherwise with the ``tashkeel on`` control.
+    tashkeel: bool = False
+    #: The vocalization form: ``"formal"`` (فصحى, case endings included) or
+    #: ``"colloquial"`` (عامية, lexical vowels only).
+    tashkeel_mode: str = "formal"
 
     def __post_init__(self) -> None:
         if self.language not in SUPPORTED_LANGUAGES:
             raise ValueError(f"Unsupported language: {self.language!r}")
         if not self.wake_word.strip():
             raise ValueError("Wake word cannot be empty.")
+        if self.tashkeel_mode not in TASHKEEL_MODES:
+            raise ValueError(f"Unsupported tashkeel mode: {self.tashkeel_mode!r}")
 
     def to_primitive(self) -> dict[str, object]:
         return {
@@ -48,6 +61,8 @@ class PreferenceRecord:
             "speak": self.speak,
             "wake_word": self.wake_word,
             "web": self.web,
+            "tashkeel": self.tashkeel,
+            "tashkeel_mode": self.tashkeel_mode,
         }
 
     @classmethod
@@ -58,6 +73,8 @@ class PreferenceRecord:
             speak=bool(data.get("speak", True)),
             wake_word=str(data.get("wake_word", "jarvis")),
             web=bool(data.get("web", False)),
+            tashkeel=bool(data.get("tashkeel", False)),
+            tashkeel_mode=str(data.get("tashkeel_mode", "formal")),
         )
 
 
@@ -86,7 +103,9 @@ class UserPreferences:
 
     def update(self, **changes: object) -> PreferenceRecord:
         """Apply explicit changes, persist them, and return the new record."""
-        unknown = set(changes) - {"user_name", "language", "speak", "wake_word", "web"}
+        unknown = set(changes) - {
+            "user_name", "language", "speak", "wake_word", "web", "tashkeel", "tashkeel_mode",
+        }
         if unknown:
             raise ValueError(f"Unknown preference(s): {', '.join(sorted(unknown))}")
         current = self._record
@@ -96,6 +115,8 @@ class UserPreferences:
             speak=bool(changes.get("speak", current.speak)),
             wake_word=str(changes.get("wake_word", current.wake_word)),
             web=bool(changes.get("web", current.web)),
+            tashkeel=bool(changes.get("tashkeel", current.tashkeel)),
+            tashkeel_mode=str(changes.get("tashkeel_mode", current.tashkeel_mode)),
         )
         self.save()
         return self._record
