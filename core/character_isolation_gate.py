@@ -24,7 +24,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.character_config import default_config_for, replace_learning
+from core.character_config import default_config_for, replace_knowledge, replace_learning
 from core.character_learning_store import CharacterLearningStore
 from core.knowledge_sharing import KnowledgeSharing
 from core.learning_isolation import (
@@ -114,6 +114,11 @@ ISOLATION_JUDGEMENTS: tuple[IsolationJudgement, ...] = (
         "a hand-edited natasha configuration cannot enable sharing",
         "config-cannot-enable-natasha",
         note="negative control: the backend's rule beats the setting",
+    ),
+    IsolationJudgement(
+        "a hand-edited natasha configuration cannot enable corpus training",
+        "config-cannot-train-natasha",
+        note="negative control: a private corpus must never enter the training text",
     ),
     IsolationJudgement("an unknown key is not an owner", "unknown-refused"),
 )
@@ -257,6 +262,14 @@ def _judgement_holds(judgement: IsolationJudgement) -> bool:
             enabled=True,
         )
         return config.effective_sharing is False
+
+    if kind == "config-cannot-train-natasha":
+        # A hand-edited file that turned training on for the private character is
+        # refused: the training flag is off, and the training keys never name her.
+        from ml.llm.corpus import training_corpus_keys
+
+        config = replace_knowledge(default_config_for("natasha"), train_on_corpus=True)
+        return config.effective_training is False and "natasha" not in training_corpus_keys()
 
     return False
 

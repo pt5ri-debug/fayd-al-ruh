@@ -19,7 +19,7 @@ validation, so it is dependency-free and testable on its own. Persistence is
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from core.character_learning import persona_for
@@ -79,6 +79,7 @@ SECTION_PERSONALITY = "personality"
 SECTION_MODEL = "model"
 SECTION_VOICE = "voice"
 SECTION_LEARNING = "learning"
+SECTION_KNOWLEDGE = "knowledge"
 
 SECTIONS: tuple[tuple[str, str], ...] = (
     (SECTION_GENERAL, "General Information"),
@@ -86,7 +87,15 @@ SECTIONS: tuple[tuple[str, str], ...] = (
     (SECTION_MODEL, "Language Model"),
     (SECTION_VOICE, "Voice Settings"),
     (SECTION_LEARNING, "Learning Settings"),
+    (SECTION_KNOWLEDGE, "Knowledge Corpus"),
 )
+
+#: Bounds for the knowledge-corpus injection dials. They are the same bounds
+#: :func:`core.character_knowledge.resolve_knowledge_limits` clamps to, so a value
+#: saved here is always one the reader accepts.
+KNOWLEDGE_LIMIT_RANGE = (1, 50)
+KNOWLEDGE_MAX_CHARS_RANGE = (500, 100_000)
+KNOWLEDGE_PASSAGE_CHARS_RANGE = (100, 20_000)
 
 
 class ConfigError(ValueError):
@@ -398,6 +407,67 @@ class LearningSettings:
 
 
 @dataclass(frozen=True)
+class KnowledgeConfig:
+    """Section F: how much of a character's own knowledge corpus reaches its prompt.
+
+    The character's own corpus (built under ``data/characters/<owner>/knowledge_base``)
+    is retrieved on **every** turn and injected into the standing instruction, so a
+    character answers from what it has read. These dials govern *how much* of it is
+    injected: how many passages are retrieved, the most characters the rendered
+    block may carry, and the most characters one passage contributes. The defaults
+    are the shipped ones from :mod:`core.character_knowledge`; raising them makes a
+    character's own knowledge more present in its replies without touching code.
+
+    ``train_on_corpus`` is the opt-in **training** switch: when on, this character's
+    own corpus may be folded into the project's language-model training text (see
+    :func:`ml.llm.corpus.character_knowledge_sentences`). It is off by default, and
+    for a private character it is refused outright -- a private corpus never enters
+    the aggregated training set, whatever the flag says (see ``effective_training``).
+    """
+
+    limit: int = 6
+    max_chars: int = 8000
+    passage_chars: int = 1200
+    train_on_corpus: bool = False
+    train_max_chunks: int = 2000
+
+    def to_primitive(self) -> dict[str, Any]:
+        return {
+            "limit": self.limit,
+            "max_chars": self.max_chars,
+            "passage_chars": self.passage_chars,
+            "train_on_corpus": self.train_on_corpus,
+            "train_max_chunks": self.train_max_chunks,
+        }
+
+    @classmethod
+    def from_primitive(cls, data: dict[str, Any]) -> KnowledgeConfig:
+        return cls(
+            limit=int(data.get("limit", 6)),
+            max_chars=int(data.get("max_chars", 8000)),
+            passage_chars=int(data.get("passage_chars", 1200)),
+            train_on_corpus=bool(data.get("train_on_corpus", False)),
+            train_max_chunks=int(data.get("train_max_chunks", 2000)),
+        )
+
+    def validate(self) -> None:
+        _check_range(SECTION_KNOWLEDGE, "limit", self.limit, KNOWLEDGE_LIMIT_RANGE)
+        _check_range(SECTION_KNOWLEDGE, "max_chars", self.max_chars, KNOWLEDGE_MAX_CHARS_RANGE)
+        _check_range(
+            SECTION_KNOWLEDGE, "passage_chars", self.passage_chars, KNOWLEDGE_PASSAGE_CHARS_RANGE
+        )
+        _check_range(
+            SECTION_KNOWLEDGE, "train_max_chunks", self.train_max_chunks, (0, 1_000_000)
+        )
+        if self.passage_chars > self.max_chars:
+            raise ConfigError(
+                SECTION_KNOWLEDGE,
+                "passage_chars",
+                "must not exceed max_chars (one passage cannot be larger than the block).",
+            )
+
+
+@dataclass(frozen=True)
 class CharacterConfig:
     """Everything about one character, in one validated, serialisable object."""
 
@@ -408,6 +478,7 @@ class CharacterConfig:
     model: ModelConfig
     voice: VoiceConfig
     learning: LearningSettings
+    knowledge: KnowledgeConfig = field(default_factory=KnowledgeConfig)
     #: The format version, so a future change can migrate rather than misread.
     version: int = 1
 
@@ -424,6 +495,7 @@ class CharacterConfig:
         self.model.validate()
         self.voice.validate()
         self.learning.validate()
+        self.knowledge.validate()
 
     @property
     def is_private(self) -> bool:
@@ -440,6 +512,17 @@ class CharacterConfig:
         """
         return self.learning.share_with_main_model and not self.is_private
 
+    @property
+    def effective_training(self) -> bool:
+        """Whether this character's own corpus may enter the training text.
+
+        The training flag **and** not private, for the same reason
+        :attr:`effective_sharing` exists: a private character's corpus must never
+        reach the aggregated training set, whatever a hand-edited file says, so the
+        isolation policy wins over the setting.
+        """
+        return self.knowledge.train_on_corpus and not self.is_private
+
     # ------------------------------------------------------------ persistence
 
     def to_primitive(self) -> dict[str, Any]:
@@ -452,6 +535,7 @@ class CharacterConfig:
             "model": self.model.to_primitive(),
             "voice": self.voice.to_primitive(),
             "learning": self.learning.to_primitive(),
+            "knowledge": self.knowledge.to_primitive(),
         }
 
     @classmethod
@@ -483,6 +567,9 @@ class CharacterConfig:
             learning=LearningSettings.from_primitive(data["learning"])
             if isinstance(data.get("learning"), dict)
             else base.learning,
+            knowledge=KnowledgeConfig.from_primitive(data["knowledge"])
+            if isinstance(data.get("knowledge"), dict)
+            else base.knowledge,
             version=int(data.get("version", 1)),
         )
 
@@ -505,6 +592,9 @@ class CharacterConfig:
                 f"  learning    : {'on' if self.learning.enabled else 'off'} "
                 f"({self.learning.mode}), sharing "
                 f"{'on' if self.effective_sharing else 'off'}",
+                f"  knowledge   : {self.knowledge.limit} passage(s), "
+                f"{self.knowledge.max_chars} chars, training "
+                f"{'on' if self.effective_training else 'off'}",
             ]
         )
 
@@ -803,6 +893,15 @@ def default_config_for(key: str) -> CharacterConfig:
     personality = personality_defaults_for(owner)
     style = style_defaults_for(owner)
     voice = voice_defaults_for(owner)
+    # The knowledge dials default to the reader's own shipped limits, imported here
+    # (lazily, so there is no import cycle) rather than copied, so the two can never
+    # drift apart.
+    from core.character_knowledge import (
+        KNOWLEDGE_LIMIT,
+        KNOWLEDGE_MAX_CHARS,
+        KNOWLEDGE_PASSAGE_CHARS,
+    )
+
     return CharacterConfig(
         key=owner,
         owner=owner,
@@ -832,6 +931,11 @@ def default_config_for(key: str) -> CharacterConfig:
             # A private character never shares, whatever the flag says; the default
             # flag is on, and `effective_sharing` reports the truth.
             share_with_main_model=owner not in PRIVATE_OWNERS,
+        ),
+        knowledge=KnowledgeConfig(
+            limit=KNOWLEDGE_LIMIT,
+            max_chars=KNOWLEDGE_MAX_CHARS,
+            passage_chars=KNOWLEDGE_PASSAGE_CHARS,
         ),
     )
 
@@ -878,10 +982,18 @@ def replace_learning(config: CharacterConfig, **changes: Any) -> CharacterConfig
     return replace(config, learning=replace(config.learning, **changes))
 
 
+def replace_knowledge(config: CharacterConfig, **changes: Any) -> CharacterConfig:
+    """A copy with the Knowledge-corpus section changed."""
+    return replace(config, knowledge=replace(config.knowledge, **changes))
+
+
 __all__ = [
     "CONFIDENCE_RANGE",
     "CONTEXT_RANGE",
     "DEFAULT_NAMES",
+    "KNOWLEDGE_LIMIT_RANGE",
+    "KNOWLEDGE_MAX_CHARS_RANGE",
+    "KNOWLEDGE_PASSAGE_CHARS_RANGE",
     "LANGUAGES",
     "LANGUAGE_MATCH",
     "LEARNING_MODES",
@@ -892,6 +1004,7 @@ __all__ = [
     "PITCH_RANGE",
     "SECTIONS",
     "SECTION_GENERAL",
+    "SECTION_KNOWLEDGE",
     "SECTION_LEARNING",
     "SECTION_MODEL",
     "SECTION_PERSONALITY",
@@ -904,6 +1017,7 @@ __all__ = [
     "CharacterConfig",
     "ConfigError",
     "GeneralConfig",
+    "KnowledgeConfig",
     "LearningSettings",
     "ModelConfig",
     "PersonalityConfig",
@@ -913,6 +1027,7 @@ __all__ = [
     "owner_names",
     "personality_defaults_for",
     "replace_general",
+    "replace_knowledge",
     "replace_learning",
     "replace_model",
     "replace_personality",

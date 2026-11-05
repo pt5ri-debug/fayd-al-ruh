@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import unicodedata
 from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
 
 
 def _sentences() -> list[str]:
@@ -125,6 +127,148 @@ def knowledge_base_sentences(*, kb_max_chunks: int) -> list[str]:
 
     documents, _relevant = knowledge_base_sample(max_chunks=kb_max_chunks)
     return sentences_from_documents(documents)
+
+
+def training_corpus_keys() -> tuple[str, ...]:
+    """The characters whose **own** corpus may enter the training text.
+
+    A character's Knowledge section has a ``train_on_corpus`` switch, off by
+    default. Only a character that switched it on **and** is not private
+    contributes: the isolation policy is the authority, so a hand-edited file that
+    turned training on for the private character is refused here rather than
+    obeyed. The switch is read through the character registry, so an APPLY in the
+    Characters window is honoured, and the shipped default is the fallback.
+    Returns the owners in the project's order.
+    """
+    from core.learning_isolation import CHARACTER_OWNERS, owner_for
+
+    try:
+        from core.character_registry import default_registry
+
+        registry = default_registry()
+        load = registry.load
+    except (ImportError, OSError):
+        from core.character_config import default_config_for
+
+        load = default_config_for
+
+    chosen: list[str] = []
+    for owner in CHARACTER_OWNERS:
+        try:
+            config = load(owner)
+        except (ValueError, OSError):
+            continue
+        if config.effective_training:
+            chosen.append(owner_for(owner))
+    return tuple(chosen)
+
+
+def _character_corpus_documents(
+    key: str, *, max_chunks: int, root: str | Path | None = None
+) -> list[Any]:
+    """The first ``max_chunks`` documents of one character's own corpus.
+
+    Read through the *same* :class:`core.character_knowledge.CharacterKnowledge`
+    the answer path uses, so the training text and what the character answers from
+    are one corpus. Returns ``()`` for an unbuilt corpus, and never raises.
+    """
+    from core.character_knowledge import CharacterKnowledge
+    from core.knowledge_base import KnowledgeBaseStore
+
+    if max_chunks < 1:
+        return []
+    try:
+        knowledge = CharacterKnowledge(key, root=root)
+        if not knowledge.available:
+            return []
+        store = KnowledgeBaseStore(knowledge.dir)
+        documents: list[Any] = []
+        for chunk in store.iter_chunks():
+            documents.append(chunk.to_document())
+            if len(documents) >= max_chunks:
+                break
+        return documents
+    except (OSError, ValueError):
+        return []
+
+
+def _permitted_corpus_keys(keys: Iterable[str] | None) -> tuple[str, ...]:
+    """The requested keys minus any private owner, in order.
+
+    The aggregate default is already only the opted-in shareable characters; this
+    guard is the second half of the isolation rule, so a caller that names a
+    private character's key explicitly is refused just as ``learn_from`` refuses
+    her before it resolves a path. Nothing is trained on a private corpus.
+    """
+    from core.learning_isolation import PRIVATE_OWNERS, owner_for
+
+    chosen = training_corpus_keys() if keys is None else tuple(keys)
+    permitted: list[str] = []
+    for key in chosen:
+        owner = owner_for(key)
+        if owner in PRIVATE_OWNERS:
+            continue
+        if owner not in permitted:
+            permitted.append(owner)
+    return tuple(permitted)
+
+
+def character_knowledge_sentences(
+    keys: Iterable[str] | None = None,
+    *,
+    max_chunks: int = 2000,
+    root: str | Path | None = None,
+) -> list[str]:
+    """Training prose from the characters' **own** knowledge corpora.
+
+    A character answers from its own corpus by retrieval (see
+    :mod:`core.character_knowledge`); this is the *opt-in* training path, so a
+    character whose Knowledge section switched training on also contributes its
+    corpus to the project model's training text. The default set is
+    :func:`training_corpus_keys` -- only a shareable character that opted in -- and
+    a private character is refused even when her key is named explicitly, so a
+    private corpus never enters the training text by any route. A character with no
+    built corpus contributes nothing.
+    """
+    from collections import OrderedDict
+
+    spoken: list[str] = []
+    for key in _permitted_corpus_keys(keys):
+        documents = _character_corpus_documents(key, max_chunks=max_chunks, root=root)
+        if not documents:
+            continue
+        from ml.knowledge_corpus import sentences_from_documents
+
+        spoken.extend(sentences_from_documents(documents))
+    return list(OrderedDict.fromkeys(sentence for sentence in spoken if sentence.strip()))
+
+
+def character_knowledge_units(
+    keys: Iterable[str] | None = None,
+    *,
+    max_chunks: int = 2000,
+    root: str | Path | None = None,
+) -> list[str]:
+    """The characters' own corpora as distinct documents, for an honest split.
+
+    One document per opted-in character, so a document-level train/test split never
+    puts one character's corpus on both sides of the line. A private character is
+    refused exactly as in :func:`character_knowledge_sentences`, and a character
+    with no built corpus contributes nothing.
+    """
+    from collections import OrderedDict
+
+    units: list[str] = []
+    for key in _permitted_corpus_keys(keys):
+        documents = _character_corpus_documents(key, max_chunks=max_chunks, root=root)
+        if not documents:
+            continue
+        from ml.knowledge_corpus import sentences_from_documents
+
+        joined = " ".join(sentences_from_documents(documents))
+        if joined.strip():
+            units.append(joined)
+    return list(OrderedDict.fromkeys(unit for unit in units if unit.strip()))
 
 
 #: The local mouths, mapped to the data sub-path each one persists its
@@ -248,6 +392,9 @@ def build_corpus(
     session_repeats: int = 1,
     include_characters: bool = False,
     character_repeats: int = 1,
+    include_character_knowledge: bool = False,
+    character_knowledge_chunks: int = 2000,
+    character_knowledge_repeats: int = 1,
     exclude: set[str] | frozenset[str] | None = None,
     include: set[str] | frozenset[str] | None = None,
 ) -> str:
@@ -262,7 +409,9 @@ def build_corpus(
     saved conversations when ``include_sessions`` is set (Jarvis, Ultron,
     Vision, and Banner -- off by default, because a transcript is personal), the
     seven characters' own learning when ``include_characters`` is set (off by
-    default for the same reason), a
+    default for the same reason), the characters' own **knowledge corpora** when
+    ``include_character_knowledge`` is set (off by default, and only for a
+    character whose Knowledge section opted in and that is not private), a
     relevance-filtered sample of the bulk knowledge base when ``kb_max_chunks``
     is positive (repeated ``kb_repeats`` times, since it is large and broad),
     and JSON objects in the shape ``MODEL_OUTPUT_SCHEMA`` expects. The JSON
@@ -284,6 +433,8 @@ def build_corpus(
         session_repeats = 1
     if character_repeats < 1:
         character_repeats = 1
+    if character_knowledge_repeats < 1:
+        character_knowledge_repeats = 1
     held = exclude or frozenset()
     chosen = include
 
@@ -301,6 +452,11 @@ def build_corpus(
     repositories = keep(repository_sentences(include_runtime=include_runtime))
     sessions = keep(session_sentences(sources=session_sources)) if include_sessions else ""
     characters = keep(character_learning_sentences()) if include_characters else ""
+    character_corpus = (
+        keep(character_knowledge_sentences(max_chunks=character_knowledge_chunks))
+        if include_character_knowledge
+        else ""
+    )
     bulk = keep(knowledge_base_sentences(kb_max_chunks=kb_max_chunks))
     structured = " ".join(structured_examples())
     return (
@@ -313,6 +469,7 @@ def build_corpus(
         + (repositories + " ") * (repeats if repositories else 0)
         + (sessions + " ") * (session_repeats if sessions else 0)
         + (characters + " ") * (character_repeats if characters else 0)
+        + (character_corpus + " ") * (character_knowledge_repeats if character_corpus else 0)
         + (bulk + " ") * (kb_repeats if bulk else 0)
         + (structured + " ") * structured_repeats
     )
@@ -360,7 +517,13 @@ def arabic_sentences() -> list[str]:
     return arabic_sentence_blocks()
 
 
-def corpus_units(*, include_sessions: bool = False, include_characters: bool = False) -> list[str]:
+def corpus_units(
+    *,
+    include_sessions: bool = False,
+    include_characters: bool = False,
+    include_character_knowledge: bool = False,
+    character_knowledge_chunks: int = 2000,
+) -> list[str]:
     """Unique documents for splitting and tokenizer training.
 
     Concatenating the repeated training text would let the same sentence appear
@@ -368,8 +531,9 @@ def corpus_units(*, include_sessions: bool = False, include_characters: bool = F
     so a document-level split stays honest. The small structured-JSON block is
     left out on purpose -- it teaches output shape and is always trained on.
     The mouths' saved conversations are included only when ``include_sessions``
-    is set, and the seven characters' own learning only when
-    ``include_characters`` is set, matching :func:`build_corpus`.
+    is set, the seven characters' own learning only when ``include_characters``
+    is set, and their own knowledge corpora only when
+    ``include_character_knowledge`` is set, matching :func:`build_corpus`.
     """
     from collections import OrderedDict
 
@@ -386,6 +550,8 @@ def corpus_units(*, include_sessions: bool = False, include_characters: bool = F
         units = units + session_sentences()
     if include_characters:
         units = units + character_learning_sentences()
+    if include_character_knowledge:
+        units = units + character_knowledge_units(max_chunks=character_knowledge_chunks)
     return list(OrderedDict.fromkeys(unit for unit in units if unit.strip()))
 
 
@@ -454,6 +620,8 @@ __all__ = [
     "MOUTH_SESSION_SOURCES",
     "arabic_sentences",
     "build_corpus",
+    "character_knowledge_sentences",
+    "character_knowledge_units",
     "character_learning_sentences",
     "corpus_sentences",
     "corpus_units",
@@ -464,4 +632,5 @@ __all__ = [
     "repository_sentences",
     "session_sentences",
     "structured_examples",
+    "training_corpus_keys",
 ]

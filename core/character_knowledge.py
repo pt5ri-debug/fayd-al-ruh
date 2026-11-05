@@ -27,6 +27,7 @@ Design rules, all deliberate:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,14 +35,76 @@ from typing import Any
 from core.learning_isolation import LearningAccessError, is_owner, owner_for
 from core.paths import characters_dir
 
-#: How many passages a character retrieves for one question.
-KNOWLEDGE_LIMIT = 4
+#: How many passages a character retrieves for one question. Raised so a
+#: character answers from more of its own corpus at once; still small enough that
+#: a passage-heavy question cannot flood a small model's context.
+KNOWLEDGE_LIMIT = 6
 
-#: The most characters the rendered reference block may carry.
-KNOWLEDGE_MAX_CHARS = 4000
+#: The most characters the rendered reference block may carry. Raised with the
+#: passage count so more of the corpus can reach the model, still bounded.
+KNOWLEDGE_MAX_CHARS = 8000
 
 #: The most characters one passage contributes before it is elided.
-KNOWLEDGE_PASSAGE_CHARS = 900
+KNOWLEDGE_PASSAGE_CHARS = 1200
+
+#: The environment variables a user may set to make a character's knowledge more
+#: (or less) present without editing code. They follow the project's
+#: "explicit arg -> ``FAYD_*`` env -> default" convention, so a per-run override
+#: is possible and the shipped default is what a bare run uses.
+ENV_KNOWLEDGE_LIMIT = "FAYD_KNOWLEDGE_LIMIT"
+ENV_KNOWLEDGE_MAX_CHARS = "FAYD_KNOWLEDGE_MAX_CHARS"
+ENV_KNOWLEDGE_PASSAGE_CHARS = "FAYD_KNOWLEDGE_PASSAGE_CHARS"
+
+#: The bounds a resolved limit must fall inside, so a bad value (a hand-set env
+#: var, a caller's typo) is clamped rather than allowed to flood the context or
+#: silently disable retrieval.
+LIMIT_RANGE = (1, 50)
+MAX_CHARS_RANGE = (500, 100_000)
+PASSAGE_CHARS_RANGE = (100, 20_000)
+
+
+def _clamp(value: int, bounds: tuple[int, int]) -> int:
+    low, high = bounds
+    return max(low, min(high, value))
+
+
+def _env_int(name: str) -> int | None:
+    """Read an integer from the environment, or ``None`` when it is unset/invalid."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def resolve_knowledge_limits(
+    *,
+    limit: int | None = None,
+    max_chars: int | None = None,
+    passage_chars: int | None = None,
+) -> tuple[int, int, int]:
+    """The effective ``(limit, max_chars, passage_chars)`` for one reader.
+
+    Resolved as explicit argument -> ``FAYD_KNOWLEDGE_*`` env -> shipped default,
+    each clamped to its own bounds, so a caller can tune one character's knowledge
+    presence without touching the code and a bad value can never break retrieval.
+    """
+    resolved_limit = limit if limit is not None else _env_int(ENV_KNOWLEDGE_LIMIT)
+    resolved_max = max_chars if max_chars is not None else _env_int(ENV_KNOWLEDGE_MAX_CHARS)
+    resolved_passage = (
+        passage_chars if passage_chars is not None else _env_int(ENV_KNOWLEDGE_PASSAGE_CHARS)
+    )
+    return (
+        _clamp(resolved_limit if resolved_limit is not None else KNOWLEDGE_LIMIT, LIMIT_RANGE),
+        _clamp(resolved_max if resolved_max is not None else KNOWLEDGE_MAX_CHARS, MAX_CHARS_RANGE),
+        _clamp(
+            resolved_passage if resolved_passage is not None else KNOWLEDGE_PASSAGE_CHARS,
+            PASSAGE_CHARS_RANGE,
+        ),
+    )
+
 
 #: The block's opening line. It states plainly that the material is *reference*,
 #: so a character treats it as something it read rather than as its own opinion.
@@ -88,12 +151,22 @@ class CharacterKnowledge:
         *,
         root: Path | str | None = None,
         retriever: Any | None = None,
+        limit: int | None = None,
+        max_chars: int | None = None,
+        passage_chars: int | None = None,
     ) -> None:
         self.key = key
         self.owner = owner_for(key)
         if not is_owner(self.owner):
             raise LearningAccessError(f"{key!r} is not a known character.")
         self.dir = character_knowledge_dir(self.owner, root=root)
+        # The limits are resolved once, from the explicit arguments, the
+        # ``FAYD_KNOWLEDGE_*`` env, then the shipped defaults, each clamped, so a
+        # character's knowledge presence is tunable per reader without a code change
+        # and a bad value can never flood the context or disable retrieval.
+        self.limit, self.max_chars, self.passage_chars = resolve_knowledge_limits(
+            limit=limit, max_chars=max_chars, passage_chars=passage_chars
+        )
         # ``retriever`` is the test seam: any object with ``retrieve(query,
         # limit=) -> passages``. The default reads the character's own corpus.
         self._retriever = retriever
@@ -124,15 +197,16 @@ class CharacterKnowledge:
             index=index if index.exists() else None,
         )
 
-    def retrieve(self, question: str, *, limit: int = KNOWLEDGE_LIMIT) -> tuple[KnowledgeHit, ...]:
+    def retrieve(self, question: str, *, limit: int | None = None) -> tuple[KnowledgeHit, ...]:
         """The passages of this character's corpus that bear on ``question``.
 
         Returns ``()`` for a blank question, an unbuilt corpus, or a corpus with no
         match -- never raising, so a character with no knowledge answers exactly as
-        it did before.
+        it did before. ``limit`` defaults to this reader's own resolved limit.
         """
         if not (question or "").strip():
             return ()
+        effective_limit = self.limit if limit is None else limit
         retriever = self._retriever
         if retriever is None:
             if not self.available:
@@ -142,7 +216,7 @@ class CharacterKnowledge:
             except (OSError, ValueError):
                 return ()
         try:
-            passages = retriever.retrieve(question, limit=limit)
+            passages = retriever.retrieve(question, limit=effective_limit)
         except (OSError, ValueError):
             return ()
         return tuple(
@@ -157,26 +231,37 @@ class CharacterKnowledge:
             if getattr(p, "text", "")
         )
 
-    def reference_block(self, question: str, *, limit: int = KNOWLEDGE_LIMIT) -> str:
+    def reference_block(self, question: str, *, limit: int | None = None) -> str:
         """A bounded, readable block of this corpus's passages for ``question``.
 
         The block is what reaches a mouth's prompt. It is empty when nothing
-        matches, so it never adds noise to an answer the corpus cannot help.
+        matches, so it never adds noise to an answer the corpus cannot help. The
+        block's size (passages and characters) is this reader's own resolved limit.
+        The first passage is always carried -- trimmed to fit when even one entry
+        would exceed the block -- so a small block still answers the question.
         """
         hits = self.retrieve(question, limit=limit)
         if not hits:
             return ""
         lines = [KNOWLEDGE_HEADER]
+        # ``total`` counts the block as it will be joined (a newline per extra line),
+        # so the rendered block is never longer than ``max_chars``.
         total = len(KNOWLEDGE_HEADER)
         for hit in hits:
             text = " ".join(hit.text.split())
-            if len(text) > KNOWLEDGE_PASSAGE_CHARS:
-                text = text[:KNOWLEDGE_PASSAGE_CHARS].rstrip() + "..."
+            if len(text) > self.passage_chars:
+                text = text[: self.passage_chars].rstrip() + "..."
             entry = f"- {hit.title}: {text}"
-            if total + len(entry) > KNOWLEDGE_MAX_CHARS:
+            room = self.max_chars - total - 1  # the joining newline
+            if room <= 0:
                 break
+            if len(entry) > room:
+                # Trim this entry to the room left, keeping it whenever there is any,
+                # so one large passage never yields an empty block.
+                ellipsis = "..." if room > 3 else ""
+                entry = entry[: room - len(ellipsis)].rstrip() + ellipsis
             lines.append(entry)
-            total += len(entry)
+            total += len(entry) + 1
         return "\n".join(lines) if len(lines) > 1 else ""
 
     # ---------------------------------------------------------- management

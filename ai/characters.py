@@ -242,14 +242,30 @@ class CharacterMouth:
 
         A character with no corpus (the default) simply has no reader, so its
         answers are unchanged. Isolation is structural: the reader resolves the
-        folder from the character's own owner key.
+        folder from the character's own owner key. The reader's injection limits
+        (how many passages, the block's size, one passage's size) come from the
+        character's own Knowledge section, so an edit in the Characters window -- or
+        a ``FAYD_KNOWLEDGE_*`` env var -- really makes the corpus more present.
         """
         try:
             from core.character_knowledge import CharacterKnowledge
 
-            self._knowledge = CharacterKnowledge(self.key, root=self._knowledge_root)
+            limits = self._knowledge_limits()
+            self._knowledge = CharacterKnowledge(self.key, root=self._knowledge_root, **limits)
         except (ValueError, OSError):
             self._knowledge = None
+
+    def _knowledge_limits(self) -> dict[str, int]:
+        """This character's Knowledge-section dials, for the corpus reader."""
+        config = self._config
+        if config is None:
+            return {}
+        knowledge = config.knowledge
+        return {
+            "limit": knowledge.limit,
+            "max_chars": knowledge.max_chars,
+            "passage_chars": knowledge.passage_chars,
+        }
 
     def _store_root(self) -> Any:
         """The data root the learning store should use (a test's, or the default)."""
@@ -281,6 +297,10 @@ class CharacterMouth:
         # again -- this is what makes a saved temperature or output cap take effect
         # without rebuilding the whole mouth.
         self.apply_model_settings()
+        # An APPLY may also have changed the Knowledge section, so rebuild the corpus
+        # reader with the new limits -- this is what makes a raised passage count or
+        # block size reach the very next answer.
+        self._build_knowledge()
         return self._config
 
     # ------------------------------------------------------------ personality

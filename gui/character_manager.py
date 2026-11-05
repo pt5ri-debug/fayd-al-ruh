@@ -33,6 +33,7 @@ from core.character_config import (
     LANGUAGES,
     LEARNING_MODES,
     SECTION_GENERAL,
+    SECTION_KNOWLEDGE,
     SECTION_LEARNING,
     SECTION_MODEL,
     SECTION_PERSONALITY,
@@ -244,7 +245,9 @@ class CharacterManagerService:
         def activate(applied: CharacterConfig) -> tuple[str, ...]:
             activated = [SECTION_GENERAL, SECTION_PERSONALITY, SECTION_LEARNING]
             if self._hot_apply_model(applied):
-                activated.append(SECTION_MODEL)
+                # ``reload_config`` re-reads the whole configuration, so it re-applies
+                # the Model *and* the Knowledge section to a live mouth at once.
+                activated.extend((SECTION_MODEL, SECTION_KNOWLEDGE))
             # The voice reaches an open window through the sink the window supplies
             # (a per-mouth window re-applies it to its reader); a window that is not
             # open picks it up when it next opens, so it is only named as activated
@@ -427,6 +430,21 @@ class CharacterManagerService:
         exchanges = len(learning.exchanges())
         used = 0.5 * (facts / MAX_FACTS) + 0.5 * (exchanges / MAX_EXCHANGES)
         return facts, exchanges, round(min(1.0, used), 6)
+
+    def knowledge_stats(self, key: str) -> dict:
+        """The owner's own corpus statistics (empty when there is no corpus).
+
+        Read-only and offline: the loader resolves the owner through the isolation
+        policy before any path, and an absent corpus reads as an empty dict rather
+        than raising, so the window can always draw its status line.
+        """
+        from core.character_knowledge import CharacterKnowledge
+        from core.learning_isolation import owner_for
+
+        try:
+            return CharacterKnowledge(owner_for(key), root=self._data_root).stats()
+        except (ValueError, OSError):
+            return {}
 
     def seed(
         self,
@@ -638,13 +656,24 @@ def _section_text(config: CharacterConfig, section: str) -> str:
             f"  pitch: {voice.pitch}\n  volume: {voice.volume}\n  active: {voice.active}"
         )
     learning = config.learning
-    return (
-        f"  enabled: {learning.enabled}\n  from the model: {learning.learn_from_model}\n"
-        f"  from the internet: {learning.learn_from_internet}\n"
-        f"  mode: {learning.mode}\n  verification threshold: {learning.verification_threshold}\n"
-        f"  confidence threshold: {learning.confidence_threshold}\n"
-        f"  sharing: {config.effective_sharing}"
-    )
+    if section == SECTION_LEARNING:
+        return (
+            f"  enabled: {learning.enabled}\n  from the model: {learning.learn_from_model}\n"
+            f"  from the internet: {learning.learn_from_internet}\n"
+            f"  mode: {learning.mode}\n  verification threshold: {learning.verification_threshold}\n"
+            f"  confidence threshold: {learning.confidence_threshold}\n"
+            f"  sharing: {config.effective_sharing}"
+        )
+    knowledge = config.knowledge
+    if section == SECTION_KNOWLEDGE:
+        return (
+            f"  passages per answer: {knowledge.limit}\n"
+            f"  block characters: {knowledge.max_chars}\n"
+            f"  passage characters: {knowledge.passage_chars}\n"
+            f"  train on the corpus: {config.effective_training}\n"
+            f"  training chunks: {knowledge.train_max_chunks}"
+        )
+    return f"  (unknown section {section!r})"
 
 
 def _stamp() -> str:

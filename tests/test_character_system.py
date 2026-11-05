@@ -824,6 +824,62 @@ def test_the_cli_set_refuses_an_invalid_change(data_root: Path) -> None:
     assert cli.main(["show", "vision", "--json"]) == 0
 
 
+def test_the_cli_set_applies_the_knowledge_dials(data_root: Path, capsys) -> None:
+    from cli import characters as cli
+
+    assert (
+        cli.main(
+            [
+                "set",
+                "vision",
+                "--knowledge-limit",
+                "10",
+                "--knowledge-max-chars",
+                "12000",
+                "--knowledge-passage-chars",
+                "900",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert cli.main(["show", "vision", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["knowledge"]["limit"] == 10
+    assert payload["knowledge"]["max_chars"] == 12000
+    assert payload["knowledge"]["passage_chars"] == 900
+
+
+def test_the_cli_set_refuses_an_out_of_range_knowledge_dial(data_root: Path) -> None:
+    from cli import characters as cli
+
+    assert cli.main(["set", "vision", "--knowledge-limit", "10000"]) == 4
+
+
+def test_the_cli_set_refuses_to_train_natashas_corpus(data_root: Path, capsys) -> None:
+    from cli import characters as cli
+
+    # The private character's switch is saved but its effective value stays off.
+    assert cli.main(["set", "natasha", "--train-on-corpus", "true"]) == 0
+    capsys.readouterr()
+    assert cli.main(["show", "natasha", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["knowledge"]["train_on_corpus"] is True
+    # The backend's rule beats the setting: the corpus path never reads her.
+    from ml.llm.corpus import training_corpus_keys
+
+    assert "natasha" not in training_corpus_keys()
+
+
+def test_the_cli_knowledge_reports_the_injection_dials(data_root: Path, capsys) -> None:
+    from cli import characters as cli
+
+    assert cli.main(["knowledge", "jarvis"]) == 0
+    out = capsys.readouterr().out
+    assert "injection:" in out
+    assert "training :" in out
+
+
 def test_the_cli_share_refuses_natasha(data_root: Path, capsys) -> None:
     from cli import characters as cli
 

@@ -200,8 +200,13 @@ back through a queue the UI thread drains.
   may share and who may not.
 * Choosing a character draws its **complete, editable page**, section by section:
   A. General · B. Personality · C. Language model · D. Voice settings ·
-  E. Learning settings · F. Memory and learning management.
-* Section F shows the character's own statistics, a search over its records, an
+  E. Learning settings · F. Knowledge corpus · G. Memory and learning management.
+* Section F governs how much of the character's **own knowledge corpus** reaches
+  its prompt (passages per answer, the block's character budget, and the size of
+  one passage) and carries the opt-in **training** switch — on for a shareable
+  character, refused for a private one. Raising the dials makes the character's
+  own knowledge more present in its replies without touching code.
+* Section G shows the character's own statistics, a search over its records, an
   export/backup, and a reset that must be **explicitly confirmed**.
 * **There is no control anywhere that lets one character edit another's private
   learning data** — each page reads and writes only the selected character's own

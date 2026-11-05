@@ -6549,3 +6549,54 @@ regression monitor each can refuse a change.
   network. Tests: `tests/test_self_improvement_phase9.py` (72 tests) and
   `tests/test_improve_cli.py` (12 tests). Docs: `docs/self_improvement/` (11 files)
   and `docs/architecture/PHASE_9_IMPLEMENTATION_REPORT.md`.
+
+- Phase (D) — **a character's own knowledge is more present, and can be trained
+  on** (the character-knowledge follow-up). A character answers from its own bulk
+  corpus by **retrieval** (the corpus is injected into its standing instruction
+  each turn, because a GGUF mouth cannot be fine-tuned in place), so the way to
+  make that knowledge "more present" is to inject more of it -- and the dials that
+  governed it were module constants, not configuration. Three pieces close it.
+  **(1) The injection limits are dials.** `core/character_knowledge.py` now
+  resolves them as explicit argument -> `FAYD_KNOWLEDGE_LIMIT` /
+  `FAYD_KNOWLEDGE_MAX_CHARS` / `FAYD_KNOWLEDGE_PASSAGE_CHARS` env -> the shipped
+  default, each **clamped** to a documented range (`LIMIT_RANGE` 1..50,
+  `MAX_CHARS_RANGE` 500..100000, `PASSAGE_CHARS_RANGE` 100..20000); a
+  `CharacterKnowledge` accepts per-reader `limit`/`max_chars`/`passage_chars`, and
+  `retrieve()`/`reference_block()` use them. The shipped defaults are **raised**
+  (4 -> 6 passages, 4000 -> 8000 characters, 1000 -> 1200 per passage) so a
+  character answers from more of its corpus out of the box. `reference_block` now
+  always carries the first passage (trimmed to fit) rather than yielding an empty
+  block when one passage exceeds the budget. **(2) A new configuration section.**
+  `core/character_config.KnowledgeConfig` (section **F. Knowledge corpus**) carries
+  `limit`/`max_chars`/`passage_chars`, the opt-in `train_on_corpus` switch, and
+  `train_max_chunks`, with the same validation every other section has
+  (`passage_chars <= max_chars`); it round-trips through `to_primitive`/
+  `from_primitive`, is rendered by `describe()`, has a `replace_knowledge()` editor,
+  and `effective_training` is the switch **and** `not is_private` -- so a
+  hand-edited file can never enable training for Natasha, exactly as
+  `effective_sharing` works. `ai.characters.CharacterMouth._build_knowledge()`
+  reads the character's own section, and `reload_config()` rebuilds the reader so
+  an APPLY is in force on the next answer. It is editable everywhere the other
+  sections are: the Characters window's new **F. Knowledge corpus** page (with an
+  honest note naming the private-character refusal and the real training next
+  step), the CLI `python -m cli characters set --knowledge-limit/--knowledge-max-
+  chars/--knowledge-passage-chars/--train-on-corpus/--train-chunks`, and
+  `knowledge` now prints the resolved dials and the effective training state.
+  **(3) An opt-in training path.** `ml.llm.corpus` gains
+  `character_knowledge_sentences`/`character_knowledge_units` (one document per
+  character, for an honest document-level split) and `knowledge_base_sentences`,
+  threaded through `build_corpus`/`corpus_units` and the
+  `include_character_knowledge`/`character_knowledge_chunks` flags;
+  `training_corpus_keys()` reads the **registry** (so an APPLY counts) and is
+  intersected with the shareable owners, and a private key is refused even when
+  named explicitly -- nothing is trained on a private corpus by any route. Wired
+  through `ml.llm.__main__`'s `--llm-character-corpus`/`--character-corpus-chunks`
+  and `ml.release`'s `TrainingConfig`/`--llm-character-corpus`/
+  `--character-corpus-chunks`, with the counts recorded in `corpus_summary` and
+  folded into `corpus_balance`. The held-out isolation gate gains a negative
+  control (`config-cannot-train-natasha`), and `tests/test_character_corpus_
+  training.py` (new) pins the opt-in, the chunk bound, the private refusal, the
+  `build_corpus`/`corpus_units` wiring, and the registry read; `tests/
+  test_character_knowledge.py` pins the dials, the resolution order, the clamping,
+  and the per-reader limits; `tests/test_character_system.py` pins the CLI. Gates:
+  ruff clean, mypy 1027 files OK, evaluation PASS, pytest green.
