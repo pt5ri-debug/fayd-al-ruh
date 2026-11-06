@@ -6758,8 +6758,10 @@ regression monitor each can refuse a change.
   `resume-gate` command, and `_run_id` gained microseconds so a resume started in
   the same second no longer collides ("the run id ... already exists"). **Resume is
   the default** everywhere and `--fresh` is the opt-out: `ml`, `ml.petroleum`,
-  `ml.llm`, `ml.release`, and the CLI/GUI menu entries (relabelled *... (continues
-  from the last run)*) all continue unless asked not to. The held-out gate
+  `ml.llm`, `ml.release`, and the CLI/GUI menu entries all continue unless asked
+  not to (the existing menu labels and their `--resume` arguments are unchanged,
+  and a new menu entry *Check that training resumes instead of restarting
+  (held-out gate)* runs the gate). The held-out gate
   `ml/resume_gate.py` (`training_resume_accuracy`) runs the **real** trainers on a
   fast task and checks six properties with **negative controls** -- the ledger
   round-trips and tolerates corruption, a changed config resets a record while a
