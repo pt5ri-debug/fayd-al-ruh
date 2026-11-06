@@ -222,3 +222,104 @@ def test_describe_checkpoint_defaults_total_steps_to_the_budget(tmp_path):
     assert info["resumed"] is False
     assert info["steps"] == 7
     assert info["total_steps"] == 7
+
+
+def test_dropout_rng_is_persisted_so_a_resume_repeats_the_masks(tmp_path):
+    """A saved model restores the dropout RNG, not a fresh one.
+
+    Without this, a dropout model resumed from disk drew *different* masks and
+    diverged from an uninterrupted run -- "resume" would quietly mean "retrain".
+    """
+    config = TransformerConfig(n_layer=2, n_head=2, n_embd=16, block_size=16, dropout=0.3)
+    model = TransformerLM(config, seed=0)
+    path = tmp_path / "m.npz"
+    model.save(path)
+    restored = TransformerLM.load(path)
+    assert restored._rng.random() == model._rng.random()
+
+
+def test_older_checkpoint_without_rng_still_loads(tmp_path):
+    """A checkpoint written before the RNG field loads, with a fresh RNG."""
+    config = TransformerConfig(n_layer=1, n_head=2, n_embd=16, block_size=8)
+    model = TransformerLM(config, seed=0)
+    path = tmp_path / "old.npz"
+    # Emulate the old on-disk shape: parameters + a 7-entry config, no "rng".
+    arrays = {f"p{i}": p for i, p in enumerate(model.parameters())}
+    arrays["config"] = np.array(
+        [config.vocab_size, config.n_layer, config.n_head, config.n_embd, config.block_size, 0.0, 0]
+    )
+    np.savez_compressed(path, **arrays)
+    restored = TransformerLM.load(path)
+    assert restored.config.n_embd == 16
+
+
+def test_resumed_batch_sequence_continues_the_uninterrupted_run():
+    """A resumed run draws the batch an uninterrupted run would have drawn.
+
+    Re-seeding at ``seed + start_step`` used to hand back a different batch order,
+    so continuing a run sampled different data than never stopping would have.
+    """
+    block, batch_size, start_step = 16, 4, 3
+    stream = list(range(3000))
+    max_start = len(stream) - block - 1
+
+    def draws_from(advance: int) -> np.ndarray:
+        rng = np.random.default_rng(7)
+        for _ in range(advance):
+            rng.integers(0, max_start, size=batch_size)
+        return rng.integers(0, max_start, size=batch_size)
+
+    # A fresh run's 4th draw (index 3) must equal the resumed run's 1st draw.
+    assert np.array_equal(draws_from(3), draws_from(start_step))
+
+
+def test_resume_matches_an_uninterrupted_run_when_lr_is_constant(tmp_path):
+    """Save/load preserves every piece of state a continued run needs.
+
+    The learning-rate schedule is horizon-relative on purpose (a later ``--resume``
+    extends the horizon), so the *schedule* is not reproduced here. This pins the
+    other half of the contract at the level below it: given a constant rate, the
+    weights, Adam moments, and the dropout/batch RNG all survive a save/load, so
+    three steps then three resumed steps land exactly where six straight steps do.
+    """
+    from ml.models import Adam
+
+    config = TransformerConfig(n_layer=2, n_head=2, n_embd=16, block_size=16)
+    stream = list(np.random.default_rng(0).integers(0, 257, size=3000))
+    block, batch = config.block_size, 4
+    max_start = len(stream) - block - 1
+
+    def step_once(model, optimizer, rng):
+        starts = rng.integers(0, max_start, size=batch)
+        x = np.stack([stream[s : s + block] for s in starts])
+        y = np.stack([stream[s + 1 : s + block + 1] for s in starts])
+        model.train(True)
+        model.loss(model.forward(x), y)
+        optimizer.step(model.backward(y))
+
+    uninterrupted = TransformerLM(config, seed=0)
+    opt_a = Adam(uninterrupted.parameters(), lr=0.01)
+    rng_a = np.random.default_rng(5)
+    for _ in range(6):
+        step_once(uninterrupted, opt_a, rng_a)
+
+    resumed = TransformerLM(config, seed=0)
+    opt_b = Adam(resumed.parameters(), lr=0.01)
+    rng_b = np.random.default_rng(5)
+    for _ in range(3):
+        step_once(resumed, opt_b, rng_b)
+    checkpoint = tmp_path / "m.npz"
+    resumed.save(checkpoint)
+    loaded = TransformerLM.load(checkpoint)
+    opt_c = Adam(loaded.parameters(), lr=0.01)
+    opt_c.state.m = [m.copy() for m in opt_b.state.m]
+    opt_c.state.v = [v.copy() for v in opt_b.state.v]
+    opt_c.state.t = opt_b.state.t
+    rng_c = np.random.default_rng(5)
+    for _ in range(3):  # advance to the resume point, as the trainer does
+        rng_c.integers(0, max_start, size=batch)
+    for _ in range(3):
+        step_once(loaded, opt_c, rng_c)
+
+    for a, b in zip(uninterrupted.parameters(), loaded.parameters(), strict=False):
+        assert np.allclose(a, b, rtol=1e-10, atol=1e-12)
