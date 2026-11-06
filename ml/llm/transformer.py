@@ -13,6 +13,7 @@ be, a frontier model.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from ml.llm.tokenizer import VOCAB_SIZE
 from ml.models import Adam
 
 _EPS = 1e-5
+_GELU_C = float(np.sqrt(2.0 / np.pi))
 
 
 @dataclass(frozen=True)
@@ -79,16 +81,19 @@ PRESETS: dict[str, dict] = {
 
 
 def _gelu(x: np.ndarray) -> np.ndarray:
-    c = np.sqrt(2.0 / np.pi)
-    return 0.5 * x * (1.0 + np.tanh(c * (x + 0.044715 * x**3)))
+    # ``x*x*x`` rather than ``x**3``: numpy routes an integer power through the
+    # slow general ``power`` ufunc, and this activation dominates the step.
+    c = _GELU_C
+    return 0.5 * x * (1.0 + np.tanh(c * (x + 0.044715 * x * x * x)))
 
 
 def _gelu_grad(x: np.ndarray) -> np.ndarray:
-    c = np.sqrt(2.0 / np.pi)
-    inner = c * (x + 0.044715 * x**3)
+    c = _GELU_C
+    x2 = x * x
+    inner = c * (x + 0.044715 * x2 * x)
     tanh = np.tanh(inner)
-    sech2 = 1.0 - tanh**2
-    return 0.5 * (1.0 + tanh) + 0.5 * x * sech2 * c * (1.0 + 3 * 0.044715 * x**2)
+    sech2 = 1.0 - tanh * tanh
+    return 0.5 * (1.0 + tanh) + 0.5 * x * sech2 * c * (1.0 + 3 * 0.044715 * x2)
 
 
 def _softmax_rows(x: np.ndarray) -> np.ndarray:
@@ -252,7 +257,8 @@ class TransformerLM:
             x = residual + attn_out
             residual = x
             normed2, ln2_cache = _layer_norm(x, layer.ln2_w, layer.ln2_b)
-            hidden = _gelu(normed2 @ layer.fc_w + layer.fc_b)
+            pre_gelu = normed2 @ layer.fc_w + layer.fc_b
+            hidden = _gelu(pre_gelu)
             hidden, mask = self._dropout(hidden, p)
             cache["drop_masks"].append(mask)
             fc2_out = hidden @ layer.fc2_w + layer.fc2_b
@@ -264,6 +270,7 @@ class TransformerLM:
                     "attn": attn_cache,
                     "ln2": ln2_cache,
                     "normed2": normed2,
+                    "pre_gelu": pre_gelu,
                     "hidden": hidden,
                 }
             )
@@ -320,7 +327,9 @@ class TransformerLM:
             grads[f"fc2_w_{index}"] = layer_cache["hidden"].reshape(-1, layer_cache["hidden"].shape[-1]).T @ grad_x.reshape(-1, grad_x.shape[-1])
             grads[f"fc2_b_{index}"] = grad_x.reshape(-1, grad_x.shape[-1]).sum(axis=0)
             grad_hidden = _apply_mask(grad_x @ layer.fc2_w.T, masks[2 + 2 * index])
-            grad_pre_gelu = grad_hidden * _gelu_grad(layer_cache["normed2"] @ layer.fc_w + layer.fc_b)
+            # Reuse the forward pass's pre-activation instead of recomputing the
+            # ``normed2 @ fc_w + fc_b`` matmul a second time in the backward pass.
+            grad_pre_gelu = grad_hidden * _gelu_grad(layer_cache["pre_gelu"])
             grads[f"fc_w_{index}"] = layer_cache["normed2"].reshape(-1, layer_cache["normed2"].shape[-1]).T @ grad_pre_gelu.reshape(-1, grad_pre_gelu.shape[-1])
             grads[f"fc_b_{index}"] = grad_pre_gelu.reshape(-1, grad_pre_gelu.shape[-1]).sum(axis=0)
             grad_normed2 = grad_pre_gelu @ layer.fc_w.T
@@ -420,6 +429,10 @@ class TransformerLM:
             ],
             dtype=np.float64,
         )
+        # Persist the dropout RNG so a resumed run draws the same masks an
+        # uninterrupted run would: without this a dropout model resumes to a
+        # *different* trajectory, and "resume" would quietly mean "retrain".
+        arrays["rng"] = np.array([json.dumps(self._rng.bit_generator.state)])
         np.savez_compressed(target, **arrays)  # type: ignore[arg-type]
 
     @classmethod
@@ -442,6 +455,8 @@ class TransformerLM:
         model = cls(config)
         for i, param in enumerate(model.parameters()):
             param[...] = data[f"p{i}"]
+        if "rng" in data.files:
+            model._rng.bit_generator.state = json.loads(str(data["rng"][0]))
         model.eval()
         return model
 
@@ -555,12 +570,18 @@ def train_language_model(
     if start_step < 0:
         raise ValueError("start_step must not be negative.")
     total_steps = start_step + steps
-    rng = np.random.default_rng(seed + start_step)
+    max_start = len(token_stream) - block - 1
+    # Seed once and advance to the resume point, so the batch sequence of a
+    # resumed run is exactly the uninterrupted run's sequence. Re-seeding at
+    # ``seed + start_step`` drew a *different* batch order after a resume, which
+    # made "resume" quietly mean "continue differently".
+    rng = np.random.default_rng(seed)
+    for _ in range(start_step):
+        rng.integers(0, max_start, size=batch_size)
     optimizer = optimizer or Adam(model.parameters(), lr=learning_rate)
     if len(optimizer.params) != len(model.parameters()):
         raise ValueError("Optimiser state does not match the model's parameters.")
     report = TrainReport(steps=steps)
-    max_start = len(token_stream) - block - 1
     model.train(True)
     for step in range(start_step + 1, total_steps + 1):
         lr = _lr_at(step, steps=total_steps, base_lr=learning_rate, warmup=warmup)

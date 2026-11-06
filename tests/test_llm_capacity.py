@@ -212,3 +212,47 @@ def test_encode_documents_opens_each_with_bos():
     stream = encode_documents(ByteTokenizer(), ["a", "b"])
     assert stream[0] == BOS_ID
     assert BOS_ID in stream[2:]
+
+
+def test_gelu_is_numerically_exact_and_gradient_is_correct():
+    """The GELU fast path (``x*x*x``) must match the reference formula.
+
+    ``x*x*x`` and ``x**3`` differ by at most one unit in the last place (float64
+    rounding), never more, so the activation and its gradient agree to machine
+    precision while the step is several times faster.
+    """
+    from ml.llm.transformer import _gelu, _gelu_grad
+
+    x = np.linspace(-6.0, 6.0, 2001)
+    c = np.sqrt(2.0 / np.pi)
+    reference = 0.5 * x * (1.0 + np.tanh(c * (x + 0.044715 * x**3)))
+    assert np.allclose(_gelu(x), reference, rtol=0.0, atol=1e-12)
+
+    inner = c * (x + 0.044715 * x**3)
+    tanh = np.tanh(inner)
+    sech2 = 1.0 - tanh**2
+    reference_grad = 0.5 * (1.0 + tanh) + 0.5 * x * sech2 * c * (1.0 + 3 * 0.044715 * x**2)
+    assert np.allclose(_gelu_grad(x), reference_grad, rtol=0.0, atol=1e-12)
+
+
+def test_backward_reuses_the_forward_pre_activation():
+    """The backward pass reads the cached pre-GELU, not a recomputed matmul."""
+    config = TransformerConfig(n_layer=2, n_head=2, n_embd=16, block_size=8)
+    model = TransformerLM(config, seed=0)
+    model.train(True)
+    x = np.array([[1, 2, 3, 4, 5, 6, 7, 8]])
+    y = np.array([[2, 3, 4, 5, 6, 7, 8, 9]])
+    model.forward(x)
+    assert "pre_gelu" in model._cache["layers"][0]
+    # The cached activation is exactly the one the forward pass used.
+    layer = model.layers[0]
+    expected = model._cache["layers"][0]["normed2"] @ layer.fc_w + layer.fc_b
+    assert np.array_equal(model._cache["layers"][0]["pre_gelu"], expected)
+    model.loss(model.forward(x), y)
+    grads = model.backward(y)
+    assert len(grads) == len(model.parameters())
+
+
+def test_grad_check_still_passes_on_the_fast_gelu_path():
+    tied = TransformerConfig(n_layer=2, n_head=2, n_embd=16, block_size=8, tie_weights=True)
+    assert _grad_check(tied) < 1e-5
