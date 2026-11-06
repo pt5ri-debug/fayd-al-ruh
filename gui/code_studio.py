@@ -39,6 +39,33 @@ from core.coder_model import (
     CoderUnavailable,
     coder_status,
 )
+from core.studio_files import (
+    BatchReport,
+    FileEngine,
+    NoteScan,
+    OutlineReport,
+    TreeEntry,
+)
+from core.studio_git import (
+    BranchInfo,
+    CommitInfo,
+    ConflictReport,
+    GitEngine,
+    GitError,
+    RemoteInfo,
+    StashEntry,
+    StatusEntry,
+)
+from core.studio_tasks import (
+    CommandOutcome,
+    CommandRunner,
+    CommandSpec,
+    ProjectProfile,
+    TaskError,
+    catalog_for,
+    custom_spec,
+    detect_project,
+)
 
 
 @dataclass(frozen=True)
@@ -60,6 +87,11 @@ class StudioState:
     base_branch: str = "main"
     base_revision: str = ""
     backend: BackendStatus | None = None
+    #: What kind of checkout this is (python/node/rust/...), for the task menu.
+    project: ProjectProfile | None = None
+    #: The current branch of the main checkout, and whether it is clean.
+    current_branch: str = ""
+    dirty: bool = False
 
 
 @dataclass(frozen=True)
@@ -103,13 +135,21 @@ class CodeStudioService:
         check_command: tuple[str, ...] | None = None,
         max_steps: int = 12,
         prefer_in_process: bool = True,
+        runner: CommandRunner | None = None,
     ) -> None:
+        self.root = Path(root)
         self.studio = studio or CodeStudio(root)
         self._client = client
         self._explicit_client = client is not None
         self.check_command = check_command or default_check_command(root)
         self.max_steps = max_steps
         self.prefer_in_process = prefer_in_process
+        # The three engines the window and the CLI both drive: git, the file
+        # tree, and the project's own commands. Each is a thin wrapper, built
+        # once, so no surface re-implements the logic.
+        self.git = GitEngine(self.root)
+        self.files = FileEngine(self.studio)
+        self.runner = runner or CommandRunner()
 
     # --- model ----------------------------------------------------------
     def resolve_client(self) -> CoderClient:
@@ -194,6 +234,9 @@ class CodeStudioService:
             base_branch=self.studio.base_branch,
             base_revision=base_revision,
             backend=self.backend(),
+            project=detect_project(self.root),
+            current_branch=self.git.current_branch() if repository else "",
+            dirty=(not self.git.is_clean()) if repository else False,
         )
 
     # --- workspaces -----------------------------------------------------
@@ -394,6 +437,272 @@ class CodeStudioService:
         )
         return StudioReport(result.ok, result.message, detail=detail)
 
+    # --- git (per workspace) --------------------------------------------
+    def _workspace_git(self, slug: str) -> GitEngine:
+        """A git engine pointed at one workspace's worktree."""
+        return GitEngine(self.workspace(slug).path)
+
+    def git_status(self, slug: str) -> tuple[StatusEntry, ...]:
+        """The workspace's ``git status``, as structured entries."""
+        try:
+            return self._workspace_git(slug).status()
+        except (StudioError, GitError):
+            return ()
+
+    def git_log(self, slug: str, *, limit: int = 30, path: str = "") -> tuple[CommitInfo, ...]:
+        """The workspace's recent commits, newest first."""
+        try:
+            return self._workspace_git(slug).log(limit=limit, path=path)
+        except (StudioError, GitError):
+            return ()
+
+    def git_branches(self, slug: str, *, include_remote: bool = True) -> tuple[BranchInfo, ...]:
+        """The branches in the workspace's repository, with tracking state."""
+        try:
+            return self._workspace_git(slug).branches(include_remote=include_remote)
+        except (StudioError, GitError):
+            return ()
+
+    def git_remotes(self, slug: str) -> tuple[RemoteInfo, ...]:
+        """The workspace's configured remotes, each URL sanitized of any credential."""
+        try:
+            return self._workspace_git(slug).remotes()
+        except (StudioError, GitError):
+            return ()
+
+    def git_stash_list(self, slug: str) -> tuple[StashEntry, ...]:
+        try:
+            return self._workspace_git(slug).stash_list()
+        except (StudioError, GitError):
+            return ()
+
+    def git_conflicts(self, slug: str) -> ConflictReport:
+        try:
+            return self._workspace_git(slug).conflicts()
+        except (StudioError, GitError):
+            return ConflictReport()
+
+    def git_show(self, slug: str, ref: str = "HEAD", *, stat: bool = True) -> StudioReport:
+        try:
+            text = self._workspace_git(slug).show(ref, stat=stat)
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        return StudioReport(True, f"Showing {ref}.", detail=text)
+
+    def git_blame(self, slug: str, path: str) -> StudioReport:
+        try:
+            text = self._workspace_git(slug).blame(path)
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        return StudioReport(True, f"Blame for {path}.", detail=text)
+
+    def stage(self, slug: str, *paths: str) -> StudioReport:
+        """Stage files (or everything) in the workspace."""
+        try:
+            result = self._workspace_git(slug).stage(*paths)
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        target = ", ".join(paths) if paths else "everything"
+        return StudioReport(result.ok, f"Staged {target}." if result.ok else result.summary())
+
+    def unstage(self, slug: str, *paths: str) -> StudioReport:
+        try:
+            result = self._workspace_git(slug).unstage(*paths)
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        target = ", ".join(paths) if paths else "everything"
+        return StudioReport(result.ok, f"Unstaged {target}." if result.ok else result.summary())
+
+    def commit(self, slug: str, message: str) -> StudioReport:
+        """Commit the workspace's staged changes (author supplied if unset)."""
+        try:
+            result = self._workspace_git(slug).commit(message)
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        if result.ok:
+            self.studio._invalidate_checks(self.workspace(slug))
+            return StudioReport(True, f"Committed: {result.stdout.splitlines()[0] if result.stdout else message}")
+        return StudioReport(False, result.summary())
+
+    def discard_changes(self, slug: str, *paths: str) -> StudioReport:
+        """Discard worktree changes (``git restore``) in the workspace."""
+        try:
+            result = self._workspace_git(slug).restore(*paths)
+            self.studio._invalidate_checks(self.workspace(slug))
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        target = ", ".join(paths) if paths else "all files"
+        return StudioReport(result.ok, f"Discarded changes in {target}." if result.ok else result.summary())
+
+    def stash(self, slug: str, message: str = "", *, include_untracked: bool = False) -> StudioReport:
+        try:
+            result = self._workspace_git(slug).stash(message, include_untracked=include_untracked)
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        return StudioReport(result.ok, result.stdout.strip() or result.summary())
+
+    def stash_pop(self, slug: str, index: int = 0) -> StudioReport:
+        try:
+            result = self._workspace_git(slug).stash_pop(index)
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        return StudioReport(result.ok, result.stdout.strip() or result.summary())
+
+    def create_branch(self, slug: str, name: str, *, checkout: bool = True) -> StudioReport:
+        """Create a branch in the workspace's repository."""
+        try:
+            result = self._workspace_git(slug).create_branch(name, checkout=checkout)
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        return StudioReport(result.ok, f"Created branch `{name}`." if result.ok else result.summary())
+
+    def switch_branch(self, slug: str, name: str) -> StudioReport:
+        try:
+            result = self._workspace_git(slug).switch_branch(name)
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        return StudioReport(result.ok, f"Switched to `{name}`." if result.ok else result.summary())
+
+    def apply_patch(self, slug: str, patch_text: str, *, check: bool = False) -> StudioReport:
+        """Apply a unified diff to the workspace (a dry run with ``check``)."""
+        try:
+            result = self._workspace_git(slug).apply_patch(patch_text, check=check)
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        return StudioReport(result.ok, result.message, detail=result.detail)
+
+    def export_patch(self, slug: str) -> StudioReport:
+        """The workspace's whole change as a patch that can be saved and re-applied."""
+        try:
+            text = self._workspace_git(slug).diff()
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        return StudioReport(True, "Patch ready.", detail=text)
+
+    def remote_action(self, slug: str, action: str, *, remote: str = "origin") -> StudioReport:
+        """Fetch/pull/push the workspace's repository.
+
+        The caller must have passed the approval gate first: this method only
+        performs the action, so a network call can never happen by accident.
+        """
+        try:
+            engine = self._workspace_git(slug)
+            if action == "fetch":
+                result = engine.fetch(remote=remote)
+            elif action == "pull":
+                result = engine.pull(remote=remote)
+            elif action == "push":
+                result = engine.push(remote=remote, branch=engine.current_branch())
+            else:
+                return StudioReport(False, f"Unknown remote action {action!r}.")
+        except (StudioError, GitError) as error:
+            return StudioReport(False, str(error))
+        return StudioReport(result.ok, f"{action} {remote}." if result.ok else result.summary())
+
+    # --- files (per workspace) ------------------------------------------
+    def file_tree(self, slug: str, *, relative: str = "") -> tuple[TreeEntry, ...]:
+        """The workspace's nested editable-file tree."""
+        try:
+            return self.files.tree(self.workspace(slug), relative=relative)
+        except (StudioError, GitError):
+            return ()
+
+    def create_file(self, slug: str, relative: str, content: str = "") -> StudioReport:
+        try:
+            written = self.files.create_file(self.workspace(slug), relative, content)
+        except StudioError as error:
+            return StudioReport(False, str(error))
+        return StudioReport(True, f"Created {relative} ({written} bytes).")
+
+    def create_directory(self, slug: str, relative: str) -> StudioReport:
+        try:
+            self.files.create_directory(self.workspace(slug), relative)
+        except StudioError as error:
+            return StudioReport(False, str(error))
+        return StudioReport(True, f"Created folder {relative}.")
+
+    def rename_file(self, slug: str, relative: str, new_relative: str) -> StudioReport:
+        try:
+            moved = self.files.rename(self.workspace(slug), relative, new_relative)
+        except StudioError as error:
+            return StudioReport(False, str(error))
+        return StudioReport(True, f"Renamed {relative} to {moved}.")
+
+    def copy_file(self, slug: str, relative: str, new_relative: str) -> StudioReport:
+        try:
+            made = self.files.copy(self.workspace(slug), relative, new_relative)
+        except StudioError as error:
+            return StudioReport(False, str(error))
+        return StudioReport(True, f"Copied {relative} to {made}.")
+
+    def delete_file(self, slug: str, relative: str, *, directory: bool = False) -> StudioReport:
+        try:
+            if directory:
+                removed = self.files.delete_directory(self.workspace(slug), relative)
+                return StudioReport(True, f"Deleted folder {relative} ({removed} file(s)).")
+            self.files.delete(self.workspace(slug), relative)
+        except StudioError as error:
+            return StudioReport(False, str(error))
+        return StudioReport(True, f"Deleted {relative}.")
+
+    def replace_across(
+        self, slug: str, old: str, new: str, *, relative: str = "", apply: bool = False
+    ) -> BatchReport:
+        """Replace a literal string across the workspace, previewing by default."""
+        try:
+            return self.files.replace_across(
+                self.workspace(slug), old, new, relative=relative, apply=apply
+            )
+        except StudioError as error:
+            return BatchReport(False, str(error))
+
+    def outline(self, slug: str, relative: str) -> OutlineReport:
+        try:
+            return self.files.outline(self.workspace(slug), relative)
+        except StudioError as error:
+            return OutlineReport(relative, error=str(error))
+
+    def scan_notes(self, slug: str, *, relative: str = "") -> NoteScan:
+        try:
+            return self.files.scan_notes(self.workspace(slug), relative=relative)
+        except StudioError:
+            return NoteScan()
+
+    # --- tasks (project commands) ---------------------------------------
+    def project_profile(self) -> ProjectProfile:
+        return detect_project(self.root)
+
+    def command_catalog(self) -> tuple[CommandSpec, ...]:
+        """The development commands that fit this project."""
+        return catalog_for(self.root, check_command=self.check_command)
+
+    def run_command(
+        self,
+        slug: str,
+        key: str,
+        *,
+        on_line: Callable[[str], None] | None = None,
+        command_line: str = "",
+    ) -> CommandOutcome:
+        """Run one catalog command (or a custom one) inside the workspace.
+
+        The command runs in the workspace's own directory, so a test or a lint
+        sees the change and not the main checkout. A custom command is parsed
+        with :func:`shlex.split` and never handed to a shell.
+        """
+        if key == "custom":
+            spec = custom_spec(command_line)
+        else:
+            found = next((s for s in self.command_catalog() if s.key == key), None)
+            if found is None:
+                raise TaskError(f"No task named {key!r} fits this project.")
+            spec = found
+        return self.runner.run(spec, cwd=self.workspace(slug).path, on_line=on_line)
+
+    def cancel_command(self) -> None:
+        """Stop the running command, if any."""
+        self.runner.cancel()
+
     # --- in-process model management -------------------------------------
     def available_models(self) -> tuple[tuple[str, str, float, str], ...]:
         """The coding models ``download_model`` can fetch, for a menu."""
@@ -424,8 +733,21 @@ class CodeStudioService:
 
 
 __all__ = [
+    "BatchReport",
+    "BranchInfo",
     "ChangeResult",
     "CodeStudioService",
+    "CommandOutcome",
+    "CommandSpec",
+    "CommitInfo",
+    "ConflictReport",
+    "NoteScan",
+    "OutlineReport",
+    "ProjectProfile",
+    "RemoteInfo",
+    "StashEntry",
+    "StatusEntry",
     "StudioReport",
     "StudioState",
+    "TreeEntry",
 ]

@@ -1,29 +1,42 @@
-"""The Code Studio window: change the project's own code from a chat, test it, apply it.
+"""The Code Studio window: a complete, local IDE for the project's own code.
 
-This is the project's "code host in a window". It borrows the model a developer
-already uses on a code host -- a branch per change, reviewed and applied when it is
-good -- and implements it with the project's own ``git``:
+This is the project's "code host and IDE in a window". It borrows the model a
+developer already uses on a code host -- a branch per change, reviewed and applied
+when it is good -- and implements it with the project's own ``git``, and it puts
+the rest of a developer's day beside it, so the whole workflow happens here with
+no cloud service:
 
 * **A workspace is created for you.** Opening the Studio opens a workspace (a
   ``git worktree`` under ``data/studio/workspaces/<slug>`` on its own
   ``studio/<slug>`` branch, cut from ``main``), named automatically in order:
-  ``PR1``, ``PR2``, ... You never have to invent a name. Everything you and the
-  coding model change happens there, so the running checkout is never touched and
-  a broken change cannot stop the program.
+  ``PR1``, ``PR2``, ... Everything you and the coding model change happens there,
+  so the running checkout is never touched and a broken change cannot stop the
+  program.
 * **You just describe the change in the chat.** Type what you want changed in the
-  project's own code in the box below and press *Send*. *Start a new change*
-  opens the next workspace when you want a fresh one.
-* **The coding model edits it, live.** A local coding model
-  (``qwen2.5-coder:7b`` through Ollama by default) reads and writes files *inside
-  the workspace only*, through a strict JSON protocol. The request appears as the
-  user's own message, and every step the model takes is shown in the transcript as
-  it happens -- first by first, like the project's own chat window -- so its work
-  is reviewable rather than magic.
+  project's own code in the box below and press *Send*. *New change* opens the
+  next workspace.
+* **The coding model edits it, live.** A local coding model reads and writes files
+  *inside the workspace only*, through a strict JSON protocol. The request appears
+  as the user's own message, and every step the model takes is shown in the
+  transcript as it happens -- first by first, so its work is reviewable.
+* **A developer's whole toolbox is on the left.** The tool column groups:
+  *Workspaces* (every change, its branch, its state), *Explorer* (the workspace's
+  file tree, with new file / new folder / rename / delete), *Editor* (open a file,
+  save it, read its outline), *Find & Replace* (search the project, and a
+  project-wide literal replace with a preview), *Source Control* (git status,
+  stage/unstage, commit, discard, stash, branches, history, diff, blame, and —
+  only when you approve it — fetch/pull/push), *Tasks* (run the project's own
+  tests, lint, type check, evaluation gate, build, or a command of your own, with
+  live output), *Notes* (a TODO/FIXME scan), and *Review and apply* (the merge
+  gate).
 * **Test, then ask to apply.** When the model finishes, the project's own test
   command runs *inside the workspace*. Only when it passes does the window ask for
-  your approval to apply the change to the real project (the **Apply to the
-  project** button); a failing or unapproved change never reaches it. *Show diff*
-  is the change as a unified diff; *Discard change* throws it away.
+  your approval to apply the change to the real project; a failing or unapproved
+  change never reaches it.
+
+Everything runs **locally**: the model is local, git is local, the tasks are the
+project's own commands, and the one network action (a remote fetch/pull/push) is
+gated behind an explicit confirmation. Nothing here calls a cloud service.
 
 The window is a thin view over :class:`gui.code_studio.CodeStudioService`, so all
 of the logic is testable with no display. Tk is imported lazily with the rest of
@@ -42,6 +55,7 @@ from typing import Any, Literal
 
 from core.answer_provenance import AnswerProvenance
 from core.coder_model import DEFAULT_CODER_MODEL, PULL_HINT
+from core.studio_tasks import CommandSpec
 
 from gui import clipboard, rich_text
 from gui import markdown as md
@@ -60,6 +74,9 @@ _COLUMN_MAX = 820
 #: A message taller than this scrolls inside its own card rather than the column.
 _MAX_BUBBLE_LINES = 40
 
+#: The width of the left tool column.
+_SIDEBAR_WIDTH = 300
+
 #: A sentinel queued when the model has finished and the checks are about to run,
 #: so the live bubble can say so. It is identity-compared, never a real step.
 CHECKS_MARKER = object()
@@ -75,7 +92,9 @@ SUBTITLE = (
 HONESTY_LINE = (
     "Type the change you want in the box below and press Send. The coding model's edits are "
     "real file writes, but they happen in an isolated workspace and nothing reaches the "
-    "project until the checks pass and you approve applying the change."
+    "project until the checks pass and you approve applying the change. The panels on the "
+    "left are the rest of a developer's day: browse and edit files, search the whole project, "
+    "review git, and run the project's own commands — all inside this workspace."
 )
 
 #: The default coding model, shown in the status line so the choice is explicit.
@@ -83,7 +102,7 @@ DEFAULT_MODEL_NOTE = f"Coding model: qwen2.5-coder:7b (Ollama). If it is missing
 
 
 class CodeStudioDialog(ThemedDialog):
-    """A window for editing, testing, and merging changes to the project."""
+    """A complete local IDE for editing, testing, and applying project changes."""
 
     def __init__(
         self,
@@ -123,9 +142,13 @@ class CodeStudioDialog(ThemedDialog):
         # Live agent steps, pushed from the worker thread and drained on the UI
         # thread (Tk is not thread-safe), so the model's work appears as it happens.
         self._steps: queue.Queue[Any] = queue.Queue()
+        # Live task output lines, drained on the UI thread into the task's own
+        # transcript row (Tk is not thread-safe, so the worker only queues).
+        self._task_lines: queue.Queue[str] = queue.Queue()
         self._live: tk.Text | None = None
-        # Set when a run finished with a passing change, so the window can offer to
-        # apply it to the real project (the user's explicit approval).
+        self._task_running = False
+        # The workspace a finished run left ready to apply, so the approval applies
+        # the change the user was just shown rather than whatever is selected now.
         self._pending_apply: str = ""
         # True while the automatic first workspace is being opened, so its message
         # does not overwrite one the user is reading.
@@ -135,14 +158,22 @@ class CodeStudioDialog(ThemedDialog):
         self._quiet_job = False
         # The slug being applied, so the result message names it after the run.
         self._applying_slug = ""
+        # The catalog tasks, in menu order, so a selection maps back to a spec.
+        self._task_specs: list[CommandSpec] = []
 
         self._request_var = tk.StringVar(value="")
+        self._find_var = tk.StringVar(value="")
+        self._replace_var = tk.StringVar(value="")
+        self._scope_var = tk.StringVar(value="")
+        self._commit_var = tk.StringVar(value="")
+        self._branch_var = tk.StringVar(value="")
+        self._custom_task_var = tk.StringVar(value="")
 
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("1180x608")
-        self.window.minsize(900, 600)
+        self.window.geometry("1280x720")
+        self.window.minsize(1000, 640)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -154,20 +185,19 @@ class CodeStudioDialog(ThemedDialog):
 
     # -- layout -----------------------------------------------------------
 
-    # -- layout -----------------------------------------------------------
-
     def _build(self) -> None:
         """Assemble the window the way the chat window is assembled.
 
-        A slim header, a sidebar for the workspace, and a centred conversation
-        column with its composer pinned to the bottom -- the same shape and the
-        same theme tokens as the main chat window, so the Studio reads as part of
-        the program rather than a separate tool.
+        A slim header, a left tool column, and a centred conversation column with
+        its composer pinned to the bottom -- the same shape and the same theme
+        tokens as the main chat window, so the Studio reads as part of the program
+        rather than a separate tool.
         """
         theme = self.theme
         # Set the first time the model's work is shown; the tests read them after.
         self._trace: Any = None
         self._review: Any = None
+        self._output: Any = None
         self._row_frames: list[tk.Frame] = []
 
         self._build_header()
@@ -175,7 +205,7 @@ class CodeStudioDialog(ThemedDialog):
         body = tk.Frame(self.window, bg=theme.base)
         body.pack(fill="both", expand=True)
         body.rowconfigure(0, weight=1)
-        body.columnconfigure(0, weight=0, minsize=280)
+        body.columnconfigure(0, weight=0, minsize=_SIDEBAR_WIDTH)
         body.columnconfigure(1, weight=1)
 
         self._build_sidebar(body)
@@ -215,7 +245,7 @@ class CodeStudioDialog(ThemedDialog):
             parent,
             theme=self.theme,
             typography=self._type,
-            width=280,
+            width=_SIDEBAR_WIDTH,
             scope="code-studio",
             state_root=getattr(self.service, "data_root", None),
         )
@@ -237,15 +267,33 @@ class CodeStudioDialog(ThemedDialog):
 
         self._status_line = tk.Label(
             column.body, text=DEFAULT_MODEL_NOTE, bg=self.theme.surface, fg=self.theme.text_dim,
-            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=248,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=264,
         )
         self._status_line.pack(fill="x", padx=14, pady=(0, 2))
 
+        self._project_line = tk.Label(
+            column.body, text="", bg=self.theme.surface, fg=self.theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=264,
+        )
+        self._project_line.pack(fill="x", padx=14, pady=(0, 8))
+
+        self._build_workspaces_section(column)
+        self._build_explorer_section(column)
+        self._build_editor_section(column)
+        self._build_find_section(column)
+        self._build_source_control_section(column)
+        self._build_tasks_section(column)
+        self._build_notes_section(column)
+        self._build_review_section(column)
+
+    # -- workspaces -------------------------------------------------------
+
+    def _build_workspaces_section(self, column: SidebarColumn) -> None:
         sidebar = column.add("workspaces", "Workspaces", icon="🗂")
         self._workspace_list = tk.Listbox(
             sidebar, bg=self.theme.base, fg=self.theme.foreground, selectbackground=self.theme.primary,
             selectforeground=self.theme.primary_foreground, relief="flat", highlightthickness=0,
-            font=self._list_type.font("xs"), height=6, activestyle="none",
+            font=self._list_type.font("xs"), height=5, activestyle="none",
         )
         self._workspace_list.pack(fill="x", padx=14, pady=(4, 6))
         self._workspace_list.bind("<<ListboxSelect>>", self._on_workspace_select)
@@ -253,43 +301,234 @@ class CodeStudioDialog(ThemedDialog):
         tk.Label(
             sidebar, text="Workspaces are named for you, in order (PR1, PR2, …).",
             bg=self.theme.surface, fg=self.theme.text_secondary, font=self._list_type.font("2xs"),
-            anchor="w", justify="left", wraplength=248,
+            anchor="w", justify="left", wraplength=264,
         ).pack(fill="x", padx=14, pady=(0, 4))
         row = tk.Frame(sidebar, bg=self.theme.surface)
         row.pack(fill="x", padx=14, pady=(0, 6))
-        self._button(row, "Start a new change", self._on_new_change).pack(side="left")
+        self._button(row, "New change", self._on_new_change).pack(side="left")
         self._button(row, "Refresh", self.refresh).pack(side="left", padx=(6, 0))
+        self._button(row, "Discard", self._on_discard).pack(side="left", padx=(6, 0))
 
         self._workspace_label = tk.Label(
             sidebar, text="No workspace selected.", bg=self.theme.surface, fg=self.theme.text_secondary,
-            font=self._type.font("xs", weight="bold"), anchor="w", justify="left", wraplength=248,
+            font=self._type.font("xs", weight="bold"), anchor="w", justify="left", wraplength=264,
         )
-        self._workspace_label.pack(fill="x", padx=14, pady=(0, 2))
+        self._workspace_label.pack(fill="x", padx=14, pady=(0, 10))
 
-        files = column.add("files", "Files", icon="📄")
+    # -- explorer ---------------------------------------------------------
+
+    def _build_explorer_section(self, column: SidebarColumn) -> None:
+        explorer = column.add("explorer", "Explorer", icon="📁")
         self._file_list = tk.Listbox(
-            files, bg=self.theme.base, fg=self.theme.foreground, selectbackground=self.theme.primary,
+            explorer, bg=self.theme.base, fg=self.theme.foreground, selectbackground=self.theme.primary,
             selectforeground=self.theme.primary_foreground, relief="flat", highlightthickness=0,
-            font=self._list_type.mono("2xs"), height=8, activestyle="none",
+            font=self._list_type.mono("2xs"), height=10, activestyle="none",
         )
-        self._file_list.pack(fill="both", expand=True, padx=14, pady=(4, 6))
+        self._file_list.pack(fill="both", expand=True, padx=14, pady=(4, 4))
         self._file_list.bind("<<ListboxSelect>>", self._on_file_select)
 
+        row = tk.Frame(explorer, bg=self.theme.surface)
+        row.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(row, "New file", self._on_new_file).pack(side="left")
+        self._button(row, "New folder", self._on_new_folder).pack(side="left", padx=(6, 0))
+        row2 = tk.Frame(explorer, bg=self.theme.surface)
+        row2.pack(fill="x", padx=14, pady=(0, 10))
+        self._button(row2, "Rename", self._on_rename_file).pack(side="left")
+        self._button(row2, "Copy", self._on_copy_file).pack(side="left", padx=(6, 0))
+        self._button(row2, "Delete", self._on_delete_file).pack(side="left", padx=(6, 0))
+
+    # -- editor -----------------------------------------------------------
+
+    def _build_editor_section(self, column: SidebarColumn) -> None:
+        editor = column.add("editor", "Editor", icon="✏")
+        self._file_label = tk.Label(
+            editor, text="Select a file to open it.", bg=self.theme.surface, fg=self.theme.text_secondary,
+            font=self._type.mono("2xs"), anchor="w", justify="left", wraplength=264,
+        )
+        self._file_label.pack(fill="x", padx=14, pady=(4, 4))
+        row = tk.Frame(editor, bg=self.theme.surface)
+        row.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(row, "Save file", self._on_save_file).pack(side="left")
+        self._button(row, "Close", self._hide_editor).pack(side="left", padx=(6, 0))
+        row2 = tk.Frame(editor, bg=self.theme.surface)
+        row2.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(row2, "Outline", self._on_outline).pack(side="left")
+        self._button(row2, "Blame", self._on_blame).pack(side="left", padx=(6, 0))
+        self._button(row2, "Discard file", self._on_discard_file).pack(side="left", padx=(6, 0))
+        tk.Label(
+            editor, text="Editing writes into the workspace only, never the running project.",
+            bg=self.theme.surface, fg=self.theme.text_dim, font=self._type.font("2xs"),
+            anchor="w", justify="left", wraplength=264,
+        ).pack(fill="x", padx=14, pady=(0, 10))
+
+    # -- find & replace ---------------------------------------------------
+
+    def _build_find_section(self, column: SidebarColumn) -> None:
+        find = column.add("find", "Find & Replace", icon="🔍", open=False)
+        tk.Label(
+            find, text="Find", bg=self.theme.surface, fg=self.theme.text_secondary,
+            font=self._type.font("2xs"),
+        ).pack(anchor="w", padx=14, pady=(4, 0))
+        self._find_entry = tk.Entry(
+            find, textvariable=self._find_var, bg=self.theme.base, fg=self.theme.foreground,
+            relief="flat", highlightthickness=1, highlightbackground=self.theme.border_subtle,
+            font=self._type.font("xs"),
+        )
+        self._find_entry.pack(fill="x", padx=14, pady=(2, 4))
+        self._find_entry.bind("<Return>", lambda _e: self._on_search())
+
+        tk.Label(
+            find, text="Limit to one file or folder (optional)", bg=self.theme.surface,
+            fg=self.theme.text_secondary, font=self._type.font("2xs"),
+        ).pack(anchor="w", padx=14)
+        self._scope_entry = tk.Entry(
+            find, textvariable=self._scope_var, bg=self.theme.base, fg=self.theme.foreground,
+            relief="flat", highlightthickness=1, highlightbackground=self.theme.border_subtle,
+            font=self._type.mono("2xs"),
+        )
+        self._scope_entry.pack(fill="x", padx=14, pady=(2, 4))
+
+        row = tk.Frame(find, bg=self.theme.surface)
+        row.pack(fill="x", padx=14, pady=(0, 6))
+        self._button(row, "Search", self._on_search).pack(side="left")
+
+        tk.Label(
+            find, text="Replace (literal, in the whole project)", bg=self.theme.surface,
+            fg=self.theme.text_secondary, font=self._type.font("2xs"),
+        ).pack(anchor="w", padx=14)
+        self._replace_entry = tk.Entry(
+            find, textvariable=self._replace_var, bg=self.theme.base, fg=self.theme.foreground,
+            relief="flat", highlightthickness=1, highlightbackground=self.theme.border_subtle,
+            font=self._type.font("xs"),
+        )
+        self._replace_entry.pack(fill="x", padx=14, pady=(2, 4))
+        row2 = tk.Frame(find, bg=self.theme.surface)
+        row2.pack(fill="x", padx=14, pady=(0, 10))
+        self._button(row2, "Preview", self._on_replace_preview).pack(side="left")
+        self._button(row2, "Replace all", self._on_replace_apply).pack(side="left", padx=(6, 0))
+
+    # -- source control ---------------------------------------------------
+
+    def _build_source_control_section(self, column: SidebarColumn) -> None:
+        scm = column.add("scm", "Source Control", icon="⎇", open=False)
+        self._git_label = tk.Label(
+            scm, text="", bg=self.theme.surface, fg=self.theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=264,
+        )
+        self._git_label.pack(fill="x", padx=14, pady=(4, 2))
+        self._git_status_list = tk.Listbox(
+            scm, bg=self.theme.base, fg=self.theme.foreground, selectbackground=self.theme.primary,
+            selectforeground=self.theme.primary_foreground, relief="flat", highlightthickness=0,
+            font=self._list_type.mono("2xs"), height=6, activestyle="none", selectmode="extended",
+        )
+        self._git_status_list.pack(fill="x", padx=14, pady=(2, 4))
+        row = tk.Frame(scm, bg=self.theme.surface)
+        row.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(row, "Stage", self._on_stage).pack(side="left")
+        self._button(row, "Unstage", self._on_unstage).pack(side="left", padx=(6, 0))
+        self._button(row, "Discard", self._on_discard_changes).pack(side="left", padx=(6, 0))
+
+        self._commit_entry = tk.Entry(
+            scm, textvariable=self._commit_var, bg=self.theme.base, fg=self.theme.foreground,
+            relief="flat", highlightthickness=1, highlightbackground=self.theme.border_subtle,
+            font=self._type.font("xs"),
+        )
+        self._commit_entry.pack(fill="x", padx=14, pady=(4, 4))
+        row2 = tk.Frame(scm, bg=self.theme.surface)
+        row2.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(row2, "Commit", self._on_commit).pack(side="left")
+        self._button(row2, "Stash", self._on_stash).pack(side="left", padx=(6, 0))
+        self._button(row2, "Pop stash", self._on_stash_pop).pack(side="left", padx=(6, 0))
+
+        self._branch_entry = tk.Entry(
+            scm, textvariable=self._branch_var, bg=self.theme.base, fg=self.theme.foreground,
+            relief="flat", highlightthickness=1, highlightbackground=self.theme.border_subtle,
+            font=self._type.font("xs"),
+        )
+        self._branch_entry.pack(fill="x", padx=14, pady=(4, 4))
+        row3 = tk.Frame(scm, bg=self.theme.surface)
+        row3.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(row3, "New branch", self._on_new_branch).pack(side="left")
+        self._button(row3, "Switch", self._on_switch_branch).pack(side="left", padx=(6, 0))
+
+        row4 = tk.Frame(scm, bg=self.theme.surface)
+        row4.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(row4, "History", self._on_history).pack(side="left")
+        self._button(row4, "Branches", self._on_branches).pack(side="left", padx=(6, 0))
+        self._button(row4, "Diff", self._on_show_diff).pack(side="left", padx=(6, 0))
+
+        tk.Label(
+            scm, text="Remote (leaves the machine — asks first)", bg=self.theme.surface,
+            fg=self.theme.text_dim, font=self._type.font("2xs"),
+        ).pack(anchor="w", padx=14, pady=(6, 2))
+        row5 = tk.Frame(scm, bg=self.theme.surface)
+        row5.pack(fill="x", padx=14, pady=(0, 10))
+        self._button(row5, "Fetch", self._on_fetch).pack(side="left")
+        self._button(row5, "Pull", self._on_pull).pack(side="left", padx=(6, 0))
+        self._button(row5, "Push", self._on_push).pack(side="left", padx=(6, 0))
+
+    # -- tasks ------------------------------------------------------------
+
+    def _build_tasks_section(self, column: SidebarColumn) -> None:
+        tasks = column.add("tasks", "Tasks", icon="▶", open=False)
+        self._task_list = tk.Listbox(
+            tasks, bg=self.theme.base, fg=self.theme.foreground, selectbackground=self.theme.primary,
+            selectforeground=self.theme.primary_foreground, relief="flat", highlightthickness=0,
+            font=self._list_type.font("2xs"), height=8, activestyle="none",
+        )
+        self._task_list.pack(fill="x", padx=14, pady=(4, 4))
+        row = tk.Frame(tasks, bg=self.theme.surface)
+        row.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(row, "Run", self._on_run_task).pack(side="left")
+        self._button(row, "Stop", self._on_stop_task).pack(side="left", padx=(6, 0))
+        self._button(row, "Clear output", self._on_clear_output).pack(side="left", padx=(6, 0))
+
+        tk.Label(
+            tasks, text="A command of your own (run in the workspace)", bg=self.theme.surface,
+            fg=self.theme.text_secondary, font=self._type.font("2xs"),
+        ).pack(anchor="w", padx=14)
+        self._custom_task_entry = tk.Entry(
+            tasks, textvariable=self._custom_task_var, bg=self.theme.base, fg=self.theme.foreground,
+            relief="flat", highlightthickness=1, highlightbackground=self.theme.border_subtle,
+            font=self._type.mono("2xs"),
+        )
+        self._custom_task_entry.pack(fill="x", padx=14, pady=(2, 4))
+        self._custom_task_entry.bind("<Return>", lambda _e: self._on_run_custom_task())
+        self._button(tasks, "Run custom command", self._on_run_custom_task).pack(anchor="w", padx=14, pady=(0, 10))
+
+    # -- notes ------------------------------------------------------------
+
+    def _build_notes_section(self, column: SidebarColumn) -> None:
+        notes = column.add("notes", "Notes (TODO scan)", icon="🗒", open=False)
+        self._notes_label = tk.Label(
+            notes, text="Scan the workspace for TODO/FIXME/BUG/XXX/HACK notes.",
+            bg=self.theme.surface, fg=self.theme.text_secondary, font=self._type.font("2xs"),
+            anchor="w", justify="left", wraplength=264,
+        )
+        self._notes_label.pack(fill="x", padx=14, pady=(4, 4))
+        self._button(notes, "Scan for notes", self._on_scan_notes).pack(anchor="w", padx=14, pady=(0, 10))
+
+    # -- review and apply -------------------------------------------------
+
+    def _build_review_section(self, column: SidebarColumn) -> None:
         review = column.add("review", "Review and apply", icon="✔")
         gate = tk.Frame(review, bg=self.theme.surface)
         gate.pack(fill="x", padx=14, pady=(4, 4))
         self._merge_button = self._button(gate, "Apply to the project", self._on_merge)
         self._merge_button.pack(side="left")
         self._merge_button.configure(state="disabled")
-        self._button(gate, "Discard change", self._on_discard).pack(side="left", padx=(6, 0))
+        row = tk.Frame(review, bg=self.theme.surface)
+        row.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(row, "Run checks", self._on_run_checks).pack(side="left")
+        self._button(row, "Export patch", self._on_export_patch).pack(side="left", padx=(6, 0))
         self._checks_label = tk.Label(
             review, text="Checks have not run yet.", bg=self.theme.surface, fg=self.theme.text_dim,
-            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=248,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=264,
         )
         self._checks_label.pack(fill="x", padx=14)
         self._merge_note = tk.Label(
             review, text="", bg=self.theme.surface, fg=self.theme.text_secondary, font=self._type.font("2xs"),
-            anchor="w", justify="left", wraplength=248,
+            anchor="w", justify="left", wraplength=264,
         )
         self._merge_note.pack(fill="x", padx=14, pady=(4, 14))
 
@@ -299,9 +538,6 @@ class CodeStudioDialog(ThemedDialog):
         theme = self.theme
         col = tk.Frame(parent, bg=theme.base)
         col.grid(row=0, column=1, sticky="nsew")
-
-        self._build_composer(col)
-        self._build_editor_panel(col)
 
         container = tk.Frame(col, bg=theme.base)
         container.pack(fill="both", expand=True)
@@ -318,6 +554,9 @@ class CodeStudioDialog(ThemedDialog):
             widget.bind("<MouseWheel>", self._on_mousewheel)
             widget.bind("<Button-4>", self._on_mousewheel)
             widget.bind("<Button-5>", self._on_mousewheel)
+
+        self._build_composer(col)
+        self._build_editor_panel(col)
 
         self._add_message("note", HONESTY_LINE)
 
@@ -344,16 +583,16 @@ class CodeStudioDialog(ThemedDialog):
         composer.add_tool(self._button(composer.right_tools, "Show diff", self._on_show_diff))
 
     def _build_editor_panel(self, parent: tk.Frame) -> None:
-        """The file editor, revealed in the column when a file is opened."""
+        """The file editor, revealed above the composer when a file is opened."""
         theme = self.theme
         panel = tk.Frame(parent, bg=theme.surface)
         head = tk.Frame(panel, bg=theme.surface)
         head.pack(fill="x", padx=12, pady=(10, 4))
-        self._file_label = tk.Label(
+        self._editor_file_label = tk.Label(
             head, text="Select a file to open it.", bg=theme.surface, fg=theme.text_secondary,
             font=self._type.mono("code"), anchor="w",
         )
-        self._file_label.pack(side="left")
+        self._editor_file_label.pack(side="left")
         self._button(head, "Close", self._hide_editor).pack(side="right")
         self._button(head, "Save file", self._on_save_file).pack(side="right", padx=(0, 6))
 
@@ -532,15 +771,27 @@ class CodeStudioDialog(ThemedDialog):
             parent, text=text, command=command, bg=theme.surface_raised,
             fg=theme.foreground, activebackground=theme.interactive_active,
             activeforeground=theme.contrast, relief="flat", borderwidth=0,
-            font=self._type.font("xs", weight="bold"), padx=12, pady=4, cursor="hand2",
+            font=self._type.font("xs", weight="bold"), padx=10, pady=3, cursor="hand2",
         )
 
     # -- state ------------------------------------------------------------
 
     def refresh(self) -> None:
-        """Reload the workspace list and the model status line."""
+        """Reload the workspace list, the model status line, and the task menu."""
         state = self.service.state()
         self._status_line.configure(text=state.coder.summary() if state.coder else "")
+        project = getattr(state, "project", None)
+        kind = getattr(project, "kind", "") if project else ""
+        branch = getattr(state, "current_branch", "")
+        dirty = " · uncommitted changes" if getattr(state, "dirty", False) else ""
+        if kind:
+            self._project_line.configure(
+                text=f"Project: {kind} · on `{branch}`{dirty}"
+                if state.repository
+                else f"Project: {kind} · not a git checkout"
+            )
+        else:
+            self._project_line.configure(text="")
         self._workspace_list.delete(0, "end")
         self._workspaces = state.workspaces
         for workspace in state.workspaces:
@@ -557,6 +808,7 @@ class CodeStudioDialog(ThemedDialog):
         if self._current_slug and not any(w.slug == self._current_slug for w in state.workspaces):
             self._current_slug = ""
             self._workspace_label.configure(text="No workspace selected.")
+        self._refresh_task_menu()
 
     def _selected_slug(self) -> str:
         selection = self._workspace_list.curselection()
@@ -582,6 +834,7 @@ class CodeStudioDialog(ThemedDialog):
             fg=self.theme.text_secondary if workspace.checks_passed else self.theme.text_dim,
         )
         self._refresh_files()
+        self._refresh_source_control()
         self._refresh_merge_state(keep_note=keep_note)
         self._set_trace(workspace.task or "")
 
@@ -665,7 +918,7 @@ class CodeStudioDialog(ThemedDialog):
         self._auto_open = True
         self._ensure_workspace()
 
-    # -- editor -----------------------------------------------------------
+    # -- explorer ---------------------------------------------------------
 
     def _refresh_files(self) -> None:
         self._file_list.delete(0, "end")
@@ -680,6 +933,12 @@ class CodeStudioDialog(ThemedDialog):
         for entry in entries:
             self._file_list.insert("end", entry.path)
 
+    def _selected_file(self) -> str:
+        selection = self._file_list.curselection()
+        if not selection:
+            return self._current_file
+        return self._files[selection[0]].path
+
     def _on_file_select(self, _event: tk.Event | None = None) -> None:
         selection = self._file_list.curselection()
         if not selection:
@@ -690,6 +949,7 @@ class CodeStudioDialog(ThemedDialog):
             self._set_merge_note(report.message, error=True)
             return
         self._current_file = relative
+        self._editor_file_label.configure(text=relative)
         self._file_label.configure(text=relative)
         self._show_editor()
         self._editor.delete("1.0", "end")
@@ -697,10 +957,77 @@ class CodeStudioDialog(ThemedDialog):
         self._editor.edit_modified(False)
         self._dirty = False
 
+    def _on_new_file(self) -> None:
+        slug = self._current_slug
+        if not slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        relative = _ask_string(self.window, "New file", "Path inside the workspace (e.g. core/new.py):")
+        if not relative:
+            return
+        report = self.service.create_file(slug, relative, "")
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_files()
+
+    def _on_new_folder(self) -> None:
+        slug = self._current_slug
+        if not slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        relative = _ask_string(self.window, "New folder", "Path inside the workspace (e.g. core/sub):")
+        if not relative:
+            return
+        report = self.service.create_directory(slug, relative)
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_files()
+
+    def _on_rename_file(self) -> None:
+        slug = self._current_slug
+        current = self._selected_file()
+        if not slug or not current:
+            self._set_merge_note("Select a file to rename.", error=True)
+            return
+        new_relative = _ask_string(self.window, "Rename", "New path:", initial=current)
+        if not new_relative or new_relative == current:
+            return
+        report = self.service.rename_file(slug, current, new_relative)
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_files()
+
+    def _on_copy_file(self) -> None:
+        slug = self._current_slug
+        current = self._selected_file()
+        if not slug or not current:
+            self._set_merge_note("Select a file to copy.", error=True)
+            return
+        new_relative = _ask_string(self.window, "Copy", "New path:", initial=current)
+        if not new_relative or new_relative == current:
+            return
+        report = self.service.copy_file(slug, current, new_relative)
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_files()
+
+    def _on_delete_file(self) -> None:
+        slug = self._current_slug
+        current = self._selected_file()
+        if not slug or not current:
+            self._set_merge_note("Select a file to delete.", error=True)
+            return
+        if not _confirm(self.window, "Delete", f"Delete {current} from the workspace?"):
+            return
+        report = self.service.delete_file(slug, current)
+        self._set_merge_note(report.message, error=not report.ok)
+        if report.ok and current == self._current_file:
+            self._current_file = ""
+            self._hide_editor()
+        self._refresh_files()
+
+    # -- editor -----------------------------------------------------------
+
     def _on_editor_modified(self, _event: tk.Event | None = None) -> None:
         if self._editor.edit_modified():
             self._dirty = True
-            self._file_label.configure(text=f"{self._current_file}  (unsaved)")
+            self._editor_file_label.configure(text=f"{self._current_file}  (unsaved)")
             self._editor.edit_modified(False)
 
     def _on_save_file(self) -> None:
@@ -712,8 +1039,366 @@ class CodeStudioDialog(ThemedDialog):
         self._set_merge_note(report.message, error=not report.ok)
         if report.ok:
             self._dirty = False
+            self._editor_file_label.configure(text=self._current_file)
             self._file_label.configure(text=self._current_file)
             self._refresh_merge_state(keep_note=True)
+
+    def _on_outline(self) -> None:
+        if not self._current_slug or not self._current_file:
+            self._set_merge_note("Open a file first.", error=True)
+            return
+        report = self.service.outline(self._current_slug, self._current_file)
+        self._set_review(report.describe())
+
+    def _on_blame(self) -> None:
+        if not self._current_slug or not self._current_file:
+            self._set_merge_note("Open a file first.", error=True)
+            return
+        report = self.service.git_blame(self._current_slug, self._current_file)
+        self._set_review(report.detail if report.ok else report.message)
+
+    def _on_discard_file(self) -> None:
+        slug = self._current_slug
+        current = self._selected_file()
+        if not slug or not current:
+            self._set_merge_note("Select a file to discard.", error=True)
+            return
+        if not _confirm(self.window, "Discard", f"Discard uncommitted changes in {current}?"):
+            return
+        report = self.service.discard_changes(slug, current)
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_files()
+        self._refresh_source_control()
+
+    # -- find & replace ---------------------------------------------------
+
+    def _on_search(self) -> None:
+        slug = self._current_slug
+        query = self._find_var.get().strip()
+        if not slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        if not query:
+            self._set_merge_note("Type something to search for.", error=True)
+            return
+        report = self.service.search(slug, query, relative=self._scope_var.get().strip())
+        self._set_review(report.detail or report.message)
+        self._set_merge_note(report.message, error=not report.ok)
+
+    def _on_replace_preview(self) -> None:
+        self._run_replace(apply=False)
+
+    def _on_replace_apply(self) -> None:
+        old = self._find_var.get().strip()
+        if not _confirm(self.window, "Replace all", f"Replace every occurrence of {old!r} in the project?"):
+            return
+        self._run_replace(apply=True)
+
+    def _run_replace(self, *, apply: bool) -> None:
+        slug = self._current_slug
+        old = self._find_var.get().strip()
+        new = self._replace_var.get()
+        if not slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        if not old:
+            self._set_merge_note("Type the text to replace.", error=True)
+            return
+        report = self.service.replace_across(
+            slug, old, new, relative=self._scope_var.get().strip(), apply=apply
+        )
+        detail = "\n".join([report.message, *report.summary_lines()])
+        self._set_review(detail)
+        self._set_merge_note(report.message, error=not report.ok)
+        if report.ok and report.applied:
+            self._refresh_files()
+
+    # -- source control ---------------------------------------------------
+
+    def _refresh_source_control(self) -> None:
+        """Redraw the git status list and the branch line for the current workspace."""
+        if not hasattr(self, "_git_status_list"):
+            return
+        self._git_status_list.delete(0, "end")
+        if not self._current_slug:
+            self._git_label.configure(text="")
+            return
+        entries = self.service.git_status(self._current_slug)
+        self._git_entries = entries
+        for entry in entries:
+            self._git_status_list.insert("end", entry.describe())
+        branch = ""
+        try:
+            branch = self.service.workspace(self._current_slug).branch
+        except Exception:
+            branch = ""
+        clean = "clean" if not entries else f"{len(entries)} change(s)"
+        self._git_label.configure(text=f"On `{branch}` · {clean}")
+        # Prefill the commit box with a sensible default the user can edit.
+        if not self._commit_var.get().strip():
+            task = ""
+            try:
+                task = self.service.workspace(self._current_slug).task
+            except Exception:
+                task = ""
+            self._commit_var.set(f"Studio: {task}" if task else f"Studio: {self._current_slug}")
+
+    def _selected_status_paths(self) -> tuple[str, ...]:
+        selection = self._git_status_list.curselection()
+        entries = getattr(self, "_git_entries", ())
+        return tuple(entries[i].path for i in selection if i < len(entries))
+
+    def _on_stage(self) -> None:
+        slug = self._current_slug
+        if not slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        paths = self._selected_status_paths()
+        report = self.service.stage(slug, *paths)
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_source_control()
+
+    def _on_unstage(self) -> None:
+        slug = self._current_slug
+        if not slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        paths = self._selected_status_paths()
+        report = self.service.unstage(slug, *paths)
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_source_control()
+
+    def _on_discard_changes(self) -> None:
+        slug = self._current_slug
+        paths = self._selected_status_paths()
+        if not slug or not paths:
+            self._set_merge_note("Select file(s) to discard.", error=True)
+            return
+        if not _confirm(self.window, "Discard", f"Discard changes in {len(paths)} file(s)?"):
+            return
+        report = self.service.discard_changes(slug, *paths)
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_files()
+        self._refresh_source_control()
+
+    def _on_commit(self) -> None:
+        slug = self._current_slug
+        message = self._commit_var.get().strip()
+        if not slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        if not message:
+            self._set_merge_note("Write a commit message.", error=True)
+            return
+        report = self.service.commit(slug, message)
+        self._set_merge_note(report.message, error=not report.ok)
+        if report.ok:
+            self._commit_var.set("")
+            self._refresh_source_control()
+            self._refresh_merge_state(keep_note=True)
+
+    def _on_stash(self) -> None:
+        if not self._current_slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        report = self.service.stash(self._current_slug, self._commit_var.get().strip(), include_untracked=True)
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_files()
+        self._refresh_source_control()
+
+    def _on_stash_pop(self) -> None:
+        if not self._current_slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        report = self.service.stash_pop(self._current_slug)
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_files()
+        self._refresh_source_control()
+
+    def _on_new_branch(self) -> None:
+        slug = self._current_slug
+        name = self._branch_var.get().strip()
+        if not slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        if not name:
+            self._set_merge_note("Type a branch name.", error=True)
+            return
+        report = self.service.create_branch(slug, name)
+        self._set_merge_note(report.message, error=not report.ok)
+        if report.ok:
+            self._branch_var.set("")
+            self._refresh_source_control()
+
+    def _on_switch_branch(self) -> None:
+        slug = self._current_slug
+        name = self._branch_var.get().strip()
+        if not slug or not name:
+            self._set_merge_note("Type a branch name to switch to.", error=True)
+            return
+        report = self.service.switch_branch(slug, name)
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_source_control()
+
+    def _on_history(self) -> None:
+        if not self._current_slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        commits = self.service.git_log(self._current_slug, limit=40)
+        lines = [commit.describe() for commit in commits] or ["No commits yet."]
+        self._set_review("\n".join(lines))
+
+    def _on_branches(self) -> None:
+        if not self._current_slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        branches = self.service.git_branches(self._current_slug)
+        lines = [branch.describe() for branch in branches] or ["No branches."]
+        self._set_review("\n".join(lines))
+
+    def _on_export_patch(self) -> None:
+        if not self._current_slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        report = self.service.export_patch(self._current_slug)
+        if not report.ok:
+            self._set_merge_note(report.message, error=True)
+            return
+        _ask_save(self.window, report.detail, default_name=f"{self._current_slug}.patch")
+        self._set_merge_note("Patch ready (use Save in the dialog to keep it).")
+
+    def _remote_action(self, action: str) -> None:
+        slug = self._current_slug
+        if not slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        if not _confirm(
+            self.window, f"{action.title()} remote",
+            f"`git {action}` contacts the network. Run it now?",
+        ):
+            return
+        report = self.service.remote_action(slug, action)
+        self._set_merge_note(report.message, error=not report.ok)
+        self._refresh_source_control()
+
+    def _on_fetch(self) -> None:
+        self._remote_action("fetch")
+
+    def _on_pull(self) -> None:
+        self._remote_action("pull")
+
+    def _on_push(self) -> None:
+        self._remote_action("push")
+
+    # -- tasks ------------------------------------------------------------
+
+    def _refresh_task_menu(self) -> None:
+        """Fill the task list from the catalog that fits this project."""
+        if not hasattr(self, "_task_list"):
+            return
+        self._task_specs = list(self.service.command_catalog())
+        self._task_list.delete(0, "end")
+        for spec in self._task_specs:
+            self._task_list.insert("end", f"[{spec.category}] {spec.title}")
+        # Run the tests first, so the most common action is the pre-selected one.
+        for index, spec in enumerate(self._task_specs):
+            if spec.key == "tests":
+                self._task_list.selection_set(index)
+                break
+
+    def _selected_task(self) -> CommandSpec | None:
+        selection = self._task_list.curselection()
+        if not selection:
+            return self._task_specs[0] if self._task_specs else None
+        return self._task_specs[selection[0]]
+
+    def _on_run_task(self) -> None:
+        slug = self._current_slug
+        spec = self._selected_task()
+        if not slug or spec is None:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        self._start_task(slug, spec.key, spec.title, "")
+
+    def _on_run_custom_task(self) -> None:
+        slug = self._current_slug
+        command_line = self._custom_task_var.get().strip()
+        if not slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        if not command_line:
+            self._set_merge_note("Type a command to run.", error=True)
+            return
+        self._start_task(slug, "custom", command_line, command_line)
+
+    def _start_task(self, slug: str, key: str, title: str, command_line: str) -> None:
+        if self._task_running or self._busy:
+            self._set_merge_note("A task is already running.", error=True)
+            return
+        self._task_running = True
+        self._set_merge_note(f"Running {title}…")
+        # The task's output is a transcript message like every other row, so it is
+        # selectable, copyable, and scrolls with the rest of the conversation.
+        self._output = self._add_message("note", "", title=f"Task: {title}", mono_body=True)
+        self._set_buttons_enabled(False)
+
+        def on_line(line: str) -> None:
+            self._task_lines.put(line)
+
+        def job() -> Any:
+            return self.service.run_command(slug, key, on_line=on_line, command_line=command_line)
+
+        self._run_background(f"Running {title}…", job, self._after_task)
+
+    def _on_stop_task(self) -> None:
+        if not self._task_running:
+            return
+        self.service.cancel_command()
+        self._set_merge_note("Stopping the task…")
+
+    def _after_task(self, outcome: Any, error: Exception | None) -> None:
+        self._task_running = False
+        self._drain_task_lines()
+        if error is not None:
+            self._set_merge_note(f"The task could not run: {error}", error=True)
+            return
+        self._set_merge_note(outcome.summary(), error=not outcome.ok)
+        if self._output is not None:
+            if not self._output.get("1.0", "end-1c").strip() and outcome.output:
+                self._output.insert("1.0", outcome.output)
+            self._output.insert("end", "\n" + outcome.summary())
+            self._fit_height(self._output)
+        self._refresh_source_control()
+        self._refresh_merge_state(keep_note=True)
+
+    def _on_clear_output(self) -> None:
+        """Forget the last task's output row (it stays in the transcript above)."""
+        self._output = None
+        self._set_merge_note("The task output is cleared; scroll the transcript to review it.")
+
+    def _drain_task_lines(self) -> None:
+        appended = False
+        while True:
+            try:
+                line = self._task_lines.get_nowait()
+            except queue.Empty:
+                break
+            if self._output is not None:
+                self._output.insert("end", "\n" + line)
+                appended = True
+        if appended and self._output is not None:
+            self._fit_height(self._output)
+            self._scroll_to_bottom()
+
+    # -- notes ------------------------------------------------------------
+
+    def _on_scan_notes(self) -> None:
+        if not self._current_slug:
+            self._set_merge_note("Open a workspace first.", error=True)
+            return
+        scan = self.service.scan_notes(self._current_slug)
+        self._notes_label.configure(text=scan.describe().splitlines()[0] if scan.notes else "No notes found.")
+        self._set_review(scan.describe())
 
     # -- model ------------------------------------------------------------
 
@@ -801,6 +1486,7 @@ class CodeStudioDialog(ThemedDialog):
         self._set_merge_note(change.report.message, error=not change.report.ok)
         self.refresh()
         self._refresh_files()
+        self._refresh_source_control()
         self._refresh_merge_state(keep_note=True)
         self._offer_apply(change)
 
@@ -997,9 +1683,10 @@ class CodeStudioDialog(ThemedDialog):
             self.window.after(60, self._schedule_pump)
 
     def _pump_results(self) -> None:
-        # Render the model's live steps first, so the transcript keeps pace with
-        # the worker even before the run finishes.
+        # Render the model's live steps and the task's live output first, so the
+        # window keeps pace with the worker even before the run finishes.
         self._drain_steps()
+        self._drain_task_lines()
         while True:
             try:
                 finish, result, error = self._results.get_nowait()
@@ -1066,6 +1753,44 @@ class CodeStudioDialog(ThemedDialog):
         if self._on_close is not None:
             self._on_close()
         self.window.destroy()
+
+
+# -- small modal helpers -----------------------------------------------------
+
+
+def _ask_string(parent: tk.Misc, title: str, prompt: str, *, initial: str = "") -> str:
+    """A one-line modal prompt, or an empty string when cancelled.
+
+    The project avoids heavy modal dialogs where a small prompt will do; this is
+    the one place the Studio asks for a name, so every "new file / rename / copy"
+    path reads the same way.
+    """
+    from tkinter import simpledialog
+
+    answer = simpledialog.askstring(title, prompt, initialvalue=initial, parent=parent)
+    return (answer or "").strip()
+
+
+def _confirm(parent: tk.Misc, title: str, message: str) -> bool:
+    """A yes/no confirmation, used before anything destructive or networked."""
+    from tkinter import messagebox
+
+    return bool(messagebox.askyesno(title, message, parent=parent))
+
+
+def _ask_save(parent: tk.Misc, text: str, *, default_name: str) -> None:
+    """Let the user save a piece of text (a patch, a report) to a file of their choosing."""
+    from tkinter import filedialog
+
+    path = filedialog.asksaveasfilename(
+        parent=parent, title="Save", initialfile=default_name,
+        defaultextension=".patch", filetypes=[("Patch", "*.patch"), ("All files", "*.*")],
+    )
+    if not path:
+        return
+    from pathlib import Path
+
+    Path(path).write_text(text, encoding="utf-8")
 
 
 __all__ = [

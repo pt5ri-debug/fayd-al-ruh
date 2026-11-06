@@ -629,6 +629,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         ("characters",),
     ),
     ("Code Studio: edit and merge the project's own code", run_code_studio, ("status",)),
+    ("Code Studio: show the project's own development tasks", run_code_studio, ("tasks",)),
     ("Presentation Studio: build a PowerPoint deck from a discussion", run_presentation, ("list",)),
     ("Doc's Studio: read any document (incl. scanned) with the local vision model", run_docs, ("status",)),
     (
