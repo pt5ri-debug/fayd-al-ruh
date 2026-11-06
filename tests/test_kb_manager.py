@@ -784,11 +784,17 @@ def test_window_paste_adds_to_the_selected_character(data_root) -> None:
         dialog._on_character("natasha")
         dialog._composer.set_text("A story about the sea. " * 30)
         dialog._on_paste()
-        # Drain the worker queue deterministically.
-        for _ in range(200):
+        # Drain the worker queue deterministically. The import runs on a worker
+        # thread, so the loop must yield to it (`time.sleep`) as well as pump the
+        # UI queue; a bare `root.update()` loop spins without ever letting the
+        # thread run and the test then reads a corpus that was never written.
+        import time
+
+        for _ in range(400):
             root.update()
             if not dialog._busy:
                 break
+            time.sleep(0.01)
         assert service.knowledge("natasha").stats()["present"] is True
     finally:
         root.destroy()

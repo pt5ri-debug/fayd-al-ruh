@@ -2203,8 +2203,10 @@ Arabic is kept as secondary aliases where useful.
   cancel is a marker file (`SqlImportService.request_cancel`) that a running
   import polls, so `sql-cancel` works from a separate invocation.
 - `cli/studio.py` — the **Code Studio CLI**, the headless twin of the Studio
-  window: `status`/`coder`/`new`/`list`/`files`/`read`/`write`/`ask`/`diff`/
-  `check`/`merge`/`discard` (`python -m cli studio …`, wired in `cli/menu.py` as
+  window: `status`/`coder`/`backend`/`models`/`download`/`new`/`list`/`files`/
+  `tree`/`read`/`write`/`edit`/`search`/`replace`/`outline`/`notes`/`touch`/
+  `mkdir`/`rename`/`cp`/`rm`/`git`/`tasks`/`run`/`ask`/`diff`/`check`/`merge`/
+  `discard` (`python -m cli studio …`, wired in `cli/menu.py` as
   `run_code_studio` and in the menu as *Code Studio: edit and merge the project's
   own code*). `new`'s `task` is optional and the workspace is named for you
   (`PR1`, `PR2`, …) unless `--slug` forces a name. It drives the *same*
@@ -2214,10 +2216,13 @@ Arabic is kept as secondary aliases where useful.
   the current directory), `--base-branch` the branch workspaces cut from and merge
   into, `--max-steps` how many model turns one `ask` may take, `--check-command`
   the command `check` runs (one shell string, default `python -m pytest -q`), and
-  `--json` for machine-readable output. Exit codes: `0` success (a `status`
+  `--json` for machine-readable output — and all of them are accepted **before or
+  after** the subcommand. Exit codes: `0` success (a `status`
   report succeeds even when the model is missing — it *states* the next step),
   `2` invalid arguments, `3` the coding model is not available (`coder`, `ask`),
-  `4` a workspace/gate refused the operation, `5` an unexpected failure.
+  `4` a workspace/gate refused the operation, `5` an unexpected failure. The full
+  description is in the *Code Studio* entry near `core/studio_git.py` below; see
+  also `docs/CODE_STUDIO.md`.
 - `evaluation/` — regression gate. `evaluation/runner.py` assembles metrics,
   `benchmark.py` declares `MetricSpec`s, `baseline.json` is the reference.
   Update the baseline with `python -m evaluation --update-baseline`.
@@ -2974,7 +2979,17 @@ Arabic is kept as secondary aliases where useful.
   wraps the engine, the coder client, and the check command, and returns plain
   reports (`create_workspace`, `list_files`, `read_file`, `save_file`,
   `changed_files`, `diff`, `run_checks`, `can_merge`, `merge`, `remove_workspace`,
-  `run_agent`, `state`, `status`). `create_workspace(task="", slug=None)` needs no
+  `run_agent`, `state`, `status`) and, for the universal Studio, the whole
+  developer's day: `git_status`/`git_log`/`git_branches`/`git_remotes`/
+  `git_stash_list`/`git_conflicts`/`git_show`/`git_blame`, `stage`/`unstage`/
+  `commit`/`discard_changes`/`stash`/`stash_pop`, `create_branch`/`switch_branch`,
+  `apply_patch`/`export_patch`, `remote_action` (fetch/pull/push, gated),
+  `file_tree`/`create_file`/`create_directory`/`rename_file`/`copy_file`/
+  `delete_file`, `replace_across` (preview by default), `outline`/`scan_notes`,
+  `project_profile`/`command_catalog`/`run_command`/`cancel_command`, and
+  `available_models`/`download_model`/`local_model_file`. Every one returns a
+  plain `StudioReport` (or the engine's own dataclass), so the window and the CLI
+  render the same result. `create_workspace(task="", slug=None)` needs no
   name and may open the workspace before the first request. `run_change(slug,
   task, on_step=…, on_checks=…)` is **one whole chat turn**: it runs the agent
   (streaming each step through `on_step`), then — when the model actually changed
@@ -2988,18 +3003,53 @@ Arabic is kept as secondary aliases where useful.
   model is offered first and a machine with no Ollama is never told to start a
   server it never needed (`test_service_status_offers_the_in_process_model_first`);
   the Ollama wording appears only when Ollama is the runtime that can answer.
+- `core/studio_git.py` — the Studio's **git engine**: a dependency-free wrapper
+  over the project's own `git` (`GitEngine`, `GitResult`, `StatusEntry`,
+  `CommitInfo`, `BranchInfo`, `RemoteInfo`, `StashEntry`, `ConflictReport`,
+  `PatchResult`, `GitError`). It reads status/log/branches/remotes/tags/stash/
+  diff/show/blame/config, and writes staging, commit/amend, restore, stash,
+  branch create/switch/delete, patch apply (with `--check`), revert, and
+  fetch/pull/push — the three network actions are only ever explicit calls. It is
+  non-interactive, strips embedded credentials from every message, and supplies a
+  commit identity **only for its own commits**, so a machine with no global git
+  identity still works.
+- `core/studio_files.py` — the Studio's **file engine**: `FileEngine` over the
+  workspace's confined tree (`TreeEntry`/`iter_tree`, `create_file`,
+  `create_directory`, `rename`, `copy`, `delete`, `delete_directory`,
+  `replace_across` (a **literal**, preview-by-default, bounded project-wide
+  replace), `outline` (Python `ast` symbols, else a generic scan, reporting a
+  syntax error honestly), `scan_notes` (TODO/FIXME/BUG/XXX/HACK), `file_summary`).
+  Every path goes through the engine's deny-by-default confinement, the text
+  allow-list, and the size cap.
+- `core/studio_tasks.py` — the Studio's **task catalog**: `detect_project` reads a
+  checkout's markers into a `ProjectProfile` (python/node/rust/go/unknown),
+  `catalog_for` builds the runnable `CommandSpec`s per kind (plus the project's own
+  check command), `find_spec`/`custom_spec` resolve one, and `CommandRunner` runs
+  it with streamed output, a timeout, and cooperative cancellation (the whole
+  process group is terminated, never a stray child left behind). A command is
+  always an **argv**, never a shell, so metacharacters are inert; a missing
+  program is an honest `returncode 127` result, not an exception.
 - `gui/code_studio_dialog.py` — the Code Studio **window** (Tk, imported lazily):
   built the way the chat window is built, so the Studio reads as part of the
-  program rather than a separate tool — a slim header, a left **sidebar** for the
-  workspace list + *Start a new change*, the file list,
-  and *Apply to the project* / *Discard change* / *Run checks* with their
-  state, and a centred conversation column with the rounded composer card pinned
-  to the bottom (`_COLUMN_MAX`/`_column_pad`, the same theme tokens and
-  `RoundedBox`). Opening the window **opens the first workspace for you**
-  (`_ensure_workspace`, named `PR1`), so the composer is ready to use and there is
-  no name field; after an apply or a discard it opens the next one silently, and
-  the sidebar hint says the names are assigned in order. The model's step trace and
-  the diff/check output are transcript
+  program rather than a separate tool — a slim header, a left **`SidebarColumn`**
+  of collapsible groups, one per part of a developer's day (**Workspaces**,
+  **Explorer**, **Editor**, **Find & replace**, **Source control**, **Tasks**,
+  **Notes**, **Review and apply**), each drawn with the shared `SidebarSection`
+  (so the column scrolls and each group folds), and a centred conversation column
+  with the rounded composer card pinned to the bottom (`_COLUMN_MAX`/
+  `_column_pad`, the same theme tokens and `RoundedBox`). Opening the window
+  **opens the first workspace for you** (`_ensure_workspace`, named `PR1`), so the
+  composer is ready to use and there is no name field; after an apply or a discard
+  it opens the next one silently, and the sidebar hint says the names are assigned
+  in order. The explorer shows the workspace file tree and creates/renames/copies/
+  deletes files and folders; the editor opens and saves a file, outlines it,
+  blames it, and discards its changes; find & replace previews then applies a
+  project-wide literal replace; source control lists status, stages, commits,
+  shows history/branches/remotes, creates a branch, stashes and pops, reports
+  conflicts, exports a patch, and runs fetch/pull/push only after a confirmation;
+  the tasks menu runs the project's own commands (or a custom one) with the output
+  streamed into its own transcript row and a **Stop** control; notes scans the
+  tree. The model's step trace and the diff/check output are transcript
   messages like a chat reply, not separate tabs: `_set_trace` adds a "Coding
   model" row and `_set_review` a "Diff and checks" row, both monospaced, through
   the same `_add_message`/`_fit_height` path the chat window uses. *Send* now
@@ -3023,6 +3073,19 @@ Arabic is kept as secondary aliases where useful.
   Reachable from the composer's **＋** menu (**Code Studio — edit and merge the
   project's own code…**), whose sidebar action is hidden; the headless twin is
   `python -m cli studio`.
+- `cli/studio.py` — the **Code Studio CLI**, the headless twin of the Studio
+  window: `status`/`coder`/`backend`/`models`/`download`/`new`/`list`/`files`/
+  `tree`/`read`/`write`/`edit`/`search`/`replace`/`outline`/`notes`/`touch`/
+  `mkdir`/`rename`/`cp`/`rm`/`git`/`tasks`/`run`/`ask`/`diff`/`check`/`merge`/
+  `discard`. It drives the *same* `gui.code_studio.CodeStudioService`, so the CLI
+  and the window share one set of workspaces, one diff, and one merge gate. The
+  shared flags (`--root`, `--base-branch`, `--max-steps`, `--check-command`,
+  `--json`) are accepted **before or after** the subcommand (`_common_flags`/
+  `_sub`), so `studio list --json` and `studio --json list` agree. `git` is one
+  command with an action argument; `fetch`/`pull`/`push` need `--approve` and
+  exit `2` without it. Exit codes: `0` success, `2` invalid arguments, `3` the
+  coding model is not available, `4` a workspace/gate refused the operation, `5`
+  an unexpected failure. See `docs/CODE_STUDIO.md`.
 - `core/presentation.py` — the **Presentation Studio** content model and the
   dependency-free `.pptx` writer. A project walks a strict state machine
   (`DISCUSSION` → `OUTLINE_DRAFT` → `OUTLINE_REVIEW` → `SLIDE_DRAFTING` →
