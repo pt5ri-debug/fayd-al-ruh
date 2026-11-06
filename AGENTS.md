@@ -107,7 +107,11 @@ Arabic is kept as secondary aliases where useful.
   `ml/artifacts/release_manifest.json` (with `knowledge.curriculum_coverage` and
   `knowledge.corpus_coverage`). Trained artifacts in `ml/artifacts/` and
   `ml/llm/checkpoints/fayd-llm.npz` are committed on purpose for a release;
-  regenerate with `python -m cli release`.
+  regenerate with `python -m cli release`. Training **resumes by default**: a
+  run continues from the last one (`ml/checkpoint.py`'s `training_progress.json`
+  ledger) instead of restarting, and `--fresh` is the opt-out. `ml/resume_gate.py`
+  is the held-out `training_resume_accuracy` gate that proves a resumed run is
+  identical to an uninterrupted one.
 - `core/paths.py` — resolves bundled assets vs. writable data (source vs. frozen
   build). A source checkout keeps learned data (artifacts, LLM checkpoints,
   knowledge base, learned documents) in a git-ignored `data/` folder beside the
@@ -6724,3 +6728,45 @@ regression monitor each can refuse a change.
   tests) pin the vocalizer, the polisher, the preference, the conversation control,
   the companion/scholar wiring, the environment overrides, the CLI, and the gate.
   Gates: ruff clean, mypy 1036 files OK, evaluation PASS, pytest 6614 passed.
+
+- Phase (F) — **training resumes from where it stopped instead of restarting**.
+  Every trainer kept its learned models on disk, but only the language model could
+  actually *continue*: `ml/petroleum.py`'s policy/brain loops and `ml/__main__.py`'s
+  base pipeline re-ran from episode 0 on every invocation, so a run interrupted at
+  hour two restarted at hour zero. `ml/checkpoint.py` (new) is the missing
+  bookkeeping: one small JSON **progress ledger** (`training_progress.json`) written
+  beside the models it describes, recording each unit's **cumulative** completed
+  count and the artifact it left behind, under a **scope** (`petroleum`, `ml`) so
+  several trainers can share a folder. Three honesty rules: a **changed
+  configuration invalidates the record** (the ledger stores a fingerprint of the
+  task list, seed, and replay batch -- but deliberately **not** the episode budget,
+  which is what makes a *top-up* possible), a **corrupt ledger reads as empty** (a
+  crash mid-write cannot brick a trainer), and it is **bounded**
+  (`DEFAULT_MAX_UNITS`). The trainers gained resume: `train_petroleum(...,
+  resume=True)` loads a task already trained to the budget from its saved policy and
+  brain (no retraining) and continues one trained part-way for the remaining
+  episodes, writing both artifacts and the ledger back; `ml/__main__.py` does the
+  same through `_train_task_with_resume` (tiers 1 and 2 together) and forwards
+  `--resume`/`--fresh` to the release child. `ml/release.py` threads `resume` into
+  both the petroleum run and the base child process. **A resumed run is not merely
+  similar to an uninterrupted one -- it is identical**: `QLearningAgent.save/load`
+  and `CognitiveBrain.save/load` now persist their RNG state (the agent's PCG64
+  generator, the brain's replay `random.Random`), so the continued episodes draw
+  the same sequence, and the gate proves `3 then resume to 6` leaves the *exact*
+  bytes an uninterrupted `6` leaves. `cli/train.py` gains `run --resume-from
+  <adapter>` (continuing the controlled Phase-6 job from an earlier adapter), a
+  `resume-gate` command, and `_run_id` gained microseconds so a resume started in
+  the same second no longer collides ("the run id ... already exists"). **Resume is
+  the default** everywhere and `--fresh` is the opt-out: `ml`, `ml.petroleum`,
+  `ml.llm`, `ml.release`, and the CLI/GUI menu entries (relabelled *... (continues
+  from the last run)*) all continue unless asked not to. The held-out gate
+  `ml/resume_gate.py` (`training_resume_accuracy`) runs the **real** trainers on a
+  fast task and checks six properties with **negative controls** -- the ledger
+  round-trips and tolerates corruption, a changed config resets a record while a
+  raised budget keeps it, a finished task is loaded not retrained (byte-identical),
+  a partial run continues to the uninterrupted bytes, a raised budget tops up
+  (6 → 8), and the language model's own resume still raises the step count; it is a
+  metric in `evaluation` (`training_resume_accuracy`, entering `overall`).
+  `tests/test_training_resume.py` (35 tests) pins the ledger, the RNG round-trips,
+  the petroleum resume and top-up, the CLI flags, and the gate. Gates: ruff clean,
+  mypy OK, evaluation PASS, pytest green.

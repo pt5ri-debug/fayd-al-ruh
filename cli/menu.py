@@ -749,6 +749,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         run_release,
         ("--llm-sessions",),
     ),
+    (
+        "Check that training resumes instead of restarting (held-out gate)",
+        run_train,
+        ("resume-gate",),
+    ),
     ("Autonomous mind: run one thinking cycle now", run_cognition, ("think",)),
     ("Autonomous mind: the ideas awaiting review", run_cognition, ("ideas",)),
     ("Autonomous mind: which of its strategies pay off (metacognition)", run_cognition, ("metacognition",)),

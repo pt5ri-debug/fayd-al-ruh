@@ -53,7 +53,10 @@ def _now() -> str:
 
 
 def _run_id(model_id: str, dataset_id: str, version: int) -> str:
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    # Microseconds keep the id unique when two runs start in the same second --
+    # which is exactly what a resume-from run does, and a collision here made
+    # the trainer refuse to run ("the run id ... already exists").
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
     safe_model = "".join(c if c.isalnum() or c in "-_" else "-" for c in model_id)[:24]
     return f"{stamp}-{safe_model or 'model'}-{dataset_id}-v{version}"
 

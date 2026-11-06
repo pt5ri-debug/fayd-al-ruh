@@ -8,6 +8,7 @@ environments -- no external tool is touched.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -163,13 +164,19 @@ class QLearningAgent:
     def save(self, path: str | Path) -> Path:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            target,
-            W=self.W,
-            epsilon=np.array(self.epsilon),
-            alpha=np.array(self.alpha),
-            gamma=np.array(self.gamma),
-        )
+        # The exploration RNG's state is saved too, so a resumed run draws the
+        # same sequence it would have drawn uninterrupted -- otherwise the
+        # continued episodes diverge from an unbroken run purely by chance. The
+        # PCG64 state is a 128-bit integer, so it is stored as text (a uint64
+        # array overflows) and read back with ``json``.
+        arrays: dict[str, object] = {
+            "W": self.W,
+            "epsilon": np.array(self.epsilon),
+            "alpha": np.array(self.alpha),
+            "gamma": np.array(self.gamma),
+            "rng_state": np.array(json.dumps(self._rng.bit_generator.state, default=int)),
+        }
+        np.savez(target, **arrays)  # type: ignore[arg-type]
         return target
 
     @classmethod
@@ -184,6 +191,8 @@ class QLearningAgent:
             epsilon=float(data["epsilon"]),
         )
         agent.W = weights
+        if "rng_state" in data:
+            agent._rng.bit_generator.state = json.loads(str(data["rng_state"]))
         return agent
 
 

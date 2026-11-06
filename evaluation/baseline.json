@@ -84,7 +84,7 @@
     "learning_accuracy": 1.0,
     "memory_architecture_accuracy": 1.0,
     "memory_seeding_accuracy": 1.0,
-    "overall": 0.990645,
+    "overall": 0.990791,
     "perception_bridge_accuracy": 1.0,
     "personality_agents_accuracy": 1.0,
     "petroleum_causal_accuracy": 1.0,
@@ -115,7 +115,8 @@
     "task_execution_accuracy": 1.0,
     "temporal_accuracy": 1.0,
     "tool_selection_accuracy": 1.0,
-    "training_accuracy": 1.0
+    "training_accuracy": 1.0,
+    "training_resume_accuracy": 1.0
   },
   "scenarios": [
     {

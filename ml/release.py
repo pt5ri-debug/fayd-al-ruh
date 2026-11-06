@@ -241,7 +241,12 @@ def corpus_summary(config: TrainingConfig) -> Manifest:
 
 
 def _base_training(config: TrainingConfig, save_dir: Path, *, verbose: bool = False) -> Manifest:
-    """Run the base ML pipeline (policies, brain, classifier) via its CLI."""
+    """Run the base ML pipeline (policies, brain, classifier) via its CLI.
+
+    ``config.resume`` is forwarded so the child continues the base pipeline from
+    what a previous release left in ``save_dir`` rather than retraining every
+    task from episode zero.
+    """
     command = [
         sys.executable,
         "-m",
@@ -254,6 +259,10 @@ def _base_training(config: TrainingConfig, save_dir: Path, *, verbose: bool = Fa
         str(save_dir),
         "--json",
     ]
+    if config.resume:
+        command.append("--resume")
+    else:
+        command.append("--fresh")
     if not verbose:
         result = subprocess.run(command, capture_output=True, text=True, check=True)
         return json.loads(result.stdout)
@@ -434,6 +443,7 @@ def train_release(
         include_procedural=config.include_procedural,
         max_procedural=config.max_procedural,
         verbose=verbose,
+        resume=config.resume,
     )
     manifest["petroleum"] = petroleum.as_dict()
 
@@ -624,8 +634,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="continue language-model training from the checkpoint at --checkpoint "
-        "instead of starting from scratch (falls back to a fresh run when absent)",
+        default=True,
+        help="Continue from what a previous release left on disk -- the language "
+        "checkpoint and its optimiser sidecar, and the base/petroleum policies and "
+        "brains -- instead of starting from scratch (the default). Use --fresh to "
+        "retrain everything from episode zero.",
+    )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Ignore every saved artifact and train the whole release from scratch.",
     )
     parser.add_argument(
         "--llm-shards",
@@ -662,7 +680,7 @@ def main(argv: list[str] | None = None) -> int:
         character_knowledge_chunks=args.character_corpus_chunks,
         include_procedural=not args.no_procedural,
         measure_perplexity=args.measure_perplexity,
-        resume=args.resume,
+        resume=bool(args.resume) and not args.fresh,
         shard_count=args.llm_shards,
     )
 

@@ -262,6 +262,9 @@ class CognitiveBrain:
             "feature_size": self.hasher.size,
             "num_actions": self.num_actions,
             "memory": self.memory.to_dicts(),
+            # The replay RNG's state, so a resumed run replays the same batches an
+            # uninterrupted run would have drawn instead of diverging by chance.
+            "rng_state": self._rng.getstate(),
         }
         (target / "brain.json").write_text(
             json.dumps(metadata, ensure_ascii=False), encoding="utf-8"
@@ -284,6 +287,12 @@ class CognitiveBrain:
         brain.learning_rate = float(metadata["learning_rate"])
         brain.episodes_trained = int(metadata["episodes_trained"])
         brain.memory.load_dicts(metadata.get("memory", []))
+        rng_state = metadata.get("rng_state")
+        if rng_state is not None:
+            # ``getstate`` is ``(version, state_vector, gauss_next)``; JSON turns
+            # the state vector into a list, which ``setstate`` rejects.
+            version, vector, gauss = rng_state
+            brain._rng.setstate((version, tuple(vector), gauss))
         return brain
 
     def learn(
