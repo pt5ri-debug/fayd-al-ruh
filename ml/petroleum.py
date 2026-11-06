@@ -13,6 +13,7 @@ given discipline-shaped tasks, covers the field.
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,9 +29,10 @@ from core.progress import ProgressReporter
 from core.sandbox_environment import SandboxTask
 from core.state import State
 
+from ml.checkpoint import TrainingProgress
 from ml.cognitive_brain import CognitiveBrain
 from ml.dataset import FeatureHasher
-from ml.learner import evaluate_policy, train_policy
+from ml.learner import QLearningAgent, evaluate_policy, train_policy
 from ml.procedural_tasks import procedural_sandbox_tasks, procedural_success
 
 
@@ -155,23 +157,90 @@ def _train_task(
     replay_batch: int,
     save_dir: Path | None,
     verbose: bool = False,
+    resume: bool = False,
+    progress_state: TrainingProgress | None = None,
 ) -> TaskOutcome:
-    success = petroleum_success(task.name)
-    policy_progress = ProgressReporter(f"policy {task.name}", episodes, enabled=verbose)
-    brain_progress = ProgressReporter(f"brain {task.name}", episodes, enabled=verbose)
+    """Train (or top up) one task's policy and brain, resuming from disk when asked.
 
+    With ``resume`` and a ledger that records this task, the work already done is
+    loaded rather than repeated: a task that has reached the budget is skipped
+    entirely, and one that has not is continued for the remaining episodes. The
+    artifacts are always written back and the ledger is updated with the new
+    cumulative count, so a later run -- even with a larger budget -- continues
+    from here.
+    """
+    success = petroleum_success(task.name)
+    policy_path = (save_dir / f"policy_{task.name}.npz") if save_dir is not None else None
+    brain_dir = (save_dir / f"brain_{task.name}") if save_dir is not None else None
+    already = progress_state.completed(task.name) if progress_state is not None else 0
+
+    def _brain_is_saved() -> bool:
+        return brain_dir is not None and (brain_dir / "brain.json").exists()
+
+    # A fully-trained task is loaded, not retrained, when both artifacts are on
+    # disk; a missing artifact falls back to training so the record cannot strand
+    # a task with no model.
+    trained = (
+        resume
+        and already >= episodes
+        and policy_path is not None
+        and policy_path.exists()
+        and _brain_is_saved()
+    )
+    start = already if (resume and already < episodes) else 0
+
+    if trained:
+        agent = QLearningAgent.load(policy_path)  # type: ignore[arg-type]
+        brain = CognitiveBrain.load(brain_dir, task, success)  # type: ignore[arg-type]
+        brain.replay_batch_size = replay_batch
+        # The training-time success window is not recoverable from a loaded
+        # agent, so the measured greedy success stands in for both figures
+        # rather than inventing one.
+        held_out = evaluate_policy(task, success, agent, episodes=20, hasher=hasher)
+        recent = brain.reflect().recent_error
+        if progress_state is not None:
+            progress_state.record(task.name, already, artifact=brain_dir)
+        return TaskOutcome(
+            name=task.name,
+            discipline=task.discipline,
+            train_success=held_out,
+            held_out_success=held_out,
+            brain_initial_error=recent,
+            brain_final_error=recent,
+            brain_policy_success=held_out,
+        )
+
+    remaining = max(1, episodes - start)
+    policy_progress = ProgressReporter(f"policy {task.name}", remaining, enabled=verbose)
+    brain_progress = ProgressReporter(f"brain {task.name}", remaining, enabled=verbose)
+
+    loaded_agent: QLearningAgent | None = None
+    if start > 0 and policy_path is not None and policy_path.exists():
+        loaded_agent = QLearningAgent.load(policy_path)
     agent, policy_report = train_policy(
-        task, success, episodes=episodes, hasher=hasher, seed=seed, progress=policy_progress
+        task,
+        success,
+        episodes=remaining,
+        hasher=hasher,
+        seed=seed,
+        agent=loaded_agent,
+        progress=policy_progress,
     )
     held_out = evaluate_policy(task, success, agent, episodes=20, hasher=hasher)
 
-    brain = CognitiveBrain(task, success, seed=seed, replay_batch_size=replay_batch)
-    brain_report = brain.learn(episodes=episodes, progress=brain_progress)
+    resumed_brain: CognitiveBrain | None = None
+    if start > 0 and _brain_is_saved():
+        resumed_brain = CognitiveBrain.load(brain_dir, task, success)  # type: ignore[arg-type]
+        resumed_brain.replay_batch_size = replay_batch
+    brain = resumed_brain if resumed_brain is not None else CognitiveBrain(task, success, seed=seed, replay_batch_size=replay_batch)
+    brain_report = brain.learn(episodes=remaining, progress=brain_progress)
 
     if save_dir is not None:
         save_dir.mkdir(parents=True, exist_ok=True)
         agent.save(save_dir / f"policy_{task.name}.npz")
         brain.save(save_dir / f"brain_{task.name}")
+    if progress_state is not None:
+        progress_state.record(task.name, start + remaining, artifact=brain_dir)
 
     return TaskOutcome(
         name=task.name,
@@ -184,6 +253,31 @@ def _train_task(
     )
 
 
+def _petroleum_scope_config(
+    tasks: tuple[SandboxTask, ...],
+    *,
+    seed: int,
+    replay_batch: int,
+    include_held_out: bool,
+    include_procedural: bool,
+    max_procedural: int | None,
+) -> dict[str, object]:
+    """The work a petroleum ledger describes, so a changed run is not resumed into.
+
+    The episode budget is deliberately absent: raising it is a *top-up*, not a
+    different run, and the whole point of the ledger is that a bigger budget
+    continues rather than restarts.
+    """
+    return {
+        "tasks": [task.name for task in tasks],
+        "seed": seed,
+        "replay_batch": replay_batch,
+        "include_held_out": include_held_out,
+        "include_procedural": include_procedural,
+        "max_procedural": max_procedural,
+    }
+
+
 def train_petroleum(
     *,
     episodes: int = 120,
@@ -194,6 +288,7 @@ def train_petroleum(
     include_procedural: bool = False,
     max_procedural: int | None = None,
     verbose: bool = False,
+    resume: bool = False,
 ) -> PetroleumReport:
     """Train the policy and brain on every petroleum task.
 
@@ -205,6 +300,12 @@ def train_petroleum(
     used (``None`` uses all), which keeps the evaluation gate fast. With
     ``verbose`` set, a live progress line is printed for each task's policy and
     brain.
+
+    With ``resume`` (and a ``save_dir``), a task already trained to the budget is
+    loaded from its saved policy and brain rather than retrained, and one trained
+    part-way is continued for the remaining episodes -- so a second run continues
+    where the first stopped instead of starting over. The per-task progress is
+    read from, and written back to, the ledger in ``save_dir``.
     """
     hasher = FeatureHasher(64)
     trained_tasks = PETROLEUM_TASKS
@@ -214,6 +315,34 @@ def train_petroleum(
     if max_procedural is not None:
         procedural = procedural[:max_procedural]
     tasks = (*trained_tasks, *held_out_tasks, *procedural)
+
+    progress_state: TrainingProgress | None = None
+    if save_dir is not None and resume:
+        progress_state = TrainingProgress(
+            save_dir,
+            scope="petroleum",
+            config=_petroleum_scope_config(
+                tasks,
+                seed=seed,
+                replay_batch=replay_batch,
+                include_held_out=include_held_out,
+                include_procedural=include_procedural,
+                max_procedural=max_procedural,
+            ),
+        )
+        if verbose:
+            if progress_state.stale:
+                print(
+                    "Petroleum progress recorded for a different run; starting fresh.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            elif progress_state.available:
+                print(
+                    f"Resuming petroleum training: {progress_state.describe()}",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
     outcomes: list[TaskOutcome] = []
     for index, task in enumerate(tasks, start=1):
@@ -228,8 +357,13 @@ def train_petroleum(
                 replay_batch=replay_batch,
                 save_dir=save_dir,
                 verbose=verbose,
+                resume=resume,
+                progress_state=progress_state,
             )
         )
+
+    if progress_state is not None:
+        progress_state.save()
 
     def grouped_success(selected: tuple[SandboxTask, ...]) -> dict[str, float]:
         names = {task.name for task in selected}
@@ -295,7 +429,6 @@ __all__ = [
 def main(argv: list[str] | None = None) -> int:
     """CLI: ``python -m ml.petroleum [--episodes N] [--json] [--save-dir DIR]``."""
     import argparse
-    import json
     from pathlib import Path as _Path
 
     parser = argparse.ArgumentParser(description="Train the petroleum-engineering tasks.")
@@ -320,6 +453,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print only the final report, not the live per-task progress lines.",
     )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Ignore any saved progress and retrain every task from scratch "
+        "(default is to continue from what a previous run left in --save-dir).",
+    )
     args = parser.parse_args(argv)
 
     report = train_petroleum(
@@ -330,6 +469,7 @@ def main(argv: list[str] | None = None) -> int:
         include_procedural=args.procedural,
         max_procedural=args.max_procedural,
         verbose=not (args.json or args.quiet),
+        resume=not args.fresh,
     )
     if args.json:
         print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))

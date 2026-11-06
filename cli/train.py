@@ -236,7 +236,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if not args.approve:
         print("\nDry run: feasibility passed. Re-run with --approve to train.")
         return 0
-    result = coordinator.start(model, dataset, config, tokenizer=ByteTokenizer())
+    resume_from = Path(args.resume_from) if args.resume_from else None
+    if resume_from is not None and not resume_from.exists():
+        return _fail(f"No adapter to resume from at {resume_from}.", 3)
+    if resume_from is not None:
+        print(f"Continuing from the adapter at {resume_from}.")
+    result = coordinator.start(
+        model, dataset, config, tokenizer=ByteTokenizer(), resume_from=resume_from
+    )
     print()
     print(result.describe())
     return 0 if result.ok else 4
@@ -307,6 +314,20 @@ def _cmd_adapters(args: argparse.Namespace) -> int:
 def _cmd_presets(args: argparse.Namespace) -> int:
     for name, summary in preset_summaries():
         print(f"{name}: {summary}")
+    return 0
+
+
+def _cmd_resume_gate(args: argparse.Namespace) -> int:
+    from ml.resume_gate import describe as resume_describe
+    from ml.resume_gate import judgements
+
+    if args.json:
+        print(json.dumps(
+            [{"name": j.name, "passed": j.passed, "detail": j.detail} for j in judgements()],
+            indent=2,
+        ))
+        return 0
+    print(resume_describe())
     return 0
 
 
@@ -432,6 +453,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--steps", type=int, default=None)
     p_run.add_argument("--rank", type=int, default=None)
     p_run.add_argument("--batch-size", type=int, default=None)
+    p_run.add_argument(
+        "--resume-from",
+        default="",
+        help="continue from the adapter saved by an earlier run (a path to its "
+        "adapter directory) instead of starting a fresh adapter",
+    )
     p_run.add_argument("--approve", action="store_true", help="actually run the job")
     p_run.set_defaults(func=_cmd_run)
 
@@ -459,6 +486,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_gate = sub.add_parser("gate", help="the Phase-6 held-out gate report")
     p_gate.add_argument("--json", action="store_true")
     p_gate.set_defaults(func=_cmd_gate)
+
+    p_resume = sub.add_parser(
+        "resume-gate", help="the held-out resumable-training gate report"
+    )
+    p_resume.add_argument("--json", action="store_true")
+    p_resume.set_defaults(func=_cmd_resume_gate)
 
     return parser
 

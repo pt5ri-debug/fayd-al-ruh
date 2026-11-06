@@ -307,9 +307,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--resume",
         action="store_true",
+        default=True,
         help="Continue training from the checkpoint at --checkpoint (and its "
-        "optimiser-state sidecar) instead of starting from scratch. Falls back to "
-        "a fresh run when the checkpoint does not exist.",
+        "optimiser-state sidecar) instead of starting from scratch -- the default. "
+        "Falls back to a fresh run when the checkpoint does not exist. Use --fresh "
+        "to start over.",
+    )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Ignore the saved checkpoint and its optimiser state and train from "
+        "scratch.",
     )
     parser.add_argument(
         "--llm-shards",
@@ -355,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
         include_characters=args.llm_characters,
         include_character_knowledge=args.llm_character_corpus,
         character_knowledge_chunks=args.character_corpus_chunks,
-        resume=args.resume,
+        resume=bool(args.resume) and not args.fresh,
         shard_count=args.llm_shards,
         progress_every=args.progress_every,
         verbose=not args.quiet,

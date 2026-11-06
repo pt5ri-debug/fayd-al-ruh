@@ -59,6 +59,7 @@ from core.relation_polarity import polarity_accuracy
 from core.state import State
 from core.tool_agent import tool_selection_accuracy
 from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
+from ml.resume_gate import training_resume_accuracy
 from ml.training.gate import training_accuracy
 
 from evaluation.metrics import (
@@ -274,6 +275,14 @@ class EvaluationMetrics:
     memory and learning scope -- with Natasha's memory and learning isolated, the
     router honest about when no personality is suitable, delegation bounded by
     depth and budget, and conflicts preserved rather than voted away (Phase 5)."""
+
+    training_resume_accuracy: float
+    """The share of held-out resumable-training judgements satisfied: the progress
+    ledger round-trips and tolerates corruption; a changed configuration
+    invalidates a record while a raised episode budget tops it up; a finished unit
+    is loaded rather than retrained; a partial run continues to the same policy an
+    uninterrupted run reaches; and the language model's own resume still raises the
+    cumulative step count (Phase: resumable training)."""
 
     training_accuracy: float
     """The share of held-out Phase-6 training judgements satisfied: dataset
@@ -1266,6 +1275,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     tool_selection_value = tool_selection_accuracy()
     personality_agents_value = personality_agents_accuracy()
     training_value = training_accuracy()
+    # Resumable training: a second run continues from what the first left -- the
+    # ledger round-trips and tolerates corruption, a changed config invalidates a
+    # record while a raised budget tops it up, a finished unit is loaded not
+    # retrained, a partial run continues to the same bytes an uninterrupted one
+    # reaches, and the language model's own resume still holds (Phase: resumable
+    # training). Held-out judgements with negative controls, run on the real trainers.
+    resume_value = training_resume_accuracy()
 
     # Perception (Phase 7): a perceived artifact must reach the answer path as
     # *evidence* with its provenance, never as a verified fact. Held-out judgements
@@ -1380,6 +1396,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         tool_selection_value,
         personality_agents_value,
         training_value,
+        resume_value,
         perception_value,
         planning_value,
         self_improvement_value,
@@ -1451,6 +1468,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         tool_selection_accuracy=round(tool_selection_value, 6),
         personality_agents_accuracy=round(personality_agents_value, 6),
         training_accuracy=round(training_value, 6),
+        training_resume_accuracy=round(resume_value, 6),
         perception_bridge_accuracy=round(perception_value, 6),
         task_execution_accuracy=round(planning_value, 6),
         self_improvement_loop_accuracy=round(self_improvement_value, 6),
