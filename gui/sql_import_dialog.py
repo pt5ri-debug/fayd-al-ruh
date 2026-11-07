@@ -145,23 +145,20 @@ class SqlImportDialog(ThemedDialog):
         self._build_results_section()
 
     def _section(self, title: str) -> tk.Frame:
-        theme = self.theme
-        frame = tk.Frame(self.window, bg=theme.surface, highlightthickness=1,
-                         highlightbackground=theme.border_subtle)
-        frame.pack(fill="x", padx=20, pady=(10, 0))
-        tk.Label(
-            frame, text=title, bg=theme.surface, fg=theme.contrast,
-            font=self._type.font("sm", weight="bold"), anchor="w",
-        ).pack(fill="x", padx=12, pady=(10, 2))
-        return frame
+        """A titled surface the caller fills (the shared :class:`Section`)."""
+        from gui.components import Section
+
+        return Section(
+            self.window, title=title, theme=self.theme, typography=self._type, card=False
+        ).body
 
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
-        theme = self.theme
-        return tk.Button(
-            parent, text=text, command=command, bg=theme.surface_raised,
-            fg=theme.foreground, activebackground=theme.interactive_active,
-            activeforeground=theme.contrast, relief="flat", borderwidth=0,
-            font=self._type.font("xs", weight="bold"), padx=12, pady=4, cursor="hand2",
+        """A themed flat button (the shared :func:`gui.components.button`)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="secondary", small=False, anchor="center",
         )
 
     def _build_file_section(self) -> None:

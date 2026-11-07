@@ -184,11 +184,12 @@ class SceneStudioDialog(ThemedDialog):
         ).pack(fill="x", padx=14, pady=(10, 2))
 
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
-        return tk.Button(
-            parent, text=text, command=command, relief="flat", borderwidth=0,
-            highlightthickness=0, bg=self.theme.surface_raised, fg=self.theme.foreground,
-            activebackground=self.theme.interactive_active, activeforeground=self.theme.contrast,
-            font=self._type.font("2xs", weight="bold"), padx=10, pady=4, cursor="hand2",
+        """A themed flat button (the shared :func:`gui.components.button`)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="secondary", small=True, anchor="w",
         )
 
     # -- sidebar ----------------------------------------------------------

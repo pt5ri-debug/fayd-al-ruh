@@ -174,13 +174,15 @@ class ModelChatDialog(ThemedDialog):
         )
         tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
 
-    def _button(self, parent: tk.Misc, text: str, command: Any, *, small: bool = False) -> tk.Button:
-        return tk.Button(
-            parent, text=text, command=command, relief="flat", borderwidth=0,
-            highlightthickness=0, bg=self.theme.surface_raised, fg=self.theme.foreground,
-            activebackground=self.theme.interactive_active, activeforeground=self.theme.contrast,
-            font=self._type.font("2xs", weight="bold"), padx=10, pady=4 if small else 6,
-            cursor="hand2", anchor="w",
+    def _button(
+        self, parent: tk.Misc, text: str, command: Any, *, small: bool = False
+    ) -> tk.Button:
+        """A themed flat button (the shared :func:`gui.components.button`)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="secondary", small=True, anchor="w", pady=4 if small else 6,
         )
 
     # -- sidebar ----------------------------------------------------------

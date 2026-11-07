@@ -52,7 +52,6 @@ from core.character_config import (
 )
 from core.learning_isolation import MAIN_MODEL_OWNER, is_private
 
-from gui.app import RoundedBox
 from gui.character_manager import CharacterManagerService
 from gui.dialog_base import ThemedDialog
 from gui.sidebar import SidebarColumn
@@ -169,17 +168,16 @@ class CharacterManagerDialog(ThemedDialog):
         tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
 
     def _button(
-        self, parent: tk.Misc, text: str, command: Any, *, small: bool = False, primary: bool = False
+        self, parent: tk.Misc, text: str, command: Any, *, small: bool = False,
+        primary: bool = False,
     ) -> tk.Button:
-        theme = self.theme
-        background = theme.primary if primary else theme.surface_raised
-        foreground = theme.primary_foreground if primary else theme.foreground
-        return tk.Button(
-            parent, text=text, command=command, relief="flat", borderwidth=0,
-            highlightthickness=0, bg=background, fg=foreground,
-            activebackground=theme.interactive_active, activeforeground=theme.contrast,
-            font=self._type.font("2xs", weight="bold"), padx=10, pady=4 if small else 7,
-            cursor="hand2", anchor="w" if small else "center",
+        """A themed flat button (the shared :func:`gui.components.button`)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="primary" if primary else "secondary", small=True,
+            anchor="w" if small else "center", pady=4 if small else 7,
         )
 
     # -- sidebar (the character list) -------------------------------------
@@ -323,20 +321,12 @@ class CharacterManagerDialog(ThemedDialog):
         self._build_management()
 
     def _section(self, title: str) -> tk.Frame:
-        """A titled card the caller fills with rows."""
-        theme = self.theme
-        card = RoundedBox(
-            self._form, bg=theme.base, fill=theme.surface, outline=theme.border_subtle,
-            corner=12, parent_bg=theme.base,
-        )
-        card.pack(fill="x", padx=18, pady=(6, 2))
-        tk.Label(
-            card.inner, text=title, bg=theme.surface, fg=theme.contrast,
-            font=self._type.font("sm", weight="bold"), anchor="w",
-        ).pack(anchor="w", padx=14, pady=(10, 2))
-        body = tk.Frame(card.inner, bg=theme.surface)
-        body.pack(fill="x", padx=14, pady=(0, 12))
-        return body
+        """A titled card the caller fills with rows (the shared :class:`Section`)."""
+        from gui.components import Section
+
+        return Section(
+            self._form, title=title, theme=self.theme, typography=self._type
+        ).body
 
     def _row(self, parent: tk.Frame, label: str) -> tk.Frame:
         theme = self.theme
