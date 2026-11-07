@@ -355,6 +355,11 @@ def run_code_studio(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.studio", argv)
 
 
+def run_training_center(argv: Sequence[str] = ()) -> int:
+    """Learn, build governed datasets, train, and evaluate (the Training Center)."""
+    return _run_module("cli.training_center", argv)
+
+
 def run_presentation(argv: Sequence[str] = ()) -> int:
     """Build a PowerPoint deck from a discussion, slide by slide (Presentation Studio)."""
     return _run_module("cli.presentation", argv)
@@ -630,6 +635,10 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ),
     ("Code Studio: edit and merge the project's own code", run_code_studio, ("status",)),
     ("Code Studio: show the project's own development tasks", run_code_studio, ("tasks",)),
+    ("Training Center: learn, build datasets, train, and evaluate", run_training_center, ("dashboard",)),
+    ("Training Center: what every learning and training control does", run_training_center, ("catalog",)),
+    ("Training Center: the learning pipelines", run_training_center, ("pipeline", "--list")),
+    ("Training Center: this machine's own resources", run_training_center, ("resources",)),
     ("Presentation Studio: build a PowerPoint deck from a discussion", run_presentation, ("list",)),
     ("Doc's Studio: read any document (incl. scanned) with the local vision model", run_docs, ("status",)),
     (

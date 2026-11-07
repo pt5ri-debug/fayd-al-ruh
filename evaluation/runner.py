@@ -58,6 +58,7 @@ from core.relation_paths import connection_accuracy
 from core.relation_polarity import polarity_accuracy
 from core.state import State
 from core.tool_agent import tool_selection_accuracy
+from core.training_center.gate import training_center_accuracy
 from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
 from ml.resume_gate import training_resume_accuracy
 from ml.training.gate import training_accuracy
@@ -291,6 +292,16 @@ class EvaluationMetrics:
     QLoRA needs a CUDA GPU); config validation; the training job life cycle; the
     base model provably unchanged by a run; and controlled promotion plus rollback
     -- each on the real implementation, with negative controls (Phase 6)."""
+
+    training_center_accuracy: float
+    """The share of held-out Training Center judgements satisfied: a review status
+    governs export (an unapproved example is refused, a rejected one is never
+    approved), a governed pipeline stage is refused without approval and an
+    unimplemented stage is reported unavailable, the catalogue is complete and its
+    CLI commands resolve, a provider with no key/approval is honest, an
+    unreportable resource reads as unknown rather than zero, and a pipeline
+    round-trips through its store -- each on the real implementation, with negative
+    controls."""
 
     perception_bridge_accuracy: float
     """The share of held-out Phase-7 perception judgements satisfied: a document,
@@ -1275,6 +1286,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     tool_selection_value = tool_selection_accuracy()
     personality_agents_value = personality_agents_accuracy()
     training_value = training_accuracy()
+    training_center_value = training_center_accuracy()
     # Resumable training: a second run continues from what the first left -- the
     # ledger round-trips and tolerates corruption, a changed config invalidates a
     # record while a raised budget tops it up, a finished unit is loaded not
@@ -1396,6 +1408,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         tool_selection_value,
         personality_agents_value,
         training_value,
+        training_center_value,
         resume_value,
         perception_value,
         planning_value,
@@ -1468,6 +1481,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         tool_selection_accuracy=round(tool_selection_value, 6),
         personality_agents_accuracy=round(personality_agents_value, 6),
         training_accuracy=round(training_value, 6),
+        training_center_accuracy=round(training_center_value, 6),
         training_resume_accuracy=round(resume_value, 6),
         perception_bridge_accuracy=round(perception_value, 6),
         task_execution_accuracy=round(planning_value, 6),

@@ -1,0 +1,279 @@
+"""The Training Center window: the sidebar, the sections, and the wiring.
+
+The window parts are skipped unless a display (or Xvfb) is available, exactly like
+``tests/test_model_manager_window.py``. The engine the window drives is exercised
+headless in ``tests/test_training_center.py``; here the *view* is what is checked,
+so the window is opened with a stand-in service and no model, network, or training
+run ever happens.
+"""
+
+from __future__ import annotations
+
+import tkinter as tk
+
+import pytest
+
+from tests.test_gui_design import _display_available
+
+
+class StubService:
+    """A stand-in service: fixed reports, no store, no model, no network."""
+
+    def __init__(self) -> None:
+        from core.training_center.dashboard import ChartSeries, DashboardSnapshot
+        from core.training_center.qa_learning import ReviewSummary
+        from core.training_center.records import LearningExample
+
+        self.settings_set: list[tuple[str, object]] = []
+        self.dashboard_snapshot = DashboardSnapshot(
+            learning_sources=2,
+            documents=10,
+            chunks=42,
+            datasets=1,
+            dataset_versions=1,
+            training_examples=6,
+            learning_examples=3,
+            approved_examples=2,
+            pending_examples=1,
+            jobs=1,
+            completed_jobs=1,
+            charts=(ChartSeries("Training loss", (("run-1", 0.5),)),),
+        )
+        self._example = LearningExample(
+            question="What is porosity?", answer="Void space.", provider="manual",
+        )
+        self._summary = ReviewSummary(counts={"pending": 1})
+
+    # -- dashboard ---------------------------------------------------------
+    def dashboard(self):
+        return self.dashboard_snapshot
+
+    # -- catalog / settings ------------------------------------------------
+    def catalog_text(self) -> str:
+        return "Training Center — catalog\n  dashboard.refresh  Refresh"
+
+    def capabilities(self):
+        from core.training_center.catalog import CAPABILITIES
+
+        return CAPABILITIES
+
+    def settings(self) -> dict:
+        return {"chunk_chars": 1200, "review_required": True}
+
+    def setting(self, key: str):
+        return self.settings().get(key)
+
+    def set_setting(self, key: str, value) -> dict:
+        self.settings_set.append((key, value))
+        return self.settings()
+
+    def settings_text(self) -> str:
+        return "Training Center — settings\n  chunk_chars: 1200"
+
+    # -- knowledge ---------------------------------------------------------
+    def knowledge_stats(self) -> dict:
+        return {"chunks": 42, "articles": 10, "size_bytes": 1024}
+
+    def knowledge_search(self, query: str, *, limit: int = 4):
+        return ()
+
+    def reindex(self, *, progress=None) -> dict:
+        return {"chunks": 42}
+
+    def knowledge_store_dir(self):
+        from pathlib import Path
+
+        return Path("/tmp/fayd-tc-window")
+
+    def export_knowledge(self, destination) -> str:
+        return f"Copied 0 file(s) to {destination}."
+
+    # -- sources / imports -------------------------------------------------
+    def import_files(self, paths):
+        raise AssertionError("import_files should not run in this test")
+
+    def import_folder(self, folder, *, recursive: bool = True):
+        raise AssertionError("import_folder should not run in this test")
+
+    def import_urls(self, urls, *, approved: bool = False):
+        raise AssertionError("import_urls should not run in this test")
+
+    def provider_statuses(self):
+        return ()
+
+    # -- Q&A ---------------------------------------------------------------
+    def ask(self, question: str, *, provider: str = "", topic: str = "", system: str = ""):
+        return self._example
+
+    def generate_questions(self, topic: str, *, count: int = 5, provider: str = ""):
+        return ()
+
+    def ask_many(self, questions, *, provider: str = "", topic: str = ""):
+        return ()
+
+    def examples(self, *, status: str = "", query: str = ""):
+        return (self._example,)
+
+    def review_summary(self):
+        return self._summary
+
+    def approve(self, example_id: str, *, note: str = ""):
+        return self._example
+
+    def reject(self, example_id: str, *, note: str = ""):
+        return self._example
+
+    def correct(self, example_id: str, answer: str, *, note: str = ""):
+        return self._example
+
+    # -- datasets ----------------------------------------------------------
+    def dataset_rows(self):
+        return ()
+
+    def build_dataset_from_approved(self, dataset_id: str):
+        raise AssertionError("build_dataset_from_approved should not run in this test")
+
+    def build_dataset_from_texts(self, dataset_id: str, texts):
+        raise AssertionError("build_dataset_from_texts should not run in this test")
+
+    def validate_dataset(self, dataset_id: str, version=None) -> str:
+        return f"{dataset_id}: ok"
+
+    def export_dataset(self, dataset_id: str, destination, version=None):
+        raise AssertionError("export_dataset should not run in this test")
+
+    # -- jobs --------------------------------------------------------------
+    def job_rows(self):
+        return ()
+
+    def build_config(self, **kwargs):
+        return object()
+
+    def feasibility(self, model, dataset_id, config, *, version=None):
+        return type("Report", (), {"describe": lambda self: "feasibility: ok"})()
+
+    def start_job(self, *args, **kwargs):
+        raise AssertionError("start_job should not run in this test")
+
+    def cancel_job(self, run_id: str) -> bool:
+        return False
+
+    def evaluate_run(self, run_id: str):
+        raise AssertionError("evaluate_run should not run in this test")
+
+    # -- pipelines ---------------------------------------------------------
+    def pipeline_list(self):
+        return ()
+
+    def create_pipeline(self, pipeline_id: str):
+        raise AssertionError("create_pipeline should not run in this test")
+
+    def run_pipeline(self, pipeline_id: str, *, approved: bool = False):
+        raise AssertionError("run_pipeline should not run in this test")
+
+    # -- history -----------------------------------------------------------
+    def history_lines(self, *, kind: str = "", query: str = "", limit: int = 100):
+        return ()
+
+    # -- resources ---------------------------------------------------------
+    def resources(self):
+        from core.training_center.resources import read_resources
+
+        return read_resources()
+
+    def estimate(self, **kwargs):
+        return type("Estimate", (), {"describe": lambda self: "estimate: unknown"})()
+
+    def model_choices(self):
+        return ()
+
+
+def _dialog(root, service):
+    from gui.app import DARK_THEME
+    from gui.training_center_dialog import TrainingCenterDialog
+
+    return TrainingCenterDialog(
+        root, service, theme=DARK_THEME, font="DejaVu Sans", mono="DejaVu Sans Mono"
+    )
+
+
+def _button_texts(widget: tk.Misc) -> set[str]:
+    """Every button label in a widget tree, so a drawn button can be checked."""
+    texts: set[str] = set()
+    for child in widget.winfo_children():
+        if isinstance(child, tk.Button):
+            texts.add(str(child.cget("text")))
+        texts |= _button_texts(child)
+    return texts
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_builds_every_section() -> None:
+    from core.training_center.catalog import SECTIONS
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        keys = set(dialog._sidebar_column.sections)
+        assert {"dashboard", "sources", "knowledge", "qa", "datasets"} <= keys
+        assert {"jobs", "finetune", "pretrain", "evaluation"} <= keys
+        assert {"kb", "pipelines", "history", "resources", "settings"} <= keys
+        assert len(SECTIONS) == 14
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_every_button_comes_from_the_catalogue() -> None:
+    from core.training_center.catalog import CAPABILITIES
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        titles = {cap.title for cap in CAPABILITIES}
+        drawn = _button_texts(dialog.window) & titles
+        # Every catalogue capability is drawn as a button with the catalogue's own
+        # title, so the window and the catalogue can never drift apart.
+        assert len(drawn) == len(CAPABILITIES)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_opening_shows_the_dashboard_and_its_charts() -> None:
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        text = "\n".join(card.get("1.0", "end") for card in dialog._cards)
+        assert "dashboard" in text.lower()
+        assert "Training loss" in text  # a chart line is drawn
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_setting_a_preference_reaches_the_service(monkeypatch) -> None:
+    import gui.training_center_dialog as dialog_module
+
+    root = tk.Tk()
+    try:
+        service = StubService()
+        dialog = _dialog(root, service)
+        answers = iter(["chunk_chars", "900"])
+        monkeypatch.setattr(dialog_module.simpledialog, "askstring", lambda *a, **k: next(answers))
+        dialog._on_set_setting()
+        assert service.settings_set == [("chunk_chars", 900)]
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_closes_without_leaving_a_pending_callback() -> None:
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._close()
+        assert dialog._closed
+        assert dialog._pump_after is None
+    finally:
+        root.destroy()

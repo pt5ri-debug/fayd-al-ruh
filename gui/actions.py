@@ -52,6 +52,7 @@ from cli.menu import (
     run_scene3d,
     run_selfcheck,
     run_shared_models,
+    run_training_center,
     run_ultron_chat,
     run_update,
     run_vision_chat,
@@ -249,6 +250,7 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         "Training & Learning",
         "🧠",
         (
+            "training-center",
             "llm",
             "llm-sessions",
             "llm-characters",
@@ -487,6 +489,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         run_code_studio,
         ("status",),
         hidden=True,
+    ),
+    GuiAction(
+        "training-center",
+        "Training Center: learn, build datasets, train, and evaluate",
+        run_training_center,
+        ("dashboard",),
     ),
     GuiAction(
         "presentation",
