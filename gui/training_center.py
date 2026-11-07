@@ -181,17 +181,49 @@ class TrainingCenterService:
     def web_enabled(self) -> bool:
         """Whether the external paths (cloud, URL import, KB build) are approved.
 
-        This is the Training Center's own permission switch: off on a fresh
-        install, persisted, and the *one* place a path that leaves the machine
-        consults before it runs. Turning it on is the human approval, exactly as
-        the chat's web toggle is for a search.
+        This is **the one internet preference** the whole application consults
+        (Phase 3): it is stored in ``core.preferences`` beside the chat's own web
+        toggle, so turning the internet on in the chat turns it on here too (and
+        the reverse), and no surface keeps a private copy. Off on a fresh install.
+        Turning it on is the human approval, exactly as the chat's web toggle is
+        for a search. A value saved by an older build under the Training Center's
+        own namespace is honoured once and migrated.
         """
+        record = self._preferences()
+        if record is not None:
+            return bool(record.record.web)
         return bool(self.setting("web"))
 
     def set_web(self, enabled: bool) -> bool:
-        """Turn the internet paths on or off and persist the choice."""
+        """Turn the internet paths on or off and persist the one shared choice."""
+        preferences = self._preferences()
+        if preferences is not None:
+            preferences.update(web=bool(enabled))
+            return bool(preferences.record.web)
         self.set_setting("web", bool(enabled))
         return self.web_enabled()
+
+    def _preferences(self) -> Any:
+        """The shared preferences store, or ``None`` when it cannot be read.
+
+        Reads the one authoritative preference through the Phase-3 settings hub,
+        migrating a legacy Training-Center-only value the first time it is seen so
+        an existing install does not silently lose its choice.
+        """
+        try:
+            from core.preferences import UserPreferences
+
+            preferences = UserPreferences(self.root)
+        except Exception:
+            return None
+        if not preferences.record.web:
+            legacy = self.setting("web")
+            if legacy:
+                try:
+                    preferences.update(web=True)
+                except Exception:
+                    return preferences
+        return preferences
 
     def toggle_web(self) -> bool:
         return self.set_web(not self.web_enabled())

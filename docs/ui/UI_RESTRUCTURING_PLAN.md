@@ -63,22 +63,32 @@ tests still pass unchanged; `ruff`/`mypy` clean.
 
 See `docs/ui/UI_NAVIGATION.md` for the full sidebar map.
 
-## Phase 3 — Centralize settings
+## Phase 3 — Centralize settings *(done)*
 
 **Goal:** one authoritative home per **global** setting; context-dependent ones
 stay distinct.
 
-- `gui/settings_hub.py` (new, Tk-free model) + `gui/settings_dialog.py` (new
-  window): a single Settings window whose sections *link to* the authoritative
-  editors (Themes, Fonts, Reading Voice, Cloud, the internet switch, Backup,
-  Diagnostics) rather than re-implementing them.
-- Ensure the **internet switch** is one preference read by the main composer,
-  the Training Center, and Jarvis.
-- **Do not merge** per-mouth voice/model, per-character model, per-agent
-  permissions, or per-task limits; add contextual links instead.
+- `gui/settings_hub.py` (new, Tk-free): the **registry** of every global setting
+  with its one authoritative `reader`/`writer`/`store`, the list of settings that
+  are deliberately **context-dependent** (`CONTEXTUAL_SETTINGS`), and the one
+  **internet switch** (`read_internet`/`write_internet`/`internet_status`) that
+  every surface consults.
+- The **internet switch is one preference** now: `TrainingCenterService.web_enabled`/
+  `set_web` read and write `core.preferences` through the hub instead of keeping a
+  private `training_center/web` value, so the chat composer toggle, the Training
+  Center, and the new Settings switch are one value (a legacy value is migrated).
+- The main window's **Settings section** became the centralized settings page: it
+  reports every global setting and its live value, each with a link to the section
+  that owns its editor (Themes, Fonts & paragraphs, Reading Voice), plus the one
+  internet switch — so it *shows* a setting rather than keeping a second copy.
+- **Not merged** (kept distinct, and named in the registry): per-mouth voice/model,
+  per-character model, per-agent permissions, per-task limits.
 
-**Gate:** a test asserts each global setting has exactly one writer; the
-context-dependent settings are asserted to remain separate.
+**Gate:** `tests/test_settings_hub.py` asserts every entry names a real
+reader/writer, that a shared writer only serves one store, that the
+context-dependent settings are separate, and that the one internet switch is the
+same value the Training Center and a chat session read; the window tests assert
+the Settings page reports each setting and flips the shared switch.
 
 ## Phase 4 — Restructure existing windows and dialogs
 

@@ -53,7 +53,7 @@ from core.voices import (
 )
 from hakeem.hakeem_agent import HakeemError
 
-from gui import chat_composer, clipboard, rich_text
+from gui import chat_composer, clipboard, rich_text, settings_hub
 from gui import dashboard as dashboard_module
 from gui import markdown as md
 from gui.actions import GuiAction, grouped_visible_actions
@@ -1166,12 +1166,23 @@ class FaydGUI:
             self._settings_built = True
 
     def _build_settings_panel(self, panel: tk.Misc) -> None:
-        """Build the Settings section's contents (once, on first open)."""
-        # The "Answering mouth" radio list is hidden on purpose: the header's model
-        # selector is the one visible mouth switch. The variable still tracks the
-        # live mouth (the header sets it), so nothing else has to change.
+        """Build the Settings section's contents (once, on first open).
+
+        This is the **centralized settings page** (Phase 3): every global setting
+        and its current value, read from the one authoritative source
+        (:mod:`gui.settings_hub`), each with a link to the section that owns its
+        editor -- so the page *reports* a setting rather than keeping a second copy
+        of it. The one internet switch lives here too, and it is the same
+        preference the chat's web toggle and the Training Center consult.
+
+        The "Answering mouth" radio list is hidden on purpose: the header's model
+        selector is the one visible mouth switch. The variable still tracks the
+        live mouth (the header sets it), so nothing else has to change.
+        """
         self._source_var.set(self.service.source)
 
+        self._build_settings_summary(panel)
+        self._build_internet_row(panel)
         self._build_cloud_provider_picker(panel)
 
         self._sidebar_button(
@@ -1180,6 +1191,91 @@ class FaydGUI:
         self._sidebar_button(
             panel, "⌫   Clear transcript", self._clear_transcript, small=True
         ).pack(fill="x", padx=12, pady=(2, 0))
+
+    def _build_settings_summary(self, panel: tk.Misc) -> None:
+        """Every global setting, its live value, and a link to its own editor."""
+        tk.Label(
+            panel, text="Global settings", bg=self._theme.surface, fg=self._theme.foreground,
+            font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=16, pady=(8, 2))
+        try:
+            values = settings_hub.current_values(getattr(self.service, "data_root", None))
+        except Exception:
+            values = {}
+        for entry in settings_hub.SETTINGS_ENTRIES:
+            if entry.key == "internet":
+                continue  # drawn as the switch below
+            line = tk.Frame(panel, bg=self._theme.surface)
+            line.pack(fill="x", padx=16, pady=0)
+            tk.Label(
+                line, text=entry.title, bg=self._theme.surface, fg=self._theme.text_dim,
+                font=self._type.font("2xs"), anchor="w", width=13, justify="left",
+            ).pack(side="left")
+            value = tk.Label(
+                line, text=values.get(entry.key, "unknown"), bg=self._theme.surface,
+                fg=self._theme.foreground, font=self._type.font("2xs"), anchor="w",
+                justify="left", wraplength=140,
+            )
+            value.pack(side="left", fill="x", expand=True)
+            _Tooltip(value, entry.description, self._theme, self._type)
+            if entry.link:
+                link = self._sidebar_button(
+                    line, "▸", self._settings_link_command(entry.link), small=True
+                )
+                link.pack(side="right")
+                _Tooltip(link, f"Open {entry.title}", self._theme, self._type)
+
+    def _settings_link_command(self, link: str) -> Any:
+        """The command that opens the section owning a setting's editor."""
+        return {
+            "themes": self._toggle_themes,
+            "fonts": self._toggle_fonts,
+            "voices": self._toggle_voices,
+            "settings": self._toggle_settings,
+        }.get(link, self._toggle_settings)
+
+    def _build_internet_row(self, panel: tk.Misc) -> None:
+        """The one internet switch -- the same preference every surface consults."""
+        line = tk.Frame(panel, bg=self._theme.surface)
+        line.pack(fill="x", padx=12, pady=(8, 2))
+        enabled = settings_hub.read_internet(getattr(self.service, "data_root", None))
+        self._internet_var = tk.StringVar(value="on" if enabled else "off")
+        button = self._sidebar_button(
+            line,
+            f"🌐   Internet: {self._internet_var.get()}",
+            self._toggle_internet,
+            small=True,
+        )
+        button.pack(fill="x")
+        self._internet_button = button
+        _Tooltip(
+            button,
+            settings_hub.internet_status(getattr(self.service, "data_root", None)),
+            self._theme,
+            self._type,
+        )
+
+    def _toggle_internet(self) -> None:
+        """Flip the one internet preference, persist it, and refresh the label.
+
+        The switch is shared: it writes the same ``core.preferences`` value the
+        chat's web toggle and the Training Center read, so turning it here turns it
+        on everywhere, and the live chat session is switched too when it can search.
+        """
+        root = getattr(self.service, "data_root", None)
+        now = settings_hub.write_internet(root, not settings_hub.read_internet(root))
+        self._internet_var.set("on" if now else "off")
+        if hasattr(self, "_internet_button"):
+            self._internet_button.configure(text=f"🌐   Internet: {'on' if now else 'off'}")
+            _Tooltip(
+                self._internet_button, settings_hub.internet_status(root), self._theme, self._type
+            )
+        # Switch the live session too, so the chat answers with the new choice now.
+        try:
+            if self.service.web_available():
+                self.service.set_web(now)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------- home dashboard
 

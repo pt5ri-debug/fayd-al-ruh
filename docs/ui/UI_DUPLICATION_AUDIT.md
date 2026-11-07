@@ -46,6 +46,7 @@ component re-implemented per window:
 | Operating mode | `gui/operating_mode` | (retired to one mode) | single value now |
 | Cloud provider | `cloud` namespace | Main *Settings* section | **DUP risk**: also settable from the CLI `cloud use` — same store, OK |
 | Cloud model | `cloud` namespace | Main *Settings* section | same store, OK |
+| Internet switch | `jarvis`/`preferences` (`web`) | Main *Settings* switch, the chat composer toggle, the Training Center | **was duplicated** (chat read `PreferenceRecord.web`, the Training Center its own `training_center/web`) — **fixed in Phase 3**: one `core.preferences` value, read by all three |
 | Sidebar section states | `gui/sidebar_sections[:scope]` | every window | per-window by design |
 
 ### 2b. Context-dependent settings that must **stay distinct**
@@ -59,7 +60,6 @@ a regression:
 | Language model | each mouth's `mouths` profile | each character's `CharacterConfig.model` | a personality-specific override is not the global default |
 | Permissions | global sandbox allow-list | each agent's capability ceiling | a personality's ceiling is `requested ∩ ceiling`, never wider |
 | Resource limits | global `MonitorConfig` | task-specific limits in the execution engine | a task may set a tighter bound, never a looser one |
-| Web switch | the saved `PreferenceRecord.web` | the Training Center's own `web` | two governed surfaces, one preference each, both off by default |
 
 ### 2c. Genuine duplication to eliminate
 
@@ -91,3 +91,22 @@ funnel into **one** handler, so they can never disagree:
 - **Do not merge**: per-mouth voice/model, per-character model, per-agent
   permissions, per-task resource limits. Add *contextual links* from a dialog to
   the authoritative page instead.
+
+## 5. Phase 3 outcome
+
+The rule is now enforced, not merely stated:
+
+- `gui/settings_hub.py` is the **registry**: every global setting names its one
+  authoritative `reader`/`writer`/`store`, and `tests/test_settings_hub.py`
+  proves every name resolves to a real function and that no two settings share a
+  store they do not belong to.
+- The **one internet switch** was de-duplicated: the Training Center no longer
+  keeps its own `web` preference — `TrainingCenterService.web_enabled`/`set_web`
+  read and write `core.preferences` through the hub, so the chat toggle, the
+  Training Center, and the new Settings switch are one value (a legacy
+  Training-Center value is migrated on first read).
+- The **Settings page** now reports every global setting and its live value, each
+  with a link to the section that owns its editor, so the page *shows* a setting
+  rather than keeping a second copy of it.
+- The **context-dependent** settings remain separate and are named in
+  `CONTEXTUAL_SETTINGS`, so a future change cannot quietly merge them.
