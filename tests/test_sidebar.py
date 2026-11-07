@@ -336,6 +336,56 @@ def test_window_settings_section_does_not_repeat_the_voice_list(tmp_path) -> Non
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_settings_page_reports_every_global_setting(tmp_path) -> None:
+    """The Settings page reports each global setting and links to its editor."""
+    import tkinter as tk
+
+    from gui import settings_hub
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        app._toggle_settings()
+        root.update()
+        texts = _widget_text(app._settings_panel)
+        assert "Global settings" in texts
+        for entry in settings_hub.SETTINGS_ENTRIES:
+            if entry.key == "internet":
+                continue
+            assert entry.title in texts
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_settings_page_carries_the_one_internet_switch(tmp_path) -> None:
+    """The switch writes the shared preference and the label follows it."""
+    import tkinter as tk
+
+    from gui import settings_hub
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        app._toggle_settings()
+        root.update()
+        assert settings_hub.read_internet(tmp_path) is False
+        assert "off" in app._internet_button.cget("text")
+        app._toggle_internet()
+        root.update()
+        assert settings_hub.read_internet(tmp_path) is True
+        assert "on" in app._internet_button.cget("text")
+        app._toggle_internet()
+        assert settings_hub.read_internet(tmp_path) is False
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_settings_toggle_is_idempotent(tmp_path) -> None:
     """A second "show the settings" call does not rebuild the pickers."""
     import tkinter as tk

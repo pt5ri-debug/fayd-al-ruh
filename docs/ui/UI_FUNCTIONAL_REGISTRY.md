@@ -99,6 +99,9 @@ that shape rather than repeated per window.
 | VS-01 | Voice studio | engine/voice/mood/document | `VoiceStudioService` | OK |
 | VS-02 | Voice studio | Engine setup (install/download) | `install_runtime`/`download_voices` | OK |
 | VS-03 | Voice studio | My voice (clone/import) | `core.audiocpp_speech` import/clone | OK |
+| SH-01 | Main window · Settings | report every global setting | `gui.settings_hub.current_values` | OK (Phase 3) |
+| SH-02 | Main window · Settings | the one internet switch | `gui.settings_hub.write_internet` | OK (Phase 3) |
+| SH-03 | Main window · Settings | link to a setting's own editor | `_settings_link_command` | OK (Phase 3) |
 
 ## 4. Findings
 
@@ -119,3 +122,7 @@ that shape rather than repeated per window.
   (Phase 6).
 - **Per-window state is stored under the `gui` namespace** with several keys and
   several `scope` variants; there is no single settings page (§Phase 3).
+  **Phase 3 closed this**: `gui/settings_hub.py` is the registry of every global
+  setting and the main window's *Settings* section is the single page that reports
+  them; the one genuinely duplicated preference (the internet switch, which the
+  Training Center kept a private copy of) now reads/writes `core.preferences`.
