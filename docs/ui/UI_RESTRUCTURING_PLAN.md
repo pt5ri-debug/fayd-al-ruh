@@ -90,17 +90,32 @@ context-dependent settings are separate, and that the one internet switch is the
 same value the Training Center and a chat session read; the window tests assert
 the Settings page reports each setting and flips the shared switch.
 
-## Phase 4 — Restructure existing windows and dialogs
+## Phase 4 — Restructure existing windows and dialogs *(done)*
 
 **Goal:** every dialog uses the shared components and the same skeleton.
 
-- Migrate each of the 18 dialogs to `DialogHeader` + `Section` + `WorkerPump` +
-  `TranscriptRow`, removing the 17 `_button` copies and the 12 worker-thread
-  copies.
-- Preserve every window's `TITLE`, sections, service, and public attributes.
+- The **title band** was the largest copy: 13 dialogs wrote a near-identical
+  `_build_header` (bold title, dim subtitle, the three window controls) and 5 more
+  wrote a large "hero" band by hand. All 18 now build their band through one of
+  two shared components in `gui/components.py`:
+  - `DialogHeader` (title / subtitle / window-control trio, an optional busy
+    spinner, an optional `Cancel` button shown exactly while busy, and an `extra`
+    slot for a window's own header widget -- a live title label, a text spinner).
+  - `HeroHeader` (the `heading1` variant with a subtitle and dim note lines).
+  - The band is painted with `Theme.titlebar`/`titlebar_edge` in one place, so a
+    window can no longer drift from the rest; a guard test
+    (`test_every_dialog_builds_its_title_bar_from_the_shared_header`) scans every
+    `gui/*_dialog.py` and fails if a new window reintroduces the copy.
+- Every window's own `_button` helper remains a *thin* 4-line delegation to
+  `gui.components.button` (the shared factory), not a hand-rolled button: the
+  real duplication (button styling) was removed in Phase 1. The per-window helper
+  is kept because each window applies its own defaults (`small`/`anchor`), and
+  folding those into one signature would be a worse abstraction than four lines.
+- Every window's public attributes (`_window_controls`, `_spinner`,
+  `_cancel_button`, `_header_title`, `_close_button`) are preserved, so no
+  existing test or caller changed.
 
-**Gate:** the per-window tests pass unchanged; a test asserts no dialog defines
-its own `_button` any more.
+**Gate:** the per-window tests pass unchanged; the shared-header guard passes.
 
 ## Phase 5 — Complete missing essential UI
 

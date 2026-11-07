@@ -329,6 +329,16 @@ class DialogHeader:
     title, a dim subtitle, and the minimize/maximize/close trio on the right. This
     builds them once, installs the controls through :mod:`gui.window_controls`,
     and returns the created widgets so a window can keep its own references.
+
+    Two optional pieces cover what the copies had *in addition* to the trio:
+
+    * ``extra`` -- a callback that draws into the header's inner frame, so a
+      window with its own header control (a Cancel button, a live title label, a
+      text spinner) keeps it while the band itself stays one implementation. The
+      callback receives the ``inner`` frame and may ``pack(side="right")`` into it.
+    * ``cancel`` -- the ordinary "Cancel" button, packed on the right, exposed as
+      :attr:`cancel_button`; :meth:`set_busy` shows it exactly while a job runs, so
+      a window does not wire that dance itself.
     """
 
     def __init__(
@@ -342,6 +352,8 @@ class DialogHeader:
         on_close: Callable[[], None] | None = None,
         spinner_length: int = SIZE.spinner,
         show_spinner: bool = True,
+        extra: Callable[[tk.Frame], None] | None = None,
+        cancel: Callable[[], None] | None = None,
     ) -> None:
         from tkinter import ttk
 
@@ -379,23 +391,99 @@ class DialogHeader:
         self.spinner: Any = None
         if show_spinner:
             self.spinner = ttk.Progressbar(inner, mode="indeterminate", length=spinner_length)
+        self.cancel_button: tk.Button | None = None
+        if cancel is not None:
+            self.cancel_button = button(
+                inner, "Cancel", cancel, theme=theme, typography=typography,
+                variant="secondary", small=True,
+            )
         self.controls = install_window_controls(
             window, inner, theme=theme, typography=typography, on_close=on_close
         )
+        self.inner = inner
+        if extra is not None:
+            extra(inner)
         tk.Frame(window, bg=_token(theme, "titlebar_edge"), height=1).pack(fill="x")
         self.bar = bar
-        self.inner = inner
 
     def set_busy(self, busy: bool) -> None:
-        """Show or hide the busy spinner (a no-op when none was built)."""
-        if self.spinner is None:
-            return
+        """Show or hide the busy spinner (and the Cancel button, when one exists)."""
         if busy:
-            self.spinner.pack(side="right", padx=SPACE.md)
-            self.spinner.start(12)
-        else:
+            if self.spinner is not None:
+                self.spinner.pack(side="right", padx=SPACE.md)
+                self.spinner.start(12)
+            if self.cancel_button is not None:
+                self.cancel_button.pack(side="right", padx=(0, SPACE.md))
+            return
+        if self.spinner is not None:
             self.spinner.stop()
             self.spinner.pack_forget()
+        if self.cancel_button is not None:
+            self.cancel_button.pack_forget()
+
+
+class HeroHeader:
+    """The large "hero" title band the five form-style dialogs draw.
+
+    A different visual variant from :class:`DialogHeader` (a ``heading1`` title
+    with a subtitle and one or more dim note lines), but the same *component*: it
+    builds the title row, installs the window controls, and returns them, so the
+    five copies become one. ``notes`` are the dim lines under the subtitle (the
+    honesty line, the accepted-formats line, the unsupported-formats line).
+    """
+
+    def __init__(
+        self,
+        window: tk.Tk | tk.Toplevel,
+        *,
+        title: str,
+        subtitle: str = "",
+        notes: tuple[str, ...] = (),
+        theme: Any,
+        typography: Any,
+        on_close: Callable[[], None] | None = None,
+        padx: int = 20,
+        wraplength: int = 980,
+        extra: Callable[[tk.Frame], None] | None = None,
+    ) -> None:
+        from gui.window_controls import install_window_controls
+
+        bar = tk.Frame(window, bg=_token(theme, "titlebar"))
+        bar.pack(fill="x")
+        header = tk.Frame(bar, bg=_token(theme, "titlebar"))
+        header.pack(fill="x", padx=padx, pady=(SPACE.xl, SPACE.md))
+        title_row = tk.Frame(header, bg=_token(theme, "titlebar"))
+        title_row.pack(fill="x")
+        self.title_label = tk.Label(
+            title_row, text=title, bg=_token(theme, "titlebar"), fg=_token(theme, "contrast"),
+            font=typography.font("heading1", weight="bold"), anchor="w",
+        )
+        self.title_label.pack(side="left")
+        self.controls = install_window_controls(
+            window, title_row, theme=theme, typography=typography, on_close=on_close
+        )
+        self.subtitle_label: tk.Label | None = None
+        if subtitle:
+            self.subtitle_label = tk.Label(
+                header, text=subtitle, bg=_token(theme, "titlebar"),
+                fg=_token(theme, "text_secondary"), font=typography.font("xs"),
+                anchor="w", justify="left", wraplength=wraplength,
+            )
+            self.subtitle_label.pack(fill="x", pady=(SPACE.xs, 0))
+        self.note_labels: list[tk.Label] = []
+        for note in notes:
+            label = tk.Label(
+                header, text=note, bg=_token(theme, "titlebar"), fg=_token(theme, "text_dim"),
+                font=typography.font("2xs"), anchor="w", justify="left", wraplength=wraplength,
+            )
+            label.pack(fill="x", pady=(SPACE.sm, 0))
+            self.note_labels.append(label)
+        if extra is not None:
+            extra(title_row)
+        tk.Frame(window, bg=_token(theme, "titlebar_edge"), height=1).pack(fill="x")
+        self.bar = bar
+        self.header = header
+        self.title_row = title_row
 
 
 class EmptyState:
@@ -844,6 +932,7 @@ __all__ = [
     "Button",
     "DialogHeader",
     "EmptyState",
+    "HeroHeader",
     "LoadingState",
     "Notification",
     "NotificationCenter",

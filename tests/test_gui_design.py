@@ -1302,6 +1302,51 @@ def test_main_window_composer_carries_the_web_toggle(tmp_path) -> None:
 # --- every window's title bar ------------------------------------------------
 
 
+def test_every_dialog_builds_its_title_bar_from_the_shared_header() -> None:
+    """No dialog draws its own title band: all go through the shared components.
+
+    Phase 4 replaced thirteen ``_build_header`` copies and five hand-built "hero"
+    bands with :class:`gui.components.DialogHeader` / :class:`HeroHeader`. This
+    scans every dialog module's source so a new window cannot quietly reintroduce
+    the duplication: it must build its band through one of the shared headers, and
+    must not paint the ``titlebar`` band itself.
+    """
+    import ast
+    import pathlib
+
+    gui = pathlib.Path(__file__).resolve().parents[1] / "gui"
+    offenders: list[str] = []
+    for path in sorted(gui.glob("*_dialog.py")):
+        source = path.read_text(encoding="utf-8")
+        if "titlebar_edge" not in source and "DialogHeader" not in source \
+                and "HeroHeader" not in source:
+            continue  # not a window with a title band
+        if "DialogHeader" not in source and "HeroHeader" not in source:
+            offenders.append(path.name)
+            continue
+        # It must not *build the band frame itself* -- no ``tk.Frame(<window>,
+        # bg=...titlebar)`` (the shared headers own that). A widget drawn *into*
+        # the band through the ``extra`` slot may still carry the band colour.
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "Frame"):
+                continue
+            parent_is_window = bool(node.args) and (
+                (isinstance(node.args[0], ast.Attribute) and node.args[0].attr == "window")
+                or (isinstance(node.args[0], ast.Name) and node.args[0].id == "window")
+            )
+            if not parent_is_window:
+                continue
+            for keyword in node.keywords:
+                if keyword.arg == "bg" and isinstance(keyword.value, ast.Attribute) \
+                        and keyword.value.attr == "titlebar":
+                    offenders.append(f"{path.name}:{node.lineno}")
+    assert offenders == [], f"dialogs still painting their own title band: {offenders}"
+
+
 @pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_every_window_title_bar_has_the_three_controls(tmp_path) -> None:
     """Minimize, maximize, and close live on the main window and every dialog.

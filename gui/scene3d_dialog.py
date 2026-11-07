@@ -34,7 +34,7 @@ import threading
 import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
-from tkinter import filedialog, ttk
+from tkinter import filedialog
 from typing import Any, Literal
 
 from core.scene3d import Vec3
@@ -54,7 +54,6 @@ from gui.scene3d import (
 )
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
-from gui.window_controls import install_window_controls
 
 TITLE = "Scene Studio"
 SUBTITLE = (
@@ -156,26 +155,15 @@ class SceneStudioDialog(ThemedDialog):
         self._layout_columns()
 
     def _build_header(self) -> None:
-        theme = self.theme
-        bar = tk.Frame(self.window, bg=theme.titlebar)
-        bar.pack(fill="x")
-        inner = tk.Frame(bar, bg=theme.titlebar)
-        inner.pack(fill="x", padx=16, pady=(12, 8))
-        titles = tk.Frame(inner, bg=theme.titlebar)
-        titles.pack(side="left", anchor="w")
-        tk.Label(
-            titles, text=TITLE, bg=theme.titlebar, fg=theme.contrast,
-            font=self._type.font("heading3", weight="bold"), anchor="w",
-        ).pack(anchor="w")
-        tk.Label(
-            titles, text=SUBTITLE, bg=theme.titlebar, fg=theme.text_secondary,
-            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=900,
-        ).pack(anchor="w", pady=(2, 0))
-        self._spinner = ttk.Progressbar(inner, mode="indeterminate", length=120)
-        self._window_controls = install_window_controls(
-            self.window, inner, theme=theme, typography=self._type, on_close=self._close
+        """The shared title band (the one :class:`gui.components.DialogHeader`)."""
+        from gui.components import DialogHeader
+
+        header = DialogHeader(
+            self.window, title=TITLE, subtitle=SUBTITLE, theme=self.theme,
+            typography=self._type, on_close=self._close,
         )
-        tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
+        self._spinner = header.spinner
+        self._window_controls = header.controls
 
     def _section_label(self, parent: tk.Misc, text: str) -> None:
         tk.Label(
