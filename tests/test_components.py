@@ -180,6 +180,69 @@ def test_dialog_header_busy_toggles_the_spinner() -> None:
         window.destroy()
 
 
+def test_dialog_header_cancel_button_is_shown_only_while_busy() -> None:
+    with _Root() as root:
+        window = tk.Toplevel(root)
+        cancelled: list[bool] = []
+        header = components.DialogHeader(
+            window, title="T", theme=DARK_THEME, typography=DEFAULT_TYPOGRAPHY,
+            cancel=lambda: cancelled.append(True),
+        )
+        assert header.cancel_button is not None
+        assert not header.cancel_button.winfo_manager()  # hidden at rest
+        header.set_busy(True)
+        assert header.cancel_button.winfo_manager() == "pack"
+        header.cancel_button.invoke()
+        assert cancelled == [True]
+        header.set_busy(False)
+        assert not header.cancel_button.winfo_manager()
+        window.destroy()
+
+
+def test_dialog_header_extra_slot_draws_into_the_inner_frame() -> None:
+    with _Root() as root:
+        window = tk.Toplevel(root)
+        seen: list[tk.Frame] = []
+
+        def extra(inner: tk.Frame) -> None:
+            seen.append(inner)
+            tk.Label(inner, text="working…").pack(side="right")
+
+        header = components.DialogHeader(
+            window, title="T", theme=DARK_THEME, typography=DEFAULT_TYPOGRAPHY,
+            extra=extra,
+        )
+        assert seen == [header.inner]
+        assert len(header.inner.winfo_children()) >= 2  # titles + the extra widget
+        window.destroy()
+
+
+def test_hero_header_builds_title_subtitle_notes_and_controls() -> None:
+    with _Root() as root:
+        window = tk.Toplevel(root)
+        header = components.HeroHeader(
+            window, title="Big", subtitle="a subtitle", notes=("note one", "note two"),
+            theme=DARK_THEME, typography=DEFAULT_TYPOGRAPHY,
+        )
+        assert str(header.title_label.cget("text")) == "Big"
+        assert header.subtitle_label is not None
+        assert [str(n.cget("text")) for n in header.note_labels] == ["note one", "note two"]
+        assert header.controls is not None
+        window.destroy()
+
+
+def test_hero_header_extra_packs_beside_the_controls() -> None:
+    with _Root() as root:
+        window = tk.Toplevel(root)
+        extra_seen: list[tk.Frame] = []
+        header = components.HeroHeader(
+            window, title="Big", theme=DARK_THEME, typography=DEFAULT_TYPOGRAPHY,
+            extra=extra_seen.append,
+        )
+        assert extra_seen == [header.title_row]
+        window.destroy()
+
+
 # ------------------------------------------------------------------- states
 
 

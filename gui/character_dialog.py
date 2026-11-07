@@ -56,7 +56,7 @@ from gui.character_manager import CharacterManagerService
 from gui.dialog_base import ThemedDialog
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
-from gui.window_controls import fit_geometry, install_window_controls
+from gui.window_controls import fit_geometry
 
 #: The transcript reads as a centred column, capped like the chat window's.
 _COLUMN_MAX = 900
@@ -144,28 +144,19 @@ class CharacterManagerDialog(ThemedDialog):
         self._build_editor(body)
 
     def _build_header(self) -> None:
-        theme = self.theme
-        bar = tk.Frame(self.window, bg=theme.titlebar)
-        bar.pack(fill="x")
-        inner = tk.Frame(bar, bg=theme.titlebar)
-        inner.pack(fill="x", padx=16, pady=(12, 8))
-        titles = tk.Frame(inner, bg=theme.titlebar)
-        titles.pack(side="left", anchor="w")
-        tk.Label(
-            titles, text="Characters", bg=theme.titlebar, fg=theme.contrast,
-            font=self._type.font("heading3", weight="bold"), anchor="w",
-        ).pack(anchor="w")
-        tk.Label(
-            titles,
-            text="Seven characters and the project's own model — each with its own "
-            "personality, model, voice, and isolated learning store.",
-            bg=theme.titlebar, fg=theme.text_secondary, font=self._type.font("2xs"),
-            anchor="w", justify="left", wraplength=820,
-        ).pack(anchor="w", pady=(2, 0))
-        self._window_controls = install_window_controls(
-            self.window, inner, theme=theme, typography=self._type, on_close=self._close
+        """The shared title band (the one :class:`gui.components.DialogHeader`)."""
+        from gui.components import DialogHeader
+
+        header = DialogHeader(
+            self.window,
+            title="Characters",
+            subtitle=(
+                "Seven characters and the project's own model — each with its own "
+                "personality, model, voice, and isolated learning store."
+            ),
+            theme=self.theme, typography=self._type, on_close=self._close,
         )
-        tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
+        self._window_controls = header.controls
 
     def _button(
         self, parent: tk.Misc, text: str, command: Any, *, small: bool = False,

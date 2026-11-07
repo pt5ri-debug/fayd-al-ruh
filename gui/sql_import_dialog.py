@@ -41,7 +41,6 @@ from gui.sql_import import (
     redact_secrets,
 )
 from gui.typography import resolve
-from gui.window_controls import install_window_controls
 
 #: The page title and one-line description.
 TITLE = "SQL Database Import"
@@ -115,28 +114,13 @@ class SqlImportDialog(ThemedDialog):
 
     def _build(self) -> None:
         theme = self.theme
-        bar = tk.Frame(self.window, bg=theme.titlebar)
-        bar.pack(fill="x")
-        header = tk.Frame(bar, bg=theme.titlebar)
-        header.pack(fill="x", padx=20, pady=(18, 8))
-        title_row = tk.Frame(header, bg=theme.titlebar)
-        title_row.pack(fill="x")
-        tk.Label(
-            title_row, text=TITLE, bg=theme.titlebar, fg=theme.contrast,
-            font=self._type.font("heading1", weight="bold"), anchor="w",
-        ).pack(side="left")
-        self._window_controls = install_window_controls(
-            self.window, title_row, theme=theme, typography=self._type, on_close=self._close
+        from gui.components import HeroHeader
+
+        header = HeroHeader(
+            self.window, title=TITLE, subtitle=SUBTITLE, notes=(FORMATS_LINE,),
+            theme=theme, typography=self._type, on_close=self._close, wraplength=760,
         )
-        tk.Label(
-            header, text=SUBTITLE, bg=theme.titlebar, fg=theme.text_secondary,
-            font=self._type.font("xs"), anchor="w", justify="left", wraplength=760,
-        ).pack(fill="x", pady=(4, 0))
-        tk.Label(
-            header, text=FORMATS_LINE, bg=theme.titlebar, fg=theme.text_dim,
-            font=self._type.font("2xs"), anchor="w",
-        ).pack(fill="x", pady=(6, 0))
-        tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
+        self._window_controls = header.controls
 
         self._build_file_section()
         self._build_schema_section()

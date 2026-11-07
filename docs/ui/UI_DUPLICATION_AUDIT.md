@@ -64,9 +64,14 @@ a regression:
 ### 2c. Genuine duplication to eliminate
 
 1. **`_button` ×17** → one shared factory with a small variant enum.
-2. **`_build_header` ×13** → one `DialogHeader` component.
+   *(done — Phase 1; each window's own helper is now a 4-line delegation.)*
+2. **`_build_header` ×13 + hero band ×5** → `DialogHeader` + `HeroHeader`.
+   *(done — Phase 4; all 18 dialogs build their band from one component, and a
+   guard test fails if a new window reintroduces the copy.)*
 3. **worker-thread/queue plumbing ×12** → one `WorkerPump` (start + drain +
-   cancel) so a window cannot get the thread-safety wrong.
+   cancel) so a window cannot get the thread-safety wrong. *(the shared class
+   exists; migrating each window is Phase 5 work, kept separate so each window's
+   bespoke busy/cancel/progress behaviour is preserved.)*
 4. **transcript row/column metrics ×5–11** → one `TranscriptMetrics` +
    `TranscriptRow`.
 5. **status line ×9** → one `StatusLine`.
