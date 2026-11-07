@@ -78,11 +78,49 @@ python -m cli training-center evaluate <run_id>
 python -m cli training-center pipeline --run <id> --approve
 python -m cli training-center history --kind import
 python -m cli training-center resources
+python -m cli training-center web --on             # the internet switch
+python -m cli training-center providers            # the choices a dropdown offers
 python -m cli training-center gate               # the held-out gate report
 ```
 
 Exit codes: `0` success, `2` invalid arguments, `3` a source or engine is
 unavailable, `4` a gate refused the operation, `5` an unexpected failure.
+
+## Choices, not free typing
+
+Every control that used to ask for a name in a plain text box now offers an
+**editable dropdown**: a user picks a real value from the list *or* types one.
+`gui/choice_dialog.py`'s `ask_choice` is the one helper behind it, and the service
+(`gui/training_center.py`) is the one place that computes the choices, so the
+window and the CLI can never disagree about what is on offer:
+
+- **provider** — `manual`, `document`, every cloud provider by name
+  (`gemini`, `openai`, …), a local model per mouth (`local:ultron`), and a
+  character per key (`character:hakeem`);
+- **mouth / character** — the local mouths and the seven characters by name;
+- **dataset / run / pipeline id** — read from the real stores, newest first (a
+  dataset may still be *typed*, because it is created by building it);
+- **learning topic** — the project's own disciplines and corpus-entry titles, so
+  a topic is picked from what the project really knows (and typed when it is
+  new);
+- **setting key and value** — the preference keys and their sensible values.
+
+## The internet switch
+
+The Training Center has **one** internet switch (`web`, off on a fresh install
+and persisted). It governs every path that leaves this machine — a cloud
+provider, a URL import, and the bulk knowledge-base build — so turning it on *is*
+the human approval, exactly as the chat's web toggle is for a search. It is
+reachable three ways, all driving the same setting:
+
+- the **Web** switch beside the message box in the window;
+- the *Settings → Turn the internet on or off* entry;
+- `python -m cli training-center web --on|--off` (or `settings --set web=true`).
+
+When an option that needs the internet is chosen while the switch is off, the
+window asks once and turns it on for the user; if the user declines, nothing runs
+and the reason is stated. The CLI's `sources` command refuses with the real next
+step rather than silently doing nothing.
 
 ## The safety model (non-negotiable)
 
@@ -189,4 +227,7 @@ section chains the stages into one named, re-runnable workflow.
   the held-out gate.
 - `tests/test_training_center_cli.py` — the CLI surface and exit codes.
 - `tests/test_training_center_window.py` — the real Tk window (skips with no
+  display).
+- `tests/test_training_center_choices.py` — the editable dropdown: the label/value
+  resolution (headless) and the window's switch and dropdown wiring (skips with no
   display).

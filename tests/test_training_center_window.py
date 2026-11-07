@@ -25,6 +25,8 @@ class StubService:
         from core.training_center.records import LearningExample
 
         self.settings_set: list[tuple[str, object]] = []
+        self.asked: list[tuple[str, str]] = []
+        self._web = False
         self.dashboard_snapshot = DashboardSnapshot(
             learning_sources=2,
             documents=10,
@@ -58,17 +60,76 @@ class StubService:
         return CAPABILITIES
 
     def settings(self) -> dict:
-        return {"chunk_chars": 1200, "review_required": True}
+        return {"chunk_chars": 1200, "review_required": True, "web": self._web}
 
     def setting(self, key: str):
         return self.settings().get(key)
 
     def set_setting(self, key: str, value) -> dict:
         self.settings_set.append((key, value))
+        if key == "web":
+            self._web = bool(value)
         return self.settings()
 
     def settings_text(self) -> str:
         return "Training Center — settings\n  chunk_chars: 1200"
+
+    # -- the internet switch and the dropdown choices ----------------------
+    def web_enabled(self) -> bool:
+        return self._web
+
+    def set_web(self, enabled: bool) -> bool:
+        self._web = bool(enabled)
+        return self._web
+
+    def toggle_web(self) -> bool:
+        self._web = not self._web
+        return self._web
+
+    def web_status(self) -> str:
+        return "Internet: on" if self._web else "Internet: off"
+
+    def provider_choices(self):
+        return (("manual", "A hand-written answer"), ("document", "The sources"))
+
+    def provider_values(self):
+        return tuple(value for value, _ in self.provider_choices())
+
+    def cloud_choices(self):
+        return (("gemini", "Gemini (cloud)"),)
+
+    def cloud_values(self):
+        return tuple(value for value, _ in self.cloud_choices())
+
+    def mouth_choices(self):
+        return (("ultron", "Ultron"), ("vision", "Vision"))
+
+    def mouth_values(self):
+        return tuple(value for value, _ in self.mouth_choices())
+
+    def character_choices(self):
+        return (("sources", "Jarvis"), ("hakeem", "Hakeem"))
+
+    def character_values(self):
+        return tuple(value for value, _ in self.character_choices())
+
+    def dataset_choices(self):
+        return ("learned",)
+
+    def run_choices(self):
+        return ()
+
+    def pipeline_choices(self):
+        return ("demo",)
+
+    def setting_keys(self):
+        return ("chunk_chars", "review_required", "web")
+
+    def setting_value_choices(self, key: str):
+        return ("true", "false") if key == "web" else ("900",)
+
+    def topic_choices(self):
+        return ("Reservoir Engineering", "Drilling Engineering")
 
     # -- knowledge ---------------------------------------------------------
     def knowledge_stats(self) -> dict:
@@ -103,6 +164,7 @@ class StubService:
 
     # -- Q&A ---------------------------------------------------------------
     def ask(self, question: str, *, provider: str = "", topic: str = "", system: str = ""):
+        self.asked.append((question, provider))
         return self._example
 
     def generate_questions(self, topic: str, *, count: int = 5, provider: str = ""):
@@ -260,7 +322,7 @@ def test_setting_a_preference_reaches_the_service(monkeypatch) -> None:
         service = StubService()
         dialog = _dialog(root, service)
         answers = iter(["chunk_chars", "900"])
-        monkeypatch.setattr(dialog_module.simpledialog, "askstring", lambda *a, **k: next(answers))
+        monkeypatch.setattr(dialog_module, "ask_choice", lambda *a, **k: next(answers))
         dialog._on_set_setting()
         assert service.settings_set == [("chunk_chars", 900)]
     finally:
