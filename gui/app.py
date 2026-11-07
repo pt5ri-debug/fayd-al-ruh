@@ -54,6 +54,7 @@ from core.voices import (
 from hakeem.hakeem_agent import HakeemError
 
 from gui import chat_composer, clipboard, rich_text
+from gui import dashboard as dashboard_module
 from gui import markdown as md
 from gui.actions import GuiAction, grouped_visible_actions
 from gui.attachments import Attachment, AttachmentNotice
@@ -678,7 +679,17 @@ class FaydGUI:
             widget.bind("<Button-5>", self._on_sidebar_wheel)
         self._side_panel = panel
 
-        # 1. The chat history, open by default -- it is what a user returns to.
+        # 1. Home: the dashboard. What is answering, what the session is, the
+        # recent conversations, the knowledge/learning activity, and the machine's
+        # own figures -- plus quick actions that run the everyday sidebar entries.
+        # It is open by default (it is the window's front page) and its rows are
+        # (re)built when it is opened, so it always reflects the live session.
+        home = self._add_section(panel, key="home", title="Home", icon="🏠", default_open=True)
+        self._home_panel = tk.Frame(home.body, bg=self._theme.surface)
+        self._home_panel.pack(fill="x")
+        self._home_open = home.is_open
+
+        # 2. The chat history, open by default -- it is what a user returns to.
         chats = self._add_section(panel, key="chats", title="Chats", icon="🗂", default_open=True)
         self._history_panel = tk.Frame(chats.body, bg=self._theme.surface)
         self._history_panel.pack(fill="x")
@@ -777,6 +788,8 @@ class FaydGUI:
         *Themes*, *Fonts & paragraphs*, or *Settings* section is never blank after
         a launch or a rebuild.
         """
+        if getattr(self, "_home_open", False) and getattr(self, "_home_panel", None) is not None:
+            self._build_home_panel(self._home_panel)
         if self._section_states.get("themes") and getattr(self, "_themes_panel", None) is not None:
             self._build_themes_panel(self._themes_panel)
         if self._section_states.get("fonts") and getattr(self, "_fonts_panel", None) is not None:
@@ -828,7 +841,14 @@ class FaydGUI:
         """Remember a section's open/closed choice and keep the scrollbar honest."""
         self._section_states[key] = is_open
         save_sidebar_sections(self._section_states, getattr(self.service, "data_root", None))
-        if key == "voices":
+        if key == "home":
+            self._home_open = is_open
+            # The dashboard reads the live session and the machine, so it is
+            # rebuilt on every open -- a plain header click must not show a stale
+            # model name or an out-of-date figure.
+            if is_open:
+                self._build_home_panel(self._home_panel)
+        elif key == "voices":
             self._voices_open = is_open
             # The voice list is the one menu that must reflect what is installed
             # *right now*, so it is (re)built the moment the section is opened --
@@ -1160,6 +1180,114 @@ class FaydGUI:
         self._sidebar_button(
             panel, "⌫   Clear transcript", self._clear_transcript, small=True
         ).pack(fill="x", padx=12, pady=(2, 0))
+
+    # ------------------------------------------------------------- home dashboard
+
+    def _build_home_panel(self, panel: tk.Misc) -> None:
+        """Build (or rebuild) the Home dashboard section.
+
+        The rows come from :mod:`gui.dashboard`, which reads the live session and
+        the machine's own figures -- so the dashboard never names a model the
+        session is not using and never invents a resource figure. The quick-action
+        buttons run the *existing* sidebar actions by their keys, so a shortcut can
+        never do something the sidebar cannot.
+        """
+        if panel is None:
+            return
+        for child in panel.winfo_children():
+            child.destroy()
+        dashboard = dashboard_module.dashboard_for(
+            self.service,
+            mouth_label=self._source_choice_label(),
+            recent_chats=self._home_recent_chats(),
+            knowledge_summary=self._home_knowledge_summary(),
+            resources=self._home_resources(),
+            quick_actions=self._home_quick_actions(),
+        )
+        for section in dashboard.sections:
+            self._home_section(panel, section)
+        if dashboard.quick_actions:
+            tk.Label(
+                panel, text="Quick actions", bg=self._theme.surface, fg=self._theme.text_dim,
+                font=self._type.font("2xs", weight="bold"), anchor="w",
+            ).pack(fill="x", padx=16, pady=(6, 2))
+            for action in dashboard.quick_actions:
+                self._sidebar_button(
+                    panel, action.label, partial(self._home_run_action, action.key), small=True
+                ).pack(fill="x", padx=12, pady=1)
+
+    def _home_section(self, panel: tk.Misc, section: Any) -> None:
+        """One dashboard section: a heading and its labelled rows."""
+        tk.Label(
+            panel, text=section.title, bg=self._theme.surface, fg=self._theme.foreground,
+            font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=16, pady=(6, 1))
+        for row in section.rows:
+            line = tk.Frame(panel, bg=self._theme.surface)
+            line.pack(fill="x", padx=16, pady=0)
+            tk.Label(
+                line, text=row.label, bg=self._theme.surface, fg=self._theme.text_dim,
+                font=self._type.font("2xs"), anchor="w", width=11, justify="left",
+            ).pack(side="left")
+            value = tk.Label(
+                line, text=row.value, bg=self._theme.surface, fg=self._theme.foreground,
+                font=self._type.font("2xs"), anchor="w", justify="left", wraplength=150,
+            )
+            value.pack(side="left", fill="x", expand=True)
+            if row.detail:
+                _Tooltip(value, row.detail, self._theme, self._type)
+
+    def _home_recent_chats(self) -> tuple[Any, ...]:
+        """The few most recent saved conversations, newest first (never raising)."""
+        try:
+            items = self.service.saved_session_summaries()
+        except Exception:  # a broken store must not blank the dashboard
+            return ()
+        return tuple(items[: dashboard_module.DEFAULT_RECENT_CHATS])
+
+    def _home_knowledge_summary(self) -> str:
+        """A one-line knowledge-base figure, or ``""`` when there is none to show.
+
+        The figure comes from :func:`gui.dashboard.knowledge_base_summary`, which
+        reads the project's own store, so the dashboard and the CLI agree.
+        """
+        return dashboard_module.knowledge_base_summary(
+            getattr(self.service, "data_root", None)
+        )
+
+    def _home_resources(self) -> Any:
+        """The machine's own figures, or ``None`` when they cannot be read."""
+        try:
+            from core.model_resources import system_resources
+
+            return system_resources(disk_path=getattr(self.service, "data_root", None))
+        except Exception:
+            return None
+
+    def _home_quick_actions(self) -> tuple[Any, ...]:
+        """The quick-action shortcuts, resolved against the real action catalogue."""
+        from gui.actions import action_by_key
+
+        actions: list[Any] = []
+        for key in dashboard_module.QUICK_ACTION_KEYS:
+            try:
+                action = action_by_key(key)
+            except KeyError:
+                continue  # an action that left the catalogue is simply skipped
+            actions.append(
+                dashboard_module.QuickAction(action.key, action.sidebar_label)
+            )
+        return tuple(actions)
+
+    def _home_run_action(self, key: str) -> None:
+        """Run a quick action through the window's one action dispatcher."""
+        from gui.actions import action_by_key
+
+        try:
+            action = action_by_key(key)
+        except KeyError:
+            return
+        self._on_action(action)
 
     def _build_themes_panel(self, panel: tk.Misc) -> None:
         """Build (or rebuild) the Themes section: one clickable row per theme.
@@ -2847,7 +2975,13 @@ class FaydGUI:
         self._source_menu_var_reset()
         self._sync_model_buttons()
         self._apply_mode_label()
+        self._refresh_home()
         self._add_bubble("note", chat_module.mouth_switched_message(want))
+
+    def _refresh_home(self) -> None:
+        """Redraw the Home dashboard if it is open (the model it names changed)."""
+        if getattr(self, "_home_open", False) and getattr(self, "_home_panel", None) is not None:
+            self._build_home_panel(self._home_panel)
 
     def _on_enter(self, _event: tk.Event) -> str:
         self._on_send()

@@ -166,35 +166,51 @@ class ActionGroup:
     keys: tuple[str, ...]
 
 
-#: The sidebar's sections, in the order a user meets them: the things used every
-#: day first (chats, the reading voice, the characters), then the knowledge and
-#: speech engines, then the power-user tools (training, system, preferences). The
-#: grouping is the fix for the flat, repetitive column the window used to draw --
-#: every action appears in exactly one section, and the sections mirror the CLI
-#: menu's own neighbourhoods so the two never disagree about what belongs where.
-ACTION_GROUPS: tuple[ActionGroup, ...] = (
-    ActionGroup(
+#: The sidebar's sections, in the order a user meets them. The grouping is a
+#: professional, hierarchical navigation -- the things used every day first, then
+#: the knowledge and speech engines, then the power-user tools -- rather than one
+#: long flat column. Every visible action appears in exactly one section, and the
+#: sections mirror the CLI menu's own neighbourhoods so the two never disagree
+#: about what belongs where.
+#:
+#: The section list itself is built from :data:`_GROUP_SPECS` (title, icon, keys)
+#: so the *shape* of the navigation is one readable declaration. The order and the
+#: titles are the Phase-2 restructuring: **AI Interaction**, **Cognitive System**,
+#: **Personalities**, **Model Management**, **Knowledge & Data**, **Learning &
+#: Training**, **Voice & Audio**, and **System** -- the requested logical groups,
+#: as groups *over the existing actions* (no action is lost, none is duplicated).
+_GROUP_SPECS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    (
         "assistant",
-        "Assistant",
+        "AI Interaction",
         "✨",
         (
             "insight",
-            "cognition",
             "ask-teacher",
         ),
     ),
-    ActionGroup(
+    (
+        "cognitive",
+        "Cognitive System",
+        "🧠",
+        ("cognition",),
+    ),
+    (
         "characters",
-        "Characters",
+        "Personalities",
         "🧑",
         (
             "characters",
             "characters-shareable",
+            "natasha-traits",
+            "natasha-mood",
+            "natasha-initiative",
+            "natasha-relationship-memory",
         ),
     ),
-    ActionGroup(
+    (
         "models",
-        "Language models",
+        "Model Management",
         "🧩",
         (
             "models",
@@ -203,9 +219,9 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
             "shared-models-migrate",
         ),
     ),
-    ActionGroup(
+    (
         "knowledge",
-        "Knowledge & Web",
+        "Knowledge & Data",
         "📚",
         (
             "learn",
@@ -219,36 +235,10 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
             "import-center",
         ),
     ),
-    ActionGroup(
-        "companion",
-        "Companion",
-        "💬",
-        (
-            "natasha-traits",
-            "natasha-mood",
-            "natasha-initiative",
-            "natasha-relationship-memory",
-        ),
-    ),
-    ActionGroup(
-        "speech",
-        "Speech Models",
-        "🔊",
-        (
-            "qwen-speech",
-            "qwen-speech-asr",
-            "qwen-speech-tts",
-            "piper",
-            "piper-download",
-            "audio-speech",
-            "audio-speech-voices",
-            "audio-speech-download",
-        ),
-    ),
-    ActionGroup(
+    (
         "training",
-        "Training & Learning",
-        "🧠",
+        "Learning & Training",
+        "🎓",
         (
             "training-center",
             "llm",
@@ -261,7 +251,22 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
             "demo",
         ),
     ),
-    ActionGroup(
+    (
+        "speech",
+        "Voice & Audio",
+        "🔊",
+        (
+            "qwen-speech",
+            "qwen-speech-asr",
+            "qwen-speech-tts",
+            "piper",
+            "piper-download",
+            "audio-speech",
+            "audio-speech-voices",
+            "audio-speech-download",
+        ),
+    ),
+    (
         "system",
         "System",
         "⚙",
@@ -276,6 +281,10 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
             "update",
         ),
     ),
+)
+
+ACTION_GROUPS: tuple[ActionGroup, ...] = tuple(
+    ActionGroup(key, title, icon, keys) for key, title, icon, keys in _GROUP_SPECS
 )
 
 

@@ -554,14 +554,14 @@ def test_closing_releases_the_pump_and_clears_the_callback() -> None:
 
 
 def test_the_cognition_action_is_grouped_and_opens_the_window() -> None:
-    # The sidebar entry is a real action in the Assistant group, and pressing it
-    # opens the cognition window rather than running a tool.
+    # The sidebar entry is a real action in the Cognitive System group, and
+    # pressing it opens the cognition window rather than running a tool.
     from gui.actions import ACTIONS, grouped_visible_actions
 
     by_key = {action.key: action for action in ACTIONS}
     assert "cognition" in by_key
     groups = {group.key: tuple(a.key for a in actions) for group, actions in grouped_visible_actions()}
-    assert "cognition" in groups["assistant"]
+    assert "cognition" in groups["cognitive"]
 
 
 def test_the_cognition_cli_is_registered() -> None:

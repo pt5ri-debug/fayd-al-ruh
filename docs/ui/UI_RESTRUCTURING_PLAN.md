@@ -41,22 +41,27 @@
 **Gate:** the new components have their own tests; a migrated window's existing
 tests still pass unchanged; `ruff`/`mypy` clean.
 
-## Phase 2 — Main shell and navigation
+## Phase 2 — Main shell and navigation *(done)*
 
 **Goal:** a professional, hierarchical navigation without inventing windows.
 
-- Reorganize `gui/actions.py`'s `ACTION_GROUPS` to mirror the requested
-  structure (Home, AI Interaction, Cognitive System, Model Management, Learning
-  & Training, Personalities, Voice & Audio, Image & Multimedia, Code Studio,
-  Knowledge & Data, System) — **as groups over the existing actions**, so no
-  action is lost (`grouped_visible_actions` already appends any orphan).
-- Add a **Home / Dashboard** section to the main window: current model,
-  personality, recent chats, resource figures, and quick actions, reading the
-  existing services (`ChatService`, `core.model_resources`).
-- Keep the header model selector and composer row exactly as they are.
+- Reorganized `gui/actions.py`'s `ACTION_GROUPS` to mirror the requested
+  structure — **AI Interaction**, **Cognitive System**, **Personalities**,
+  **Model Management**, **Knowledge & Data**, **Learning & Training**,
+  **Voice & Audio**, **System** — **as groups over the existing actions**, so no
+  action is lost (`grouped_visible_actions` still appends any orphan). The
+  section list is declared once in `_GROUP_SPECS` (title, icon, keys).
+- Added a **Home / Dashboard** section to the main window: the answering model,
+  the session, the recent chats, the knowledge figure, the machine's own figures,
+  and quick actions, read through the new Tk-free `gui/dashboard.py`
+  (`build_dashboard`/`dashboard_for`), from the existing services (`ChatService`,
+  `core.model_resources`, `core.knowledge_base`).
+- Kept the header model selector and composer row exactly as they are.
 
-**Gate:** every one of the 45 visible actions still resolves and appears in
-exactly one group; `test_gui_design.py` updated and green.
+**Gate:** every visible action still resolves and appears in exactly one group;
+`tests/test_sidebar.py` + `tests/test_dashboard.py` green.
+
+See `docs/ui/UI_NAVIGATION.md` for the full sidebar map.
 
 ## Phase 3 — Centralize settings
 
