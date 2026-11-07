@@ -60,6 +60,31 @@ The fourteen sidebar sections are:
 13. **Settings** — the Training Center's own preferences.
 14. **Pipelines** — the visual learning-pipeline builder and runner.
 
+## Live training details in the chat area
+
+Every long operation streams its detail into the window's own chat area *while it
+runs*, not only when it ends -- exactly the pattern the main window uses for a
+training action. A worker thread never touches a widget: it queues each line on a
+`queue.Queue`, and the UI thread's pump drains it into **one growing message**,
+coalesced to a bounded rate (~0.15 s) so a fast training loop cannot freeze the
+window.
+
+What streams, and from where:
+
+- **A training run** (`Start a training job`, `Continue training the checkpoint`,
+  `Resume from a checkpoint`, `Retry a failed job`) wires the pipeline's own
+  `on_step` callback to the chat area: the first step, the last, and about every
+  tenth in between, each line naming the run, `step N/max (P%)`, the loss,
+  steps/second, and an ETA. The run still ends with its full result message.
+- **A pipeline run** streams each stage's outcome (`[ok] import: …`) as it
+  completes, through the runner's own `on_stage` callback.
+- **Building the bulk knowledge base** streams the build's own progress lines
+  (category fetches and failures), through `build_knowledge_base(progress=…)`.
+
+`_start_streamed_job` is the one place the wiring lives, so every training
+control streams identically; the CLI is unaffected (it prints to stdout as
+before).
+
 ## The CLI (`python -m cli training-center …`)
 
 ```bash
@@ -227,7 +252,9 @@ section chains the stages into one named, re-runnable workflow.
   the held-out gate.
 - `tests/test_training_center_cli.py` — the CLI surface and exit codes.
 - `tests/test_training_center_window.py` — the real Tk window (skips with no
-  display).
+  display): the sidebar sections, the catalogue-driven buttons, and the **live
+  stream** (the step throttle's first/last/about-ten rule, `_start_streamed_job`
+  wiring `on_step`, and the growing message the pump draws).
 - `tests/test_training_center_choices.py` — the editable dropdown: the label/value
   resolution (headless) and the window's switch and dropdown wiring (skips with no
   display).

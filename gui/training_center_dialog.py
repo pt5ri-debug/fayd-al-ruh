@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import filedialog, messagebox, simpledialog
@@ -102,6 +103,14 @@ class TrainingCenterDialog(ThemedDialog):
         self._command_var = tk.StringVar(value="")
         self._topic_var = tk.StringVar(value="")
         self._web_toggle: Any = None
+        # Live training details stream into the chat area. The worker thread never
+        # touches a widget: it puts each line on ``_lines`` and the UI thread's
+        # pump drains it into one growing message, coalesced so a fast loop cannot
+        # freeze the window (exactly the main window's pattern).
+        self._lines: queue.Queue[str] = queue.Queue()
+        self._pending: list[str] = []
+        self._last_render = 0.0
+        self._stream_body: tk.Text | None = None
 
         self.window = tk.Toplevel(parent)
         self.window.title(f"{TITLE} — Fayd Al-Ruh")
@@ -571,6 +580,8 @@ class TrainingCenterDialog(ThemedDialog):
             return
         self._busy = True
         self._spinner.configure(text="working…")
+        self._pending = []
+        self._stream_body = None
 
         def run() -> None:
             try:
@@ -591,6 +602,8 @@ class TrainingCenterDialog(ThemedDialog):
         self._pump_after = None
         if self._closed:
             return
+        self._drain_lines(cap=500)
+        self._flush_stream()
         try:
             finish, result, error = self._results.get_nowait()
         except queue.Empty:
@@ -598,8 +611,53 @@ class TrainingCenterDialog(ThemedDialog):
                 self._schedule_pump()
             return
         self._busy = False
+        self._drain_lines(cap=None)
+        self._flush_stream(force=True)
         self._spinner.configure(text="")
         finish(result, error)
+
+    # -- live streaming ---------------------------------------------------
+
+    def _stream_line(self, text: str) -> None:
+        """Queue one line of live detail from a worker thread (Tk-safe).
+
+        A worker never touches a widget: it only puts the line here, and the UI
+        thread's pump drains it into the growing message. This is the one entry a
+        training callback needs, so a run's details reach the chat area live.
+        """
+        if text:
+            self._lines.put(str(text))
+
+    def _drain_lines(self, *, cap: int | None) -> None:
+        drained = 0
+        while cap is None or drained < cap:
+            try:
+                self._pending.append(self._lines.get_nowait())
+                drained += 1
+            except queue.Empty:
+                break
+
+    def _flush_stream(self, *, force: bool = False) -> None:
+        """Append the queued lines to the streaming message, at a bounded rate."""
+        if not self._pending:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_render < 0.15:
+            return
+        text = "\n".join(self._pending)
+        self._pending.clear()
+        self._last_render = now
+        if self._stream_body is None:
+            self._stream_body = self._add_message("note", text)
+        else:
+            try:
+                self._stream_body.configure(state="normal")
+                self._stream_body.insert("end", f"\n{text}")
+                self._stream_body.configure(state="disabled")
+            except tk.TclError:  # the window closed mid-run
+                return
+        self._fit_card(self._stream_body)
+        self._scroll_to_end()
 
     def _report(self, role: str, title: str, lines: tuple[str, ...] = (), detail: str = "") -> None:
         body = title
@@ -613,6 +671,64 @@ class TrainingCenterDialog(ThemedDialog):
         """Run ``job`` off the thread and post its returned text as a message."""
         self._add_message("note", title)
         self._start_work(job, lambda result, error: self._post(result, error, ok_role))
+
+    def _step_stream(
+        self, run_id: str, step: int, loss: float, max_steps: int, *, started: float
+    ) -> None:
+        """Queue one live step line, throttled to roughly ten reports per run.
+
+        The callback runs on the training thread, so it only queues a line -- the
+        UI thread's pump is what draws it. Reporting the first step, the last, and
+        about every tenth in between keeps a long run readable without flooding the
+        chat area.
+        """
+        interval = max(1, max_steps // 10)
+        if step != 1 and step != max_steps and step % interval:
+            return
+        elapsed = max(1e-6, time.monotonic() - started)
+        rate = step / elapsed
+        eta = (max_steps - step) / rate if rate > 0 else 0.0
+        percent = (step / max_steps * 100) if max_steps else 0.0
+        self._stream_line(
+            f"[{run_id}] step {step}/{max_steps} ({percent:.0f}%) · "
+            f"loss {loss:.4f} · {rate:.1f} steps/s · eta {eta:.0f}s"
+        )
+
+    def _start_streamed_job(
+        self,
+        model: Any,
+        dataset_id: str,
+        config: Any,
+        *,
+        resume_from: Any = None,
+    ) -> Any:
+        """Start a governed run and stream its live detail; block until it ends.
+
+        Runs inside a ``_run`` job (already on a worker thread), so it starts the
+        pipeline job, wires ``on_step`` to the chat area's live stream, and waits
+        for the handle. Every training control goes through here, so the details
+        always stream and never only appear at the end.
+        """
+        max_steps = int(getattr(config, "max_steps", 0) or 0)
+        started = time.monotonic()
+        holder: dict[str, str] = {"run_id": str(getattr(config, "run_id", "") or "")}
+
+        def on_step(step: int, loss: float) -> None:
+            self._step_stream(holder["run_id"] or "run", step, loss, max_steps, started=started)
+
+        handle = self.service.start_job(
+            model, dataset_id, config, resume_from=resume_from, on_step=on_step
+        )
+        holder["run_id"] = handle.run_id
+        self._stream_line(f"[{handle.run_id}] training on {dataset_id!r} started.")
+        handle.wait()
+        return handle
+
+    def _describe_handle(self, handle: Any) -> str:
+        if handle.error is not None:
+            return f"The run failed: {handle.error}"
+        result = handle.result
+        return result.describe() if result is not None else "The run produced no result."
 
     def _post(self, result: Any, error: Exception | None, ok_role: str) -> None:
         if error is not None:
@@ -1083,12 +1199,8 @@ class TrainingCenterDialog(ThemedDialog):
                 model_id="fayd-inprocess-model", dataset_id=dataset_id,
                 dataset_version=0, preset=preset,
             )
-            handle = self.service.start_job(model, dataset_id, config)
-            handle.wait()
-            if handle.error is not None:
-                return f"The run failed: {handle.error}"
-            result = handle.result
-            return result.describe() if result is not None else "The run produced no result."
+            handle = self._start_streamed_job(model, dataset_id, config)
+            return self._describe_handle(handle)
 
         self._run(f"Training on {dataset_id!r}…", job)
 
@@ -1131,11 +1243,10 @@ class TrainingCenterDialog(ThemedDialog):
                 model_id="fayd-inprocess-model", dataset_id=dataset_id,
                 dataset_version=0, preset=str(self.service.setting("default_preset")),
             )
-            handle = self.service.start_job(model, dataset_id, config, resume_from=adapter)
-            handle.wait()
-            if handle.error is not None:
-                return f"The run failed: {handle.error}"
-            return handle.result.describe() if handle.result is not None else "No result."
+            handle = self._start_streamed_job(
+                model, dataset_id, config, resume_from=adapter
+            )
+            return self._describe_handle(handle)
 
         self._run(f"Resuming from {run_id!r}…", job)
 
@@ -1157,9 +1268,8 @@ class TrainingCenterDialog(ThemedDialog):
                 model_id=view.model_id, dataset_id=view.dataset_id,
                 dataset_version=view.dataset_version, preset=str(self.service.setting("default_preset")),
             )
-            handle = self.service.start_job(model, view.dataset_id, config)
-            handle.wait()
-            return handle.result.describe() if handle.result is not None else "No result."
+            handle = self._start_streamed_job(model, view.dataset_id, config)
+            return self._describe_handle(handle)
 
         self._run(f"Retrying {run_id!r}…", job)
 
@@ -1253,9 +1363,8 @@ class TrainingCenterDialog(ThemedDialog):
                 model_id="fayd-inprocess-model", dataset_id=dataset_id,
                 dataset_version=0, preset=str(self.service.setting("default_preset")),
             )
-            handle = self.service.start_job(model, dataset_id, config)
-            handle.wait()
-            return handle.result.describe() if handle.result is not None else "No result."
+            handle = self._start_streamed_job(model, dataset_id, config)
+            return self._describe_handle(handle)
 
         self._run(f"Continuing training on {dataset_id!r}…", job)
 
@@ -1316,7 +1425,9 @@ class TrainingCenterDialog(ThemedDialog):
             return
 
         def job() -> str:
-            report = self.service.build_knowledge_base(target_mb=target_mb)
+            report = self.service.build_knowledge_base(
+                target_mb=target_mb, progress=self._stream_line
+            )
             return report.describe() if hasattr(report, "describe") else str(report)
 
         self._run(f"Building the knowledge base to {target_mb:g} MB…", job)
@@ -1360,7 +1471,9 @@ class TrainingCenterDialog(ThemedDialog):
             return
 
         def job() -> str:
-            report = self.service.run_pipeline(pipeline_id, approved=True)
+            report = self.service.run_pipeline(
+                pipeline_id, approved=True, on_stage=lambda outcome: self._stream_line(outcome.describe())
+            )
             return report.describe()
 
         self._run(f"Running {pipeline_id!r}…", job)
