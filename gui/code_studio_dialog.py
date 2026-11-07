@@ -766,12 +766,12 @@ class CodeStudioDialog(ThemedDialog):
         rich_text.insert_markdown(widget, text, theme=self.theme, typography=self._type)
 
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
-        theme = self.theme
-        return tk.Button(
-            parent, text=text, command=command, bg=theme.surface_raised,
-            fg=theme.foreground, activebackground=theme.interactive_active,
-            activeforeground=theme.contrast, relief="flat", borderwidth=0,
-            font=self._type.font("xs", weight="bold"), padx=10, pady=3, cursor="hand2",
+        """A themed flat button (the shared :func:`gui.components.button`)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="secondary", small=False, anchor="center",
         )
 
     # -- state ------------------------------------------------------------
