@@ -976,6 +976,7 @@ class FaydGUI:
             "_characters_dialog",
             "_cognition_dialog",
             "_model_manager_dialog",
+            "_training_center_dialog",
             "_image_gen_dialog",
             "_image_edit_dialog",
             "_presentation_dialog",
@@ -2680,6 +2681,15 @@ class FaydGUI:
             options=[("Open the Code Studio…", self._open_code_studio)],
             tip="Code Studio: edit and merge the project's own code",
         )
+        # The Training Center pill, beside Code Studio: one click opens the
+        # learning-and-training workspace. It is a *view* of the real control (the
+        # window's own sidebar entry opens the same window), not a second source of
+        # truth, so the two can never disagree about what Training does.
+        self._training_mode_selector = self._composer.add_mode_selector(
+            icon="🎓", label="Training",
+            options=[("Open the Training Center…", self._open_training_center)],
+            tip="Training Center: learn, build datasets, train, and evaluate",
+        )
         self._chat_mode_selector = self._composer.add_mode_selector(
             icon="💬", label=self._source_choice_label(),
             options=[(text, partial(self._switch_mouth, key)) for key, text in MOUTH_CHOICES],
@@ -3034,6 +3044,10 @@ class FaydGUI:
         menu.add_command(
             label="Code Studio — edit and merge the project's own code…",
             command=self._open_code_studio,
+        )
+        menu.add_command(
+            label="Training Center — learn, build datasets, train, and evaluate…",
+            command=self._open_training_center,
         )
         return menu
 
@@ -3418,6 +3432,43 @@ class FaydGUI:
     def _forget_model_manager(self) -> None:
         """Drop the closed Model Manager window's reference, so it is not held alive."""
         self._model_manager_dialog = None
+
+    def _open_training_center(self) -> None:
+        """Open (or focus) the Training Center window.
+
+        The composer's **Training** control (beside **Code Studio**) and the
+        sidebar's **Training Center** entry both open this one window, which drives
+        the shared :class:`gui.training_center.TrainingCenterService` -- so the
+        window and ``python -m cli training-center`` share one review queue, one
+        dataset registry, one run log, and one history. One window is kept and
+        reused, so a second click raises the open one.
+        """
+        existing = getattr(self, "_training_center_dialog", None)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:  # the window was closed out from under us
+                self._training_center_dialog = None
+
+        from gui.training_center import TrainingCenterService
+        from gui.training_center_dialog import TrainingCenterDialog
+
+        self._training_center_dialog = TrainingCenterDialog(
+            self.root,
+            TrainingCenterService(),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
+            on_close=self._forget_training_center,
+        )
+
+    def _forget_training_center(self) -> None:
+        """Drop the closed Training Center window's reference."""
+        self._training_center_dialog = None
 
     def _open_image_gen(self) -> None:
         """Open the text-to-image screen as a separate window."""
@@ -3863,6 +3914,10 @@ class FaydGUI:
         # opens it rather than running the headless status command.
         if action.key == "code-studio":
             self._open_code_studio()
+            return
+        # The Training Center likewise has its own window and service.
+        if action.key == "training-center":
+            self._open_training_center()
             return
         # Presentation Studio likewise has its own window and service.
         if action.key == "presentation":

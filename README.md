@@ -2013,6 +2013,42 @@ How it works, and what is honest about it:
 The scene engine is dependency-free and headless, so the whole path — build, pose,
 render, save, load, export — is tested on a fresh clone with no GPU and no model.
 
+## Training Center (learn, build datasets, train, and evaluate)
+
+The Training Center is the project's **one workspace for learning, dataset
+building, training, and evaluation**, opened from the composer's **Training**
+control beside **Code Studio** (or the sidebar's *Training Center* entry), and
+reachable headless as `python -m cli training-center …`.
+
+```bash
+python -m cli training-center dashboard          # every figure from the real stores
+python -m cli training-center catalog            # what every control does
+python -m cli training-center import <path>      # files or folders
+python -m cli training-center ask --topic "reservoir simulation" --count 5
+python -m cli training-center review --pending   # then --approve <id>
+python -m cli training-center export --dataset learned   # approved examples only
+python -m cli training-center datasets --validate learned
+python -m cli training-center gate               # the held-out gate report
+```
+
+It is a **thin composition** over machinery the project already has — the
+knowledge base and retrieval, the document readers, the governed dataset builder,
+the controlled Phase-6 trainer, the Model Manager, the characters, the cloud
+client, and the web search — so it adds no new model, store, or training loop.
+The window and the CLI drive the *same* Tk-free service, so they share one review
+queue, one dataset registry, one run log, and one history.
+
+The rules that hold everywhere: **nothing is trained on unreviewed data** (a
+gathered answer is `pending` until a human approves it, and the dataset builder
+refuses anything else); **a governed stage is refused without approval** (training,
+a web crawl, and a cloud call each pass the project's permission + human-approval
+gate); **an unimplemented capability is reported unavailable**, never run as a
+no-op; **nothing is fabricated** (every figure is read from a real store, an
+unreportable resource reads as unknown rather than zero, and an estimate is
+labelled an estimate); and **imported content is data, not instructions**. A
+character may take part as a learning participant, but its personality is never
+silently changed. See `docs/TRAINING_CENTER.md`.
+
 ## Multimodal perception (optional)
 
 Perception is an optional add-on, not a requirement: the core and the assistant

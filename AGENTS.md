@@ -3824,6 +3824,70 @@ Arabic is kept as secondary aliases where useful.
   the Import Center) instead of the reader's CLI-only flag. `remove_documents`
   detaches them again. Kept out of the Tk window so the logic is testable without
   a display.
+- `core/training_center/` + `gui/training_center.py` / `gui/training_center_dialog.py`
+  / `cli/training_center.py` — the **Training Center**: one professional
+  learn-and-train workspace over the project's *existing* machinery, reached from
+  the composer's **Training** pill beside **Code Studio** (and the sidebar's
+  **Training Center** entry), from `python -m cli training-center …`, and from
+  the menu's four entries. It is deliberately a **thin composition**, never a
+  second implementation: the Tk-free `TrainingCenterService` (`gui/training_center.py`)
+  drives the same collaborators the project already has and the window and the CLI
+  both drive *that one service*, so they share one review queue, one dataset
+  registry, one run log, one knowledge base, and one history. The pieces:
+  `core/training_center/records.py` (the durable records -- `LearningExample`
+  with the closed status set `pending`/`approved`/`rejected`/`needs_review`/
+  `corrected`/`exported`/`used_in_training`, `HistoryEntry`); `providers.py` (the
+  `LearningProvider` protocol and its five implementations -- `ManualProvider`,
+  `DocumentLearningProvider` over the project's own retriever with citations,
+  `CloudLearningProvider` over the existing OpenAI-compatible
+  `core.cloud_model` client, `LocalModelLearningProvider` through
+  `ai.mouths.build_mouth`, and `CharacterLearningProvider` -- plus
+  `build_provider`/`provider_names`/`provider_statuses`, so a surface never
+  imports an engine itself); `qa_learning.py` (`LearningReviewQueue`, the durable
+  review queue: nothing is trained on unreviewed data, `approve`/`reject`/
+  `correct`/`by_status`/`search`/`summary`); `datasets.py` (`DatasetStudio` over
+  the real `ml.training.datasets.DatasetBuilder` -- build from approved examples,
+  validate, list, export); `jobs.py` (`TrainingJobManager` over the real
+  `ml.training.coordinator.TrainingCoordinator`, so a run is started on a worker
+  thread with a cancellable `TrainingJob`, feasibility-checked first, and never
+  on the interface thread); `dashboard.py` (`build_dashboard`, every figure read
+  from the real stores -- never fabricated -- plus `ChartSeries` for the loss/
+  perplexity/throughput charts); `resources.py` (the machine's own CPU/RAM/disk
+  through `core.model_resources`, with an unreportable figure as ``None``, never a
+  zero, and `estimate_training` labelled an estimate); `pipelines.py`
+  (`LearningPipeline`/`PipelineStage`/`PipelineRunner`/`PipelineStore` and the
+  `STAGE_SPECS` catalogue -- a governed stage such as training is **refused**
+  without explicit approval, and an unimplemented stage is reported *unavailable*,
+  never run as a no-op); `history.py` (`TrainingHistory`, the joined timeline over
+  the project's own records plus a bounded journal, honouring the service's own
+  root); `catalog.py` (the one source of truth for what every control does -- a
+  `Capability` per control with its title, summary, what it returns, whether it is
+  governed, and the exact headless CLI command, in English and Arabic, grouped into
+  the fourteen sections); and `gate.py` (the held-out gate
+  `training_center_accuracy` with negative controls -- an unreviewed example is
+  refused, an empty dataset is refused, a governed pipeline stage is refused
+  without approval, an unavailable capability is reported unavailable, an
+  unapproved cloud provider names the real next step, an unreportable resource
+  stays ``None``, and every catalogue CLI command resolves against the real
+  parser -- a metric in `evaluation`). The window
+  (`gui/training_center_dialog.py`) is built the way every other window is built
+  (the shared `Theme` tokens, `RoundedBox`, `gui.rich_text`, the shared
+  `gui.chat_composer.ChatComposer`, the three `gui.window_controls` title-bar
+  buttons, a `SidebarColumn` of the fourteen collapsible sections, and a
+  worker-thread/queue the UI thread drains), and every button's label, one-line
+  hint, and hover tooltip come *from the catalogue*, so the window and the
+  catalogue can never disagree. It adopts `ThemedDialog`, so a theme or font
+  change restyles it in place. The CLI (`cli/training_center.py`) is the headless
+  twin (`dashboard`/`catalog`/`settings`/`import`/`sources`/`knowledge`/`ask`/
+  `review`/`export`/`datasets`/`jobs`/`evaluate`/`pipeline`/`history`/`resources`/
+  `gate`, with `--root` and `--json`), driving the *same* service. Exit codes:
+  `0` success, `2` invalid arguments, `3` a source/engine is unavailable, `4` a
+  gate refused the operation, `5` an unexpected failure. Everything is local and
+  governed: a cloud call or a web crawl needs explicit approval (the same
+  permission + human-approval gate every other external action uses), no API key
+  is ever logged or stored, imported content is treated as data (never an
+  instruction), and no model weight is touched except through the project's own
+  Phase-6 controlled trainer. Docs: `docs/TRAINING_CENTER.md`.
 - `fayd-al-ruh.spec` — PyInstaller; uses `collect_submodules` for `ml`,
   `evaluation`, `ai`, `storage`, `gui` (and `core` is bundled as an imported
   package).
