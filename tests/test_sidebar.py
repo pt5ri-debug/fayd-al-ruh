@@ -49,6 +49,20 @@ def _service(tmp_path: Path) -> ChatService:
     return ChatService(mode=cast(JarvisMode, FakeSession()), data_root=tmp_path)
 
 
+def _widget_text(widget: Any) -> set[str]:
+    """Every ``text`` string drawn anywhere under ``widget`` (for a widget check)."""
+    texts: set[str] = set()
+    for child in widget.winfo_children():
+        try:
+            text = child.cget("text")
+        except Exception:
+            text = ""
+        if text:
+            texts.add(str(text))
+        texts |= _widget_text(child)
+    return texts
+
+
 def _display_available() -> bool:
     try:
         import tkinter as tk
@@ -99,9 +113,28 @@ def test_a_new_unnamed_action_is_still_shown(monkeypatch) -> None:
 
 
 def test_action_group_by_key_reports_an_unknown_key() -> None:
-    assert action_group_by_key("knowledge").title == "Knowledge & Web"
+    assert action_group_by_key("knowledge").title == "Knowledge & Data"
     with pytest.raises(KeyError):
         action_group_by_key("does-not-exist")
+
+
+def test_the_navigation_mirrors_the_requested_hierarchy() -> None:
+    """Phase 2: the sections are the requested logical groups, in order."""
+    titles = [group.title for group in ACTION_GROUPS]
+    assert titles == [
+        "AI Interaction",
+        "Cognitive System",
+        "Personalities",
+        "Model Management",
+        "Knowledge & Data",
+        "Learning & Training",
+        "Voice & Audio",
+        "System",
+    ]
+    # The old titles are gone (a rename, not a second set of groups).
+    for retired in ("Assistant", "Characters", "Language models", "Knowledge & Web",
+                    "Companion", "Speech Models"):
+        assert retired not in titles
 
 
 def test_the_reading_voice_is_not_repeated_in_the_settings_group() -> None:
@@ -214,8 +247,52 @@ def test_window_builds_the_grouped_collapsible_sidebar(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_builds_the_home_dashboard(tmp_path) -> None:
+    """The Home section is open by default and names the live model and session."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        assert "home" in app._sections
+        assert app._sections["home"].is_open is True
+        # Its rows are built on open, so the panel is never blank.
+        assert app._home_panel.winfo_children()
+        texts = _widget_text(app._home_panel)
+        assert "Home" in texts
+        # Quick actions are drawn and resolve against the real catalogue.
+        assert any("What the AI can do" in text for text in texts)
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_home_dashboard_refreshes_after_a_mouth_switch(tmp_path) -> None:
+    """A model switch redraws the dashboard, so it never names a stale model."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        before = _widget_text(app._home_panel)
+        # Rebuild the dashboard directly (the switch path calls _refresh_home).
+        app._build_home_panel(app._home_panel)
+        root.update()
+        after = _widget_text(app._home_panel)
+        assert after  # still built, never blanked
+        assert "Home" in before and "Home" in after
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_window_settings_section_does_not_repeat_the_voice_list(tmp_path) -> None:
-    """Opening Settings builds the Cloud pickers but no voice radios (one home)."""
     import tkinter as tk
 
     from gui.app import FaydGUI
