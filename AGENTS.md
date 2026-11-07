@@ -3877,8 +3877,26 @@ Arabic is kept as secondary aliases where useful.
   worker-thread/queue the UI thread drains), and every button's label, one-line
   hint, and hover tooltip come *from the catalogue*, so the window and the
   catalogue can never disagree. It adopts `ThemedDialog`, so a theme or font
-  change restyles it in place. The CLI (`cli/training_center.py`) is the headless
-  twin (`dashboard`/`catalog`/`settings`/`import`/`sources`/`knowledge`/`ask`/
+  change restyles it in place. Every control that used to ask for a name in a
+  plain text box now offers an **editable dropdown** -- a user picks a real value
+  from the list *or* types one -- through the one helper
+  `gui/choice_dialog.py`'s `ask_choice`, whose choice lists the service computes
+  (`provider_choices`/`mouth_choices`/`character_choices`/`dataset_choices`/
+  `run_choices`/`pipeline_choices`/`topic_choices`/`setting_keys`/`setting_value_choices`), so the
+  window and the CLI can never disagree about what is on offer. The Training
+  Center has **one internet switch** (`web`, off on a fresh install and
+  persisted): it governs every path that leaves this machine -- a cloud provider,
+  a URL import, and the bulk knowledge-base build -- so turning it on *is* the
+  human approval, exactly as the chat's web toggle is for a search. It is
+  reachable from the window's **Web** switch beside the message box, the
+  *Settings → Turn the internet on or off* entry, and
+  `python -m cli training-center web --on|--off` (or `settings --set web=true`);
+  `set_web`/`toggle_web`/`web_enabled`/`web_status` are the service API, and
+  `TrainingCenterService.provider` rebuilds a cloud provider when the switch
+  flips, so a cached unapproved one is never reused. The CLI
+  (`cli/training_center.py`) is the headless
+  twin (`dashboard`/`catalog`/`settings`/`web`/`providers`/`import`/`sources`/
+  `knowledge`/`ask`/
   `review`/`export`/`datasets`/`jobs`/`evaluate`/`pipeline`/`history`/`resources`/
   `gate`, with `--root` and `--json`), driving the *same* service. Exit codes:
   `0` success, `2` invalid arguments, `3` a source/engine is unavailable, `4` a

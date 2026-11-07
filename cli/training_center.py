@@ -80,6 +80,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_set.add_argument("--json", action="store_true")
     p_set.set_defaults(func=_cmd_settings)
 
+    p_web = sub.add_parser("web", help="the internet switch (cloud, URL import, KB build)")
+    p_web.add_argument("--on", action="store_true")
+    p_web.add_argument("--off", action="store_true")
+    p_web.add_argument("--json", action="store_true")
+    p_web.set_defaults(func=_cmd_web)
+
+    p_prov = sub.add_parser("providers", help="the answer providers (for a dropdown)")
+    p_prov.add_argument("--json", action="store_true")
+    p_prov.set_defaults(func=_cmd_providers)
+
     p_imp = sub.add_parser("import", help="import files or folders")
     p_imp.add_argument("paths", nargs="+")
     p_imp.add_argument("--json", action="store_true")
@@ -228,6 +238,34 @@ def _cmd_settings(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_web(args: argparse.Namespace) -> int:
+    service = _service(args.root)
+    if args.on and args.off:
+        return _fail("invalid: --on and --off are mutually exclusive", EXIT_USAGE)
+    if args.on:
+        service.set_web(True)
+    elif args.off:
+        service.set_web(False)
+    if args.json:
+        print(json.dumps({"web": service.web_enabled(), "status": service.web_status()}, indent=2, ensure_ascii=False))
+        return EXIT_OK
+    print(service.web_status())
+    return EXIT_OK
+
+
+def _cmd_providers(args: argparse.Namespace) -> int:
+    service = _service(args.root)
+    choices = service.provider_choices()
+    if args.json:
+        print(json.dumps([{"value": v, "label": label} for v, label in choices], indent=2, ensure_ascii=False))
+        return EXIT_OK
+    print("Providers (value — label):")
+    for value, label in choices:
+        print(f"  {value} — {label}")
+    print("\n" + service.web_status())
+    return EXIT_OK
+
+
 def _cmd_import(args: argparse.Namespace) -> int:
     service = _service(args.root)
     reports = []
@@ -254,6 +292,12 @@ def _cmd_sources(args: argparse.Namespace) -> int:
         return _fail(
             "refused: importing from the internet needs --approve (the web path is "
             "denied by default).",
+            EXIT_GATE,
+        )
+    if not service.web_enabled():
+        return _fail(
+            "refused: the Training Center's internet switch is off; run "
+            "`training-center web --on` first.",
             EXIT_GATE,
         )
     outcomes = service.import_urls(args.url, approved=True)

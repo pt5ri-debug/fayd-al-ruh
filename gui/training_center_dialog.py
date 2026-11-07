@@ -42,6 +42,7 @@ from core.training_center.catalog import capability
 
 from gui.app import RADIUS_LARGE, RoundedBox
 from gui.chat_composer import ChatComposer, Tooltip
+from gui.choice_dialog import ask_choice
 from gui.dialog_base import ThemedDialog
 from gui.sidebar import SidebarColumn
 from gui.training_center import TrainingCenterService
@@ -100,6 +101,7 @@ class TrainingCenterDialog(ThemedDialog):
         self._pump_after: str | None = None
         self._command_var = tk.StringVar(value="")
         self._topic_var = tk.StringVar(value="")
+        self._web_toggle: Any = None
 
         self.window = tk.Toplevel(parent)
         self.window.title(f"{TITLE} — Fayd Al-Ruh")
@@ -165,6 +167,53 @@ class TrainingCenterDialog(ThemedDialog):
             font=self._type.font("2xs", weight="bold"), padx=10, pady=4, cursor="hand2",
             anchor="w",
         )
+
+    def _choose(
+        self,
+        title: str,
+        prompt: str,
+        *,
+        values: Any = (),
+        initial: str = "",
+    ) -> str:
+        """Ask for one value with an *editable dropdown* of the real choices.
+
+        The dropdown counterpart of :func:`simpledialog.askstring`: the box lists
+        the choices the service really accepts **and** still accepts a typed
+        value, so a control asks "which one?" instead of "type the exact name".
+        An empty return means the user cancelled.
+        """
+        return ask_choice(
+            self.window, title, prompt, values=tuple(values), initial=initial,
+            theme=self.theme, typography=self._type,
+        )
+
+    def _require_web(self, what: str) -> bool:
+        """Make sure the internet switch is on for an action that needs it.
+
+        When it is off, ask once -- so the option that needs the internet *turns
+        it on* for the user -- and only proceed when the user agrees. When the
+        user declines, nothing runs and the transcript says why.
+        """
+        if self.service.web_enabled():
+            return True
+        if messagebox.askyesno(
+            "Turn the internet on?",
+            f"{what} needs the internet, and it is off.\n\nTurn it on now? "
+            "Turning it on approves cloud providers, URL imports, and the bulk "
+            "knowledge-base build for this Training Center.",
+            parent=self.window,
+        ):
+            self.service.set_web(True)
+            self._refresh_web_toggle()
+            self._add_message("ok", self.service.web_status())
+            return True
+        self._add_message(
+            "error",
+            f"{what} needs the internet, which is off. Turn it on in Settings, or "
+            "with the Web switch beside the message box.",
+        )
+        return False
 
     def _hint(self, parent: tk.Misc, text: str) -> tk.Label:
         label = tk.Label(
@@ -361,6 +410,7 @@ class TrainingCenterDialog(ThemedDialog):
     def _build_settings_section(self, column: SidebarColumn) -> None:
         section = column.add("settings", "Settings", icon="⚙")
         self._section_note(section, "settings")
+        self._cap_button(section, "settings.web", self._on_toggle_web)
         self._cap_button(section, "settings.show", self._on_settings)
         self._cap_button(section, "settings.set", self._on_set_setting)
         self._cap_button(section, "settings.catalog", self._on_catalog)
@@ -410,6 +460,26 @@ class TrainingCenterDialog(ThemedDialog):
             self.theme,
             self._type,
         )
+        # The internet switch: a real control, beside the Ask button, that governs
+        # every external path (cloud, URL import, KB build). It shows the state in
+        # force, so it can never disagree with the session it belongs to.
+        self._web_toggle = composer.add_web_toggle(
+            self._on_web_toggled,
+            initial=self.service.web_enabled(),
+            available=True,
+            tip=self.service.web_status(),
+        )
+
+    def _on_web_toggled(self, enabled: bool) -> None:
+        now = self.service.set_web(enabled)
+        self._refresh_web_toggle()
+        self._add_message("ok" if now else "note", self.service.web_status())
+
+    def _refresh_web_toggle(self) -> None:
+        toggle = getattr(self, "_web_toggle", None)
+        if toggle is None:
+            return
+        toggle.set_state(self.service.web_enabled(), available=True)
 
     # -- layout helpers ---------------------------------------------------
 
@@ -609,6 +679,8 @@ class TrainingCenterDialog(ThemedDialog):
         self._run(f"Inspecting {path}…", job)
 
     def _on_internet(self) -> None:
+        if not self._require_web("Learning from the internet"):
+            return
         urls = simpledialog.askstring(
             "Learn from the internet",
             "One or more URLs, separated by commas:",
@@ -638,33 +710,52 @@ class TrainingCenterDialog(ThemedDialog):
         self._run(f"Importing {len(parsed)} URL(s)…", job)
 
     def _on_gemini(self) -> None:
-        topic = simpledialog.askstring("Learn from Gemini", "The learning topic:", parent=self.window)
+        if not self._require_web("Asking a cloud model (Gemini)"):
+            return
+        provider = self._choose(
+            "Learn from a cloud model",
+            "Which cloud provider?",
+            values=self.service.cloud_choices(),
+            initial=str(self.service.setting("cloud_provider")),
+        )
+        if not provider:
+            return
+        topic = self._choose(
+            "Learn from Gemini",
+            "The learning topic (pick one or type your own):",
+            values=self.service.topic_choices(),
+        )
         if not topic:
             return
 
         def job() -> str:
-            questions = self.service.generate_questions(topic, count=5, provider="gemini")
+            questions = self.service.generate_questions(topic, count=5, provider=provider)
             if not questions:
                 return (
-                    "Gemini could not generate questions (set GEMINI_API_KEY and approve "
-                    "the cloud path)."
+                    f"{provider} could not generate questions (set the provider's API key "
+                    "and keep the internet switch on)."
                 )
-            examples = self.service.ask_many(questions, provider="gemini", topic=topic)
+            examples = self.service.ask_many(questions, provider=provider, topic=topic)
             return "\n".join(e.describe() for e in examples) + (
                 "\n\nThese are pending; approve them before export."
             )
 
-        self._run(f"Asking Gemini about {topic!r}…", job)
+        self._run(f"Asking {provider} about {topic!r}…", job)
 
     def _on_local_model(self) -> None:
-        mouth = simpledialog.askstring(
+        mouth = self._choose(
             "Learn from a local model",
-            "Which mouth? (ultron, vision, banner, model, natasha, hakeem)",
-            parent=self.window,
+            "Which local model?",
+            values=self.service.mouth_choices(),
+            initial="ultron",
         )
         if not mouth:
             return
-        topic = simpledialog.askstring("Learning topic", "The learning topic:", parent=self.window)
+        topic = self._choose(
+            "Learning topic",
+            "The learning topic (pick one or type your own):",
+            values=self.service.topic_choices(),
+        )
         if not topic:
             return
 
@@ -712,14 +803,21 @@ class TrainingCenterDialog(ThemedDialog):
         self._run(f"Importing the collection at {folder}…", job)
 
     def _on_characters(self) -> None:
-        character = simpledialog.askstring(
+        character = self._choose(
             "Learn with a character",
-            "Which character? (jarvis, ultron, vision, banner, natasha, hakeem, cloud)",
-            parent=self.window,
+            "Which character?",
+            values=self.service.character_choices(),
+            initial="hakeem",
         )
         if not character:
             return
-        topic = simpledialog.askstring("Learning topic", "The learning topic:", parent=self.window)
+        if character == "cloud" and not self._require_web("Learning with the Cloud character"):
+            return
+        topic = self._choose(
+            "Learning topic",
+            "The learning topic (pick one or type your own):",
+            values=self.service.topic_choices(),
+        )
         if not topic:
             return
 
@@ -786,10 +884,17 @@ class TrainingCenterDialog(ThemedDialog):
         question = simpledialog.askstring("Ask a question", "The question:", parent=self.window)
         if not question:
             return
-        provider = simpledialog.askstring(
-            "Provider", "Which provider? (manual, document, gemini, local:ultron…)", parent=self.window
+        provider = self._choose(
+            "Provider",
+            "Which provider should answer?",
+            values=self.service.provider_choices(),
+            initial=str(self.service.setting("default_provider")),
         )
-        provider = (provider or "document").strip()
+        if not provider:
+            return
+        provider = provider.strip()
+        if not self._provider_ready(provider):
+            return
 
         def job() -> str:
             example = self.service.ask(question, provider=provider)
@@ -798,13 +903,24 @@ class TrainingCenterDialog(ThemedDialog):
         self._run(f"Asking {provider}…", job)
 
     def _on_generate(self) -> None:
-        topic = simpledialog.askstring("Generate questions", "The learning topic:", parent=self.window)
+        topic = self._choose(
+            "Generate questions",
+            "The learning topic (pick one or type your own):",
+            values=self.service.topic_choices(),
+        )
         if not topic:
             return
-        provider = simpledialog.askstring(
-            "Provider", "Which provider? (document, gemini, local:ultron…)", parent=self.window
+        provider = self._choose(
+            "Provider",
+            "Which provider should generate the questions?",
+            values=self.service.provider_choices(),
+            initial=str(self.service.setting("default_provider")),
         )
-        provider = (provider or "document").strip()
+        if not provider:
+            return
+        provider = provider.strip()
+        if not self._provider_ready(provider):
+            return
 
         def job() -> str:
             questions = self.service.generate_questions(topic, count=5, provider=provider)
@@ -814,6 +930,24 @@ class TrainingCenterDialog(ThemedDialog):
             return "\n".join(e.describe() for e in examples)
 
         self._run(f"Generating questions on {topic!r}…", job)
+
+    def _provider_ready(self, provider: str) -> bool:
+        """Make sure a provider that needs the internet has the switch on.
+
+        A cloud provider (a name in the cloud catalog, or ``cloud``) is refused
+        unless the internet switch is on; the local, retrieval, and manual
+        providers need nothing and are always ready.
+        """
+        cloud = False
+        try:
+            from core.cloud_model import provider_names
+
+            cloud = provider == "cloud" or provider in provider_names()
+        except Exception:  # pragma: no cover - defensive
+            cloud = False
+        if cloud and not self._require_web(f"Asking the cloud provider {provider!r}"):
+            return False
+        return True
 
     def _on_review(self) -> None:
         self._run(
@@ -825,8 +959,11 @@ class TrainingCenterDialog(ThemedDialog):
         )
 
     def _on_export_dataset(self) -> None:
-        dataset_id = simpledialog.askstring(
-            "Export approved answers", "The dataset id (lower-case, e.g. learned):", parent=self.window
+        dataset_id = self._choose(
+            "Export approved answers",
+            "The dataset id to build from the approved examples:",
+            values=self.service.dataset_choices(),
+            initial="learned",
         )
         if not dataset_id:
             return
@@ -849,7 +986,12 @@ class TrainingCenterDialog(ThemedDialog):
         self._run("Listing the datasets…", job)
 
     def _on_build_dataset(self) -> None:
-        dataset_id = simpledialog.askstring("Build a dataset", "The dataset id:", parent=self.window)
+        dataset_id = self._choose(
+            "Build a dataset",
+            "The dataset id to build (type a new name, or pick an existing one):",
+            values=self.service.dataset_choices(),
+            initial="learned",
+        )
         if not dataset_id:
             return
 
@@ -860,13 +1002,21 @@ class TrainingCenterDialog(ThemedDialog):
         self._run(f"Building {dataset_id!r}…", job)
 
     def _on_validate_dataset(self) -> None:
-        dataset_id = simpledialog.askstring("Validate a dataset", "The dataset id:", parent=self.window)
+        dataset_id = self._choose(
+            "Validate a dataset",
+            "Which dataset?",
+            values=self.service.dataset_choices(),
+        )
         if not dataset_id:
             return
         self._run(f"Validating {dataset_id!r}…", lambda: self.service.validate_dataset(dataset_id))
 
     def _on_export_dataset_file(self) -> None:
-        dataset_id = simpledialog.askstring("Export a dataset", "The dataset id:", parent=self.window)
+        dataset_id = self._choose(
+            "Export a dataset",
+            "Which dataset?",
+            values=self.service.dataset_choices(),
+        )
         if not dataset_id:
             return
         folder = filedialog.askdirectory(parent=self.window, title="Export the dataset to…")
@@ -891,7 +1041,11 @@ class TrainingCenterDialog(ThemedDialog):
         self._run("Listing the training jobs…", job)
 
     def _on_feasibility(self) -> None:
-        dataset_id = simpledialog.askstring("Check feasibility", "The dataset id:", parent=self.window)
+        dataset_id = self._choose(
+            "Check feasibility",
+            "Which dataset?",
+            values=self.service.dataset_choices(),
+        )
         if not dataset_id:
             return
 
@@ -907,7 +1061,11 @@ class TrainingCenterDialog(ThemedDialog):
         self._run(f"Checking feasibility for {dataset_id!r}…", job)
 
     def _on_start_job(self) -> None:
-        dataset_id = simpledialog.askstring("Start a training job", "The dataset id:", parent=self.window)
+        dataset_id = self._choose(
+            "Start a training job",
+            "Which dataset?",
+            values=self.service.dataset_choices(),
+        )
         if not dataset_id:
             return
         preset = str(self.service.setting("default_preset"))
@@ -935,7 +1093,11 @@ class TrainingCenterDialog(ThemedDialog):
         self._run(f"Training on {dataset_id!r}…", job)
 
     def _on_cancel_job(self) -> None:
-        run_id = simpledialog.askstring("Cancel a job", "The run id:", parent=self.window)
+        run_id = self._choose(
+            "Cancel a job",
+            "Which run?",
+            values=self.service.run_choices(),
+        )
         if not run_id:
             return
         cancelled = self.service.cancel_job(run_id)
@@ -945,10 +1107,18 @@ class TrainingCenterDialog(ThemedDialog):
         )
 
     def _on_resume_job(self) -> None:
-        run_id = simpledialog.askstring("Resume a job", "The run id to resume from:", parent=self.window)
+        run_id = self._choose(
+            "Resume a job",
+            "Which run should we resume from?",
+            values=self.service.run_choices(),
+        )
         if not run_id:
             return
-        dataset_id = simpledialog.askstring("Dataset", "The dataset id to continue on:", parent=self.window)
+        dataset_id = self._choose(
+            "Dataset",
+            "Which dataset should the resumed run continue on?",
+            values=self.service.dataset_choices(),
+        )
         if not dataset_id:
             return
 
@@ -970,7 +1140,11 @@ class TrainingCenterDialog(ThemedDialog):
         self._run(f"Resuming from {run_id!r}…", job)
 
     def _on_retry_job(self) -> None:
-        run_id = simpledialog.askstring("Retry a job", "The run id to retry:", parent=self.window)
+        run_id = self._choose(
+            "Retry a job",
+            "Which run should we retry?",
+            values=self.service.run_choices(),
+        )
         if not run_id:
             return
 
@@ -1058,7 +1232,11 @@ class TrainingCenterDialog(ThemedDialog):
         self._run("Estimating the resources…", job)
 
     def _on_continue_training(self) -> None:
-        dataset_id = simpledialog.askstring("Continue training", "The dataset id:", parent=self.window)
+        dataset_id = self._choose(
+            "Continue training",
+            "Which dataset should the continued run train on?",
+            values=self.service.dataset_choices(),
+        )
         if not dataset_id:
             return
         if not messagebox.askyesno(
@@ -1084,7 +1262,11 @@ class TrainingCenterDialog(ThemedDialog):
     # -- evaluation -------------------------------------------------------
 
     def _on_evaluate(self) -> None:
-        run_id = simpledialog.askstring("Evaluate a model", "The run id to evaluate:", parent=self.window)
+        run_id = self._choose(
+            "Evaluate a model",
+            "Which run should we evaluate?",
+            values=self.service.run_choices(),
+        )
         if not run_id:
             return
 
@@ -1113,6 +1295,8 @@ class TrainingCenterDialog(ThemedDialog):
     # -- knowledge base ---------------------------------------------------
 
     def _on_kb_build(self) -> None:
+        if not self._require_web("Building the bulk knowledge base"):
+            return
         target = simpledialog.askstring(
             "Build the knowledge base", "Target size in MB:", parent=self.window, initialvalue="100"
         )
@@ -1132,9 +1316,7 @@ class TrainingCenterDialog(ThemedDialog):
             return
 
         def job() -> str:
-            from core.knowledge_base import build_knowledge_base, default_knowledge_base_dir
-
-            report = build_knowledge_base(default_knowledge_base_dir(), target_mb=target_mb)
+            report = self.service.build_knowledge_base(target_mb=target_mb)
             return report.describe() if hasattr(report, "describe") else str(report)
 
         self._run(f"Building the knowledge base to {target_mb:g} MB…", job)
@@ -1158,7 +1340,11 @@ class TrainingCenterDialog(ThemedDialog):
         self._run("Listing the pipelines…", job)
 
     def _on_pipeline_run(self) -> None:
-        pipeline_id = simpledialog.askstring("Run a pipeline", "The pipeline id:", parent=self.window)
+        pipeline_id = self._choose(
+            "Run a pipeline",
+            "Which pipeline?",
+            values=self.service.pipeline_choices(),
+        )
         if not pipeline_id:
             return
         if not messagebox.askyesno(
@@ -1168,12 +1354,26 @@ class TrainingCenterDialog(ThemedDialog):
             parent=self.window,
         ):
             return
+        if self._pipeline_needs_web(pipeline_id) and not self._require_web(
+            f"The pipeline {pipeline_id!r} downloads URLs"
+        ):
+            return
 
         def job() -> str:
             report = self.service.run_pipeline(pipeline_id, approved=True)
             return report.describe()
 
         self._run(f"Running {pipeline_id!r}…", job)
+
+    def _pipeline_needs_web(self, pipeline_id: str) -> bool:
+        """Whether a saved pipeline has a stage that reaches the internet."""
+        try:
+            pipeline = self.service.pipelines.get(pipeline_id)
+        except Exception:  # pragma: no cover - defensive
+            return False
+        if pipeline is None:
+            return False
+        return any(stage.stage == "import_urls" and stage.enabled for stage in pipeline.stages)
 
     # -- resources --------------------------------------------------------
 
@@ -1186,16 +1386,24 @@ class TrainingCenterDialog(ThemedDialog):
         self._add_message("assistant", self.service.settings_text())
 
     def _on_set_setting(self) -> None:
-        key = simpledialog.askstring(
+        key = self._choose(
             "Change a setting",
-            "The setting key (language, chunk_chars, review_required, default_provider, "
-            "cloud_provider, default_preset, include_documents):",
-            parent=self.window,
+            "Which setting?",
+            values=self.service.setting_keys(),
         )
         if not key:
             return
-        value = simpledialog.askstring("Value", "The new value:", parent=self.window)
-        if value is None:
+        key = key.strip()
+        if key not in self.service.setting_keys():
+            self._add_message("error", f"Unknown setting {key!r}.")
+            return
+        value = self._choose(
+            "Value",
+            f"New value for {key}:",
+            values=self.service.setting_value_choices(key),
+            initial=str(self.service.settings().get(key, "")),
+        )
+        if value == "":
             return
         parsed: object = value
         if value.lower() in ("true", "false"):
@@ -1203,11 +1411,19 @@ class TrainingCenterDialog(ThemedDialog):
         elif value.isdigit():
             parsed = int(value)
         try:
-            self.service.set_setting(key.strip(), parsed)
+            self.service.set_setting(key, parsed)
         except KeyError as error:
             self._add_message("error", str(error))
             return
-        self._add_message("ok", f"{key.strip()} = {parsed}")
+        self._add_message("ok", f"{key} = {parsed}")
+        if key == "web":
+            self._refresh_web_toggle()
+
+    def _on_toggle_web(self) -> None:
+        """Flip the internet switch from the Settings section."""
+        now = self.service.toggle_web()
+        self._refresh_web_toggle()
+        self._add_message("ok" if now else "note", self.service.web_status())
 
     def _on_catalog(self) -> None:
         self._add_message("assistant", self.service.catalog_text())

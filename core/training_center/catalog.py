@@ -564,6 +564,15 @@ CAPABILITIES: tuple[Capability, ...] = (
         title_ar="غيّر إعدادًا", summary_ar="غيّر تفضيلًا واحدًا في مركز التدريب واحفظه.",
     ),
     _cap(
+        "settings.web", "Turn the internet on or off", SECTION_SETTINGS,
+        "Flip the switch that governs every path leaving this machine — cloud "
+        "providers, URL imports, and the bulk knowledge-base build — and persist it.",
+        "The switch's new state (on or off).",
+        "python -m cli training-center settings --set web=true",
+        governed=True, writes=True,
+        title_ar="شغّل الإنترنت أو أطفئه", summary_ar="بدّل المفتاح الذي يحكم كل مسار خارج الجهاز واحفظه.",
+    ),
+    _cap(
         "settings.catalog", "Show every control", SECTION_SETTINGS,
         "Print this catalogue: what every control does, what it returns, and the "
         "headless command that runs it.",

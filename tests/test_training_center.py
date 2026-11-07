@@ -412,3 +412,121 @@ def test_service_provider_statuses_are_honest(tmp_path: Path) -> None:
     statuses = service.provider_statuses()
     assert statuses
     assert all(isinstance(status, ProviderStatus) for status in statuses)
+
+
+# -- the internet switch ---------------------------------------------------
+
+
+def test_web_is_off_by_default(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    assert service.web_enabled() is False
+    assert "off" in service.web_status().lower()
+
+
+def test_set_web_persists_and_reports(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    assert service.set_web(True) is True
+    assert service.web_enabled() is True
+    # A second service over the same root reads the saved choice.
+    assert _service(tmp_path).web_enabled() is True
+    assert service.toggle_web() is False
+    assert service.web_enabled() is False
+
+
+def test_import_urls_needs_the_switch_even_with_approval(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    # approved=True but the internet switch is off: nothing runs, nothing fetched.
+    assert service.import_urls(["https://example.com"], approved=True) == ()
+    service.set_web(True)
+    # With the switch on, an *unapproved* call is still refused.
+    assert service.import_urls(["https://example.com"], approved=False) == ()
+
+
+def test_build_knowledge_base_is_refused_until_the_switch_is_on(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    with pytest.raises(PermissionError):
+        service.build_knowledge_base(target_mb=1)
+
+
+def test_cloud_provider_is_unapproved_until_the_switch_is_on(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    off = service.provider("gemini")
+    assert off.status().available is False
+    service.set_web(True)
+    on = service.provider("gemini")
+    # The switch rebuilds the provider, so a cached unapproved one is never reused.
+    assert on is not off
+
+
+# -- the dropdown choices --------------------------------------------------
+
+
+def test_provider_choices_are_values_the_service_accepts(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    rows = service.provider_choices()
+    values = [value for value, _ in rows]
+    assert "manual" in values
+    assert "document" in values
+    assert any(value.startswith("local:") for value in values)
+    assert any(value.startswith("character:") for value in values)
+    # Every row is a value the service really accepts: a manual ask works.
+    assert all(isinstance(label, str) and label for _, label in rows)
+
+
+def test_provider_choices_include_the_cloud_providers(tmp_path: Path) -> None:
+    from core.cloud_model import provider_names
+
+    service = _service(tmp_path)
+    values = set(service.provider_values())
+    assert set(provider_names()) <= values
+
+
+def test_mouth_and_character_choices(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    assert "ultron" in service.mouth_values()
+    assert "cloud" not in service.mouth_values()  # cloud is remote, not a local mouth
+    assert service.character_values() == (
+        "sources", "ultron", "vision", "banner", "natasha", "hakeem", "cloud",
+    )
+
+
+def test_dataset_run_and_pipeline_choices_read_the_stores(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    assert service.dataset_choices() == ()
+    assert service.run_choices() == ()
+    assert service.pipeline_choices() == ()
+    service.create_pipeline("demo")
+    assert "demo" in service.pipeline_choices()
+
+
+def test_setting_keys_and_value_choices(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    assert "web" in service.setting_keys()
+    assert service.setting_value_choices("web") == ("true", "false")
+    assert service.setting_value_choices("language") == ("en", "ar")
+    assert "manual" in service.setting_value_choices("default_provider")
+
+
+def test_provider_resolves_the_local_and_character_prefixes(tmp_path: Path) -> None:
+    from core.training_center.providers import (
+        CharacterLearningProvider,
+        LocalModelLearningProvider,
+    )
+
+    service = _service(tmp_path)
+    local = service.provider("local:vision")
+    assert isinstance(local, LocalModelLearningProvider)
+    assert local.mouth == "vision"
+    character = service.provider("character:hakeem")
+    assert isinstance(character, CharacterLearningProvider)
+    assert character.character == "hakeem"
+    # The same value returns the cached instance.
+    assert service.provider("local:vision") is local
+
+
+def test_every_provider_choice_resolves(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    for value in service.provider_values():
+        # A value the dropdown offers must build without raising.
+        provider = service.provider(value)
+        assert provider is not None

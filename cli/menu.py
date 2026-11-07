@@ -637,6 +637,8 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Code Studio: show the project's own development tasks", run_code_studio, ("tasks",)),
     ("Training Center: learn, build datasets, train, and evaluate", run_training_center, ("dashboard",)),
     ("Training Center: what every learning and training control does", run_training_center, ("catalog",)),
+    ("Training Center: turn the internet on or off (cloud, URLs, KB build)", run_training_center, ("web",)),
+    ("Training Center: the answer providers to choose from", run_training_center, ("providers",)),
     ("Training Center: the learning pipelines", run_training_center, ("pipeline", "--list")),
     ("Training Center: this machine's own resources", run_training_center, ("resources",)),
     ("Presentation Studio: build a PowerPoint deck from a discussion", run_presentation, ("list",)),

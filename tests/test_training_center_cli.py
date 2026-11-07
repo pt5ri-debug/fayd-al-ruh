@@ -208,3 +208,54 @@ def test_sidebar_action_opens_the_training_center() -> None:
     assert action is not None
     assert not action.hidden
     assert "Training Center" in action.label
+
+
+# -- the internet switch ---------------------------------------------------
+
+
+def test_web_is_off_by_default_and_toggles(tmp_path: Path, capsys) -> None:
+    code, out = _run(capsys, "web", root=tmp_path)
+    assert code == cli.EXIT_OK
+    assert "off" in out.lower()
+    code, out = _run(capsys, "web", "--on", root=tmp_path)
+    assert code == cli.EXIT_OK
+    assert "on" in out.lower()
+    code, out = _run(capsys, "web", "--json", root=tmp_path)
+    assert code == cli.EXIT_OK
+    assert json.loads(out)["web"] is True
+
+
+def test_web_on_and_off_together_is_refused(tmp_path: Path, capsys) -> None:
+    code, out = _run(capsys, "web", "--on", "--off", root=tmp_path)
+    assert code == cli.EXIT_USAGE
+    assert "invalid" in out
+
+
+def test_settings_set_web_persists(tmp_path: Path, capsys) -> None:
+    code, _ = _run(capsys, "settings", "--set", "web=true", root=tmp_path)
+    assert code == cli.EXIT_OK
+    code, out = _run(capsys, "web", "--json", root=tmp_path)
+    assert json.loads(out)["web"] is True
+
+
+def test_sources_refuses_when_the_switch_is_off(tmp_path: Path, capsys) -> None:
+    code, out = _run(
+        capsys, "sources", "--url", "https://example.com", "--approve", root=tmp_path
+    )
+    # Approved at the CLI but the switch is off -> refused, nothing fetched.
+    assert code == cli.EXIT_GATE
+    assert "switch is off" in out
+
+
+def test_providers_lists_the_choices(tmp_path: Path, capsys) -> None:
+    code, out = _run(capsys, "providers", "--json", root=tmp_path)
+    assert code == cli.EXIT_OK
+    payload = json.loads(out)
+    values = {row["value"] for row in payload}
+    assert {"manual", "document"} <= values
+    assert any(value.startswith("local:") for value in values)
+
+
+def test_menu_has_the_web_entry() -> None:
+    labels = [entry[0] for entry in menu.MENU]
+    assert any("internet on or off" in label for label in labels)

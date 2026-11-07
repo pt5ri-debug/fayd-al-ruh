@@ -62,6 +62,11 @@ _SETTINGS_KEY = "settings"
 #: The shipped preferences. A review is required before export by default, which
 #: is the project's hard rule made a setting the user can see (and turn off only
 #: deliberately).
+#:
+#: ``web`` is the internet switch: every path that leaves this machine (a cloud
+#: provider, a URL import, the bulk knowledge-base build) is refused until it is
+#: on, so turning it on *is* the human approval. It is off on a fresh install,
+#: like every other external action in the project.
 DEFAULT_SETTINGS: dict[str, Any] = {
     "language": "en",
     "chunk_chars": 1200,
@@ -70,6 +75,40 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "cloud_provider": "gemini",
     "default_preset": "cpu-safe",
     "include_documents": True,
+    "web": False,
+}
+
+#: The mouths that run a **GGUF file in this process**, in the order a dropdown
+#: offers them. Cloud is deliberately absent: it is a *remote* provider, reached
+#: through :meth:`TrainingCenterService.cloud_choices`, never a local model.
+LOCAL_MOUTHS: tuple[str, ...] = (
+    "model",
+    "ultron",
+    "vision",
+    "banner",
+    "natasha",
+    "hakeem",
+)
+
+#: A readable label per local mouth, for a dropdown.
+MOUTH_LABELS: dict[str, str] = {
+    "model": "the project's own trained model",
+    "ultron": "Ultron (general local model)",
+    "vision": "Vision (petroleum local model)",
+    "banner": "Banner (presentation local model)",
+    "natasha": "Natasha (companion)",
+    "hakeem": "Hakeem (scholar of religion and history)",
+}
+
+#: A readable label per character, for the character dropdown.
+CHARACTER_LABELS: dict[str, str] = {
+    "sources": "Jarvis (internal sources + web)",
+    "ultron": "Ultron (general local model)",
+    "vision": "Vision (petroleum local model)",
+    "banner": "Banner (presentation local model)",
+    "natasha": "Natasha (companion)",
+    "hakeem": "Hakeem (scholar of religion and history)",
+    "cloud": "Cloud (remote provider)",
 }
 
 
@@ -132,7 +171,179 @@ class TrainingCenterService:
             "A review is required before export: "
             + ("yes" if self.setting("review_required") else "no")
         )
+        lines.append(
+            "The internet is "
+            + ("on (external paths are approved)" if self.web_enabled() else "off (external paths are refused)")
+        )
         return "\n".join(lines)
+
+    # -- the internet switch ----------------------------------------------
+    def web_enabled(self) -> bool:
+        """Whether the external paths (cloud, URL import, KB build) are approved.
+
+        This is the Training Center's own permission switch: off on a fresh
+        install, persisted, and the *one* place a path that leaves the machine
+        consults before it runs. Turning it on is the human approval, exactly as
+        the chat's web toggle is for a search.
+        """
+        return bool(self.setting("web"))
+
+    def set_web(self, enabled: bool) -> bool:
+        """Turn the internet paths on or off and persist the choice."""
+        self.set_setting("web", bool(enabled))
+        return self.web_enabled()
+
+    def toggle_web(self) -> bool:
+        return self.set_web(not self.web_enabled())
+
+    def web_status(self) -> str:
+        """One honest line about the internet switch and what it governs."""
+        if self.web_enabled():
+            return (
+                "Internet: on — cloud providers, URL imports, and the bulk "
+                "knowledge-base build may reach the network."
+            )
+        return (
+            "Internet: off — a cloud provider, a URL import, or a knowledge-base "
+            "build is refused until you turn this on."
+        )
+
+    # -- the dropdown choices ---------------------------------------------
+    def provider_choices(self) -> tuple[tuple[str, str], ...]:
+        """Every answer provider as ``(value, label)`` rows for a dropdown.
+
+        The cloud providers are named individually (``gemini``, ``openai``, …) so
+        a user picks the service by name; a local model is offered once per mouth
+        (``local:ultron``); a character once per key (``character:hakeem``). Every
+        row is a value the service really accepts in :meth:`ask`, so a chosen row
+        can never be a value the engine would reject.
+        """
+        rows: list[tuple[str, str]] = [
+            ("manual", "A hand-written answer (no model)"),
+            ("document", "The project's own knowledge base (retrieval, cited)"),
+        ]
+        with best_effort("read the cloud provider catalog"):
+            from core.cloud_model import provider_summaries
+
+            for key, title, *_ in provider_summaries():
+                rows.append((key, f"{title} (cloud)"))
+        for mouth in LOCAL_MOUTHS:
+            rows.append((f"local:{mouth}", f"Local model — {MOUTH_LABELS.get(mouth, mouth)}"))
+        for key in ("ultron", "vision", "banner", "natasha", "hakeem", "cloud"):
+            rows.append((f"character:{key}", f"Character — {CHARACTER_LABELS.get(key, key)}"))
+        return tuple(rows)
+
+    def provider_values(self) -> tuple[str, ...]:
+        return tuple(value for value, _ in self.provider_choices())
+
+    def cloud_choices(self) -> tuple[tuple[str, str], ...]:
+        """The remote (cloud) providers as ``(value, label)`` rows."""
+        rows: list[tuple[str, str]] = []
+        with best_effort("read the cloud provider catalog"):
+            from core.cloud_model import provider_summaries
+
+            for key, title, *_ in provider_summaries():
+                rows.append((key, f"{title} (cloud)"))
+        return tuple(rows) or (("gemini", "Gemini (cloud)"),)
+
+    def cloud_values(self) -> tuple[str, ...]:
+        return tuple(value for value, _ in self.cloud_choices())
+
+    def mouth_choices(self) -> tuple[tuple[str, str], ...]:
+        """The local (in-process) mouths as ``(value, label)`` rows."""
+        return tuple((mouth, MOUTH_LABELS.get(mouth, mouth)) for mouth in LOCAL_MOUTHS)
+
+    def mouth_values(self) -> tuple[str, ...]:
+        return tuple(mouth for mouth, _ in self.mouth_choices())
+
+    def character_choices(self) -> tuple[tuple[str, str], ...]:
+        """The project's characters as ``(value, label)`` rows."""
+        return tuple(
+            (key, CHARACTER_LABELS.get(key, key))
+            for key in ("sources", "ultron", "vision", "banner", "natasha", "hakeem", "cloud")
+        )
+
+    def character_values(self) -> tuple[str, ...]:
+        return tuple(key for key, _ in self.character_choices())
+
+    def dataset_choices(self) -> tuple[str, ...]:
+        """Every stored dataset id, newest first, for a dropdown.
+
+        Free typing is still allowed (a dataset is created by building it), so
+        this is the *suggestions* a dropdown offers rather than a closed set.
+        """
+        ids: list[str] = []
+        with best_effort("read the dataset registry"):
+            for row in self.dataset_rows():
+                if row.dataset_id not in ids:
+                    ids.append(row.dataset_id)
+        return tuple(ids)
+
+    def run_choices(self) -> tuple[str, ...]:
+        """Every training run id, newest first, for a dropdown."""
+        ids: list[str] = []
+        with best_effort("read the run log"):
+            for row in self.job_rows():
+                if row.run_id not in ids:
+                    ids.append(row.run_id)
+        return tuple(ids)
+
+    def pipeline_choices(self) -> tuple[str, ...]:
+        """Every saved pipeline id, for a dropdown."""
+        ids: list[str] = []
+        with best_effort("read the pipeline store"):
+            for pipeline in self.pipeline_list():
+                if pipeline.pipeline_id not in ids:
+                    ids.append(pipeline.pipeline_id)
+        return tuple(ids)
+
+    def setting_keys(self) -> tuple[str, ...]:
+        """Every settable preference key, for a dropdown."""
+        return tuple(DEFAULT_SETTINGS)
+
+    def setting_value_choices(self, key: str) -> tuple[str, ...]:
+        """Suggested values for a setting, for a dropdown (typing still allowed)."""
+        current = self.settings().get(key)
+        if key == "language":
+            return ("en", "ar")
+        if key in ("review_required", "include_documents", "web"):
+            return ("true", "false")
+        if key == "default_provider":
+            return self.provider_values()
+        if key == "cloud_provider":
+            return self.cloud_values()
+        if key == "default_preset":
+            with best_effort("read the training presets"):
+                from ml.training.config import preset_names
+
+                return tuple(preset_names())
+        if key == "chunk_chars" and current is not None:
+            return (str(current), "1200", "2000", "4000")
+        return (str(current),) if current is not None else ()
+
+    def topic_choices(self) -> tuple[str, ...]:
+        """The project's own learning topics, for a dropdown.
+
+        The disciplines and the corpus entries are the topics the project really
+        knows, so a topic field offers them first while still accepting a typed
+        topic of the user's own.
+        """
+        topics: list[str] = []
+        with best_effort("read the domain disciplines"):
+            from core.domain_knowledge import discipline_labels
+
+            topics.extend(discipline_labels().values())
+        with best_effort("read the corpus titles"):
+            from core.petroleum_corpus import entries as corpus_entries
+
+            topics.extend(entry.title for entry in corpus_entries())
+        seen: set[str] = set()
+        unique: list[str] = []
+        for topic in topics:
+            if topic and topic not in seen:
+                seen.add(topic)
+                unique.append(topic)
+        return tuple(unique)
 
     # -- dashboard ---------------------------------------------------------
     def dashboard(self) -> DashboardSnapshot:
@@ -167,16 +378,35 @@ class TrainingCenterService:
         """Import user-supplied URLs through the governed web path.
 
         The web path is the project's own permission + approval gate: without
-        ``approved`` this returns an empty tuple and records nothing, so a caller
-        must explicitly consent (the same click the chat's web toggle is).
+        ``approved`` -- or with the Training Center's internet switch off -- this
+        returns an empty tuple and records nothing, so a caller must explicitly
+        consent (the same click the chat's web toggle is).
         """
-        if not approved:
+        if not approved or not self.web_enabled():
             return ()
         importer = self._importer_for(allow_web=True)
         outcomes = tuple(importer.import_url(url) for url in urls)
         ok = sum(1 for outcome in outcomes if outcome.ok)
         self.history.record("crawl", f"imported {ok}/{len(urls)} URL(s)")
         return outcomes
+
+    def build_knowledge_base(self, *, target_mb: float = 100.0, **kwargs: Any) -> Any:
+        """Build the bulk knowledge base, through the internet switch.
+
+        The build fetches from public sources, so it is an external action like a
+        cloud call: it is refused unless the internet switch is on, and the
+        refusal names that next step rather than silently doing nothing.
+        """
+        if not self.web_enabled():
+            raise PermissionError(
+                "The bulk knowledge base fetches from the internet; turn the "
+                "Training Center's internet switch on first."
+            )
+        from core.knowledge_base import build_knowledge_base as _build
+
+        report = _build(self.knowledge_store_dir(), target_mb=target_mb, **kwargs)
+        self.history.record("knowledge", f"built the knowledge base to {target_mb:g} MB")
+        return report
 
     def knowledge_stats(self) -> dict[str, Any]:
         try:
@@ -225,12 +455,58 @@ class TrainingCenterService:
 
     # -- providers and Q&A -------------------------------------------------
     def provider(self, kind: str, **kwargs: Any) -> LearningProvider:
-        """The provider for ``kind`` (cached, so a local model loads once)."""
-        if kind not in self._providers:
-            if kind == "gemini":
-                kwargs.setdefault("provider", self.setting("cloud_provider"))
-            self._providers[kind] = build_provider(kind, **kwargs)
-        return self._providers[kind]
+        """The provider for ``kind`` (cached, so a local model loads once).
+
+        A *cloud* provider is built through its own engine's approval gate, which
+        the Training Center's internet switch drives: with the switch off the
+        provider is built unapproved, so a call raises the engine's own honest
+        "needs approval" error rather than reaching the network. Turning the switch
+        on rebuilds the provider, so a cached unapproved one is never reused.
+
+        ``local:<mouth>`` and ``character:<key>`` name *which* local model or
+        character to use (the values :meth:`provider_choices` offers); the bare
+        ``local``/``character`` kinds fall back to the project's defaults.
+        """
+        cloud = self._cloud_provider_key(kind)
+        cache_key = kind if not cloud else f"{kind}:approved={self.web_enabled()}"
+        if cache_key in self._providers:
+            return self._providers[cache_key]
+        provider: LearningProvider
+        if cloud:
+            from core.training_center.providers import CloudLearningProvider
+
+            kwargs.setdefault("provider", cloud)
+            kwargs.setdefault("approved", self.web_enabled())
+            provider = CloudLearningProvider(**kwargs)
+        elif kind.startswith("local:"):
+            from core.training_center.providers import LocalModelLearningProvider
+
+            kwargs.setdefault("mouth", kind.split(":", 1)[1] or "ultron")
+            provider = LocalModelLearningProvider(**kwargs)
+        elif kind.startswith("character:"):
+            from core.training_center.providers import CharacterLearningProvider
+
+            kwargs.setdefault("character", kind.split(":", 1)[1] or "hakeem")
+            provider = CharacterLearningProvider(**kwargs)
+        else:
+            provider = build_provider(kind, **kwargs)
+        self._providers[cache_key] = provider
+        return provider
+
+    def _cloud_provider_key(self, kind: str) -> str:
+        """The cloud provider ``kind`` names, or ``""`` for a local provider.
+
+        ``cloud`` means "the configured provider"; any other name that the cloud
+        catalog knows (``gemini``, ``openai``, …) is that provider by name.
+        """
+        with best_effort("read the cloud provider catalog"):
+            from core.cloud_model import provider_names
+
+            if kind == "cloud":
+                return str(self.setting("cloud_provider"))
+            if kind in provider_names():
+                return kind
+        return ""
 
     def provider_statuses(self) -> tuple[ProviderStatus, ...]:
         """The status of every provider the Training Center offers."""
