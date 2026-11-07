@@ -3876,8 +3876,19 @@ Arabic is kept as secondary aliases where useful.
   buttons, a `SidebarColumn` of the fourteen collapsible sections, and a
   worker-thread/queue the UI thread drains), and every button's label, one-line
   hint, and hover tooltip come *from the catalogue*, so the window and the
-  catalogue can never disagree. It adopts `ThemedDialog`, so a theme or font
-  change restyles it in place. Every control that used to ask for a name in a
+  catalogue can never disagree. Every long operation **streams its detail into the
+  window's own chat area while it runs** (never only at the end), exactly like the
+  main window: a worker thread only queues each line on a `queue.Queue`, and the UI
+  thread's pump drains it into one growing message at a bounded rate (~0.15 s), so
+  a fast loop cannot freeze the window. A training run streams its `on_step`
+  progress (the first step, the last, and about every tenth between, each naming
+  the run, `step N/max (P%)`, loss, steps/s, and an ETA), a pipeline run streams
+  each stage's outcome through the runner's `on_stage`, and the bulk
+  knowledge-base build streams the build's own progress lines through
+  `build_knowledge_base(progress=…)`. `_start_streamed_job` is the one place that
+  wiring lives, so every training control streams identically. It adopts
+  `ThemedDialog`, so a theme or font change restyles it in place. Every control
+  that used to ask for a name in a
   plain text box now offers an **editable dropdown** -- a user picks a real value
   from the list *or* types one -- through the one helper
   `gui/choice_dialog.py`'s `ask_choice`, whose choice lists the service computes

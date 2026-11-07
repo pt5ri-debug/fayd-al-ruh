@@ -9,6 +9,7 @@ run ever happens.
 
 from __future__ import annotations
 
+import time
 import tkinter as tk
 
 import pytest
@@ -337,5 +338,104 @@ def test_window_closes_without_leaving_a_pending_callback() -> None:
         dialog._close()
         assert dialog._closed
         assert dialog._pump_after is None
+    finally:
+        root.destroy()
+
+
+# -- live streaming into the chat area ------------------------------------
+
+
+class _FakeResult:
+    def describe(self) -> str:
+        return "run finished: 4 steps"
+
+
+class _FakeHandle:
+    def __init__(self, run_id: str = "run-1") -> None:
+        self.run_id = run_id
+        self.result = _FakeResult()
+        self.error: Exception | None = None
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return True
+
+
+class _StreamingStubService(StubService):
+    """A stub that drives the training callback, so the live stream can be seen."""
+
+    def __init__(self, steps: int = 4) -> None:
+        super().__init__()
+        self._steps = steps
+        self.started: list[dict] = []
+
+    def start_job(self, model, dataset_id, config, **kwargs):
+        self.started.append({"dataset_id": dataset_id, "config": config, **kwargs})
+        on_step = kwargs.get("on_step")
+        if on_step is not None:
+            for step in range(1, self._steps + 1):
+                on_step(step, 1.0 / step)
+        return _FakeHandle()
+
+    def build_config(self, **kwargs):
+        return type("Config", (), {"max_steps": self._steps, "run_id": ""})()
+
+
+class _Config:
+    def __init__(self, max_steps: int = 4) -> None:
+        self.max_steps = max_steps
+        self.run_id = ""
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_step_stream_reports_the_first_last_and_about_ten_between() -> None:
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        lines: list[str] = []
+        dialog._stream_line = lines.append  # type: ignore[method-assign]
+        for step in range(1, 21):
+            dialog._step_stream("run-1", step, 0.5, 20, started=time.monotonic())
+        # The first and last step are always reported, and only about ten in
+        # between -- never all twenty.
+        assert any("step 1/20" in line for line in lines)
+        assert any("step 20/20" in line for line in lines)
+        assert 10 <= len(lines) <= 12
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_streamed_training_wires_on_step_and_posts_the_result() -> None:
+    root = tk.Tk()
+    try:
+        service = _StreamingStubService(steps=4)
+        dialog = _dialog(root, service)
+        handle = dialog._start_streamed_job(object(), "learned", _Config(max_steps=4))
+        assert handle.run_id == "run-1"
+        # The service received a real on_step callback...
+        assert callable(service.started[0]["on_step"])
+        # ...and the live lines are waiting to be drawn by the pump.
+        assert dialog._lines.qsize() >= 2
+        assert dialog._describe_handle(handle) == "run finished: 4 steps"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_flush_stream_draws_one_growing_message() -> None:
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._stream_line("first line")
+        dialog._drain_lines(cap=None)
+        dialog._flush_stream(force=True)
+        assert dialog._stream_body is not None
+        first = dialog._stream_body.get("1.0", "end")
+        assert "first line" in first
+        dialog._stream_line("second line")
+        dialog._drain_lines(cap=None)
+        dialog._flush_stream(force=True)
+        combined = dialog._stream_body.get("1.0", "end")
+        assert "first line" in combined and "second line" in combined
     finally:
         root.destroy()

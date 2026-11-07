@@ -390,12 +390,20 @@ class TrainingCenterService:
         self.history.record("crawl", f"imported {ok}/{len(urls)} URL(s)")
         return outcomes
 
-    def build_knowledge_base(self, *, target_mb: float = 100.0, **kwargs: Any) -> Any:
+    def build_knowledge_base(
+        self,
+        *,
+        target_mb: float = 100.0,
+        progress: Callable[[str], None] | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Build the bulk knowledge base, through the internet switch.
 
         The build fetches from public sources, so it is an external action like a
         cloud call: it is refused unless the internet switch is on, and the
-        refusal names that next step rather than silently doing nothing.
+        refusal names that next step rather than silently doing nothing. An
+        optional ``progress`` callback receives each line the build reports, so a
+        window can stream it into its chat area.
         """
         if not self.web_enabled():
             raise PermissionError(
@@ -404,6 +412,8 @@ class TrainingCenterService:
             )
         from core.knowledge_base import build_knowledge_base as _build
 
+        if progress is not None:
+            kwargs["progress"] = progress
         report = _build(self.knowledge_store_dir(), target_mb=target_mb, **kwargs)
         self.history.record("knowledge", f"built the knowledge base to {target_mb:g} MB")
         return report
