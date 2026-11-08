@@ -116,7 +116,24 @@ two surfaces keep an independent copy — pinned by `tests/test_settings_hub.py`
   plus additions to `test_gui_design.py`, `test_window_controls.py`,
   `test_typography_settings.py`, `test_model_chat.py`, `test_sidebar.py`.
 
-## 7. Files added / modified
+## 7. Performance comparison
+
+Measured on this machine (headless X, the same stub service for both), with the
+main window built and then rebuilt 20 times:
+
+| Measurement | Baseline (`34e19d6`) | Final | Verdict |
+|-------------|----------------------|-------|---------|
+| Main window build | 134 ms | 148 ms | within noise |
+| Main window rebuild (avg of 20) | 116 ms | 111 ms | within noise |
+| `import gui.components/design/dashboard/settings_hub/layout_direction/maintenance` | n/a (new modules) | 76 ms | negligible |
+
+The restructuring added **no** measurable cost to building or rebuilding the
+window (the two figures differ by less than run-to-run variance, and the rebuild
+is if anything slightly faster). The new modules import in well under 100 ms and
+do no work at import time. Long operations continue to run on worker threads, so
+they never enter these figures.
+
+## 8. Files added / modified
 
 **Added** (source): `gui/components.py`, `gui/design.py`, `gui/dashboard.py`,
 `gui/settings_hub.py`, `gui/agents.py`, `gui/agents_dialog.py`,
@@ -126,7 +143,7 @@ two surfaces keep an independent copy — pinned by `tests/test_settings_hub.py`
 **Added** (docs): `docs/ui/UI_INVENTORY.md`, `UI_FUNCTIONAL_REGISTRY.md`,
 `UI_DUPLICATION_AUDIT.md`, `UI_GAPS_AND_MISSING_FEATURES.md`,
 `UI_RESTRUCTURING_PLAN.md`, `UI_NAVIGATION.md`, `UI_COVERAGE_MATRIX.md`,
-`UI_BASELINE.md`, `UI_RESTRUCTURING_REPORT.md`.
+`UI_BASELINE.md`, `UI_REGRESSION_REPORT.md`, `UI_RESTRUCTURING_REPORT.md`.
 
 **Modified**: `gui/app.py`, `gui/actions.py`, the 18 `gui/*_dialog.py` (shared
 title band), `gui/typography.py`, `gui/typography_settings.py`, `gui/themes.py`,
@@ -135,7 +152,7 @@ title band), `gui/typography.py`, `gui/typography_settings.py`, `gui/themes.py`,
 `gui/character_evaluation.py`, `cli/__main__.py`, `cli/menu.py`, `core/paths.py`,
 and the test files named above.
 
-## 8. Remaining limitations (honest)
+## 9. Remaining limitations (honest)
 
 - **CLI-only subsystems** remain so: `perception/`, `core.planning`/
   `core.execution` (`python -m cli autonomy`), `core.analogy`,
@@ -148,7 +165,7 @@ and the test files named above.
 - **Tk draws no full justification**, so the Fonts & paragraphs alignment offers
   left / center / right only (`gui.typography_settings.ALIGNMENT_NOTE`).
 
-## 9. How to launch and test
+## 10. How to launch and test
 
 ```bash
 # Launch the window (needs a display)

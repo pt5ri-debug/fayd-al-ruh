@@ -2605,6 +2605,54 @@ Arabic is kept as secondary aliases where useful.
   (`_strip_markdown`) so the engine speaks words, not `**`/backticks. Reading runs
   on the worker thread and reports honestly: a missing engine says to install
   espeak-ng, and a silent render is named as such rather than shown as success.
+- **UI restructuring (Phases 0-8).** A professional UI/UX pass over the whole
+  window layer, **additive and de-duplicating**: no window, mode, or backend
+  function was removed. Its audit and reports live in `docs/ui/` —
+  `UI_INVENTORY.md`, `UI_FUNCTIONAL_REGISTRY.md`, `UI_DUPLICATION_AUDIT.md`,
+  `UI_GAPS_AND_MISSING_FEATURES.md`, `UI_RESTRUCTURING_PLAN.md`,
+  `UI_NAVIGATION.md`, `UI_COVERAGE_MATRIX.md`, `UI_BASELINE.md`,
+  `UI_REGRESSION_REPORT.md`, `UI_RESTRUCTURING_REPORT.md`. The one **shared
+  component library** is `gui/components.py` (`Button`/`button`, `Section`,
+  `DialogHeader`, `HeroHeader`, `StatusLine`, `EmptyState`, `LoadingState`,
+  `SearchInput`, `SettingsRow`, `SettingsSection`, `Notification`/
+  `NotificationCenter`, `WorkerPump`, `FormValidator`, `DataTable`), with the
+  design tokens in `gui/design.py`; a guard (`tests/test_ui_components_guard.py`)
+  reads the real `gui/` source with `ast` and fails if a dialog grows back its own
+  `_button`/`_section`. `gui/dashboard.py` is the Home dashboard (what is
+  answering, the session, recent chats, the knowledge figure, the machine's own
+  figures, quick actions) — read from the existing services, never fabricated.
+  `gui/settings_hub.py` is the registry of every **global** setting with its one
+  authoritative `reader`/`writer`/`store` (theme, typography, reading voice and
+  auto-speak, reading direction, the internet switch, the cloud provider/model);
+  a setting that is genuinely **context-dependent** (per-mouth voice/model,
+  per-character model, per-agent permissions, per-task limits) stays distinct and
+  is named in `CONTEXTUAL_SETTINGS`, so centralizing never merges a global
+  default with a scoped override. `gui/agents.py`/`gui/agents_dialog.py` surface
+  `core.agents` (the seven personalities as independent agents) read-only plus
+  routing; `gui/maintenance.py`/`gui/maintenance_dialog.py` (with the headless
+  twin `cli/maintenance.py`) add backup/restore, diagnostics, the keyboard-shortcut
+  catalogue, and a read-only memory/knowledge view over
+  `core.character_memory_view`/`core.knowledge_index`; `gui/notifications.py`
+  records background outcomes. `gui/layout_direction.py` (new, Tk-free) is the one
+  **LTR/RTL** preference — it moves the navigation column
+  (`side_for`), supplies the default paragraph alignment
+  (`default_alignment` → `Typography.with_overrides(..., fallback_alignment=)`, so
+  an explicit Fonts & paragraphs choice still wins), and detects the dominant
+  script of mixed text; it persists through `JsonStore` under `gui`/`appearance`
+  and is read once in `FaydGUI.__init__`. `gui/window_controls.py` gained the
+  **Escape-to-close** binding (dialogs only — the main window is a `Tk` root, so
+  Escape there is left to the window's own shortcuts) and Windows work-area
+  detection via `SystemParametersInfoW`. `gui/app.py` remembers the main window's
+  **size** (`load_window_geometry`/`save_window_geometry`) and restores it on
+  launch. Every deliberate swallow in the GUI now goes through
+  `core.best_effort.best_effort` (window geometry, sidebar sections, saved chats,
+  global settings, machine figures, the work-area probes, the installed-font
+  listing, a per-mouth model activation, stopping a reading on close), so what was
+  dropped is recorded rather than lost. `docs/ui/UI_RESTRUCTURING_REPORT.md` and
+  `UI_REGRESSION_REPORT.md` are the final reports: the full suite is **7333
+  passed / 16 skipped** (baseline 7168), `ruff` clean, `mypy` clean (1086 files),
+  `evaluation` PASS with `overall` unchanged at **0.9909**.
+
 - `core/model_manager.py` — the **Model Manager**, the one central place that
   discovers, registers, inspects, checks, loads, tests, and unloads the project's
   language models, and reports what a download *would* be. It is a **view** over
