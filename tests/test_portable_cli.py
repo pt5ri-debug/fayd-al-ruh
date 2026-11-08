@@ -302,3 +302,33 @@ def test_curriculum_action_reports_the_whole_degree(capsys) -> None:
     assert "Reservoir Engineering" in out
     assert "Petroleum Disciplines" in out
     assert f"Corpus entries: {len(corpus_disciplines())} disciplines" in out
+
+
+def test_every_cli_module_with_a_main_is_runnable() -> None:
+    """`python -m cli.<name> …` must run the module's own ``main``.
+
+    Each ``cli/<name>.py`` that defines ``main`` needs the standard
+    ``if __name__ == "__main__": raise SystemExit(main())`` guard, or the
+    documented headless command silently does nothing (exit 0, no output) --
+    the failure mode ``python -m cli.characters compare --rank`` used to hit
+    while its 25 siblings worked.
+    """
+    import ast
+    from pathlib import Path
+
+    cli_dir = Path(__file__).resolve().parent.parent / "cli"
+    missing: list[str] = []
+    for path in sorted(cli_dir.glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        defines_main = any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "main"
+            for node in tree.body
+        )
+        if not defines_main:
+            continue
+        source = path.read_text(encoding="utf-8")
+        if 'if __name__ == "__main__"' not in source:
+            missing.append(path.name)
+    assert not missing, f"cli modules with main but no __main__ guard: {missing}"
