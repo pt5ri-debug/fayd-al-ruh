@@ -265,13 +265,13 @@ def load_profiles() -> dict[str, TypographyProfile]:
     own settings rather than raising, so a window always opens.
     """
     result = profiles()
-    try:
-        from core.paths import data_dir
-        from storage.json_store import JsonStore
+    from core.best_effort import best_effort
+    from core.paths import data_dir
+    from storage.json_store import JsonStore
 
+    saved: object = None
+    with best_effort("read the saved font settings"):
         saved = JsonStore(data_dir()).load(TYPOGRAPHY_NAMESPACE, TYPOGRAPHY_KEY)
-    except Exception:
-        return result
     if not isinstance(saved, dict):
         return result
     for scope in SCOPES:
@@ -321,14 +321,14 @@ def available_families(root: object | None = None) -> list[str]:
     for name in (*UI_FONT_STACK, *MONO_FONT_STACK):
         if name not in ordered:
             ordered.append(name)
-    try:
+    from core.best_effort import best_effort
+
+    with best_effort("list the display's font families"):
         from tkinter import font as tkfont
 
         for name in sorted(set(tkfont.families(root))):  # type: ignore[arg-type]
             if name not in ordered:
                 ordered.append(name)
-    except Exception:
-        pass
     return ordered
 
 

@@ -1440,10 +1440,14 @@ class PresentationDialog(ThemedDialog):
     def reveal_slide_number(self, number: int) -> None:
         """Select and show the slide with this 1-based number, if it exists."""
         for index, slide_id in enumerate(self._slide_ids):
-            try:
-                slide = self.service.get(self._project_id).slide(slide_id)
-            except Exception:
+            # A slide that cannot be read here is skipped rather than crashing the
+            # window; the failure is recorded by ``best_effort``.
+            found: Any = None
+            with best_effort("read a slide to reveal it"):
+                found = self.service.get(self._project_id).slide(slide_id)
+            if found is None:
                 return
+            slide = found
             if slide.number == number:
                 self._slide_list.selection_clear(0, "end")
                 self._slide_list.selection_set(index)

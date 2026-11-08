@@ -75,3 +75,13 @@ survives a restart.
   home; the **Settings** section still does not repeat them.
 - Every existing action keeps its key, its label, its sidebar label, and its
   backend; only its *group title* and its *neighbourhood* changed.
+
+## Reading direction (Phase 6)
+
+The sidebar sits on the **left** for LTR and on the **right** for RTL; the
+Settings section's *Reading direction* switch flips it and the choice is
+remembered (`gui.layout_direction`, one authoritative home). The main window
+re-packs the navigation and the content on the chosen side at build time, so a
+theme switch or a direction change both land in the right layout. The direction
+also names the default paragraph alignment for new text.
+

@@ -141,6 +141,7 @@ SHORTCUTS: tuple[Shortcut, ...] = (
     Shortcut("Ctrl+A", "Select all"),
     Shortcut("Enter", "Send the message (in the composer)", "Composer"),
     Shortcut("Shift+Enter", "Insert a new line (in the composer)", "Composer"),
+    Shortcut("Escape", "Close the active window or dialog", "Windows"),
 )
 
 

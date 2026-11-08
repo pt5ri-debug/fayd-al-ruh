@@ -72,6 +72,15 @@ def test_the_stores_are_recorded() -> None:
     assert stores["typography"] == ("gui", "typography")
     assert stores["cloud_provider"] == ("cloud", "provider")
     assert stores["internet"] == ("jarvis", "preferences")
+    assert stores["reading_direction"] == ("gui", "layout_direction")
+
+
+def test_reading_direction_is_a_global_setting_with_one_home() -> None:
+    entry = settings_hub.entry_by_key("reading_direction")
+    assert entry.reader == "gui.layout_direction.load_direction"
+    assert entry.writer == "gui.layout_direction.save_direction"
+    assert settings_hub.resolve(entry.reader) is not None
+    assert settings_hub.resolve(entry.writer) is not None
 
 
 # ------------------------------------------------------- the one internet switch

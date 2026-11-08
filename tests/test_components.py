@@ -399,3 +399,36 @@ def _run_until(predicate, root: tk.Tk, *, limit: int = 200) -> None:
             return
         time.sleep(0.005)
     root.update()
+
+
+def test_worker_pump_never_blocks_the_ui_thread() -> None:
+    """A slow worker keeps the UI responsive: the event loop keeps turning.
+
+    The whole point of the pump is that long work runs off the UI thread, so a
+    slow task must not stop ``root.update()`` from returning -- a blocking
+    ``join`` (or running the task inline) would freeze the window. This measures
+    that the loop turns many times while the worker is still busy.
+    """
+    import threading
+    import time
+
+    with _Root() as root:
+        release = threading.Event()
+        got: list[object] = []
+        pump = components.WorkerPump(root, on_finish=lambda result, error: got.append(result))
+
+        def slow() -> str:
+            release.wait(timeout=5.0)  # blocks until the test lets it finish
+            return "done"
+
+        pump.start(slow)
+        turns = 0
+        deadline = time.monotonic() + 1.0
+        while pump.busy and time.monotonic() < deadline:
+            root.update()  # returns at once; the worker is on its own thread
+            turns += 1
+        assert turns > 10, "the UI thread kept turning while the worker ran"
+        assert got == []  # the slow result has not arrived yet
+        release.set()
+        _run_until(lambda: bool(got), root)
+        assert got == ["done"]

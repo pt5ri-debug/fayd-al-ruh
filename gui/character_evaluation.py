@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from core.best_effort import best_effort
 from core.character_config import CharacterConfig, owner_names
 from core.character_learning import (
     CHARACTER_KEYS,
@@ -137,11 +138,14 @@ def character_depth(key: str) -> tuple[float, tuple[str, ...]]:
         modules = ("grounding", "reasoning_report", "knowledge_carry", "answer_confidence")
         present = 0
         for name in modules:
-            try:
+            # An optional module that does not import here is *counted as absent*
+            # rather than crashing the evaluation; the failure is recorded.
+            imported = False
+            with best_effort(f"import core.{name} for the evaluation"):
                 __import__(f"core.{name}")
+                imported = True
+            if imported:
                 present += 1
-            except Exception:
-                continue
         score = round(present / len(modules), 6)
         facts.append(f"grounding stack: {present} of {len(modules)} modules importable here")
         if present == len(modules):

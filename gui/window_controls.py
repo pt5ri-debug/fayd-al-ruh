@@ -33,6 +33,8 @@ import tkinter as tk
 from collections.abc import Callable
 from typing import Any, Literal
 
+from core.best_effort import best_effort
+
 #: The glyphs. Chosen from the characters every Tk font on every platform carries,
 #: so a control never renders as a missing-glyph box.
 _MINIMIZE_GLYPH = "\u2013"  # en dash
@@ -84,7 +86,7 @@ def work_area() -> tuple[int, int, int, int] | None:
 
 def _windows_work_area() -> tuple[int, int, int, int] | None:
     """The primary monitor's work area, through ``SystemParametersInfoW``."""
-    try:
+    with best_effort("read the Windows work area"):
         import ctypes
         from ctypes import wintypes
 
@@ -111,16 +113,14 @@ def _windows_work_area() -> tuple[int, int, int, int] | None:
         height = rect.bottom - rect.top
         if width > 0 and height > 0:
             return (rect.left, rect.top, width, height)
-    except Exception:
-        pass
     return None
 
 
 def _macos_work_area() -> tuple[int, int, int, int] | None:
     """The primary screen's ``visibleFrame`` (excludes the menu bar and Dock)."""
-    try:
-        import subprocess
+    import subprocess
 
+    with best_effort("read the macOS work area"):
         script = (
             'tell application "Finder" to get bounds of window of desktop'
         )
@@ -137,8 +137,6 @@ def _macos_work_area() -> tuple[int, int, int, int] | None:
         width, height = right - left, bottom - top
         if width > 0 and height > 0:
             return (left, top, width, height)
-    except Exception:
-        pass
     return None
 
 
@@ -150,9 +148,9 @@ def _x11_work_area() -> tuple[int, int, int, int] | None:
     drops). A desktop that does not publish the property prints an error and the
     ``returncode`` guard turns that into ``None``.
     """
-    try:
-        import subprocess
+    import subprocess
 
+    with best_effort("read the X11 work area"):
         result = subprocess.run(
             ["xprop", "-root", "-notype", "_NET_WORKAREA"],
             capture_output=True, text=True, timeout=2, check=False,
@@ -169,8 +167,6 @@ def _x11_work_area() -> tuple[int, int, int, int] | None:
         x, y, width, height = numbers[:4]
         if width > 0 and height > 0:
             return (x, y, width, height)
-    except Exception:
-        pass
     return None
 
 
@@ -386,10 +382,16 @@ def install_window_controls(
     maximize_button.configure(command=controller.toggle)
     close_button.configure(command=controller.close)
     if on_close is not None:
-        try:
+        with best_effort("register the window's close handler"):
             window.protocol("WM_DELETE_WINDOW", on_close)
-        except tk.TclError:
-            pass
+    # Escape closes a **dialog**, the standard affordance; the main window is a
+    # ``Tk`` root (not a ``Toplevel``), so Escape there is left to the window's own
+    # shortcuts rather than quitting the whole application. The binding sits on the
+    # toplevel, so it works wherever focus is inside the dialog, and it never fires
+    # while a modal grab is in effect -- a nested chooser still owns Escape.
+    if isinstance(window, tk.Toplevel):
+        with best_effort("bind Escape to close the dialog"):
+            window.bind("<Escape>", lambda _event: controller.close())
     return controller
 
 
