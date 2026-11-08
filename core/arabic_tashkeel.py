@@ -477,6 +477,25 @@ def _construct_state(following: str | None) -> bool:
     return following is not None and following.startswith("ال")
 
 
+#: The marks that end a sentence (or a clause in a way a case ending must respect).
+_SENTENCE_END_CHARS = frozenset(".!?؟۔\n")
+
+
+def _sentence_boundaries(gaps: list[str]) -> list[bool]:
+    """Whether each Arabic word (by index) ends a sentence.
+
+    ``gaps`` is the delimiter list ``_ARABIC_WORD_RE.split`` returns: gap ``i`` is
+    the text *between* word ``i`` and word ``i + 1``. A word is a boundary when that
+    gap carries a sentence-final mark, which is exactly when the *following* word
+    must not govern its case.
+    """
+    flags: list[bool] = []
+    for index in range(len(gaps) - 1):
+        gap = gaps[index + 1]
+        flags.append(any(char in _SENTENCE_END_CHARS for char in gap))
+    return flags
+
+
 # --------------------------------------------------------------------------- #
 # The pass
 # --------------------------------------------------------------------------- #
@@ -579,6 +598,13 @@ def diacritize_report(text: str, *, mode: str = MODE_FORMAL) -> TashkeelReport:
     pieces = _ARABIC_WORD_RE.split(text)
     words = _ARABIC_WORD_RE.findall(text)
     skeletons = [strip_diacritics(word) for word in words]
+    # A word that ends a sentence must not inherit the *following* sentence's
+    # construct state: "المسامية عالية. النفاذية منخفضة" used to mark عالية as the
+    # first term of an إضافة (and read "عَالِيَةُ. النَّفَاذِيَّةِ") because the next
+    # word was definite and began with "ال", ignoring the full stop between them.
+    boundaries = _sentence_boundaries(pieces)
+    if len(boundaries) != len(skeletons):
+        boundaries = [False] * len(skeletons)
 
     lexical = patterned = untouched = 0
     rendered: list[str] = []
@@ -589,6 +615,14 @@ def diacritize_report(text: str, *, mode: str = MODE_FORMAL) -> TashkeelReport:
         skeleton = skeletons[index]
         preceding = skeletons[index - 1] if index > 0 else None
         following = skeletons[index + 1] if index + 1 < len(skeletons) else None
+        if boundaries[index]:
+            # This word ends a sentence, so the word after the boundary governs
+            # nothing here: keep the case the preceding word asks for.
+            following = None
+        if index > 0 and boundaries[index - 1]:
+            # ...and this word *opens* a sentence, so the word before the boundary
+            # governs nothing here either: a fresh clause starts nominative.
+            preceding = None
         vocalized, layer = _word_vocalization(
             skeleton, preceding=preceding, following=following, mode=mode
         )
