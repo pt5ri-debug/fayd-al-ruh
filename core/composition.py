@@ -179,7 +179,7 @@ _TOPIC_STOPWORDS = frozenset(
         "do", "does", "did", "can", "could", "should", "would", "will",
         # Arabic question and generic words
         "ما", "ماذا", "كيف", "هل", "من", "في", "على", "إلى", "عن", "هو", "هي",
-        "معنى", "تعريف", "اشرح", "شرح",
+        "معنى", "تعريف", "اشرح", "شرح", "بين",
     }
 )
 _TOPIC_TOKEN_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
@@ -187,8 +187,27 @@ _TOPIC_TOKEN_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
 #: Pronouns a question omits as the subject ("how do **I** measure porosity").
 #: Dropped from an English topic phrase so the phrase is the noun phrase, not a
 #: broken clause. A *leading* pronoun only -- a pronoun elsewhere is the user's
-#: own wording.
-_TOPIC_PRONOUNS = frozenset({"i", "we", "you", "one", "they"})
+#: own wording. The object forms ("explain to **me** pore pressure") are listed
+#: too, because they are the same user-addressing word the question omits.
+_TOPIC_PRONOUNS = frozenset({"i", "we", "you", "one", "they", "me", "us", "them"})
+
+#: Object pronouns an Arabic question uses to address the assistant ("اشرح **لي**
+#: ضغط المسام"): dropped from an Arabic topic phrase so the phrase is the topic,
+#: not the request. A pronoun that *is* the subject ("هو") is deliberately absent.
+_ARABIC_TOPIC_PRONOUNS = frozenset({"لي", "لنا", "لك", "لكم", "إلي", "إلينا", "معي"})
+
+#: Verbs that carry no topic on their own, in the person an Arabic question uses
+#: ("كيف **أقيس** المسامية؟"): dropped only when they *lead* an Arabic topic
+#: phrase. Deliberately small; a word that could be a noun is never listed, so
+#: nothing the user named disappears.
+_ARABIC_TOPIC_VERBS = frozenset(
+    {
+        "أقيس", "أحسب", "أعرف", "أوضح", "أحدد", "أقدّر", "أجد", "أقارن",
+        "أزيد", "أخفض", "أقلل", "أحسّن", "أمنع", "أتحكم", "أفهم", "أذكر",
+        "قس", "احسب", "اشرح", "وضح", "اذكر", "بين", "اعرف", "قارن",
+        "أخبرني", "أخبرنا", "أعطني", "أرني", "حدثني", "قل",
+    }
+)
 
 #: Verbs that carry no topic on their own. Dropped from an English topic phrase so
 #: "porosity **relate** permeability" reads "porosity permeability". Deliberately
@@ -554,10 +573,25 @@ def topic_phrase(question: str) -> str:
     ]
     if terms:
         if _language(question) == "ar":
-            return " ".join(terms)
+            return _arabic_topic_phrase(terms)
         return _english_topic_phrase(terms)
     value = clean(question).rstrip("?.!")
     return value or "this question"
+
+
+def _arabic_topic_phrase(terms: Sequence[str]) -> str:
+    """Drop the addressing pronoun and a leading bare verb from an Arabic phrase.
+
+    ``"لي ضغط المسام"`` becomes ``"ضغط المسام"`` and ``"أقيس المسامية"`` becomes
+    ``"المسامية"``, so the phrase is the topic the user named rather than the
+    request. Only an *addressing* pronoun is dropped (a subject pronoun such as
+    ``هو`` is the user's own wording) and only a *leading* known verb; a word that
+    could be a noun is kept, so nothing the user named disappears.
+    """
+    kept = [term for term in terms if term not in _ARABIC_TOPIC_PRONOUNS]
+    if kept and kept[0] in _ARABIC_TOPIC_VERBS:
+        kept = kept[1:]
+    return " ".join(kept) if kept else " ".join(terms)
 
 
 def _english_topic_phrase(terms: Sequence[str]) -> str:

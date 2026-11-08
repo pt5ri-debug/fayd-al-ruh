@@ -65,6 +65,33 @@ def test_the_vocalizer_is_idempotent() -> None:
         assert twice == once, source
 
 
+def test_a_sentence_final_word_does_not_take_the_next_sentence_s_genitive() -> None:
+    """A full stop ends the إضافة: the word before it is not the next word's مضاف.
+
+    The bug: "المسامية عالية. النفاذية منخفضة" marked عالية as the first term of an
+    إضافة (and read "عَالِيَةُ. النَّفَاذِيَّةِ") because the *following* word was
+    definite and began with "ال", ignoring the full stop between them.
+    """
+    text = diacritize("المسامية عالية. النفاذية منخفضة.", mode=MODE_FORMAL)
+    assert "عَالِيَةٌ." in text
+    assert "النَّفَاذِيَّةُ" in text
+    assert "النَّفَاذِيَّةِ" not in text
+
+
+def test_a_sentence_opening_word_is_nominative() -> None:
+    """The first word of a new sentence does not inherit the previous word's case."""
+    text = diacritize("في المكمن. النفاذية عالية", mode=MODE_FORMAL)
+    # "المكمن" is genitive (after في); the sentence that follows starts nominative.
+    assert "الْمَكْمَنِ." in text
+    assert "النَّفَاذِيَّةُ" in text
+
+
+def test_the_sentence_boundary_fix_is_idempotent() -> None:
+    source = "المسامية عالية. النفاذية منخفضة."
+    once = diacritize(source)
+    assert diacritize(once) == once
+
+
 def test_the_vocalizer_never_touches_a_latin_identifier_or_number() -> None:
     text = diacritize("القيمة 3.14 والوحدة SPE ومدى 10--20", mode=MODE_FORMAL)
     assert "3.14" in text

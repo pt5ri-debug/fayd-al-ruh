@@ -184,7 +184,8 @@ def test_topic_phrase_is_a_noun_phrase_not_a_broken_clause():
 
 def test_topic_phrase_keeps_an_arabic_question_arabic():
     assert topic_phrase("ما هي المسامية؟") == "المسامية"
-    assert topic_phrase("كيف أقيس النفاذية؟") == "أقيس النفاذية"
+    # A leading bare verb is dropped, so the phrase is the topic, not the request.
+    assert topic_phrase("كيف أقيس النفاذية؟") == "النفاذية"
 
 
 # --------------------------------------------------------------------------- #

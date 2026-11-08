@@ -454,9 +454,19 @@ def test_topic_phrase_keeps_word_order_and_drops_question_words():
     assert topic_phrase("how does water flooding affect oil recovery") == "water flooding oil recovery"
 
 
+def test_topic_phrase_drops_an_object_pronoun_the_question_omits():
+    """An object pronoun ("explain to **me** ...") is the request, not the topic."""
+    assert topic_phrase("explain to me pore pressure") == "pore pressure"
+    assert topic_phrase("tell me about porosity") == "porosity"
+
+
 def test_topic_phrase_leaves_an_arabic_question_in_arabic():
     assert topic_phrase("ما هي المسامية؟") == "المسامية"
-    assert topic_phrase("كيف أقيس النفاذية؟") == "أقيس النفاذية"
+    # A leading bare verb is dropped too, so the phrase is the topic, not the
+    # request ("أقيس النفاذية" reads as the act, not the subject).
+    assert topic_phrase("كيف أقيس النفاذية؟") == "النفاذية"
+    # The addressing pronoun ("لي") is the request, not the topic.
+    assert topic_phrase("اشرح لي ضغط المسام") == "ضغط المسام"
 
 
 def test_grounded_answer_skips_bare_fragment_sources():
