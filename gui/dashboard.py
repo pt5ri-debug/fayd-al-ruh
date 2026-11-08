@@ -32,6 +32,9 @@ QUICK_ACTION_KEYS: tuple[str, ...] = (
 #: How many recent conversations the dashboard lists before it stops.
 DEFAULT_RECENT_CHATS = 5
 
+#: How many recent notifications the dashboard lists before it stops.
+DEFAULT_RECENT_NOTIFICATIONS = 5
+
 
 @dataclass(frozen=True)
 class DashboardRow:
@@ -172,6 +175,31 @@ def _knowledge_section(knowledge: str, learning: str) -> DashboardSection | None
     return DashboardSection("home:knowledge", "Knowledge & learning", "📚", tuple(rows))
 
 
+def _notifications_section(feed: Any) -> DashboardSection | None:
+    """The most recent background results, or ``None`` when there are none.
+
+    Read from the notification feed (a :class:`gui.notifications.NotificationFeed`
+    or any object with ``recent``), so the dashboard and the window's own feed can
+    never disagree. An empty feed draws no section rather than a blank one.
+    """
+    if feed is None:
+        return None
+    try:
+        items = tuple(feed.recent(DEFAULT_RECENT_NOTIFICATIONS))
+    except Exception:
+        return None
+    rows: list[DashboardRow] = []
+    for item in items:
+        level = _attr(item, "level", "info") or "info"
+        title = _attr(item, "title", "") or ""
+        if not title:
+            continue
+        rows.append(DashboardRow(f"[{level}] {title}", _attr(item, "detail", "") or ""))
+    if not rows:
+        return None
+    return DashboardSection("home:notifications", "Notifications", "🔔", tuple(rows))
+
+
 def _resources_section(resources: Any) -> DashboardSection | None:
     if resources is None:
         return None
@@ -200,6 +228,7 @@ def build_dashboard(
     recent_chats: Iterable[Any] = (),
     knowledge_summary: str = "",
     learning_summary: str = "",
+    notifications: Any = None,
     resources: Any = None,
     quick_actions: Sequence[QuickAction] = (),
 ) -> Dashboard:
@@ -208,7 +237,7 @@ def build_dashboard(
     Every argument is optional: a caller that has no resources simply gets no
     *This machine* section, so a headless build is a smaller dashboard, never an
     error. The sections keep a fixed order (session, recent, knowledge,
-    resources) so two builds read the same way.
+    notifications, resources) so two builds read the same way.
     """
     sections: list[DashboardSection] = [
         _session_section(
@@ -221,6 +250,7 @@ def build_dashboard(
     for section in (
         _recent_section(tuple(recent_chats)),
         _knowledge_section(knowledge_summary, learning_summary),
+        _notifications_section(notifications),
         _resources_section(resources),
     ):
         if section is not None:
@@ -235,6 +265,7 @@ def dashboard_for(
     recent_chats: Sequence[Any] = (),
     knowledge_summary: str = "",
     learning_summary: str = "",
+    notifications: Any = None,
     resources: Any = None,
     quick_actions: Sequence[QuickAction] = (),
 ) -> Dashboard:
@@ -261,6 +292,7 @@ def dashboard_for(
         recent_chats=recent_chats,
         knowledge_summary=knowledge_summary,
         learning_summary=learning_summary,
+        notifications=notifications,
         resources=resources,
         quick_actions=quick_actions,
     )
@@ -268,6 +300,7 @@ def dashboard_for(
 
 __all__ = [
     "DEFAULT_RECENT_CHATS",
+    "DEFAULT_RECENT_NOTIFICATIONS",
     "QUICK_ACTION_KEYS",
     "Dashboard",
     "DashboardRow",

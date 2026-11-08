@@ -52,7 +52,31 @@ To avoid inventing work, these are deliberately excluded:
 - **No unrelated backend change** — the only backend edits are the ones a UI
   feature genuinely needs (e.g. exposing an existing method).
 
-## 5. Verification method for each fix
+## 6. Phase 5 — what was closed (measured)
+
+Each gap below was closed with a real surface, a test, and a row in
+`UI_COVERAGE_MATRIX.md`. All changes are additive; no existing control moved.
+
+| Gap | Closed by | Surface | Tests |
+|-----|-----------|---------|-------|
+| `core.agents` had no GUI | `gui/agents.py` (Tk-free `AgentsService`) + `gui/agents_dialog.py` | the **Personalities (agents)** window (list, capabilities, route, activity, isolation) | `tests/test_agents_service.py`, `tests/test_agents_window.py` |
+| No backup/restore control | `gui/maintenance.py` (`MaintenanceService`) + `cli/maintenance.py` | the **Maintenance** window + `python -m cli maintenance backup/restore` | `tests/test_maintenance.py`, `tests/test_maintenance_window.py` |
+| No system diagnostics page | same service | the **Maintenance** window's *Diagnostics* section + `python -m cli maintenance diagnostics` | same |
+| No keyboard-shortcut help | `gui/maintenance.py`'s `SHORTCUTS` | the **Maintenance** window's *Keyboard shortcuts* section + `python -m cli maintenance shortcuts` | same |
+| No memory inspection | `gui/maintenance.py`'s `memory_lines`/`memory_summary` (over `core.character_memory_view`) | the **Maintenance** window's *Memory & Knowledge* section + `python -m cli maintenance memory` | `tests/test_maintenance.py` |
+| No knowledge-base search surface | `gui/maintenance.py`'s `knowledge_search` (over `core.knowledge_index`) | the **Maintenance** window's *Memory & Knowledge* section + `python -m cli maintenance knowledge` | same |
+| No notification centre | `gui/notifications.py` (`NotificationFeed`) | the main window's Home dashboard reads the feed; background outcomes are recorded | `tests/test_notifications.py` |
+| No model-fit preflight note where a model is chosen | `gui/model_chat.py`'s `model_fit` (over `core.model_files`/`core.model_preflight`) | each per-mouth window's model note | `tests/test_model_chat.py` |
+
+### Still open (honest)
+
+- **`perception/`**, **`core.planning`/`core.execution`**, **`core.analogy`**,
+  **`core.embeddings`**, and the **evaluation viewer** remain CLI-only. They are
+  lower priority (each has a working CLI, and the answer path already reaches the
+  analogy and the evaluation metrics); a future phase may surface them.
+- **RTL layout switch** — deferred to Phase 6 (localization), where it belongs.
+
+## 7. Verification method for each fix
 
 Every gap closed in Phase 5 gets: a backend call through an existing service
 method, a widget, a test in `tests/test_gui*.py`, and a row in
