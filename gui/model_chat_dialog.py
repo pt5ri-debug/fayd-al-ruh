@@ -568,7 +568,10 @@ class ModelChatDialog(ThemedDialog):
         status = self.service.model_status()
         status_fn = getattr(self.service, "activation_status", None)
         activation = status_fn() if callable(status_fn) else ""
-        self._model_note.configure(text=f"{status}\n{activation}".strip())
+        fit_fn = getattr(self.service, "model_fit", None)
+        fit = fit_fn() if callable(fit_fn) else ""
+        lines = [status, fit, activation]
+        self._model_note.configure(text="\n".join(line for line in lines if line).strip())
         if not self.service.model_ready():
             self._model_note.configure(fg=self.theme.text_dim)
         else:

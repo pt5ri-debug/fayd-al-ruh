@@ -452,6 +452,11 @@ def run_agents(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.agents", argv)
 
 
+def run_maintenance(argv: Sequence[str] = ()) -> int:
+    """Backup/restore, diagnostics, and keyboard shortcuts (Phase 5 UI)."""
+    return _run_module("cli.maintenance", argv)
+
+
 def run_train(argv: Sequence[str] = ()) -> int:
     """Controlled model-weight training (Phase 6): datasets, LoRA, promotion."""
     return _run_module("cli.train", argv)
@@ -793,6 +798,13 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ),
     ("Run the evaluation suite", run_evaluation, ()),
     ("Self-check the install", run_selfcheck, ()),
+    ("Maintenance: the stores, diagnostics, and keyboard shortcuts", run_maintenance, ("status",)),
+    ("Maintenance: back up the long-term memory", run_maintenance, ("backup", "memory")),
+    ("Maintenance: back up the bulk knowledge base", run_maintenance, ("backup", "knowledge")),
+    ("Maintenance: the machine and model diagnostics", run_maintenance, ("diagnostics",)),
+    ("Maintenance: the keyboard shortcuts the program binds", run_maintenance, ("shortcuts",)),
+    ("Maintenance: show one personality's memory (read-only)", run_maintenance, ("memory", "fayd_al_ruh")),
+    ("Maintenance: search the bulk knowledge base (read-only)", run_maintenance, ("knowledge", "porosity")),
     ("Search for program updates (GitHub)", run_update, ("--apply",)),
 )
 
@@ -922,6 +934,7 @@ __all__ = [
     "run_learn",
     "run_learning",
     "run_llm",
+    "run_maintenance",
     "run_mind_chat",
     "run_ml",
     "run_model_chat",

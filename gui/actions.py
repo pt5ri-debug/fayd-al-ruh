@@ -18,6 +18,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from cli.menu import (
+    run_agents,
     run_ask_teacher,
     run_audio_speech,
     run_banner_chat,
@@ -41,6 +42,7 @@ from cli.menu import (
     run_knowledge,
     run_learn,
     run_llm,
+    run_maintenance,
     run_ml,
     run_models,
     run_natasha,
@@ -88,6 +90,8 @@ SIDEBAR_LABELS: dict[str, str] = {
     "shared-models-migrate": "Shared models — move from Natasha",
     "characters": "Characters",
     "characters-shareable": "Who may share knowledge",
+    "agents": "Personalities (agents)",
+    "maintenance": "Maintenance (backup, diagnostics)",
     "qwen-speech": "Qwen3 — status",
     "qwen-speech-asr": "Qwen3 — download ASR",
     "qwen-speech-tts": "Qwen3 — download TTS",
@@ -202,6 +206,7 @@ _GROUP_SPECS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         (
             "characters",
             "characters-shareable",
+            "agents",
             "natasha-traits",
             "natasha-mood",
             "natasha-initiative",
@@ -278,6 +283,7 @@ _GROUP_SPECS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
             "improve-detect",
             "improve-security",
             "selfcheck",
+            "maintenance",
             "update",
         ),
     ),
@@ -438,6 +444,18 @@ ACTIONS: tuple[GuiAction, ...] = (
         "cognition",
         "Autonomous mind: proactive thinking, learning, and gradual training",
         run_cognition,
+        ("status",),
+    ),
+    GuiAction(
+        "agents",
+        "Personalities (agents): the seven characters as independent agents",
+        run_agents,
+        ("list",),
+    ),
+    GuiAction(
+        "maintenance",
+        "Maintenance: back up and restore data, diagnostics, and shortcuts",
+        run_maintenance,
         ("status",),
     ),
     GuiAction(

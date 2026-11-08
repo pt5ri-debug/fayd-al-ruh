@@ -449,6 +449,16 @@ class FaydGUI:
         self._lines: queue.Queue[str] = queue.Queue()
         self._busy = False
         self._streaming_label: tk.Text | None = None
+        #: The label of the job currently running, so the notification feed can
+        #: name what finished (a plain string; ``_streaming_label`` is the widget).
+        self._running_label = ""
+        # The notification feed: one bounded record of what the background
+        # actually did (a finished training run, a failed download), so a result
+        # that arrives while the user looks elsewhere is not lost. The Home
+        # dashboard reads it and the unread count badges the section.
+        from gui.notifications import NotificationFeed
+
+        self._notifications = NotificationFeed()
         # Speech jobs (render / transcribe) run off the busy path, so the composer
         # stays usable while a clip renders or a recording is transcribed.
         self._speech_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
@@ -994,6 +1004,8 @@ class FaydGUI:
             "_kb_manager_dialog",
             "_sql_import_dialog",
             "_characters_dialog",
+            "_agents_dialog",
+            "_maintenance_dialog",
             "_cognition_dialog",
             "_model_manager_dialog",
             "_training_center_dialog",
@@ -1297,11 +1309,15 @@ class FaydGUI:
             mouth_label=self._source_choice_label(),
             recent_chats=self._home_recent_chats(),
             knowledge_summary=self._home_knowledge_summary(),
+            notifications=self._notifications,
             resources=self._home_resources(),
             quick_actions=self._home_quick_actions(),
         )
         for section in dashboard.sections:
             self._home_section(panel, section)
+        # Opening the dashboard is the moment the user sees what arrived, so the
+        # unread badge clears here -- the feed itself keeps the records.
+        self._notifications.mark_seen()
         if dashboard.quick_actions:
             tk.Label(
                 panel, text="Quick actions", bg=self._theme.surface, fg=self._theme.text_dim,
@@ -3493,6 +3509,89 @@ class FaydGUI:
             on_close=self._forget_characters,
         )
 
+    def _open_agents(self) -> None:
+        """Open (or focus) the Personalities (agents) window.
+
+        One window shows the seven characters as independent agents -- their
+        profiles, their capability ceilings, which one would answer a question, and
+        what each has actually done -- through a single
+        :class:`gui.agents.AgentsService`. One window is kept and reused, so
+        clicking the sidebar entry twice raises the open one.
+        """
+        existing = getattr(self, "_agents_dialog", None)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:  # the window was closed out from under us
+                self._agents_dialog = None
+
+        from gui.agents_dialog import AgentsDialog
+
+        self._agents_dialog = AgentsDialog(
+            self.root,
+            self._agents_service(),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
+            on_close=self._forget_agents,
+        )
+
+    def _forget_agents(self) -> None:
+        self._agents_dialog = None
+
+    def _open_maintenance(self) -> None:
+        """Open (or focus) the Maintenance window.
+
+        One window backs up and restores the project's own stores, reads the
+        machine's and the models' diagnostics, and lists the keyboard shortcuts
+        the program binds, through a single
+        :class:`gui.maintenance.MaintenanceService`. One window is kept and reused,
+        so clicking the sidebar entry twice raises the open one.
+        """
+        existing = getattr(self, "_maintenance_dialog", None)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:  # the window was closed out from under us
+                self._maintenance_dialog = None
+
+        from gui.maintenance import MaintenanceService
+        from gui.maintenance_dialog import MaintenanceDialog
+
+        self._maintenance_dialog = MaintenanceDialog(
+            self.root,
+            MaintenanceService(getattr(self.service, "data_root", None)),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
+            on_close=self._forget_maintenance,
+        )
+
+    def _forget_maintenance(self) -> None:
+        self._maintenance_dialog = None
+
+    def _agents_service(self):
+        """The service the agents window drives.
+
+        A real :class:`gui.agents.AgentsService` by default.
+        ``agents_service_factory`` may be set to build a lighter one, so a test can
+        open the window without a full data directory.
+        """
+        factory = getattr(self, "agents_service_factory", None)
+        if factory is not None:
+            return factory()
+        from gui.agents import AgentsService
+
+        return AgentsService(data_root=getattr(self.service, "data_root", None))
+
     def _open_cognition(self) -> None:
         """Open (or focus) the Autonomous Cognitive System window.
 
@@ -4123,6 +4222,14 @@ class FaydGUI:
         if action.key in {"characters", "characters-shareable"}:
             self._open_characters()
             return
+        # The Personalities (agents) entry opens the multi-agent window.
+        if action.key == "agents":
+            self._open_agents()
+            return
+        # The Maintenance entry opens the backup/diagnostics window.
+        if action.key == "maintenance":
+            self._open_maintenance()
+            return
         # The Autonomous mind entry opens the cognition window.
         if action.key in {"cognition", "cognition-characters"}:
             self._open_cognition()
@@ -4179,6 +4286,7 @@ class FaydGUI:
                 return
             argv = (*argv, question)
         self._add_bubble("note", f"Running: {action.label} …")
+        self._running_label = action.label
         self._streaming_label = self._add_bubble("note", f"{action.label} — live output:")
         self._start_work(lambda: self._run_action(action, argv))
 
@@ -4386,10 +4494,19 @@ class FaydGUI:
             self._hide_thinking()
             if kind == "ok":
                 self._render_result(payload)
+                self._notifications.post(
+                    self._running_label or "A background job", level="success"
+                )
             else:
                 self._add_bubble("assistant", f"Something went wrong: {payload}")
+                self._notifications.post(
+                    self._running_label or "A background job",
+                    detail=str(payload),
+                    level="error",
+                )
             self._busy = False
             self._streaming_label = None
+            self._running_label = ""
             self._set_send_enabled(True)
             self._update_status()
             self.refresh_history()
