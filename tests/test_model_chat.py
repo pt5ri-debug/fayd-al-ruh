@@ -533,6 +533,14 @@ def test_chat_service_model_status_is_ready_when_the_file_is_present(data_root) 
     assert "ready" in service.model_status()
 
 
+def test_chat_service_model_fit_is_honest_with_no_local_file(data_root) -> None:
+    """A model with no local file yields an honest 'unknown', never a figure."""
+    from gui.model_chat import ModelChatService
+
+    service = ModelChatService(catalog.MOUTH_ULTRON, data_root=data_root)
+    assert "unknown" in service.model_fit().lower()
+
+
 def test_chat_service_offers_the_full_catalog(data_root) -> None:
     from gui.model_chat import ModelChatService
 

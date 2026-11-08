@@ -326,5 +326,37 @@ def test_install_builds_the_buttons_and_wires_close() -> None:
         # The close protocol now carries the caller's handler rather than Tk's
         # default: querying it returns the registered command string.
         assert window.protocol("WM_DELETE_WINDOW")
+        # Escape closes the window, the standard keyboard affordance.
+        assert window.bind("<Escape>")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_escape_closes_the_window() -> None:
+    from gui.app import DARK_THEME
+    from gui.typography import for_root
+
+    root = tk.Tk()
+    try:
+        root.withdraw()
+        window = tk.Toplevel(root)
+        header = tk.Frame(window)
+        header.pack(fill="x")
+        closed: list[int] = []
+        install_window_controls(
+            window,
+            header,
+            theme=DARK_THEME,
+            typography=for_root(root),
+            on_close=lambda: closed.append(1),
+        )
+        root.update()
+        # Escape closes the window, the standard keyboard affordance.
+        assert window.bind("<Escape>")
+        window.focus_force()
+        window.event_generate("<Escape>", when="now")
+        root.update()
+        assert closed == [1]
     finally:
         root.destroy()

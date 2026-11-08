@@ -34,7 +34,6 @@ from gui.chat_composer import ChatComposer
 from gui.dialog_base import ThemedDialog
 from gui.image_preview import load_scaled
 from gui.typography import resolve
-from gui.window_controls import install_window_controls
 
 TITLE = "Generate an image from text"
 SUBTITLE = (
@@ -114,28 +113,13 @@ class ImageGenDialog(ThemedDialog):
 
     def _build(self) -> None:
         theme = self.theme
-        bar = tk.Frame(self.window, bg=theme.titlebar)
-        bar.pack(fill="x")
-        header = tk.Frame(bar, bg=theme.titlebar)
-        header.pack(fill="x", padx=20, pady=(18, 8))
-        title_row = tk.Frame(header, bg=theme.titlebar)
-        title_row.pack(fill="x")
-        tk.Label(
-            title_row, text=TITLE, bg=theme.titlebar, fg=theme.contrast,
-            font=self._type.font("heading1", weight="bold"), anchor="w",
-        ).pack(side="left")
-        self._window_controls = install_window_controls(
-            self.window, title_row, theme=theme, typography=self._type, on_close=self._close
+        from gui.components import HeroHeader
+
+        header = HeroHeader(
+            self.window, title=TITLE, subtitle=SUBTITLE, notes=(HONESTY_LINE,),
+            theme=theme, typography=self._type, on_close=self._close,
         )
-        tk.Label(
-            header, text=SUBTITLE, bg=theme.titlebar, fg=theme.text_secondary,
-            font=self._type.font("xs"), anchor="w", justify="left", wraplength=980,
-        ).pack(fill="x", pady=(4, 0))
-        tk.Label(
-            header, text=HONESTY_LINE, bg=theme.titlebar, fg=theme.text_dim,
-            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=980,
-        ).pack(fill="x", pady=(6, 0))
-        tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
+        self._window_controls = header.controls
 
         # Two columns: the controls on the left, the preview on the right. The
         # preview column is pinned to PREVIEW_FRACTION of the window width (see
@@ -311,14 +295,13 @@ class ImageGenDialog(ThemedDialog):
         return max(1, available)
 
     def _section(self, title: str, *, parent: tk.Misc | None = None) -> tk.Frame:
-        theme = self.theme
-        frame = tk.Frame(parent or self.window, bg=theme.surface)
-        frame.pack(fill="x", padx=20, pady=(10, 0))
-        tk.Label(
-            frame, text=title, bg=theme.surface, fg=theme.contrast,
-            font=self._type.font("sm", weight="bold"), anchor="w",
-        ).pack(fill="x", padx=12, pady=(10, 4))
-        return frame
+        """A titled surface the caller fills (the shared :class:`Section`)."""
+        from gui.components import Section
+
+        return Section(
+            parent or self.window, title=title, theme=self.theme,
+            typography=self._type, card=False,
+        ).body
 
     def _labelled_entry(self, parent: tk.Misc, label: str, var: tk.StringVar, width: int) -> None:
         theme = self.theme
@@ -332,12 +315,12 @@ class ImageGenDialog(ThemedDialog):
         ).pack(side="left", padx=(0, 12))
 
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
-        theme = self.theme
-        return tk.Button(
-            parent, text=text, command=command, bg=theme.surface_raised,
-            fg=theme.foreground, activebackground=theme.interactive_active,
-            activeforeground=theme.contrast, relief="flat", borderwidth=0,
-            font=self._type.font("xs", weight="bold"), padx=12, pady=4, cursor="hand2",
+        """A themed flat button (the shared :func:`gui.components.button`)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="secondary", small=False, anchor="center",
         )
 
     # -- behaviour --------------------------------------------------------

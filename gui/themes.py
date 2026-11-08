@@ -401,13 +401,13 @@ def contrast_ratio(first: str, second: str) -> float | None:
 
 def load_theme_name() -> str:
     """The saved theme name, defaulting to dark; never raises on a bad store."""
+    from core.best_effort import best_effort
     from core.paths import data_dir
     from storage.json_store import JsonStore
 
-    try:
+    saved: object = None
+    with best_effort("read the saved appearance"):
         saved = JsonStore(data_dir()).load(THEME_NAMESPACE, THEME_KEY)
-    except Exception:  # a broken store must not stop the window opening
-        return default_theme().name
     name = saved.get("theme") if isinstance(saved, dict) else None
     return name if name in THEMES else default_theme().name
 

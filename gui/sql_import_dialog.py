@@ -41,7 +41,6 @@ from gui.sql_import import (
     redact_secrets,
 )
 from gui.typography import resolve
-from gui.window_controls import install_window_controls
 
 #: The page title and one-line description.
 TITLE = "SQL Database Import"
@@ -115,28 +114,13 @@ class SqlImportDialog(ThemedDialog):
 
     def _build(self) -> None:
         theme = self.theme
-        bar = tk.Frame(self.window, bg=theme.titlebar)
-        bar.pack(fill="x")
-        header = tk.Frame(bar, bg=theme.titlebar)
-        header.pack(fill="x", padx=20, pady=(18, 8))
-        title_row = tk.Frame(header, bg=theme.titlebar)
-        title_row.pack(fill="x")
-        tk.Label(
-            title_row, text=TITLE, bg=theme.titlebar, fg=theme.contrast,
-            font=self._type.font("heading1", weight="bold"), anchor="w",
-        ).pack(side="left")
-        self._window_controls = install_window_controls(
-            self.window, title_row, theme=theme, typography=self._type, on_close=self._close
+        from gui.components import HeroHeader
+
+        header = HeroHeader(
+            self.window, title=TITLE, subtitle=SUBTITLE, notes=(FORMATS_LINE,),
+            theme=theme, typography=self._type, on_close=self._close, wraplength=760,
         )
-        tk.Label(
-            header, text=SUBTITLE, bg=theme.titlebar, fg=theme.text_secondary,
-            font=self._type.font("xs"), anchor="w", justify="left", wraplength=760,
-        ).pack(fill="x", pady=(4, 0))
-        tk.Label(
-            header, text=FORMATS_LINE, bg=theme.titlebar, fg=theme.text_dim,
-            font=self._type.font("2xs"), anchor="w",
-        ).pack(fill="x", pady=(6, 0))
-        tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
+        self._window_controls = header.controls
 
         self._build_file_section()
         self._build_schema_section()
@@ -145,23 +129,20 @@ class SqlImportDialog(ThemedDialog):
         self._build_results_section()
 
     def _section(self, title: str) -> tk.Frame:
-        theme = self.theme
-        frame = tk.Frame(self.window, bg=theme.surface, highlightthickness=1,
-                         highlightbackground=theme.border_subtle)
-        frame.pack(fill="x", padx=20, pady=(10, 0))
-        tk.Label(
-            frame, text=title, bg=theme.surface, fg=theme.contrast,
-            font=self._type.font("sm", weight="bold"), anchor="w",
-        ).pack(fill="x", padx=12, pady=(10, 2))
-        return frame
+        """A titled surface the caller fills (the shared :class:`Section`)."""
+        from gui.components import Section
+
+        return Section(
+            self.window, title=title, theme=self.theme, typography=self._type, card=False
+        ).body
 
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
-        theme = self.theme
-        return tk.Button(
-            parent, text=text, command=command, bg=theme.surface_raised,
-            fg=theme.foreground, activebackground=theme.interactive_active,
-            activeforeground=theme.contrast, relief="flat", borderwidth=0,
-            font=self._type.font("xs", weight="bold"), padx=12, pady=4, cursor="hand2",
+        """A themed flat button (the shared :func:`gui.components.button`)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="secondary", small=False, anchor="center",
         )
 
     def _build_file_section(self) -> None:

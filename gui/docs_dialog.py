@@ -31,7 +31,7 @@ import threading
 import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
-from tkinter import filedialog, ttk
+from tkinter import filedialog
 from tkinter import font as tkfont
 from typing import Any, Literal
 
@@ -50,7 +50,6 @@ from gui.image_preview import load_scaled
 from gui.message_footer import add_provenance_label
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
-from gui.window_controls import install_window_controls
 
 TITLE = "Doc's Studio"
 SUBTITLE = (
@@ -158,33 +157,23 @@ class DocsDialog(ThemedDialog):
         self._layout_columns()
 
     def _build_header(self) -> None:
-        theme = self.theme
-        bar = tk.Frame(self.window, bg=theme.titlebar)
-        bar.pack(fill="x")
-        inner = tk.Frame(bar, bg=theme.titlebar)
-        inner.pack(fill="x", padx=16, pady=(12, 8))
-        titles = tk.Frame(inner, bg=theme.titlebar)
-        titles.pack(side="left", anchor="w")
-        tk.Label(
-            titles, text=TITLE, bg=theme.titlebar, fg=theme.contrast,
-            font=self._type.font("heading3", weight="bold"), anchor="w",
-        ).pack(anchor="w")
-        tk.Label(
-            titles, text=SUBTITLE, bg=theme.titlebar, fg=theme.text_secondary,
-            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=820,
-        ).pack(anchor="w", pady=(2, 0))
-        self._spinner = ttk.Progressbar(inner, mode="indeterminate", length=120)
-        self._window_controls = install_window_controls(
-            self.window, inner, theme=theme, typography=self._type, on_close=self._close
+        """The shared title band (the one :class:`gui.components.DialogHeader`)."""
+        from gui.components import DialogHeader
+
+        header = DialogHeader(
+            self.window, title=TITLE, subtitle=SUBTITLE, theme=self.theme,
+            typography=self._type, on_close=self._close,
         )
-        tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
+        self._spinner = header.spinner
+        self._window_controls = header.controls
 
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
-        return tk.Button(
-            parent, text=text, command=command, relief="flat", borderwidth=0,
-            highlightthickness=0, bg=self.theme.surface_raised, fg=self.theme.foreground,
-            activebackground=self.theme.interactive_active, activeforeground=self.theme.contrast,
-            font=self._type.font("2xs", weight="bold"), padx=10, pady=4, cursor="hand2",
+        """A themed flat button (the shared :func:`gui.components.button`)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="secondary", small=True, anchor="w",
         )
 
     # -- sidebar ----------------------------------------------------------

@@ -37,7 +37,6 @@ from core.presentation_courses import CourseDetail, CourseMatch
 from gui.dialog_base import ThemedDialog
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
-from gui.window_controls import install_window_controls
 
 TITLE = "Course content"
 SUBTITLE = (
@@ -108,31 +107,14 @@ class PresentationCourseDialog(ThemedDialog):
 
     def _build(self) -> None:
         theme = self.theme
-        bar = tk.Frame(self.window, bg=theme.titlebar)
-        bar.pack(fill="x")
-        inner = tk.Frame(bar, bg=theme.titlebar)
-        inner.pack(fill="x", padx=16, pady=(12, 8))
-        titles = tk.Frame(inner, bg=theme.titlebar)
-        titles.pack(side="left", anchor="w")
-        tk.Label(
-            titles, text=TITLE, bg=theme.titlebar, fg=theme.contrast,
-            font=self._type.font("heading3", weight="bold"), anchor="w",
-        ).pack(anchor="w")
-        tk.Label(
-            titles, text=SUBTITLE, bg=theme.titlebar, fg=theme.text_secondary,
-            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=760,
-        ).pack(anchor="w", pady=(2, 0))
-        self._close_button = tk.Button(
-            inner, text="Close", command=self._close, relief="flat", borderwidth=0,
-            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
-            activebackground=theme.interactive_active, activeforeground=theme.contrast,
-            font=self._type.font("2xs", weight="bold"), padx=10, pady=4, cursor="hand2",
+        from gui.components import HeroHeader
+
+        header = HeroHeader(
+            self.window, title=TITLE, subtitle=SUBTITLE, theme=theme,
+            typography=self._type, on_close=self._close, wraplength=760,
+            extra=lambda title_row: self._build_close_button(title_row, theme),
         )
-        self._close_button.pack(side="right")
-        self._window_controls = install_window_controls(
-            self.window, inner, theme=theme, typography=self._type, on_close=self._close
-        )
-        tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
+        self._window_controls = header.controls
 
         body = tk.Frame(self.window, bg=theme.base)
         body.pack(fill="both", expand=True)
@@ -141,6 +123,16 @@ class PresentationCourseDialog(ThemedDialog):
         body.columnconfigure(1, weight=1)
         self._build_sidebar(body)
         self._build_main(body)
+
+    def _build_close_button(self, title_row: tk.Frame, theme: Any) -> None:
+        """The window's own "Close" button, drawn beside the window controls."""
+        self._close_button = tk.Button(
+            title_row, text="Close", command=self._close, relief="flat", borderwidth=0,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            activebackground=theme.interactive_active, activeforeground=theme.contrast,
+            font=self._type.font("2xs", weight="bold"), padx=10, pady=4, cursor="hand2",
+        )
+        self._close_button.pack(side="right")
 
     def _build_sidebar(self, parent: tk.Frame) -> None:
         # A stack of collapsible sections (the shared :class:`~gui.sidebar.SidebarColumn`):
@@ -227,11 +219,12 @@ class PresentationCourseDialog(ThemedDialog):
         self._canvas.yview_scroll(int(-event.delta / 120), "units")
 
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
-        return tk.Button(
-            parent, text=text, command=command, relief="flat", borderwidth=0,
-            highlightthickness=0, bg=self.theme.surface_raised, fg=self.theme.foreground,
-            activebackground=self.theme.interactive_active, activeforeground=self.theme.contrast,
-            font=self._type.font("2xs", weight="bold"), padx=10, pady=4, cursor="hand2",
+        """A themed flat button (the shared :func:`gui.components.button`)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="secondary", small=True, anchor="w",
         )
 
     def _add_note(self, text: str, *, title: str = "") -> None:

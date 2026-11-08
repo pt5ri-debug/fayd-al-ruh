@@ -38,7 +38,7 @@ from gui.dialog_base import ThemedDialog
 from gui.kb_manager import KnowledgeBaseManagerService, WebFetchReport
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
-from gui.window_controls import fit_geometry, install_window_controls
+from gui.window_controls import fit_geometry
 
 TITLE = "Knowledge Base Manager"
 
@@ -134,33 +134,24 @@ class KnowledgeBaseManagerDialog(ThemedDialog):
         self._build_conversation(body)
 
     def _build_header(self) -> None:
-        theme = self.theme
-        bar = tk.Frame(self.window, bg=theme.titlebar)
-        bar.pack(fill="x")
-        inner = tk.Frame(bar, bg=theme.titlebar)
-        inner.pack(fill="x", padx=16, pady=(12, 8))
-        titles = tk.Frame(inner, bg=theme.titlebar)
-        titles.pack(side="left", anchor="w")
-        tk.Label(
-            titles, text=TITLE, bg=theme.titlebar, fg=theme.contrast,
-            font=self._type.font("heading3", weight="bold"), anchor="w",
-        ).pack(anchor="w")
-        tk.Label(
-            titles, text=SUBTITLE, bg=theme.titlebar, fg=theme.text_secondary,
-            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=780,
-        ).pack(anchor="w", pady=(2, 0))
-        self._window_controls = install_window_controls(
-            self.window, inner, theme=theme, typography=self._type, on_close=self._close
-        )
-        tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
+        """The shared title band (the one :class:`gui.components.DialogHeader`)."""
+        from gui.components import DialogHeader
 
-    def _button(self, parent: tk.Misc, text: str, command: Any, *, small: bool = False) -> tk.Button:
-        return tk.Button(
-            parent, text=text, command=command, relief="flat", borderwidth=0,
-            highlightthickness=0, bg=self.theme.surface_raised, fg=self.theme.foreground,
-            activebackground=self.theme.interactive_active, activeforeground=self.theme.contrast,
-            font=self._type.font("2xs", weight="bold"), padx=10, pady=4 if small else 6,
-            cursor="hand2", anchor="w",
+        header = DialogHeader(
+            self.window, title=TITLE, subtitle=SUBTITLE, theme=self.theme,
+            typography=self._type, on_close=self._close,
+        )
+        self._window_controls = header.controls
+
+    def _button(
+        self, parent: tk.Misc, text: str, command: Any, *, small: bool = False
+    ) -> tk.Button:
+        """A themed flat button (the shared :func:`gui.components.button`)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="secondary", small=True, anchor="w", pady=4 if small else 6,
         )
 
     # -- sidebar ----------------------------------------------------------

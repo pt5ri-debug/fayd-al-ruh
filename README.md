@@ -1392,6 +1392,25 @@ The window is a thin shell over the same code the CLI already runs:
 - Answers run on a **worker thread** and are posted back through a queue, so the
   window never freezes while the model thinks; output from a sidebar action is
   streamed into the transcript.
+- The interface is built on **one shared component library** (`gui/components.py`
+  — `Button`/`button`, `Section`, `DialogHeader`/`HeroHeader`, `StatusLine`,
+  `EmptyState`, `LoadingState`, `SearchInput`, `SettingsRow`, `SettingsSection`,
+  `Notification`/`NotificationCenter`, `WorkerPump`) with the design tokens in
+  `gui/design.py` (`Spacing`/`Radii`/`Sizes`/`space`), so every window inherits
+  the same spacing, radii, buttons, inputs, and title band; a guard
+  (`tests/test_ui_components_guard.py`) fails if a dialog grows back its own copy.
+  A **Home dashboard** (`gui/dashboard.py`) opens the window with what is
+  answering, the session, recent chats, the knowledge figure, the machine's own
+  figures, and quick actions. Every **global** setting has one authoritative home,
+  registered in `gui/settings_hub.py` (theme, fonts & paragraphs, reading voice and
+  auto-speak, reading direction, the internet switch, the cloud provider/model); a
+  genuinely context-dependent setting (per-mouth voice/model, per-character model,
+  per-agent permissions) stays separate, so centralizing never merges a global
+  default with a scoped override. The window remembers its **size** between runs,
+  **Escape** closes a dialog, and a **reading-direction** switch (`gui/layout_direction.py`)
+  moves the navigation to the right for RTL and right-aligns plain text (an
+  explicit Fonts & paragraphs choice still wins). The audit and the phase reports
+  live in `docs/ui/`.
 
 Tkinter is used for the window because it ships with CPython — **no new
 dependency** is added, keeping the runtime at pure Python plus numpy/requests. It

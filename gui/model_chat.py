@@ -22,6 +22,7 @@ real session to be tested.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,22 @@ _ACTIVATION_ERRORS = (
     CompanionError,
     HakeemError,
 )
+
+
+@dataclass(frozen=True)
+class _FitRecord:
+    """The facts :func:`core.model_preflight.estimate_memory` needs from a file.
+
+    A tiny adapter so the memory estimate reads a model file's own header (its
+    size, architecture, context, and parameter count) without the preflight module
+    importing the catalog. It carries no behaviour.
+    """
+
+    size_bytes: int = 0
+    architecture: str = ""
+    context_length: int | None = None
+    parameter_count: int | None = None
+
 
 #: A short, honest line per mouth explaining what it is, shown in its window.
 MOUTH_BLURBS: dict[str, str] = {
@@ -427,12 +444,8 @@ class ModelChatService:
         self.profile = profiles.set_model(self.mouth, key)
         setter = getattr(self.service, "set_mouth_model", None)
         if setter is not None:
-            try:
+            with best_effort("rebuild the mouth on the chosen model"):
                 setter(self.mouth, key)
-            except _ACTIVATION_ERRORS:
-                pass  # saved; ``activation_status`` reports why it cannot answer yet
-            except Exception:
-                pass
         self._activate()
         return key
 
@@ -531,6 +544,52 @@ class ModelChatService:
         if choice is None:
             return "No selectable model for this mouth."
         return choice.describe()
+
+    def model_fit(self) -> str:
+        """A one-line "will it fit here?" note for the chosen model (an estimate).
+
+        Reads the chosen model's own file header through
+        :func:`core.model_files.probe_file` and estimates its memory need with
+        :func:`core.model_preflight.estimate_memory`, compared against what the
+        machine reports as available. Honest by construction: a cloud model or a
+        model whose file is not on disk says so rather than inventing a figure,
+        and the result is always labelled an estimate, never a guarantee.
+        """
+        choice = self._choice()
+        if choice is None or choice.path is None:
+            return "Model fit: unknown (the chosen model has no local file to measure)."
+        with best_effort("estimate the model's memory need"):
+            from core.model_files import probe_file
+            from core.model_preflight import estimate_memory
+            from core.model_resources import system_resources
+
+            probe = probe_file(choice.path)
+            if not probe.exists:
+                return f"Model fit: unknown ({probe.detail or 'the file is not on disk'})."
+            gguf = probe.gguf
+            record = _FitRecord(
+                size_bytes=probe.size_bytes,
+                architecture=getattr(gguf, "architecture", "") or "",
+                context_length=getattr(gguf, "context_length", None),
+                parameter_count=getattr(gguf, "parameter_count", None),
+            )
+            estimate = estimate_memory(record)
+            resources = system_resources()
+            available = resources.available_memory_bytes
+            typical = estimate.typical
+            if not typical:
+                return "Model fit: unknown (the file size could not be read)."
+            if available is None:
+                return (
+                    f"Model fit: about {typical / 1e9:.1f} GB (estimate; this machine "
+                    "does not report available memory)."
+                )
+            verdict = "fits by the estimate" if typical <= available else "may exceed available memory"
+            return (
+                f"Model fit: about {typical / 1e9:.1f} GB vs {available / 1e9:.1f} GB free "
+                f"-- {verdict} (an estimate, not a guarantee)."
+            )
+        return "Model fit: unknown."
 
     def describe(self) -> str:
         """A one-line description of the mouth, its model, and its voice."""

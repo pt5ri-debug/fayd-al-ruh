@@ -936,14 +936,14 @@ def test_the_characters_sidebar_entry_exists_and_is_visible() -> None:
     assert action in visible_actions()
     # It sits in a named group, so the sidebar draws it under a header.
     titles = {group.title for group, _members in grouped_visible_actions()}
-    assert "Characters" in titles
+    assert "Personalities" in titles
 
 
 def test_the_characters_action_is_in_the_characters_group() -> None:
     from gui.actions import action_group_by_key
 
     group = action_group_by_key("characters")
-    assert group.title == "Characters"
+    assert group.title == "Personalities"
     assert "characters" in group.keys
 
 

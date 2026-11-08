@@ -35,6 +35,7 @@ from tkinter import filedialog
 from tkinter import font as tkfont
 from typing import Any
 
+from core.best_effort import best_effort
 from core.reading import clip_is_silent
 
 from gui import clipboard, rich_text
@@ -47,7 +48,7 @@ from gui.message_footer import MessageFooter, strip_markdown
 from gui.model_chat import ModelChatService, mouth_title
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
-from gui.window_controls import fit_geometry, install_window_controls
+from gui.window_controls import fit_geometry
 
 #: The transcript reads as a centred column, capped like the chat window's.
 _COLUMN_MAX = 860
@@ -152,35 +153,27 @@ class ModelChatDialog(ThemedDialog):
         self._build_conversation(body)
 
     def _build_header(self) -> None:
-        theme = self.theme
-        bar = tk.Frame(self.window, bg=theme.titlebar)
-        bar.pack(fill="x")
-        inner = tk.Frame(bar, bg=theme.titlebar)
-        inner.pack(fill="x", padx=16, pady=(12, 8))
-        titles = tk.Frame(inner, bg=theme.titlebar)
-        titles.pack(side="left", anchor="w")
-        self._header_title = tk.Label(
-            titles, text=self.service.name, bg=theme.titlebar, fg=theme.contrast,
-            font=self._type.font("heading3", weight="bold"), anchor="w",
-        )
-        self._header_title.pack(anchor="w")
-        tk.Label(
-            titles, text=f"{mouth_title(self.service.mouth)} — {self.service.blurb()}",
-            bg=theme.titlebar, fg=theme.text_secondary, font=self._type.font("2xs"),
-            anchor="w", justify="left", wraplength=760,
-        ).pack(anchor="w", pady=(2, 0))
-        self._window_controls = install_window_controls(
-            self.window, inner, theme=theme, typography=self._type, on_close=self._close
-        )
-        tk.Frame(self.window, bg=theme.titlebar_edge, height=1).pack(fill="x")
+        """The shared title band (the one :class:`gui.components.DialogHeader`)."""
+        from gui.components import DialogHeader
 
-    def _button(self, parent: tk.Misc, text: str, command: Any, *, small: bool = False) -> tk.Button:
-        return tk.Button(
-            parent, text=text, command=command, relief="flat", borderwidth=0,
-            highlightthickness=0, bg=self.theme.surface_raised, fg=self.theme.foreground,
-            activebackground=self.theme.interactive_active, activeforeground=self.theme.contrast,
-            font=self._type.font("2xs", weight="bold"), padx=10, pady=4 if small else 6,
-            cursor="hand2", anchor="w",
+        header = DialogHeader(
+            self.window,
+            title=self.service.name,
+            subtitle=f"{mouth_title(self.service.mouth)} — {self.service.blurb()}",
+            theme=self.theme, typography=self._type, on_close=self._close,
+        )
+        self._header_title = header.title_label
+        self._window_controls = header.controls
+
+    def _button(
+        self, parent: tk.Misc, text: str, command: Any, *, small: bool = False
+    ) -> tk.Button:
+        """A themed flat button (the shared :func:`gui.components.button`)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="secondary", small=True, anchor="w", pady=4 if small else 6,
         )
 
     # -- sidebar ----------------------------------------------------------
@@ -576,7 +569,10 @@ class ModelChatDialog(ThemedDialog):
         status = self.service.model_status()
         status_fn = getattr(self.service, "activation_status", None)
         activation = status_fn() if callable(status_fn) else ""
-        self._model_note.configure(text=f"{status}\n{activation}".strip())
+        fit_fn = getattr(self.service, "model_fit", None)
+        fit = fit_fn() if callable(fit_fn) else ""
+        lines = [status, fit, activation]
+        self._model_note.configure(text="\n".join(line for line in lines if line).strip())
         if not self.service.model_ready():
             self._model_note.configure(fg=self.theme.text_dim)
         else:
@@ -1029,18 +1025,14 @@ class ModelChatDialog(ThemedDialog):
                 pass
             self._pump_after = None
         if self._recording is not None:
-            try:
+            with best_effort("stop the recording when the window closes"):
                 self.service.stop_recording()
-            except Exception:
-                pass
             self._recording = None
         # End a reading in progress and drop every footer's bound command, so the
         # destroyed window is not held by a cycle only the cyclic collector could
         # break (which can run on a worker thread and deadlock on a Tcl call).
-        try:
+        with best_effort("stop the reading when the window closes"):
             self.service.stop_reading()
-        except Exception:
-            pass
         for footer in self._footers:
             footer.clear_commands()
         self._footers.clear()

@@ -1302,6 +1302,51 @@ def test_main_window_composer_carries_the_web_toggle(tmp_path) -> None:
 # --- every window's title bar ------------------------------------------------
 
 
+def test_every_dialog_builds_its_title_bar_from_the_shared_header() -> None:
+    """No dialog draws its own title band: all go through the shared components.
+
+    Phase 4 replaced thirteen ``_build_header`` copies and five hand-built "hero"
+    bands with :class:`gui.components.DialogHeader` / :class:`HeroHeader`. This
+    scans every dialog module's source so a new window cannot quietly reintroduce
+    the duplication: it must build its band through one of the shared headers, and
+    must not paint the ``titlebar`` band itself.
+    """
+    import ast
+    import pathlib
+
+    gui = pathlib.Path(__file__).resolve().parents[1] / "gui"
+    offenders: list[str] = []
+    for path in sorted(gui.glob("*_dialog.py")):
+        source = path.read_text(encoding="utf-8")
+        if "titlebar_edge" not in source and "DialogHeader" not in source \
+                and "HeroHeader" not in source:
+            continue  # not a window with a title band
+        if "DialogHeader" not in source and "HeroHeader" not in source:
+            offenders.append(path.name)
+            continue
+        # It must not *build the band frame itself* -- no ``tk.Frame(<window>,
+        # bg=...titlebar)`` (the shared headers own that). A widget drawn *into*
+        # the band through the ``extra`` slot may still carry the band colour.
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "Frame"):
+                continue
+            parent_is_window = bool(node.args) and (
+                (isinstance(node.args[0], ast.Attribute) and node.args[0].attr == "window")
+                or (isinstance(node.args[0], ast.Name) and node.args[0].id == "window")
+            )
+            if not parent_is_window:
+                continue
+            for keyword in node.keywords:
+                if keyword.arg == "bg" and isinstance(keyword.value, ast.Attribute) \
+                        and keyword.value.attr == "titlebar":
+                    offenders.append(f"{path.name}:{node.lineno}")
+    assert offenders == [], f"dialogs still painting their own title band: {offenders}"
+
+
 @pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_every_window_title_bar_has_the_three_controls(tmp_path) -> None:
     """Minimize, maximize, and close live on the main window and every dialog.
@@ -1776,5 +1821,68 @@ def test_ask_teacher_toggles_the_loop_and_streams_turns(tmp_path) -> None:
         app._toggle_asking()
         assert app._asking_active is False
         assert built[0].stopped is True
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_remembers_its_size(tmp_path) -> None:
+    """The main window's size is saved on close and restored on the next launch."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI, load_window_geometry
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.geometry("900x640")
+        root.update()
+        app._on_close()
+    finally:
+        try:
+            root.destroy()
+        except tk.TclError:
+            pass
+    width, height, _zoomed = load_window_geometry(tmp_path)
+    assert (width, height) == (900, 640)
+
+
+def test_saved_geometry_rejects_an_unusable_size(tmp_path) -> None:
+    """A saved size below the usable minimum falls back to the default opening size."""
+    from gui.app import _DEFAULT_WINDOW_SIZE, load_window_geometry
+
+    assert load_window_geometry(tmp_path)[:2] == _DEFAULT_WINDOW_SIZE
+    from storage.json_store import JsonStore
+
+    JsonStore(tmp_path).save("gui", "window_geometry", {"width": 100, "height": 100})
+    assert load_window_geometry(tmp_path)[:2] == _DEFAULT_WINDOW_SIZE
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_reading_direction_moves_the_navigation(tmp_path) -> None:
+    """Choosing RTL packs the navigation on the right; the choice is remembered."""
+    import tkinter as tk
+
+    from gui import layout_direction
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        assert app._nav_side() == "left"
+        assert app._sidebar.pack_info()["side"] == "left"
+        assert app._direction_alignment() == "left"
+        app._toggle_direction()
+        root.update()
+        assert app._direction == "rtl"
+        assert app._nav_side() == "right"
+        # The sidebar really moved: it is packed on the right in the rebuilt window.
+        assert app._sidebar.pack_info()["side"] == "right"
+        # And the direction supplies the default paragraph alignment, so plain
+        # text follows it (an explicit Fonts & paragraphs choice would still win).
+        assert app._direction_alignment() == "right"
+        assert app._chat_type.justify() == "right"
+        assert layout_direction.load_direction(tmp_path) == "rtl"
     finally:
         root.destroy()

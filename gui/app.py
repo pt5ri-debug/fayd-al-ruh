@@ -53,7 +53,8 @@ from core.voices import (
 )
 from hakeem.hakeem_agent import HakeemError
 
-from gui import chat_composer, clipboard, rich_text
+from gui import chat_composer, clipboard, layout_direction, rich_text, settings_hub
+from gui import dashboard as dashboard_module
 from gui import markdown as md
 from gui.actions import GuiAction, grouped_visible_actions
 from gui.attachments import Attachment, AttachmentNotice
@@ -65,6 +66,7 @@ from gui.chat_composer import (
 from gui.chat_composer import (
     Tooltip as _Tooltip,
 )
+from gui.layout_direction import Direction
 from gui.modes import (
     FAYD_MODEL_MODE,
     HistoryItem,
@@ -242,10 +244,9 @@ def load_reading_voice() -> str:
     from storage.json_store import JsonStore
 
     valid = {voice.key for voice in VOICE_CATALOG}
-    try:
+    saved: object = None
+    with best_effort("read the saved reading voice"):
         saved = JsonStore(data_dir()).load(_THEME_NAMESPACE, _VOICE_KEY)
-    except Exception:
-        return DEFAULT_VOICE_KEY
     key = saved.get("voice") if isinstance(saved, dict) else None
     if not isinstance(key, str):
         return DEFAULT_VOICE_KEY
@@ -266,10 +267,9 @@ def load_auto_speak() -> bool:
     """Whether new assistant answers should be read aloud automatically."""
     from storage.json_store import JsonStore
 
-    try:
+    saved: object = None
+    with best_effort("read the saved auto-speak choice"):
         saved = JsonStore(data_dir()).load(_THEME_NAMESPACE, _SPEAK_KEY)
-    except Exception:
-        return False
     enabled = saved.get("enabled") if isinstance(saved, dict) else None
     return enabled if isinstance(enabled, bool) else False
 
@@ -283,6 +283,71 @@ def save_auto_speak(enabled: bool) -> None:
 
 
 _SECTIONS_KEY = "sidebar_sections"
+_WINDOW_KEY = "window_geometry"
+
+#: The main window's smallest useful size; a saved geometry below this is ignored
+#: so a window can never open too small to use.
+_MIN_WINDOW_WIDTH = 420
+_MIN_WINDOW_HEIGHT = 520
+#: The size the main window opens at when there is no saved geometry.
+_DEFAULT_WINDOW_SIZE = (1180, 780)
+
+
+def load_window_geometry(root: Path | None = None) -> tuple[int, int, bool]:
+    """The main window's saved size and maximized state.
+
+    Returns ``(width, height, zoomed)``. A missing or broken record, a size below
+    the usable minimum, or a size larger than the screen falls back to the default
+    opening size, so a stale preference can never leave the window unusable. Only
+    the *size* is remembered -- not the position, which a multi-monitor change can
+    move off-screen.
+    """
+    from storage.json_store import JsonStore
+
+    default = (*_DEFAULT_WINDOW_SIZE, False)
+    saved: object = None
+    with best_effort("read the saved window size"):
+        saved = JsonStore(root if root is not None else data_dir()).load(
+            _THEME_NAMESPACE, _WINDOW_KEY
+        )
+    if not isinstance(saved, dict):
+        return default
+    width = saved.get("width")
+    height = saved.get("height")
+    zoomed = bool(saved.get("zoomed", False))
+    if not isinstance(width, int) or not isinstance(height, int):
+        return default
+    if width < _MIN_WINDOW_WIDTH or height < _MIN_WINDOW_HEIGHT:
+        return default
+    return (width, height, zoomed)
+
+
+def save_window_geometry(window: Any, root: Path | None = None) -> None:
+    """Persist the main window's size (and whether it is maximized).
+
+    A maximized window reports the *screen* size as its own, which would make the
+    restored size the screen; so while zoomed only the ``zoomed`` flag is updated
+    and the last normal size is kept. A store error is recorded, never fatal.
+    """
+    from storage.json_store import JsonStore
+
+    try:
+        zoomed = window.state() == "zoomed"
+    except (tk.TclError, AttributeError):
+        zoomed = False
+    width = window.winfo_width()
+    height = window.winfo_height()
+    payload: dict[str, Any] = {"zoomed": zoomed}
+    if not zoomed and width >= _MIN_WINDOW_WIDTH and height >= _MIN_WINDOW_HEIGHT:
+        payload["width"] = int(width)
+        payload["height"] = int(height)
+    with best_effort("save the window size"):
+        store = JsonStore(root if root is not None else data_dir())
+        existing = store.load(_THEME_NAMESPACE, _WINDOW_KEY)
+        if isinstance(existing, dict):
+            for key in ("width", "height"):
+                payload.setdefault(key, existing.get(key))
+        store.save(_THEME_NAMESPACE, _WINDOW_KEY, payload)
 
 
 def load_sidebar_sections(root: Path | None = None) -> dict[str, bool]:
@@ -297,12 +362,11 @@ def load_sidebar_sections(root: Path | None = None) -> dict[str, bool]:
     """
     from storage.json_store import JsonStore
 
-    try:
+    saved: object = None
+    with best_effort("read the saved sidebar sections"):
         saved = JsonStore(root if root is not None else data_dir()).load(
             _THEME_NAMESPACE, _SECTIONS_KEY
         )
-    except Exception:
-        return {}
     raw = saved.get("sections") if isinstance(saved, dict) else None
     if not isinstance(raw, dict):
         return {}
@@ -448,6 +512,16 @@ class FaydGUI:
         self._lines: queue.Queue[str] = queue.Queue()
         self._busy = False
         self._streaming_label: tk.Text | None = None
+        #: The label of the job currently running, so the notification feed can
+        #: name what finished (a plain string; ``_streaming_label`` is the widget).
+        self._running_label = ""
+        # The notification feed: one bounded record of what the background
+        # actually did (a finished training run, a failed download), so a result
+        # that arrives while the user looks elsewhere is not lost. The Home
+        # dashboard reads it and the unread count badges the section.
+        from gui.notifications import NotificationFeed
+
+        self._notifications = NotificationFeed()
         # Speech jobs (render / transcribe) run off the busy path, so the composer
         # stays usable while a clip renders or a recording is transcribed.
         self._speech_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
@@ -463,12 +537,14 @@ class FaydGUI:
         # built from the same OpenHands scale, so an untouched profile is exactly
         # the shipped look. See :mod:`gui.typography_settings`.
         self._profiles: dict[str, TypographyProfile] = load_profiles()
+        # The reading direction (LTR/RTL); loaded once, honoured on every build --
+        # and read before the type scales, so a plain block's default alignment
+        # follows the direction (an explicit Fonts & paragraphs choice still wins).
+        self._direction: Direction = layout_direction.load_direction(
+            getattr(self.service, "data_root", None)
+        )
         self._base_type: Typography = for_root(root)
-        self._type: Typography = self._base_type.with_overrides(self._profiles[SCOPE_WINDOWS])
-        self._chat_type: Typography = self._base_type.with_overrides(self._profiles[SCOPE_CHAT])
-        self._lists_type: Typography = self._base_type.with_overrides(self._profiles[SCOPE_LISTS])
-        self._font = self._type.ui_family
-        self._mono = self._type.mono_family
+        self._resolve_type_scales()
         # The Fonts & paragraphs panel's live variables, so a rebuild can restore
         # each menu to the setting in force (keyed by scope, and by scope+field).
         self._font_family_vars: dict[str, tk.StringVar] = {}
@@ -555,8 +631,14 @@ class FaydGUI:
         root.bind("<Control-s>", self._on_save)
 
         root.title("Fayd Al-Ruh")
-        root.geometry("1180x780")
-        root.minsize(420, 520)
+        width, height, zoomed = load_window_geometry(getattr(self.service, "data_root", None))
+        root.geometry(f"{width}x{height}")
+        root.minsize(_MIN_WINDOW_WIDTH, _MIN_WINDOW_HEIGHT)
+        if zoomed:
+            # Restore a maximized window; a window manager without "zoomed" simply
+            # keeps the saved size, so this never fails.
+            with best_effort("restore the maximized window"):
+                root.state("zoomed")
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_ui()
@@ -564,6 +646,7 @@ class FaydGUI:
 
     def _on_close(self) -> None:
         """Stop any reading, recording, or asking loop before the window dies."""
+        save_window_geometry(self.root, getattr(self.service, "data_root", None))
         self._stop_asking()
         self._stop_speaking()
         self._cancel_recording()
@@ -590,6 +673,9 @@ class FaydGUI:
         snapshot = self._snapshot_transcript()
         self._rows = []
         self._pending = []
+        # Re-resolve the type scales, so a direction change (which rebuilds the
+        # window) really re-aligns plain text, not only the layout.
+        self._resolve_type_scales()
         self._streaming_label = None
         self._thinking_row = None
         self._thinking = None
@@ -631,10 +717,13 @@ class FaydGUI:
         section holds only what no other section already offers.
         """
         sidebar = tk.Frame(shell, bg=self._theme.surface, width=_SIDEBAR_WIDTH)
-        sidebar.pack(side="left", fill="y")
+        sidebar.pack(side=self._nav_side(), fill="y")
         sidebar.pack_propagate(False)
         self._sidebar = sidebar
-        tk.Frame(sidebar, bg=self._theme.border_subtle, width=1).pack(side="right", fill="y")
+        # The hairline sits on the edge that faces the content, so it reads as a
+        # divider whichever side the navigation is on.
+        border_side: Literal["left", "right"] = "left" if self._nav_side() == "right" else "right"
+        tk.Frame(sidebar, bg=self._theme.border_subtle, width=1).pack(side=border_side, fill="y")
 
         self._brand(sidebar)
 
@@ -678,7 +767,17 @@ class FaydGUI:
             widget.bind("<Button-5>", self._on_sidebar_wheel)
         self._side_panel = panel
 
-        # 1. The chat history, open by default -- it is what a user returns to.
+        # 1. Home: the dashboard. What is answering, what the session is, the
+        # recent conversations, the knowledge/learning activity, and the machine's
+        # own figures -- plus quick actions that run the everyday sidebar entries.
+        # It is open by default (it is the window's front page) and its rows are
+        # (re)built when it is opened, so it always reflects the live session.
+        home = self._add_section(panel, key="home", title="Home", icon="🏠", default_open=True)
+        self._home_panel = tk.Frame(home.body, bg=self._theme.surface)
+        self._home_panel.pack(fill="x")
+        self._home_open = home.is_open
+
+        # 2. The chat history, open by default -- it is what a user returns to.
         chats = self._add_section(panel, key="chats", title="Chats", icon="🗂", default_open=True)
         self._history_panel = tk.Frame(chats.body, bg=self._theme.surface)
         self._history_panel.pack(fill="x")
@@ -777,6 +876,8 @@ class FaydGUI:
         *Themes*, *Fonts & paragraphs*, or *Settings* section is never blank after
         a launch or a rebuild.
         """
+        if getattr(self, "_home_open", False) and getattr(self, "_home_panel", None) is not None:
+            self._build_home_panel(self._home_panel)
         if self._section_states.get("themes") and getattr(self, "_themes_panel", None) is not None:
             self._build_themes_panel(self._themes_panel)
         if self._section_states.get("fonts") and getattr(self, "_fonts_panel", None) is not None:
@@ -828,7 +929,14 @@ class FaydGUI:
         """Remember a section's open/closed choice and keep the scrollbar honest."""
         self._section_states[key] = is_open
         save_sidebar_sections(self._section_states, getattr(self.service, "data_root", None))
-        if key == "voices":
+        if key == "home":
+            self._home_open = is_open
+            # The dashboard reads the live session and the machine, so it is
+            # rebuilt on every open -- a plain header click must not show a stale
+            # model name or an out-of-date figure.
+            if is_open:
+                self._build_home_panel(self._home_panel)
+        elif key == "voices":
             self._voices_open = is_open
             # The voice list is the one menu that must reflect what is installed
             # *right now*, so it is (re)built the moment the section is opened --
@@ -974,6 +1082,8 @@ class FaydGUI:
             "_kb_manager_dialog",
             "_sql_import_dialog",
             "_characters_dialog",
+            "_agents_dialog",
+            "_maintenance_dialog",
             "_cognition_dialog",
             "_model_manager_dialog",
             "_training_center_dialog",
@@ -1056,10 +1166,9 @@ class FaydGUI:
         for widget in self._history_buttons:
             widget.destroy()
         self._history_buttons = []
-        try:
-            items = self.service.saved_session_summaries()
-        except Exception:  # a broken store must not blank the sidebar
-            items = ()
+        items: tuple[Any, ...] = ()
+        with best_effort("read the saved conversations"):
+            items = tuple(self.service.saved_session_summaries())
         query = self._history_query.get()
         if query == "Search chats":
             query = ""
@@ -1146,12 +1255,24 @@ class FaydGUI:
             self._settings_built = True
 
     def _build_settings_panel(self, panel: tk.Misc) -> None:
-        """Build the Settings section's contents (once, on first open)."""
-        # The "Answering mouth" radio list is hidden on purpose: the header's model
-        # selector is the one visible mouth switch. The variable still tracks the
-        # live mouth (the header sets it), so nothing else has to change.
+        """Build the Settings section's contents (once, on first open).
+
+        This is the **centralized settings page** (Phase 3): every global setting
+        and its current value, read from the one authoritative source
+        (:mod:`gui.settings_hub`), each with a link to the section that owns its
+        editor -- so the page *reports* a setting rather than keeping a second copy
+        of it. The one internet switch lives here too, and it is the same
+        preference the chat's web toggle and the Training Center consult.
+
+        The "Answering mouth" radio list is hidden on purpose: the header's model
+        selector is the one visible mouth switch. The variable still tracks the
+        live mouth (the header sets it), so nothing else has to change.
+        """
         self._source_var.set(self.service.source)
 
+        self._build_settings_summary(panel)
+        self._build_internet_row(panel)
+        self._build_direction_row(panel)
         self._build_cloud_provider_picker(panel)
 
         self._sidebar_button(
@@ -1160,6 +1281,234 @@ class FaydGUI:
         self._sidebar_button(
             panel, "⌫   Clear transcript", self._clear_transcript, small=True
         ).pack(fill="x", padx=12, pady=(2, 0))
+
+    def _build_settings_summary(self, panel: tk.Misc) -> None:
+        """Every global setting, its live value, and a link to its own editor."""
+        tk.Label(
+            panel, text="Global settings", bg=self._theme.surface, fg=self._theme.foreground,
+            font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=16, pady=(8, 2))
+        values: dict[str, str] = {}
+        with best_effort("read the global settings values"):
+            values = settings_hub.current_values(getattr(self.service, "data_root", None))
+        for entry in settings_hub.SETTINGS_ENTRIES:
+            if entry.key == "internet":
+                continue  # drawn as the switch below
+            line = tk.Frame(panel, bg=self._theme.surface)
+            line.pack(fill="x", padx=16, pady=0)
+            tk.Label(
+                line, text=entry.title, bg=self._theme.surface, fg=self._theme.text_dim,
+                font=self._type.font("2xs"), anchor="w", width=13, justify="left",
+            ).pack(side="left")
+            value = tk.Label(
+                line, text=values.get(entry.key, "unknown"), bg=self._theme.surface,
+                fg=self._theme.foreground, font=self._type.font("2xs"), anchor="w",
+                justify="left", wraplength=140,
+            )
+            value.pack(side="left", fill="x", expand=True)
+            _Tooltip(value, entry.description, self._theme, self._type)
+            if entry.link:
+                link = self._sidebar_button(
+                    line, "▸", self._settings_link_command(entry.link), small=True
+                )
+                link.pack(side="right")
+                _Tooltip(link, f"Open {entry.title}", self._theme, self._type)
+
+    def _settings_link_command(self, link: str) -> Any:
+        """The command that opens the section owning a setting's editor."""
+        return {
+            "themes": self._toggle_themes,
+            "fonts": self._toggle_fonts,
+            "voices": self._toggle_voices,
+            "settings": self._toggle_settings,
+        }.get(link, self._toggle_settings)
+
+    def _build_internet_row(self, panel: tk.Misc) -> None:
+        """The one internet switch -- the same preference every surface consults."""
+        line = tk.Frame(panel, bg=self._theme.surface)
+        line.pack(fill="x", padx=12, pady=(8, 2))
+        enabled = settings_hub.read_internet(getattr(self.service, "data_root", None))
+        self._internet_var = tk.StringVar(value="on" if enabled else "off")
+        button = self._sidebar_button(
+            line,
+            f"🌐   Internet: {self._internet_var.get()}",
+            self._toggle_internet,
+            small=True,
+        )
+        button.pack(fill="x")
+        self._internet_button = button
+        _Tooltip(
+            button,
+            settings_hub.internet_status(getattr(self.service, "data_root", None)),
+            self._theme,
+            self._type,
+        )
+
+    def _build_direction_row(self, panel: tk.Misc) -> None:
+        """The reading-direction switch: left-to-right or right-to-left.
+
+        The one authoritative place the direction is chosen; it moves the
+        navigation to the right for Arabic and persists through
+        :mod:`gui.layout_direction`. A change rebuilds the window (like a theme
+        switch), so the sidebar really moves.
+        """
+        line = tk.Frame(panel, bg=self._theme.surface)
+        line.pack(fill="x", padx=12, pady=(6, 2))
+        current = self._direction
+        button = self._sidebar_button(
+            line,
+            f"↔   Reading direction: {'RTL' if current == 'rtl' else 'LTR'}",
+            self._toggle_direction,
+            small=True,
+        )
+        button.pack(fill="x")
+        self._direction_button = button
+        _Tooltip(button, layout_direction.describe(current), self._theme, self._type)
+
+    def _toggle_direction(self) -> None:
+        """Flip the reading direction, persist it, and rebuild the window."""
+        now: Direction = "rtl" if self._direction == "ltr" else "ltr"
+        self._direction = now
+        layout_direction.save_direction(now, getattr(self.service, "data_root", None))
+        # A rebuild re-packs the navigation on the chosen side (the transcript is
+        # snapshotted first, so no message is lost).
+        self._build_ui()
+
+    def _toggle_internet(self) -> None:
+        """Flip the one internet preference, persist it, and refresh the label.
+
+        The switch is shared: it writes the same ``core.preferences`` value the
+        chat's web toggle and the Training Center read, so turning it here turns it
+        on everywhere, and the live chat session is switched too when it can search.
+        """
+        root = getattr(self.service, "data_root", None)
+        now = settings_hub.write_internet(root, not settings_hub.read_internet(root))
+        self._internet_var.set("on" if now else "off")
+        if hasattr(self, "_internet_button"):
+            self._internet_button.configure(text=f"🌐   Internet: {'on' if now else 'off'}")
+            _Tooltip(
+                self._internet_button, settings_hub.internet_status(root), self._theme, self._type
+            )
+        # Switch the live session too, so the chat answers with the new choice now.
+        with best_effort("switch the live session's internet setting"):
+            if self.service.web_available():
+                self.service.set_web(now)
+
+    # ------------------------------------------------------------- home dashboard
+
+    def _build_home_panel(self, panel: tk.Misc) -> None:
+        """Build (or rebuild) the Home dashboard section.
+
+        The rows come from :mod:`gui.dashboard`, which reads the live session and
+        the machine's own figures -- so the dashboard never names a model the
+        session is not using and never invents a resource figure. The quick-action
+        buttons run the *existing* sidebar actions by their keys, so a shortcut can
+        never do something the sidebar cannot.
+        """
+        if panel is None:
+            return
+        for child in panel.winfo_children():
+            child.destroy()
+        dashboard = dashboard_module.dashboard_for(
+            self.service,
+            mouth_label=self._source_choice_label(),
+            recent_chats=self._home_recent_chats(),
+            knowledge_summary=self._home_knowledge_summary(),
+            notifications=self._notifications,
+            resources=self._home_resources(),
+            quick_actions=self._home_quick_actions(),
+        )
+        for section in dashboard.sections:
+            self._home_section(panel, section)
+        # Opening the dashboard is the moment the user sees what arrived, so the
+        # unread badge clears here -- the feed itself keeps the records.
+        self._notifications.mark_seen()
+        if dashboard.quick_actions:
+            tk.Label(
+                panel, text="Quick actions", bg=self._theme.surface, fg=self._theme.text_dim,
+                font=self._type.font("2xs", weight="bold"), anchor="w",
+            ).pack(fill="x", padx=16, pady=(6, 2))
+            for action in dashboard.quick_actions:
+                self._sidebar_button(
+                    panel, action.label, partial(self._home_run_action, action.key), small=True
+                ).pack(fill="x", padx=12, pady=1)
+
+    def _home_section(self, panel: tk.Misc, section: Any) -> None:
+        """One dashboard section: a heading and its labelled rows."""
+        tk.Label(
+            panel, text=section.title, bg=self._theme.surface, fg=self._theme.foreground,
+            font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=16, pady=(6, 1))
+        for row in section.rows:
+            line = tk.Frame(panel, bg=self._theme.surface)
+            line.pack(fill="x", padx=16, pady=0)
+            tk.Label(
+                line, text=row.label, bg=self._theme.surface, fg=self._theme.text_dim,
+                font=self._type.font("2xs"), anchor="w", width=11, justify="left",
+            ).pack(side="left")
+            value = tk.Label(
+                line, text=row.value, bg=self._theme.surface, fg=self._theme.foreground,
+                font=self._type.font("2xs"), anchor="w", justify="left", wraplength=150,
+            )
+            value.pack(side="left", fill="x", expand=True)
+            if row.detail:
+                _Tooltip(value, row.detail, self._theme, self._type)
+
+    def _home_recent_chats(self) -> tuple[Any, ...]:
+        """The few most recent saved conversations, newest first (never raising)."""
+        items: tuple[Any, ...] = ()
+        with best_effort("read the recent conversations"):
+            items = tuple(self.service.saved_session_summaries())
+        return items[: dashboard_module.DEFAULT_RECENT_CHATS]
+
+    def _home_knowledge_summary(self) -> str:
+        """A one-line knowledge-base figure, or ``""`` when there is none to show.
+
+        The figure comes from :func:`gui.dashboard.knowledge_base_summary`, which
+        reads the project's own store, so the dashboard and the CLI agree.
+        """
+        return dashboard_module.knowledge_base_summary(
+            getattr(self.service, "data_root", None)
+        )
+
+    def _home_resources(self) -> Any:
+        """The machine's own figures, or ``None`` when they cannot be read."""
+        result: Any = None
+
+        def _read() -> None:
+            nonlocal result
+            from core.model_resources import system_resources
+
+            result = system_resources(disk_path=getattr(self.service, "data_root", None))
+
+        with best_effort("read the machine's own resource figures"):
+            _read()
+        return result
+
+    def _home_quick_actions(self) -> tuple[Any, ...]:
+        """The quick-action shortcuts, resolved against the real action catalogue."""
+        from gui.actions import action_by_key
+
+        actions: list[Any] = []
+        for key in dashboard_module.QUICK_ACTION_KEYS:
+            try:
+                action = action_by_key(key)
+            except KeyError:
+                continue  # an action that left the catalogue is simply skipped
+            actions.append(
+                dashboard_module.QuickAction(action.key, action.sidebar_label)
+            )
+        return tuple(actions)
+
+    def _home_run_action(self, key: str) -> None:
+        """Run a quick action through the window's one action dispatcher."""
+        from gui.actions import action_by_key
+
+        try:
+            action = action_by_key(key)
+        except KeyError:
+            return
+        self._on_action(action)
 
     def _build_themes_panel(self, panel: tk.Misc) -> None:
         """Build (or rebuild) the Themes section: one clickable row per theme.
@@ -1483,11 +1832,7 @@ class FaydGUI:
         self._profiles[scope] = profile
         save_profiles(self._profiles)
         self._base_type = for_root(self.root)
-        self._type = self._base_type.with_overrides(self._profiles[SCOPE_WINDOWS])
-        self._chat_type = self._base_type.with_overrides(self._profiles[SCOPE_CHAT])
-        self._lists_type = self._base_type.with_overrides(self._profiles[SCOPE_LISTS])
-        self._font = self._type.ui_family
-        self._mono = self._type.mono_family
+        self._resolve_type_scales()
         self._rebuild_preserving_transcript()
         # The *windows* and *lists* scopes reach the dialogs; a chat-only change
         # leaves them exactly as they are (rebuilding every open window for nothing
@@ -1866,9 +2211,38 @@ class FaydGUI:
 
     # -------------------------------------------------------------------- main
 
+    def _nav_side(self) -> Literal["left", "right"]:
+        """The side the navigation column sits on for the chosen reading direction."""
+        return layout_direction.side_for(getattr(self, "_direction", "ltr"))
+
+    def _direction_alignment(self) -> Literal["left", "right"]:
+        """The default paragraph alignment the reading direction asks for."""
+        return layout_direction.default_alignment(getattr(self, "_direction", "ltr"))
+
+    def _resolve_type_scales(self) -> None:
+        """Build the three type scales from the base and the user's own profiles.
+
+        One place does it, so the *windows*, *chat*, and *lists* scales can never
+        drift, and each one is told the reading direction's default alignment -- so
+        an untouched profile makes plain text follow the direction (right for RTL)
+        while an explicit Fonts & paragraphs alignment still wins.
+        """
+        fallback = self._direction_alignment()
+        self._type = self._base_type.with_overrides(
+            self._profiles[SCOPE_WINDOWS], fallback_alignment=fallback
+        )
+        self._chat_type = self._base_type.with_overrides(
+            self._profiles[SCOPE_CHAT], fallback_alignment=fallback
+        )
+        self._lists_type = self._base_type.with_overrides(
+            self._profiles[SCOPE_LISTS], fallback_alignment=fallback
+        )
+        self._font = self._type.ui_family
+        self._mono = self._type.mono_family
+
     def _build_main(self, shell: tk.Frame) -> None:
         main = tk.Frame(shell, bg=self._theme.base)
-        main.pack(side="left", fill="both", expand=True)
+        main.pack(side=self._nav_side(), fill="both", expand=True)
         self._main_frame = main
 
         self._build_header(main)
@@ -2847,7 +3221,13 @@ class FaydGUI:
         self._source_menu_var_reset()
         self._sync_model_buttons()
         self._apply_mode_label()
+        self._refresh_home()
         self._add_bubble("note", chat_module.mouth_switched_message(want))
+
+    def _refresh_home(self) -> None:
+        """Redraw the Home dashboard if it is open (the model it names changed)."""
+        if getattr(self, "_home_open", False) and getattr(self, "_home_panel", None) is not None:
+            self._build_home_panel(self._home_panel)
 
     def _on_enter(self, _event: tk.Event) -> str:
         self._on_send()
@@ -2957,7 +3337,7 @@ class FaydGUI:
             self._sidebar_visible = False
             self._auto_hidden = False
         else:
-            self._sidebar.pack(side="left", fill="y", before=self._main_frame)
+            self._sidebar.pack(side=self._nav_side(), fill="y", before=self._main_frame)
             self._sidebar_visible = True
             self._auto_hidden = False
 
@@ -2970,7 +3350,7 @@ class FaydGUI:
             self._sidebar_visible = False
             self._auto_hidden = True
         elif not self._is_compact() and not self._sidebar_visible and getattr(self, "_auto_hidden", False):
-            self._sidebar.pack(side="left", fill="y", before=self._main_frame)
+            self._sidebar.pack(side=self._nav_side(), fill="y", before=self._main_frame)
             self._sidebar_visible = True
             self._auto_hidden = False
 
@@ -3090,12 +3470,14 @@ class FaydGUI:
         # One window is kept and reused: a second press raises the open one.
         existing = getattr(self, "_kb_manager_dialog", None)
         if existing is not None:
-            try:
+            raised = False
+            with best_effort("raise the open Knowledge Base Manager"):
                 existing.window.lift()
+                raised = True
                 existing.window.focus_set()
+            if raised:
                 return
-            except Exception:
-                self._kb_manager_dialog = None
+            self._kb_manager_dialog = None
         service = KnowledgeBaseManagerService(data_root=self.service.data_root)
         self._kb_manager_dialog = KnowledgeBaseManagerDialog(
             self.root,
@@ -3263,6 +3645,89 @@ class FaydGUI:
             on_close=self._forget_characters,
         )
 
+    def _open_agents(self) -> None:
+        """Open (or focus) the Personalities (agents) window.
+
+        One window shows the seven characters as independent agents -- their
+        profiles, their capability ceilings, which one would answer a question, and
+        what each has actually done -- through a single
+        :class:`gui.agents.AgentsService`. One window is kept and reused, so
+        clicking the sidebar entry twice raises the open one.
+        """
+        existing = getattr(self, "_agents_dialog", None)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:  # the window was closed out from under us
+                self._agents_dialog = None
+
+        from gui.agents_dialog import AgentsDialog
+
+        self._agents_dialog = AgentsDialog(
+            self.root,
+            self._agents_service(),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
+            on_close=self._forget_agents,
+        )
+
+    def _forget_agents(self) -> None:
+        self._agents_dialog = None
+
+    def _open_maintenance(self) -> None:
+        """Open (or focus) the Maintenance window.
+
+        One window backs up and restores the project's own stores, reads the
+        machine's and the models' diagnostics, and lists the keyboard shortcuts
+        the program binds, through a single
+        :class:`gui.maintenance.MaintenanceService`. One window is kept and reused,
+        so clicking the sidebar entry twice raises the open one.
+        """
+        existing = getattr(self, "_maintenance_dialog", None)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:  # the window was closed out from under us
+                self._maintenance_dialog = None
+
+        from gui.maintenance import MaintenanceService
+        from gui.maintenance_dialog import MaintenanceDialog
+
+        self._maintenance_dialog = MaintenanceDialog(
+            self.root,
+            MaintenanceService(getattr(self.service, "data_root", None)),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
+            on_close=self._forget_maintenance,
+        )
+
+    def _forget_maintenance(self) -> None:
+        self._maintenance_dialog = None
+
+    def _agents_service(self):
+        """The service the agents window drives.
+
+        A real :class:`gui.agents.AgentsService` by default.
+        ``agents_service_factory`` may be set to build a lighter one, so a test can
+        open the window without a full data directory.
+        """
+        factory = getattr(self, "agents_service_factory", None)
+        if factory is not None:
+            return factory()
+        from gui.agents import AgentsService
+
+        return AgentsService(data_root=getattr(self.service, "data_root", None))
+
     def _open_cognition(self) -> None:
         """Open (or focus) the Autonomous Cognitive System window.
 
@@ -3350,10 +3815,10 @@ class FaydGUI:
         apply = getattr(getattr(dialog, "service", None), "reload_character_voice", None)
         if not callable(apply):
             return False
-        try:
-            return bool(apply())
-        except Exception:
-            return False
+        applied = False
+        with best_effort("re-apply the character's voice to an open window"):
+            applied = bool(apply())
+        return applied
 
     def _live_character_assistant(self, key: str) -> Any:
         """The character's loaded assistant in the live session, or ``None``.
@@ -3893,6 +4358,14 @@ class FaydGUI:
         if action.key in {"characters", "characters-shareable"}:
             self._open_characters()
             return
+        # The Personalities (agents) entry opens the multi-agent window.
+        if action.key == "agents":
+            self._open_agents()
+            return
+        # The Maintenance entry opens the backup/diagnostics window.
+        if action.key == "maintenance":
+            self._open_maintenance()
+            return
         # The Autonomous mind entry opens the cognition window.
         if action.key in {"cognition", "cognition-characters"}:
             self._open_cognition()
@@ -3949,6 +4422,7 @@ class FaydGUI:
                 return
             argv = (*argv, question)
         self._add_bubble("note", f"Running: {action.label} …")
+        self._running_label = action.label
         self._streaming_label = self._add_bubble("note", f"{action.label} — live output:")
         self._start_work(lambda: self._run_action(action, argv))
 
@@ -4156,10 +4630,19 @@ class FaydGUI:
             self._hide_thinking()
             if kind == "ok":
                 self._render_result(payload)
+                self._notifications.post(
+                    self._running_label or "A background job", level="success"
+                )
             else:
                 self._add_bubble("assistant", f"Something went wrong: {payload}")
+                self._notifications.post(
+                    self._running_label or "A background job",
+                    detail=str(payload),
+                    level="error",
+                )
             self._busy = False
             self._streaming_label = None
+            self._running_label = ""
             self._set_send_enabled(True)
             self._update_status()
             self.refresh_history()

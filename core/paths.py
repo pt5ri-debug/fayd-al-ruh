@@ -444,6 +444,17 @@ def self_improvement_backups_dir() -> Path:
     return self_improvement_dir() / "backups"
 
 
+def backups_dir() -> Path:
+    """Where the Maintenance page writes a user-requested backup (``data/backups``).
+
+    Git-ignored and ``FAYD_DATA_DIR``-aware like every other writable folder, so a
+    backup never dirties the working tree. It holds the memory/learning database
+    copies and the knowledge-base backup the Settings hub's Maintenance section
+    offers; the copies are the user's own data, never committed.
+    """
+    return data_dir() / "backups"
+
+
 def bundled_artifacts_dir() -> Path:
     """Read-only artifacts inside the code or bundle, used as a fallback."""
     return bundle_root() / "ml" / "artifacts"
@@ -570,6 +581,7 @@ __all__ = [
     "ENV_DATA_DIR",
     "artifacts_dir",
     "audiocpp_models_dir",
+    "backups_dir",
     "bundle_root",
     "bundled_artifacts_dir",
     "bundled_checkpoints_dir",
