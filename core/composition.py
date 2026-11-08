@@ -209,6 +209,31 @@ _ARABIC_TOPIC_VERBS = frozenset(
     }
 )
 
+#: Arabic *request* words -- the framing of the question rather than its topic.
+#: Dropped only at the leading position, so a word that could name a topic is
+#: never removed from the middle of the phrase. ``أفعل`` ("do") in
+#: ``ماذا أفعل لزيادة النفاذية؟`` is the case this exists for.
+_ARABIC_TOPIC_LEADING_VERBS = frozenset(
+    {
+        "أفعل", "أريد", "أحتاج", "أستطيع", "أقدر", "يمكنني", "أعمل",
+        "يجب", "ينبغي", "علي", "أود", "أطلب", "أسأل", "أبحث",
+        # The particles that introduce the verb ("أريد **أن** أفهم") -- dropped so
+        # the leading-verb drop can reach the verb behind them.
+        "أن", "أنّ", "إن", "إنّ",
+    }
+)
+
+#: English request verbs -- the framing of the question rather than its topic.
+#: Dropped only at the leading position (and, once dropped, another leading one
+#: is dropped too, so ``"I want to understand porosity"`` reads
+#: ``"porosity"``), so a verb that could name a topic inside the phrase is kept.
+_TOPIC_LEADING_VERBS = frozenset(
+    {
+        "want", "need", "understand", "know", "learn", "see", "get",
+        "like", "help", "try", "wish", "ask",
+    }
+)
+
 #: Verbs that carry no topic on their own. Dropped from an English topic phrase so
 #: "porosity **relate** permeability" reads "porosity permeability". Deliberately
 #: small and unambiguously verbal: a word that could be a noun (a process, a
@@ -589,7 +614,7 @@ def _arabic_topic_phrase(terms: Sequence[str]) -> str:
     could be a noun is kept, so nothing the user named disappears.
     """
     kept = [term for term in terms if term not in _ARABIC_TOPIC_PRONOUNS]
-    if kept and kept[0] in _ARABIC_TOPIC_VERBS:
+    while kept and kept[0] in _ARABIC_TOPIC_VERBS | _ARABIC_TOPIC_LEADING_VERBS:
         kept = kept[1:]
     return " ".join(kept) if kept else " ".join(terms)
 
@@ -605,7 +630,7 @@ def _english_topic_phrase(terms: Sequence[str]) -> str:
     disappears.
     """
     kept = [term for term in terms if term.casefold() not in _TOPIC_PRONOUNS]
-    if kept and kept[0].casefold() in _TOPIC_VERBS:
+    while kept and kept[0].casefold() in _TOPIC_VERBS | _TOPIC_LEADING_VERBS:
         kept = kept[1:]
     kept = [term for term in kept if term.casefold() not in _TOPIC_VERBS]
     return " ".join(kept) if kept else " ".join(terms)

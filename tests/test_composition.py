@@ -460,6 +460,17 @@ def test_topic_phrase_drops_an_object_pronoun_the_question_omits():
     assert topic_phrase("tell me about porosity") == "porosity"
 
 
+def test_topic_phrase_drops_a_leading_request_verb():
+    """The verb that frames the request is not part of the topic.
+
+    "I want to understand porosity" reads as the request; the topic is
+    "porosity". Only the *leading* position is touched, and the drop repeats, so
+    two stacked request words both go and a verb inside the phrase is kept.
+    """
+    assert topic_phrase("I want to understand porosity") == "porosity"
+    assert topic_phrase("what can I do about water cut?") == "water cut"
+
+
 def test_topic_phrase_leaves_an_arabic_question_in_arabic():
     assert topic_phrase("ما هي المسامية؟") == "المسامية"
     # A leading bare verb is dropped too, so the phrase is the topic, not the
@@ -467,6 +478,15 @@ def test_topic_phrase_leaves_an_arabic_question_in_arabic():
     assert topic_phrase("كيف أقيس النفاذية؟") == "النفاذية"
     # The addressing pronoun ("لي") is the request, not the topic.
     assert topic_phrase("اشرح لي ضغط المسام") == "ضغط المسام"
+
+
+def test_topic_phrase_drops_an_arabic_request_verb_and_its_particle():
+    """The Arabic request framing ("ماذا **أفعل**"، "أريد **أن** أفهم") is not the topic."""
+    assert topic_phrase("ماذا أفعل لزيادة النفاذية؟") == "لزيادة النفاذية"
+    assert topic_phrase("أريد أن أفهم المسامية") == "المسامية"
+    assert topic_phrase("كيف أعمل على تحسين الإنتاج؟") == "تحسين الإنتاج"
+    # A word that could be a noun is kept: "معامل التكوين" survives untouched.
+    assert topic_phrase("ما هو معامل التكوين؟") == "معامل التكوين"
 
 
 def test_grounded_answer_skips_bare_fragment_sources():
