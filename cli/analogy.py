@@ -161,3 +161,5 @@ def main(argv: Sequence[str] | None = None) -> int:
     if handler is None:
         return EXIT_USAGE
     return handler(args)
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

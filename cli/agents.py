@@ -320,3 +320,5 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = ["build_parser", "main"]
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

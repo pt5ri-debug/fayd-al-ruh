@@ -965,3 +965,5 @@ _HANDLERS.update(
 )
 
 __all__ = ["INDICATORS", "LABELS", "STAGE_SETTINGS", "main"]
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

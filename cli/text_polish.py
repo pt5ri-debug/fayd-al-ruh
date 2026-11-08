@@ -111,3 +111,5 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception as error:
         print(f"Unexpected failure: {error}", file=sys.stderr)
         return EXIT_FAILURE
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
