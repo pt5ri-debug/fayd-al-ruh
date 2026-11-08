@@ -42,6 +42,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Literal
 
+from core.best_effort import best_effort
+
 # ------------------------------------------------------------ the font stacks
 #
 # OpenHands' ``src/index.css``: the body stack is the system UI stack (its
@@ -85,10 +87,9 @@ def _tk_scaling(root: object | None) -> float:
     interpreter = getattr(root, "tk", None)
     if interpreter is None:
         return _BASE_SCALING
-    try:
+    value = _BASE_SCALING
+    with best_effort("read the display's Tk scaling"):
         value = float(interpreter.call("tk", "scaling"))
-    except Exception:
-        return _BASE_SCALING
     if value <= 0:
         return _BASE_SCALING
     return value
@@ -231,7 +232,9 @@ class Typography:
         """A raw pixel size (e.g. a one-off) as a Tk point size."""
         return to_points(pixels, self.scaling)
 
-    def with_overrides(self, profile: object) -> Typography:
+    def with_overrides(
+        self, profile: object, *, fallback_alignment: str | None = None
+    ) -> Typography:
         """A copy of this scale with a user profile's own choices folded in.
 
         ``profile`` is duck-typed (:class:`gui.typography_settings.TypographyProfile`):
@@ -241,6 +244,12 @@ class Typography:
         weight, slant, and leading. An empty field means "keep the project's
         own", so a profile that never touched the font leaves the scale exactly
         as it was.
+
+        ``fallback_alignment`` is the reading direction's default alignment
+        (``right`` for RTL). It applies **only** when the profile never chose an
+        alignment of its own, so a reader who set the paragraph alignment in
+        Fonts & paragraphs always wins -- the direction supplies a default, it
+        never overrides an explicit choice.
         """
         family = getattr(profile, "family", "") or ""
         mono = getattr(profile, "mono_family", "") or ""
@@ -252,6 +261,10 @@ class Typography:
         alignment = str(getattr(paragraph, "alignment", "left") or "left")
         if alignment not in ("left", "center", "right"):
             alignment = "left"
+        if alignment == "left" and fallback_alignment in ("left", "center", "right"):
+            is_default = getattr(paragraph, "is_default", None)
+            if is_default is None or is_default():
+                alignment = fallback_alignment
         return replace(
             self,
             ui_family=family or self.ui_family,
@@ -404,12 +417,12 @@ def for_root(root: object | None) -> Typography:
 
 def _families(root: object | None) -> set[str]:
     """Every font family Tk can see, or an empty set with no display."""
-    try:
+    families: set[str] = set()
+    with best_effort("list the display's font families"):
         from tkinter import font as tkfont
 
-        return set(tkfont.families(root))  # type: ignore[arg-type]
-    except Exception:
-        return set()
+        families = set(tkfont.families(root))  # type: ignore[arg-type]
+    return families
 
 
 #: A typography built for the default scale, for a caller with no root yet

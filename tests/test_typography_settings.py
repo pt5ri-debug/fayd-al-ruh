@@ -310,6 +310,22 @@ def test_a_bad_paragraph_falls_to_a_drawable_alignment() -> None:
     assert typed.justify() == "left"
 
 
+def test_the_reading_direction_supplies_a_default_alignment() -> None:
+    """RTL makes plain text right-aligned, but never overrides a real choice."""
+    base = for_root(None)
+    # An untouched profile takes the direction's default (right for RTL).
+    rtl = base.with_overrides(TypographyProfile(), fallback_alignment="right")
+    assert rtl.justify() == "right"
+    # LTR keeps the project's own left alignment.
+    assert base.with_overrides(TypographyProfile(), fallback_alignment="left").justify() == "left"
+    # A reader who chose an alignment keeps it: the direction only fills a gap.
+    chosen = base.with_overrides(
+        TypographyProfile(paragraph=ParagraphStyle(alignment="center")),
+        fallback_alignment="right",
+    )
+    assert chosen.justify() == "center"
+
+
 def test_the_size_scale_multiplies_every_role() -> None:
     """The scale's own sizes are all multiplied, so the whole window grows."""
     base = for_root(None)

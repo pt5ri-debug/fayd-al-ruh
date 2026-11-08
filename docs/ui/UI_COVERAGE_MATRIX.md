@@ -70,6 +70,17 @@ the "Phase 5 additions" heading are the *new* surfaces.
 | Notification feed | main window | record background outcomes | `gui.notifications.NotificationFeed` | `tests/test_notifications.py` | n/a |
 | Model-fit note | each per-mouth window | "will it fit?" estimate | `core.model_files`/`model_preflight` | `tests/test_model_chat.py` | n/a |
 
+## Phase 6 additions (accessibility, localization, persistence)
+
+| Control / behaviour | Location | Function | Backend | Test | Regression |
+|---------------------|----------|----------|---------|------|-----------|
+| Reading direction (LTR/RTL) | Settings section | move the navigation, choose alignment | `gui.layout_direction` | `tests/test_layout_direction.py`, `tests/test_gui_design.py` | n/a |
+| Direction default alignment | type scales (all scopes) | plain text follows the direction; an explicit choice still wins | `gui.typography.Typography.with_overrides` | `tests/test_typography_settings.py` | n/a |
+| Escape to close | every window's title bar | close the active window/dialog | `gui.window_controls.install_window_controls` | `tests/test_window_controls.py` | OK (unchanged) |
+| Window size memory | main window | restore the last size on launch | `gui.app.load_window_geometry`/`save_window_geometry` | `tests/test_gui_design.py` | n/a |
+| UI never blocks | every worker pump | run long work off the UI thread | `gui.components.WorkerPump` | `tests/test_components.py` | OK (unchanged) |
+| Escape listed | Maintenance window | shortcut catalogue | `gui.maintenance.SHORTCUTS` | `tests/test_maintenance.py` | OK (unchanged) |
+
 ## Target vs. measured
 
 | Target | Measured |

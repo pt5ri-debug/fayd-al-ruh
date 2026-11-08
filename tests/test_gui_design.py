@@ -1823,3 +1823,66 @@ def test_ask_teacher_toggles_the_loop_and_streams_turns(tmp_path) -> None:
         assert built[0].stopped is True
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_window_remembers_its_size(tmp_path) -> None:
+    """The main window's size is saved on close and restored on the next launch."""
+    import tkinter as tk
+
+    from gui.app import FaydGUI, load_window_geometry
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.geometry("900x640")
+        root.update()
+        app._on_close()
+    finally:
+        try:
+            root.destroy()
+        except tk.TclError:
+            pass
+    width, height, _zoomed = load_window_geometry(tmp_path)
+    assert (width, height) == (900, 640)
+
+
+def test_saved_geometry_rejects_an_unusable_size(tmp_path) -> None:
+    """A saved size below the usable minimum falls back to the default opening size."""
+    from gui.app import _DEFAULT_WINDOW_SIZE, load_window_geometry
+
+    assert load_window_geometry(tmp_path)[:2] == _DEFAULT_WINDOW_SIZE
+    from storage.json_store import JsonStore
+
+    JsonStore(tmp_path).save("gui", "window_geometry", {"width": 100, "height": 100})
+    assert load_window_geometry(tmp_path)[:2] == _DEFAULT_WINDOW_SIZE
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_reading_direction_moves_the_navigation(tmp_path) -> None:
+    """Choosing RTL packs the navigation on the right; the choice is remembered."""
+    import tkinter as tk
+
+    from gui import layout_direction
+    from gui.app import FaydGUI
+
+    root = tk.Tk()
+    try:
+        app = FaydGUI(root, service=_service(tmp_path))
+        root.update()
+        assert app._nav_side() == "left"
+        assert app._sidebar.pack_info()["side"] == "left"
+        assert app._direction_alignment() == "left"
+        app._toggle_direction()
+        root.update()
+        assert app._direction == "rtl"
+        assert app._nav_side() == "right"
+        # The sidebar really moved: it is packed on the right in the rebuilt window.
+        assert app._sidebar.pack_info()["side"] == "right"
+        # And the direction supplies the default paragraph alignment, so plain
+        # text follows it (an explicit Fonts & paragraphs choice would still win).
+        assert app._direction_alignment() == "right"
+        assert app._chat_type.justify() == "right"
+        assert layout_direction.load_direction(tmp_path) == "rtl"
+    finally:
+        root.destroy()

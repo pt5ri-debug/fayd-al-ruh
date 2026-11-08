@@ -171,6 +171,7 @@ def test_shortcuts_match_the_real_bindings() -> None:
     app_source = Path("gui/app.py").read_text(encoding="utf-8").lower()
     clipboard_source = Path("gui/clipboard.py").read_text(encoding="utf-8").lower()
     composer_source = Path("gui/chat_composer.py").read_text(encoding="utf-8").lower()
+    controls_source = Path("gui/window_controls.py").read_text(encoding="utf-8").lower()
     combined = app_source + clipboard_source + composer_source
     for shortcut in MaintenanceService().shortcuts():
         if shortcut.keys.startswith("Ctrl+"):
@@ -183,6 +184,8 @@ def test_shortcuts_match_the_real_bindings() -> None:
             assert "<return>" in composer_source
         if shortcut.keys == "Shift+Enter":
             assert "<shift-return>" in composer_source
+        if shortcut.keys == "Escape":
+            assert "<escape>" in controls_source
 
 
 # ------------------------------------------------------------------- CLI

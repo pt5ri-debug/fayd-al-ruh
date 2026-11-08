@@ -444,12 +444,8 @@ class ModelChatService:
         self.profile = profiles.set_model(self.mouth, key)
         setter = getattr(self.service, "set_mouth_model", None)
         if setter is not None:
-            try:
+            with best_effort("rebuild the mouth on the chosen model"):
                 setter(self.mouth, key)
-            except _ACTIVATION_ERRORS:
-                pass  # saved; ``activation_status`` reports why it cannot answer yet
-            except Exception:
-                pass
         self._activate()
         return key
 

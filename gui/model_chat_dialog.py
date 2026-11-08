@@ -35,6 +35,7 @@ from tkinter import filedialog
 from tkinter import font as tkfont
 from typing import Any
 
+from core.best_effort import best_effort
 from core.reading import clip_is_silent
 
 from gui import clipboard, rich_text
@@ -1024,18 +1025,14 @@ class ModelChatDialog(ThemedDialog):
                 pass
             self._pump_after = None
         if self._recording is not None:
-            try:
+            with best_effort("stop the recording when the window closes"):
                 self.service.stop_recording()
-            except Exception:
-                pass
             self._recording = None
         # End a reading in progress and drop every footer's bound command, so the
         # destroyed window is not held by a cycle only the cyclic collector could
         # break (which can run on a worker thread and deadlock on a Tcl call).
-        try:
+        with best_effort("stop the reading when the window closes"):
             self.service.stop_reading()
-        except Exception:
-            pass
         for footer in self._footers:
             footer.clear_commands()
         self._footers.clear()

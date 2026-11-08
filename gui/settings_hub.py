@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.best_effort import best_effort
+
 #: The JSON namespace the window's own preferences share (theme, voice, fonts,
 #: sidebar layout), matching ``gui.app``/``gui.themes``/``gui.typography_settings``.
 GUI_NAMESPACE = "gui"
@@ -131,6 +133,15 @@ SETTINGS_ENTRIES: tuple[SettingsEntry, ...] = (
         writer="gui.app.save_sidebar_sections",
         store=(GUI_NAMESPACE, "sidebar_sections"),
     ),
+    SettingsEntry(
+        key="reading_direction",
+        title="Reading direction",
+        description="Left-to-right or right-to-left; moves the navigation and default alignment.",
+        reader="gui.layout_direction.load_direction",
+        writer="gui.layout_direction.save_direction",
+        store=(GUI_NAMESPACE, "layout_direction"),
+        link="settings",
+    ),
 )
 
 #: Settings that are deliberately **context-dependent**, so they must *not* be
@@ -215,10 +226,10 @@ def _preferences(root: Any) -> Any:
 
 def read_internet(root: Any) -> bool:
     """Whether the internet is on, read from the one authoritative preference."""
-    try:
-        return bool(_preferences(root).record.web)
-    except Exception:
-        return False
+    enabled = False
+    with best_effort("read the internet preference"):
+        enabled = bool(_preferences(root).record.web)
+    return enabled
 
 
 def write_internet(root: Any, enabled: bool) -> bool:
@@ -247,10 +258,10 @@ def internet_status(root: Any) -> str:
 
 
 def _safe(call: Any, default: Any) -> Any:
-    try:
-        return call()
-    except Exception:
-        return default
+    result = default
+    with best_effort("read a global setting's value"):
+        result = call()
+    return result
 
 
 def current_values(root: Path | None = None) -> dict[str, str]:
@@ -267,45 +278,48 @@ def current_values(root: Path | None = None) -> dict[str, str]:
         "reading_voice": _safe(load_reading_voice, "unknown") or "the default voice",
         "auto_speak": "on" if _safe(load_auto_speak, False) else "off",
     }
-    try:
+    typography = "unknown"
+    with best_effort("read the typography settings"):
         from gui.typography_settings import SCOPES, load_profile
 
-        values["typography"] = ", ".join(
+        typography = ", ".join(
             f"{scope}: {_safe(lambda scope=scope: load_profile(scope).describe(), 'unknown')}"
             for scope in SCOPES
         )
-    except Exception:
-        values["typography"] = "unknown"
+    values["typography"] = typography
     values["internet"] = "on" if read_internet(root) else "off"
-    try:
+    tashkeel = "unknown"
+    with best_effort("read the tashkeel preference"):
         record = _preferences(root).record
-        values["tashkeel"] = (
-            f"{'on' if record.tashkeel else 'off'} ({record.tashkeel_mode})"
-        )
-    except Exception:
-        values["tashkeel"] = "unknown"
-    try:
-        from core.cloud_model import (
-            load_model_key,
-            selected_provider,
-        )
+        tashkeel = f"{'on' if record.tashkeel else 'off'} ({record.tashkeel_mode})"
+    values["tashkeel"] = tashkeel
+    cloud_provider = "unknown"
+    cloud_model = "unknown"
+    with best_effort("read the cloud provider and model"):
+        from core.cloud_model import load_model_key, selected_provider
         from core.paths import data_dir
 
         provider = _safe(lambda: selected_provider(data_dir()), None)
-        values["cloud_provider"] = _safe(lambda: provider.key, "unknown") if provider else "unknown"
-        model = _safe(lambda: load_model_key(data_dir(), provider.key), None) if provider else None
-        values["cloud_model"] = model or "(provider default)"
-    except Exception:
-        values["cloud_provider"] = "unknown"
-        values["cloud_model"] = "unknown"
-    try:
+        cloud_provider = _safe(lambda: provider.key, "unknown") if provider else "unknown"
+        model = load_model_key(data_dir(), provider.key) if provider else None
+        cloud_model = model or "(provider default)"
+    values["cloud_provider"] = cloud_provider
+    values["cloud_model"] = cloud_model
+    sidebar_layout = "unknown"
+    with best_effort("read the sidebar layout"):
         from gui.app import load_sidebar_sections
 
         states = load_sidebar_sections(root)
         opened = sum(1 for open_ in states.values() if open_)
-        values["sidebar_layout"] = f"{opened} section(s) open"
-    except Exception:
-        values["sidebar_layout"] = "unknown"
+        sidebar_layout = f"{opened} section(s) open"
+    values["sidebar_layout"] = sidebar_layout
+    direction = "unknown"
+    with best_effort("read the reading direction"):
+        from gui.layout_direction import describe as describe_direction
+        from gui.layout_direction import load_direction
+
+        direction = describe_direction(load_direction(root))
+    values["reading_direction"] = direction
     return values
 
 

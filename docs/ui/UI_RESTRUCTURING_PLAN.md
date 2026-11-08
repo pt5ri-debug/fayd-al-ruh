@@ -131,16 +131,45 @@ the Settings page reports each setting and flips the shared switch.
 
 **Gate:** each new surface has tests and a row in `UI_COVERAGE_MATRIX.md`.
 
-## Phase 6 — Performance, accessibility, localization
+## Phase 6 — Performance, accessibility, localization *(done)*
 
-- Route the broad `except Exception: pass` blocks through
-  `core.best_effort.best_effort`.
-- Keyboard navigation: logical tab order, documented shortcuts, Escape to close.
-- RTL layout preference for Arabic; mixed Arabic-English rendering.
-- Persist window sizes; confirm long work never blocks the UI thread.
+- **Broad swallows routed through `core.best_effort.best_effort`.** Every place
+  the interface deliberately ignores a failure (a live internet-session switch,
+  a per-mouth model activation, stopping a recording/reading on close, the
+  Windows/macOS/X11 work-area probes, the installed-font listing) now goes
+  through the one helper, so what was dropped is *recorded* rather than lost.
+- **Keyboard navigation.** `install_window_controls` binds **Escape** to close
+  the active window/dialog (the standard affordance), and the shortcut catalogue
+  (`gui.maintenance.SHORTCUTS`) now lists it -- `tests/test_maintenance.py`'s
+  binding check confirms the key is really bound.
+- **RTL/LTR layout direction.** `gui/layout_direction.py` (new, Tk-free) is the
+  one preference: it moves the navigation column to the **right** for RTL and
+  left for LTR, chooses the default paragraph alignment, and offers a
+  `detect_direction` for mixed text. The main window reads it once at build and
+  re-packs the sidebar/main frame on the chosen side; the Settings section has
+  the one switch (`_toggle_direction`), which rebuilds the window (the
+  transcript is snapshotted first). The direction's default alignment reaches the
+  type scales: `Typography.with_overrides` takes a `fallback_alignment`, and
+  `FaydGUI._resolve_type_scales` (the one place the three scales are built) passes
+  it, so plain text follows the direction while an explicit Fonts & paragraphs
+  alignment always wins. The preference is registered in
+  `gui.settings_hub` as a global setting with one authoritative home.
+- **Mixed Arabic-English rendering.** Pinned by test: the Arabic-script run is
+  detected as RTL even with a Latin term inside, an English sentence with an
+  Arabic term stays LTR, and a letters-free string uses the fallback rather than
+  guessing.
+- **Window-size persistence.** The main window's size (and maximized flag) is
+  saved on close through `save_window_geometry` and restored at startup through
+  `load_window_geometry`; an unusable saved size (below the minimum) falls back
+  to the default opening size.
+- **Long work never blocks the UI thread.** Pinned by
+  `test_worker_pump_never_blocks_the_ui_thread`: a slow worker leaves the Tk
+  event loop turning (the pump runs it on its own thread and hands the result
+  back through the queue), so the window stays responsive.
 
-**Gate:** `test_gui_typography.py`/`test_gui_design.py` extended; a test proves
-the UI thread is never blocked.
+**Gate:** `tests/test_layout_direction.py` (new), `tests/test_window_controls.py`,
+`tests/test_components.py`, `tests/test_gui_design.py`, and
+`tests/test_settings_hub.py` extended; `ruff`/`mypy` clean; `evaluation` PASS.
 
 ## Phase 7 — Full regression and integration
 
