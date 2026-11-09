@@ -131,6 +131,29 @@ def test_auto_names_never_repeat_a_discarded_number(studio: CodeStudio) -> None:
     assert second.slug == "PR2"
 
 
+def test_auto_names_skip_a_name_whose_branch_still_exists(studio: CodeStudio) -> None:
+    """A leftover ``studio/PR1`` branch must not break auto-naming.
+
+    A crash mid-discard, a ``forget``, or a data directory reset can leave the
+    branch behind while the Studio's own list is empty. ``_next_slug`` used to
+    hand ``PR1`` back regardless, so ``create`` then refused its own auto-assigned
+    name -- an unusable Studio. The auto-name now skips a name whose branch
+    still exists.
+    """
+    workspace = studio.create("First")
+    assert workspace.slug == "PR1"
+    # The branch survives, but the Studio no longer remembers the workspace
+    # (and the forward counter is gone, as after a data-directory reset).
+    studio.forget(workspace.slug)
+    state = studio._load_state()
+    state.pop("__next_serial__", None)
+    studio._save_state(state)
+
+    second = studio.create("Second")
+    assert second.slug == "PR2"
+    assert second.branch == "studio/PR2"
+
+
 def test_an_explicit_slug_is_still_honoured(studio: CodeStudio) -> None:
     workspace = studio.create("Add a --json flag", slug="add-a-json-flag")
     assert workspace.slug == "add-a-json-flag"
