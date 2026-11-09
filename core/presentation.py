@@ -1047,12 +1047,29 @@ class PresentationStore:
         self.root = Path(root) if root is not None else data_dir()
         self._store = JsonStore(self.root)
 
+    @staticmethod
+    def _require_id(project_id: str) -> str:
+        """A project id must be a non-empty simple name.
+
+        The id usually comes from the user (a CLI argument or a window field),
+        and a blank one -- an empty string, or a shell variable that expanded to
+        nothing -- is not a lookup that "found nothing": it is a malformed
+        request. Raised as :class:`PresentationError` so the CLI reports it
+        cleanly (its ``main`` catches that) instead of leaking the storage
+        layer's generic ``ValueError`` as a traceback.
+        """
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise PresentationError("A presentation project needs a non-empty id.")
+        return project_id
+
     def save(self, project: PresentationProject) -> None:
         """Persist one project (atomic: JsonStore writes a temp then replaces)."""
+        self._require_id(project.project_id)
         self._store.save(PRESENTATIONS_NAMESPACE, project.project_id, project.to_primitive())
 
     def load(self, project_id: str) -> PresentationProject | None:
         """Load a project by id, or ``None`` when it does not exist."""
+        self._require_id(project_id)
         record = self._store.load(PRESENTATIONS_NAMESPACE, project_id)
         if record is None:
             return None
@@ -1076,6 +1093,7 @@ class PresentationStore:
 
     def delete(self, project_id: str) -> bool:
         """Remove a project. Returns whether a file was removed."""
+        self._require_id(project_id)
         path = self._store.root / self._store._encode(PRESENTATIONS_NAMESPACE)
         target = path / f"{self._store._encode(project_id)}.json"
         if target.exists():
