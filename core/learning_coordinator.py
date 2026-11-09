@@ -91,6 +91,21 @@ class CoordinatorStatus:
             f"lessons={self.lessons}; feedback={self.feedback}; version={self.version}"
         )
 
+    def to_primitive(self) -> dict[str, Any]:
+        """The snapshot as plain JSON-able data, for ``--json`` callers."""
+        return {
+            "owner": self.owner,
+            "is_main_model": self.is_main_model,
+            "private": self.private,
+            "events": self.events,
+            "counts": dict(self.counts),
+            "procedures": self.procedures,
+            "trusted_procedures": self.trusted_procedures,
+            "lessons": self.lessons,
+            "feedback": self.feedback,
+            "version": self.version,
+        }
+
 
 class LearningCoordinator:
     """The one owner's learning system: knowledge, experience, feedback, patterns."""

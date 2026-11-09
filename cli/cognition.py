@@ -275,6 +275,35 @@ def _cmd_prove(args: argparse.Namespace) -> int:
     rolls back. Nothing is asserted that the run did not do.
     """
     controller = _controller()
+    if args.json:
+        cycle = controller.think(max_ideas=args.ideas)
+        report = CognitiveEvaluator(controller.ontology).evaluate()
+        learning = controller.cognitive_learning()
+        learning.learn_fact(
+            "prove-1",
+            "acid stimulation increases permeability",
+            source=Source(SourceKind.CORPUS, "petroleum_corpus"),
+            confidence=0.9,
+            verified=True,
+        )
+        recalled = learning.recall("permeability", limit=3)
+        payload: dict[str, object] = {
+            "cycle": cycle.to_primitive(),
+            "report": report.to_primitive(),
+            "recalled": recalled,
+            "trained": False,
+        }
+        if args.train:
+            outcome = IncrementalTrainer().run(stage=TrainingStage.SMOKE)
+            payload["trained"] = True
+            payload["training"] = {
+                "stage": outcome.stage().value,
+                "accepted": outcome.accepted,
+                "reason": outcome.reason,
+            }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
     print("1. Thinking")
     cycle = controller.think(max_ideas=args.ideas)
     print(f"   {cycle.describe()}")
@@ -300,8 +329,6 @@ def _cmd_prove(args: argparse.Namespace) -> int:
         print("4. A staged training run (smoke)")
         outcome = IncrementalTrainer().run(stage=TrainingStage.SMOKE)
         print(f"   {outcome.describe()}")
-    if args.json:
-        print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))
     return 0
 
 
