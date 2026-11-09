@@ -1059,10 +1059,12 @@ class ChatService:
     def _presentation_ask(self, question: str) -> str:
         """Answer one Presentation Studio question with *this* session's assistant.
 
-        The Studio must never stand up a second AI: it borrows the conversation's
-        own loop (``self.mode``), so a presentation is discussed with the same
-        grounded assistant, the same knowledge base, and the same citations the
-        chat window uses. Speech is suppressed -- the Studio reads text.
+        This is the Studio's *fallback* brain: the Studio's own language model
+        (:meth:`presentation_author`) writes the discussion, outline, and slides
+        whenever it is installed, and only when it is absent does the Studio borrow
+        the conversation's own grounded loop (``self.mode``) -- so a deck is not
+        silently reduced to cited extracts. Speech is suppressed -- the Studio
+        reads text.
         """
         turn = self.mode.handle(question, require_wake=False, speak=False)
         return turn.answer_text or turn.response

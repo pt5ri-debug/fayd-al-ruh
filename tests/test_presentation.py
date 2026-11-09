@@ -440,6 +440,29 @@ def test_the_discussion_uses_the_injected_assistant(tmp_path: Path) -> None:
     assert assistant.asked == ["What is porosity?"]
 
 
+def test_the_discussion_prefers_the_studio_model_over_the_assistant(tmp_path: Path) -> None:
+    # The Studio's own model is the primary brain for everything the Studio
+    # generates: the discussion must come from it, not from the grounded source
+    # retriever (the injected assistant), so a deck's facts are the Studio's own.
+    assistant = ScriptedAssistant("A cited extract from the sources.")
+    author = ScriptedAssistant("The Studio model's own answer.")
+    service = PresentationService(root=tmp_path / "store", ask=assistant)
+    service.set_author(author)
+    project = service.new_project("Deck")
+    result = service.discuss(project.project_id, "What is porosity?")
+    assert result.answer == "The Studio model's own answer."
+    assert author.asked == ["What is porosity?"]
+    assert assistant.asked == []  # the source assistant was never consulted
+
+
+def test_the_discussion_falls_back_to_the_assistant_with_no_studio_model(tmp_path: Path) -> None:
+    assistant = ScriptedAssistant("A grounded answer.")
+    service = PresentationService(root=tmp_path / "store", ask=assistant)
+    project = service.new_project("Deck")
+    service.discuss(project.project_id, "What is porosity?")
+    assert assistant.asked == ["What is porosity?"]
+
+
 def test_a_missing_assistant_is_reported_rather_than_faked(tmp_path: Path) -> None:
     service = PresentationService(root=tmp_path / "store")
     project = service.new_project("Deck")
