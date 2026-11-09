@@ -1,6 +1,8 @@
 """Command line for Presentation Studio (the headless twin of its window).
 
     python -m cli presentation new "Reservoir Porosity"   # a new project
+    python -m cli presentation from-schedule "Petroleum 101" --schedule-file schedule.txt
+    python -m cli presentation from-schedule "Deck" --example --parse-only  # read a schedule
     python -m cli presentation list                       # the projects so far
     python -m cli presentation show PRS-001               # state + slides
     python -m cli presentation rename PRS-001 "New title"
@@ -70,6 +72,7 @@ from core.presentation import (
     parse_slide_range,
 )
 from core.presentation_layout import LAYOUTS
+from core.presentation_schedule import SCHEDULE_EXAMPLE
 from gui.presentation import PresentationService, SlideSpec
 
 
@@ -281,6 +284,48 @@ def _run_new(service: PresentationService, args: argparse.Namespace) -> int:
         _print_json({"ok": True, "project_id": project.project_id, "title": project.title})
     else:
         print(f"Created {project.project_id}: {project.title!r} ({STATE_LABELS[project.state]}).")
+    return 0
+
+
+def _read_text_arg(args: argparse.Namespace, *, direct: str, file_attr: str) -> str | None:
+    """Read a text argument either directly or from the file it names."""
+    if direct:
+        return direct
+    path = getattr(args, file_attr, None)
+    if path:
+        return Path(path).read_text(encoding="utf-8")
+    return None
+
+
+def _run_from_schedule(service: PresentationService, args: argparse.Namespace) -> int:
+    schedule = _read_text_arg(args, direct=args.schedule or "", file_attr="schedule_file")
+    if not schedule and getattr(args, "example", False):
+        schedule = SCHEDULE_EXAMPLE
+    if not schedule:
+        print("Provide the schedule with --schedule or --schedule-file.", file=sys.stderr)
+        return 2
+    if args.parse_only:
+        plan = service.parse_schedule(schedule, title=args.title)
+        if args.as_json:
+            _print_json(plan.to_primitive())
+        else:
+            print(plan.describe())
+        return 0
+    text = _read_text_arg(args, direct=args.text or "", file_attr="text_file")
+    report = service.build_from_schedule(
+        args.title,
+        schedule,
+        subtitle=args.subtitle or "",
+        audience=args.audience or "",
+        language=args.language,
+        text=text,
+    )
+    if args.as_json:
+        _print_json(report.as_dict())
+    else:
+        print(report.summary())
+        for slide in report.project.ordered_slides():
+            print(f"  {slide.number}. {slide.title}")
     return 0
 
 
@@ -1082,6 +1127,7 @@ def _run_courses(service: PresentationService, args: argparse.Namespace) -> int:
 
 _HANDLERS = {
     "new": _run_new,
+    "from-schedule": _run_from_schedule,
     "list": _run_list,
     "show": _run_show,
     "status": _run_status,
@@ -1134,6 +1180,20 @@ _NEEDS_ASSISTANT = frozenset(
 )
 
 
+def _needs_assistant(args: argparse.Namespace) -> bool:
+    """Whether this command loads the assistant (drafting) or can run with no model.
+
+    ``from-schedule`` drafts slides through the assistant, but a ``--text`` /
+    ``--text-file`` supplies the content directly (and ``--parse-only`` only reads
+    the schedule), so it is loaded only when the assistant will really be asked.
+    """
+    if args.command in _NEEDS_ASSISTANT:
+        return True
+    if args.command == "from-schedule":
+        return not args.parse_only and not (args.text or args.text_file)
+    return False
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="presentation", description=__doc__)
     parser.add_argument("--root", default=None, help="Where projects are stored (default: the data directory).")
@@ -1151,6 +1211,35 @@ def _build_parser() -> argparse.ArgumentParser:
     new.add_argument("--subtitle", default="")
     new.add_argument("--audience", default="")
     new.add_argument("--language", default="en", help="Content language hint (default: en).")
+
+    from_schedule = sub.add_parser(
+        "from-schedule",
+        help="Build a whole deck from a pasted training schedule (days and topics).",
+    )
+    from_schedule.add_argument("title")
+    from_schedule.add_argument(
+        "--schedule", default="", help="The schedule text (days/sessions and their topics)."
+    )
+    from_schedule.add_argument(
+        "--schedule-file", default=None, help="Read the schedule text from this file."
+    )
+    from_schedule.add_argument(
+        "--parse-only", action="store_true",
+        help="Only parse and print the schedule (no project is created).",
+    )
+    from_schedule.add_argument(
+        "--example", action="store_true",
+        help="Use the built-in worked-example schedule (no input needed).",
+    )
+    from_schedule.add_argument("--subtitle", default="")
+    from_schedule.add_argument("--audience", default="")
+    from_schedule.add_argument("--language", default="en", help="Content language hint (default: en).")
+    from_schedule.add_argument(
+        "--text", default="", help="Use this text for every slide instead of the assistant."
+    )
+    from_schedule.add_argument(
+        "--text-file", default=None, help="Read the per-slide text from this file."
+    )
 
     sub.add_parser("list", help="List the presentation projects.")
 
@@ -1426,7 +1515,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 0
     try:
-        service = _service(args, need_assistant=args.command in _NEEDS_ASSISTANT)
+        service = _service(args, need_assistant=_needs_assistant(args))
         return _HANDLERS[args.command](service, args)
     except PresentationError as error:
         print(str(error), file=sys.stderr)

@@ -1,0 +1,248 @@
+"""Tests for the schedule engine, the schedule build, and its CLI command.
+
+The Studio's headline capability is: paste a training schedule (days and topics),
+and the window prepares professional scientific content, split into numbered
+slides. These tests pin the deterministic reader (``core.presentation_schedule``),
+the one-step build (``PresentationService.build_from_schedule``), and the CLI
+(``python -m cli presentation from-schedule``), with **negative controls**: a
+blank schedule yields no plan, an unrelated line is never read as a day, and a
+bare topic list still parses in order.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from core.presentation import STATE_SLIDE_REVIEW
+from core.presentation_schedule import (
+    SchedulePlan,
+    ScheduleTopic,
+    outline_from_schedule,
+    parse_schedule,
+)
+from gui.presentation import PresentationService
+
+SCHEDULE = """Day 1: Porosity and permeability
+- Definition of porosity
+- Effective vs total porosity
+Day 2: Well logging
+- Gamma ray
+- Density and neutron logs
+Day 3: Well testing
+"""
+
+
+class ScriptedAssistant:
+    """A deterministic stand-in for the project's assistant (no model needed)."""
+
+    def __init__(self, answer: str) -> None:
+        self.answer = answer
+        self.prompts: list[str] = []
+
+    def __call__(self, question: str) -> str:
+        self.prompts.append(question)
+        return self.answer
+
+
+def _service(tmp_path: Path, answer: str = "") -> PresentationService:
+    ask = ScriptedAssistant(answer) if answer else None
+    return PresentationService(root=tmp_path / "store", output_dir=tmp_path / "out", ask=ask)
+
+
+# --------------------------------------------------------------- the reader
+
+
+def test_a_day_schedule_parses_into_topics_in_order() -> None:
+    plan = parse_schedule(SCHEDULE, title="Reservoir Engineering")
+    assert plan.title == "Reservoir Engineering"
+    assert [topic.title for topic in plan.topics] == [
+        "Porosity and permeability",
+        "Well logging",
+        "Well testing",
+    ]
+    assert [topic.number for topic in plan.topics] == [1, 2, 3]
+    assert plan.topics[0].details == ("Definition of porosity", "Effective vs total porosity")
+    assert plan.topics[2].details == ()
+    assert plan.topics[0].heading == "Day 1 — Porosity and permeability"
+
+
+def test_arabic_days_parse_and_keep_their_ordinal() -> None:
+    text = "اليوم الأول: المسامية والنفاذية\n- تعريف المسامية\nاليوم الثاني: تسجيل الآبار\n"
+    plan = parse_schedule(text)
+    assert [topic.title for topic in plan.topics] == ["المسامية والنفاذية", "تسجيل الآبار"]
+    # The Arabic ordinal is used as written, never replaced with a digit.
+    assert plan.topics[0].heading == "اليوم الأول — المسامية والنفاذية"
+
+
+def test_session_and_word_numbers_parse() -> None:
+    plan = parse_schedule("Session one - Intro\nSession two - Darcy's law")
+    assert [topic.title for topic in plan.topics] == ["Intro", "Darcy's law"]
+    assert [topic.number for topic in plan.topics] == [1, 2]
+
+
+def test_a_bare_topic_list_still_parses_in_order() -> None:
+    plan = parse_schedule("Porosity\nPermeability\nWell logs")
+    assert [topic.title for topic in plan.topics] == ["Porosity", "Permeability", "Well logs"]
+    # A bare list has no day label, so each line is its own numbered topic.
+    assert all(topic.label == "" for topic in plan.topics)
+
+
+def test_a_blank_schedule_yields_no_plan() -> None:
+    plan = parse_schedule("   \n\n\t\n")
+    assert plan.is_empty
+    assert plan.topics == ()
+
+
+def test_an_unrelated_line_is_never_read_as_a_day() -> None:
+    # "Playlist" starts with "Play", not a day noun, so it is a plain topic.
+    plan = parse_schedule("Playlist\nSomething else")
+    assert [topic.title for topic in plan.topics] == ["Playlist", "Something else"]
+    assert all(topic.label == "" for topic in plan.topics)
+
+
+def test_the_outline_has_one_section_per_day_with_its_subtopics() -> None:
+    plan = parse_schedule(SCHEDULE)
+    sections = outline_from_schedule(plan)
+    assert [section.heading for section in sections] == [
+        "Day 1 — Porosity and permeability",
+        "Day 2 — Well logging",
+        "Day 3 — Well testing",
+    ]
+    assert sections[0].subsections == ("Definition of porosity", "Effective vs total porosity")
+    assert sections[0].estimated_slides == 2
+    assert sections[2].subsections == ()
+
+
+def test_the_plan_round_trips_through_its_primitive() -> None:
+    plan = parse_schedule(SCHEDULE, title="Deck")
+    restored = SchedulePlan.from_primitive(json.loads(json.dumps(plan.to_primitive())))
+    assert restored == plan
+
+
+def test_a_topic_needs_a_title() -> None:
+    with pytest.raises(ValueError):
+        ScheduleTopic(label="Day", number=1, title="   ")
+
+
+# --------------------------------------------------------------- the build
+
+
+def test_build_from_schedule_makes_a_numbered_deck(tmp_path: Path) -> None:
+    text = (
+        "Porosity\n"
+        "- Porosity is the fraction of bulk volume that is void.\n"
+        "- Effective porosity counts only interconnected pores.\n"
+    )
+    service = _service(tmp_path, answer=text)
+    report = service.build_from_schedule("Reservoir Engineering", SCHEDULE)
+    assert report.topic_count == 3
+    assert report.drafted == 7  # 3 day headings + 2 + 2 sub-topics
+    assert report.state == STATE_SLIDE_REVIEW
+    project = service.get(report.project_id)
+    numbers = [slide.number for slide in project.ordered_slides()]
+    assert numbers == [1, 2, 3, 4, 5, 6, 7]
+    # Every slide keeps the day it came from and the sub-topic it covers.
+    assert project.ordered_slides()[0].section == "Day 1 — Porosity and permeability"
+    assert project.ordered_slides()[1].subsection == "Definition of porosity"
+    # The approved outline is the schedule itself, so the deck is a real structure.
+    assert project.outline is not None
+    assert len(project.outline.sections) == 3
+
+
+def test_build_from_schedule_asks_a_professional_scientific_prompt(tmp_path: Path) -> None:
+    assistant = ScriptedAssistant("Title\n- One scientific statement.\n")
+    service = PresentationService(root=tmp_path / "s", output_dir=tmp_path / "o", ask=assistant)
+    service.build_from_schedule("Deck", "Day 1: Porosity\n")
+    assert assistant.prompts, "the assistant must have been asked for slide content"
+    prompt = assistant.prompts[0]
+    assert "professional training deck" in prompt
+    assert "Porosity" in prompt
+    assert "units" in prompt
+
+
+def test_build_from_schedule_with_supplied_text_needs_no_model(tmp_path: Path) -> None:
+    service = _service(tmp_path)  # no assistant at all
+    report = service.build_from_schedule(
+        "Deck", "Day 1: Porosity\n", text="Title\n- A bullet.\n- Another bullet.\n"
+    )
+    assert report.drafted == 1
+    assert report.state == STATE_SLIDE_REVIEW
+
+
+def test_build_from_schedule_refuses_a_blank_schedule(tmp_path: Path) -> None:
+    service = _service(tmp_path, answer="x\n- y\n")
+    from core.presentation import PresentationError
+
+    with pytest.raises(PresentationError):
+        service.build_from_schedule("Deck", "   \n\n")
+
+
+def test_parse_schedule_on_the_service_matches_the_engine(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    assert service.parse_schedule(SCHEDULE).topics == parse_schedule(SCHEDULE).topics
+
+
+# --------------------------------------------------------------- the CLI
+
+
+def test_cli_from_schedule_parse_only(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from cli.presentation import main
+
+    root = tmp_path / "store"
+    rc = main(
+        [
+            "--root", str(root),
+            "from-schedule", "Petroleum 101",
+            "--schedule", SCHEDULE,
+            "--parse-only",
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Day 1 — Porosity and permeability" in out
+    assert "Well logging" in out
+
+
+def test_cli_from_schedule_builds_with_text(tmp_path: Path) -> None:
+    from cli.presentation import main
+
+    root = tmp_path / "store"
+    text_file = tmp_path / "slide.txt"
+    text_file.write_text("Porosity\n- A bullet.\n- Another bullet.\n", encoding="utf-8")
+    rc = main(
+        [
+            "--root", str(root),
+            "from-schedule", "Petroleum 101",
+            "--schedule", "Day 1: Porosity\nDay 2: Permeability\n",
+            "--text-file", str(text_file),
+        ]
+    )
+    assert rc == 0
+    from gui.presentation import PresentationService
+
+    service = PresentationService(root=root)
+    project = service.list_projects()[0]
+    assert len(project.slides) == 2
+
+
+def test_cli_from_schedule_json_is_pure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.presentation import main
+
+    root = tmp_path / "store"
+    rc = main(
+        [
+            "--json", "--root", str(root),
+            "from-schedule", "Deck",
+            "--schedule", "Day 1: A\n",
+            "--text", "A\n- bullet one\n- bullet two\n",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["drafted"] == 1
+    assert payload["state"] == STATE_SLIDE_REVIEW
+    assert payload["topics"] == 1

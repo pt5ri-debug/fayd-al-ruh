@@ -49,6 +49,7 @@ from core.presentation import (
     PresentationError,
     theme_names,
 )
+from core.presentation_schedule import SCHEDULE_EXAMPLE
 
 from gui import clipboard, rich_text
 from gui import markdown as md
@@ -74,21 +75,33 @@ SUBTITLE = (
 HONESTY_LINE = (
     "Discussion, outline, and slide text come from the project's own assistant — the same "
     "grounded assistant and knowledge base the chat window uses, with its citations. "
-    "Nothing is exported until you approve the content. The .pptx is written locally, in "
-    "editable PowerPoint shapes, with the optional python-pptx engine (the built-in "
-    "writer is used when it is not installed)."
+    "Paste a training schedule (days and topics) to build a whole numbered deck in one "
+    "step. Nothing is exported until you approve the content. The .pptx is written "
+    "locally, in editable PowerPoint shapes, with the optional python-pptx engine (the "
+    "built-in writer is used when it is not installed)."
 )
 
-#: The workflow, in order, with the sidebar button that advances it.
+#: The guidance shown under the schedule box.
+SCHEDULE_HINT = (
+    "Paste your training schedule — one day/session per line (\"Day 1: Porosity\", "
+    "\"اليوم الأول: المسامية\", \"Session 2 …\"), with any sub-topics indented beneath "
+    "it. The Studio reads it, then writes professional scientific content for each "
+    "topic, one numbered slide after another."
+)
+
+#: The production workflow, in order, with the sidebar button that advances it.
+#: The labels read as clear production steps (a small, universal vocabulary a
+#: user of any presentation program recognises), while the keys are the stable
+#: contract the rest of the window and the tests use.
 STEPS: tuple[tuple[str, str], ...] = (
-    ("discuss", "1. Discuss the subject"),
-    ("outline", "2. Draft the outline"),
-    ("review-outline", "3. Review the outline"),
-    ("approve-outline", "4. Approve the outline"),
-    ("slides", "5. Draft the slides"),
-    ("review-slides", "6. Review the slides"),
-    ("approve-content", "7. Approve the content"),
-    ("export", "8. Export the .pptx"),
+    ("discuss", "1  Content & discussion"),
+    ("outline", "2  Draft the outline"),
+    ("review-outline", "3  Review the outline"),
+    ("approve-outline", "4  Approve the outline"),
+    ("slides", "5  Draft the slides"),
+    ("review-slides", "6  Review the slides"),
+    ("approve-content", "7  Approve the content"),
+    ("export", "8  Export the .pptx"),
 )
 
 
@@ -165,6 +178,7 @@ class PresentationDialog(ThemedDialog):
         self._slide_type_var = tk.StringVar(value="bullets")
         self._slide_section_var = tk.StringVar(value="")
         self._slide_subsection_var = tk.StringVar(value="")
+        self._schedule_title_var = tk.StringVar(value="")
 
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
@@ -210,6 +224,15 @@ class PresentationDialog(ThemedDialog):
         return button(
             parent, text, command, theme=self.theme, typography=self._type,
             variant="secondary", small=True, anchor="w",
+        )
+
+    def _primary_button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
+        """The one call-to-action button (the shared ``primary`` variant)."""
+        from gui.components import button
+
+        return button(
+            parent, text, command, theme=self.theme, typography=self._type,
+            variant="primary", small=True, anchor="w",
         )
 
     # -- sidebar ----------------------------------------------------------
@@ -277,7 +300,44 @@ class PresentationDialog(ThemedDialog):
         )
         self._state_label.pack(fill="x", padx=14, pady=(0, 4))
 
-        workflow = column.add("workflow", "The workflow", icon="🧭")
+        schedule = column.add("schedule", "From a schedule", icon="📅")
+        tk.Label(
+            schedule, text=SCHEDULE_HINT, bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        ).pack(fill="x", padx=14, pady=(4, 4))
+        tk.Label(
+            schedule, text="Title of the presentation", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(2, 0))
+        tk.Entry(
+            schedule, textvariable=self._schedule_title_var, bg=theme.base,
+            fg=theme.foreground, insertbackground=theme.primary, relief="flat",
+            highlightthickness=0, font=self._type.font("xs"),
+        ).pack(fill="x", padx=14, pady=(2, 6))
+        self._schedule_box = tk.Text(
+            schedule, wrap="word", height=8, bg=theme.base, fg=theme.foreground,
+            insertbackground=theme.primary, relief="flat", highlightthickness=0,
+            font=self._type.font("2xs"), padx=6, pady=6,
+        )
+        self._schedule_box.pack(fill="x", padx=14, pady=(0, 4))
+        self._schedule_box.insert("1.0", SCHEDULE_EXAMPLE)
+        schedule_actions = tk.Frame(schedule, bg=theme.surface)
+        schedule_actions.pack(fill="x", padx=14, pady=(0, 4))
+        self._schedule_button = self._primary_button(
+            schedule_actions, "Build the deck", self._on_build_from_schedule
+        )
+        self._schedule_button.pack(side="left")
+        self._schedule_parse_button = self._button(
+            schedule_actions, "Read only", self._on_parse_schedule
+        )
+        self._schedule_parse_button.pack(side="left", padx=(6, 0))
+        self._schedule_note = tk.Label(
+            schedule, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._schedule_note.pack(fill="x", padx=14, pady=(0, 10))
+
+        workflow = column.add("workflow", "Production steps", icon="🧭")
         self._step_buttons: dict[str, tk.Button] = {}
         for key, label in STEPS:
             button = self._button(workflow, label, lambda k=key: self._run_step(k))
@@ -806,6 +866,12 @@ class PresentationDialog(ThemedDialog):
             button.configure(state=state)
         for button in (self._rename_button, self._duplicate_button, self._delete_button):
             button.configure(state="disabled")
+        for extra in (
+            getattr(self, "_schedule_button", None),
+            getattr(self, "_schedule_parse_button", None),
+        ):
+            if extra is not None:
+                extra.configure(state=state)
         if not enabled:
             self._export_button.configure(state="disabled")
             self._check_button.configure(state="disabled")
@@ -1079,6 +1145,67 @@ class PresentationDialog(ThemedDialog):
             self._set_status("Create a presentation first.", error=True)
             return
         handler()
+
+    def _on_build_from_schedule(self) -> None:
+        """Build a whole numbered deck from the pasted schedule, in one step."""
+        schedule = self._schedule_box.get("1.0", "end").strip()
+        if not schedule:
+            self._set_schedule_note("Paste a schedule first.", error=True)
+            return
+        title = self._schedule_title_var.get().strip()
+        if not title:
+            first = next((line.strip() for line in schedule.splitlines() if line.strip()), "")
+            title = first.split(":", 1)[-1].strip() or "Training deck"
+            self._schedule_title_var.set(title)
+        self._add_message("user", schedule, title="Training schedule")
+        self._add_message(
+            "note",
+            f"Building **{title}** from the schedule: reading the days and topics, then "
+            "writing professional scientific content for each, one numbered slide at a "
+            "time. This runs on the worker thread — the status line shows the progress.",
+            title="Building the deck",
+        )
+
+        def job() -> Any:
+            return self.service.build_from_schedule(title, schedule)
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._report_error(error)
+                return
+            self._refresh_projects()
+            self._select_project(result.project_id)
+            self._set_schedule_note(result.summary())
+            self._add_message(
+                "note",
+                f"{result.summary()}\n\nReview and edit the slides below, approve the "
+                "content, then export the .pptx.",
+                title="Deck built",
+            )
+
+        self._run_background("Building the deck from the schedule…", job, finish)
+
+    def _on_parse_schedule(self) -> None:
+        """Read the pasted schedule and show the topics it found (no deck built)."""
+        schedule = self._schedule_box.get("1.0", "end").strip()
+        if not schedule:
+            self._set_schedule_note("Paste a schedule first.", error=True)
+            return
+        try:
+            plan = self.service.parse_schedule(schedule, title=self._schedule_title_var.get())
+        except Exception as error:
+            self._report_error(error)
+            return
+        if plan.is_empty:
+            self._set_schedule_note("No topics were found in that text.", error=True)
+            return
+        self._set_schedule_note(f"Read {len(plan.topics)} topic(s).")
+        self._add_message("assistant", plan.describe(), title="Schedule read")
+
+    def _set_schedule_note(self, message: str, *, error: bool = False) -> None:
+        self._schedule_note.configure(
+            text=message, fg=self.theme.danger if error else self.theme.text_secondary
+        )
 
     def _on_new_project(self) -> None:
         title = simpledialog.askstring(TITLE, "Title of the presentation:", parent=self.window)

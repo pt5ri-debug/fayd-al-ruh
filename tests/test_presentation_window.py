@@ -598,3 +598,53 @@ def test_the_export_button_validates_before_it_writes(tmp_path: Path) -> None:
     finally:
         root.destroy()
 
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_window_builds_a_deck_from_a_pasted_schedule(tmp_path: Path) -> None:
+    """The headline capability: paste a schedule, get a numbered deck, in the window."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.presentation_dialog import PresentationDialog
+
+    service = _service(tmp_path)
+    root = tk.Tk()
+    try:
+        dialog = PresentationDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        root.update()
+        # The schedule box starts with a worked example and the build button exists.
+        assert dialog._schedule_box.get("1.0", "end").strip()
+        assert dialog._schedule_button.cget("state") == "normal"
+
+        dialog._schedule_title_var.set("Petroleum 101")
+        dialog._schedule_box.delete("1.0", "end")
+        dialog._schedule_box.insert(
+            "1.0",
+            "Day 1: Porosity and permeability\n"
+            "- Definition of porosity\n"
+            "Day 2: Well logging\n",
+        )
+        # "Read only" reports the topics without building anything.
+        dialog._on_parse_schedule()
+        root.update()
+        assert "topic(s)" in dialog._schedule_note.cget("text")
+        assert not service.list_projects()
+
+        # "Build the deck" drafts a whole numbered deck on the worker thread.
+        dialog._on_build_from_schedule()
+        assert _wait_until(root, lambda: not dialog._busy)
+        projects = service.list_projects()
+        assert len(projects) == 1
+        project = projects[0]
+        assert project.project_id == dialog._project_id
+        assert len(project.slides) == 3  # day 1 + its sub-topic + day 2
+        assert dialog._slide_list.size() == 3
+        # The slides are numbered 1..3 in the schedule's order.
+        assert project.ordered_slides()[0].number == 1
+        assert project.ordered_slides()[2].number == 3
+        dialog._close()
+    finally:
+        root.destroy()
