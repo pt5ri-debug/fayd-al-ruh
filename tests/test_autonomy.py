@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 from core.agents.runtime import CancellationToken
-from core.execution.coordinator import ExecutionCoordinator
+from core.execution.coordinator import ExecutionCoordinator, default_executor
 from core.execution.engine import ExecutionEngine, ExecutionReport, TaskExecution
 from core.execution.history import ExecutionHistory, redact
 from core.execution.permissions import ActionCategory, PermissionManager
@@ -220,6 +220,24 @@ def test_decomposition_is_bounded(root: Path):
         "read a.txt write b.txt compute 1+1"
     )
     assert len(engine.decompose(goal)) <= 2
+
+
+def test_decomposition_a_listing_goal_uses_list_dir_not_read_file(root: Path):
+    """A goal that asks to *list* is a directory listing, not a file read.
+
+    "list the files" names no file, so a read task would be missing its input and
+    could never satisfy the goal; it must select ``list_dir`` and run to success.
+    """
+    planner = PlanningCoordinator(catalogue=_catalogue(root))
+    goal = planner.goals.create("List the files in the workspace")
+    tasks = planner.decomposition.decompose(goal)  # type: ignore[union-attr]
+    listing = next(t for t in tasks if t.tool == "list_dir")
+    assert listing.arguments.get("relative") == "."
+    assert all(t.tool != "read_file" for t in tasks)
+    # The goal actually runs to success through the real coordinator, rather than
+    # failing on a missing file input the way a read task would.
+    result = default_executor(root=root).run_goal(goal)
+    assert result.success, result.describe()
 
 
 def test_decomposition_depth_over_bound_is_refused(root: Path):
