@@ -3,12 +3,13 @@
 This page turns a conversation into a real PowerPoint file, in the order a deck is
 actually made:
 
-* **Discuss.** Talk the subject over with the project's *existing* assistant --
-  the same grounded assistant and knowledge base the chat window uses. Every
-  answer is shown with its citations, exactly as the chat would.
-* **Outline.** Ask the assistant for an outline, or write one yourself; the
+* **Discuss.** Talk the subject over with the Studio's *own* language model (the
+  optional Qwen3 GGUF), so the facts and wording of the deck come from the Studio
+  rather than the grounded source retriever. With no model installed the project's
+  grounded assistant answers instead, which is the documented fallback.
+* **Outline.** Ask the Studio's model for an outline, or write one yourself; the
   outline is numbered and can be revised until you approve a revision.
-* **Draft the slides.** The assistant writes each section's slide content, one
+* **Draft the slides.** The Studio's model writes each section's slide content, one
   reviewable batch at a time.
 * **Review every slide.** Each slide is individually numbered; you can edit its
   title, body, table, equations, notes, its section/subsection, reorder it,
@@ -73,8 +74,9 @@ SUBTITLE = (
     "exactly the slides you approved, in exactly the order you approved them."
 )
 HONESTY_LINE = (
-    "Discussion, outline, and slide text come from the project's own assistant — the same "
-    "grounded assistant and knowledge base the chat window uses, with its citations. "
+    "The Studio's own language model writes the discussion, the outline, and the slide "
+    "content, so a deck's facts and wording come from it rather than the grounded source "
+    "retriever; with no model installed the project's grounded assistant answers instead. "
     "Paste a training schedule (days and topics) to build a whole numbered deck in one "
     "step. Nothing is exported until you approve the content. The .pptx is written "
     "locally, in editable PowerPoint shapes, with the optional python-pptx engine (the "
@@ -139,7 +141,7 @@ class PresentationDialog(ThemedDialog):
         # chat window owns that window's lifetime, so this dialog only asks for it.
         self._on_open_final_editor = on_open_final_editor
         # An optional callable returning the authoring model's honest status, shown
-        # so the user knows whether a dedicated model is drafting or the assistant.
+        # so the user knows whether the Studio's own model is drafting or the fallback.
         self._model_status = model_status
         # Called on the *worker* thread before a draft, so the Studio's own model is
         # loaded there (once) rather than at construction -- loading a multi-gigabyte
@@ -488,7 +490,7 @@ class PresentationDialog(ThemedDialog):
         """The shared rounded composer card, pinned to the bottom like the chat window."""
         composer = ChatComposer(
             parent, theme=self.theme, typography=self._type,
-            placeholder="Ask the assistant about the subject…", on_submit=self._on_discuss,
+            placeholder="Ask the Studio's model about the subject…", on_submit=self._on_discuss,
             outer_bg=self.theme.base, with_attach=False,
         )
         composer.wrap.pack(side="bottom", fill="x", padx=self._column_pad(), pady=(8, 12))
@@ -906,7 +908,7 @@ class PresentationDialog(ThemedDialog):
             self._add_message(
                 "note",
                 "Press **New presentation** to start, then discuss the subject with the "
-                "assistant in the box below.",
+                "Studio's model in the box below.",
                 title="Getting started",
             )
 
@@ -1085,14 +1087,14 @@ class PresentationDialog(ThemedDialog):
             backend = getattr(status, "backend", "")
             where = "in-process" if backend == "in-process" else "Ollama"
             return (
-                f"Drafting model: {getattr(status, 'model', 'qwen3:8b')} ({where}) — "
-                "outlines and slides are written by it."
+                f"Drafting model: {getattr(status, 'model', 'qwen3:8b')} ({where}) — the "
+                "discussion, outlines, and slides are written by it."
             )
         return (
-            "Drafting model: the project's own assistant. Install the Studio's Qwen3 "
-            "model for purpose-built slides: `python -m pip install -r "
-            "requirements-presentation.txt` then `python -m cli presentation "
-            "model-download --approve`."
+            "Drafting model: the project's grounded assistant (a fallback). Install the "
+            "Studio's Qwen3 model so the deck's facts and wording come from the Studio "
+            "itself: `python -m pip install -r requirements-presentation.txt` then "
+            "`python -m cli presentation model-download --approve`."
         )
 
     def _engine_line(self) -> str:
@@ -1167,6 +1169,7 @@ class PresentationDialog(ThemedDialog):
         )
 
         def job() -> Any:
+            self._prepare_author()
             return self.service.build_from_schedule(title, schedule)
 
         def finish(result: Any, error: Exception | None) -> None:
@@ -1307,6 +1310,7 @@ class PresentationDialog(ThemedDialog):
         self._add_message("user", question)
 
         def job() -> Any:
+            self._prepare_author()
             return self.service.discuss(self._project_id, question)
 
         def finish(result: Any, error: Exception | None) -> None:
@@ -1314,21 +1318,22 @@ class PresentationDialog(ThemedDialog):
                 self._report_error(error)
                 return
             self._add_message(
-                "assistant", result.answer, title="Assistant",
+                "assistant", result.answer, title="Studio model",
                 provenance=self._answer_provenance_line(),
             )
             self.refresh()
 
-        self._run_background("Asking the assistant…", job, finish)
+        self._run_background("Asking the Studio's model…", job, finish)
 
     def _answer_provenance_line(self) -> str:
         """Which model wrote this answer, and what it rested on.
 
-        The Studio drafts with its own Qwen3 model when one is installed and with
-        the project's assistant otherwise; the line names whichever it really is
-        (from the same honest status the sidebar note uses) so a reader of the
-        transcript knows what produced the words. The sources are the assistant's
-        own citations when the grounded path answered.
+        The Studio's own Qwen3 model writes the discussion, the outline, and the
+        slides; only when none is installed does the project's grounded assistant
+        answer. The line names whichever it really is (from the same honest status
+        the sidebar note uses) so a reader of the transcript knows what produced
+        the words. The sources are the grounded assistant's own citations when it
+        is the one that answered.
         """
         status = None
         if callable(self._model_status):
@@ -1354,17 +1359,18 @@ class PresentationDialog(ThemedDialog):
         note = simpledialog.askstring(
             TITLE,
             "Optional: write the outline yourself (one section per line, sub-sections "
-            "indented). Leave empty to ask the assistant.",
+            "indented). Leave empty to ask the Studio's model.",
             parent=self.window,
         )
         self.draft_outline(note if note and note.strip() else None)
 
-    def _prepare_draft(self) -> None:
+    def _prepare_author(self) -> None:
         """Wire the Studio's own authoring model, if one is installed.
 
-        Called on the worker thread just before a draft. It is best-effort: with no
-        model installed, or on a load failure, the Studio simply drafts with the
-        project's assistant, which is the documented fallback.
+        Called on the worker thread just before the Studio generates anything
+        (the discussion, an outline, or slide content). It is best-effort: with no
+        model installed, or on a load failure, the Studio simply falls back to the
+        project's grounded assistant, which is the documented fallback.
         """
         ensure = self._ensure_author
         if not callable(ensure):
@@ -1373,10 +1379,10 @@ class PresentationDialog(ThemedDialog):
             ensure()
 
     def draft_outline(self, text: str | None = None) -> None:
-        """Draft an outline (from ``text``, or by asking the assistant)."""
+        """Draft an outline (from ``text``, or by asking the Studio's model)."""
 
         def job() -> Any:
-            self._prepare_draft()
+            self._prepare_author()
             return self.service.draft_outline(self._project_id, text=text)
 
         def finish(result: Any, error: Exception | None) -> None:
@@ -1440,7 +1446,7 @@ class PresentationDialog(ThemedDialog):
             heading = heading.strip()
 
         def job() -> Any:
-            self._prepare_draft()
+            self._prepare_author()
             return self.service.draft_slides_from_outline(self._project_id, heading=heading)
 
         def finish(result: Any, error: Exception | None) -> None:
@@ -1556,7 +1562,7 @@ class PresentationDialog(ThemedDialog):
         """Put curriculum concepts into the Studio's own question box.
 
         The Course window hands the deck's *missing* concepts here; the user then
-        decides whether to ask the assistant about them. The Studio never drafts
+        decides whether to ask the Studio's model about them. The Studio never drafts
         on its own, so the user keeps control of what enters the deck.
         """
         current = self._composer.text().strip()

@@ -648,3 +648,49 @@ def test_the_window_builds_a_deck_from_a_pasted_schedule(tmp_path: Path) -> None
         dialog._close()
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_window_discussion_uses_the_studio_model_when_present(tmp_path: Path) -> None:
+    """The chat is answered by the Studio's own model, not the grounded sources."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.presentation_dialog import PresentationDialog
+
+    class _Recording:
+        def __init__(self, answer: str) -> None:
+            self.answer = answer
+            self.asked: list[str] = []
+
+        def __call__(self, question: str) -> str:
+            self.asked.append(question)
+            return self.answer
+
+    assistant = _Recording("A cited extract from the sources.")
+    author = _Recording("The Studio model's own answer.")
+    service = PresentationService(root=tmp_path / "store", output_dir=tmp_path / "out", ask=assistant)
+    service.set_author(author)
+
+    root = tk.Tk()
+    try:
+        dialog = PresentationDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        root.update()
+        project = service.new_project("Petrophysics")
+        dialog._refresh_projects()
+        dialog._select_project(project.project_id)
+        root.update()
+
+        dialog._question.insert("1.0", "What is porosity?")
+        dialog._on_discuss()
+        assert _wait_until(root, lambda: not dialog._busy)
+        text = _transcript_text(dialog).lower()
+        assert "the studio model's own answer" in text
+        assert "cited extract from the sources" not in text
+        assert author.asked == ["What is porosity?"]
+        assert assistant.asked == []
+        dialog._close()
+    finally:
+        root.destroy()

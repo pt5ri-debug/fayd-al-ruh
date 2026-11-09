@@ -40,10 +40,11 @@ It drives the *same* :class:`gui.presentation.PresentationService` the window
 uses, so the CLI and the window share one set of projects, one revision history,
 and one export gate. No workflow logic is reimplemented here.
 
-The discussion, outline draft, and slide draft call the project's *existing*
-assistant (through ``ai.jarvis.build_session``); with no model installed they
-still work when you supply the text yourself (``--text`` / ``--text-file`` /
-``--title`` / ``--bullet``).
+The discussion, outline draft, and slide draft use the Studio's *own* language
+model when one is installed (``core.presentation_model``), and fall back to the
+project's *existing* assistant (through ``ai.jarvis.build_session``) when it is
+not; with no model at all they still work when you supply the text yourself
+(``--text`` / ``--text-file`` / ``--title`` / ``--bullet``).
 
 Exit codes: ``0`` success, ``2`` invalid arguments, ``3`` the assistant is not
 available, ``4`` a gate refused the operation, ``5`` an unexpected failure.
