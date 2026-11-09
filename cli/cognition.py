@@ -207,7 +207,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as exit_:  # argparse already printed the reason
-        return int(exit_.code or EXIT_USAGE)
+        # Preserve argparse's own code exactly: ``--help`` raises ``SystemExit(0)``
+        # and a usage error ``SystemExit(2)``. ``exit_.code or EXIT_USAGE`` would
+        # turn the successful help exit (0 is falsy) into a failure.
+        return EXIT_OK if exit_.code is None else int(exit_.code)
     if not args.command:
         parser.print_help()
         return EXIT_OK

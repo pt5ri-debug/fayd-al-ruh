@@ -183,6 +183,21 @@ def test_an_unknown_command_is_a_usage_error():
     assert cognition_cli.main(["nonsense"]) == cognition_cli.EXIT_USAGE
 
 
+def test_help_exits_zero_and_a_usage_error_exits_two(capsys):
+    """``--help`` is a success, not a usage error.
+
+    argparse raises ``SystemExit(0)`` for ``--help``; catching it with
+    ``exit_.code or EXIT_USAGE`` treated the falsy ``0`` as a failure, so
+    ``python -m cli cognition --help`` exited ``2`` while the documented
+    ``python -m cli.cognition --help`` exited ``0``. The exit codes must match
+    what argparse itself chose.
+    """
+    assert cognition_cli.main(["--help"]) == cognition_cli.EXIT_OK
+    assert "usage" in capsys.readouterr().out.lower()
+    # A missing required value is still a real usage error.
+    assert cognition_cli.main(["learn"]) == cognition_cli.EXIT_USAGE
+
+
 def test_experience_records_a_lesson(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
     code = cognition_cli.main(
