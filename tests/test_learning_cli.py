@@ -75,6 +75,13 @@ class TestLearningCli:
         metrics = json.loads(capsys.readouterr().out)
         assert metrics["knowledge_events"] == 1.0
 
+    def test_status_json_is_machine_readable(self, env, capsys):
+        assert _run("status", "--json") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["owner"] == "fayd_al_ruh"
+        assert payload["is_main_model"] is True
+        assert payload["counts"]["knowledge"] == 0
+
     def test_evaluate_measures_the_learning(self, env, capsys):
         assert _run("evaluate", "porosity increases permeability", "--source", "document") == 0
         assert "improved" in capsys.readouterr().out
