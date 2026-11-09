@@ -34,6 +34,7 @@ from typing import Any
 
 from core.best_effort import best_effort
 from core.character_config import (
+    SECTIONS,
     CharacterConfig,
     default_config_for,
     owner_names,
@@ -251,7 +252,7 @@ class CharacterRegistry:
                     message=f"{type(error).__name__}: {error}",
                 )
                 return report
-        everything = ("general", "personality", "model", "voice", "learning")
+        everything = tuple(name for name, _ in SECTIONS)
         restart = tuple(name for name in everything if name not in activated)
         return ApplyReport(
             key=config.owner,

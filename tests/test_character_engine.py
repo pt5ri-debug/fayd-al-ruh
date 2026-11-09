@@ -430,6 +430,27 @@ def test_apply_without_a_live_lookup_still_saves() -> None:
     assert "model" not in result.report.activated
 
 
+def test_apply_reports_every_section_that_needs_a_restart() -> None:
+    """A section the hook did not activate is named as restart-required.
+
+    The Knowledge section was silently dropped from the report: the
+    ``restart_required`` tuple enumerated only five of the six sections, so an
+    edit that could not be hot-applied (e.g. the corpus dials, with no live
+    mouth) appeared in neither "Activated now" nor "Needs a restart".
+    """
+    from core.character_config import SECTIONS
+    from gui.character_manager import CharacterManagerService
+
+    service = CharacterManagerService()
+    service.set_live_lookup(lambda key: None)
+    result = service.apply(_config_for("ultron", temperature=0.03))
+    assert result.ok
+    assert result.report is not None
+    reported = set(result.report.activated) | set(result.report.restart_required)
+    assert reported == {name for name, _ in SECTIONS}
+    assert "knowledge" in result.report.restart_required
+
+
 def test_apply_hot_applies_the_voice_to_an_open_window() -> None:
     from gui.character_manager import CharacterManagerService
 
