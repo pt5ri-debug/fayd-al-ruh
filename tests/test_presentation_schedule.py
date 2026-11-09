@@ -171,6 +171,33 @@ def test_build_from_schedule_with_supplied_text_needs_no_model(tmp_path: Path) -
     assert report.state == STATE_SLIDE_REVIEW
 
 
+def test_build_from_schedule_flags_a_slide_whose_material_all_repeats(
+    tmp_path: Path,
+) -> None:
+    """A schedule slide that only repeats an earlier one is flagged, not silent.
+
+    The model (or the extractive fallback) can return the same material for two
+    related headings. The outline path already keeps the single strongest line
+    and sets a note; the schedule path must do the same, so a repeated slide is
+    visible in review rather than passed off as fresh content.
+    """
+    from gui.presentation import REPEATED_HEADING_NOTE
+
+    # The same two bullets for every topic, so every slide after the first has
+    # nothing new and must be flagged.
+    text = "Title\n- One repeated statement.\n- Another repeated statement.\n"
+    service = _service(tmp_path, answer=text)
+    report = service.build_from_schedule(
+        "Deck", "Day 1: Porosity\n- A subtopic\nDay 2: Logging\n"
+    )
+    project = service.get(report.project_id)
+    slides = project.ordered_slides()
+    assert len(slides) >= 3
+    # The first slide shows the material; every later one is flagged as repeated.
+    assert slides[0].notes == ""
+    assert all(slide.notes == REPEATED_HEADING_NOTE for slide in slides[1:])
+
+
 def test_build_from_schedule_refuses_a_blank_schedule(tmp_path: Path) -> None:
     service = _service(tmp_path, answer="x\n- y\n")
     from core.presentation import PresentationError

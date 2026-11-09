@@ -151,10 +151,11 @@ EXAMPLE_PROMPT = (
     "bullets, naming every quantity and its units."
 )
 
-#: A drafted slide's note when the retriever returned no new material for its
-#: heading, so the slide is flagged for the user instead of silently repeated.
+#: A drafted slide's note when no new material was found for its heading (the
+#: model or the retriever returned only material an earlier slide already
+#: shows), so the slide is flagged for the user instead of silently repeated.
 REPEATED_HEADING_NOTE = (
-    "The retriever returned no new material for this heading; "
+    "This heading returned no new material; "
     "only its strongest line is kept. Replace it during slide review."
 )
 
@@ -910,8 +911,15 @@ class PresentationService:
                         )
                     )
                 bullets = [line for line in bullets_from_text(answer) if dedup_key(line) not in used]
+                repeated = False
                 if not bullets:
+                    # Every line repeated an earlier slide (the model can return
+                    # the same material for two related headings). A blank slide is
+                    # worse than a flagged one, so keep the single strongest line
+                    # and say so, exactly as the outline path does -- slide review
+                    # is where the user replaces it.
                     bullets = bullets_from_text(answer)[:1]
+                    repeated = True
                 used.update(dedup_key(line) for line in bullets)
                 explicit = title_from_text(answer, fallback="")
                 if explicit and _is_title_line(explicit, bullets):
@@ -925,6 +933,7 @@ class PresentationService:
                         sources=(label,),
                         section=section,
                         subsection=subsection,
+                        notes=REPEATED_HEADING_NOTE if repeated else "",
                     )
                 )
         if not specs:
