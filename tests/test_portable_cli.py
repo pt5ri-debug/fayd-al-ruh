@@ -332,3 +332,37 @@ def test_every_cli_module_with_a_main_is_runnable() -> None:
         if 'if __name__ == "__main__"' not in source:
             missing.append(path.name)
     assert not missing, f"cli modules with main but no __main__ guard: {missing}"
+
+
+def test_every_cli_module_help_exits_zero() -> None:
+    """``--help`` must exit **0** for every cli module.
+
+    argparse raises ``SystemExit(0)`` for ``--help`` and ``SystemExit(2)`` for a
+    usage error. A module that caught the exit with ``exit_.code or EXIT_USAGE``
+    turned the successful help (``0`` is falsy) into a failure, so
+    ``python -m cli.cognition --help`` exited ``2`` while its 33 siblings exited
+    ``0``. The contract is pinned here so it cannot regress.
+    """
+    import ast
+    import importlib
+    from pathlib import Path
+
+    cli_dir = Path(__file__).resolve().parent.parent / "cli"
+    bad: list[str] = []
+    for path in sorted(cli_dir.glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if not any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "main"
+            for node in tree.body
+        ):
+            continue
+        module = importlib.import_module(f"cli.{path.stem}")
+        try:
+            code = module.main(["--help"])
+        except SystemExit as exit_:  # a module that lets argparse's exit escape
+            code = exit_.code
+        if int(code or 0) != 0:
+            bad.append(f"{path.name} -> {code}")
+    assert not bad, f"cli modules whose --help is not exit 0: {bad}"
