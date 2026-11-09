@@ -416,7 +416,10 @@ def _cmd_last_study(args: argparse.Namespace) -> int:
 
     report = last_study_report()
     if report is None:
-        print("No self-study session has been run yet.")
+        if args.json:
+            print(json.dumps({"report": None}, ensure_ascii=False, indent=2))
+        else:
+            print("No self-study session has been run yet.")
         return 0
     if args.json:
         print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))

@@ -189,6 +189,21 @@ def test_prove_json_is_pure_json(tmp_path, monkeypatch, capsys):
     assert "1. Thinking" not in out
 
 
+def test_last_study_json_is_pure_json_when_empty(tmp_path, monkeypatch, capsys):
+    """``--json`` with no study yet must still be valid JSON, not prose.
+
+    The empty state used to print "No self-study session has been run yet."
+    while returning exit 0, so a ``--json`` caller got prose where it promised
+    JSON.
+    """
+    import json
+
+    monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
+    assert cognition_cli.main(["last-study", "--json"]) == cognition_cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"report": None}
+
+
 def test_teach_runs_one_exchange(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("FAYD_DATA_DIR", str(tmp_path))
     assert cognition_cli.main(["teach", "what does a density log measure"]) == cognition_cli.EXIT_OK
