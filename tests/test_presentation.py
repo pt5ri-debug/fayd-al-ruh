@@ -515,6 +515,32 @@ def test_the_cli_reports_an_unknown_project_without_crashing(tmp_path: Path) -> 
     assert main(["--root", root, "status", "PRS-999"]) != 0
 
 
+def test_the_cli_reports_a_blank_project_id_cleanly(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """A blank id -- an empty string, or a shell variable that expanded to
+    nothing -- is a malformed request, not a missing project: it must be
+    reported as a clean error (exit 4), never leak the storage layer's
+    ``ValueError`` as a traceback."""
+    from cli.presentation import main
+
+    root = str(tmp_path / "store")
+    assert main(["--root", root, "status", ""]) == 4
+    captured = capsys.readouterr()
+    assert "non-empty id" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_a_blank_project_id_is_refused_by_the_store(tmp_path: Path) -> None:
+    from core.presentation import PresentationError, PresentationStore
+
+    store = PresentationStore(tmp_path / "store")
+    with pytest.raises(PresentationError):
+        store.load("")
+    with pytest.raises(PresentationError):
+        store.delete("   ")
+
+
 def test_the_cli_lists_nothing_before_a_project_exists(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
