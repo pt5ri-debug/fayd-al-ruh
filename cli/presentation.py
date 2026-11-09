@@ -124,9 +124,17 @@ def _conversation_root(root: Path | None) -> Path:
 
 
 def _load_conversation_id(root: Path | None, project_id: str) -> str:
-    """The saved conversation id for a project, or "" when none is stored."""
+    """The saved conversation id for a project, or "" when none is stored.
+
+    A blank project id -- an empty string, or a shell variable that expanded to
+    nothing -- has no stored conversation, so it is answered without touching the
+    store (``JsonStore`` refuses an empty key). The command's own handler still
+    reports the blank id cleanly through the project store's guard.
+    """
     from storage.json_store import JsonStore
 
+    if not project_id or not project_id.strip():
+        return ""
     value = JsonStore(_conversation_root(root)).load("map", project_id)
     return value if isinstance(value, str) else ""
 
@@ -135,6 +143,8 @@ def _save_conversation_id(root: Path | None, project_id: str, conversation_id: s
     """Remember which conversation a project is discussed in (best effort)."""
     from storage.json_store import JsonStore
 
+    if not project_id or not project_id.strip():
+        return
     try:
         JsonStore(_conversation_root(root)).save("map", project_id, conversation_id)
     except (OSError, ValueError):

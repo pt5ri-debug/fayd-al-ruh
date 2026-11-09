@@ -541,6 +541,32 @@ def test_a_blank_project_id_is_refused_by_the_store(tmp_path: Path) -> None:
         store.delete("   ")
 
 
+def test_the_cli_does_not_leak_a_traceback_for_a_blank_id_on_any_command(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Every command that takes a project id must report a blank one cleanly.
+
+    A whitespace-only id used to slip past the earlier ``if project_id`` check
+    and reach ``JsonStore`` while the assistant was being built -- *before* the
+    command's own handler ran -- so ``draft "   "`` printed a raw traceback.
+    """
+    from cli.presentation import main
+
+    root = str(tmp_path / "store")
+    for command in (
+        ["status", "   "],
+        ["show", "   "],
+        ["draft", "   "],
+        ["outline", "   "],
+        ["approve-outline", "   "],
+        ["export", "   "],
+    ):
+        assert main(["--root", root, *command]) == 4
+        captured = capsys.readouterr()
+        assert "Traceback" not in captured.err, command
+        assert "non-empty id" in captured.err, command
+
+
 def test_the_cli_lists_nothing_before_a_project_exists(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
