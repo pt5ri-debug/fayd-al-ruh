@@ -314,12 +314,53 @@ def outline_from_schedule(plan: SchedulePlan) -> tuple[OutlineSection, ...]:
     return plan.outline_sections()
 
 
+#: A line this many words or fewer can be a topic line; a longer line reads as prose.
+_MAX_TOPIC_WORDS = 12
+#: How many bare topic lines make a pasted block a schedule rather than a sentence.
+_MIN_BARE_TOPICS = 4
+
+
+def _is_topic_line(line: str) -> bool:
+    """Whether a line reads as a topic, not a sentence or a question."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.endswith(("?", "\u061f", ".", "!", ":")):
+        return False
+    return len(stripped.split()) <= _MAX_TOPIC_WORDS
+
+
+def looks_like_schedule(text: str) -> bool:
+    """Whether pasted text reads as a training schedule (days/sessions + topics).
+
+    Deliberately conservative, so a real question is never mistaken for a
+    schedule: a schedule has **more than one line** and either two or more
+    day/session lines, a single day line with at least one topic beneath it, or a
+    bare list of several short topic lines none of which is a sentence or a
+    question. A one-line question, a paragraph, and a list of full sentences all
+    return ``False``.
+    """
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if len(lines) < 2:
+        return False
+    day_lines = [line for line in lines if _day_line(line) is not None]
+    if len(day_lines) >= 2:
+        return True
+    if len(day_lines) == 1 and any(
+        _is_topic_line(line) for line in lines if _day_line(line) is None
+    ):
+        return True
+    bare = [line for line in lines if _is_topic_line(line)]
+    return len(bare) >= _MIN_BARE_TOPICS and len(bare) == len(lines)
+
+
 __all__ = [
     "MAX_DETAILS",
     "MAX_TOPICS",
     "SCHEDULE_EXAMPLE",
     "SchedulePlan",
     "ScheduleTopic",
+    "looks_like_schedule",
     "outline_from_schedule",
     "parse_schedule",
 ]

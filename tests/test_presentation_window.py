@@ -694,3 +694,92 @@ def test_the_window_discussion_uses_the_studio_model_when_present(tmp_path: Path
         dialog._close()
     finally:
         root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_pasting_a_schedule_into_the_chat_builds_the_whole_deck(tmp_path: Path) -> None:
+    """The user's own workflow: paste the schedule into the chat, get the deck.
+
+    The schedule is typed into the *chat composer* (not the dedicated schedule
+    box), and the window recognises it and drafts the whole numbered deck, exactly
+    as the *From a schedule* box does.
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.presentation_dialog import PresentationDialog
+
+    service = _service(tmp_path)
+    root = tk.Tk()
+    try:
+        dialog = PresentationDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        root.update()
+        schedule = (
+            "Day 1: Porosity and permeability\n"
+            "- Definition of porosity\n"
+            "- Effective vs total porosity\n"
+            "Day 2: Well logging\n"
+            "- Gamma ray\n"
+            "Day 3: Well testing\n"
+        )
+        dialog._composer.set_text(schedule)
+        dialog._on_discuss()
+        assert _wait_until(root, lambda: not dialog._busy)
+        projects = service.list_projects()
+        assert len(projects) == 1
+        project = projects[0]
+        assert project.project_id == dialog._project_id
+        # One slide per topic/sub-topic, numbered in the schedule's order.
+        assert len(project.slides) == 6
+        numbers = [slide.number for slide in project.ordered_slides()]
+        assert numbers == [1, 2, 3, 4, 5, 6]
+        # The composer was cleared and the transcript shows the deck was built.
+        assert dialog._composer.text() == ""
+        assert "review and edit the slides below" in _transcript_text(dialog).lower()
+        dialog._close()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_a_question_in_the_chat_is_never_mistaken_for_a_schedule(tmp_path: Path) -> None:
+    """A real question still reaches the discussion, not the schedule build."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.presentation_dialog import PresentationDialog
+
+    class _Recording:
+        def __init__(self, answer: str) -> None:
+            self.answer = answer
+            self.asked: list[str] = []
+
+        def __call__(self, question: str) -> str:
+            self.asked.append(question)
+            return self.answer
+
+    author = _Recording("A prose answer about porosity.")
+    service = PresentationService(root=tmp_path / "store", output_dir=tmp_path / "out")
+    service.set_author(author)
+    root = tk.Tk()
+    try:
+        dialog = PresentationDialog(
+            root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+        )
+        root.update()
+        project = service.new_project("Petrophysics")
+        dialog._refresh_projects()
+        dialog._select_project(project.project_id)
+        root.update()
+
+        dialog._composer.set_text("How does porosity relate to permeability?")
+        dialog._on_discuss()
+        assert _wait_until(root, lambda: not dialog._busy)
+        assert author.asked == ["How does porosity relate to permeability?"]
+        # No schedule deck was built; the one project is the user's own.
+        assert len(service.list_projects()) == 1
+        dialog._close()
+    finally:
+        root.destroy()

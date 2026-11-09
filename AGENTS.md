@@ -6971,3 +6971,30 @@ regression monitor each can refuse a change.
   the blank-schedule refusal), and the CLI (parse-only, build-with-text, pure
   JSON). Gates: ruff clean, mypy 1088 files OK, evaluation PASS (`overall` 0.9909
   unchanged), presentation suite 260 passed.
+
+- Phase 66 — **pasting a schedule into the chat builds the deck, and the title is
+  optional**. Phase 65 added the *From a schedule* box, but the user's own
+  workflow is to paste the schedule into the window's **chat** -- and there the
+  schedule was read as a discussion question, so a pasted schedule produced a
+  prose answer, never a deck. Two small, additive changes close it.
+  **(1) A conservative schedule detector.** `core/presentation_schedule.looks_like_schedule(text)`
+  reports whether pasted text reads as a schedule: it needs **more than one line**
+  and either two or more day/session lines, one day line with at least one topic
+  beneath it, or a bare list of several short topic lines none of which is a
+  sentence or a question (`_is_topic_line`, bounded by `_MAX_TOPIC_WORDS` and
+  `_MIN_BARE_TOPICS`). A one-line question, a paragraph, and a list of full
+  sentences all return ``False`` -- the negative controls the window test pins, so
+  a real question is never mistaken for a schedule.
+  **(2) The chat builds the deck.** The Presentation Studio's `_on_discuss` now
+  runs the detector first: when the composer's text reads as a schedule it calls
+  the **same** build path the *From a schedule* box uses (factored out as
+  `_start_schedule_build(schedule, title)`, so the two entry points cannot
+  diverge), clears the composer, and drafts the whole numbered deck; otherwise it
+  discusses as before. The composer's placeholder and the *From a schedule* hint
+  both say the chat accepts a schedule too. The CLI's `from-schedule` **title is
+  now optional** (`nargs="?"`): with no title the first topic's own words become
+  it, so `python -m cli presentation from-schedule --schedule "..."` works.
+  `tests/test_presentation_schedule.py` gained eight detector tests and two
+  CLI-title tests; `tests/test_presentation_window.py` gained the chat-paste
+  build and the question-is-not-a-schedule negative control. Gates: ruff clean,
+  mypy 1088 files OK, evaluation PASS (`overall` 0.9909 unchanged).
