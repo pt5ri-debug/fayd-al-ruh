@@ -6650,7 +6650,10 @@ regression monitor each can refuse a change.
   centralized registry over the sandbox and its deterministic, explainable,
   allow-list-bounded selection); `decomposition.py` (`DecompositionEngine` — the
   rule-driven goal→tasks engine, **bounded** by `MAX_TASKS` and `MAX_DEPTH`,
-  which never emits a task with no tool); `dependencies.py`
+  which never emits a task with no tool); a goal that asks to *list* ("list the
+  files") decomposes to a `list_dir` step (`relative="."`), not a `read_file`
+  step missing its file input, so a listing goal actually runs to success;
+  `dependencies.py`
   (`DependencyGraph`/`DependencyError` — the DAG, topological order, and the
   sequential/independent/parallelizable classification); `plan.py` (`TaskPlan`,
   `PlanStatus`, `PlanValidation`, `validate_plan`); `coordinator.py`

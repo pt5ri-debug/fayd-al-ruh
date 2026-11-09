@@ -43,6 +43,8 @@ class DecompositionError(ValueError):
 # -- goal shapes ------------------------------------------------------------
 
 _READ = re.compile(r"\b(read|open|load|inspect|view|show|list|find|search|scan)\b", re.I)
+#: A goal that asks for a directory listing rather than a named file's contents.
+_LIST = re.compile(r"\b(list|listing|ls|dir|directory|folder|files|entries)\b", re.I)
 _WRITE = re.compile(r"\b(write|create|save|generate|produce|build|make|export|report)\b", re.I)
 _COMPUTE = re.compile(r"\b(compute|calculate|sum|count|average|mean|total|convert|evaluate)\b", re.I)
 _SUMMARISE = re.compile(r"\b(summar|summary|analyse|analyze|review|explain|describe)\b", re.I)
@@ -126,17 +128,34 @@ class DecompositionEngine:
         source = self._source_hint(text)
         read_task: Task | None = None
         if readish or (not writes and not computes and source):
-            read_task = self._make_task(
-                goal,
-                counter,
-                description=f"Read {source}" if source else "Read the required input",
-                tool_hint="read",
-                inputs=(source,) if source else (),
-                outputs=(f"content of {source}" if source else "input content",),
-                dependencies=(),
-                depth=depth,
-                arguments={"relative": source} if source else {},
-            )
+            # A listing goal ("list the files") is a directory listing, not a
+            # file read -- the two need different tools and different inputs, and
+            # a read task with no file to read could never satisfy the goal.
+            listing = bool(_LIST.search(text)) and not source
+            if listing:
+                read_task = self._make_task(
+                    goal,
+                    counter,
+                    description="List the directory entries",
+                    tool_hint="list",
+                    inputs=(),
+                    outputs=("directory entries",),
+                    dependencies=(),
+                    depth=depth,
+                    arguments={"relative": "."},
+                )
+            else:
+                read_task = self._make_task(
+                    goal,
+                    counter,
+                    description=f"Read {source}" if source else "Read the required input",
+                    tool_hint="read",
+                    inputs=(source,) if source else (),
+                    outputs=(f"content of {source}" if source else "input content",),
+                    dependencies=(),
+                    depth=depth,
+                    arguments={"relative": source} if source else {},
+                )
             tasks.append(read_task)
 
         # A compute step: only when the goal actually names an arithmetic task,
