@@ -6913,3 +6913,53 @@ regression monitor each can refuse a change.
   `tests/test_training_resume.py` (35 tests) pins the ledger, the RNG round-trips,
   the petroleum resume and top-up, the CLI flags, and the gate. Gates: ruff clean,
   mypy OK, evaluation PASS, pytest green.
+
+- Phase 65 — **the Presentation Studio builds a whole professional deck from a
+  pasted training schedule**. The Studio could discuss a subject and draft slides
+  one batch at a time, but a user who already had a *training schedule* -- the days
+  and the topics to be taught -- had to re-enter every topic by hand, and the
+  slide content it produced was generic prose rather than scientific material.
+  Three pieces close it, all additive (the manual workflow is untouched).
+  **(1) A deterministic schedule reader.** `core/presentation_schedule.py` (new)
+  parses a pasted schedule into a structured plan: `ScheduleTopic` (a `label`, a
+  `number`, a `title`, its `details`, and a readable `heading` such as
+  "Day 1 — Porosity and permeability"), `SchedulePlan` (`title`/`topics`, with
+  `is_empty`, `topic_headings()`, `outline_sections()`, and a round-tripping
+  `to_primitive`/`from_primitive`), and `parse_schedule(text, title=)`. It reads
+  English and Arabic day words ("Day 1", "اليوم الأول", "Session two"), digits,
+  bullets, and a bare topic list -- an indented line under a day becomes that
+  day's sub-topic -- with bounded `MAX_TOPICS`/`MAX_DETAILS`/`MAX_TITLE_CHARS`
+  and a shared `SCHEDULE_EXAMPLE`. Honest by construction: an unrelated line
+  ("Playlist") is never read as a day (a day noun must open the line), and a
+  blank schedule yields no plan rather than a fabricated topic.
+  **(2) A one-step build with a scientific prompt.** `gui/presentation.py` gains
+  `SCHEDULE_PROMPT` (a professional, precise prompt: a short title, then 3-5
+  complete scientific/engineering statements with the governing relation and the
+  key quantity with its units), a `BuildReport` dataclass (the project, the plan,
+  the drafted count, the state, a `summary()`, and an `as_dict()`), and
+  `PresentationService.build_from_schedule(title, schedule, *, subtitle=,
+  audience=, language=, text=)`. It parses the schedule, seeds the outline
+  **deterministically** from the plan (one section per day), approves it, and
+  drafts **one numbered slide per topic and sub-topic in schedule order** through
+  `draft_slides_from_schedule` (each slide keeps its `section`/`subsection`, so the
+  deck's numbering follows the training plan), leaving the project in *slide
+  review*. A supplied `text` is used instead of the assistant, so the whole path
+  runs with no model. `parse_schedule` is exposed on the service too.
+  **(3) The window and the CLI.** The Presentation Studio window gains a **From a
+  schedule** sidebar section -- a title field, a paste box (pre-filled with the
+  worked example), a primary **Build the deck** button (worker thread, live
+  progress, then the project is opened and its slides numbered), and a **Read
+  only** button that reports the topics without building anything -- and its
+  workflow section is relabelled as **Production steps** with clearer, universal
+  labels (*1 Content & discussion* … *8 Export the .pptx*), matching PowerPoint's
+  own vocabulary. The CLI gains `python -m cli presentation from-schedule TITLE
+  [--schedule TEXT|--schedule-file F|--example] [--parse-only] [--text|--text-file]
+  [--subtitle|--audience|--language] [--json]`, and the assistant is loaded only
+  when the slides will really be asked for (a `--parse-only` or `--text` run needs
+  no model). A menu entry demonstrates it. `tests/test_presentation_schedule.py`
+  (new, 17 tests) and a window test pin the reader (English and Arabic days, the
+  bare list, the blank-schedule and unrelated-line negative controls, the round
+  trip), the build (the numbered deck, the scientific prompt, the no-model path,
+  the blank-schedule refusal), and the CLI (parse-only, build-with-text, pure
+  JSON). Gates: ruff clean, mypy 1088 files OK, evaluation PASS (`overall` 0.9909
+  unchanged), presentation suite 260 passed.

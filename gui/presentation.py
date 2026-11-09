@@ -81,6 +81,7 @@ from core.presentation_layout import (
     safe_filename,
     unique_export_path,
 )
+from core.presentation_schedule import SchedulePlan, parse_schedule
 
 #: An ``ask`` callable: a question in, the assistant's answer out.
 AskCallback = Callable[[str], str]
@@ -159,6 +160,21 @@ REVISION_PROMPT = (
     "Requested change: {feedback}"
 )
 
+#: The prompt the Studio uses when it drafts a deck from a pasted schedule. It
+#: asks for professional scientific content in the exact shape the deterministic
+#: parsers read (a heading line, then concise bullets), so a schedule becomes a
+#: numbered, technical deck with no model-specific post-processing.
+SCHEDULE_PROMPT = (
+    "You are preparing the slide {index} of a professional training deck titled "
+    "{title!r}. The schedule covers these topics: {topics}.\n"
+    "Write the slide for the topic {heading!r}{detail_hint}.\n"
+    "Requirements: give a short slide title on the first line; then 3 to 5 concise "
+    "technical bullets, each a complete scientific or engineering statement (define "
+    "the concept, state the governing relation or principle, and give the key "
+    "quantity with its units where one applies). Stay strictly on the topic, be "
+    "precise, and do not add a preamble or a summary sentence."
+)
+
 
 @dataclass(frozen=True)
 class DiscussResult:
@@ -168,6 +184,49 @@ class DiscussResult:
     answer: str
     conversation_id: str = ""
     project_id: str = ""
+
+
+@dataclass(frozen=True)
+class BuildReport:
+    """The outcome of building a whole deck from a pasted schedule.
+
+    Carries the project, the parsed plan, the drafted slide count, and the
+    project's new state -- so the window and the CLI render the same result.
+    """
+
+    project: PresentationProject
+    plan: SchedulePlan
+    drafted: int
+    state: str
+    note: str = ""
+
+    @property
+    def project_id(self) -> str:
+        return self.project.project_id
+
+    @property
+    def topic_count(self) -> int:
+        return len(self.plan.topics)
+
+    def summary(self) -> str:
+        """A readable one-line summary of what the build produced."""
+        base = (
+            f"Built {self.project.title!r} ({self.project_id}) from a schedule of "
+            f"{self.topic_count} topic(s): {self.drafted} slide(s) drafted, state "
+            f"{STATE_LABELS.get(self.state, self.state)}."
+        )
+        return f"{base} {self.note}".strip()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "project_id": self.project_id,
+            "title": self.project.title,
+            "topics": self.topic_count,
+            "drafted": self.drafted,
+            "state": self.state,
+            "plan": self.plan.to_primitive(),
+            "note": self.note,
+        }
 
 
 @dataclass
@@ -735,6 +794,133 @@ class PresentationService:
         if conversation_id and conversation_id not in project.conversation_ids:
             project.conversation_ids.append(conversation_id)
         return self._save(project)
+
+    # --------------------------------------------------- building from a schedule
+
+    def parse_schedule(self, text: str, *, title: str = "") -> SchedulePlan:
+        """Read a pasted training schedule into a structured plan (no model)."""
+        return parse_schedule(text, title=title)
+
+    def build_from_schedule(
+        self,
+        title: str,
+        schedule: str,
+        *,
+        subtitle: str = "",
+        audience: str = "",
+        language: str = "en",
+        text: str | None = None,
+    ) -> BuildReport:
+        """Build a whole deck from a pasted schedule, in one governed step.
+
+        The schedule (days/sessions and their topics, in English or Arabic) is
+        parsed into an outline -- one section per day -- which is approved and
+        then drafted into numbered slides. Each slide's content comes from the
+        assistant, asked a professional scientific prompt per topic
+        (:data:`SCHEDULE_PROMPT`); when ``text`` is supplied it is used instead,
+        which keeps the whole path exercisable with no model. The project is left
+        in *slide review* (or *drafting* when no slides were drafted) so the user
+        reviews, approves, and exports exactly as before.
+        """
+        plan = parse_schedule(schedule, title=title)
+        if plan.is_empty:
+            raise PresentationError(
+                "No schedule topics were found; paste a list of days/sessions and "
+                "their topics (one per line)."
+            )
+        project = self.new_project(
+            title, subtitle=subtitle, audience=audience, language=language
+        )
+        # Seed the outline directly from the plan: it is deterministic, so the
+        # user reviews a real structure rather than a model's restatement of it.
+        project.outline_revisions.append(
+            OutlineRevision(revision=1, sections=plan.outline_sections(), note="from schedule")
+        )
+        project.approved_outline_revision = 1
+        require_transition(project.state, STATE_OUTLINE_DRAFT)
+        project.state = STATE_OUTLINE_REVIEW
+        require_transition(project.state, STATE_SLIDE_DRAFTING)
+        project.state = STATE_SLIDE_DRAFTING
+        self._save(project)
+        self._progress(f"Read a schedule of {len(plan.topics)} topic(s); drafting slides...")
+        drafted = self.draft_slides_from_schedule(project.project_id, plan, text=text)
+        if drafted:
+            self.review_slides(project.project_id)
+        final = self.get(project.project_id)
+        note = ""
+        if not drafted:
+            note = "No slides were drafted (the assistant returned nothing usable)."
+        return BuildReport(
+            project=final,
+            plan=plan,
+            drafted=len(drafted),
+            state=final.state,
+            note=note,
+        )
+
+    def draft_slides_from_schedule(
+        self,
+        project_id: str,
+        plan: SchedulePlan,
+        *,
+        text: str | None = None,
+    ) -> list[Slide]:
+        """Draft one numbered slide per schedule topic, using the scientific prompt.
+
+        Every topic -- each day's own heading, and each sub-topic beneath it --
+        becomes one slide, in the order the schedule wrote them, so the deck's
+        numbering follows the training plan. The outline's topics are used when
+        the plan is not passed with the same headings.
+        """
+        project = self.get(project_id)
+        if project.state not in (STATE_SLIDE_DRAFTING, STATE_SLIDE_REVIEW):
+            raise PresentationError("Slides can only be drafted after the outline is approved.")
+        topics = plan.topic_headings()
+        overview = "; ".join(topics[:12])
+        specs: list[SlideSpec] = []
+        index = 0
+        used: set[str] = set()
+        for topic in plan.topics:
+            labels: list[tuple[str, str]] = [(topic.heading, "")]
+            labels.extend((topic.heading, detail) for detail in topic.details)
+            for section, subsection in labels:
+                index += 1
+                label = subsection or section
+                detail_hint = f" (within the day {section!r})" if subsection else ""
+                self._progress(f"Drafting slide {index} — {label}...")
+                if text is not None:
+                    answer = text
+                else:
+                    answer = self._drafting_callback("slide content")(
+                        SCHEDULE_PROMPT.format(
+                            index=index,
+                            title=project.title,
+                            topics=overview,
+                            heading=label,
+                            detail_hint=detail_hint,
+                        )
+                    )
+                bullets = [line for line in bullets_from_text(answer) if dedup_key(line) not in used]
+                if not bullets:
+                    bullets = bullets_from_text(answer)[:1]
+                used.update(dedup_key(line) for line in bullets)
+                explicit = title_from_text(answer, fallback="")
+                if explicit and _is_title_line(explicit, bullets):
+                    slide_title = explicit
+                else:
+                    slide_title = label
+                specs.append(
+                    SlideSpec(
+                        title=slide_title,
+                        content=bullets,
+                        sources=(label,),
+                        section=section,
+                        subsection=subsection,
+                    )
+                )
+        if not specs:
+            return []
+        return self.add_slides(project_id, specs)
 
     # ----------------------------------------------------------- the outline
 
@@ -1929,9 +2115,11 @@ __all__ = [
     "EXPAND_PROMPT",
     "OUTLINE_PROMPT",
     "REVISION_PROMPT",
+    "SCHEDULE_PROMPT",
     "SHORTEN_PROMPT",
     "SLIDE_PROMPT",
     "AskCallback",
+    "BuildReport",
     "DiscussResult",
     "PresentationReport",
     "PresentationService",

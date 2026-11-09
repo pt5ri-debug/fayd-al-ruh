@@ -647,6 +647,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Training Center: the learning pipelines", run_training_center, ("pipeline", "--list")),
     ("Training Center: this machine's own resources", run_training_center, ("resources",)),
     ("Presentation Studio: build a PowerPoint deck from a discussion", run_presentation, ("list",)),
+    (
+        "Presentation Studio: build a whole deck from a pasted training schedule",
+        run_presentation,
+        ("from-schedule", "Example training deck", "--example", "--parse-only"),
+    ),
     ("Doc's Studio: read any document (incl. scanned) with the local vision model", run_docs, ("status",)),
     (
         "Doc's Studio: download the local vision model (~3.4 GB)",
