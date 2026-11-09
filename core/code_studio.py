@@ -355,15 +355,27 @@ class CodeStudio:
 
         The counter only ever moves forward, so a discarded workspace's number is
         never handed out again -- the numbering stays stable and predictable.
+        A name whose ``studio/`` branch still exists -- a crash mid-discard, a
+        ``forget``, or a state file that was reset while the branch survived --
+        is skipped, so auto-naming can never hand back a name :meth:`create`
+        would refuse.
         """
         state = self._load_state()
         stored = state.get(_SERIAL_KEY)
         value = stored.get("value") if isinstance(stored, dict) else None
         current = value if isinstance(value, int) else 0
         serial = max(current, self._highest_existing_serial()) + 1
+        while self._branch_exists(f"{BRANCH_PREFIX}{SERIAL_PREFIX}{serial}"):
+            serial += 1
         state[_SERIAL_KEY] = {"value": serial}
         self._save_state(state)
         return f"{SERIAL_PREFIX}{serial}"
+
+    def _branch_exists(self, branch: str) -> bool:
+        """Whether ``branch`` already exists in the repository."""
+        return self._git(
+            self.root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"
+        ).ok
 
     def _highest_existing_serial(self) -> int:
         """The largest ``prN`` number any recorded workspace already uses."""
@@ -389,7 +401,7 @@ class CodeStudio:
         path = self.workspaces_dir / slug
         if path.exists():
             raise StudioError(f"A workspace named `{slug}` already exists.")
-        if self._git(self.root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}").ok:
+        if self._branch_exists(branch):
             raise StudioError(f"Branch `{branch}` already exists; choose another name.")
 
         revision = self.base_revision()
