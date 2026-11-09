@@ -97,3 +97,30 @@ def test_docx_without_text_is_refused(tmp_path):
 
     with pytest.raises(DocumentReadError):
         read_document(path)
+
+
+@pytest.mark.parametrize("suffix", [".csv", ".tsv", ".json", ".jsonl", ".ndjson"])
+def test_structured_data_files_are_read_as_text(tmp_path, suffix):
+    # CSV/TSV/JSON/JSONL are documented as supported; they are read whole as text
+    # (not parsed field by field) so a data file can be attached or opened.
+    path = tmp_path / f"data{suffix}"
+    path.write_text('{"depth": 1000, "porosity": 0.2}\n', encoding="utf-8")
+
+    document = read_document(path)
+
+    assert "porosity" in document.text
+    assert document.kind == suffix.lstrip(".")
+
+
+def test_supported_message_names_the_structured_formats(tmp_path):
+    path = tmp_path / "image.png"
+    path.write_bytes(b"\x89PNG")
+
+    with pytest.raises(DocumentReadError) as info:
+        read_document(path)
+
+    # The message must not claim a format is supported while refusing it.
+    message = str(info.value)
+    for suffix in (".csv", ".json", ".jsonl", ".tsv", ".ndjson"):
+        assert suffix in message
+

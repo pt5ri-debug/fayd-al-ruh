@@ -1,10 +1,13 @@
-"""Read plain text out of documents: text, Markdown, Word, and digital PDF.
+"""Read plain text out of documents: text, Markdown, Word, structured data, and PDF.
 
 The reader is the project's single, dependency-light front door to a file's text:
 
 * ``.txt``/``.md``/``.markdown`` -- read with **safe encoding detection** (a BOM,
   then strict UTF-8, then a short list of legacy encodings), preserving Arabic and
   English; a very large file is streamed line by line under a hard character cap.
+* ``.csv``/``.tsv``/``.json``/``.jsonl``/``.ndjson`` -- structured/tabular text is
+  read as plain text (kept whole, with the same strict decoding), not parsed field
+  by field, so a data file attached to a chat or opened in a Studio is readable.
 * ``.docx``/``.docm`` -- a Word Office Open XML package (a ZIP holding
   ``word/document.xml``), read through :mod:`core.docx_extract`, which owns the
   untrusted-ZIP handling (resource limits, encrypted/legacy detection, malformed
@@ -40,6 +43,8 @@ if TYPE_CHECKING:  # the OCR module is optional and imported lazily at runtime
 
 #: Extensions this reader can turn into text.
 SUPPORTED_EXTENSIONS = frozenset({".docx", ".docm", ".txt", ".md", ".markdown"})
+#: Structured/tabular text read as plain text (kept whole, not parsed field by field).
+STRUCTURED_EXTENSIONS = frozenset({".csv", ".tsv", ".json", ".jsonl", ".ndjson"})
 #: Recognised but deliberately unsupported (binary, undocumented layout).
 LEGACY_EXTENSIONS = frozenset({".doc", ".rtf"})
 #: Extracted through an optional dependency (``fayd-al-ruh[pdf]``) when present.
@@ -147,13 +152,13 @@ def _read_docx(path: Path, *, max_chars: int = MAX_TEXT_CHARS) -> DocumentText:
     )
 
 
-def _read_text(path: Path, *, encoding: str | None = None) -> DocumentText:
+def _read_text(path: Path, *, encoding: str | None = None, kind: str = "text") -> DocumentText:
     try:
         size = path.stat().st_size
     except OSError as error:
         raise DocumentReadError(f"Could not open {path.name!r}: {error}") from error
     if size >= STREAM_THRESHOLD_BYTES:
-        return _read_text_streamed(path, encoding=encoding)
+        return _read_text_streamed(path, encoding=encoding, kind=kind)
     try:
         raw = path.read_bytes()
     except OSError as error:
@@ -165,10 +170,10 @@ def _read_text(path: Path, *, encoding: str | None = None) -> DocumentText:
     paragraphs = [line.strip() for line in decoded.text.splitlines() if line.strip()]
     if not paragraphs:
         raise DocumentReadError(f"{path.name!r} is empty.")
-    return _assemble(paragraphs, path, "text", encoding=decoded.encoding)
+    return _assemble(paragraphs, path, kind, encoding=decoded.encoding)
 
 
-def _read_text_streamed(path: Path, *, encoding: str | None = None) -> DocumentText:
+def _read_text_streamed(path: Path, *, encoding: str | None = None, kind: str = "text") -> DocumentText:
     """Read a very large plain-text file line by line, capping at ``MAX_TEXT_CHARS``.
 
     Memory stays bounded: only the kept lines, the accumulated text (itself
@@ -220,7 +225,7 @@ def _read_text_streamed(path: Path, *, encoding: str | None = None) -> DocumentT
         raise DocumentReadError(f"Could not open {path.name!r}: {error}") from error
     if not paragraphs:
         raise DocumentReadError(f"{path.name!r} is empty.")
-    return _assemble(paragraphs, path, "text", truncated=truncated, encoding=chosen)
+    return _assemble(paragraphs, path, kind, truncated=truncated, encoding=chosen)
 
 
 def _auto_ocr_config() -> OcrConfig | None:
@@ -480,15 +485,19 @@ def read_document(
             ocr_engine=ocr_engine,
             password=password,
         )
-    elif suffix not in SUPPORTED_EXTENSIONS:
+    elif suffix not in SUPPORTED_EXTENSIONS and suffix not in STRUCTURED_EXTENSIONS:
+        accepted = ", ".join(sorted(SUPPORTED_EXTENSIONS | OPTIONAL_EXTENSIONS | STRUCTURED_EXTENSIONS))
         raise DocumentReadError(
-            f"Unsupported file type {source.suffix or '(none)'}. "
-            "Supported: .txt, .md, .markdown, .docx, .docm, .pdf, .csv, .json."
+            f"Unsupported file type {source.suffix or '(none)'}. Supported: {accepted}."
         )
     elif suffix in {".docx", ".docm"}:
         document = _read_docx(source)
     else:
-        document = _read_text(source, encoding=encoding)
+        # Text, Markdown, and the structured/tabular formats (CSV/TSV/JSON/JSONL/
+        # NDJSON) are read as plain text -- kept whole, with the same strict,
+        # explainable decoding, rather than parsed field by field.
+        kind = suffix.lstrip(".") if suffix in STRUCTURED_EXTENSIONS else "text"
+        document = _read_text(source, encoding=encoding, kind=kind)
     if normalize:
         return _normalized(document, fold_arabic=fold_arabic)
     return document
@@ -525,6 +534,7 @@ __all__ = [
     "OCR_EXTRA",
     "OPTIONAL_EXTENSIONS",
     "STREAM_THRESHOLD_BYTES",
+    "STRUCTURED_EXTENSIONS",
     "SUPPORTED_EXTENSIONS",
     "DocumentReadError",
     "DocumentText",
