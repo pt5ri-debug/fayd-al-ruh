@@ -305,8 +305,12 @@ def _run_from_schedule(service: PresentationService, args: argparse.Namespace) -
     if not schedule:
         print("Provide the schedule with --schedule or --schedule-file.", file=sys.stderr)
         return 2
+    title = args.title
+    if not title:
+        first = next((line.strip() for line in schedule.splitlines() if line.strip()), "")
+        title = first.split(":", 1)[-1].strip() or "Training deck"
     if args.parse_only:
-        plan = service.parse_schedule(schedule, title=args.title)
+        plan = service.parse_schedule(schedule, title=title)
         if args.as_json:
             _print_json(plan.to_primitive())
         else:
@@ -314,7 +318,7 @@ def _run_from_schedule(service: PresentationService, args: argparse.Namespace) -
         return 0
     text = _read_text_arg(args, direct=args.text or "", file_attr="text_file")
     report = service.build_from_schedule(
-        args.title,
+        title,
         schedule,
         subtitle=args.subtitle or "",
         audience=args.audience or "",
@@ -1217,7 +1221,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "from-schedule",
         help="Build a whole deck from a pasted training schedule (days and topics).",
     )
-    from_schedule.add_argument("title")
+    from_schedule.add_argument(
+        "title", nargs="?", default="",
+        help="The presentation title (default: the schedule's first topic).",
+    )
     from_schedule.add_argument(
         "--schedule", default="", help="The schedule text (days/sessions and their topics)."
     )

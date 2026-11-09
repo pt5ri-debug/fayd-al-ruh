@@ -50,7 +50,7 @@ from core.presentation import (
     PresentationError,
     theme_names,
 )
-from core.presentation_schedule import SCHEDULE_EXAMPLE
+from core.presentation_schedule import SCHEDULE_EXAMPLE, looks_like_schedule
 
 from gui import clipboard, rich_text
 from gui import markdown as md
@@ -88,7 +88,8 @@ SCHEDULE_HINT = (
     "Paste your training schedule — one day/session per line (\"Day 1: Porosity\", "
     "\"اليوم الأول: المسامية\", \"Session 2 …\"), with any sub-topics indented beneath "
     "it. The Studio reads it, then writes professional scientific content for each "
-    "topic, one numbered slide after another."
+    "topic, one numbered slide after another. You can also paste the same schedule "
+    "into the chat below; it is recognised and builds the whole deck just the same."
 )
 
 #: The production workflow, in order, with the sidebar button that advances it.
@@ -490,7 +491,10 @@ class PresentationDialog(ThemedDialog):
         """The shared rounded composer card, pinned to the bottom like the chat window."""
         composer = ChatComposer(
             parent, theme=self.theme, typography=self._type,
-            placeholder="Ask the Studio's model about the subject…", on_submit=self._on_discuss,
+            placeholder=(
+                "Discuss the subject… or paste a training schedule (days and topics) to "
+                "build the whole numbered deck."
+            ), on_submit=self._on_discuss,
             outer_bg=self.theme.base, with_attach=False,
         )
         composer.wrap.pack(side="bottom", fill="x", padx=self._column_pad(), pady=(8, 12))
@@ -1154,11 +1158,18 @@ class PresentationDialog(ThemedDialog):
         if not schedule:
             self._set_schedule_note("Paste a schedule first.", error=True)
             return
-        title = self._schedule_title_var.get().strip()
+        self._start_schedule_build(schedule, self._schedule_title_var.get().strip())
+
+    def _start_schedule_build(self, schedule: str, title: str) -> None:
+        """Draft a whole numbered deck from a schedule (the one build path).
+
+        Shared by the *From a schedule* box and the chat composer, so a schedule
+        typed into either place builds the deck the same way.
+        """
         if not title:
             first = next((line.strip() for line in schedule.splitlines() if line.strip()), "")
             title = first.split(":", 1)[-1].strip() or "Training deck"
-            self._schedule_title_var.set(title)
+        self._schedule_title_var.set(title)
         self._add_message("user", schedule, title="Training schedule")
         self._add_message(
             "note",
@@ -1299,12 +1310,19 @@ class PresentationDialog(ThemedDialog):
         self._open_first_project()
 
     def _on_discuss(self) -> None:
-        if not self._project_id:
-            self._set_status("Create a presentation first.", error=True)
-            return
         question = self._composer.text().strip()
         if not question:
             self._set_status("Type a question to discuss first.", error=True)
+            return
+        # A pasted training schedule builds a whole numbered deck in one step,
+        # exactly as the *From a schedule* box does -- so pasting it into the chat
+        # is enough. A real question is never mistaken for a schedule.
+        if looks_like_schedule(question):
+            self._composer.clear()
+            self._start_schedule_build(question, "")
+            return
+        if not self._project_id:
+            self._set_status("Create a presentation first.", error=True)
             return
         self._composer.clear()
         self._add_message("user", question)

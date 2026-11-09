@@ -102,6 +102,69 @@ def test_an_unrelated_line_is_never_read_as_a_day() -> None:
     assert all(topic.label == "" for topic in plan.topics)
 
 
+# --------------------------------------------------------- schedule detection
+
+
+def test_a_day_schedule_looks_like_a_schedule() -> None:
+    from core.presentation_schedule import looks_like_schedule
+
+    assert looks_like_schedule(SCHEDULE)
+
+
+def test_an_arabic_day_schedule_looks_like_a_schedule() -> None:
+    from core.presentation_schedule import looks_like_schedule
+
+    assert looks_like_schedule(
+        "اليوم الأول: المسامية والنفاذية\n- تعريف المسامية\nاليوم الثاني: سجلات البئر\n"
+    )
+
+
+def test_a_bare_topic_list_looks_like_a_schedule() -> None:
+    from core.presentation_schedule import looks_like_schedule
+
+    assert looks_like_schedule("Porosity\nPermeability\nWell logging\nWell testing\n")
+
+
+def test_a_question_is_never_a_schedule() -> None:
+    from core.presentation_schedule import looks_like_schedule
+
+    assert not looks_like_schedule("What is porosity?")
+    assert not looks_like_schedule("How does permeability relate to porosity?")
+
+
+def test_a_paragraph_is_never_a_schedule() -> None:
+    from core.presentation_schedule import looks_like_schedule
+
+    prose = (
+        "Porosity is the fraction of the bulk volume that is void. Effective porosity "
+        "counts only the connected pores, while total porosity counts them all."
+    )
+    assert not looks_like_schedule(prose)
+
+
+def test_a_list_of_full_sentences_is_never_a_schedule() -> None:
+    from core.presentation_schedule import looks_like_schedule
+
+    assert not looks_like_schedule(
+        "Porosity is the void fraction of the rock.\n"
+        "Permeability measures how easily fluid flows.\n"
+        "Well logs estimate both from the borehole.\n"
+    )
+
+
+def test_a_single_day_with_a_topic_beneath_it_is_a_schedule() -> None:
+    from core.presentation_schedule import looks_like_schedule
+
+    assert looks_like_schedule("Day 1: Porosity\n- Definition\n- Measurement\n")
+
+
+def test_a_single_day_line_alone_is_not_a_schedule() -> None:
+    from core.presentation_schedule import looks_like_schedule
+
+    assert not looks_like_schedule("Day 1: Porosity and permeability")
+
+
+
 def test_the_outline_has_one_section_per_day_with_its_subtopics() -> None:
     plan = parse_schedule(SCHEDULE)
     sections = outline_from_schedule(plan)
@@ -273,3 +336,47 @@ def test_cli_from_schedule_json_is_pure(
     assert payload["drafted"] == 1
     assert payload["state"] == STATE_SLIDE_REVIEW
     assert payload["topics"] == 1
+
+
+def test_cli_from_schedule_derives_the_title_when_it_is_omitted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The title is optional: pasting only a schedule still builds a deck."""
+    from cli.presentation import main
+
+    root = tmp_path / "store"
+    rc = main(
+        [
+            "--json", "--root", str(root),
+            "from-schedule",
+            "--schedule", "Day 1: Porosity\nDay 2: Permeability\n",
+            "--text", "A\n- bullet one\n- bullet two\n",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["drafted"] == 2
+    from gui.presentation import PresentationService
+
+    project = PresentationService(root=root).list_projects()[0]
+    # The title came from the schedule's own first topic, not a blank name.
+    assert "Porosity" in project.title
+
+
+def test_cli_from_schedule_parse_only_needs_no_title(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.presentation import main
+
+    root = tmp_path / "store"
+    rc = main(
+        [
+            "--root", str(root),
+            "from-schedule",
+            "--schedule", "Day 1: Porosity\nDay 2: Permeability\n",
+            "--parse-only",
+        ]
+    )
+    assert rc == 0
+    assert "Porosity" in capsys.readouterr().out
+
