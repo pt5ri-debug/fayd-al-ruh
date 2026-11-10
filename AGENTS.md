@@ -232,6 +232,18 @@ Arabic is kept as secondary aliases where useful.
   (RMSNorm drops its biases, SwiGLU swaps the `fc`/`fc2` pair in place). Measured
   on the project corpus (400 steps, equal width): `modern` reaches val loss 1.973
   vs `release-1`'s 2.146 with slightly *fewer* parameters.
+  **Training gained the standard regularisation and checkpoint selection.**
+  `Adam` takes `decoupled=True` (AdamW: the decay shrinks the weight directly
+  instead of being added to the gradient; the default keeps the original coupled
+  behaviour), and `train_language_model` takes `weight_decay` (AdamW),
+  `lr_schedule` (`cosine` default / `linear` / `constant`), and `restore_best`,
+  which leaves the model holding the weights from the **lowest held-out loss**
+  step (recorded on `TrainReport.best_val_step`/`best_val`) so a run that
+  overfits late no longer ships its worst checkpoint. The CLI exposes all three
+  (`--weight-decay`, `--lr-schedule`, `--restore-best`); a resumed run applies
+  the decay policy of the current invocation rather than a stale one from the
+  sidecar. Measured on the project corpus (400 steps, `modern`): val loss 1.973
+  -> **1.673** with `weight_decay=0.01` and `restore_best`.
 - `ml/llm/schedule.py` — the sharded, resumable schedule. By default a `--resume`
   replays the same corpus, so more steps deepen the fit rather than reaching new
   material; `--llm-shards N` (in `ml/llm` and `ml.release`) instead splits the
