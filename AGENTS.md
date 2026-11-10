@@ -220,6 +220,18 @@ Arabic is kept as secondary aliases where useful.
   200-token `release-1` answer). `LocalGenerator` and `StructuredDecoder` use it,
   falling back to the sliding-window full pass once the context passes `block_size`
   (the cache is append-only), so the output is identical either way.
+  **Modern architecture primitives are opt-in config fields** whose defaults
+  reproduce the original model exactly (so every existing checkpoint and test is
+  unaffected): `norm` (`layer`/`rms` RMSNorm), `position` (`learned`/`rope` rotary
+  embeddings), and `activation` (`gelu`/`swiglu` gated SwiGLU with the `8/3`
+  hidden width). `TransformerConfig.preset("modern")` is RMSNorm + RoPE + SwiGLU at
+  `release-1`'s width. The hand-written backprop covers every combination and is
+  checked against **numerical** finite differences in
+  `tests/test_llm_modern_architecture.py`; the per-layer parameter order is the
+  original one so an existing checkpoint's arrays load into the same parameters
+  (RMSNorm drops its biases, SwiGLU swaps the `fc`/`fc2` pair in place). Measured
+  on the project corpus (400 steps, equal width): `modern` reaches val loss 1.973
+  vs `release-1`'s 2.146 with slightly *fewer* parameters.
 - `ml/llm/schedule.py` — the sharded, resumable schedule. By default a `--resume`
   replays the same corpus, so more steps deepen the fit rather than reaching new
   material; `--llm-shards N` (in `ml/llm` and `ml.release`) instead splits the

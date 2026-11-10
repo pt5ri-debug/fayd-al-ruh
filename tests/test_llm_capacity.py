@@ -243,11 +243,12 @@ def test_backward_reuses_the_forward_pre_activation():
     x = np.array([[1, 2, 3, 4, 5, 6, 7, 8]])
     y = np.array([[2, 3, 4, 5, 6, 7, 8, 9]])
     model.forward(x)
-    assert "pre_gelu" in model._cache["layers"][0]
+    mlp_cache = model._cache["layers"][0]["mlp"]
+    assert "pre_gelu" in mlp_cache
     # The cached activation is exactly the one the forward pass used.
     layer = model.layers[0]
     expected = model._cache["layers"][0]["normed2"] @ layer.fc_w + layer.fc_b
-    assert np.array_equal(model._cache["layers"][0]["pre_gelu"], expected)
+    assert np.array_equal(mlp_cache["pre_gelu"], expected)
     model.loss(model.forward(x), y)
     grads = model.backward(y)
     assert len(grads) == len(model.parameters())
