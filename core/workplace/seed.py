@@ -27,6 +27,7 @@ from typing import Any
 
 from core.workplace.model import Division, Institution, OrganisationalUnit, make_id
 from core.workplace.repository import WorkplaceRepository
+from core.workplace.taxonomy import TAXONOMY
 
 #: A stable key for the institution and the centre, so seeding is idempotent and
 #: other modules can look them up without a magic id.
@@ -161,18 +162,30 @@ class SeedReport:
     institutions: int = 0
     units: int = 0
     divisions: int = 0
+    taxonomy_areas: int = 0
+    taxonomy_disciplines: int = 0
+    details: int = 0
     skipped: int = 0
 
     @property
     def total(self) -> int:
-        return self.institutions + self.units + self.divisions
+        return (
+            self.institutions
+            + self.units
+            + self.divisions
+            + self.taxonomy_areas
+            + self.taxonomy_disciplines
+            + self.details
+        )
 
     def describe(self) -> str:
         if self.total == 0:
             return "Workplace defaults are already present; nothing was seeded."
         return (
             f"Seeded {self.institutions} institution(s), {self.units} unit(s), "
-            f"and {self.divisions} division(s); {self.skipped} already present."
+            f"{self.divisions} division(s), {self.taxonomy_areas} taxonomy area(s) "
+            f"with {self.taxonomy_disciplines} discipline(s), and {self.details} "
+            f"divisional profile item(s); {self.skipped} already present."
         )
 
 
@@ -200,20 +213,98 @@ def seed_workplace(repository: WorkplaceRepository, *, force: bool = False) -> S
         report.skipped += 1
 
     existing = {division.key for division in repository.list_divisions(include_inactive=True)}
+    division_ids: dict[str, str] = {
+        division.key: division.record_id
+        for division in repository.list_divisions(include_inactive=True)
+    }
     for order, spec in enumerate(DIVISIONS_SEED, start=1):
         if spec["key"] in existing and not force:
             report.skipped += 1
             continue
-        repository.create_division(
+        created = repository.create_division(
             unit_id=unit.record_id,
             proposed=True,
             order=order,
             metadata={"source": "proposed default", "note": PROPOSED_NOTE},
             **spec,
         )
+        division_ids[created.key] = created.record_id
         report.divisions += 1
 
+    _seed_taxonomy(repository, report, force=force)
+    _seed_division_details(repository, report, division_ids, force=force)
+
     return report
+
+
+def _seed_taxonomy(
+    repository: WorkplaceRepository, report: SeedReport, *, force: bool
+) -> None:
+    """Store the shipped taxonomy as editable nodes (idempotent by key)."""
+    existing_keys = {
+        node.key for node in repository.list_taxonomy_nodes(include_inactive=True)
+    }
+    for order, area in enumerate(TAXONOMY, start=1):
+        if area.key in existing_keys and not force:
+            report.skipped += 1
+            continue
+        node = repository.create_taxonomy_node(
+            kind="area",
+            key=area.key,
+            name=area.name,
+            name_ar=area.name_ar,
+            summary=area.summary,
+            order=order,
+            proposed=True,
+            metadata={"source": "proposed default", "note": PROPOSED_NOTE},
+        )
+        report.taxonomy_areas += 1
+        for discipline_order, discipline in enumerate(area.disciplines, start=1):
+            repository.create_taxonomy_node(
+                kind="discipline",
+                parent_id=node.record_id,
+                key=f"{area.key}:{_slugify(discipline)}",
+                name=discipline,
+                order=discipline_order,
+                proposed=True,
+                metadata={"source": "proposed default", "note": PROPOSED_NOTE},
+            )
+            report.taxonomy_disciplines += 1
+
+
+def _seed_division_details(
+    repository: WorkplaceRepository,
+    report: SeedReport,
+    division_ids: dict[str, str],
+    *,
+    force: bool,
+) -> None:
+    """Give each division a starting technical profile (the brief's §3).
+
+    Every division gets its own scope recorded as a ``discipline``/``capability``
+    seed only when it has no profile yet, so a user's own edits are never
+    overwritten. The detail is deliberately thin: the point is that the *shape*
+    exists and is editable, not that a full profile is invented.
+    """
+    for spec in DIVISIONS_SEED:
+        division_id = division_ids.get(spec["key"])
+        if not division_id:
+            continue
+        existing = repository.list_details(division_id=division_id, include_inactive=True)
+        if existing and not force:
+            report.skipped += 1
+            continue
+        scope = str(spec.get("scope", "") or "")
+        if scope:
+            repository.create_detail(
+                division_id=division_id,
+                kind="capability",
+                title="Scope of services",
+                detail=scope,
+                order=1,
+                metadata={"source": "proposed default", "note": PROPOSED_NOTE},
+            )
+            report.details += 1
 
 
 def _unit_by_key(
@@ -223,6 +314,13 @@ def _unit_by_key(
         if unit.key == key:
             return unit
     return None
+
+
+def _slugify(text: str) -> str:
+    """A stable key fragment from a name (lower-case, hyphenated)."""
+    cleaned = [character if character.isalnum() else " " for character in text.strip().casefold()]
+    parts = "".join(cleaned).split()
+    return "-".join(parts) or "item"
 
 
 def default_records() -> tuple[list[Institution], list[OrganisationalUnit], list[Division]]:

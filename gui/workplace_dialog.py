@@ -5,16 +5,22 @@ and from the sidebar, this is the project's own enterprise workspace for the
 Egyptian Petroleum Research Institute and its Technical Support & Technology
 Center (TSTC) -- *معهد بحوث البترول المصري – مركز الدعم الفني والتكنولوجي*.
 
-Phase 2 gives the page its shape:
+Phase 2 gave the page its shape; Phase 3 completes the *configurable hierarchy*:
 
 * a collapsible **institutional sidebar** (the shared :class:`~gui.sidebar.SidebarColumn`)
-  holding the dashboard, the institution tree, the divisions, the professional
-  taxonomy, and the settings;
+  holding the dashboard, the institution tree, the divisions, the division
+  **profile**, the professional taxonomy, and the settings;
 * a **dashboard** of real figures read from the Workplace database (never
   demonstration data);
-* the **institution tree** and its ten *configurable* divisions, with add,
-  rename, deactivate, and reactivate -- all without touching source code;
-* the **professional knowledge taxonomy** the brief describes.
+* the **institution tree** and its ten *configurable* divisions, with add, rename,
+  move, deactivate, and reactivate -- all without touching source code;
+* each division's **technical profile** (the brief's §3): technical disciplines,
+  personnel and qualifications, applicable standards, inspection and testing
+  capabilities, procedures, equipment, project assignments, reports, historical
+  records, and knowledge documents -- every item added and removed in the window;
+* the **professional knowledge taxonomy** (the brief's §4), stored and editable:
+  an administrator adds an area or a discipline without touching source code;
+* the **interface language and layout direction** (English/Arabic, LTR/RTL).
 
 Everything is a thin view over :class:`gui.workplace.WorkplaceService`, so the
 whole workflow is testable with no display and the CLI (``python -m cli
@@ -93,6 +99,7 @@ class WorkplaceDialog(ThemedDialog):
         self._busy = False
         self._row_frames: list[tuple[str, str, tk.Frame, tk.Text, RoundedBox | None]] = []
         self._division_ids: list[str] = []
+        self._profile_ids: list[str] = []
         self._results: queue.Queue[tuple[Callable[[Any, Exception | None], None], Any, Exception | None]] = queue.Queue()
 
         self.window = tk.Toplevel(parent)
@@ -144,6 +151,29 @@ class WorkplaceDialog(ThemedDialog):
             parent, text, command, theme=self.theme, typography=self._type,
             variant="secondary", small=small, anchor="w",
         )
+
+    def _build_detail_kind_menu(self, parent: tk.Frame) -> tk.StringVar:
+        """A compact picker for the kind of profile item to add (the brief's §3)."""
+        theme = self.theme
+        tk.Label(
+            parent, text="New item kind", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", pady=(6, 0))
+        variable = tk.StringVar(value="capability")
+        labels = dict(self.service.detail_kind_labels())
+        menu = tk.OptionMenu(parent, variable, *labels.keys())
+        menu.configure(
+            bg=theme.surface_raised, fg=theme.foreground, activebackground=theme.interactive_active,
+            activeforeground=theme.foreground, relief="flat", highlightthickness=0,
+            borderwidth=0, font=self._type.font("2xs"), anchor="w", padx=8,
+        )
+        menu["menu"].configure(
+            bg=theme.surface_raised, fg=theme.foreground,
+            activebackground=theme.primary, activeforeground=theme.primary_foreground,
+            font=self._type.font("2xs"),
+        )
+        menu.pack(fill="x", pady=(2, 0))
+        return variable
 
     # -- sidebar ----------------------------------------------------------
 
@@ -246,6 +276,31 @@ class WorkplaceDialog(ThemedDialog):
             font=self._type.font("2xs"), anchor="w",
         ).pack(fill="x", pady=(4, 0))
 
+        # The selected division's technical profile (the brief's §3).
+        profile = column.add("profile", "Divisional profile", icon="🧾")
+        self._profile_title = tk.Label(
+            profile, text="", bg=theme.surface, fg=theme.contrast,
+            font=self._type.font("xs", weight="bold"), anchor="w", justify="left",
+            wraplength=270,
+        )
+        self._profile_title.pack(fill="x", padx=14, pady=(6, 2))
+        self._profile_text = tk.Text(
+            profile, height=8, wrap="word", relief="flat", borderwidth=0,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            font=self._type.font("xs"), padx=10, pady=8, cursor="xterm", takefocus=1,
+        )
+        self._profile_text.pack(fill="x", padx=14, pady=(0, 4))
+        self._profile_text.configure(state="disabled")
+        profile_buttons = tk.Frame(profile, bg=theme.surface)
+        profile_buttons.pack(fill="x", padx=14, pady=(0, 6))
+        self._button(profile_buttons, "Add profile item…", self._on_add_profile_item).pack(
+            fill="x", pady=2
+        )
+        self._button(profile_buttons, "Remove selected item…", self._on_remove_profile_item).pack(
+            fill="x", pady=2
+        )
+        self._detail_kinds = self._build_detail_kind_menu(profile_buttons)
+
         # The professional knowledge taxonomy.
         taxonomy = column.add("taxonomy", "Professional taxonomy", icon="🧭", open=False)
         self._taxonomy_text = tk.Text(
@@ -253,18 +308,46 @@ class WorkplaceDialog(ThemedDialog):
             highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
             font=self._type.font("xs"), padx=10, pady=8, cursor="xterm", takefocus=1,
         )
-        self._taxonomy_text.pack(fill="x", padx=14, pady=(6, 12))
+        self._taxonomy_text.pack(fill="x", padx=14, pady=(6, 4))
         self._taxonomy_text.configure(state="disabled")
+        tax_buttons = tk.Frame(taxonomy, bg=theme.surface)
+        tax_buttons.pack(fill="x", padx=14, pady=(0, 12))
+        self._button(tax_buttons, "Add area…", self._on_add_taxonomy_area).pack(fill="x", pady=2)
+        self._button(tax_buttons, "Add discipline…", self._on_add_taxonomy_discipline).pack(
+            fill="x", pady=2
+        )
 
-        # Settings (database, backup, defaults).
+        # Settings (database, appearance, backup, defaults).
         settings = column.add("settings", "Settings", icon="⚙", open=False)
         self._db_label = tk.Label(
             settings, text="", bg=theme.surface, fg=theme.text_dim,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=270,
         )
         self._db_label.pack(fill="x", padx=14, pady=(6, 6))
+
+        tk.Label(
+            settings, text="Interface language", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(4, 2))
+        self._language = tk.StringVar(value="en")
+        for code, label in (("en", "English"), ("ar", "العربية")):
+            tk.Radiobutton(
+                settings, text=label, value=code, variable=self._language,
+                command=self._on_language, bg=theme.surface, fg=theme.foreground,
+                activebackground=theme.surface, activeforeground=theme.contrast,
+                selectcolor=theme.surface_raised, highlightthickness=0, borderwidth=0,
+                font=self._type.font("2xs"), anchor="w",
+            ).pack(fill="x", padx=18)
+        self._rtl = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            settings, text="Right-to-left layout", variable=self._rtl, command=self._on_rtl,
+            bg=theme.surface, fg=theme.text_secondary, activebackground=theme.surface,
+            activeforeground=theme.contrast, selectcolor=theme.surface_raised,
+            highlightthickness=0, borderwidth=0, font=self._type.font("2xs"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(4, 0))
+
         self._button(settings, "Back up the database…", self._on_backup).pack(
-            fill="x", padx=14, pady=2
+            fill="x", padx=14, pady=(8, 2)
         )
         self._button(settings, "Reinstall the defaults…", self._on_reseed).pack(
             fill="x", padx=14, pady=(2, 12)
@@ -385,7 +468,9 @@ class WorkplaceDialog(ThemedDialog):
         self._refresh_dashboard()
         self._refresh_tree()
         self._refresh_divisions()
+        self._refresh_profile()
         self._refresh_taxonomy()
+        self._refresh_settings()
 
     def _refresh_dashboard(self) -> None:
         status = self.service.status()
@@ -429,12 +514,53 @@ class WorkplaceDialog(ThemedDialog):
         self._on_division_selected()
 
     def _refresh_taxonomy(self) -> None:
-        lines = []
-        for area in self.service.taxonomy():
-            lines.append(f"{area.name} / {area.name_ar}")
-            for discipline in area.disciplines:
+        areas = self.service.taxonomy_tree()
+        if areas:
+            lines = []
+            for area in areas:
+                lines.append(f"{area.name} / {area.name_ar}")
+                for discipline in area.metadata.get("disciplines", ()):
+                    lines.append(f"    • {discipline}")
+            self._set_text(self._taxonomy_text, "\n".join(lines))
+            return
+        # No stored taxonomy yet (a database created before Phase 3): fall back to
+        # the shipped default so the tree is never empty, and say so honestly.
+        lines = ["(shipped defaults — stored once you edit the taxonomy)"]
+        for shipped in self.service.taxonomy():
+            lines.append(f"{shipped.name} / {shipped.name_ar}")
+            for discipline in shipped.disciplines:
                 lines.append(f"    • {discipline}")
         self._set_text(self._taxonomy_text, "\n".join(lines))
+
+    def _refresh_profile(self) -> None:
+        summary = self._selected_division()
+        if summary is None:
+            self._profile_title.configure(text="Select a division to see its profile.")
+            self._set_text(self._profile_text, "")
+            self._profile_ids = []
+            return
+        profile = self.service.division_profile(summary.record_id)
+        self._profile_title.configure(text=f"{summary.name} · profile")
+        self._profile_ids = [d.record_id for d in profile.details]
+        grouped = profile.by_kind()
+        lines: list[str] = []
+        if not grouped:
+            lines.append("No profile items yet. Add one below.")
+        for _kind, items in grouped.items():
+            lines.append(f"{items[0].kind_label}:")
+            for item in items:
+                text = item.title or item.detail
+                if item.title and item.detail:
+                    text += f" — {item.detail}"
+                if item.reference:
+                    text += f"  [{item.reference}]"
+                lines.append(f"    • {text}")
+        self._set_text(self._profile_text, "\n".join(lines))
+
+    def _refresh_settings(self) -> None:
+        settings = self.service.settings()
+        self._language.set(settings.language)
+        self._rtl.set(settings.rtl)
 
     @staticmethod
     def _set_text(widget: tk.Text, text: str) -> None:
@@ -458,10 +584,12 @@ class WorkplaceDialog(ThemedDialog):
         summary = self._selected_division()
         if summary is None:
             self._toggle_active_button.configure(text="Deactivate", state="disabled")
+            self._refresh_profile()
             return
         self._toggle_active_button.configure(
             text="Reactivate" if not summary.active else "Deactivate", state="normal"
         )
+        self._refresh_profile()
 
     # -- division actions -------------------------------------------------
 
@@ -525,7 +653,114 @@ class WorkplaceDialog(ThemedDialog):
             return
         self._refresh_all()
 
+    # -- profile actions --------------------------------------------------
+
+    def _on_add_profile_item(self) -> None:
+        summary = self._selected_division()
+        if summary is None:
+            return
+        kind = self._detail_kinds.get()
+        values = _prompt_profile_item(
+            self.window, self.theme, self._type,
+            kind_label=dict(self.service.detail_kind_labels()).get(kind, kind),
+        )
+        if values is None:
+            return
+        title, detail, reference = values
+        try:
+            item = self.service.add_division_detail(
+                division_id=summary.record_id, kind=kind,
+                title=title, detail=detail, reference=reference,
+            )
+        except WorkplaceError as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message(
+            "workplace",
+            f"Added a **{item.kind_label}** item to the **{summary.name}** division.",
+            title="Workplace",
+        )
+        self._refresh_all()
+
+    def _on_remove_profile_item(self) -> None:
+        summary = self._selected_division()
+        if summary is None:
+            return
+        profile = self.service.division_profile(summary.record_id)
+        if profile.empty:
+            self._add_message("note", "This division has no profile items yet.", title="Note")
+            return
+        options = [f"{d.kind_label}: {d.title or d.detail}" for d in profile.details]
+        chosen = _choose(self.window, self.theme, self._type, "Remove a profile item", options)
+        if chosen is None:
+            return
+        target = profile.details[chosen]
+        try:
+            self.service.remove_division_detail(target.record_id)
+        except WorkplaceError as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message(
+            "workplace", f"Removed a profile item from **{summary.name}**.", title="Workplace"
+        )
+        self._refresh_all()
+
+    # -- taxonomy actions -------------------------------------------------
+
+    def _on_add_taxonomy_area(self) -> None:
+        values = _prompt_division(self.window, self.theme, self._type)
+        if values is None:
+            return
+        name, name_ar, summary = values
+        try:
+            node = self.service.add_taxonomy_area(name=name, name_ar=name_ar, summary=summary)
+        except WorkplaceError as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message("workplace", f"Added the **{node.name}** taxonomy area.", title="Workplace")
+        self._refresh_all()
+
+    def _on_add_taxonomy_discipline(self) -> None:
+        areas = self.service.taxonomy_tree()
+        if not areas:
+            self._add_message(
+                "note",
+                "The taxonomy is still the shipped default. Add an area first, then a "
+                "discipline under it.",
+                title="Note",
+            )
+            return
+        options = [area.name for area in areas]
+        chosen = _choose(self.window, self.theme, self._type, "Add a discipline under", options)
+        if chosen is None:
+            return
+        values = _prompt_division(self.window, self.theme, self._type)
+        if values is None:
+            return
+        name, name_ar, _summary = values
+        try:
+            node = self.service.add_taxonomy_discipline(
+                area_id=areas[chosen].record_id, name=name, name_ar=name_ar
+            )
+        except WorkplaceError as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message("workplace", f"Added the **{node.name}** discipline.", title="Workplace")
+        self._refresh_all()
+
     # -- settings actions -------------------------------------------------
+
+    def _on_language(self) -> None:
+        try:
+            self.service.update_settings(language=self._language.get())
+        except WorkplaceError as error:
+            self._add_message("note", str(error), title="Problem")
+
+    def _on_rtl(self) -> None:
+        try:
+            self.service.update_settings(rtl=self._rtl.get())
+        except WorkplaceError as error:
+            self._add_message("note", str(error), title="Problem")
 
     def _on_backup(self) -> None:
         def job() -> str:
@@ -669,6 +904,131 @@ def _prompt_division(
     dialog.bind("<Return>", lambda _e: submit())
     dialog.bind("<Escape>", lambda _e: cancel())
     name_entry.focus_set()
+    parent.wait_window(dialog)
+    return result["value"]
+
+
+def _prompt_profile_item(
+    parent: tk.Misc,
+    theme: Any,
+    typography: Any,
+    *,
+    kind_label: str = "",
+) -> tuple[str, str, str] | None:
+    """A small modal asking for a profile item's title, detail, and reference."""
+    dialog = tk.Toplevel(parent)
+    dialog.title("Profile item")
+    dialog.configure(bg=theme.base)
+    dialog.transient(parent)  # type: ignore[call-overload]
+    dialog.grab_set()
+    result: dict[str, tuple[str, str, str] | None] = {"value": None}
+
+    frame = tk.Frame(dialog, bg=theme.surface)
+    frame.pack(fill="both", expand=True, padx=18, pady=18)
+    if kind_label:
+        tk.Label(
+            frame, text=kind_label, bg=theme.surface, fg=theme.text_dim,
+            font=typography.font("xs", weight="bold"), anchor="w",
+        ).pack(fill="x", pady=(0, 4))
+
+    def field(label: str, value: str = "") -> tk.Entry:
+        tk.Label(
+            frame, text=label, bg=theme.surface, fg=theme.text_secondary,
+            font=typography.font("xs"), anchor="w",
+        ).pack(fill="x", pady=(6, 2))
+        entry = tk.Entry(
+            frame, bg=theme.surface_raised, fg=theme.foreground,
+            insertbackground=theme.foreground, relief="flat", font=typography.font("body"),
+        )
+        entry.insert(0, value)
+        entry.pack(fill="x")
+        return entry
+
+    title_entry = field("Title")
+    detail_entry = field("Detail")
+    reference_entry = field("Reference (optional)")
+
+    def submit() -> None:
+        result["value"] = (
+            title_entry.get().strip(),
+            detail_entry.get().strip(),
+            reference_entry.get().strip(),
+        )
+        dialog.destroy()
+
+    def cancel() -> None:
+        result["value"] = None
+        dialog.destroy()
+
+    buttons = tk.Frame(frame, bg=theme.surface)
+    buttons.pack(fill="x", pady=(12, 0))
+    from gui.components import button
+
+    button(buttons, "Save", submit, theme=theme, typography=typography, variant="primary").pack(
+        side="right"
+    )
+    button(buttons, "Cancel", cancel, theme=theme, typography=typography).pack(
+        side="right", padx=(0, 8)
+    )
+    dialog.bind("<Return>", lambda _e: submit())
+    dialog.bind("<Escape>", lambda _e: cancel())
+    title_entry.focus_set()
+    parent.wait_window(dialog)
+    return result["value"]
+
+
+def _choose(
+    parent: tk.Misc, theme: Any, typography: Any, title: str, options: list[str]
+) -> int | None:
+    """A small modal asking the user to choose one of ``options`` (its index)."""
+    dialog = tk.Toplevel(parent)
+    dialog.title(title)
+    dialog.configure(bg=theme.base)
+    dialog.transient(parent)  # type: ignore[call-overload]
+    dialog.grab_set()
+    result: dict[str, int | None] = {"value": None}
+
+    frame = tk.Frame(dialog, bg=theme.surface)
+    frame.pack(fill="both", expand=True, padx=18, pady=18)
+    tk.Label(
+        frame, text=title, bg=theme.surface, fg=theme.contrast,
+        font=typography.font("body", weight="bold"), anchor="w",
+    ).pack(fill="x", pady=(0, 6))
+    listbox = tk.Listbox(
+        frame, height=min(10, max(3, len(options))), activestyle="none", relief="flat",
+        borderwidth=0, highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+        selectbackground=theme.primary, selectforeground=theme.primary_foreground,
+        font=typography.font("xs"), exportselection=False,
+    )
+    for option in options:
+        listbox.insert("end", option)
+    listbox.pack(fill="both", expand=True)
+    if options:
+        listbox.selection_set(0)
+
+    def submit() -> None:
+        selection = listbox.curselection()
+        result["value"] = selection[0] if selection else None
+        dialog.destroy()
+
+    def cancel() -> None:
+        result["value"] = None
+        dialog.destroy()
+
+    buttons = tk.Frame(frame, bg=theme.surface)
+    buttons.pack(fill="x", pady=(12, 0))
+    from gui.components import button
+
+    button(buttons, "OK", submit, theme=theme, typography=typography, variant="primary").pack(
+        side="right"
+    )
+    button(buttons, "Cancel", cancel, theme=theme, typography=typography).pack(
+        side="right", padx=(0, 8)
+    )
+    listbox.bind("<Double-Button-1>", lambda _e: submit())
+    dialog.bind("<Return>", lambda _e: submit())
+    dialog.bind("<Escape>", lambda _e: cancel())
+    listbox.focus_set()
     parent.wait_window(dialog)
     return result["value"]
 

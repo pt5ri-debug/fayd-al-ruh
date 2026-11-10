@@ -11,6 +11,12 @@
     python -m cli workplace activate-division DIV-…
     python -m cli workplace hierarchy         # the institution tree
     python -m cli workplace taxonomy          # the professional knowledge taxonomy
+    python -m cli workplace profile DIV-…     # a division's full technical profile
+    python -m cli workplace add-detail DIV-… standard --title "API 1104" --reference "API 1104"
+    python -m cli workplace kinds             # the kinds of profile item
+    python -m cli workplace add-taxonomy-area "New Area" --name-ar "مجال جديد"
+    python -m cli workplace add-taxonomy-discipline TAX-… "New Discipline"
+    python -m cli workplace settings --language ar
     python -m cli workplace backup            # a consistent copy of the database
 
 This is the headless twin of the Workplace window: it drives the *same*
@@ -103,6 +109,53 @@ def _build_parser() -> argparse.ArgumentParser:
 
     activate = _sub(sub, "activate-division", help="Reactivate a division.")
     activate.add_argument("record_id", help="The division id.")
+
+    move = _sub(sub, "move-division", help="Move a division to another unit.")
+    move.add_argument("record_id", help="The division id.")
+    move.add_argument("--unit", required=True, help="The target unit id.")
+    move.add_argument("--order", type=int, default=None, help="The new display order.")
+
+    profile = _sub(sub, "profile", help="A division's full technical profile.")
+    profile.add_argument("record_id", help="The division id.")
+
+    detail = _sub(sub, "add-detail", help="Add an item to a division's profile.")
+    detail.add_argument("division_id", help="The division id.")
+    detail.add_argument("kind", help="The item kind (see `workplace kinds`).")
+    detail.add_argument("--title", default="", help="A short title.")
+    detail.add_argument("--detail", default="", help="The detail text.")
+    detail.add_argument("--reference", default="", help="A pointer (standard number, file, ...).")
+
+    remove_detail = _sub(sub, "remove-detail", help="Remove a profile item (soft delete).")
+    remove_detail.add_argument("record_id", help="The profile item id.")
+
+    _sub(sub, "kinds", help="The kinds of divisional profile item.")
+
+    tax_add = _sub(sub, "add-taxonomy-area", help="Add a taxonomy area (no source change).")
+    tax_add.add_argument("name", help="The area name.")
+    tax_add.add_argument("--name-ar", default="", help="The Arabic name.")
+    tax_add.add_argument("--key", default="", help="A stable key (default: from the name).")
+    tax_add.add_argument("--summary", default="", help="A one-line description.")
+
+    tax_disc = _sub(sub, "add-taxonomy-discipline", help="Add a sub-discipline under an area.")
+    tax_disc.add_argument("area_id", help="The taxonomy area id.")
+    tax_disc.add_argument("name", help="The discipline name.")
+    tax_disc.add_argument("--name-ar", default="", help="The Arabic name.")
+
+    tax_rename = _sub(sub, "rename-taxonomy", help="Rename a taxonomy node.")
+    tax_rename.add_argument("record_id", help="The taxonomy node id.")
+    tax_rename.add_argument("name", help="The new name.")
+    tax_rename.add_argument("--name-ar", default="", help="The new Arabic name.")
+
+    tax_remove = _sub(sub, "remove-taxonomy", help="Deactivate a taxonomy node (soft delete).")
+    tax_remove.add_argument("record_id", help="The taxonomy node id.")
+
+    settings = _sub(sub, "settings", help="Show or change the Workplace settings.")
+    settings.add_argument("--language", choices=("en", "ar"), default=None, help="The interface language.")
+    settings.add_argument("--rtl", dest="rtl", action="store_true", default=None, help="Lay out right-to-left.")
+    settings.add_argument("--ltr", dest="rtl", action="store_false", help="Lay out left-to-right.")
+    settings.add_argument("--default-institution", default=None, help="The default institution key.")
+    settings.add_argument("--show-proposed", dest="show_proposed", action="store_true", default=None)
+    settings.add_argument("--hide-proposed", dest="show_proposed", action="store_false")
 
     backup = _sub(sub, "backup", help="Write a consistent copy of the database.")
     backup.add_argument("--output", default=None, help="Where to write the copy.")
@@ -219,18 +272,33 @@ def run_hierarchy(args: argparse.Namespace) -> int:
 
 def run_taxonomy(args: argparse.Namespace) -> int:
     service = _service(args)
-    areas = service.taxonomy()
+    # Prefer the *stored* (editable) taxonomy once it exists, so a user's own
+    # areas show up; fall back to the shipped defaults when nothing is stored.
+    stored = service.taxonomy_tree()
     if args.as_json:
-        print(json.dumps([
-            {"key": a.key, "name": a.name, "name_ar": a.name_ar, "summary": a.summary,
-             "disciplines": list(a.disciplines)}
-            for a in areas
-        ], ensure_ascii=False, indent=2))
+        if stored:
+            print(json.dumps([
+                {"key": a.key, "name": a.name, "name_ar": a.name_ar, "summary": a.summary,
+                 "disciplines": list(a.metadata.get("disciplines", ()))}
+                for a in stored
+            ], ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps([
+                {"key": a.key, "name": a.name, "name_ar": a.name_ar, "summary": a.summary,
+                 "disciplines": list(a.disciplines)}
+                for a in service.taxonomy()
+            ], ensure_ascii=False, indent=2))
         return EXIT_OK
     print(f"Professional knowledge taxonomy — {service.taxonomy_summary()}")
-    for area in areas:
-        print(f"  {area.name} / {area.name_ar}")
-        for discipline in area.disciplines:
+    if stored:
+        for area in stored:
+            print(f"  {area.name} / {area.name_ar}")
+            for discipline in area.metadata.get("disciplines", ()):
+                print(f"      • {discipline}")
+        return EXIT_OK
+    for shipped in service.taxonomy():
+        print(f"  {shipped.name} / {shipped.name_ar}")
+        for discipline in shipped.disciplines:
             print(f"      • {discipline}")
     return EXIT_OK
 
@@ -270,6 +338,155 @@ def run_activate_division(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _detail_payload(detail) -> dict[str, object]:
+    return {
+        "record_id": detail.record_id,
+        "kind": detail.kind,
+        "kind_label": detail.kind_label,
+        "title": detail.title,
+        "detail": detail.detail,
+        "reference": detail.reference,
+        "order": detail.order,
+        "active": detail.active,
+    }
+
+
+def run_move_division(args: argparse.Namespace) -> int:
+    service = _service(args)
+    summary = service.set_division_unit(args.record_id, unit_id=args.unit)
+    if args.order is not None:
+        summary = service.set_division_order(args.record_id, order=args.order)
+    if args.as_json:
+        print(json.dumps(_division_payload(summary), ensure_ascii=False, indent=2))
+    else:
+        print(f"Moved {summary.record_id}: {summary.describe()}")
+    return EXIT_OK
+
+
+def run_profile(args: argparse.Namespace) -> int:
+    profile = _service(args).division_profile(args.record_id)
+    if args.as_json:
+        print(json.dumps({
+            "division": _division_payload(profile.division),
+            "details": [_detail_payload(d) for d in profile.details],
+        }, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(f"Profile — {profile.division.describe()}")
+    grouped = profile.by_kind()
+    if not grouped:
+        print("  (no profile items yet — add one with `workplace add-detail`)")
+    for _kind, items in grouped.items():
+        print(f"  {items[0].kind_label}:")
+        for item in items:
+            print(f"      • {item.title or item.detail}"
+                  + (f" — {item.detail}" if item.title and item.detail else "")
+                  + (f"  [{item.reference}]" if item.reference else ""))
+    return EXIT_OK
+
+
+def run_add_detail(args: argparse.Namespace) -> int:
+    service = _service(args)
+    detail = service.add_division_detail(
+        division_id=args.division_id, kind=args.kind,
+        title=args.title, detail=args.detail, reference=args.reference,
+    )
+    if args.as_json:
+        print(json.dumps(_detail_payload(detail), ensure_ascii=False, indent=2))
+    else:
+        print(f"Added {detail.record_id}: {detail.describe()}")
+    return EXIT_OK
+
+
+def run_remove_detail(args: argparse.Namespace) -> int:
+    detail = _service(args).remove_division_detail(args.record_id)
+    if args.as_json:
+        print(json.dumps(_detail_payload(detail), ensure_ascii=False, indent=2))
+    else:
+        print(f"Removed {detail.record_id}: {detail.describe()}")
+    return EXIT_OK
+
+
+def run_kinds(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.detail_kind_labels()
+    if args.as_json:
+        print(json.dumps([{"kind": k, "label": label} for k, label in rows],
+                         ensure_ascii=False, indent=2))
+    else:
+        print("Kinds of divisional profile item:")
+        for kind, label in rows:
+            print(f"  {kind:12s} {label}")
+    return EXIT_OK
+
+
+def run_add_taxonomy_area(args: argparse.Namespace) -> int:
+    node = _service(args).add_taxonomy_area(
+        name=args.name, name_ar=args.name_ar, key=args.key, summary=args.summary
+    )
+    if args.as_json:
+        print(json.dumps({"record_id": node.record_id, "key": node.key, "name": node.name,
+                          "name_ar": node.name_ar}, ensure_ascii=False, indent=2))
+    else:
+        print(f"Added taxonomy area {node.record_id}: {node.name}")
+    return EXIT_OK
+
+
+def run_add_taxonomy_discipline(args: argparse.Namespace) -> int:
+    node = _service(args).add_taxonomy_discipline(
+        area_id=args.area_id, name=args.name, name_ar=args.name_ar
+    )
+    if args.as_json:
+        print(json.dumps({"record_id": node.record_id, "key": node.key, "name": node.name,
+                          "parent_id": node.parent_id}, ensure_ascii=False, indent=2))
+    else:
+        print(f"Added discipline {node.record_id}: {node.name}")
+    return EXIT_OK
+
+
+def run_rename_taxonomy(args: argparse.Namespace) -> int:
+    node = _service(args).rename_taxonomy_node(
+        args.record_id, name=args.name, name_ar=args.name_ar
+    )
+    if args.as_json:
+        print(json.dumps({"record_id": node.record_id, "name": node.name,
+                          "name_ar": node.name_ar}, ensure_ascii=False, indent=2))
+    else:
+        print(f"Renamed {node.record_id}: {node.name}")
+    return EXIT_OK
+
+
+def run_remove_taxonomy(args: argparse.Namespace) -> int:
+    node = _service(args).remove_taxonomy_node(args.record_id)
+    if args.as_json:
+        print(json.dumps({"record_id": node.record_id, "active": node.active},
+                         ensure_ascii=False, indent=2))
+    else:
+        print(f"Deactivated taxonomy node {node.record_id}.")
+    return EXIT_OK
+
+
+def run_settings(args: argparse.Namespace) -> int:
+    service = _service(args)
+    changes = {
+        key: value
+        for key, value in (
+            ("language", args.language), ("rtl", args.rtl),
+            ("default_institution", args.default_institution),
+            ("show_proposed", args.show_proposed),
+        )
+        if value is not None
+    }
+    settings = service.update_settings(**changes) if changes else service.settings()
+    if args.as_json:
+        print(json.dumps(settings.to_primitive(), ensure_ascii=False, indent=2))
+    else:
+        print(f"Language: {settings.language}")
+        print(f"Right-to-left: {settings.rtl}")
+        print(f"Default institution: {settings.default_institution or '(the first one)'}")
+        print(f"Show proposed records: {settings.show_proposed}")
+    return EXIT_OK
+
+
 def run_backup(args: argparse.Namespace) -> int:
     service = _service(args)
     path = service.backup(Path(args.output) if args.output else None)
@@ -292,6 +509,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         "rename-division": run_rename_division,
         "deactivate-division": run_deactivate_division,
         "activate-division": run_activate_division,
+        "move-division": run_move_division,
+        "profile": run_profile,
+        "add-detail": run_add_detail,
+        "remove-detail": run_remove_detail,
+        "kinds": run_kinds,
+        "add-taxonomy-area": run_add_taxonomy_area,
+        "add-taxonomy-discipline": run_add_taxonomy_discipline,
+        "rename-taxonomy": run_rename_taxonomy,
+        "remove-taxonomy": run_remove_taxonomy,
+        "settings": run_settings,
         "backup": run_backup,
     }
     handler = handlers.get(args.command)

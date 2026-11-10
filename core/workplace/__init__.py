@@ -38,33 +38,47 @@ from core.workplace.database import (
     WorkplaceLoadReport,
 )
 from core.workplace.model import (
+    DIVISION_DETAIL_KINDS,
     Division,
+    DivisionDetail,
     Institution,
     OrganisationalUnit,
     RecordBase,
+    TaxonomyNode,
     WorkplaceRecord,
     make_id,
 )
 from core.workplace.repository import WorkplaceRepository
 from core.workplace.seed import SeedReport, seed_workplace
+from core.workplace.settings import (
+    WorkplaceSettings,
+    load_settings,
+    save_settings,
+)
 from core.workplace.taxonomy import TAXONOMY, TaxonomyArea, area_for, discipline_count
 
 __all__ = [
+    "DIVISION_DETAIL_KINDS",
     "SCHEMA_VERSION",
     "TAXONOMY",
     "Division",
+    "DivisionDetail",
     "Institution",
     "OrganisationalUnit",
     "RecordBase",
     "SeedReport",
     "TaxonomyArea",
+    "TaxonomyNode",
     "WorkplaceDatabase",
     "WorkplaceDatabaseError",
     "WorkplaceLoadReport",
     "WorkplaceRecord",
     "WorkplaceRepository",
+    "WorkplaceSettings",
     "area_for",
     "discipline_count",
+    "load_settings",
     "make_id",
+    "save_settings",
     "seed_workplace",
 ]
