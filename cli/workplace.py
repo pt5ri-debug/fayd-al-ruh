@@ -22,6 +22,11 @@
     python -m cli workplace corpus            # rebuild the assistant's corpus
     python -m cli workplace ask "what coating applies to the flowline?" --profile coating
     python -m cli workplace assistant-status
+    python -m cli workplace draft-report PRJ-… --kind proposal --with-assistant --save
+    python -m cli workplace reports PRJ-…        # a project's reports
+    python -m cli workplace approve-report REP-… --by "Dr. Ahmed"
+    python -m cli workplace issue-report REP-…   # issue an approved deliverable
+    python -m cli workplace deliverables PRJ-…   # the project's issued deliverables
 
 This is the headless twin of the Workplace window: it drives the *same*
 :class:`gui.workplace.WorkplaceService`, so the CLI and the window share one
@@ -294,6 +299,56 @@ def _build_parser() -> argparse.ArgumentParser:
     corpus.add_argument("--refresh", action="store_true", help="Rebuild (the default).")
 
     _sub(sub, "assistant-status", help="An honest status of the Workplace assistant.")
+
+    # -- reporting and proposal workflows (the brief's §9, §10, §13) ------
+    report_kinds = _sub(sub, "report-kinds", help="The report kinds the Workplace drafts.")
+    report_kinds.add_argument("--language", choices=("en", "ar"), default="en")
+
+    _sub(sub, "report-statuses", help="The report lifecycle states.")
+
+    draft = _sub(sub, "draft-report", help="Draft a report from the project's own records.")
+    draft.add_argument("project", help="The project id.")
+    draft.add_argument("--kind", default="technical_report", help="The report kind (see `report-kinds`).")
+    draft.add_argument("--title", default="", help="Override the draft title.")
+    draft.add_argument("--with-assistant", action="store_true", help="Fill sections from the assistant.")
+    draft.add_argument("--profile", default="", help="The assistant profile (with --with-assistant).")
+    draft.add_argument("--save", action="store_true", help="Save the draft as a report row.")
+    draft.add_argument("--author", default="", help="The author id (with --save).")
+    draft.add_argument("--number", default="", help="The report number (with --save).")
+
+    reports = _sub(sub, "reports", help="List a project's reports.")
+    reports.add_argument("project", help="The project id.")
+    reports.add_argument("--kind", default="", help="Filter by kind.")
+
+    report = _sub(sub, "report", help="Show one report.")
+    report.add_argument("report", help="The report id.")
+
+    submit = _sub(sub, "submit-report", help="Submit a draft report for approval.")
+    submit.add_argument("report", help="The report id.")
+
+    reject = _sub(sub, "reject-report", help="Reject a submitted report.")
+    reject.add_argument("report", help="The report id.")
+    reject.add_argument("--note", default="", help="Why it was rejected.")
+
+    approve = _sub(sub, "approve-report", help="Record a person's approval of a report.")
+    approve.add_argument("report", help="The report id.")
+    approve.add_argument("--by", required=True, dest="approved_by", help="Who approved it (a person).")
+    approve.add_argument("--role", default="", help="Their role.")
+    approve.add_argument("--note", default="", help="A note.")
+
+    issue = _sub(sub, "issue-report", help="Issue an approved report as a deliverable.")
+    issue.add_argument("report", help="The report id.")
+    issue.add_argument("--no-document", action="store_true", help="Do not register a deliverable file.")
+    issue.add_argument("--issued-on", default="", help="The issue date.")
+
+    supersede = _sub(sub, "supersede-report", help="Mark a report superseded.")
+    supersede.add_argument("report", help="The report id.")
+
+    approvals = _sub(sub, "report-approvals", help="The approvals recorded for a report.")
+    approvals.add_argument("report", help="The report id.")
+
+    deliverables = _sub(sub, "deliverables", help="A project's issued deliverables.")
+    deliverables.add_argument("project", help="The project id.")
 
     return parser
 
@@ -1242,6 +1297,210 @@ def run_assistant_status(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# -- reporting and proposal workflows (the brief's §9, §10, §13) ----------
+
+
+def run_report_kinds(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.report_kinds(language=args.language)
+    if args.as_json:
+        print(json.dumps([{"key": k, "label": v} for k, v in rows], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print("Report kinds the Workplace drafts:")
+    for key, label in rows:
+        print(f"  {key:18}  {label}")
+    return EXIT_OK
+
+
+def run_report_statuses(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.report_statuses()
+    if args.as_json:
+        print(json.dumps([{"key": k, "label": v} for k, v in rows], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print("Report lifecycle states:")
+    for key, label in rows:
+        print(f"  {key:18}  {label}")
+    return EXIT_OK
+
+
+def run_draft_report(args: argparse.Namespace) -> int:
+    service = _service(args)
+    draft = service.draft_report(
+        args.project, kind=args.kind, title=args.title,
+        use_assistant=args.with_assistant, profile=args.profile,
+    )
+    saved = ""
+    if args.save:
+        report = service.save_report_draft(
+            args.project, draft, author_id=args.author, number=args.number
+        )
+        saved = report.record_id
+    if args.as_json:
+        print(json.dumps(
+            {
+                "kind": draft.kind,
+                "title": draft.title,
+                "project_id": draft.project_id,
+                "used_assistant": draft.used_assistant,
+                "citations": list(draft.citations),
+                "sections": [
+                    {"title": s.title, "ai": s.ai, "lines": list(s.lines)} for s in draft.sections
+                ],
+                "text": draft.to_text(),
+                "saved_report_id": saved,
+            },
+            ensure_ascii=False, indent=2,
+        ))
+        return EXIT_OK
+    print(draft.to_text())
+    if saved:
+        print(f"\nSaved as report {saved}.")
+    return EXIT_OK
+
+
+def run_reports(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.project_reports(args.project, kind=args.kind)
+    if args.as_json:
+        print(json.dumps([_report_payload(r) for r in rows], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(f"Reports for project {args.project}: {len(rows)}")
+    for report in rows:
+        number = report.number or report.record_id
+        print(f"  {number:16}  {report.title} [{report.status}]")
+    return EXIT_OK
+
+
+def _report_payload(report) -> dict[str, object]:
+    return {
+        "record_id": report.record_id,
+        "project_id": report.project_id,
+        "kind": report.kind,
+        "number": report.number,
+        "title": report.title,
+        "status": report.status,
+        "issued_on": report.issued_on,
+        "document_id": report.document_id,
+    }
+
+
+def run_report(args: argparse.Namespace) -> int:
+    service = _service(args)
+    report = service.report_record(args.report)
+    if report is None:
+        print(f"No report with id {args.report!r}.")
+        return EXIT_REFUSED
+    if args.as_json:
+        payload = _report_payload(report)
+        payload["body"] = report.body
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(f"{report.number or report.record_id} — {report.title} [{report.status}]")
+    if report.body:
+        print()
+        print(report.body)
+    return EXIT_OK
+
+
+def run_submit_report(args: argparse.Namespace) -> int:
+    service = _service(args)
+    report = service.submit_report(args.report)
+    print(f"Report {report.record_id} is now {report.status}.")
+    return EXIT_OK
+
+
+def run_reject_report(args: argparse.Namespace) -> int:
+    service = _service(args)
+    report = service.reject_report(args.report, note=args.note)
+    print(f"Report {report.record_id} is now {report.status}.")
+    return EXIT_OK
+
+
+def run_approve_report(args: argparse.Namespace) -> int:
+    service = _service(args)
+    report = service.approve_report(
+        args.report, approved_by=args.approved_by, role=args.role, note=args.note
+    )
+    print(f"Report {report.record_id} approved by {args.approved_by}; status {report.status}.")
+    return EXIT_OK
+
+
+def run_issue_report(args: argparse.Namespace) -> int:
+    service = _service(args)
+    deliverable = service.issue_report(
+        args.report, register_document=not args.no_document, issued_on=args.issued_on
+    )
+    if args.as_json:
+        print(json.dumps(
+            {
+                "report_id": deliverable.report.record_id,
+                "status": deliverable.report.status,
+                "document_id": deliverable.document_id,
+                "document_title": deliverable.document_title,
+            },
+            ensure_ascii=False, indent=2,
+        ))
+        return EXIT_OK
+    print(f"Issued: {deliverable.describe()}")
+    return EXIT_OK
+
+
+def run_supersede_report(args: argparse.Namespace) -> int:
+    service = _service(args)
+    report = service.supersede_report(args.report)
+    print(f"Report {report.record_id} is now {report.status}.")
+    return EXIT_OK
+
+
+def run_report_approvals(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.report_approvals(args.report)
+    if args.as_json:
+        print(json.dumps(
+            [
+                {
+                    "record_id": a.record_id,
+                    "decision": a.decision,
+                    "approved_by": a.approved_by,
+                    "role": a.role,
+                    "note": a.note,
+                    "decided_on": a.decided_on,
+                }
+                for a in rows
+            ],
+            ensure_ascii=False, indent=2,
+        ))
+        return EXIT_OK
+    print(f"Approvals for report {args.report}: {len(rows)}")
+    for approval in rows:
+        print(f"  {approval.decided_on}  {approval.decision} by {approval.approved_by}")
+    return EXIT_OK
+
+
+def run_deliverables(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.project_deliverables(args.project)
+    if args.as_json:
+        print(json.dumps(
+            [
+                {
+                    "report_id": d.report.record_id,
+                    "title": d.report.title,
+                    "document_id": d.document_id,
+                    "document_title": d.document_title,
+                }
+                for d in rows
+            ],
+            ensure_ascii=False, indent=2,
+        ))
+        return EXIT_OK
+    print(f"Deliverables for project {args.project}: {len(rows)}")
+    for deliverable in rows:
+        print(f"  {deliverable.describe()}")
+    return EXIT_OK
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else sys.argv[1:])
     handlers = {
@@ -1295,6 +1554,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         "ask": run_ask,
         "corpus": run_corpus,
         "assistant-status": run_assistant_status,
+        "report-kinds": run_report_kinds,
+        "report-statuses": run_report_statuses,
+        "draft-report": run_draft_report,
+        "reports": run_reports,
+        "report": run_report,
+        "submit-report": run_submit_report,
+        "reject-report": run_reject_report,
+        "approve-report": run_approve_report,
+        "issue-report": run_issue_report,
+        "supersede-report": run_supersede_report,
+        "report-approvals": run_report_approvals,
+        "deliverables": run_deliverables,
     }
     handler = handlers.get(args.command)
     if handler is None:

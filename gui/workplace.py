@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from core.paths import workplace_db_path
 from core.workplace.assistant import CorpusReport, WorkplaceAssistant
@@ -51,7 +52,17 @@ from core.workplace.model import (
 )
 from core.workplace.personnel import Candidate, CompetencyMatrix, PersonnelDirectory, PersonProfile
 from core.workplace.projects import ProjectManager, ProjectRow, ProjectSummary
-from core.workplace.records import Assignment, Person
+from core.workplace.records import Assignment, Person, Report
+from core.workplace.reporting import (
+    REPORT_KINDS,
+    REPORT_STATUSES,
+    Deliverable,
+    ReportDraft,
+    ReportingWorkflow,
+    can_transition,
+    report_kind_label,
+    status_label,
+)
 from core.workplace.repository import WorkplaceRepository
 from core.workplace.seed import SeedReport, seed_workplace
 from core.workplace.settings import (
@@ -307,6 +318,7 @@ class WorkplaceService:
         self._library: TechnicalLibrary | None = None
         self._documents: DocumentManager | None = None
         self._assistant: WorkplaceAssistant | None = None
+        self._reporting: ReportingWorkflow | None = None
         self._documents_dir = (
             Path(root) / "workplace" / "documents" if root is not None else None
         )
@@ -698,6 +710,103 @@ class WorkplaceService:
     def assistant_status(self, *, language: str = "en") -> str:
         """An honest one-line status of the Workplace assistant."""
         return self.assistant.status(language=language)
+
+    # -- reporting and proposal workflows (the brief's §9, §10, §13) -----
+
+    @property
+    def reporting(self) -> ReportingWorkflow:
+        """The reporting / proposal workflow over the project's own records."""
+        if self._reporting is None:
+            self._reporting = ReportingWorkflow(
+                self.repository,
+                domain=self.domain,
+                projects=self.projects,
+                assistant=self.assistant,
+                documents=self.document_manager,
+            )
+        return self._reporting
+
+    def report_kinds(self, *, language: str = "en") -> list[tuple[str, str]]:
+        """``(key, label)`` for every report kind the Workplace drafts."""
+        return [(kind, report_kind_label(kind, language=language)) for kind in REPORT_KINDS]
+
+    def report_statuses(self, *, language: str = "en") -> list[tuple[str, str]]:
+        """``(key, label)`` for every report lifecycle state."""
+        return [(state, status_label(state, language=language)) for state in REPORT_STATUSES]
+
+    def draft_report(
+        self,
+        project_id: str,
+        *,
+        kind: str = "technical_report",
+        title: str = "",
+        use_assistant: bool = False,
+        profile: str = "",
+    ) -> ReportDraft:
+        """Draft a report from the project's own records (the brief's §10)."""
+        return self.reporting.draft(
+            project_id, kind=kind, title=title, use_assistant=use_assistant, profile=profile
+        )
+
+    def save_report_draft(
+        self, project_id: str, draft: ReportDraft, *, author_id: str = "", number: str = ""
+    ) -> Report:
+        """Create a report row from a drafted report."""
+        return self.reporting.save_draft(project_id, draft, author_id=author_id, number=number)
+
+    def create_report(
+        self,
+        project_id: str,
+        *,
+        kind: str = "technical_report",
+        title: str = "",
+        body: str = "",
+        author_id: str = "",
+        division_id: str = "",
+        status: str = "draft",
+        number: str = "",
+    ) -> Report:
+        """Create a report row (a new record; the audit records the creation)."""
+        return self.reporting.create(
+            project_id, kind=kind, title=title, body=body, author_id=author_id,
+            division_id=division_id, status=status, number=number,
+        )
+
+    def project_reports(self, project_id: str, *, kind: str = "") -> list[Report]:
+        return self.reporting.reports(project_id, kind=kind)
+
+    def report_record(self, report_id: str) -> Report | None:
+        return self.reporting.report(report_id)
+
+    def submit_report(self, report_id: str) -> Report:
+        return self.reporting.submit(report_id)
+
+    def reject_report(self, report_id: str, *, note: str = "") -> Report:
+        return self.reporting.reject(report_id, note=note)
+
+    def approve_report(
+        self, report_id: str, *, approved_by: str, role: str = "", note: str = ""
+    ) -> Report:
+        return self.reporting.approve(report_id, approved_by=approved_by, role=role, note=note)
+
+    def issue_report(
+        self, report_id: str, *, register_document: bool = True, issued_on: str = ""
+    ) -> Deliverable:
+        return self.reporting.issue(
+            report_id, register_document=register_document, issued_on=issued_on
+        )
+
+    def supersede_report(self, report_id: str) -> Report:
+        return self.reporting.supersede(report_id)
+
+    def report_approvals(self, report_id: str) -> list[Any]:
+        return self.reporting.approvals(report_id)
+
+    def project_deliverables(self, project_id: str) -> list[Deliverable]:
+        return self.reporting.deliverables(project_id)
+
+    def report_can_transition(self, current: str, target: str) -> bool:
+        return can_transition(current, target)
 
     # -- institution hierarchy -------------------------------------------
 
