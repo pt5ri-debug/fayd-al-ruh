@@ -40,7 +40,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from gui.workplace import WorkplaceDomainError, WorkplaceError, WorkplaceService
+from gui.workplace import (
+    WorkplaceDomainError,
+    WorkplaceError,
+    WorkplaceService,
+    reference_kind_label,
+)
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -186,6 +191,62 @@ def _build_parser() -> argparse.ArgumentParser:
     select.add_argument("--qualification", dest="qualifications", action="append", default=[], help="A required qualification (repeatable).")
     select.add_argument("--division", dest="division_id", default=None, help="Only this division id.")
     select.add_argument("--limit", type=int, default=5, help="At most this many candidates.")
+
+    library = _sub(sub, "library", help="The technical library of standards (the brief's §7).")
+    library.add_argument("--body", default=None, help="Only this issuing body (API, ASME, ...).")
+    library.add_argument("--kind", dest="reference_kind", default=None, help="Only this reference kind.")
+    library.add_argument("--query", default=None, help="A free-text filter.")
+
+    _sub(sub, "library-bodies", help="Every issuing body with how many references it has.")
+
+    _sub(sub, "library-kinds", help="How many references the library holds of each kind.")
+
+    revisions = _sub(sub, "standard-revisions", help="Every revision of one standard, oldest first.")
+    revisions.add_argument("body", help="The issuing body.")
+    revisions.add_argument("number", help="The standard number.")
+
+    compare = _sub(sub, "compare-standards", help="Compare two revisions of one standard.")
+    compare.add_argument("body", help="The issuing body.")
+    compare.add_argument("number", help="The standard number.")
+    compare.add_argument("--from", dest="from_revision", default="", help="The older revision.")
+    compare.add_argument("--to", dest="to_revision", default="", help="The newer revision.")
+
+    add_std = _sub(sub, "add-standard", help="Add a reference to the library (metadata only).")
+    add_std.add_argument("--body", required=True, help="The issuing body.")
+    add_std.add_argument("--number", required=True, help="The standard number.")
+    add_std.add_argument("--title", default="", help="The title.")
+    add_std.add_argument("--edition", default="", help="The edition.")
+    add_std.add_argument("--revision", default="", help="The revision.")
+    add_std.add_argument("--published", dest="published_on", default="", help="The publication date.")
+    add_std.add_argument("--kind", dest="reference_kind", default="standard", help="The reference kind.")
+    add_std.add_argument("--applicability", default="", help="What it applies to.")
+    add_std.add_argument("--source", default="", help="Where the copy came from.")
+
+    documents = _sub(sub, "documents", help="The project document registry (the brief's §9).")
+    documents.add_argument("--project", dest="project_id", default=None, help="Only this project id.")
+    documents.add_argument("--type", dest="doc_type", default=None, help="Only this document type.")
+    documents.add_argument("--query", default=None, help="A free-text filter.")
+
+    document = _sub(sub, "document", help="One document record.")
+    document.add_argument("record_id", help="The document record id.")
+
+    doc_hist = _sub(sub, "document-history", help="A document's revision chain.")
+    doc_hist.add_argument("record_id", help="The document record id.")
+
+    verify = _sub(sub, "verify-document", help="Re-hash a stored document (integrity check).")
+    verify.add_argument("record_id", help="The document record id.")
+
+    doc_text = _sub(sub, "document-text", help="Read a document's text (the project's own reader).")
+    doc_text.add_argument("record_id", help="The document record id.")
+
+    register = _sub(sub, "register-document", help="Register a file in the document registry.")
+    register.add_argument("path", help="The file to register (it is copied in).")
+    register.add_argument("--title", default="", help="The document title.")
+    register.add_argument("--type", dest="doc_type", default="other", help="The document type.")
+    register.add_argument("--project", dest="project_id", default="", help="The owning project id.")
+    register.add_argument("--division", dest="division_id", default="", help="The owning division id.")
+    register.add_argument("--revision", default="", help="The revision label.")
+    register.add_argument("--confidentiality", default="internal", help="The classification.")
 
     domain_add = _sub(sub, "add", help="Create a domain record: `add <entity> key=value ...`.")
     domain_add.add_argument("entity", help="The entity name (see `workplace entities`).")
@@ -744,6 +805,237 @@ def run_select(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_library(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.library_standards(
+        body=args.body, reference_kind=args.reference_kind, query=args.query
+    )
+    if args.as_json:
+        print(json.dumps([
+            {
+                "record_id": r.record_id,
+                "body": r.body,
+                "number": r.number,
+                "title": r.title,
+                "edition": r.edition,
+                "revision": r.revision,
+                "published_on": r.published_on,
+                "reference_kind": r.reference_kind,
+                "applicability": r.applicability,
+                "status": r.status,
+                "source": r.source,
+            }
+            for r in rows
+        ], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not rows:
+        print("The library holds no references yet. Add one with `workplace add-standard ...`.")
+        return EXIT_OK
+    for revision in rows:
+        print(f"  {revision.record_id}  {revision.describe()}")
+    return EXIT_OK
+
+
+def run_library_bodies(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.library_bodies()
+    if args.as_json:
+        print(json.dumps(
+            [{"code": code, "title": title, "count": count} for code, title, count in rows],
+            ensure_ascii=False, indent=2,
+        ))
+        return EXIT_OK
+    print("Issuing bodies (the library's own holdings):")
+    for code, title, count in rows:
+        print(f"  {code:6}  {count:>3}  {title}")
+    return EXIT_OK
+
+
+def run_library_kinds(args: argparse.Namespace) -> int:
+    service = _service(args)
+    counts = service.library_counts()
+    if args.as_json:
+        print(json.dumps(counts, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print("References by kind:")
+    for kind, count in counts.items():
+        print(f"  {reference_kind_label(kind):24} {count}")
+    return EXIT_OK
+
+
+def run_standard_revisions(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.standard_revisions(body=args.body, number=args.number)
+    if args.as_json:
+        print(json.dumps([r.describe() for r in rows], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not rows:
+        print(f"No revisions of {args.body} {args.number} in the library.")
+        return EXIT_UNAVAILABLE
+    for revision in rows:
+        print(f"  {revision.record_id}  {revision.describe()}")
+    return EXIT_OK
+
+
+def run_compare_standards(args: argparse.Namespace) -> int:
+    service = _service(args)
+    comparison = service.compare_standard_revisions(
+        body=args.body, number=args.number,
+        from_revision=args.from_revision, to_revision=args.to_revision,
+    )
+    if comparison is None:
+        print(f"Nothing to compare for {args.body} {args.number} (fewer than two revisions).")
+        return EXIT_UNAVAILABLE
+    if args.as_json:
+        print(json.dumps({
+            "body": comparison.body,
+            "number": comparison.number,
+            "from": comparison.from_revision.describe(),
+            "to": comparison.to_revision.describe(),
+            "changed": comparison.changed,
+            "changes": comparison.changes(),
+        }, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(comparison.describe())
+    return EXIT_OK
+
+
+def run_add_standard(args: argparse.Namespace) -> int:
+    service = _service(args)
+    revision = service.add_standard(
+        body=args.body, number=args.number, title=args.title, edition=args.edition,
+        revision=args.revision, published_on=args.published_on,
+        reference_kind=args.reference_kind, applicability=args.applicability, source=args.source,
+    )
+    if args.as_json:
+        print(json.dumps({"record_id": revision.record_id, "label": revision.label},
+                         ensure_ascii=False, indent=2))
+    else:
+        print(f"Added {revision.describe()}")
+    return EXIT_OK
+
+
+def run_documents(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.document_rows(
+        project_id=args.project_id, doc_type=args.doc_type, query=args.query
+    )
+    if args.as_json:
+        print(json.dumps([
+            {
+                "record_id": r.record_id,
+                "title": r.title,
+                "doc_type": r.doc_type,
+                "revision": r.revision,
+                "project_id": r.project_id,
+                "confidentiality": r.confidentiality,
+                "content_hash": r.content_hash,
+                "supersedes_id": r.supersedes_id,
+            }
+            for r in rows
+        ], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not rows:
+        print("No documents registered yet. Add one with `workplace register-document <path>`.")
+        return EXIT_OK
+    for record in rows:
+        print(f"  {record.record_id}  {record.describe()}")
+    return EXIT_OK
+
+
+def run_document(args: argparse.Namespace) -> int:
+    service = _service(args)
+    record = service.document_record(args.record_id)
+    if record is None:
+        print(f"No document with id {args.record_id!r}")
+        return EXIT_UNAVAILABLE
+    if args.as_json:
+        print(json.dumps({
+            "record_id": record.record_id,
+            "title": record.title,
+            "doc_type": record.doc_type,
+            "revision": record.revision,
+            "path": record.path,
+            "content_hash": record.content_hash,
+            "supersedes_id": record.supersedes_id,
+            "confidentiality": record.confidentiality,
+            "project_id": record.project_id,
+            "division_id": record.division_id,
+        }, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(record.describe())
+    return EXIT_OK
+
+
+def run_document_history(args: argparse.Namespace) -> int:
+    service = _service(args)
+    chain = service.document_history(args.record_id)
+    if not chain:
+        print(f"No document with id {args.record_id!r}")
+        return EXIT_UNAVAILABLE
+    if args.as_json:
+        print(json.dumps([r.describe() for r in chain], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print("Revision chain (newest first):")
+    for record in chain:
+        print(f"  {record.record_id}  {record.describe()}")
+    return EXIT_OK
+
+
+def run_verify_document(args: argparse.Namespace) -> int:
+    service = _service(args)
+    try:
+        report = service.verify_document(args.record_id)
+    except ValueError as error:
+        print(str(error))
+        return EXIT_UNAVAILABLE
+    if args.as_json:
+        print(json.dumps({
+            "record_id": report.record_id, "ok": report.ok,
+            "recorded_hash": report.recorded_hash, "actual_hash": report.actual_hash,
+            "message": report.message,
+        }, ensure_ascii=False, indent=2))
+    else:
+        print(report.describe())
+    return EXIT_OK if report.ok else EXIT_UNAVAILABLE
+
+
+def run_document_text(args: argparse.Namespace) -> int:
+    service = _service(args)
+    try:
+        document = service.document_text(args.record_id)
+    except ValueError as error:
+        print(str(error))
+        return EXIT_UNAVAILABLE
+    except Exception as error:  # a reader failure (an unsupported file, a missing extra)
+        print(f"Could not read the document: {error}")
+        return EXIT_UNAVAILABLE
+    if args.as_json:
+        print(json.dumps({
+            "title": document.title, "kind": document.kind,
+            "chars": len(document.text), "words": document.word_count,
+        }, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(document.text)
+    return EXIT_OK
+
+
+def run_register_document(args: argparse.Namespace) -> int:
+    service = _service(args)
+    record = service.register_document_file(
+        Path(args.path),
+        title=args.title, doc_type=args.doc_type, project_id=args.project_id,
+        division_id=args.division_id, revision=args.revision,
+        confidentiality=args.confidentiality,
+    )
+    if args.as_json:
+        print(json.dumps({"record_id": record.record_id, "content_hash": record.content_hash},
+                         ensure_ascii=False, indent=2))
+    else:
+        print(f"Registered {record.describe()}  [{record.record_id}]")
+    return EXIT_OK
+
+
 def _parse_fields(pairs: Sequence[str]) -> dict[str, str]:
     """Turn ``["name=Ali", "role=Inspector"]`` into a field dict."""
     fields: dict[str, str] = {}
@@ -906,6 +1198,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         "person": run_person,
         "matrix": run_matrix,
         "select": run_select,
+        "library": run_library,
+        "library-bodies": run_library_bodies,
+        "library-kinds": run_library_kinds,
+        "standard-revisions": run_standard_revisions,
+        "compare-standards": run_compare_standards,
+        "add-standard": run_add_standard,
+        "documents": run_documents,
+        "document": run_document,
+        "document-history": run_document_history,
+        "verify-document": run_verify_document,
+        "document-text": run_document_text,
+        "register-document": run_register_document,
         "add": run_domain_add,
         "list": run_domain_list,
         "show": run_domain_show,
@@ -922,6 +1226,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Workplace refused the operation: {error}")
         return EXIT_REFUSED
     except WorkplaceDomainError as error:
+        print(f"Workplace refused the operation: {error}")
+        return EXIT_REFUSED
+    except ValueError as error:
         print(f"Workplace refused the operation: {error}")
         return EXIT_REFUSED
     except Exception as error:  # pragma: no cover - a last-resort guard

@@ -673,6 +673,8 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Workplace: the projects and their own real figures", run_workplace, ("projects",)),
     ("Workplace: the personnel directory (staff and their qualifications)", run_workplace, ("people",)),
     ("Workplace: the competency matrix (people × qualifications)", run_workplace, ("matrix",)),
+    ("Workplace: the technical library of standards and references", run_workplace, ("library",)),
+    ("Workplace: the project document registry", run_workplace, ("documents",)),
     ("Workplace: the append-only audit trail", run_workplace, ("audit",)),
     ("Model chat windows: each model's own name, logo, voice, and model", run_model_chat, ("mouths",)),
     ("Model Manager: every language model the program can run", run_models, ("list",)),

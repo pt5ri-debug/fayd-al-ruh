@@ -27,7 +27,19 @@ from pathlib import Path
 
 from core.paths import workplace_db_path
 from core.workplace.database import WorkplaceDatabase
+from core.workplace.documents import (
+    DocumentManager,
+    DocumentRecord,
+    DocumentVerification,
+    document_type_label,
+)
 from core.workplace.domain import WorkplaceDomain, WorkplaceDomainError
+from core.workplace.library import (
+    RevisionComparison,
+    StandardRevision,
+    TechnicalLibrary,
+    reference_kind_label,
+)
 from core.workplace.model import (
     DIVISION_DETAIL_KINDS,
     Division,
@@ -291,6 +303,11 @@ class WorkplaceService:
         self._domain: WorkplaceDomain | None = None
         self._projects: ProjectManager | None = None
         self._personnel: PersonnelDirectory | None = None
+        self._library: TechnicalLibrary | None = None
+        self._documents: DocumentManager | None = None
+        self._documents_dir = (
+            Path(root) / "workplace" / "documents" if root is not None else None
+        )
         self._actor = "system"
         self._seed_report: SeedReport | None = None
         self._auto_seed = auto_seed
@@ -347,6 +364,22 @@ class WorkplaceService:
         if self._personnel is None:
             self._personnel = PersonnelDirectory(self.repository, self.domain)
         return self._personnel
+
+    @property
+    def library(self) -> TechnicalLibrary:
+        """The technical library of standards and references (the brief's §7)."""
+        if self._library is None:
+            self._library = TechnicalLibrary(self.repository, self.domain)
+        return self._library
+
+    @property
+    def document_manager(self) -> DocumentManager:
+        """The project document registry (the brief's §9)."""
+        if self._documents is None:
+            self._documents = DocumentManager(
+                self.repository, self.domain, documents_dir=self._documents_dir
+            )
+        return self._documents
 
     def seed(self, *, force: bool = False) -> SeedReport:
         """Install (or reset) the Workplace defaults."""
@@ -481,6 +514,157 @@ class WorkplaceService:
             division_id=division_id,
             limit=limit,
         )
+
+    # -- technical library (the brief's §7) -------------------------------
+
+    def library_standards(
+        self,
+        *,
+        body: str | None = None,
+        reference_kind: str | None = None,
+        query: str | None = None,
+    ) -> list[StandardRevision]:
+        """The standards library, optionally narrowed by body, kind, or query."""
+        self.open()
+        return self.library.standards(body=body, reference_kind=reference_kind, query=query)
+
+    def library_bodies(self) -> list[tuple[str, str, int]]:
+        """Every issuing body with its title and how many references it has."""
+        self.open()
+        return self.library.bodies()
+
+    def library_counts(self) -> dict[str, int]:
+        """How many references the library holds of each reference kind."""
+        self.open()
+        return self.library.counts_by_kind()
+
+    def standard_revisions(self, *, body: str, number: str) -> list[StandardRevision]:
+        """Every revision of one standard, oldest first."""
+        self.open()
+        return self.library.revisions(body=body, number=number)
+
+    def compare_standard_revisions(
+        self, *, body: str, number: str, from_revision: str = "", to_revision: str = ""
+    ) -> RevisionComparison | None:
+        """Compare two revisions of one standard (``None`` when there is nothing)."""
+        self.open()
+        return self.library.compare_revisions(
+            body=body, number=number, from_revision=from_revision, to_revision=to_revision
+        )
+
+    def add_standard(
+        self,
+        *,
+        body: str,
+        number: str,
+        title: str = "",
+        edition: str = "",
+        revision: str = "",
+        published_on: str = "",
+        reference_kind: str = "standard",
+        applicability: str = "",
+        source: str = "",
+        status: str = "active",
+    ) -> StandardRevision:
+        """Add a reference to the library (audited)."""
+        self.open()
+        return self.library.add_standard(
+            body=body, number=number, title=title, edition=edition, revision=revision,
+            published_on=published_on, reference_kind=reference_kind,
+            applicability=applicability, source=source, status=status,
+        )
+
+    def record_standard_revision(self, record_id: str, **changes: object) -> StandardRevision:
+        """Record a *new* revision of a standard (the original row is untouched)."""
+        self.open()
+        return self.library.record_new_revision(record_id, **changes)
+
+    # -- document registry (the brief's §9) -------------------------------
+
+    def register_document_file(
+        self,
+        source: Path | str,
+        *,
+        title: str = "",
+        title_ar: str = "",
+        project_id: str = "",
+        division_id: str = "",
+        doc_type: str = "other",
+        revision: str = "",
+        supersedes_id: str = "",
+        confidentiality: str = "internal",
+        author_id: str = "",
+        issued_on: str = "",
+    ) -> DocumentRecord:
+        """Copy a file in and register it in the project document registry."""
+        self.open()
+        return self.document_manager.register_file(
+            source, title=title, title_ar=title_ar, project_id=project_id,
+            division_id=division_id, doc_type=doc_type, revision=revision,
+            supersedes_id=supersedes_id, confidentiality=confidentiality,
+            author_id=author_id, issued_on=issued_on,
+        )
+
+    def register_document_text(
+        self,
+        text: str,
+        *,
+        title: str,
+        doc_type: str = "other",
+        project_id: str = "",
+        division_id: str = "",
+        revision: str = "",
+        confidentiality: str = "internal",
+    ) -> DocumentRecord:
+        """Register a document whose text is supplied directly."""
+        self.open()
+        return self.document_manager.register_text(
+            text, title=title, doc_type=doc_type, project_id=project_id,
+            division_id=division_id, revision=revision, confidentiality=confidentiality,
+        )
+
+    def document_rows(
+        self,
+        *,
+        project_id: str | None = None,
+        doc_type: str | None = None,
+        query: str | None = None,
+    ) -> list[DocumentRecord]:
+        """The document registry, optionally narrowed."""
+        self.open()
+        return self.document_manager.documents(
+            project_id=project_id, doc_type=doc_type, query=query
+        )
+
+    def document_record(self, record_id: str) -> DocumentRecord | None:
+        self.open()
+        return self.document_manager.document(record_id)
+
+    def document_history(self, record_id: str) -> list[DocumentRecord]:
+        """A document's revision chain."""
+        self.open()
+        return self.document_manager.history(record_id)
+
+    def verify_document(self, record_id: str) -> DocumentVerification:
+        """Re-hash a stored document and report whether it still matches."""
+        self.open()
+        return self.document_manager.verify(record_id)
+
+    def document_text(self, record_id: str):
+        """Read a registered document's text through the project's own reader."""
+        self.open()
+        return self.document_manager.read_text(record_id)
+
+    def document_chunks(
+        self, record_id: str, *, chunk_chars: int = 900, overlap: int = 120
+    ) -> list[str]:
+        """The document's text as retrievable chunks (the project's own chunker)."""
+        self.open()
+        return self.document_manager.chunks(record_id, chunk_chars=chunk_chars, overlap=overlap)
+
+    def document_types(self, *, language: str = "en") -> list[tuple[str, str]]:
+        """Every document type with its readable label, for a picker."""
+        return self.document_manager.types(language=language)
 
     # -- institution hierarchy -------------------------------------------
 
@@ -855,14 +1039,20 @@ __all__ = [
     "DivisionDetailSummary",
     "DivisionProfile",
     "DivisionSummary",
+    "DocumentRecord",
+    "DocumentVerification",
     "HierarchyView",
     "PersonProfile",
     "ProjectRow",
     "ProjectSummary",
+    "RevisionComparison",
+    "StandardRevision",
     "WorkplaceDashboard",
     "WorkplaceDomainError",
     "WorkplaceError",
     "WorkplaceService",
     "WorkplaceStatus",
     "division_detail_kind_label",
+    "document_type_label",
+    "reference_kind_label",
 ]

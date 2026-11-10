@@ -260,3 +260,54 @@ def test_the_competency_matrix_is_shown_in_the_transcript(tmp_path: Path) -> Non
         assert "Mona" in text
     finally:
         _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_library_section_lists_a_standard(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.add_standard(body="API", number="1104", title="Welding of Pipelines")
+        dialog._refresh_library()
+        assert dialog._library_list.size() == 1
+        assert "API 1104" in dialog._library_list.get(0)
+        assert "Official standard" in dialog._library_kinds_label.cget("text")
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_revision_comparison_is_shown(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        first = service.add_standard(
+            body="API", number="1104", edition="21st", published_on="2013-01-01"
+        )
+        service.record_standard_revision(
+            first.record_id, edition="22nd", published_on="2021-09-01"
+        )
+        dialog._refresh_library()
+        dialog._library_list.selection_clear(0, "end")
+        dialog._library_list.selection_set(0)
+        dialog._on_compare_revisions()
+        text = "\n".join(w.get("1.0", "end") for w in _all_text_widgets(dialog._transcript))
+        assert "22nd" in text and "edition" in text
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_document_registry_and_verification(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.register_document_text("Coating procedure text.", title="Coating procedure")
+        dialog._refresh_library()
+        assert dialog._document_list.size() == 1
+        dialog._document_list.selection_clear(0, "end")
+        dialog._document_list.selection_set(0)
+        dialog._on_read_document()
+        dialog._on_verify_document()
+        text = "\n".join(w.get("1.0", "end") for w in _all_text_widgets(dialog._transcript))
+        assert "Coating procedure text." in text
+        assert "matches" in text
+    finally:
+        _close_window(root, dialog)

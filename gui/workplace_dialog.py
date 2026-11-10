@@ -52,6 +52,7 @@ from gui.workplace import (
     WorkplaceDomainError,
     WorkplaceError,
     WorkplaceService,
+    reference_kind_label,
 )
 
 TITLE = "Workplace"
@@ -106,6 +107,8 @@ class WorkplaceDialog(ThemedDialog):
         self._profile_ids: list[str] = []
         self._project_ids: list[str] = []
         self._people_ids: list[str] = []
+        self._library_ids: list[str] = []
+        self._document_ids: list[str] = []
         self._results: queue.Queue[tuple[Callable[[Any, Exception | None], None], Any, Exception | None]] = queue.Queue()
 
         self.window = tk.Toplevel(parent)
@@ -431,6 +434,63 @@ class WorkplaceDialog(ThemedDialog):
         self._person_text.pack(fill="x", padx=14, pady=(0, 12))
         self._person_text.configure(state="disabled")
 
+        # Technical library (the brief's §7) and the document registry (§9).
+        library = column.add("library", "Technical library", icon="📚", open=False)
+        tk.Label(
+            library, text="Standards & references", bg=theme.surface,
+            fg=theme.text_dim, font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(6, 2))
+        self._library_kinds_label = tk.Label(
+            library, text="", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=240,
+        )
+        self._library_kinds_label.pack(fill="x", padx=14, pady=(0, 4))
+        self._library_list = tk.Listbox(
+            library, height=8, activestyle="none", relief="flat", borderwidth=0,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            selectbackground=theme.primary, selectforeground=theme.primary_foreground,
+            font=self._list_type.font("xs"), exportselection=False,
+        )
+        self._library_list.pack(fill="x", padx=14, pady=(0, 4))
+        self._library_list.bind("<<ListboxSelect>>", lambda _e: self._on_standard_selected())
+        library_buttons = tk.Frame(library, bg=theme.surface)
+        library_buttons.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(library_buttons, "Show the revisions…", self._on_show_revisions).pack(
+            fill="x", pady=2
+        )
+        self._button(library_buttons, "Compare revisions…", self._on_compare_revisions).pack(
+            fill="x", pady=2
+        )
+        self._button(library_buttons, "Add a reference…", self._on_add_standard).pack(
+            fill="x", pady=2
+        )
+
+        tk.Label(
+            library, text="Project documents", bg=theme.surface,
+            fg=theme.text_dim, font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(6, 2))
+        self._document_list = tk.Listbox(
+            library, height=8, activestyle="none", relief="flat", borderwidth=0,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            selectbackground=theme.primary, selectforeground=theme.primary_foreground,
+            font=self._list_type.font("xs"), exportselection=False,
+        )
+        self._document_list.pack(fill="x", padx=14, pady=(0, 4))
+        document_buttons = tk.Frame(library, bg=theme.surface)
+        document_buttons.pack(fill="x", padx=14, pady=(0, 12))
+        self._button(document_buttons, "Register a file…", self._on_register_document).pack(
+            fill="x", pady=2
+        )
+        self._button(document_buttons, "Read the document", self._on_read_document).pack(
+            fill="x", pady=2
+        )
+        self._button(document_buttons, "Verify the file", self._on_verify_document).pack(
+            fill="x", pady=2
+        )
+        self._button(document_buttons, "Revision history…", self._on_document_history).pack(
+            fill="x", pady=2
+        )
+
         # Settings (database, appearance, backup, defaults).
         settings = column.add("settings", "Settings", icon="⚙", open=False)
         self._db_label = tk.Label(
@@ -586,6 +646,7 @@ class WorkplaceDialog(ThemedDialog):
         self._refresh_taxonomy()
         self._refresh_records()
         self._refresh_work()
+        self._refresh_library()
         self._refresh_settings()
 
     def _refresh_dashboard(self) -> None:
@@ -1014,6 +1075,155 @@ class WorkplaceDialog(ThemedDialog):
             return
         lines = [candidate.describe() for candidate in candidates]
         self._add_message("workplace", "\n".join(lines), title="Ranked candidates")
+
+    # -- technical library & documents (the brief's §7 and §9) -----------
+
+    def _refresh_library(self) -> None:
+        counts = self.service.library_counts()
+        self._library_kinds_label.configure(
+            text=" · ".join(f"{reference_kind_label(kind)}: {count}" for kind, count in counts.items())
+        )
+        rows = self.service.library_standards()
+        self._library_list.delete(0, "end")
+        self._library_ids = []
+        for revision in rows:
+            self._library_list.insert("end", revision.describe())
+            self._library_ids.append(revision.record_id)
+        if rows:
+            self._library_list.selection_set(0)
+
+        documents = self.service.document_rows()
+        self._document_list.delete(0, "end")
+        self._document_ids = []
+        for record in documents:
+            self._document_list.insert("end", record.describe())
+            self._document_ids.append(record.record_id)
+        if documents:
+            self._document_list.selection_set(0)
+
+    def _selected_standard(self):
+        selection = self._library_list.curselection()
+        if not selection or selection[0] >= len(self._library_ids):
+            return None
+        return self.service.library.standard(self._library_ids[selection[0]])
+
+    def _selected_document(self):
+        selection = self._document_list.curselection()
+        if not selection or selection[0] >= len(self._document_ids):
+            return None
+        return self.service.document_record(self._document_ids[selection[0]])
+
+    def _on_standard_selected(self) -> None:
+        standard = self._selected_standard()
+        if standard is None:
+            return
+        self._add_message("workplace", standard.describe(), title="Standard")
+
+    def _on_show_revisions(self) -> None:
+        standard = self._selected_standard()
+        if standard is None:
+            self._add_message("note", "Select a reference first.", title="Library")
+            return
+        chain = self.service.standard_revisions(body=standard.body, number=standard.number)
+        lines = [revision.describe() for revision in chain] or ["(no revisions recorded)"]
+        self._add_message("workplace", "\n".join(lines),
+                          title=f"Revisions of {standard.body} {standard.number}")
+
+    def _on_compare_revisions(self) -> None:
+        standard = self._selected_standard()
+        if standard is None:
+            self._add_message("note", "Select a reference first.", title="Library")
+            return
+        comparison = self.service.compare_standard_revisions(
+            body=standard.body, number=standard.number
+        )
+        if comparison is None:
+            self._add_message(
+                "note",
+                f"{standard.body} {standard.number} has fewer than two revisions to compare.",
+                title="Library",
+            )
+            return
+        self._add_message("workplace", comparison.describe(),
+                          title="Revision comparison", mono_body=True)
+
+    def _on_add_standard(self) -> None:
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "standard",
+            ["body", "number", "title", "edition", "revision", "published_on", "source"],
+        )
+        if fields is None:
+            return
+        if not (fields.get("body", "").strip() or fields.get("number", "").strip()):
+            self._add_message("note", "A reference needs an issuing body or a number.", title="Library")
+            return
+        try:
+            revision = self.service.add_standard(**fields)
+        except (WorkplaceError, ValueError) as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message("workplace", f"Added {revision.describe()}", title="Library")
+        self._refresh_all()
+
+    def _on_register_document(self) -> None:
+        from tkinter import filedialog
+
+        path = filedialog.askopenfilename(
+            parent=self.window,
+            title="Register a document",
+            filetypes=[
+                ("Documents", "*.docx *.docm *.pdf *.txt *.md *.csv *.json *.jsonl"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "document", ["title", "doc_type", "revision"]
+        )
+        if fields is None:
+            return
+        try:
+            record = self.service.register_document_file(
+                path,
+                title=fields.get("title", ""),
+                doc_type=fields.get("doc_type", "other") or "other",
+                revision=fields.get("revision", ""),
+            )
+        except (WorkplaceError, ValueError) as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message("workplace", f"Registered {record.describe()}", title="Documents")
+        self._refresh_all()
+
+    def _on_read_document(self) -> None:
+        record = self._selected_document()
+        if record is None:
+            self._add_message("note", "Select a document first.", title="Documents")
+            return
+        try:
+            document = self.service.document_text(record.record_id)
+        except Exception as error:  # a reader failure (unsupported file, missing extra)
+            self._add_message("note", f"Could not read the document: {error}", title="Documents")
+            return
+        self._add_message("workplace", document.text, title=f"{record.title} — text")
+
+    def _on_verify_document(self) -> None:
+        record = self._selected_document()
+        if record is None:
+            self._add_message("note", "Select a document first.", title="Documents")
+            return
+        report = self.service.verify_document(record.record_id)
+        self._add_message("workplace", report.describe(), title="Integrity check")
+
+    def _on_document_history(self) -> None:
+        record = self._selected_document()
+        if record is None:
+            self._add_message("note", "Select a document first.", title="Documents")
+            return
+        chain = self.service.document_history(record.record_id)
+        lines = [entry.describe() for entry in chain] or ["(no revision history)"]
+        self._add_message("workplace", "\n".join(lines), title="Revision chain (newest first)")
 
     # -- settings actions -------------------------------------------------
 
