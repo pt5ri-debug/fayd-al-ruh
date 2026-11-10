@@ -262,17 +262,17 @@ def test_the_dashboard_counts_real_records(service: WorkplaceService):
 # -- migration ------------------------------------------------------------
 
 
-def test_a_version_2_database_migrates_to_version_3(tmp_path: Path):
+def test_a_version_2_database_migrates_to_the_current_version(tmp_path: Path):
     db_path = tmp_path / "v2.db"
     database = WorkplaceDatabase(db_path)
     # Simulate a v2 database by rewriting the stored version and dropping the
-    # domain tables; reopening must re-run the v3 migration.
+    # domain tables; reopening must re-run the v3 (and later) migrations.
     with database._write() as connection:
         for table in ("projects", "people", "audit_entries"):
             connection.execute(f"DROP TABLE IF EXISTS {table}")
         connection.execute("UPDATE meta SET value = '2' WHERE key = 'schema_version'")
     reopened = WorkplaceDatabase(db_path)
-    assert reopened.schema_version() == SCHEMA_VERSION == 3
+    assert reopened.schema_version() == SCHEMA_VERSION == 4
     assert reopened.list_records("projects") == []
     assert reopened.integrity_check()
 

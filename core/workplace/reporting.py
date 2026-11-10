@@ -598,6 +598,12 @@ class ReportingWorkflow:
         """
         if not approved_by.strip():
             raise ReportingError("An approval must name the person who approved it.")
+        from core.workplace.security import is_ai_actor
+
+        if is_ai_actor(approved_by):
+            raise ReportingError(
+                "An approval must name a person; the AI can never approve a deliverable."
+            )
         report = self._transition(report_id, "approved")
         self.domain.approve(  # type: ignore[union-attr]
             subject_id=report_id,

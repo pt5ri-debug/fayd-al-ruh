@@ -27,6 +27,12 @@
     python -m cli workplace approve-report REP-… --by "Dr. Ahmed"
     python -m cli workplace issue-report REP-…   # issue an approved deliverable
     python -m cli workplace deliverables PRJ-…   # the project's issued deliverables
+    python -m cli workplace roles                # the roles and their ceilings (§13)
+    python -m cli workplace add-user "Dr. Ahmed" --role manager --clearance internal
+    python -m cli workplace can approve --user USR-…   # a role + scope decision
+    python -m cli workplace refused              # the audited refusals
+    python -m cli workplace reopen reports REP-… --note "revise section 3"
+    python -m cli workplace assistant-clearance public,internal   # the AI's clearance
 
 This is the headless twin of the Workplace window: it drives the *same*
 :class:`gui.workplace.WorkplaceService`, so the CLI and the window share one
@@ -349,6 +355,73 @@ def _build_parser() -> argparse.ArgumentParser:
 
     deliverables = _sub(sub, "deliverables", help="A project's issued deliverables.")
     deliverables.add_argument("project", help="The project id.")
+
+    # -- security, permissions, and audit (the brief's §13) ---------------
+    _sub(sub, "roles", help="The roles and their permission ceilings.")
+    _sub(sub, "permissions", help="The closed set of permission verbs.")
+
+    users = _sub(sub, "users", help="List the Workplace users.")
+    users.add_argument("--all", action="store_true", help="Include deactivated users.")
+
+    add_user = _sub(sub, "add-user", help="Create a Workplace user (a role and a clearance).")
+    add_user.add_argument("name", help="The user's name.")
+    add_user.add_argument("--role", default="viewer", help="The role (see `roles`).")
+    add_user.add_argument("--clearance", default="", help="Comma-joined levels the user may read.")
+    add_user.add_argument("--divisions", default="", help="Comma-joined division ids (scope).")
+    add_user.add_argument("--projects", default="", help="Comma-joined project ids (scope).")
+    add_user.add_argument("--permissions", default="", help="Comma-joined per-user grants (narrow only).")
+    add_user.add_argument("--email", default="", help="The user's email.")
+    add_user.add_argument("--person", default="", help="The linked person id, if any.")
+
+    user = _sub(sub, "user", help="Show one Workplace user.")
+    user.add_argument("user", help="The user id.")
+
+    set_role = _sub(sub, "set-role", help="Set a user's role.")
+    set_role.add_argument("user", help="The user id.")
+    set_role.add_argument("role", help="The new role.")
+
+    set_clearance = _sub(sub, "set-clearance", help="Set the levels a user may read.")
+    set_clearance.add_argument("user", help="The user id.")
+    set_clearance.add_argument("levels", help="Comma-joined confidentiality levels.")
+
+    set_scope = _sub(sub, "set-scope", help="Set a user's division/project scope.")
+    set_scope.add_argument("user", help="The user id.")
+    set_scope.add_argument("--divisions", default=None, help="Comma-joined division ids.")
+    set_scope.add_argument("--projects", default=None, help="Comma-joined project ids.")
+
+    grant = _sub(sub, "grant", help="Set a user's per-user permission grant (narrows only).")
+    grant.add_argument("user", help="The user id.")
+    grant.add_argument("permissions", help="Comma-joined permissions.")
+
+    deactivate_user = _sub(sub, "deactivate-user", help="Deactivate a user (soft delete).")
+    deactivate_user.add_argument("user", help="The user id.")
+
+    can = _sub(sub, "can", help="Whether the acting user may perform a permission.")
+    can.add_argument("permission", help="The permission (see `permissions`).")
+    can.add_argument("--user", default="", help="Check as this user id (default: the acting user).")
+    can.add_argument("--entity", default="", help="Check scope against this entity.")
+    can.add_argument("--record", default="", help="The record id (with --entity).")
+
+    refused = _sub(sub, "refused", help="The most recent refused access decisions.")
+    refused.add_argument("--limit", type=int, default=50, help="How many rows (newest first).")
+
+    reopen = _sub(sub, "reopen", help="Reopen an approved record for revision (audited).")
+    reopen.add_argument("entity", help="The entity table (e.g. reports).")
+    reopen.add_argument("record_id", help="The record id.")
+    reopen.add_argument("--note", default="", help="Why it is reopened.")
+
+    member = _sub(sub, "add-member", help="Add a project membership (project-level access).")
+    member.add_argument("project", help="The project id.")
+    member.add_argument("--person", default="", help="The person id.")
+    member.add_argument("--user", default="", help="The user id.")
+    member.add_argument("--role", default="member", help="The role on the project.")
+    member.add_argument("--organization", default="", help="The member's organization.")
+
+    members = _sub(sub, "members", help="A project's members.")
+    members.add_argument("project", help="The project id.")
+
+    clearance = _sub(sub, "assistant-clearance", help="The levels the assistant may read (confidentiality).")
+    clearance.add_argument("levels", help="Comma-joined confidentiality levels.")
 
     return parser
 
@@ -1478,6 +1551,210 @@ def run_report_approvals(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_roles(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = [(role, service.role_permissions(role)) for role in service.role_names()]
+    if args.as_json:
+        print(json.dumps(
+            [{"role": role, "permissions": perms} for role, perms in rows],
+            ensure_ascii=False, indent=2,
+        ))
+        return EXIT_OK
+    print("Workplace roles (the permission ceiling of each):")
+    for role, perms in rows:
+        print(f"  {role:16}  {', '.join(perms)}")
+    return EXIT_OK
+
+
+def run_permissions(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.permission_names()
+    if args.as_json:
+        print(json.dumps(list(rows), ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print("Permissions:")
+    for name in rows:
+        print(f"  {name}")
+    return EXIT_OK
+
+
+def _user_payload(user: object) -> dict[str, object]:
+    return {
+        "record_id": user.record_id,  # type: ignore[attr-defined]
+        "name": user.name,  # type: ignore[attr-defined]
+        "role": user.role,  # type: ignore[attr-defined]
+        "clearance": user.clearance,  # type: ignore[attr-defined]
+        "division_ids": user.division_ids,  # type: ignore[attr-defined]
+        "project_ids": user.project_ids,  # type: ignore[attr-defined]
+        "permissions": user.permissions,  # type: ignore[attr-defined]
+        "active": user.active,  # type: ignore[attr-defined]
+    }
+
+
+def run_users(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.users(include_inactive=args.all)
+    if args.as_json:
+        print(json.dumps([_user_payload(u) for u in rows], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not rows:
+        print("No Workplace users yet. Run `python -m cli workplace add-user` to add one.")
+        return EXIT_OK
+    for user in rows:
+        mark = "" if user.active else "  (inactive)"
+        print(
+            f"  {user.record_id}  {user.name}  [{user.role}]  clearance={user.clearance or '-'}"
+            f"{mark}"
+        )
+    return EXIT_OK
+
+
+def run_user(args: argparse.Namespace) -> int:
+    service = _service(args)
+    user = service.user(args.user)
+    if user is None:
+        print(f"No Workplace user with id {args.user!r}.", file=sys.stderr)
+        return EXIT_UNAVAILABLE
+    if args.as_json:
+        print(json.dumps(_user_payload(user), ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(f"{user.record_id}  {user.name}")
+    print(f"  role:        {user.role}")
+    print(f"  clearance:   {user.clearance or '-'}")
+    print(f"  divisions:   {user.division_ids or '-'}")
+    print(f"  projects:    {user.project_ids or '-'}")
+    print(f"  permissions: {user.permissions or '(the role\'s own set)'}")
+    return EXIT_OK
+
+
+def run_add_user(args: argparse.Namespace) -> int:
+    service = _service(args)
+    user = service.create_user(
+        name=args.name,
+        role=args.role,
+        clearance=args.clearance or None,
+        division_ids=args.divisions or None,
+        project_ids=args.projects or None,
+        permissions=args.permissions or None,
+        email=args.email,
+        person_id=args.person,
+    )
+    if args.as_json:
+        print(json.dumps(_user_payload(user), ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(f"Created user {user.record_id}: {user.name} [{user.role}].")
+    return EXIT_OK
+
+
+def run_set_role(args: argparse.Namespace) -> int:
+    service = _service(args)
+    user = service.set_user_role(args.user, args.role)
+    print(f"{user.record_id} is now role {user.role}.")
+    return EXIT_OK
+
+
+def run_set_clearance(args: argparse.Namespace) -> int:
+    service = _service(args)
+    user = service.set_user_clearance(args.user, args.levels)
+    print(f"{user.record_id} may read: {user.clearance}.")
+    return EXIT_OK
+
+
+def run_set_scope(args: argparse.Namespace) -> int:
+    service = _service(args)
+    user = service.set_user_scope(
+        args.user,
+        division_ids=args.divisions if args.divisions is not None else None,
+        project_ids=args.projects if args.projects is not None else None,
+    )
+    print(f"{user.record_id} scope updated (divisions={user.division_ids or '-'}, projects={user.project_ids or '-'}).")
+    return EXIT_OK
+
+
+def run_grant(args: argparse.Namespace) -> int:
+    service = _service(args)
+    user = service.grant_permissions(args.user, args.permissions)
+    print(f"{user.record_id} grants set to: {user.permissions or '(the role\'s own set)'}.")
+    return EXIT_OK
+
+
+def run_deactivate_user(args: argparse.Namespace) -> int:
+    service = _service(args)
+    user = service.deactivate_user(args.user)
+    print(f"Deactivated user {user.record_id}.")
+    return EXIT_OK
+
+
+def run_can(args: argparse.Namespace) -> int:
+    service = _service(args)
+    if args.user:
+        service.set_current_user(args.user)
+    record = None
+    if args.entity and args.record:
+        record = service.repository.get_domain(args.entity, args.record)
+    decision = service.check_access(args.permission, entity=args.entity, record=record)
+    if args.as_json:
+        print(json.dumps({"allowed": decision.allowed, "reason": decision.reason}, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(("allowed" if decision.allowed else "refused") + (f": {decision.reason}" if decision.reason else ""))
+    return EXIT_OK if decision.allowed else EXIT_REFUSED
+
+
+def run_refused(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.refused_decisions(limit=args.limit)
+    if args.as_json:
+        print(json.dumps([_record_payload(row) for row in rows], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not rows:
+        print("No refused decisions recorded.")
+        return EXIT_OK
+    for row in rows:
+        print(f"  {row.created_at}  {row.actor}  {row.detail}")
+    return EXIT_OK
+
+
+def run_reopen(args: argparse.Namespace) -> int:
+    service = _service(args)
+    service.reopen_record(args.entity, args.record_id, note=args.note)
+    print(f"Reopened {args.entity} {args.record_id} for revision (recorded on the audit trail).")
+    return EXIT_OK
+
+
+def run_add_member(args: argparse.Namespace) -> int:
+    service = _service(args)
+    member = service.assign_project_member(
+        args.project,
+        person_id=args.person,
+        user_id=args.user,
+        role=args.role,
+        organization=args.organization,
+    )
+    print(f"Added member {member.record_id} to project {args.project}.")  # type: ignore[attr-defined]
+    return EXIT_OK
+
+
+def run_members(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.project_members(args.project)
+    if args.as_json:
+        print(json.dumps([_record_payload(row) for row in rows], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not rows:
+        print(f"Project {args.project} has no members recorded.")
+        return EXIT_OK
+    for row in rows:
+        print(f"  {row.record_id}  {row.role}  person={row.person_id or '-'} user={row.user_id or '-'}")
+    return EXIT_OK
+
+
+def run_assistant_clearance(args: argparse.Namespace) -> int:
+    service = _service(args)
+    service.set_assistant_clearance(args.levels)
+    print(f"The assistant may now read: {args.levels}.")
+    return EXIT_OK
+
+
 def run_deliverables(args: argparse.Namespace) -> int:
     service = _service(args)
     rows = service.project_deliverables(args.project)
@@ -1566,6 +1843,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         "supersede-report": run_supersede_report,
         "report-approvals": run_report_approvals,
         "deliverables": run_deliverables,
+        "roles": run_roles,
+        "permissions": run_permissions,
+        "users": run_users,
+        "user": run_user,
+        "add-user": run_add_user,
+        "set-role": run_set_role,
+        "set-clearance": run_set_clearance,
+        "set-scope": run_set_scope,
+        "grant": run_grant,
+        "deactivate-user": run_deactivate_user,
+        "can": run_can,
+        "refused": run_refused,
+        "reopen": run_reopen,
+        "add-member": run_add_member,
+        "members": run_members,
+        "assistant-clearance": run_assistant_clearance,
     }
     handler = handlers.get(args.command)
     if handler is None:

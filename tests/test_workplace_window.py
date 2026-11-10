@@ -386,3 +386,35 @@ def test_the_reports_block_issues_only_after_approval(tmp_path: Path) -> None:
         assert "Issued deliverable" in text
     finally:
         _close_window(root, dialog)
+
+
+# -- security, permissions, and audit (the brief's §13) -------------------
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_security_block_lists_users_and_shows_the_acting_user(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.create_user(name="Dr. Ahmed", role="manager", clearance="internal")
+        dialog._refresh_security()
+        assert dialog._user_list.size() == 1
+        assert "Dr. Ahmed" in dialog._user_list.get(0)
+        status = dialog._security_status_label.cget("text")
+        assert "Dr. Ahmed" in status and "may approve" in status
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_security_block_uses_the_selected_user(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.create_user(name="Viewer", role="viewer")
+        dialog._refresh_security()
+        dialog._user_list.selection_clear(0, "end")
+        dialog._user_list.selection_set(0)
+        dialog._on_use_user()
+        status = dialog._security_status_label.cget("text")
+        assert "Viewer" in status and "cannot approve" in status
+    finally:
+        _close_window(root, dialog)

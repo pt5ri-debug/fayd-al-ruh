@@ -31,7 +31,7 @@ from core.workplace.model import (
 from core.workplace.records import DOMAIN_RECORDS
 
 #: The schema version this build writes and understands.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -184,7 +184,9 @@ TABLES: dict[str, TableSpec] = {
 
 #: The boolean and JSON fields the domain records use, by field name, so the
 #: generic builder renders the right SQL type without a per-table list.
-_BOOLEAN_FIELDS = frozenset({"active", "official", "proposed", "available", "verified"})
+_BOOLEAN_FIELDS = frozenset(
+    {"active", "official", "proposed", "available", "verified", "active_member"}
+)
 _JSON_FIELDS = frozenset({"metadata"})
 
 #: The foreign keys of the domain tables: ``table -> ((field, ref_table), ...)``.
@@ -223,6 +225,8 @@ _DOMAIN_FOREIGN_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
     "assignments": (("project_id", "projects"), ("person_id", "people")),
     "findings": (("project_id", "projects"), ("division_id", "divisions")),
     "knowledge_records": (("project_id", "projects"), ("division_id", "divisions")),
+    "project_members": (("project_id", "projects"), ("person_id", "people")),
+    "workplace_users": (("person_id", "people"),),
 }
 
 #: The columns the domain tables index (a foreign key or a common filter).
@@ -245,6 +249,8 @@ _DOMAIN_INDEXES: dict[str, tuple[tuple[str, ...], ...]] = {
     "findings": (("project_id",), ("division_id",), ("status",)),
     "approvals": (("subject_id",), ("subject_kind",)),
     "knowledge_records": (("project_id",), ("division_id",), ("kind",)),
+    "workplace_users": (("role",), ("name",)),
+    "project_members": (("project_id",), ("person_id",)),
     "audit_entries": (("entity",), ("entity_id",), ("actor",)),
 }
 
@@ -350,12 +356,25 @@ def _migration_3(connection: object) -> None:
             execute(statement)
 
 
+def _migration_4(connection: object) -> None:
+    """Version 4: the security tables -- Workplace users and project memberships
+    (Phase 9). They are *added* tables, so an existing database keeps every row it
+    already holds; nothing already written changes."""
+    execute = connection.execute  # type: ignore[attr-defined]
+    for table in ("workplace_users", "project_members"):
+        spec = _DOMAIN_TABLES[table]
+        execute(_create_table(spec))
+        for statement in _create_indexes(spec):
+            execute(statement)
+
+
 #: The numbered migration steps. Each entry is ``(version, callable)``; a callable
 #: runs inside its own transaction and only adds what its version introduces.
 MIGRATIONS: tuple[tuple[int, object], ...] = (
     (1, _migration_1),
     (2, _migration_2),
     (3, _migration_3),
+    (4, _migration_4),
 )
 
 

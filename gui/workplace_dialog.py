@@ -110,6 +110,7 @@ class WorkplaceDialog(ThemedDialog):
         self._library_ids: list[str] = []
         self._document_ids: list[str] = []
         self._report_ids: list[str] = []
+        self._user_ids: list[str] = []
         self._results: queue.Queue[tuple[Callable[[Any, Exception | None], None], Any, Exception | None]] = queue.Queue()
 
         self.window = tk.Toplevel(parent)
@@ -579,6 +580,65 @@ class WorkplaceDialog(ThemedDialog):
             fill="x", pady=2
         )
 
+        # Security, permissions, and audit (the brief's §13): role-based access,
+        # department- and project-level scope, confidentiality clearance, read-only
+        # approved records, and the append-only audit trail. The AI can never be an
+        # approver, so a recommendation is never recorded as an engineering decision.
+        security = column.add("security", "Security & audit", icon="🔐")
+        self._security_status_label = tk.Label(
+            security, text="", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=270,
+        )
+        self._security_status_label.pack(fill="x", padx=14, pady=(6, 4))
+        tk.Label(
+            security, text="Acting user", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(4, 2))
+        self._acting_user = tk.StringVar(value="")
+        self._acting_user_menu = tk.OptionMenu(security, self._acting_user, "")
+        self._acting_user_menu.configure(
+            bg=theme.surface_raised, fg=theme.foreground, activebackground=theme.interactive_active,
+            activeforeground=theme.foreground, relief="flat", highlightthickness=0,
+            borderwidth=0, font=self._type.font("2xs"), anchor="w", padx=8,
+        )
+        self._acting_user_menu["menu"].configure(
+            bg=theme.surface_raised, fg=theme.foreground,
+            activebackground=theme.primary, activeforeground=theme.primary_foreground,
+            font=self._type.font("2xs"),
+        )
+        self._acting_user_menu.pack(fill="x", padx=14, pady=(0, 4))
+        self._user_list = tk.Listbox(
+            security, height=4, bg=theme.surface_raised, fg=theme.foreground,
+            selectbackground=theme.primary, selectforeground=theme.primary_foreground,
+            relief="flat", borderwidth=0, highlightthickness=0, font=self._type.font("2xs"),
+            activestyle="none",
+        )
+        self._user_list.pack(fill="x", padx=14, pady=(0, 4))
+        security_buttons = tk.Frame(security, bg=theme.surface)
+        security_buttons.pack(fill="x", padx=14, pady=(0, 12))
+        self._button(security_buttons, "Add a user…", self._on_add_user).pack(fill="x", pady=2)
+        self._button(security_buttons, "Set the role…", self._on_set_role).pack(fill="x", pady=2)
+        self._button(security_buttons, "Set the clearance…", self._on_set_clearance).pack(
+            fill="x", pady=2
+        )
+        self._button(security_buttons, "Set the scope…", self._on_set_scope).pack(fill="x", pady=2)
+        self._button(security_buttons, "Grant permissions…", self._on_grant_permissions).pack(
+            fill="x", pady=2
+        )
+        self._button(security_buttons, "Use this user", self._on_use_user).pack(fill="x", pady=2)
+        self._button(security_buttons, "Check a permission…", self._on_check_permission).pack(
+            fill="x", pady=2
+        )
+        self._button(security_buttons, "Reopen an approved record…", self._on_reopen).pack(
+            fill="x", pady=2
+        )
+        self._button(security_buttons, "Set the assistant's clearance…", self._on_assistant_clearance).pack(
+            fill="x", pady=2
+        )
+        self._button(security_buttons, "Show refused decisions", self._on_show_refused).pack(
+            fill="x", pady=2
+        )
+
         # Settings (database, appearance, backup, defaults).
         settings = column.add("settings", "Settings", icon="⚙", open=False)
         self._db_label = tk.Label(
@@ -737,6 +797,7 @@ class WorkplaceDialog(ThemedDialog):
         self._refresh_library()
         self._refresh_assistant()
         self._refresh_reports()
+        self._refresh_security()
         self._refresh_settings()
 
     def _refresh_reports(self) -> None:
@@ -762,8 +823,43 @@ class WorkplaceDialog(ThemedDialog):
             text=f"{len(rows)} report(s) for this project. Issuing needs a person's approval."
         )
 
+    def _refresh_security(self) -> None:
+        """List the Workplace users and show the acting user's role and status."""
+        try:
+            users = self.service.users(include_inactive=True)
+        except Exception as error:  # a read failure is reported, never hidden
+            self._security_status_label.configure(text=f"Security unavailable: {error}")
+            return
+        self._user_list.delete(0, "end")
+        self._user_ids = []
+        for user in users:
+            mark = "" if user.active else " (inactive)"
+            self._user_list.insert(
+                "end", f"{user.name} — {user.role} · {user.clearance or 'no clearance'}{mark}"
+            )
+            self._user_ids.append(user.record_id)
+        acting = self.service.current_user()
+        if acting is None:
+            self._security_status_label.configure(
+                text="No users yet. Add one to define roles and clearances (§13)."
+            )
+            self._acting_user.set("")
+            return
+        self._acting_user.set(f"{acting.name} [{acting.role}]")
+        try:
+            decision = self.service.can("approve")
+            approval = "may approve" if decision.allowed else "cannot approve"
+        except Exception:
+            approval = "permission check unavailable"
+        self._security_status_label.configure(
+            text=(
+                f"Acting: {acting.name} [{acting.role}] — {approval}. "
+                f"Clearance: {acting.clearance or 'none'}. "
+                "An approved record is read-only until reopened; the AI can never approve."
+            )
+        )
+
     def _refresh_assistant(self) -> None:
-        """Show the assistant's honest status (rebuilding the corpus first)."""
         try:
             report = self.service.refresh_assistant()
         except Exception as error:  # a build failure is reported, never hidden
@@ -1104,6 +1200,218 @@ class WorkplaceDialog(ThemedDialog):
             for row in rows
         ]
         self._add_message("workplace", "\n".join(lines), title="Audit trail (newest first)")
+
+    # -- security, permissions, and audit (the brief's §13) --------------
+
+    def _selected_user_id(self) -> str:
+        selection = self._user_list.curselection()
+        if not selection or selection[0] >= len(self._user_ids):
+            return ""
+        return self._user_ids[selection[0]]
+
+    def _on_add_user(self) -> None:
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "user",
+            ["name", "role (administrator/manager/engineer/inspector/reviewer/viewer)",
+             "clearance (public,internal,confidential,restricted)"],
+        )
+        if fields is None:
+            return
+        name = fields.get("name", "").strip()
+        if not name:
+            self._add_message("note", "A user needs a name.", title="Security")
+            return
+        role_field = fields.get("role (administrator/manager/engineer/inspector/reviewer/viewer)", "viewer")
+        role = (role_field or "viewer").strip().split()[0] if role_field else "viewer"
+        clearance_field = fields.get("clearance (public,internal,confidential,restricted)", "")
+        try:
+            user = self.service.create_user(
+                name=name, role=role, clearance=clearance_field or None
+            )
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message(
+            "workplace", f"Created user {user.record_id}: {user.name} [{user.role}].", title="Security"
+        )
+        self._refresh_security()
+
+    def _on_set_role(self) -> None:
+        user_id = self._selected_user_id()
+        if not user_id:
+            self._add_message("note", "Select a user first.", title="Security")
+            return
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "role",
+            ["role (administrator/manager/engineer/inspector/reviewer/viewer)"],
+        )
+        if fields is None:
+            return
+        role = fields.get("role (administrator/manager/engineer/inspector/reviewer/viewer)", "").strip()
+        try:
+            user = self.service.set_user_role(user_id, role)
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message("note", f"{user.name} is now role {user.role}.", title="Security")
+        self._refresh_security()
+
+    def _on_set_clearance(self) -> None:
+        user_id = self._selected_user_id()
+        if not user_id:
+            self._add_message("note", "Select a user first.", title="Security")
+            return
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "clearance",
+            ["levels (public,internal,confidential,restricted)"],
+        )
+        if fields is None:
+            return
+        levels = fields.get("levels (public,internal,confidential,restricted)", "").strip()
+        try:
+            user = self.service.set_user_clearance(user_id, levels)
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message("note", f"{user.name} may read: {user.clearance}.", title="Security")
+        self._refresh_security()
+
+    def _on_set_scope(self) -> None:
+        user_id = self._selected_user_id()
+        if not user_id:
+            self._add_message("note", "Select a user first.", title="Security")
+            return
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "scope",
+            ["division ids (comma-joined)", "project ids (comma-joined)"],
+        )
+        if fields is None:
+            return
+        try:
+            user = self.service.set_user_scope(
+                user_id,
+                division_ids=fields.get("division ids (comma-joined)", ""),
+                project_ids=fields.get("project ids (comma-joined)", ""),
+            )
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message(
+            "note",
+            f"{user.name} scope: divisions={user.division_ids or '-'} projects={user.project_ids or '-'}.",
+            title="Security",
+        )
+        self._refresh_security()
+
+    def _on_grant_permissions(self) -> None:
+        user_id = self._selected_user_id()
+        if not user_id:
+            self._add_message("note", "Select a user first.", title="Security")
+            return
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "grant",
+            ["permissions (comma-joined: read,create,update,approve,deactivate,manage_users,administer)"],
+        )
+        if fields is None:
+            return
+        granted = fields.get(
+            "permissions (comma-joined: read,create,update,approve,deactivate,manage_users,administer)", ""
+        )
+        try:
+            user = self.service.grant_permissions(user_id, granted)
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message(
+            "note",
+            f"{user.name} grants: {user.permissions or '(the role\'s own set)'} (a grant only narrows).",
+            title="Security",
+        )
+        self._refresh_security()
+
+    def _on_use_user(self) -> None:
+        user_id = self._selected_user_id()
+        if not user_id:
+            self._add_message("note", "Select a user first.", title="Security")
+            return
+        try:
+            user = self.service.set_current_user(user_id)
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message(
+            "note", f"Acting as {user.name} [{user.role}].", title="Security"
+        )
+        self._refresh_security()
+
+    def _on_check_permission(self) -> None:
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "permission check",
+            ["permission (read/create/update/approve/deactivate/manage_users/administer)"],
+        )
+        if fields is None:
+            return
+        permission = fields.get(
+            "permission (read/create/update/approve/deactivate/manage_users/administer)", ""
+        ).strip()
+        try:
+            decision = self.service.can(permission)
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        verdict = "allowed" if decision.allowed else "refused"
+        self._add_message(
+            "note",
+            f"{permission!r} is {verdict}" + (f": {decision.reason}" if decision.reason else "."),
+            title="Security",
+        )
+        self._refresh_security()
+
+    def _on_reopen(self) -> None:
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "reopen",
+            ["entity (e.g. reports)", "record id", "note (optional)"],
+        )
+        if fields is None:
+            return
+        entity = fields.get("entity (e.g. reports)", "").strip()
+        record_id = fields.get("record id", "").strip()
+        try:
+            self.service.reopen_record(entity, record_id, note=fields.get("note (optional)", ""))
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message(
+            "note", f"Reopened {entity} {record_id} for revision (recorded on the audit trail).",
+            title="Security",
+        )
+
+    def _on_assistant_clearance(self) -> None:
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "assistant clearance",
+            ["levels (public,internal,confidential,restricted)"],
+        )
+        if fields is None:
+            return
+        levels = fields.get("levels (public,internal,confidential,restricted)", "").strip()
+        try:
+            self.service.set_assistant_clearance(levels)
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message(
+            "note",
+            f"The assistant may now read: {levels or 'nothing'}. Its corpus was rebuilt.",
+            title="Security",
+        )
+
+    def _on_show_refused(self) -> None:
+        rows = self.service.refused_decisions(limit=20)
+        if not rows:
+            self._add_message("note", "No refused decisions recorded.", title="Security")
+            return
+        lines = [f"{row.created_at} · {row.actor} · {row.detail}" for row in rows]
+        self._add_message("workplace", "\n".join(lines), title="Refused decisions (newest first)")
 
     # -- the Workplace assistant (the brief's §10) -----------------------
 
