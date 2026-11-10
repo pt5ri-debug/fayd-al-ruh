@@ -165,6 +165,9 @@ class ModelSwitcher:
         *,
         loader,
         max_new_tokens: int = 96,
+        mind_top_k: int = 0,
+        mind_top_p: float = 1.0,
+        mind_repetition_penalty: float = 1.0,
         ultron_loader: Callable[[], ultron_mouth.UltronAssistant] | None = None,
         vision_loader: Callable[[], vision_mouth.VisionAssistant] | None = None,
         banner_loader: Callable[[], banner_mouth.BannerAssistant] | None = None,
@@ -185,6 +188,9 @@ class ModelSwitcher:
         self._natasha_loader = natasha_loader or natasha_mouth.load_natasha_assistant
         self._hakeem_loader = hakeem_loader or hakeem_mouth.load_hakeem_assistant
         self._max_new_tokens = max_new_tokens
+        self._mind_top_k = mind_top_k
+        self._mind_top_p = mind_top_p
+        self._mind_repetition_penalty = mind_repetition_penalty
         # Whether each mouth is wrapped as its own character -- its standing
         # personality and its own learning record (see :mod:`ai.characters`). Off
         # by default so a lightweight switcher (a test, a scripted probe) is
@@ -240,7 +246,13 @@ class ModelSwitcher:
         if self._mind is None:
             self._mind = self._characterize(
                 MOUTH_MODEL,
-                mind_module.MindAssistant(self._loader(), max_new_tokens=self._max_new_tokens),
+                mind_module.MindAssistant(
+                    self._loader(),
+                    max_new_tokens=self._max_new_tokens,
+                    top_k=self._mind_top_k,
+                    top_p=self._mind_top_p,
+                    repetition_penalty=self._mind_repetition_penalty,
+                ),
             )
         return self._mind
 
@@ -703,6 +715,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model-checkpoint", default=None, help="path to a language-model checkpoint to answer with")
     parser.add_argument("--mind-temperature", type=float, default=0.0, help="sampling temperature for model answers (0 = deterministic)")
     parser.add_argument("--mind-tokens", type=int, default=96, help="maximum tokens to generate per model answer")
+    parser.add_argument("--mind-top-k", type=int, default=0, help="keep only the k most likely tokens when the model answers (0 disables)")
+    parser.add_argument("--mind-top-p", type=float, default=1.0, help="nucleus sampling cutoff for model answers (1.0 disables)")
+    parser.add_argument(
+        "--mind-repetition-penalty",
+        type=float,
+        default=1.0,
+        help="penalise recently emitted tokens when the model answers (1.0 disables; about 1.1 helps)",
+    )
     parser.add_argument(
         "--ultron",
         action="store_true",
@@ -781,8 +801,14 @@ def main(argv: list[str] | None = None) -> int:
             args.model_checkpoint,
             temperature=args.mind_temperature,
             max_new_tokens=args.mind_tokens,
+            top_k=args.mind_top_k,
+            top_p=args.mind_top_p,
+            repetition_penalty=args.mind_repetition_penalty,
         ),
         max_new_tokens=args.mind_tokens,
+        mind_top_k=args.mind_top_k,
+        mind_top_p=args.mind_top_p,
+        mind_repetition_penalty=args.mind_repetition_penalty,
         ultron_loader=lambda: ultron_mouth.load_ultron_assistant(
             args.ultron_model,
             max_tokens=args.ultron_tokens,

@@ -244,6 +244,17 @@ Arabic is kept as secondary aliases where useful.
   the decay policy of the current invocation rather than a stale one from the
   sidecar. Measured on the project corpus (400 steps, `modern`): val loss 1.973
   -> **1.673** with `weight_decay=0.01` and `restore_best`.
+  **Decoding gained the standard quality controls.** `sample()` takes `top_k`
+  (keep the k most likely tokens), `top_p` (nucleus: the smallest token set whose
+  cumulative probability reaches the cutoff), and `repetition_penalty` (the CTRL
+  penalty: a token emitted in the recent window is demoted, its positive logit
+  divided and its negative logit multiplied). All three default to *off*, so the
+  plain sampler is byte-identical to before -- `tests/test_llm_sampling.py` proves
+  that by re-implementing the old sampler and comparing. `LocalGenerator.generate`
+  and `LocalLanguageModel` forward them, the model mouth (`MindAssistant`) accepts
+  them, and the CLI exposes `--top-k`/`--top-p`/`--repetition-penalty` on
+  `python -m ml.llm --generate` and `--mind-top-k`/`--mind-top-p`/
+  `--mind-repetition-penalty` on `python -m cli chat`.
 - `ml/llm/schedule.py` — the sharded, resumable schedule. By default a `--resume`
   replays the same corpus, so more steps deepen the fit rather than reaching new
   material; `--llm-shards N` (in `ml/llm` and `ml.release`) instead splits the

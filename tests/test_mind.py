@@ -54,6 +54,9 @@ class _EchoModel:
                 max_new_tokens: int = 64,
                 temperature: float = 0.8,
                 seed: int | None = None,
+                top_k: int = 0,
+                top_p: float = 1.0,
+                repetition_penalty: float = 1.0,
             ) -> str:
                 return prompt + self._continuation
 
@@ -117,9 +120,19 @@ class _RecordingGenerator:
         max_new_tokens: int = 64,
         temperature: float = 0.8,
         seed: int | None = None,
+        top_k: int = 0,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.0,
     ) -> str:
         self.calls.append(
-            {"max_new_tokens": max_new_tokens, "temperature": temperature, "seed": seed}
+            {
+                "max_new_tokens": max_new_tokens,
+                "temperature": temperature,
+                "seed": seed,
+                "top_k": top_k,
+                "top_p": top_p,
+                "repetition_penalty": repetition_penalty,
+            }
         )
         return prompt + self._continuation
 
