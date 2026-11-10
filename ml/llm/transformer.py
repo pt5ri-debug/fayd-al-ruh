@@ -888,6 +888,7 @@ def train_language_model(
     weight_decay: float = 0.0,
     lr_schedule: str = "cosine",
     restore_best: bool = False,
+    accum_steps: int = 1,
     progress: ProgressCallback | None = None,
 ) -> TrainReport:
     """Train on a flat token stream by next-token prediction.
@@ -910,6 +911,13 @@ def train_language_model(
     held-out loss was lowest -- a run that overfits late no longer ships its
     worst checkpoint -- and the chosen step and loss are recorded on the report.
 
+    ``accum_steps`` (>= 1) accumulates the gradients of that many micro-batches
+    before one optimiser step, so a large *effective* batch fits in the memory of
+    a single micro-batch. The accumulated gradient is the exact mean of the
+    micro-batches' gradients, so ``accum_steps=k`` with ``batch_size=b`` trains on
+    ``b*k`` examples per step -- the same update a single ``b*k`` batch would
+    make (up to float rounding). ``accum_steps=1`` is the original behaviour.
+
     ``progress`` is called with the number of steps completed in this run and
     the requested budget, so a caller can show a live bar while training.
     """
@@ -920,6 +928,8 @@ def train_language_model(
         raise ValueError("start_step must not be negative.")
     if weight_decay < 0.0:
         raise ValueError("weight_decay must not be negative.")
+    if accum_steps < 1:
+        raise ValueError("accum_steps must be at least 1.")
     total_steps = start_step + steps
     max_start = len(token_stream) - block - 1
     # Seed once and advance to the resume point, so the batch sequence of a
@@ -953,14 +963,33 @@ def train_language_model(
             step, steps=total_steps, base_lr=learning_rate, warmup=warmup, schedule=lr_schedule
         )
         optimizer.lr = lr
-        starts = rng.integers(0, max_start, size=batch_size)
-        x, y = _sample_batch(token_stream, block, starts)
-        logits = model.forward(x)
-        loss = model.loss(logits, y)
-        grads = model.backward(y)
-        _clip_grads(grads, max_grad_norm)
-        optimizer.step(grads)
-        report.losses.append(loss)
+        # Accumulate ``accum_steps`` micro-batches into one optimiser step. The
+        # running sum is scaled by 1/accum_steps, so the update matches a single
+        # batch of ``batch_size * accum_steps`` (the micro-batches are drawn from
+        # the same generator, so with a large enough budget the data is identical
+        # and only float rounding differs). ``micro_loss`` reports the last
+        # micro-batch's loss, which for the default accum_steps=1 is the step's.
+        micro_loss = 0.0
+        accumulated: list[np.ndarray] | None = None
+        for _ in range(accum_steps):
+            starts = rng.integers(0, max_start, size=batch_size)
+            x, y = _sample_batch(token_stream, block, starts)
+            logits = model.forward(x)
+            micro_loss = model.loss(logits, y)
+            grads = model.backward(y)
+            if accumulated is None:
+                accumulated = grads
+            else:
+                for acc, g in zip(accumulated, grads, strict=True):
+                    acc += g
+        assert accumulated is not None
+        if accum_steps > 1:
+            scale = 1.0 / accum_steps
+            for acc in accumulated:
+                acc *= scale
+        _clip_grads(accumulated, max_grad_norm)
+        optimizer.step(accumulated)
+        report.losses.append(micro_loss)
         report.learning_rates.append(lr)
         if val_stream is not None and val_every and (step - start_step) % val_every == 0:
             _record_validation(
@@ -971,9 +1000,9 @@ def train_language_model(
             extra = f"  lr {lr:.2e}"
             if report.val_losses:
                 extra += f"  val {report.val_losses[-1]:.4f}"
-            print(f"step {step:5d}  loss {loss:.4f}{extra}")
+            print(f"step {step:5d}  loss {micro_loss:.4f}{extra}")
         if progress is not None:
-            detail = f"loss {loss:.4f}  lr {lr:.2e}"
+            detail = f"loss {micro_loss:.4f}  lr {lr:.2e}"
             if report.val_losses:
                 detail += f"  val {report.val_losses[-1]:.4f}"
             progress(step - start_step, steps, detail=detail)
