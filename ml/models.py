@@ -44,7 +44,8 @@ class Adam:
     """Adam optimiser over a list of numpy parameter arrays."""
 
     def __init__(self, params: list[np.ndarray], lr: float = 0.01, beta1: float = 0.9,
-                 beta2: float = 0.999, eps: float = 1e-8, weight_decay: float = 0.0) -> None:
+                 beta2: float = 0.999, eps: float = 1e-8, weight_decay: float = 0.0,
+                 decoupled: bool = False) -> None:
         if lr <= 0:
             raise ValueError("Learning rate must be positive.")
         self.params = params
@@ -53,6 +54,10 @@ class Adam:
         self.beta2 = beta2
         self.eps = eps
         self.weight_decay = weight_decay
+        # ``decoupled=True`` is AdamW: the decay shrinks the weight directly
+        # instead of being added to the gradient (L2). The default keeps the
+        # original coupled behaviour so every existing caller is unaffected.
+        self.decoupled = decoupled
         self.state = AdamState(
             m=[np.zeros_like(p) for p in params],
             v=[np.zeros_like(p) for p in params],
@@ -63,12 +68,19 @@ class Adam:
             raise ValueError("Gradient count does not match parameter count.")
         self.state.t += 1
         for i, (param, grad) in enumerate(zip(self.params, grads, strict=False)):
-            g = grad + self.weight_decay * param
+            if self.decoupled:
+                g = grad
+                decay = self.weight_decay * param
+            else:
+                g = grad + self.weight_decay * param
+                decay = None
             self.state.m[i] = self.beta1 * self.state.m[i] + (1 - self.beta1) * g
             self.state.v[i] = self.beta2 * self.state.v[i] + (1 - self.beta2) * (g * g)
             m_hat = self.state.m[i] / (1 - self.beta1**self.state.t)
             v_hat = self.state.v[i] / (1 - self.beta2**self.state.t)
             param -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+            if decay is not None:
+                param -= self.lr * decay
 
 
 class SoftmaxClassifier:

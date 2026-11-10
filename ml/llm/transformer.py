@@ -792,6 +792,10 @@ class TrainReport:
     losses: list[float] = field(default_factory=list)
     val_losses: list[float] = field(default_factory=list)
     learning_rates: list[float] = field(default_factory=list)
+    #: The step (1-based, cumulative) at which validation was best, and the loss
+    #: there. ``None`` when validation was never run.
+    best_val_step: int | None = None
+    best_val: float | None = None
 
     @property
     def initial_loss(self) -> float:
@@ -803,15 +807,26 @@ class TrainReport:
 
     @property
     def best_val_loss(self) -> float:
+        if self.best_val is not None:
+            return self.best_val
         return min(self.val_losses) if self.val_losses else float("inf")
 
 
-def _lr_at(step: int, *, steps: int, base_lr: float, warmup: int) -> float:
-    """Warmup then cosine decay, the standard schedule for a small transformer."""
+def _lr_at(step: int, *, steps: int, base_lr: float, warmup: int, schedule: str = "cosine") -> float:
+    """Warmup then a decay, the standard schedule for a small transformer.
+
+    ``cosine`` (the default, the original behaviour) decays along a cosine;
+    ``linear`` decays in a straight line; ``constant`` holds the base rate after
+    warmup. The warmup ramp is identical for all three.
+    """
     if warmup > 0 and step <= warmup:
         return base_lr * step / warmup
     progress = (step - warmup) / max(1, steps - warmup)
     progress = min(1.0, max(0.0, progress))
+    if schedule == "constant":
+        return base_lr
+    if schedule == "linear":
+        return base_lr * (1.0 - progress)
     return 0.5 * base_lr * (1.0 + np.cos(np.pi * progress))
 
 
@@ -870,6 +885,9 @@ def train_language_model(
     val_batches: int = 8,
     optimizer: Adam | None = None,
     start_step: int = 0,
+    weight_decay: float = 0.0,
+    lr_schedule: str = "cosine",
+    restore_best: bool = False,
     progress: ProgressCallback | None = None,
 ) -> TrainReport:
     """Train on a flat token stream by next-token prediction.
@@ -886,6 +904,12 @@ def train_language_model(
     estimates. The learning-rate schedule then spans ``start_step + steps``, so
     asking for more steps extends the horizon rather than freezing it.
 
+    ``weight_decay`` (AdamW, decoupled) regularises the weights; ``lr_schedule``
+    picks the decay shape (``cosine``/``linear``/``constant``). With
+    ``restore_best`` the model is left holding the weights from the step whose
+    held-out loss was lowest -- a run that overfits late no longer ships its
+    worst checkpoint -- and the chosen step and loss are recorded on the report.
+
     ``progress`` is called with the number of steps completed in this run and
     the requested budget, so a caller can show a live bar while training.
     """
@@ -894,6 +918,8 @@ def train_language_model(
         raise ValueError("Token stream is too short for the configured block size.")
     if start_step < 0:
         raise ValueError("start_step must not be negative.")
+    if weight_decay < 0.0:
+        raise ValueError("weight_decay must not be negative.")
     total_steps = start_step + steps
     max_start = len(token_stream) - block - 1
     # Seed once and advance to the resume point, so the batch sequence of a
@@ -903,13 +929,29 @@ def train_language_model(
     rng = np.random.default_rng(seed)
     for _ in range(start_step):
         rng.integers(0, max_start, size=batch_size)
-    optimizer = optimizer or Adam(model.parameters(), lr=learning_rate)
+    if optimizer is None:
+        optimizer = Adam(
+            model.parameters(), lr=learning_rate, weight_decay=weight_decay, decoupled=True
+        )
     if len(optimizer.params) != len(model.parameters()):
         raise ValueError("Optimiser state does not match the model's parameters.")
     report = TrainReport(steps=steps)
     model.train(True)
+    best_snapshot: list[np.ndarray] | None = None
+
+    def _record_validation(step: int, loss: float) -> None:
+        nonlocal best_snapshot
+        report.val_losses.append(loss)
+        if report.best_val is None or loss < report.best_val:
+            report.best_val = loss
+            report.best_val_step = step
+            if restore_best:
+                best_snapshot = [param.copy() for param in model.parameters()]
+
     for step in range(start_step + 1, total_steps + 1):
-        lr = _lr_at(step, steps=total_steps, base_lr=learning_rate, warmup=warmup)
+        lr = _lr_at(
+            step, steps=total_steps, base_lr=learning_rate, warmup=warmup, schedule=lr_schedule
+        )
         optimizer.lr = lr
         starts = rng.integers(0, max_start, size=batch_size)
         x, y = _sample_batch(token_stream, block, starts)
@@ -921,8 +963,9 @@ def train_language_model(
         report.losses.append(loss)
         report.learning_rates.append(lr)
         if val_stream is not None and val_every and (step - start_step) % val_every == 0:
-            report.val_losses.append(
-                _validation_loss(model, val_stream, batch_size=batch_size, seed=seed, batches=val_batches)
+            _record_validation(
+                step,
+                _validation_loss(model, val_stream, batch_size=batch_size, seed=seed, batches=val_batches),
             )
         if log_every and (step - start_step) % log_every == 0:
             extra = f"  lr {lr:.2e}"
@@ -936,9 +979,13 @@ def train_language_model(
             progress(step - start_step, steps, detail=detail)
     model.eval()
     if val_stream is not None:
-        report.val_losses.append(
-            _validation_loss(model, val_stream, batch_size=batch_size, seed=seed, batches=val_batches)
+        _record_validation(
+            total_steps,
+            _validation_loss(model, val_stream, batch_size=batch_size, seed=seed, batches=val_batches),
         )
+    if restore_best and best_snapshot is not None:
+        for param, saved in zip(model.parameters(), best_snapshot, strict=True):
+            param[...] = saved
     return report
 
 

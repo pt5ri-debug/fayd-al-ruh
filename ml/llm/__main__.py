@@ -103,6 +103,9 @@ def train_and_save(
     warmup: int | None = None,
     max_grad_norm: float = 1.0,
     val_every: int = 200,
+    weight_decay: float = 0.0,
+    lr_schedule: str = "cosine",
+    restore_best: bool = False,
     resume: bool = False,
     state_path: Path | None = None,
     verbose: bool = True,
@@ -179,6 +182,11 @@ def train_and_save(
             loaded = load_training_state(state_path or _state_path(checkpoint), model)
             if loaded is not None:
                 optimizer, start_step = loaded
+                # The sidecar carries Adam's moments, not its decay policy, so a
+                # resumed run applies the decay this invocation asked for instead
+                # of silently keeping a stale one.
+                optimizer.weight_decay = weight_decay
+                optimizer.decoupled = True
             print(
                 f"resuming from {checkpoint} at step {start_step} "
                 f"(tokenizer {tokenizer_kind}/{tokenizer.vocab_size})"
@@ -203,7 +211,9 @@ def train_and_save(
         model = build_model(seed=seed, config=model_config)
     # Own the optimiser so its moments are real when we save the sidecar: a fresh
     # run must persist the moments it actually learned with, not a zeroed stand-in.
-    optimizer = optimizer or Adam(model.parameters())
+    optimizer = optimizer or Adam(
+        model.parameters(), lr=learning_rate, weight_decay=weight_decay, decoupled=True
+    )
     warmup = warmup if warmup is not None else max(1, steps // 20)
     progress = (
         ProgressReporter("language model", steps, every=progress_every, enabled=verbose)
@@ -224,6 +234,9 @@ def train_and_save(
         val_every=val_every,
         optimizer=optimizer,
         start_step=start_step,
+        weight_decay=weight_decay,
+        lr_schedule=lr_schedule,
+        restore_best=restore_best,
         progress=progress,
     )
     model.save(checkpoint)
@@ -236,9 +249,12 @@ def train_and_save(
         schedule.units = len(shard) if shard is not None else schedule.units
         save_schedule(schedule, schedule_file)
     params = sum(p.size for p in model.parameters())
+    best = f"  best-val {report.best_val_loss:.3f}"
+    if report.best_val_step is not None:
+        best += f" (step {report.best_val_step})"
     print(
         f"trained {steps} steps  loss {report.initial_loss:.3f} -> "
-        f"{report.final_loss:.3f}  val {report.best_val_loss:.3f}  "
+        f"{report.final_loss:.3f}  val {report.best_val_loss:.3f}{best}  "
         f"params {params}  tokens {len(stream)}  "
         f"tokenizer {tokenizer_kind}/{tokenizer.vocab_size}  "
         f"preset {preset}  saved {checkpoint}"
@@ -331,6 +347,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--generate", type=str, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=0.0,
+        help="AdamW (decoupled) weight decay; 0 disables it (the default).",
+    )
+    parser.add_argument(
+        "--lr-schedule",
+        choices=("cosine", "linear", "constant"),
+        default="cosine",
+        help="The learning-rate decay shape after warmup (default: cosine).",
+    )
+    parser.add_argument(
+        "--restore-best",
+        action="store_true",
+        help="Keep the weights from the step with the lowest held-out loss instead "
+        "of the final step, so a run that overfits late does not ship its worst "
+        "checkpoint.",
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Print only the final summary, not the live progress lines.",
@@ -357,6 +392,9 @@ def main(argv: list[str] | None = None) -> int:
         warmup=args.warmup,
         max_grad_norm=args.max_grad_norm,
         val_every=args.val_every,
+        weight_decay=args.weight_decay,
+        lr_schedule=args.lr_schedule,
+        restore_best=args.restore_best,
         kb_max_chunks=args.kb_max_chunks,
         include_runtime=not args.no_runtime_docs,
         include_sessions=args.llm_sessions,
