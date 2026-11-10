@@ -29,6 +29,23 @@ _PREFIXES = {
     "division": "DIV",
     "division_detail": "DET",
     "taxonomy": "TAX",
+    "person": "PER",
+    "qualification": "QUAL",
+    "client": "CLI",
+    "project": "PRJ",
+    "contract": "CON",
+    "standard": "STD",
+    "procedure": "PROC",
+    "inspection": "INSP",
+    "test": "TEST",
+    "document": "DOC",
+    "report": "REP",
+    "correspondence": "COR",
+    "assignment": "ASG",
+    "finding": "FND",
+    "approval": "APR",
+    "knowledge": "KNW",
+    "audit": "AUD",
 }
 
 #: The kinds whose records carry the institutional hierarchy (this phase).

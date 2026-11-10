@@ -29,6 +29,7 @@ from core.workplace.model import (
     TaxonomyNode,
     make_id,
 )
+from core.workplace.records import DOMAIN_PREFIXES, DOMAIN_RECORDS, AuditEntry
 
 T = TypeVar("T", bound=RecordBase)
 
@@ -291,6 +292,102 @@ class WorkplaceRepository:
         updated = node.deactivate()
         self.db.upsert(TAXONOMY_NODES, updated)
         return updated  # type: ignore[return-value]
+
+    # -- generic domain records (the brief's §12) -------------------------
+
+    def create_domain(self, table: str, *, prefix: str | None = None, **fields: Any) -> RecordBase:
+        """Create a domain record in ``table`` (the record class is looked up).
+
+        Every domain table maps to one record class in
+        :data:`core.workplace.records.DOMAIN_RECORDS`; this is the one generic
+        creator the service uses, so a new record type needs no repository method.
+        An unknown table is a clear error, never a silent no-op.
+        """
+        record_type = DOMAIN_RECORDS.get(table)
+        if record_type is None:
+            raise KeyError(f"Unknown Workplace domain table: {table!r}")
+        record = record_type(
+            record_id=make_id(table, prefix=prefix or DOMAIN_PREFIXES.get(table)), **fields
+        )
+        self.db.upsert(table, record)
+        return record
+
+    def get_domain(self, table: str, record_id: str) -> Any:
+        return self.db.get(table, record_id)
+
+    def list_domain(
+        self,
+        table: str,
+        *,
+        where: str = "",
+        params: Sequence[Any] = (),
+        include_inactive: bool = False,
+        limit: int | None = None,
+    ) -> list[Any]:
+        """Read a domain table with an optional filter (used by the finders)."""
+        return self.db.list_records(
+            table,
+            where=where,
+            params=params,
+            include_inactive=include_inactive,
+            limit=limit,
+        )
+
+    def save_domain(self, table: str, record: RecordBase) -> RecordBase:
+        self.db.upsert(table, record)
+        return record
+
+    def deactivate_domain(self, table: str, record_id: str) -> RecordBase | None:
+        """Deactivate a domain record (the soft delete); history survives."""
+        record = self.get_domain(table, record_id)
+        if record is None:
+            return None
+        updated = record.deactivate()
+        self.db.upsert(table, updated)
+        return updated
+
+    # -- the audit trail (the brief's §13) --------------------------------
+
+    def audit(
+        self,
+        *,
+        actor: str,
+        action: str,
+        entity: str,
+        entity_id: str = "",
+        detail: str = "",
+        before: str = "",
+        after: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> AuditEntry:
+        """Append one audit-trail row (append-only: nothing rewrites a row)."""
+        entry = AuditEntry(
+            record_id=make_id("audit"),
+            actor=actor or "unknown",
+            action=action,
+            entity=entity,
+            entity_id=entity_id,
+            detail=detail,
+            before=before,
+            after=after,
+            metadata=metadata or {},
+        )
+        self.db.upsert("audit_entries", entry)
+        return entry
+
+    def audit_tail(self, *, limit: int = 50) -> list[AuditEntry]:
+        """The most recent audit rows, newest first."""
+        rows = self.db.list_records("audit_entries", include_inactive=True)
+        rows.sort(key=lambda row: (row.created_at, row.record_id), reverse=True)
+        return rows[:limit]
+
+    def audit_for(self, entity_id: str, *, limit: int = 50) -> list[AuditEntry]:
+        """The audit rows about one record, newest first."""
+        rows = self.db.list_records(
+            "audit_entries", where="entity_id = ?", params=(entity_id,), include_inactive=True
+        )
+        rows.sort(key=lambda row: (row.created_at, row.record_id), reverse=True)
+        return rows[:limit]
 
     # -- bulk -------------------------------------------------------------
 

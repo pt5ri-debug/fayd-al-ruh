@@ -27,6 +27,7 @@ from pathlib import Path
 
 from core.paths import workplace_db_path
 from core.workplace.database import WorkplaceDatabase
+from core.workplace.domain import WorkplaceDomain, WorkplaceDomainError
 from core.workplace.model import (
     DIVISION_DETAIL_KINDS,
     Division,
@@ -174,6 +175,75 @@ class DivisionProfile:
         return not self.details
 
 
+@dataclass
+class WorkplaceDashboard:
+    """The dashboard's figures (the brief's §5) -- **real records**, never demo data.
+
+    Every figure is a count read from the Workplace database at the moment the
+    dashboard is built, so a dashboard never shows a made-up number. A figure that
+    has no meaning yet (no projects, no inspections) is honestly ``0``.
+    """
+
+    active_projects: int = 0
+    completed_projects: int = 0
+    total_projects: int = 0
+    pending_assignments: int = 0
+    upcoming_inspections: int = 0
+    outstanding_findings: int = 0
+    reports_awaiting_approval: int = 0
+    documents: int = 0
+    personnel: int = 0
+    clients: int = 0
+    standards: int = 0
+    knowledge_records: int = 0
+    divisions: int = 0
+
+    def as_rows(self, *, language: str = "en") -> list[tuple[str, str]]:
+        """The figures as ``(label, value)`` rows a surface draws."""
+        labels_en = {
+            "active_projects": "Active projects",
+            "completed_projects": "Completed projects",
+            "total_projects": "Total projects",
+            "pending_assignments": "Assignments",
+            "upcoming_inspections": "Inspections (planned)",
+            "outstanding_findings": "Outstanding findings",
+            "reports_awaiting_approval": "Reports awaiting approval",
+            "documents": "Documents registered",
+            "personnel": "Personnel",
+            "clients": "Clients / contractors",
+            "standards": "Standards in the library",
+            "knowledge_records": "Knowledge records",
+            "divisions": "Divisions",
+        }
+        labels_ar = {
+            "active_projects": "المشروعات النشطة",
+            "completed_projects": "المشروعات المكتملة",
+            "total_projects": "إجمالي المشروعات",
+            "pending_assignments": "التكليفات",
+            "upcoming_inspections": "الفحوص (مخططة)",
+            "outstanding_findings": "الملاحظات القائمة",
+            "reports_awaiting_approval": "تقارير بانتظار الاعتماد",
+            "documents": "الوثائق المسجلة",
+            "personnel": "الكوادر",
+            "clients": "العملاء / المقاولون",
+            "standards": "المعايير في المكتبة",
+            "knowledge_records": "سجلات المعرفة",
+            "divisions": "الأقسام",
+        }
+        labels = labels_ar if language == "ar" else labels_en
+        order = [
+            "active_projects", "completed_projects", "total_projects",
+            "upcoming_inspections", "outstanding_findings", "reports_awaiting_approval",
+            "pending_assignments", "documents", "personnel", "clients", "standards",
+            "knowledge_records", "divisions",
+        ]
+        return [(labels[key], str(getattr(self, key))) for key in order]
+
+    def describe(self, *, language: str = "en") -> str:
+        rows = self.as_rows(language=language)
+        return " · ".join(f"{label}: {value}" for label, value in rows)
+
+
 #: The readable labels for the divisional detail kinds (English + Arabic).
 DIVISION_DETAIL_LABELS: dict[str, tuple[str, str]] = {
     "discipline": ("Technical disciplines", "التخصصات الفنية"),
@@ -215,6 +285,8 @@ class WorkplaceService:
         )
         self._db: WorkplaceDatabase | None = None
         self._repo: WorkplaceRepository | None = None
+        self._domain: WorkplaceDomain | None = None
+        self._actor = "system"
         self._seed_report: SeedReport | None = None
         self._auto_seed = auto_seed
 
@@ -243,6 +315,19 @@ class WorkplaceService:
             self.open()
         assert self._repo is not None
         return self._repo
+
+    @property
+    def domain(self) -> WorkplaceDomain:
+        """The audited domain service over the repository (created on first use)."""
+        if self._domain is None:
+            self._domain = WorkplaceDomain(self.repository, actor=self._actor)
+        return self._domain
+
+    def set_actor(self, actor: str) -> None:
+        """Set the name recorded on the audit trail (the security phase supplies one)."""
+        self._actor = actor or "system"
+        if self._domain is not None:
+            self._domain.actor = self._actor
 
     def seed(self, *, force: bool = False) -> SeedReport:
         """Install (or reset) the Workplace defaults."""
@@ -276,6 +361,34 @@ class WorkplaceService:
             taxonomy_disciplines=sum(a.discipline_count for a in TAXONOMY),
             ready=True,
             message="",
+        )
+
+    # -- dashboard (the brief's §5) --------------------------------------
+
+    def dashboard(self, *, language: str = "en") -> WorkplaceDashboard:
+        """The dashboard's figures, every one a **real** count from the database."""
+        self.open()
+        repo = self.repository
+        projects = repo.list_domain("projects")
+        inspections = repo.list_domain("inspections")
+        findings = repo.list_domain("findings")
+        reports = repo.list_domain("reports")
+        return WorkplaceDashboard(
+            active_projects=sum(1 for p in projects if p.status == "active"),
+            completed_projects=sum(1 for p in projects if p.status in {"completed", "closed"}),
+            total_projects=len(projects),
+            pending_assignments=len(repo.list_domain("assignments")),
+            upcoming_inspections=sum(1 for i in inspections if i.status == "planned"),
+            outstanding_findings=sum(1 for f in findings if f.status != "closed"),
+            reports_awaiting_approval=sum(
+                1 for r in reports if r.status in {"draft", "submitted"}
+            ),
+            documents=len(repo.list_domain("workplace_documents")),
+            personnel=len(repo.list_domain("people")),
+            clients=len(repo.list_domain("clients")),
+            standards=len(repo.list_domain("standards")),
+            knowledge_records=len(repo.list_domain("knowledge_records")),
+            divisions=len(repo.list_divisions()),
         )
 
     # -- institution hierarchy -------------------------------------------
@@ -650,6 +763,8 @@ __all__ = [
     "DivisionProfile",
     "DivisionSummary",
     "HierarchyView",
+    "WorkplaceDashboard",
+    "WorkplaceDomainError",
     "WorkplaceError",
     "WorkplaceService",
     "WorkplaceStatus",

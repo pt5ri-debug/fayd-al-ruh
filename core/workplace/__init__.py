@@ -37,6 +37,11 @@ from core.workplace.database import (
     WorkplaceDatabaseError,
     WorkplaceLoadReport,
 )
+from core.workplace.domain import (
+    ENTITY_NAMES,
+    WorkplaceDomain,
+    WorkplaceDomainError,
+)
 from core.workplace.model import (
     DIVISION_DETAIL_KINDS,
     Division,
@@ -48,6 +53,13 @@ from core.workplace.model import (
     WorkplaceRecord,
     make_id,
 )
+from core.workplace.records import (
+    CONFIDENTIALITY_LEVELS,
+    DOCUMENT_TYPES,
+    DOMAIN_RECORDS,
+    PROJECT_STATUSES,
+    REFERENCE_KINDS,
+)
 from core.workplace.repository import WorkplaceRepository
 from core.workplace.seed import SeedReport, seed_workplace
 from core.workplace.settings import (
@@ -58,7 +70,13 @@ from core.workplace.settings import (
 from core.workplace.taxonomy import TAXONOMY, TaxonomyArea, area_for, discipline_count
 
 __all__ = [
+    "CONFIDENTIALITY_LEVELS",
     "DIVISION_DETAIL_KINDS",
+    "DOCUMENT_TYPES",
+    "DOMAIN_RECORDS",
+    "ENTITY_NAMES",
+    "PROJECT_STATUSES",
+    "REFERENCE_KINDS",
     "SCHEMA_VERSION",
     "TAXONOMY",
     "Division",
@@ -71,6 +89,8 @@ __all__ = [
     "TaxonomyNode",
     "WorkplaceDatabase",
     "WorkplaceDatabaseError",
+    "WorkplaceDomain",
+    "WorkplaceDomainError",
     "WorkplaceLoadReport",
     "WorkplaceRecord",
     "WorkplaceRepository",

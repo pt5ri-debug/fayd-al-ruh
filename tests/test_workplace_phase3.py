@@ -191,7 +191,7 @@ def test_save_settings_reports_a_read_only_folder(tmp_path: Path, monkeypatch):
 # -- migration ------------------------------------------------------------
 
 
-def test_a_version_1_database_migrates_to_version_2(tmp_path: Path):
+def test_a_version_1_database_migrates_to_the_current_version(tmp_path: Path):
     import sqlite3
 
     db_path = tmp_path / "old.db"
@@ -202,6 +202,16 @@ def test_a_version_1_database_migrates_to_version_2(tmp_path: Path):
         "updated_at TEXT, active INTEGER, key TEXT, name TEXT, name_ar TEXT, kind TEXT, "
         "country TEXT, website TEXT, summary TEXT, official INTEGER, metadata TEXT)"
     )
+    connection.execute(
+        "CREATE TABLE organisational_units (record_id TEXT PRIMARY KEY, created_at TEXT, "
+        "updated_at TEXT, active INTEGER, institution_id TEXT, key TEXT, name TEXT, "
+        "name_ar TEXT, kind TEXT, summary TEXT, official INTEGER, metadata TEXT)"
+    )
+    connection.execute(
+        "CREATE TABLE divisions (record_id TEXT PRIMARY KEY, created_at TEXT, "
+        "updated_at TEXT, active INTEGER, unit_id TEXT, key TEXT, name TEXT, name_ar TEXT, "
+        "summary TEXT, proposed INTEGER, metadata TEXT)"
+    )
     connection.execute("INSERT INTO meta VALUES('schema_version','1')")
     connection.execute(
         "INSERT INTO institutions VALUES('INST-1','t','t',1,'epri','EPRI','معهد',"
@@ -211,12 +221,15 @@ def test_a_version_1_database_migrates_to_version_2(tmp_path: Path):
     connection.close()
 
     database = WorkplaceDatabase(db_path)
-    assert database.schema_version() == SCHEMA_VERSION == 2
+    assert database.schema_version() == SCHEMA_VERSION
     assert len(database.list_records("institutions")) == 1  # nothing was lost
     assert database.integrity_check()
-    # The new tables exist and are empty.
-    assert database.list_records("division_details") == []
-    assert database.list_records("taxonomy_nodes") == []
+    # Every table the current schema declares now exists and reads empty
+    # (the v2 and v3 migrations added theirs without touching the v1 data).
+    from core.workplace.schema import TABLES
+
+    for table in TABLES:
+        assert database.list_records(table) == [] or table == "institutions"
 
 
 def test_a_newer_database_is_refused(tmp_path: Path):

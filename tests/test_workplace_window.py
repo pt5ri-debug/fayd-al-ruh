@@ -189,3 +189,43 @@ def test_the_honesty_note_is_shown(tmp_path: Path) -> None:
         assert "proposed, configurable defaults" in text
     finally:
         _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_dashboard_reads_the_new_domain_figures(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.domain.create_project(number="P-1", title="A")
+        service.domain.create_person(name="Ali")
+        dialog._refresh_dashboard()
+        assert dialog._dash_labels["active_projects"].cget("text") == "0"
+        assert dialog._dash_labels["personnel"].cget("text") == "1"
+        assert dialog._dash_labels["standards"].cget("text") == "0"
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_records_section_lists_a_project(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.domain.create_project(number="TSTC-2026-001", title="Coating inspection")
+        dialog._record_entity.set("projects")
+        dialog._refresh_records()
+        text = dialog._records_text.get("1.0", "end")
+        assert "TSTC-2026-001" in text
+        assert "Coating inspection" in text
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_audit_trail_is_shown(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.domain.create_person(name="Ali")
+        dialog._on_show_audit()
+        text = "\n".join(w.get("1.0", "end") for w in _all_text_widgets(dialog._transcript))
+        assert "create" in text and "people" in text
+    finally:
+        _close_window(root, dialog)

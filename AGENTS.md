@@ -2065,10 +2065,34 @@ Arabic is kept as secondary aliases where useful.
   is the headless twin (`python -m cli workplace status|seed|divisions|hierarchy|
   taxonomy|profile|add-detail|remove-detail|kinds|add-division|rename-division|
   move-division|deactivate-division|activate-division|add-taxonomy-area|
-  add-taxonomy-discipline|rename-taxonomy|remove-taxonomy|settings|backup`).
+  add-taxonomy-discipline|rename-taxonomy|remove-taxonomy|settings|backup|
+  dashboard|entities|add|list|show|update|deactivate|audit`).
   Everything lives under the git-ignored `data/workplace` (`core.paths.workplace_*`).
-  Later phases add projects, personnel, standards, documents, inspections,
-  reports, the assistant, and security, each additive.
+  **Phase 4** adds the **domain data architecture** (the brief's §12): sixteen
+  first-class records in `core/workplace/records.py` (people, qualifications,
+  clients, projects, contracts, standards, procedures, inspections, tests,
+  `workplace_documents`, reports, correspondence, assignments, findings,
+  approvals, knowledge_records) plus the append-only `audit_entries`; every record
+  carries the base fields (a stable prefixed `record_id`, the `created_at`/
+  `updated_at` pair, the `active` soft-delete flag, a free `metadata` map), and the
+  schema is now **version 3** (an additive v2 → v3 migration creates the tables
+  with no data loss). Two honesty rules the schema enforces: a document and a
+  knowledge record are **registry rows** (path/hash/revision/`supersedes_id`,
+  source/reference) -- **never** a second copy of the text, which lives in the
+  project's own `core.documents`/`core.knowledge_base`/`core.knowledge_index`. The
+  audited `WorkplaceDomain` (`core/workplace/domain.py`) is the typed service: an
+  edit is a **new value** (a bumped `updated_at`, the changed fields named on the
+  audit row), `deactivate` is the soft delete (a deactivated division's project
+  still resolves it), a create validates its foreign keys, and `approve` records a
+  **new** approval row per decision. `WorkplaceService.dashboard()` returns a
+  `WorkplaceDashboard` whose every figure is a **real count** (active/completed/
+  total projects, planned inspections, outstanding findings, reports awaiting
+  approval, assignments, documents, personnel, clients, standards, knowledge
+  records, divisions), bilingual via `as_rows(language=)`. The window gains the
+  domain figures on its dashboard and a **Projects & records** section (list an
+  entity, add one, show the audit trail); the CLI gains `dashboard`/`entities`/
+  `add`/`list`/`show`/`update`/`deactivate`/`audit`. Later phases add the assistant
+  and security, each additive.
 - `ingest/` — the **local-first ingestion subsystem**: a separate pipeline that
   turns *sources* into the same on-disk knowledge store without ever loading a
   whole dataset into RAM. `ingest.records` holds the contracts (`SourceSpec`,
