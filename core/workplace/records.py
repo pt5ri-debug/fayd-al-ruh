@@ -359,6 +359,54 @@ class KnowledgeRecord(RecordBase):
 
 
 @dataclass(frozen=True)
+class WorkplaceUser(RecordBase):
+    """A Workplace user: a person with a role, a clearance, and a scope.
+
+    This is the record the security layer (the brief's §13) reads. ``role`` is one
+    of :data:`core.workplace.security.ROLES` and is a **ceiling**; ``permissions``
+    is an optional per-user grant that may only *narrow* it. ``clearance`` is a
+    comma-joined subset of :data:`CONFIDENTIALITY_LEVELS` the user may read, and
+    ``division_ids`` / ``project_ids`` are the comma-joined scopes that confine a
+    non-administrator to their own department and projects. It is a *separate*
+    record from :class:`Person` on purpose: a staff member and a system login are
+    different facts (a person need not have a login, and an auditor may be a user
+    without being on the roster).
+    """
+
+    name: str = ""
+    role: str = "viewer"
+    email: str = ""
+    clearance: str = "public,internal"
+    division_ids: str = ""
+    project_ids: str = ""
+    permissions: str = ""
+    person_id: str = ""
+    note: str = ""
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ProjectMember(RecordBase):
+    """A person's membership of a project (the project-level access list).
+
+    ``project_id`` + ``person_id`` (or ``user_id``) name the membership; ``role``
+    is the member's role on *that* project (client, contractor, consultant,
+    reviewer, ...), which is what a project-scoped access check reads. It is a
+    lightweight membership row, never a second assignment table: the work
+    assignment itself stays in :class:`Assignment`.
+    """
+
+    project_id: str = ""
+    person_id: str = ""
+    user_id: str = ""
+    role: str = "member"
+    organization: str = ""
+    active_member: bool = True
+    note: str = ""
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class AuditEntry(RecordBase):
     """One append-only audit-trail row (the brief's §13).
 
@@ -398,6 +446,8 @@ DOMAIN_RECORDS: dict[str, type[RecordBase]] = {
     "findings": Finding,
     "approvals": Approval,
     "knowledge_records": KnowledgeRecord,
+    "workplace_users": WorkplaceUser,
+    "project_members": ProjectMember,
     "audit_entries": AuditEntry,
 }
 
@@ -421,6 +471,8 @@ DOMAIN_PREFIXES: dict[str, str] = {
     "findings": "FND",
     "approvals": "APR",
     "knowledge_records": "KNW",
+    "workplace_users": "USR",
+    "project_members": "MEM",
     "audit_entries": "AUD",
 }
 
@@ -443,9 +495,11 @@ __all__ = [
     "Person",
     "Procedure",
     "Project",
+    "ProjectMember",
     "Qualification",
     "Report",
     "Standard",
     "Test",
     "WorkplaceDocument",
+    "WorkplaceUser",
 ]

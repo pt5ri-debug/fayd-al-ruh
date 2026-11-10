@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from core.paths import workplace_db_path
-from core.workplace.assistant import CorpusReport, WorkplaceAssistant
+from core.workplace.assistant import DEFAULT_CLEARANCE, CorpusReport, WorkplaceAssistant
 from core.workplace.database import WorkplaceDatabase
 from core.workplace.documents import (
     DocumentManager,
@@ -52,7 +52,14 @@ from core.workplace.model import (
 )
 from core.workplace.personnel import Candidate, CompetencyMatrix, PersonnelDirectory, PersonProfile
 from core.workplace.projects import ProjectManager, ProjectRow, ProjectSummary
-from core.workplace.records import Assignment, Person, Report
+from core.workplace.records import (
+    Assignment,
+    AuditEntry,
+    Person,
+    ProjectMember,
+    Report,
+    WorkplaceUser,
+)
 from core.workplace.reporting import (
     REPORT_KINDS,
     REPORT_STATUSES,
@@ -64,6 +71,15 @@ from core.workplace.reporting import (
     status_label,
 )
 from core.workplace.repository import WorkplaceRepository
+from core.workplace.security import (
+    PERMISSIONS,
+    ROLES,
+    AccessDecision,
+    ReadReport,
+    SecurityManager,
+    WorkplaceSecurityError,
+    permissions_for,
+)
 from core.workplace.seed import SeedReport, seed_workplace
 from core.workplace.settings import (
     WorkplaceSettings,
@@ -319,6 +335,9 @@ class WorkplaceService:
         self._documents: DocumentManager | None = None
         self._assistant: WorkplaceAssistant | None = None
         self._reporting: ReportingWorkflow | None = None
+        self._security: SecurityManager | None = None
+        self._current_user: WorkplaceUser | None = None
+        self._assistant_clearance: tuple[str, ...] = tuple(DEFAULT_CLEARANCE)
         self._documents_dir = (
             Path(root) / "workplace" / "documents" if root is not None else None
         )
@@ -690,6 +709,7 @@ class WorkplaceService:
                 self.repository,
                 domain=self.domain,
                 documents=self.document_manager,
+                clearance=self._assistant_clearance,
             )
         return self._assistant
 
@@ -807,6 +827,187 @@ class WorkplaceService:
 
     def report_can_transition(self, current: str, target: str) -> bool:
         return can_transition(current, target)
+
+    # -- security, permissions, and audit (the brief's §13) --------------
+
+    @property
+    def security(self) -> SecurityManager:
+        """The role/permission/clearance/approval policy over the records."""
+        if self._security is None:
+            self._security = SecurityManager(self.repository, self.domain)
+        return self._security
+
+    # roles/permissions the UI needs to render a picker
+
+    def role_names(self) -> list[str]:
+        return list(ROLES)
+
+    def role_permissions(self, role: str) -> list[str]:
+        return [p for p in PERMISSIONS if p in permissions_for(role)]
+
+    def permission_names(self) -> list[str]:
+        return list(PERMISSIONS)
+
+    def create_user(
+        self,
+        *,
+        name: str,
+        role: str = "viewer",
+        clearance: object = None,
+        division_ids: object = None,
+        project_ids: object = None,
+        permissions: object = None,
+        **fields: object,
+    ) -> WorkplaceUser:
+        """Create a Workplace user (the brief's §13)."""
+        if clearance is not None:
+            fields["clearance"] = clearance
+        if division_ids is not None:
+            fields["division_ids"] = SecurityManager._join_ids(division_ids)
+        if project_ids is not None:
+            fields["project_ids"] = SecurityManager._join_ids(project_ids)
+        if permissions is not None:
+            fields["permissions"] = ",".join(
+                str(item).strip() for item in SecurityManager._as_sequence(permissions)
+            )
+        return self.security.create_user(name=name, role=role, **fields)
+
+    def users(self, *, include_inactive: bool = False) -> list[WorkplaceUser]:
+        return self.security.users(include_inactive=include_inactive)
+
+    def user(self, user_id: str) -> WorkplaceUser | None:
+        return self.security.user(user_id)
+
+    def set_user_role(self, user_id: str, role: str) -> WorkplaceUser:
+        return self.security.set_role(user_id, role)
+
+    def set_user_clearance(self, user_id: str, clearance: object) -> WorkplaceUser:
+        return self.security.set_clearance(user_id, clearance)
+
+    def set_user_scope(
+        self, user_id: str, *, division_ids: object = None, project_ids: object = None
+    ) -> WorkplaceUser:
+        return self.security.set_scope(
+            user_id, division_ids=division_ids, project_ids=project_ids
+        )
+
+    def grant_permissions(self, user_id: str, permissions: object) -> WorkplaceUser:
+        return self.security.grant(user_id, permissions)
+
+    def deactivate_user(self, user_id: str) -> WorkplaceUser:
+        if self.domain is None:
+            raise WorkplaceSecurityError("This Workplace has no writable domain.")
+        updated = self.domain.update("workplace_users", user_id, active=False)
+        assert isinstance(updated, WorkplaceUser)
+        return updated
+
+    def set_current_user(self, user_id: str) -> WorkplaceUser:
+        """Make ``user_id`` the acting user for the permission checks below."""
+        user = self.security.user(user_id)
+        if user is None:
+            raise WorkplaceSecurityError(f"No Workplace user with id {user_id!r}.")
+        self._current_user = user
+        return user
+
+    def current_user(self) -> WorkplaceUser | None:
+        """The acting user, defaulting to the first administrator, else the first user."""
+        if self._current_user is not None:
+            return self._current_user
+        users = self.users()
+        admins = [u for u in users if u.role == "administrator"]
+        chosen = admins[0] if admins else (users[0] if users else None)
+        if chosen is not None:
+            self._current_user = chosen
+        return chosen
+
+    def clear_current_user(self) -> None:
+        self._current_user = None
+
+    def can(self, permission: str) -> AccessDecision:
+        """Whether the acting user may perform ``permission`` (role + scope)."""
+        return self.security.can(self.current_user(), permission)
+
+    def check_access(
+        self, permission: str, *, entity: str = "", record: object = None
+    ) -> AccessDecision:
+        """The full check (permission + scope + confidentiality) for the acting user."""
+        return self.security.check(
+            self.current_user(), permission, entity=entity, record=record
+        )
+
+    def require_access(
+        self, permission: str, *, entity: str = "", record: object = None
+    ) -> None:
+        self.security.require(
+            self.current_user(), permission, entity=entity, record=record
+        )
+
+    def cleared_records(self, records: list[object]) -> ReadReport:
+        """Split ``records`` into what the acting user may read and what is withheld."""
+        return self.security.filter_for_clearance(self.current_user(), records)
+
+    def is_approved(self, entity: str, record_id: str) -> bool:
+        return self.security.is_approved(entity, record_id)
+
+    def reopen_record(self, entity: str, record_id: str, *, note: str = "") -> None:
+        """Deliberately reopen an approved record for revision (audited)."""
+        self.require_access("update", entity=entity)
+        self.security.reopen(entity, record_id, actor=self._actor, note=note)
+
+    def refused_decisions(self, *, limit: int = 50) -> list[AuditEntry]:
+        """The most recent refused access decisions (audit rows)."""
+        return self.security.refused_tail(limit=limit)
+
+    def assign_project_member(
+        self,
+        project_id: str,
+        *,
+        person_id: str = "",
+        user_id: str = "",
+        role: str = "member",
+        organization: str = "",
+        note: str = "",
+    ) -> ProjectMember:
+        """Add a project membership (the project-level access list, §13)."""
+        if self.domain is None:
+            raise WorkplaceSecurityError("This Workplace has no writable domain.")
+        member: ProjectMember = self.domain.create(
+            "project_members",
+            project_id=project_id,
+            person_id=person_id,
+            user_id=user_id,
+            role=role,
+            organization=organization,
+            note=note,
+        )
+        return member
+
+    def project_members(
+        self, project_id: str, *, include_inactive: bool = False
+    ) -> list[ProjectMember]:
+        rows: list[ProjectMember] = self.repository.list_domain(
+            "project_members",
+            where="project_id = ?",
+            params=(project_id,),
+            include_inactive=include_inactive,
+        )
+        return rows
+
+    def set_assistant_clearance(self, clearance: str | list[str] | tuple[str, ...] | None) -> None:
+        """Set the confidentiality levels the Workplace assistant may read (§13).
+
+        The assistant's corpus is clearance-filtered at build time, so a record
+        classified above the caller's clearance is withheld from retrieval. This
+        rebuilds the corpus so the new clearance takes effect at once.
+        """
+        if isinstance(clearance, str):
+            items = clearance.split(",")
+        else:
+            items = list(clearance) if clearance else []
+        levels = tuple(str(level).strip() for level in items if str(level).strip())
+        self._assistant_clearance = levels
+        self._assistant = None
+        self.refresh_assistant()
 
     # -- institution hierarchy -------------------------------------------
 
