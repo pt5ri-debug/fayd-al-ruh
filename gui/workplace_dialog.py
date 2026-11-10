@@ -33,11 +33,14 @@ form, and the sidebar sits on the side the direction preference asks for.
 
 from __future__ import annotations
 
+import dataclasses
 import queue
 import threading
 import tkinter as tk
 from collections.abc import Callable
 from typing import Any
+
+from core.workplace.records import DOMAIN_RECORDS
 
 from gui import clipboard
 from gui.app import RoundedBox
@@ -46,6 +49,7 @@ from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.workplace import (
     DivisionSummary,
+    WorkplaceDomainError,
     WorkplaceError,
     WorkplaceService,
 )
@@ -210,6 +214,17 @@ class WorkplaceDialog(ThemedDialog):
             ("divisions", "Divisions"),
             ("active_divisions", "Active divisions"),
             ("taxonomy", "Taxonomy areas · disciplines"),
+            ("active_projects", "Active projects"),
+            ("completed_projects", "Completed projects"),
+            ("upcoming_inspections", "Inspections (planned)"),
+            ("outstanding_findings", "Outstanding findings"),
+            ("reports_awaiting_approval", "Reports awaiting approval"),
+            ("pending_assignments", "Assignments"),
+            ("documents", "Documents registered"),
+            ("personnel", "Personnel"),
+            ("clients", "Clients / contractors"),
+            ("standards", "Standards in the library"),
+            ("knowledge_records", "Knowledge records"),
         ):
             row = tk.Frame(dash, bg=theme.surface)
             row.pack(fill="x", padx=14, pady=2)
@@ -314,6 +329,45 @@ class WorkplaceDialog(ThemedDialog):
         tax_buttons.pack(fill="x", padx=14, pady=(0, 12))
         self._button(tax_buttons, "Add area…", self._on_add_taxonomy_area).pack(fill="x", pady=2)
         self._button(tax_buttons, "Add discipline…", self._on_add_taxonomy_discipline).pack(
+            fill="x", pady=2
+        )
+
+        # The work records (the brief's §12): projects, people, standards, and
+        # the audited domain service behind them.
+        records = column.add("records", "Projects & records", icon="🗂", open=False)
+        self._records_text = tk.Text(
+            records, height=10, wrap="word", relief="flat", borderwidth=0,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            font=self._type.font("xs"), padx=10, pady=8, cursor="xterm", takefocus=1,
+        )
+        self._records_text.pack(fill="x", padx=14, pady=(6, 4))
+        self._records_text.configure(state="disabled")
+
+        tk.Label(
+            records, text="Entity", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(4, 2))
+        self._record_entity = tk.StringVar(value="projects")
+        entity_menu = tk.OptionMenu(
+            records, self._record_entity, *sorted(DOMAIN_RECORDS),
+            command=lambda _value: self._refresh_records(),
+        )
+        entity_menu.configure(
+            bg=theme.surface_raised, fg=theme.foreground, activebackground=theme.interactive_active,
+            activeforeground=theme.foreground, relief="flat", highlightthickness=0,
+            borderwidth=0, font=self._type.font("2xs"), anchor="w", padx=8,
+        )
+        entity_menu["menu"].configure(
+            bg=theme.surface_raised, fg=theme.foreground,
+            activebackground=theme.primary, activeforeground=theme.primary_foreground,
+            font=self._type.font("2xs"),
+        )
+        entity_menu.pack(fill="x", padx=14, pady=(0, 4))
+
+        record_buttons = tk.Frame(records, bg=theme.surface)
+        record_buttons.pack(fill="x", padx=14, pady=(0, 12))
+        self._button(record_buttons, "Add a record…", self._on_add_record).pack(fill="x", pady=2)
+        self._button(record_buttons, "Show the audit trail", self._on_show_audit).pack(
             fill="x", pady=2
         )
 
@@ -470,16 +524,29 @@ class WorkplaceDialog(ThemedDialog):
         self._refresh_divisions()
         self._refresh_profile()
         self._refresh_taxonomy()
+        self._refresh_records()
         self._refresh_settings()
 
     def _refresh_dashboard(self) -> None:
         status = self.service.status()
+        board = self.service.dashboard()
         values = {
             "institutions": str(status.institutions),
             "units": str(status.units),
             "divisions": str(status.divisions),
             "active_divisions": str(status.active_divisions),
             "taxonomy": f"{status.taxonomy_areas} · {status.taxonomy_disciplines}",
+            "active_projects": str(board.active_projects),
+            "completed_projects": str(board.completed_projects),
+            "upcoming_inspections": str(board.upcoming_inspections),
+            "outstanding_findings": str(board.outstanding_findings),
+            "reports_awaiting_approval": str(board.reports_awaiting_approval),
+            "pending_assignments": str(board.pending_assignments),
+            "documents": str(board.documents),
+            "personnel": str(board.personnel),
+            "clients": str(board.clients),
+            "standards": str(board.standards),
+            "knowledge_records": str(board.knowledge_records),
         }
         for key, label in self._dash_labels.items():
             label.configure(text=values.get(key, "—"))
@@ -748,6 +815,52 @@ class WorkplaceDialog(ThemedDialog):
         self._add_message("workplace", f"Added the **{node.name}** discipline.", title="Workplace")
         self._refresh_all()
 
+    # -- records (the brief's §12) ---------------------------------------
+
+    def _refresh_records(self) -> None:
+        entity = self._record_entity.get()
+        rows = self.service.domain.list_records(entity)
+        lines: list[str] = []
+        if not rows:
+            lines.append(f"No {entity} records yet. Use “Add a record…” below.")
+        for row in rows:
+            lines.append(f"• {row.record_id}  {_record_title(row)}")
+        self._set_text(self._records_text, "\n".join(lines))
+
+    def _on_add_record(self) -> None:
+        entity = self._record_entity.get()
+        record_type = DOMAIN_RECORDS[entity]
+        fields = [
+            spec.name
+            for spec in dataclasses.fields(record_type)
+            if spec.name
+            not in {"record_id", "created_at", "updated_at", "active", "metadata"}
+            and spec.type in {"str", "bool"}
+        ]
+        values = _prompt_record(self.window, self.theme, self._type, entity, fields)
+        if values is None:
+            return
+        try:
+            record = self.service.domain.create(entity, **values)
+        except WorkplaceDomainError as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message("workplace", f"Added the **{entity}** record `{record.record_id}`.",
+                          title="Workplace")
+        self._refresh_all()
+
+    def _on_show_audit(self) -> None:
+        rows = self.service.domain.audit_tail(limit=20)
+        if not rows:
+            self._add_message("note", "The audit trail is empty.", title="Audit")
+            return
+        lines = [
+            f"{row.created_at} · {row.actor} · {row.action} · {row.entity} {row.entity_id}"
+            + (f" — {row.detail}" if row.detail else "")
+            for row in rows
+        ]
+        self._add_message("workplace", "\n".join(lines), title="Audit trail (newest first)")
+
     # -- settings actions -------------------------------------------------
 
     def _on_language(self) -> None:
@@ -973,6 +1086,82 @@ def _prompt_profile_item(
     dialog.bind("<Return>", lambda _e: submit())
     dialog.bind("<Escape>", lambda _e: cancel())
     title_entry.focus_set()
+    parent.wait_window(dialog)
+    return result["value"]
+
+
+def _record_title(record: object) -> str:
+    """A record's readable one-line title: its number/name, else its id."""
+    parts: list[str] = []
+    for name in ("number", "title", "name", "subject"):
+        value = getattr(record, name, "")
+        if value:
+            parts.append(str(value))
+    if not parts:
+        return getattr(record, "record_id", "")
+    return " · ".join(parts)
+
+
+def _prompt_record(
+    parent: tk.Misc,
+    theme: Any,
+    typography: Any,
+    entity: str,
+    fields: list[str],
+) -> dict[str, str] | None:
+    """A modal asking for a new domain record's fields (empty ones are skipped)."""
+    dialog = tk.Toplevel(parent)
+    dialog.title(f"New {entity}")
+    dialog.configure(bg=theme.base)
+    dialog.transient(parent)  # type: ignore[call-overload]
+    dialog.grab_set()
+    result: dict[str, dict[str, str] | None] = {"value": None}
+
+    frame = tk.Frame(dialog, bg=theme.surface)
+    frame.pack(fill="both", expand=True, padx=18, pady=18)
+    tk.Label(
+        frame, text=f"New {entity} record", bg=theme.surface, fg=theme.contrast,
+        font=typography.font("body", weight="bold"), anchor="w",
+    ).pack(fill="x", pady=(0, 6))
+
+    entries: dict[str, tk.Entry] = {}
+    # A canvas scroll is unnecessary for the handful of fields an entity has.
+    for name in fields:
+        tk.Label(
+            frame, text=name, bg=theme.surface, fg=theme.text_secondary,
+            font=typography.font("xs"), anchor="w",
+        ).pack(fill="x", pady=(6, 2))
+        entry = tk.Entry(
+            frame, bg=theme.surface_raised, fg=theme.foreground,
+            insertbackground=theme.foreground, relief="flat", font=typography.font("body"),
+        )
+        entry.pack(fill="x")
+        entries[name] = entry
+
+    def submit() -> None:
+        result["value"] = {
+            name: entry.get().strip() for name, entry in entries.items() if entry.get().strip()
+        }
+        dialog.destroy()
+
+    def cancel() -> None:
+        result["value"] = None
+        dialog.destroy()
+
+    buttons = tk.Frame(frame, bg=theme.surface)
+    buttons.pack(fill="x", pady=(12, 0))
+    from gui.components import button
+
+    button(buttons, "Save", submit, theme=theme, typography=typography, variant="primary").pack(
+        side="right"
+    )
+    button(buttons, "Cancel", cancel, theme=theme, typography=typography).pack(
+        side="right", padx=(0, 8)
+    )
+    dialog.bind("<Return>", lambda _e: submit())
+    dialog.bind("<Escape>", lambda _e: cancel())
+    if entries:
+        next(iter(entries.values())).focus_set()
     parent.wait_window(dialog)
     return result["value"]
 

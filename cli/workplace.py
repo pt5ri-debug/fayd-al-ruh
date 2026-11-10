@@ -40,7 +40,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from gui.workplace import WorkplaceError, WorkplaceService
+from gui.workplace import WorkplaceDomainError, WorkplaceError, WorkplaceService
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -159,6 +159,39 @@ def _build_parser() -> argparse.ArgumentParser:
 
     backup = _sub(sub, "backup", help="Write a consistent copy of the database.")
     backup.add_argument("--output", default=None, help="Where to write the copy.")
+
+    _sub(sub, "dashboard", help="The dashboard figures (real records, never demo data).")
+
+    _sub(sub, "entities", help="The domain entity names (people, projects, ...).")
+
+    domain_add = _sub(sub, "add", help="Create a domain record: `add <entity> key=value ...`.")
+    domain_add.add_argument("entity", help="The entity name (see `workplace entities`).")
+    domain_add.add_argument("fields", nargs="*", help="Field assignments, e.g. name=Ali role=Inspector.")
+
+    domain_list = _sub(sub, "list", help="List domain records of an entity.")
+    domain_list.add_argument("entity", help="The entity name.")
+    domain_list.add_argument("--all", action="store_true", help="Include deactivated records.")
+    domain_list.add_argument("--limit", type=int, default=None, help="At most this many.")
+    domain_list.add_argument(
+        "--where", default="", help="A raw SQL filter (advanced), e.g. \"status = 'active'\"."
+    )
+
+    domain_show = _sub(sub, "show", help="Show one domain record.")
+    domain_show.add_argument("entity", help="The entity name.")
+    domain_show.add_argument("record_id", help="The record id.")
+
+    domain_update = _sub(sub, "update", help="Edit a domain record: `update <entity> <id> key=value ...`.")
+    domain_update.add_argument("entity", help="The entity name.")
+    domain_update.add_argument("record_id", help="The record id.")
+    domain_update.add_argument("fields", nargs="+", help="Field assignments.")
+
+    domain_deactivate = _sub(sub, "deactivate", help="Deactivate a domain record (soft delete).")
+    domain_deactivate.add_argument("entity", help="The entity name.")
+    domain_deactivate.add_argument("record_id", help="The record id.")
+
+    audit = _sub(sub, "audit", help="The append-only audit trail.")
+    audit.add_argument("--for", dest="for_id", default="", help="Only rows about one record id.")
+    audit.add_argument("--limit", type=int, default=50, help="How many rows (newest first).")
 
     return parser
 
@@ -497,6 +530,176 @@ def run_backup(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_dashboard(args: argparse.Namespace) -> int:
+    service = _service(args)
+    board = service.dashboard()
+    if args.as_json:
+        print(json.dumps({
+            "active_projects": board.active_projects,
+            "completed_projects": board.completed_projects,
+            "total_projects": board.total_projects,
+            "pending_assignments": board.pending_assignments,
+            "upcoming_inspections": board.upcoming_inspections,
+            "outstanding_findings": board.outstanding_findings,
+            "reports_awaiting_approval": board.reports_awaiting_approval,
+            "documents": board.documents,
+            "personnel": board.personnel,
+            "clients": board.clients,
+            "standards": board.standards,
+            "knowledge_records": board.knowledge_records,
+            "divisions": board.divisions,
+        }, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print("Workplace dashboard (real records):")
+    for label, value in board.as_rows():
+        print(f"  {label}: {value}")
+    return EXIT_OK
+
+
+def run_entities(args: argparse.Namespace) -> int:
+    from core.workplace.records import DOMAIN_RECORDS
+
+    names = sorted(DOMAIN_RECORDS)
+    if args.as_json:
+        print(json.dumps(names, ensure_ascii=False, indent=2))
+    else:
+        print("Workplace entities:")
+        for name in names:
+            print(f"  {name}")
+    return EXIT_OK
+
+
+def _parse_fields(pairs: Sequence[str]) -> dict[str, str]:
+    """Turn ``["name=Ali", "role=Inspector"]`` into a field dict."""
+    fields: dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise WorkplaceError(f"Expected key=value, got {pair!r}")
+        key, _, value = pair.partition("=")
+        fields[key.strip()] = value.strip()
+    return fields
+
+
+def run_domain_add(args: argparse.Namespace) -> int:
+    service = _service(args)
+    fields = _parse_fields(args.fields)
+    try:
+        record = service.domain.create(args.entity, **fields)
+    except WorkplaceDomainError as error:
+        print(f"Workplace refused the operation: {error}")
+        return EXIT_REFUSED
+    if args.as_json:
+        print(json.dumps(_record_payload(record), ensure_ascii=False, indent=2))
+    else:
+        print(f"Created {args.entity} {record.record_id}: {_record_title(record)}")
+    return EXIT_OK
+
+
+def run_domain_list(args: argparse.Namespace) -> int:
+    service = _service(args)
+    try:
+        rows = service.domain.list_records(
+            args.entity, where=args.where, include_inactive=args.all, limit=args.limit
+        )
+    except WorkplaceDomainError as error:
+        print(f"Workplace refused the operation: {error}")
+        return EXIT_REFUSED
+    if args.as_json:
+        print(json.dumps([_record_payload(row) for row in rows], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not rows:
+        print(f"No {args.entity} records yet.")
+        return EXIT_OK
+    for row in rows:
+        print(f"  {row.record_id}  {_record_title(row)}")
+    return EXIT_OK
+
+
+def run_domain_show(args: argparse.Namespace) -> int:
+    service = _service(args)
+    try:
+        record = service.domain.get(args.entity, args.record_id)
+    except WorkplaceDomainError as error:
+        print(f"Workplace refused the operation: {error}")
+        return EXIT_REFUSED
+    if record is None:
+        print(f"No {args.entity} with id {args.record_id!r}")
+        return EXIT_UNAVAILABLE
+    if args.as_json:
+        print(json.dumps(_record_payload(record), ensure_ascii=False, indent=2))
+    else:
+        for key, value in _record_payload(record).items():
+            print(f"  {key}: {value}")
+    return EXIT_OK
+
+
+def run_domain_update(args: argparse.Namespace) -> int:
+    service = _service(args)
+    fields = _parse_fields(args.fields)
+    try:
+        record = service.domain.update(args.entity, args.record_id, **fields)
+    except WorkplaceDomainError as error:
+        print(f"Workplace refused the operation: {error}")
+        return EXIT_REFUSED
+    if args.as_json:
+        print(json.dumps(_record_payload(record), ensure_ascii=False, indent=2))
+    else:
+        print(f"Updated {args.entity} {record.record_id}: {_record_title(record)}")
+    return EXIT_OK
+
+
+def run_domain_deactivate(args: argparse.Namespace) -> int:
+    service = _service(args)
+    try:
+        record = service.domain.deactivate(args.entity, args.record_id)
+    except WorkplaceDomainError as error:
+        print(f"Workplace refused the operation: {error}")
+        return EXIT_REFUSED
+    if args.as_json:
+        print(json.dumps({"record_id": record.record_id, "active": record.active},
+                         ensure_ascii=False, indent=2))
+    else:
+        print(f"Deactivated {args.entity} {record.record_id}.")
+    return EXIT_OK
+
+
+def run_audit(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = (
+        service.domain.audit_for(args.for_id, limit=args.limit)
+        if args.for_id
+        else service.domain.audit_tail(limit=args.limit)
+    )
+    if args.as_json:
+        print(json.dumps([_record_payload(row) for row in rows], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not rows:
+        print("The audit trail is empty.")
+        return EXIT_OK
+    for row in rows:
+        print(f"  {row.created_at}  {row.actor}  {row.action}  {row.entity} {row.entity_id}"
+              + (f"  — {row.detail}" if row.detail else ""))
+    return EXIT_OK
+
+
+def _record_title(record: object) -> str:
+    for name in ("title", "name", "subject", "number"):
+        value = getattr(record, name, "")
+        if value:
+            return str(value)
+    return getattr(record, "record_id", "")
+
+
+def _record_payload(record: object) -> dict[str, object]:
+    import dataclasses
+
+    payload: dict[str, object] = {}
+    for spec in dataclasses.fields(record):  # type: ignore[arg-type]
+        value = getattr(record, spec.name)
+        payload[spec.name] = dict(value) if isinstance(value, dict) else value
+    return payload
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else sys.argv[1:])
     handlers = {
@@ -520,6 +723,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         "remove-taxonomy": run_remove_taxonomy,
         "settings": run_settings,
         "backup": run_backup,
+        "dashboard": run_dashboard,
+        "entities": run_entities,
+        "add": run_domain_add,
+        "list": run_domain_list,
+        "show": run_domain_show,
+        "update": run_domain_update,
+        "deactivate": run_domain_deactivate,
+        "audit": run_audit,
     }
     handler = handlers.get(args.command)
     if handler is None:
@@ -527,6 +738,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return handler(args)
     except WorkplaceError as error:
+        print(f"Workplace refused the operation: {error}")
+        return EXIT_REFUSED
+    except WorkplaceDomainError as error:
         print(f"Workplace refused the operation: {error}")
         return EXIT_REFUSED
     except Exception as error:  # pragma: no cover - a last-resort guard
