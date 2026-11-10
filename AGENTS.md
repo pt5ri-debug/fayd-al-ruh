@@ -107,7 +107,15 @@ Arabic is kept as secondary aliases where useful.
   `ml/artifacts/release_manifest.json` (with `knowledge.curriculum_coverage` and
   `knowledge.corpus_coverage`). Trained artifacts in `ml/artifacts/` and
   `ml/llm/checkpoints/fayd-llm.npz` are committed on purpose for a release;
-  regenerate with `python -m cli release`. Training **resumes by default**: a
+  regenerate with `python -m cli release`. A release **applies the training
+  upgrades by default** -- AdamW weight decay (`weight_decay=0.01`), the
+  warmup+cosine schedule, `restore_best` (ship the lowest held-out loss step, not
+  the final one), gradient accumulation (`accum_steps`), warmup, and gradient
+  clipping -- and records every one of them in `manifest["config"]` (through
+  `_config_manifest`, the one place the config is written, so the full-run and
+  `--manifest-only` manifests cannot drift). The CLI exposes them
+  (`--weight-decay`, `--lr-schedule`, `--no-restore-best`, `--accum-steps`,
+  `--warmup`, `--max-grad-norm`). Training **resumes by default**: a
   run continues from the last one (`ml/checkpoint.py`'s `training_progress.json`
   ledger) instead of restarting, and `--fresh` is the opt-out. `ml/resume_gate.py`
   is the held-out `training_resume_accuracy` gate that proves a resumed run is
