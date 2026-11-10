@@ -114,7 +114,8 @@ def test_deactivating_a_user_is_a_soft_delete(service: WorkplaceService):
     user = service.create_user(name="Ali", role="engineer")
     service.deactivate_user(user.record_id)
     assert service.users() == []  # not listed
-    assert service.user(user.record_id).active is False  # but still there
+    reloaded = service.user(user.record_id)
+    assert reloaded is not None and reloaded.active is False  # but still there
 
 
 # -- the role + permission decision ---------------------------------------
@@ -139,7 +140,8 @@ def test_an_inactive_user_cannot_act(service: WorkplaceService):
 def test_the_current_user_defaults_to_the_first_administrator(service: WorkplaceService):
     admin = service.create_user(name="Admin", role="administrator")
     service.create_user(name="Other", role="viewer")
-    assert service.current_user().record_id == admin.record_id
+    current = service.current_user()
+    assert current is not None and current.record_id == admin.record_id
 
 
 # -- department and project scope -----------------------------------------
