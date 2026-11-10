@@ -230,3 +230,33 @@ def test_the_audit_trail_is_shown(tmp_path: Path) -> None:
         assert "create" in text and "people" in text
     finally:
         _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_work_section_lists_a_project_and_a_person(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.domain.create_project(number="TSTC-2026-500", title="Flowlines")
+        service.domain.create_person(name="Ali Hassan", role="Welding Engineer")
+        dialog._refresh_work()
+        assert dialog._project_list.size() == 1
+        assert "TSTC-2026-500" in dialog._project_list.get(0)
+        assert "Ali Hassan" in dialog._people_list.get(0)
+        # The selected project's view is drawn in the sidebar.
+        assert "Flowlines" in dialog._project_text.get("1.0", "end")
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_competency_matrix_is_shown_in_the_transcript(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        person = service.domain.create_person(name="Mona")
+        service.domain.add_qualification(person_id=person.record_id, title="CSWIP 3.1")
+        dialog._on_show_matrix()
+        text = "\n".join(w.get("1.0", "end") for w in _all_text_widgets(dialog._transcript))
+        assert "CSWIP 3.1" in text
+        assert "Mona" in text
+    finally:
+        _close_window(root, dialog)

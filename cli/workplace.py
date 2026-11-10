@@ -164,6 +164,29 @@ def _build_parser() -> argparse.ArgumentParser:
 
     _sub(sub, "entities", help="The domain entity names (people, projects, ...).")
 
+    projects = _sub(sub, "projects", help="List projects with their own real counts.")
+    projects.add_argument("--status", default=None, help="Only this project status.")
+    projects.add_argument("--division", dest="division_id", default=None, help="Only this division id.")
+
+    project = _sub(sub, "project", help="The full view of one project (references resolved).")
+    project.add_argument("record_id", help="The project record id (or its number).")
+
+    people = _sub(sub, "people", help="List personnel (the brief's §8).")
+    people.add_argument("--division", dest="division_id", default=None, help="Only this division id.")
+    people.add_argument("--discipline", default=None, help="Only this discipline.")
+    people.add_argument("--available", action="store_true", help="Only available people.")
+
+    person = _sub(sub, "person", help="One person's profile: qualifications and projects.")
+    person.add_argument("record_id", help="The person record id.")
+
+    _sub(sub, "matrix", help="The competency matrix (people × qualifications).")
+
+    select = _sub(sub, "select", help="Rank the people who can cover the required skills.")
+    select.add_argument("--skill", dest="skills", action="append", default=[], help="A required skill (repeatable).")
+    select.add_argument("--qualification", dest="qualifications", action="append", default=[], help="A required qualification (repeatable).")
+    select.add_argument("--division", dest="division_id", default=None, help="Only this division id.")
+    select.add_argument("--limit", type=int, default=5, help="At most this many candidates.")
+
     domain_add = _sub(sub, "add", help="Create a domain record: `add <entity> key=value ...`.")
     domain_add.add_argument("entity", help="The entity name (see `workplace entities`).")
     domain_add.add_argument("fields", nargs="*", help="Field assignments, e.g. name=Ali role=Inspector.")
@@ -569,6 +592,158 @@ def run_entities(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_projects(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.project_rows(status=args.status, division_id=args.division_id)
+    if args.as_json:
+        print(json.dumps([
+            {
+                "record_id": row.project.record_id,
+                "number": row.project.number,
+                "title": row.project.title,
+                "status": row.project.status,
+                "client": row.client_name,
+                "division": row.division_name,
+                "open_findings": row.open_findings,
+                "reports_awaiting_approval": row.reports_awaiting_approval,
+                "documents": row.documents,
+                "assignments": row.assignments,
+            }
+            for row in rows
+        ], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not rows:
+        print("No projects yet. Create one with `workplace add projects number=... title=...`.")
+        return EXIT_OK
+    for row in rows:
+        print(
+            f"  {row.project.record_id}  {row.describe()}  "
+            f"[client: {row.client_name or '—'}; division: {row.division_name or '—'}; "
+            f"findings: {row.open_findings}; docs: {row.documents}; staff: {row.assignments}]"
+        )
+    return EXIT_OK
+
+
+def run_project(args: argparse.Namespace) -> int:
+    service = _service(args)
+    view = service.project_view(args.record_id)
+    if view is None:
+        by_number = service.projects.project_by_number(args.record_id)
+        if by_number is not None:
+            view = service.project_view(by_number.record_id)
+    if view is None:
+        print(f"No project with id or number {args.record_id!r}")
+        return EXIT_UNAVAILABLE
+    if args.as_json:
+        counts = view.counts()
+        print(json.dumps({
+            "record_id": view.project.record_id,
+            "number": view.project.number,
+            "title": view.project.title,
+            "status": view.project.status,
+            "client": view.client.name if view.client else "",
+            "contractor": view.contractor.name if view.contractor else "",
+            "consultant": view.consultant.name if view.consultant else "",
+            "division": view.division.name if view.division else "",
+            "manager": view.manager.name if view.manager else "",
+            "counts": counts,
+        }, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(view.describe())
+    return EXIT_OK
+
+
+def run_people(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.personnel_people(
+        division_id=args.division_id, discipline=args.discipline, available_only=args.available
+    )
+    if args.as_json:
+        print(json.dumps([
+            {
+                "record_id": person.record_id,
+                "name": person.name,
+                "role": person.role,
+                "discipline": person.discipline,
+                "division_id": person.division_id,
+                "available": person.available,
+            }
+            for person in rows
+        ], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not rows:
+        print("No personnel yet. Create one with `workplace add people name=... role=...`.")
+        return EXIT_OK
+    for person in rows:
+        mark = "" if person.available else "  (not available)"
+        print(f"  {person.record_id}  {person.name} — {person.role or person.discipline or '—'}{mark}")
+    return EXIT_OK
+
+
+def run_person(args: argparse.Namespace) -> int:
+    service = _service(args)
+    profile = service.person_view(args.record_id)
+    if profile is None:
+        print(f"No person with id {args.record_id!r}")
+        return EXIT_UNAVAILABLE
+    if args.as_json:
+        print(json.dumps({
+            "record_id": profile.person.record_id,
+            "name": profile.person.name,
+            "role": profile.person.role,
+            "discipline": profile.person.discipline,
+            "available": profile.person.available,
+            "qualifications": [q.title or q.kind for q in profile.qualifications],
+            "projects": [f"{p.number} {p.title}".strip() for p in profile.projects],
+        }, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(profile.describe())
+    return EXIT_OK
+
+
+def run_matrix(args: argparse.Namespace) -> int:
+    service = _service(args)
+    matrix = service.competency_matrix()
+    if args.as_json:
+        print(json.dumps({
+            "columns": list(matrix.columns),
+            "rows": [{"name": name, "marks": list(marks)} for name, marks in matrix.rows],
+            "coverage": matrix.coverage(),
+        }, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(matrix.describe())
+    return EXIT_OK
+
+
+def run_select(args: argparse.Namespace) -> int:
+    service = _service(args)
+    candidates = service.select_personnel(
+        skills=tuple(args.skills),
+        qualifications=tuple(args.qualifications),
+        division_id=args.division_id,
+        limit=args.limit,
+    )
+    if args.as_json:
+        print(json.dumps([
+            {
+                "record_id": c.person.record_id,
+                "name": c.person.name,
+                "score": round(c.score, 4),
+                "matched": list(c.matched),
+                "missing": list(c.missing),
+            }
+            for c in candidates
+        ], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not candidates:
+        print("No personnel to select from yet.")
+        return EXIT_OK
+    print("Ranked candidates (score, then name):")
+    for candidate in candidates:
+        print(f"  {candidate.describe()}")
+    return EXIT_OK
+
+
 def _parse_fields(pairs: Sequence[str]) -> dict[str, str]:
     """Turn ``["name=Ali", "role=Inspector"]`` into a field dict."""
     fields: dict[str, str] = {}
@@ -725,6 +900,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "backup": run_backup,
         "dashboard": run_dashboard,
         "entities": run_entities,
+        "projects": run_projects,
+        "project": run_project,
+        "people": run_people,
+        "person": run_person,
+        "matrix": run_matrix,
+        "select": run_select,
         "add": run_domain_add,
         "list": run_domain_list,
         "show": run_domain_show,
