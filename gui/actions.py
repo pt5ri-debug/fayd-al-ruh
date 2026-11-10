@@ -59,6 +59,7 @@ from cli.menu import (
     run_update,
     run_vision_chat,
     run_web,
+    run_workplace,
 )
 
 Command = Callable[[Sequence[str]], int]
@@ -69,6 +70,7 @@ Command = Callable[[Sequence[str]], int]
 #: showing a sentence per row. An action with no entry here keeps its full label.
 SIDEBAR_LABELS: dict[str, str] = {
     "insight": "✨   What the AI can do",
+    "workplace": "🏢   Workplace (EPRI/TSTC)",
     "cognition": "Autonomous mind",
     "cognition-characters": "Evaluate the characters",
     "ask-teacher": "🎓   Learn from a teacher",
@@ -229,6 +231,7 @@ _GROUP_SPECS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "Knowledge & Data",
         "📚",
         (
+            "workplace",
             "learn",
             "internet-learner",
             "web",
@@ -516,6 +519,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         run_code_studio,
         ("status",),
         hidden=True,
+    ),
+    GuiAction(
+        "workplace",
+        "Workplace: EPRI/TSTC's digital office (projects, staff, documents)",
+        run_workplace,
+        ("status",),
     ),
     GuiAction(
         "training-center",

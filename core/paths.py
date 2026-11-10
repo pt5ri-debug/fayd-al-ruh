@@ -292,6 +292,39 @@ def scene_studio_library_dir() -> Path:
     return scene_studio_dir() / "library"
 
 
+def workplace_dir() -> Path:
+    """Where the Workplace (the institute's digital office) keeps its data.
+
+    The Workplace module (see :mod:`core.workplace`) stores its relational
+    database, the documents it registers, and its backups under this folder. It is
+    git-ignored, so institutional records and uploaded documents never dirty the
+    working tree or bloat a program update. ``FAYD_DATA_DIR`` moves it with the
+    rest of the data.
+    """
+    return data_dir() / "workplace"
+
+
+def workplace_db_path() -> Path:
+    """The Workplace relational database file (``data/workplace/workplace.db``)."""
+    return workplace_dir() / "workplace.db"
+
+
+def workplace_documents_dir() -> Path:
+    """Where the Workplace keeps copies of the documents it registers.
+
+    A registered document's *text* is indexed through the project's existing
+    ingestion pipeline (never a second store); this folder holds the source files
+    the Workplace itself copies in, so a project's document repository is
+    self-contained and a later revision can be compared against the original.
+    """
+    return workplace_dir() / "documents"
+
+
+def workplace_backups_dir() -> Path:
+    """Where the Workplace writes database backups (``data/workplace/backups``)."""
+    return workplace_dir() / "backups"
+
+
 def characters_dir() -> Path:
     """Where the per-mouth logos live (``data/characters``, git-ignored).
 
@@ -627,4 +660,8 @@ __all__ = [
     "training_runs_dir",
     "ultron_models_dir",
     "vision_models_dir",
+    "workplace_backups_dir",
+    "workplace_db_path",
+    "workplace_dir",
+    "workplace_documents_dir",
 ]

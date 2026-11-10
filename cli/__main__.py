@@ -168,6 +168,7 @@ from cli.menu import (
     run_voice,
     run_voice_studio,
     run_web,
+    run_workplace,
 )
 
 _COMMANDS = {
@@ -248,6 +249,8 @@ _COMMANDS = {
     "deps": run_deps,
     "perception": run_perception,
     "perceive": run_perception,
+    "workplace": run_workplace,
+    "workplace-office": run_workplace,
     "autonomy": run_autonomy,
     "autonomous": run_autonomy,
     "improve": run_improve,
