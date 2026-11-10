@@ -49,6 +49,7 @@ from gui.sidebar import SidebarColumn
 from gui.typography import resolve
 from gui.workplace import (
     DivisionSummary,
+    SearchHit,
     WorkplaceDomainError,
     WorkplaceError,
     WorkplaceService,
@@ -111,6 +112,7 @@ class WorkplaceDialog(ThemedDialog):
         self._document_ids: list[str] = []
         self._report_ids: list[str] = []
         self._user_ids: list[str] = []
+        self._search_hits: list[SearchHit] = []
         self._results: queue.Queue[tuple[Callable[[Any, Exception | None], None], Any, Exception | None]] = queue.Queue()
 
         self.window = tk.Toplevel(parent)
@@ -250,6 +252,68 @@ class WorkplaceDialog(ThemedDialog):
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=270,
         )
         self._status_line.pack(fill="x", padx=14, pady=(4, 10))
+
+        # Advanced search (the brief's §14): one box over every Workplace record
+        # kind -- projects, personnel, standards, procedures, documents, findings,
+        # and the rest -- so a reader can find *where* a term appears instead of
+        # opening twenty lists. It reads the same repository every other surface
+        # reads (no second index) and honours the acting user's clearance.
+        search = column.add("search", "Advanced search", icon="🔎")
+        self._search_entry = tk.Entry(
+            search, relief="flat", borderwidth=0, highlightthickness=1,
+            highlightbackground=theme.border_subtle, highlightcolor=theme.primary,
+            bg=theme.surface_raised, fg=theme.foreground, insertbackground=theme.foreground,
+            font=self._type.font("xs"),
+        )
+        self._search_entry.pack(fill="x", padx=14, pady=(6, 4), ipady=4)
+        self._search_entry.bind("<Return>", lambda _e: self._on_search())
+        search_kind_row = tk.Frame(search, bg=theme.surface)
+        search_kind_row.pack(fill="x", padx=14, pady=(0, 2))
+        tk.Label(
+            search_kind_row, text="Kind", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"), anchor="w",
+        ).pack(side="left")
+        self._search_kind = tk.StringVar(value="all")
+        kind_menu = tk.OptionMenu(
+            search_kind_row, self._search_kind,
+            *(["all"] + [kind for kind, _label in self.service.searchable_kinds()]),
+        )
+        kind_menu.configure(
+            bg=theme.surface_raised, fg=theme.foreground, activebackground=theme.interactive_active,
+            activeforeground=theme.foreground, relief="flat", highlightthickness=0,
+            borderwidth=0, font=self._type.font("2xs"), anchor="w", padx=6,
+        )
+        kind_menu["menu"].configure(
+            bg=theme.surface_raised, fg=theme.foreground,
+            activebackground=theme.primary, activeforeground=theme.primary_foreground,
+            font=self._type.font("2xs"),
+        )
+        kind_menu.pack(side="right", fill="x", expand=True, padx=(6, 0))
+        self._search_status_label = tk.Label(
+            search, text="", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=270,
+        )
+        self._search_status_label.pack(fill="x", padx=14, pady=(2, 2))
+        # A rebuild (first build, or after a re-theme/re-type) recreates the list
+        # empty, so the cached hits are dropped with it and the hint is shown again.
+        self._search_hits = []
+        self._search_status_label.configure(
+            text="Type a word and press Enter to search every record kind."
+        )
+        self._search_list = tk.Listbox(
+            search, height=8, activestyle="none", relief="flat", borderwidth=0,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            selectbackground=theme.primary, selectforeground=theme.primary_foreground,
+            font=self._list_type.font("xs"), exportselection=False,
+        )
+        self._search_list.pack(fill="x", padx=14, pady=(0, 4))
+        self._search_list.bind("<<ListboxSelect>>", lambda _e: self._on_search_hit_selected())
+        search_buttons = tk.Frame(search, bg=theme.surface)
+        search_buttons.pack(fill="x", padx=14, pady=(0, 10))
+        self._button(search_buttons, "Search", self._on_search).pack(fill="x", pady=2)
+        self._button(search_buttons, "Open the record", self._on_open_search_hit).pack(
+            fill="x", pady=2
+        )
 
         # Institution tree + divisions.
         institution = column.add("institution", "Institution", icon="🏛")
@@ -799,6 +863,63 @@ class WorkplaceDialog(ThemedDialog):
         self._refresh_reports()
         self._refresh_security()
         self._refresh_settings()
+        self._refresh_search_status()
+
+    def _refresh_search_status(self) -> None:
+        """A one-line hint until the first search is run."""
+        if not self._search_hits:
+            self._search_status_label.configure(
+                text="Type a word and press Enter to search every record kind."
+            )
+
+    def _on_search(self) -> None:
+        """Run the cross-entity search and list its ranked hits."""
+        query = self._search_entry.get().strip()
+        kind = self._search_kind.get()
+        kinds = None if kind in ("", "all") else [kind]
+        try:
+            report = self.service.search(query, kinds=kinds)
+        except Exception as error:  # a search failure is reported, never hidden
+            self._search_status_label.configure(text=f"Search unavailable: {error}")
+            return
+        self._search_list.delete(0, "end")
+        self._search_hits = list(report.hits)
+        for hit in report.hits:
+            self._search_list.insert("end", f"[{hit.score:.2f}] {hit.describe()}")
+        self._search_status_label.configure(text=report.describe())
+
+    def _selected_search_hit(self) -> SearchHit | None:
+        selection = self._search_list.curselection()
+        if not selection or selection[0] >= len(self._search_hits):
+            return None
+        return self._search_hits[selection[0]]
+
+    def _on_search_hit_selected(self) -> None:
+        hit = self._selected_search_hit()
+        if hit is None:
+            return
+        self._search_status_label.configure(text=hit.describe())
+
+    def _on_open_search_hit(self) -> None:
+        """Open the record a hit names, in the surface that already shows it."""
+        hit = self._selected_search_hit()
+        if hit is None:
+            self._add_message("note", "Run a search and pick a hit first.", title="Search")
+            return
+        if hit.kind == "projects":
+            view = self.service.project_view(hit.record_id)
+            if view is not None:
+                self._add_message("workplace", view.describe(), title="Project")
+                return
+        record = self.service.record(hit.kind, hit.record_id)
+        if record is None:
+            self._add_message(
+                "note", f"The record {hit.record_id} is no longer available.", title="Search"
+            )
+            return
+        self._add_message(
+            "workplace", _describe_record(record), title=f"{hit.kind_label}"
+        )
 
     def _refresh_reports(self) -> None:
         """List the selected project's reports and an honest one-line status."""
@@ -2048,6 +2169,26 @@ def _record_title(record: object) -> str:
     if not parts:
         return getattr(record, "record_id", "")
     return " · ".join(parts)
+
+
+def _describe_record(record: object) -> str:
+    """A readable multi-line view of any Workplace record (its own string fields).
+
+    Used when a search hit is opened: it shows the record's real fields, skipping
+    the empty ones, so nothing is invented and no field is hidden. A record whose
+    fields are all empty falls back to its id rather than a blank line.
+    """
+    import dataclasses
+
+    lines: list[str] = []
+    for spec in dataclasses.fields(record):  # type: ignore[arg-type]
+        if spec.name in {"metadata", "active"}:
+            continue
+        value = getattr(record, spec.name, "")
+        if value in ("", None, ()):
+            continue
+        lines.append(f"**{spec.name}**: {value}")
+    return "\n".join(lines) if lines else "(no readable fields on file)"
 
 
 def _prompt_record(

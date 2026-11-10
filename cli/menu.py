@@ -677,6 +677,7 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Workplace: the project document registry", run_workplace, ("documents",)),
     ("Workplace: the append-only audit trail", run_workplace, ("audit",)),
     ("Workplace: the eleven specialised assistant profiles (§10)", run_workplace, ("profiles",)),
+    ("Workplace: search every record kind (§14)", run_workplace, ("search", "welding")),
     ("Workplace: the assistant's status (knowledge corpus)", run_workplace, ("assistant-status",)),
     ("Workplace: rebuild the assistant's knowledge corpus", run_workplace, ("corpus",)),
     ("Workplace: the report kinds the Workplace drafts (§9)", run_workplace, ("report-kinds",)),

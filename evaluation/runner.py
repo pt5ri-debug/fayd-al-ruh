@@ -59,6 +59,7 @@ from core.relation_polarity import polarity_accuracy
 from core.state import State
 from core.tool_agent import tool_selection_accuracy
 from core.training_center.gate import training_center_accuracy
+from core.workplace.phase10_gate import workplace_phase10_accuracy
 from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
 from ml.resume_gate import training_resume_accuracy
 from ml.training.gate import training_accuracy
@@ -339,6 +340,16 @@ class EvaluationMetrics:
     automatically; a rollback restores and verifies without deleting history; and
     the audit log is append-only with no forbidden self-modification operation
     exposed -- each on the real implementation, with negative controls."""
+
+    workplace_phase10_accuracy: float
+    """The share of held-out Workplace Phase-10 judgements satisfied: one search
+    query reaches every record kind that carries it, a blank query returns nothing,
+    a kind filter narrows to that kind, the row carrying the whole query ranks
+    first, a query naming nothing yields no hit, the search adds no parallel index,
+    a classified record is withheld from an uncleared reader, and the project
+    listing's per-project counts are correct and gathered with a bounded number of
+    reads (the N+1 fix) -- each on the real search engine and repository, with
+    negative controls."""
 
     knowledge_validation_accuracy: float
     """The share of held-out cognitive-core judgements satisfied: the event bus
@@ -1327,6 +1338,15 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # self-improvement fails here.
     self_improvement_value = self_improvement_loop_accuracy()
 
+    # The Workplace (EPRI/TSTC's digital office): the enterprise module's Phase 10
+    # measures its *advanced search* -- one query reaching every record kind, a
+    # blank query returning nothing, a kind filter narrowing, the strongest match
+    # ranking first, no parallel index -- and that the project listing's counts are
+    # correct and gathered with a bounded number of reads (the N+1 fix). Held-out
+    # judgements over the real search engine and repository, with negative controls,
+    # so a fabricated hit or a re-introduced N+1 fails here.
+    workplace_value = workplace_phase10_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1413,6 +1433,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         perception_value,
         planning_value,
         self_improvement_value,
+        workplace_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1486,6 +1507,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         perception_bridge_accuracy=round(perception_value, 6),
         task_execution_accuracy=round(planning_value, 6),
         self_improvement_loop_accuracy=round(self_improvement_value, 6),
+        workplace_phase10_accuracy=round(workplace_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

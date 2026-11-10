@@ -418,3 +418,55 @@ def test_the_security_block_uses_the_selected_user(tmp_path: Path) -> None:
         assert "Viewer" in status and "cannot approve" in status
     finally:
         _close_window(root, dialog)
+
+
+# -- advanced search (the brief's §14) ------------------------------------
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_search_block_runs_a_query_and_lists_hits(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.domain.create("projects", number="PRJ-1", title="Pipeline welding")
+        service.domain.create("people", name="Ahmed", role="Welding Inspector")
+        dialog._search_entry.delete(0, "end")
+        dialog._search_entry.insert(0, "welding")
+        dialog._on_search()
+        assert dialog._search_list.size() >= 1
+        assert "welding" in dialog._search_status_label.cget("text")
+        assert len(dialog._search_hits) == dialog._search_list.size()
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_search_block_opens_a_hit_record(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.domain.create("projects", number="PRJ-1", title="Pipeline welding")
+        dialog._search_entry.delete(0, "end")
+        dialog._search_entry.insert(0, "welding")
+        dialog._on_search()
+        dialog._search_list.selection_clear(0, "end")
+        dialog._search_list.selection_set(0)
+        dialog._on_open_search_hit()
+        text = "\n".join(w.get("1.0", "end") for w in _all_text_widgets(dialog._transcript))
+        assert "Pipeline welding" in text
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_search_block_narrows_by_kind(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.domain.create("projects", number="PRJ-1", title="Pipeline welding")
+        service.domain.create("people", name="Ahmed", role="Welding Inspector")
+        dialog._search_entry.delete(0, "end")
+        dialog._search_entry.insert(0, "welding")
+        dialog._search_kind.set("people")
+        dialog._on_search()
+        assert dialog._search_list.size() == 1
+        assert all(hit.kind == "people" for hit in dialog._search_hits)
+    finally:
+        _close_window(root, dialog)
