@@ -609,6 +609,34 @@ class WorkplaceDialog(ThemedDialog):
             fill="x", pady=2
         )
 
+        # Cumulative institutional knowledge: turn *finished* work -- a completed
+        # project, an approved report, an issued document, a closed NCR, a
+        # completed inspection, a finished test -- into knowledge records the
+        # assistant already cites. It is a *view* over the existing registry (no
+        # second store), idempotent (a source is captured once), and it inherits
+        # the source's own confidentiality, so a restricted document yields a
+        # restricted knowledge record the clearance filter still withholds.
+        knowledge = column.add("knowledge", "Cumulative knowledge", icon="🧠")
+        self._knowledge_status_label = tk.Label(
+            knowledge, text="", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=270,
+        )
+        self._knowledge_status_label.pack(fill="x", padx=14, pady=(6, 4))
+        knowledge_buttons = tk.Frame(knowledge, bg=theme.surface)
+        knowledge_buttons.pack(fill="x", padx=14, pady=(0, 6))
+        self._button(knowledge_buttons, "Show what can be captured", self._on_knowledge_candidates).pack(
+            fill="x", pady=2
+        )
+        self._button(knowledge_buttons, "Capture everything finished", self._on_capture_all_knowledge).pack(
+            fill="x", pady=2
+        )
+        self._button(knowledge_buttons, "Capture the selected project's work", self._on_capture_project_knowledge).pack(
+            fill="x", pady=2
+        )
+        self._button(knowledge_buttons, "List captured knowledge", self._on_list_knowledge).pack(
+            fill="x", pady=2
+        )
+
         # Reporting & proposals (the brief's §9, §10, §13): draft a report from
         # the selected project's own records, move it through its lifecycle, and
         # issue a deliverable -- which can only happen after a *person* approves
@@ -860,6 +888,7 @@ class WorkplaceDialog(ThemedDialog):
         self._refresh_work()
         self._refresh_library()
         self._refresh_assistant()
+        self._refresh_knowledge()
         self._refresh_reports()
         self._refresh_security()
         self._refresh_settings()
@@ -1573,6 +1602,75 @@ class WorkplaceDialog(ThemedDialog):
             f"Rebuilt the assistant's corpus: {report.describe()}.",
             title="Workplace assistant",
         )
+
+    # -- cumulative institutional knowledge ------------------------------
+
+    def _refresh_knowledge(self) -> None:
+        """An honest one-line status of what could still be captured."""
+        try:
+            self._knowledge_status_label.configure(
+                text=self.service.knowledge_capture_status()
+            )
+        except Exception as error:  # a broken store is reported, never hidden
+            self._knowledge_status_label.configure(text=f"Knowledge unavailable: {error}")
+
+    def _on_knowledge_candidates(self) -> None:
+        self._refresh_knowledge()
+        try:
+            candidates = self.service.knowledge_candidates()
+        except Exception as error:
+            self._add_message("note", str(error), title="Knowledge")
+            return
+        if not candidates:
+            self._add_message(
+                "note", "No finished source yields knowledge yet.", title="Knowledge"
+            )
+            return
+        lines = [f"{len(candidates)} finished source(s) yield institutional knowledge:"]
+        lines.extend(f"  • {candidate.describe()}" for candidate in candidates)
+        self._add_message("workplace", "\n".join(lines), title="Cumulative knowledge")
+
+    def _on_capture_all_knowledge(self) -> None:
+        self._run_background(
+            "Capturing finished work as knowledge…",
+            self.service.capture_all_knowledge,
+            self._finish_capture,
+        )
+
+    def _on_capture_project_knowledge(self) -> None:
+        project = self._selected_project()
+        if project is None:
+            self._add_message("note", "Select a project first.", title="Knowledge")
+            return
+        self._run_background(
+            "Capturing the project's finished work…",
+            lambda: self.service.capture_project_knowledge(project.project.record_id),
+            self._finish_capture,
+        )
+
+    def _finish_capture(self, report: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._add_message("note", str(error), title="Knowledge")
+            return
+        self._refresh_knowledge()
+        lines = [report.describe()]
+        lines.extend(f"  + {record.title}" for record in report.captured)
+        self._add_message("workplace", "\n".join(lines), title="Cumulative knowledge")
+
+    def _on_list_knowledge(self) -> None:
+        try:
+            records = self.service.captured_knowledge()
+        except Exception as error:
+            self._add_message("note", str(error), title="Knowledge")
+            return
+        if not records:
+            self._add_message("note", "No captured knowledge records yet.", title="Knowledge")
+            return
+        lines = [f"{len(records)} captured knowledge record(s):"]
+        for record in records:
+            flag = " ✓" if record.verified else ""
+            lines.append(f"  • [{record.source}] {record.title} ({record.kind}){flag}")
+        self._add_message("workplace", "\n".join(lines), title="Cumulative knowledge")
 
     # -- projects & personnel (the brief's §6 and §8) --------------------
 

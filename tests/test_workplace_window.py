@@ -470,3 +470,50 @@ def test_the_search_block_narrows_by_kind(tmp_path: Path) -> None:
         assert all(hit.kind == "people" for hit in dialog._search_hits)
     finally:
         _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_cumulative_knowledge_block_captures_finished_work(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.domain.create(
+            "projects", number="PRJ-1", title="Pipeline welding", status="completed"
+        )
+        dialog._refresh_knowledge()
+        assert "1 finished source" in dialog._knowledge_status_label.cget("text")
+        dialog._on_capture_all_knowledge()
+        _wait_until(root, lambda: not dialog._busy, timeout=5.0)
+        assert "0 finished source" in dialog._knowledge_status_label.cget("text")
+        text = "\n".join(w.get("1.0", "end") for w in _all_text_widgets(dialog._transcript))
+        assert "Pipeline welding" in text
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_cumulative_knowledge_block_lists_candidates(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.domain.create(
+            "projects", number="PRJ-1", title="Pipeline welding", status="completed"
+        )
+        dialog._on_knowledge_candidates()
+        text = "\n".join(w.get("1.0", "end") for w in _all_text_widgets(dialog._transcript))
+        assert "Completed project" in text and "Pipeline welding" in text
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_cumulative_knowledge_block_lists_captured_records(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        project = service.domain.create(
+            "projects", number="PRJ-1", title="Pipeline welding", status="completed"
+        )
+        service.capture_knowledge("project", project.record_id)
+        dialog._on_list_knowledge()
+        text = "\n".join(w.get("1.0", "end") for w in _all_text_widgets(dialog._transcript))
+        assert "captured knowledge record(s)" in text and "Pipeline welding" in text
+    finally:
+        _close_window(root, dialog)

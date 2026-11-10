@@ -55,6 +55,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from core.workplace.knowledge_capture import WorkplaceKnowledgeError
 from gui.workplace import (
     WorkplaceDomainError,
     WorkplaceError,
@@ -197,6 +198,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     _sub(sub, "search-kinds", help="The record kinds the search reads.")
+
+    _sub(sub, "knowledge-sources", help="The finished-work source kinds a capture reads.")
+    kcand = _sub(sub, "knowledge-candidates", help="Finished sources that yield knowledge.")
+    kcand.add_argument("--kind", dest="source_kind", default=None, help="Only this source kind.")
+    _sub(sub, "knowledge-status", help="What could still be captured (honest status).")
+    klist = _sub(sub, "knowledge", help="The captured institutional knowledge records.")
+    klist.add_argument("--project", dest="project_id", default=None, help="Only this project.")
+    capture = _sub(sub, "capture-knowledge", help="Capture one finished source as knowledge.")
+    capture.add_argument("source_kind", help="The source kind (see `knowledge-sources`).")
+    capture.add_argument("source_id", help="The source record id.")
+    cap_all = _sub(sub, "capture-all-knowledge", help="Capture every finished source (idempotent).")
+    cap_all.add_argument("--kind", dest="source_kind", default=None, help="Only this source kind.")
+    cap_proj = _sub(sub, "capture-project-knowledge", help="Capture a project's own finished work.")
+    cap_proj.add_argument("project", help="The project id.")
 
     projects = _sub(sub, "projects", help="List projects with their own real counts.")
     projects.add_argument("--status", default=None, help="Only this project status.")
@@ -843,6 +858,116 @@ def run_search_kinds(args: argparse.Namespace) -> int:
     for kind, label in kinds:
         print(f"  {kind} — {label}")
     return EXIT_OK
+
+
+def run_knowledge_sources(args: argparse.Namespace) -> int:
+    service = _service(args)
+    kinds = service.knowledge_source_kinds()
+    if args.as_json:
+        print(json.dumps(
+            [{"kind": kind, "label": label} for kind, label in kinds],
+            ensure_ascii=False, indent=2,
+        ))
+        return EXIT_OK
+    print("Finished-work source kinds a capture reads:")
+    for kind, label in kinds:
+        print(f"  {kind} — {label}")
+    return EXIT_OK
+
+
+def run_knowledge_candidates(args: argparse.Namespace) -> int:
+    service = _service(args)
+    candidates = service.knowledge_candidates(source_kind=args.source_kind)
+    if args.as_json:
+        print(json.dumps([
+            {
+                "source_kind": c.source_kind,
+                "source_id": c.source_id,
+                "title": c.title,
+                "kind": c.kind,
+                "confidentiality": c.confidentiality,
+                "verified": c.verified,
+            }
+            for c in candidates
+        ], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not candidates:
+        print("No finished source yields knowledge yet.")
+        return EXIT_OK
+    print(f"{len(candidates)} finished source(s) yield institutional knowledge:")
+    for c in candidates:
+        print(f"  {c.describe()}")
+    return EXIT_OK
+
+
+def run_knowledge_status(args: argparse.Namespace) -> int:
+    service = _service(args)
+    print(service.knowledge_capture_status())
+    return EXIT_OK
+
+
+def run_knowledge(args: argparse.Namespace) -> int:
+    service = _service(args)
+    records = service.captured_knowledge(project_id=args.project_id)
+    if args.as_json:
+        print(json.dumps([
+            {
+                "record_id": r.record_id,
+                "title": r.title,
+                "kind": r.kind,
+                "source": r.source,
+                "reference": r.reference,
+                "confidentiality": r.confidentiality,
+                "verified": r.verified,
+                "project_id": r.project_id,
+            }
+            for r in records
+        ], ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if not records:
+        print("No captured knowledge records yet.")
+        return EXIT_OK
+    print(f"{len(records)} captured knowledge record(s):")
+    for r in records:
+        flag = " (verified)" if r.verified else ""
+        print(f"  [{r.source}] {r.title} ({r.kind}, {r.confidentiality}){flag}")
+    return EXIT_OK
+
+
+def run_capture_knowledge(args: argparse.Namespace) -> int:
+    service = _service(args)
+    record = service.capture_knowledge(args.source_kind, args.source_id)
+    if args.as_json:
+        print(json.dumps({
+            "record_id": record.record_id, "title": record.title,
+            "source": record.source, "reference": record.reference,
+            "confidentiality": record.confidentiality, "verified": record.verified,
+        }, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(f"Captured knowledge: {record.title} ({record.confidentiality}).")
+    return EXIT_OK
+
+
+def _print_capture_report(report, *, as_json: bool) -> int:
+    if as_json:
+        print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(report.describe())
+    for record in report.captured:
+        print(f"  + {record.title}")
+    return EXIT_OK
+
+
+def run_capture_all_knowledge(args: argparse.Namespace) -> int:
+    service = _service(args)
+    report = service.capture_all_knowledge(source_kind=args.source_kind)
+    return _print_capture_report(report, as_json=args.as_json)
+
+
+def run_capture_project_knowledge(args: argparse.Namespace) -> int:
+    service = _service(args)
+    report = service.capture_project_knowledge(args.project)
+    return _print_capture_report(report, as_json=args.as_json)
 
 
 def run_entities(args: argparse.Namespace) -> int:
@@ -1864,6 +1989,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         "entities": run_entities,
         "search": run_search,
         "search-kinds": run_search_kinds,
+        "knowledge-sources": run_knowledge_sources,
+        "knowledge-candidates": run_knowledge_candidates,
+        "knowledge-status": run_knowledge_status,
+        "knowledge": run_knowledge,
+        "capture-knowledge": run_capture_knowledge,
+        "capture-all-knowledge": run_capture_all_knowledge,
+        "capture-project-knowledge": run_capture_project_knowledge,
         "projects": run_projects,
         "project": run_project,
         "people": run_people,
@@ -1930,6 +2062,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Workplace refused the operation: {error}")
         return EXIT_REFUSED
     except WorkplaceDomainError as error:
+        print(f"Workplace refused the operation: {error}")
+        return EXIT_REFUSED
+    except WorkplaceKnowledgeError as error:
         print(f"Workplace refused the operation: {error}")
         return EXIT_REFUSED
     except ValueError as error:

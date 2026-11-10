@@ -2245,6 +2245,39 @@ Arabic is kept as secondary aliases where useful.
   (nine judgements with negative controls, run on the real search and repository) is
   a metric in `evaluation`. `docs/workplace/WORKPLACE_PHASE10_SEARCH_DOCS.md` is the
   report and `tests/test_workplace_phase10.py` (19 tests) pins it.
+  **Phase 11 adds the cumulative institutional knowledge workflow** -- the user's
+  most-emphasised requirement: every completed project, approved report, and
+  documented technical experience *adds* to the institution's knowledge, while the
+  source and confidentiality of each piece are preserved.
+  `core/workplace/knowledge_capture.py`'s `KnowledgeCapture(repository, *,
+  domain=, projects=)` turns **finished** work into knowledge records in the
+  *existing* `knowledge_records` registry (a *view*, never a second store -- the
+  brief's §11 rule; no new table, no migration). It captures a project whose status
+  is `completed`/`closed`, a report that is `approved`/`issued`, a document that
+  carries an approval or an issue date, a `closed` finding (as a `lesson`), a
+  `completed` inspection (as a `best_practice`), and a test that carries a result --
+  and **nothing** for work still in progress (a draft report, an open NCR), so a
+  half-finished experience is never recorded as knowledge. Every captured record
+  carries its **provenance** (`source = "workplace:<kind>"`, `reference = <source
+  id>`) and inherits the **source's own confidentiality** (a `restricted` document
+  yields a `restricted` knowledge record the assistant's clearance filter still
+  withholds), so confidentiality is never widened by capturing. The `(source,
+  reference)` pair is the **dedup key**, so a second capture is *skipped*, never
+  duplicated (idempotent), and an unknown source id is **refused** rather than
+  invented. `candidate`/`candidates`/`capture`/`capture_all`/`capture_project`/
+  `knowledge`/`summary`/`describe` are the API; `CaptureReport` reports what a run
+  did (`captured`/`skipped`/`refused`/`errors`). `WorkplaceService` gains
+  `knowledge_capture`/`knowledge_candidates`/`capture_knowledge`/
+  `capture_all_knowledge`/`capture_project_knowledge`/`captured_knowledge`/
+  `knowledge_capture_status`/`knowledge_source_kinds`; the window gains a
+  **Cumulative knowledge** sidebar section (a status line and four buttons); and the
+  CLI gains `knowledge-sources`/`knowledge-candidates`/`knowledge-status`/
+  `knowledge`/`capture-knowledge`/`capture-all-knowledge`/`capture-project-knowledge`
+  (each `--json`; a refusal exits `4`), with four menu entries.
+  `core/workplace/phase11_gate.py`'s `workplace_phase11_accuracy` (twelve judgements
+  with negative controls, run on the real capture engine) is a metric in
+  `evaluation`. `docs/workplace/WORKPLACE_PHASE11_KNOWLEDGE.md` is the report and
+  `tests/test_workplace_phase11.py` (32 tests) plus three window tests pin it.
 - `ingest/` — the **local-first ingestion subsystem**: a separate pipeline that
   turns *sources* into the same on-disk knowledge store without ever loading a
   whole dataset into RAM. `ingest.records` holds the contracts (`SourceSpec`,
