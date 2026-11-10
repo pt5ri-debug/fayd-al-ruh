@@ -10,12 +10,18 @@ from __future__ import annotations
 from ml.llm.generator import LocalGenerator
 from ml.llm.schema import StructuredDecoder
 from ml.llm.tokenizer import BOS_ID, VOCAB_SIZE, ByteTokenizer
-from ml.llm.transformer import TransformerConfig, TransformerLM, train_language_model
+from ml.llm.transformer import (
+    KVCache,
+    TransformerConfig,
+    TransformerLM,
+    train_language_model,
+)
 
 __all__ = [
     "BOS_ID",
     "VOCAB_SIZE",
     "ByteTokenizer",
+    "KVCache",
     "LocalGenerator",
     "StructuredDecoder",
     "TransformerConfig",
