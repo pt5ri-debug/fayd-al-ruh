@@ -213,6 +213,7 @@ def test_the_records_section_lists_a_project(tmp_path: Path) -> None:
         dialog._record_entity.set("projects")
         dialog._refresh_records()
         text = dialog._records_text.get("1.0", "end")
+        assert "PRJ-" in text
         assert "TSTC-2026-001" in text
         assert "Coating inspection" in text
     finally:

@@ -824,12 +824,7 @@ class WorkplaceDialog(ThemedDialog):
         if not rows:
             lines.append(f"No {entity} records yet. Use “Add a record…” below.")
         for row in rows:
-            title = next(
-                (str(getattr(row, name)) for name in ("title", "name", "subject", "number")
-                 if getattr(row, name, "")),
-                row.record_id,
-            )
-            lines.append(f"• {row.record_id}  {title}")
+            lines.append(f"• {row.record_id}  {_record_title(row)}")
         self._set_text(self._records_text, "\n".join(lines))
 
     def _on_add_record(self) -> None:
@@ -1093,6 +1088,18 @@ def _prompt_profile_item(
     title_entry.focus_set()
     parent.wait_window(dialog)
     return result["value"]
+
+
+def _record_title(record: object) -> str:
+    """A record's readable one-line title: its number/name, else its id."""
+    parts: list[str] = []
+    for name in ("number", "title", "name", "subject"):
+        value = getattr(record, name, "")
+        if value:
+            parts.append(str(value))
+    if not parts:
+        return getattr(record, "record_id", "")
+    return " · ".join(parts)
 
 
 def _prompt_record(
