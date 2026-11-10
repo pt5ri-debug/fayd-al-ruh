@@ -242,7 +242,12 @@ class ProjectManager:
     def rows(
         self, *, status: str | None = None, division_id: str | None = None
     ) -> list[ProjectRow]:
-        """A light listing of projects with their own real counts."""
+        """A light listing of projects with their own real counts.
+
+        The per-project counts are gathered from **one** read of each supporting
+        table rather than one read per project, so listing a hundred projects does
+        not issue four hundred queries (the N+1 the first version had).
+        """
         where = []
         params: list[str] = []
         if status:
@@ -254,26 +259,61 @@ class ProjectManager:
         clause = " AND ".join(where)
         projects = self.repository.list_domain("projects", where=clause, params=tuple(params))
         projects.sort(key=lambda p: (p.number, p.title))
+
+        # One pass over each supporting table, bucketed by project id.
+        clients = {c.record_id: c for c in self.repository.list_domain("clients")}
+        divisions = {d.record_id: d for d in self.repository.list_domain("divisions")}
+        findings_by_project = self._count_by("findings", "project_id")
+        reports_by_project = self._count_by("reports", "project_id")
+        documents_by_project = self._count_by("workplace_documents", "project_id")
+        assignments_by_project = self._count_by("assignments", "project_id")
+
         rows: list[ProjectRow] = []
         for project in projects:
-            client = self._get("clients", project.client_id)
-            division = self._get("divisions", project.division_id)
-            findings = self._list("findings", "project_id", project.record_id)
-            reports = self._list("reports", "project_id", project.record_id)
+            client = clients.get(project.client_id)
+            division = divisions.get(project.division_id)
             rows.append(
                 ProjectRow(
                     project=project,
                     client_name=client.name if isinstance(client, Client) else "",
                     division_name=division.name if isinstance(division, Division) else "",
-                    open_findings=sum(1 for f in findings if f.status in OPEN_FINDING_STATUSES),
-                    reports_awaiting_approval=sum(
-                        1 for r in reports if r.status in AWAITING_APPROVAL_STATUSES
+                    open_findings=findings_by_project.get(project.record_id, {}).get(
+                        "open", 0
                     ),
-                    documents=len(self._list("workplace_documents", "project_id", project.record_id)),
-                    assignments=len(self._list("assignments", "project_id", project.record_id)),
+                    reports_awaiting_approval=reports_by_project.get(
+                        project.record_id, {}
+                    ).get("awaiting", 0),
+                    documents=documents_by_project.get(project.record_id, {}).get(
+                        "total", 0
+                    ),
+                    assignments=assignments_by_project.get(project.record_id, {}).get(
+                        "total", 0
+                    ),
                 )
             )
         return rows
+
+    def _count_by(self, table: str, column: str) -> dict[str, dict[str, int]]:
+        """Bucket a supporting table's rows by ``column`` in **one** read.
+
+        ``findings`` and ``reports`` count a status subset, so the bucket carries
+        the two figures the listing shows (``open``/``awaiting``) beside the total;
+        a table with no status subset just carries ``total``. This is the fix for
+        the listing's N+1 reads.
+        """
+        counts: dict[str, dict[str, int]] = {}
+        for record in self.repository.list_domain(table):
+            key = getattr(record, column, "")
+            if not key:
+                continue
+            bucket = counts.setdefault(key, {"total": 0, "open": 0, "awaiting": 0})
+            bucket["total"] += 1
+            status = getattr(record, "status", "")
+            if status in OPEN_FINDING_STATUSES:
+                bucket["open"] += 1
+            if status in AWAITING_APPROVAL_STATUSES:
+                bucket["awaiting"] += 1
+        return counts
 
     # -- the project's own document repository ---------------------------
 

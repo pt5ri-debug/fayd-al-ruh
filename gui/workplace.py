@@ -22,6 +22,7 @@ written says so.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -71,6 +72,12 @@ from core.workplace.reporting import (
     status_label,
 )
 from core.workplace.repository import WorkplaceRepository
+from core.workplace.search import (
+    SearchHit,
+    SearchReport,
+    search_workplace,
+)
+from core.workplace.search import searchable_kinds as _searchable_kinds
 from core.workplace.security import (
     PERMISSIONS,
     ROLES,
@@ -447,6 +454,64 @@ class WorkplaceService:
             ready=True,
             message="",
         )
+
+    # -- advanced search (the brief's §14) -------------------------------
+
+    def search(
+        self,
+        query: str,
+        *,
+        kinds: Sequence[str] | None = None,
+        limit: int = 20,
+        min_score: float = 0.0,
+    ) -> SearchReport:
+        """Search every Workplace record kind for ``query`` (the brief's §14).
+
+        One entry point over the whole Workplace -- projects, personnel,
+        standards, procedures, documents, findings, and the rest -- so a reader
+        can find *where* a term appears rather than opening twenty lists. It reads
+        the same repository every other surface reads (no second index) and
+        applies the acting user's clearance first, so a restricted record is never
+        surfaced to a reader who may not see it.
+        """
+        self.open()
+        report = search_workplace(
+            self.repository, query, kinds=kinds, limit=limit, min_score=min_score
+        )
+        # The clearance filter is applied to the *hits*: a kind that carries a
+        # confidentiality field is withheld when the acting user's clearance does
+        # not reach it, exactly as the assistant's corpus filter does.
+        allowed: list[SearchHit] = []
+        for hit in report.hits:
+            record = self.repository.get_domain(hit.kind, hit.record_id)
+            if self._may_read_record(record):
+                allowed.append(hit)
+        report.hits = allowed
+        return report
+
+    def _may_read_record(self, record: object | None) -> bool:
+        """Whether the acting user's clearance reaches ``record`` (else allow)."""
+        if record is None:
+            return False
+        user = self.current_user()
+        if user is None:
+            # No user is defined yet. Apply the project's default clearance
+            # (public + internal) exactly as the assistant's corpus filter does, so
+            # a fresh Workplace is searchable before its first user is added -- and
+            # a restricted record is still withheld.
+            classification = str(getattr(record, "confidentiality", "") or "")
+            return not classification or classification in DEFAULT_CLEARANCE
+        decision = self.security.check_clearance(user, record)
+        return decision.allowed
+
+    def searchable_kinds(self) -> list[tuple[str, str]]:
+        """``(kind, label)`` for every record kind the search reads."""
+        return _searchable_kinds()
+
+    def record(self, kind: str, record_id: str):
+        """One domain record by kind and id (``None`` for an unknown id)."""
+        self.open()
+        return self.repository.get_domain(kind, record_id)
 
     # -- dashboard (the brief's §5) --------------------------------------
 

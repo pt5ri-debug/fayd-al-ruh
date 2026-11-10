@@ -116,6 +116,12 @@ from core.workplace.reporting import (
     status_label,
 )
 from core.workplace.repository import WorkplaceRepository
+from core.workplace.search import (
+    SearchHit,
+    SearchReport,
+    search_workplace,
+    searchable_kinds,
+)
 from core.workplace.security import (
     AI_ACTORS,
     DEFAULT_ROLE,
@@ -187,6 +193,8 @@ __all__ = [
     "ReportingError",
     "ReportingWorkflow",
     "RevisionComparison",
+    "SearchHit",
+    "SearchReport",
     "SecurityManager",
     "SeedReport",
     "StandardRevision",
@@ -221,6 +229,8 @@ __all__ = [
     "report_kind_label",
     "role_ceiling",
     "save_settings",
+    "search_workplace",
+    "searchable_kinds",
     "seed_workplace",
     "status_label",
 ]

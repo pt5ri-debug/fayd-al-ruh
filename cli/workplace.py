@@ -184,6 +184,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
     _sub(sub, "entities", help="The domain entity names (people, projects, ...).")
 
+    search = _sub(sub, "search", help="Search every Workplace record kind (the brief's §14).")
+    search.add_argument("query", help="The word or phrase to search for.")
+    search.add_argument(
+        "--kind", dest="kinds", action="append", default=None,
+        help="Limit to one record kind (repeatable, e.g. --kind projects).",
+    )
+    search.add_argument("--limit", type=int, default=20, help="Maximum hits (default 20).")
+    search.add_argument(
+        "--min-score", type=float, default=0.0,
+        help="Drop a hit carrying less than this share of the query (0..1).",
+    )
+
+    _sub(sub, "search-kinds", help="The record kinds the search reads.")
+
     projects = _sub(sub, "projects", help="List projects with their own real counts.")
     projects.add_argument("--status", default=None, help="Only this project status.")
     projects.add_argument("--division", dest="division_id", default=None, help="Only this division id.")
@@ -783,6 +797,51 @@ def run_dashboard(args: argparse.Namespace) -> int:
     print("Workplace dashboard (real records):")
     for label, value in board.as_rows():
         print(f"  {label}: {value}")
+    return EXIT_OK
+
+
+def run_search(args: argparse.Namespace) -> int:
+    service = _service(args)
+    report = service.search(
+        args.query, kinds=args.kinds, limit=args.limit, min_score=args.min_score
+    )
+    if args.as_json:
+        print(json.dumps({
+            "query": report.query,
+            "terms": list(report.terms),
+            "count": report.count,
+            "searched_kinds": list(report.searched_kinds),
+            "hits": [
+                {
+                    "kind": hit.kind,
+                    "kind_label": hit.kind_label,
+                    "record_id": hit.record_id,
+                    "title": hit.title,
+                    "matched": list(hit.matched),
+                    "score": hit.score,
+                }
+                for hit in report.hits
+            ],
+        }, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(report.describe())
+    for hit in report.hits:
+        print(f"  [{hit.score:.2f}] {hit.describe()}")
+    return EXIT_OK
+
+
+def run_search_kinds(args: argparse.Namespace) -> int:
+    service = _service(args)
+    kinds = service.searchable_kinds()
+    if args.as_json:
+        print(json.dumps(
+            [{"kind": kind, "label": label} for kind, label in kinds],
+            ensure_ascii=False, indent=2,
+        ))
+        return EXIT_OK
+    print("Searchable Workplace record kinds:")
+    for kind, label in kinds:
+        print(f"  {kind} — {label}")
     return EXIT_OK
 
 
@@ -1803,6 +1862,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "backup": run_backup,
         "dashboard": run_dashboard,
         "entities": run_entities,
+        "search": run_search,
+        "search-kinds": run_search_kinds,
         "projects": run_projects,
         "project": run_project,
         "people": run_people,

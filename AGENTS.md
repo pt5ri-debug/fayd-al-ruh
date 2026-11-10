@@ -2218,6 +2218,33 @@ Arabic is kept as secondary aliases where useful.
   `deliverables` (each `--json`), with three new menu entries.
   `docs/workplace/WORKPLACE_PHASE8_REPORTING.md` is the report and
   `tests/test_workplace_phase8.py` (33 tests) plus two window tests pin it.
+  **Phase 9 adds the security and governance layer** (the brief's §13):
+  `core/workplace/security.py`'s `SecurityManager` over the real repository and
+  domain -- a closed permission vocabulary, six roles, a per-user grant that only
+  *narrows* a role's ceiling, department/project scope, confidentiality clearance
+  with read reports that name what was withheld, read-only approved records, an
+  append-only refusal audit, and the rule that the AI can never be an approver
+  (`is_ai_actor`); `core/workplace/security_gate.py` is its held-out gate. The
+  schema moved to version 4 (`workplace_users`). **Phase 10 adds advanced search
+  (§14), the project-listing optimization, and the documentation.**
+  `core/workplace/search.py`'s `search_workplace(repository, query, *, kinds, limit,
+  min_score)` is **one** search over every Workplace record kind -- a *view* over the
+  repository, never a second index (no new table, no migration, the brief's §11
+  rule). A `SearchHit` names the fields that matched and carries a coverage `score`
+  (the share of the query's content terms a row's own text carries, via
+  `core.tokenize`), the strongest match ranks first with a stable tie-break, a blank
+  query returns **nothing** (not every row), a kind filter narrows, and the acting
+  user's clearance is applied to the hits (with the same default-clearance fallback
+  the assistant's corpus filter uses). `ProjectManager.rows()` no longer counts each
+  project's findings/reports/documents with a query **per project** (the N+1 removed:
+  each supporting table is read once and folded in memory, counts unchanged).
+  `WorkplaceService` gains `search`/`searchable_kinds`/`record`; the window gains an
+  **Advanced search** sidebar section (a query box, a kind selector, a ranked list,
+  *Open the record*); and the CLI gains `search`/`search-kinds` (each `--json`), with
+  a menu entry. `core/workplace/phase10_gate.py`'s `workplace_phase10_accuracy`
+  (nine judgements with negative controls, run on the real search and repository) is
+  a metric in `evaluation`. `docs/workplace/WORKPLACE_PHASE10_SEARCH_DOCS.md` is the
+  report and `tests/test_workplace_phase10.py` (19 tests) pins it.
 - `ingest/` — the **local-first ingestion subsystem**: a separate pipeline that
   turns *sources* into the same on-disk knowledge store without ever loading a
   whole dataset into RAM. `ingest.records` holds the contracts (`SourceSpec`,
