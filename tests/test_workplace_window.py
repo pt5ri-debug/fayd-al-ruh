@@ -340,8 +340,12 @@ def test_the_reports_block_drafts_and_lists(tmp_path: Path) -> None:
         project = service.domain.create_project(
             number="TSTC-2026-900", title="Flowline coating", status="active"
         )
-        # The status line names the report count for the selected project.
-        dialog._refresh_reports()
+        # Refresh the project list so the project is selected, then the reports.
+        dialog._refresh_work()
+        assert dialog._project_list.size() == 1
+        dialog._project_list.selection_clear(0, "end")
+        dialog._project_list.selection_set(0)
+        dialog._on_project_selected()
         assert "report" in dialog._reports_status_label.cget("text").lower()
         # Saving a draft directly makes it appear in the report list.
         draft = service.draft_report(project.record_id, kind="technical_report")
@@ -361,7 +365,10 @@ def test_the_reports_block_issues_only_after_approval(tmp_path: Path) -> None:
             number="TSTC-2026-901", title="Issued deliverable", status="active"
         )
         report = service.create_report(project.record_id, title="Final report", body="Body.")
-        dialog._refresh_reports()
+        dialog._refresh_work()
+        dialog._project_list.selection_clear(0, "end")
+        dialog._project_list.selection_set(0)
+        dialog._on_project_selected()
         # Issuing an unapproved report is refused in the transcript, not a crash.
         dialog._report_list.selection_clear(0, "end")
         dialog._report_list.selection_set(0)
