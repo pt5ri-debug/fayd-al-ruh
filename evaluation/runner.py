@@ -60,6 +60,7 @@ from core.state import State
 from core.tool_agent import tool_selection_accuracy
 from core.training_center.gate import training_center_accuracy
 from core.workplace.phase10_gate import workplace_phase10_accuracy
+from core.workplace.phase11_gate import workplace_phase11_accuracy
 from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
 from ml.resume_gate import training_resume_accuracy
 from ml.training.gate import training_accuracy
@@ -340,6 +341,16 @@ class EvaluationMetrics:
     automatically; a rollback restores and verifies without deleting history; and
     the audit log is append-only with no forbidden self-modification operation
     exposed -- each on the real implementation, with negative controls."""
+
+    workplace_phase11_accuracy: float
+    """The share of held-out Workplace Phase-11 judgements satisfied: the
+    institutional knowledge base is *cumulative* -- a completed project, an
+    approved report, and a closed NCR each become a knowledge record, an
+    in-progress project, a draft report, and an open NCR yield nothing, a second
+    capture of the same source is skipped (idempotent), the captured record
+    preserves its source (provenance) and inherits the source's confidentiality,
+    an unknown source id is refused, and the capture writes to the existing
+    knowledge table (no second store)."""
 
     workplace_phase10_accuracy: float
     """The share of held-out Workplace Phase-10 judgements satisfied: one search
@@ -1347,6 +1358,14 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # so a fabricated hit or a re-introduced N+1 fails here.
     workplace_value = workplace_phase10_accuracy()
 
+    # The Workplace Phase 11 measures the *cumulative institutional knowledge*
+    # requirement: finished work (a completed project, an approved report, a
+    # closed NCR) becomes a knowledge record the assistant already cites, while
+    # work in progress yields nothing, a repeated capture is skipped, provenance
+    # and confidentiality are preserved, and no second store is created -- each a
+    # held-out judgement over the real capture engine, with negative controls.
+    workplace_knowledge_value = workplace_phase11_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1434,6 +1453,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         planning_value,
         self_improvement_value,
         workplace_value,
+        workplace_knowledge_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1508,6 +1528,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         task_execution_accuracy=round(planning_value, 6),
         self_improvement_loop_accuracy=round(self_improvement_value, 6),
         workplace_phase10_accuracy=round(workplace_value, 6),
+        workplace_phase11_accuracy=round(workplace_knowledge_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

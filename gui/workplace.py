@@ -37,6 +37,13 @@ from core.workplace.documents import (
     document_type_label,
 )
 from core.workplace.domain import WorkplaceDomain, WorkplaceDomainError
+from core.workplace.knowledge_capture import (
+    SOURCE_KINDS,
+    CaptureReport,
+    KnowledgeCandidate,
+    KnowledgeCapture,
+    source_label,
+)
 from core.workplace.library import (
     RevisionComparison,
     StandardRevision,
@@ -56,6 +63,7 @@ from core.workplace.projects import ProjectManager, ProjectRow, ProjectSummary
 from core.workplace.records import (
     Assignment,
     AuditEntry,
+    KnowledgeRecord,
     Person,
     ProjectMember,
     Report,
@@ -341,6 +349,7 @@ class WorkplaceService:
         self._library: TechnicalLibrary | None = None
         self._documents: DocumentManager | None = None
         self._assistant: WorkplaceAssistant | None = None
+        self._knowledge_capture: KnowledgeCapture | None = None
         self._reporting: ReportingWorkflow | None = None
         self._security: SecurityManager | None = None
         self._current_user: WorkplaceUser | None = None
@@ -795,6 +804,45 @@ class WorkplaceService:
     def assistant_status(self, *, language: str = "en") -> str:
         """An honest one-line status of the Workplace assistant."""
         return self.assistant.status(language=language)
+
+    # -- cumulative institutional knowledge -------------------------------
+
+    @property
+    def knowledge_capture(self) -> KnowledgeCapture:
+        """The engine that turns *finished* work into knowledge records."""
+        if self._knowledge_capture is None:
+            self._knowledge_capture = KnowledgeCapture(
+                self.repository, domain=self.domain, projects=self.projects
+            )
+        return self._knowledge_capture
+
+    def knowledge_candidates(self, *, source_kind: str | None = None) -> list[KnowledgeCandidate]:
+        """Every *finished* source that yields institutional knowledge."""
+        return self.knowledge_capture.candidates(source_kind=source_kind)
+
+    def capture_knowledge(self, source_kind: str, source_id: str) -> KnowledgeRecord:
+        """Capture one finished source into the knowledge registry."""
+        return self.knowledge_capture.capture(source_kind, source_id)
+
+    def capture_all_knowledge(self, *, source_kind: str | None = None) -> CaptureReport:
+        """Capture every finished source (idempotent: already-captured skipped)."""
+        return self.knowledge_capture.capture_all(source_kind=source_kind)
+
+    def capture_project_knowledge(self, project_id: str) -> CaptureReport:
+        """Capture a project's own finished work (the project and its outcomes)."""
+        return self.knowledge_capture.capture_project(project_id)
+
+    def captured_knowledge(self, *, project_id: str | None = None) -> list[KnowledgeRecord]:
+        """The captured knowledge records, newest first (optionally per project)."""
+        return self.knowledge_capture.knowledge(project_id=project_id)
+
+    def knowledge_capture_status(self, *, language: str = "en") -> str:
+        """An honest one-line status of what could be captured."""
+        return self.knowledge_capture.describe(language=language)
+
+    def knowledge_source_kinds(self, *, language: str = "en") -> list[tuple[str, str]]:
+        """``(key, label)`` for every capture source kind."""
+        return [(kind, source_label(kind, language=language)) for kind in SOURCE_KINDS]
 
     # -- reporting and proposal workflows (the brief's §9, §10, §13) -----
 

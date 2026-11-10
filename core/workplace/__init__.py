@@ -62,6 +62,14 @@ from core.workplace.domain import (
     WorkplaceDomain,
     WorkplaceDomainError,
 )
+from core.workplace.knowledge_capture import (
+    SOURCE_KINDS,
+    CaptureReport,
+    KnowledgeCandidate,
+    KnowledgeCapture,
+    WorkplaceKnowledgeError,
+    source_label,
+)
 from core.workplace.library import (
     REFERENCE_KIND_LABELS,
     STANDARD_BODIES,
@@ -166,10 +174,12 @@ __all__ = [
     "REPORT_TRANSITIONS",
     "ROLES",
     "SCHEMA_VERSION",
+    "SOURCE_KINDS",
     "STANDARD_BODIES",
     "TAXONOMY",
     "AccessDecision",
     "Candidate",
+    "CaptureReport",
     "CompetencyMatrix",
     "CorpusReport",
     "Deliverable",
@@ -179,6 +189,8 @@ __all__ = [
     "DocumentRecord",
     "DocumentVerification",
     "Institution",
+    "KnowledgeCandidate",
+    "KnowledgeCapture",
     "OrganisationalUnit",
     "PersonProfile",
     "PersonnelDirectory",
@@ -206,6 +218,7 @@ __all__ = [
     "WorkplaceDatabaseError",
     "WorkplaceDomain",
     "WorkplaceDomainError",
+    "WorkplaceKnowledgeError",
     "WorkplaceLoadReport",
     "WorkplaceProfile",
     "WorkplaceRecord",
@@ -232,5 +245,6 @@ __all__ = [
     "search_workplace",
     "searchable_kinds",
     "seed_workplace",
+    "source_label",
     "status_label",
 ]
