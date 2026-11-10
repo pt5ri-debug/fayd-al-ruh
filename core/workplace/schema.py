@@ -21,10 +21,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.workplace.model import Division, Institution, OrganisationalUnit
+from core.workplace.model import (
+    Division,
+    DivisionDetail,
+    Institution,
+    OrganisationalUnit,
+    TaxonomyNode,
+)
 
 #: The schema version this build writes and understands.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -129,11 +135,49 @@ DIVISIONS = TableSpec(
     indexes=(("unit_id",), ("key",)),
 )
 
+DIVISION_DETAILS = TableSpec(
+    name="division_details",
+    record=DivisionDetail,
+    columns=(
+        *_BASE_COLUMNS,
+        Column("division_id", "division_id"),
+        Column("kind", "kind"),
+        Column("title", "title"),
+        Column("detail", "detail"),
+        Column("reference", "reference"),
+        Column("sort_order", "order", "INTEGER"),
+        _METADATA,
+    ),
+    foreign_keys=(("division_id", "divisions", "record_id"),),
+    indexes=(("division_id",), ("kind",)),
+)
+
+TAXONOMY_NODES = TableSpec(
+    name="taxonomy_nodes",
+    record=TaxonomyNode,
+    columns=(
+        *_BASE_COLUMNS,
+        Column("parent_id", "parent_id"),
+        Column("kind", "kind"),
+        Column("key", "key"),
+        Column("name", "name"),
+        Column("name_ar", "name_ar"),
+        Column("summary", "summary"),
+        Column("sort_order", "order", "INTEGER"),
+        Column("proposed", "proposed", "INTEGER", boolean=True),
+        _METADATA,
+    ),
+    foreign_keys=(("parent_id", "taxonomy_nodes", "record_id"),),
+    indexes=(("parent_id",), ("key",)),
+)
+
 #: Every table this build knows, by name.
 TABLES: dict[str, TableSpec] = {
     INSTITUTIONS.name: INSTITUTIONS,
     ORGANISATIONAL_UNITS.name: ORGANISATIONAL_UNITS,
     DIVISIONS.name: DIVISIONS,
+    DIVISION_DETAILS.name: DIVISION_DETAILS,
+    TAXONOMY_NODES.name: TAXONOMY_NODES,
 }
 
 #: The table that records the schema version on disk.
@@ -174,7 +218,16 @@ def _migration_1(connection: object) -> None:
     """Version 1: the institutional hierarchy tables."""
     execute = connection.execute  # type: ignore[attr-defined]
     execute(_META_DDL)
-    for spec in TABLES.values():
+    for spec in (INSTITUTIONS, ORGANISATIONAL_UNITS, DIVISIONS):
+        execute(_create_table(spec))
+        for statement in _create_indexes(spec):
+            execute(statement)
+
+
+def _migration_2(connection: object) -> None:
+    """Version 2: divisional detail and the stored taxonomy (Phase 3)."""
+    execute = connection.execute  # type: ignore[attr-defined]
+    for spec in (DIVISION_DETAILS, TAXONOMY_NODES):
         execute(_create_table(spec))
         for statement in _create_indexes(spec):
             execute(statement)
@@ -184,16 +237,19 @@ def _migration_1(connection: object) -> None:
 #: runs inside its own transaction and only adds what its version introduces.
 MIGRATIONS: tuple[tuple[int, object], ...] = (
     (1, _migration_1),
+    (2, _migration_2),
 )
 
 
 __all__ = [
     "DIVISIONS",
+    "DIVISION_DETAILS",
     "INSTITUTIONS",
     "MIGRATIONS",
     "ORGANISATIONAL_UNITS",
     "SCHEMA_VERSION",
     "TABLES",
+    "TAXONOMY_NODES",
     "Column",
     "TableSpec",
 ]

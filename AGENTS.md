@@ -2022,6 +2022,53 @@ Arabic is kept as secondary aliases where useful.
   from the corpus's own topics so a seeded character's *memory* is measurably
   fuller rather than "ready but unused".
 - `core/version.py` is the single source of the version string.
+- `core/workplace/` + `gui/workplace.py` + `gui/workplace_dialog.py` +
+  `cli/workplace.py` — the **Workplace**: the Egyptian Petroleum Research
+  Institute (EPRI) and its Technical Support & Technology Center (TSTC) as a
+  professional digital office inside Fayd al-Ruh (the composer's **Workplace**
+  pill beside **Code Studio**). It is a **domain module** over the project's own
+  systems — **no** parallel document engine, RAG, or model manager. The record
+  model (`core/workplace/model.py`) is frozen dataclasses with a stable string id,
+  a `created_at`/`updated_at` audit pair, and an `active` **soft-delete** flag, so
+  a record is deactivated, never deleted, and history that references it can never
+  be orphaned. The store (`core/workplace/database.py`, stdlib `sqlite3` only,
+  following `core.memory_db`) is **versioned and migrated** (`core/workplace/schema.py`,
+  `SCHEMA_VERSION` + numbered `MIGRATIONS`; a newer database is refused, a v1
+  database migrates to v2 with no data loss), **transactional**, **bounded**,
+  **corrupt-row tolerant**, and has an integrity-checked **backup/restore**; every
+  foreign key is `ON DELETE RESTRICT`. `core/workplace/repository.py` is the typed
+  CRUD over it (the "deactivate, never delete" rule in one place). The seed
+  (`core/workplace/seed.py`) ships the EPRI record (`official=True`), the TSTC
+  centre, and the **ten proposed, configurable divisions** (`proposed=True`, a
+  `metadata` source note), plus each division's scope as a first profile item;
+  **nothing about the institution is invented** — only publicly documented EPRI
+  facts are seeded, and the centre + divisions are a starting point an
+  administrator edits. The taxonomy (`core/workplace/taxonomy.py`) is the
+  declarative default (8 areas, 52 disciplines). **Phase 3** completes the
+  configurable hierarchy: `DivisionDetail` (`division_details`, one row per item
+  typed by `kind` — discipline / personnel / standard / capability / procedure /
+  equipment / project / report / history / knowledge, so a new kind needs no
+  migration) gives every division its technical profile (the brief's §3);
+  `TaxonomyNode` (`taxonomy_nodes`) **stores** the taxonomy so an area or a
+  sub-discipline is added, renamed, or deactivated without a source change (the
+  brief's §4); and `core/workplace/settings.py` persists the interface language
+  (`en`/`ar`), the RTL flag, the default institution, and the "show proposed" flag
+  through the project's own `JsonStore`. `gui/workplace.py` is the Tk-free
+  `WorkplaceService` the window and the CLI both drive (status, hierarchy,
+  divisions + add/rename/move/deactivate/activate, `division_profile` +
+  `add_division_detail`/`remove_division_detail` + `detail_kind_labels`,
+  `taxonomy_tree` + `add_taxonomy_area`/`add_taxonomy_discipline`/`rename_taxonomy_node`/
+  `remove_taxonomy_node`, `settings`/`update_settings`, `backup`); the window
+  (`gui/workplace_dialog.py`, Tk, imported lazily) is built like every other
+  window (the shared `Theme`, `DialogHeader`, `SidebarColumn`, `gui.components.button`,
+  and `ThemedDialog`) with a collapsible institutional sidebar; and `cli/workplace.py`
+  is the headless twin (`python -m cli workplace status|seed|divisions|hierarchy|
+  taxonomy|profile|add-detail|remove-detail|kinds|add-division|rename-division|
+  move-division|deactivate-division|activate-division|add-taxonomy-area|
+  add-taxonomy-discipline|rename-taxonomy|remove-taxonomy|settings|backup`).
+  Everything lives under the git-ignored `data/workplace` (`core.paths.workplace_*`).
+  Later phases add projects, personnel, standards, documents, inspections,
+  reports, the assistant, and security, each additive.
 - `ingest/` — the **local-first ingestion subsystem**: a separate pipeline that
   turns *sources* into the same on-disk knowledge store without ever loading a
   whole dataset into RAM. `ingest.records` holds the contracts (`SourceSpec`,

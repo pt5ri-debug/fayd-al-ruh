@@ -27,9 +27,21 @@ from pathlib import Path
 
 from core.paths import workplace_db_path
 from core.workplace.database import WorkplaceDatabase
-from core.workplace.model import Division, Institution, OrganisationalUnit
+from core.workplace.model import (
+    DIVISION_DETAIL_KINDS,
+    Division,
+    DivisionDetail,
+    Institution,
+    OrganisationalUnit,
+    TaxonomyNode,
+)
 from core.workplace.repository import WorkplaceRepository
 from core.workplace.seed import SeedReport, seed_workplace
+from core.workplace.settings import (
+    WorkplaceSettings,
+    load_settings,
+    save_settings,
+)
 from core.workplace.taxonomy import TAXONOMY, TaxonomyArea
 
 
@@ -110,6 +122,79 @@ class HierarchyView:
     @property
     def empty(self) -> bool:
         return self.institution is None and not self.units and not self.unassigned
+
+
+@dataclass
+class DivisionDetailSummary:
+    """One item of a division's technical profile, as a surface shows it."""
+
+    record_id: str
+    kind: str
+    title: str
+    detail: str
+    reference: str
+    order: int
+    active: bool
+
+    @property
+    def kind_label(self) -> str:
+        """The readable name of the kind (``division_detail_kind_label``)."""
+        return division_detail_kind_label(self.kind)
+
+    def describe(self) -> str:
+        head = self.title or self.kind_label
+        parts = [f"{self.kind_label}: {head}"]
+        if self.detail:
+            parts.append(f"— {self.detail}")
+        if self.reference:
+            parts.append(f"[{self.reference}]")
+        if not self.active:
+            parts.append("(inactive)")
+        return " ".join(parts)
+
+
+@dataclass
+class DivisionProfile:
+    """A division's full technical profile, grouped by the brief's §3 kinds."""
+
+    division: DivisionSummary
+    details: list[DivisionDetailSummary] = field(default_factory=list)
+
+    def by_kind(self) -> dict[str, list[DivisionDetailSummary]]:
+        grouped: dict[str, list[DivisionDetailSummary]] = {}
+        for detail in self.details:
+            grouped.setdefault(detail.kind, []).append(detail)
+        return grouped
+
+    def count(self, kind: str) -> int:
+        return sum(1 for detail in self.details if detail.kind == kind)
+
+    @property
+    def empty(self) -> bool:
+        return not self.details
+
+
+#: The readable labels for the divisional detail kinds (English + Arabic).
+DIVISION_DETAIL_LABELS: dict[str, tuple[str, str]] = {
+    "discipline": ("Technical disciplines", "التخصصات الفنية"),
+    "personnel": ("Personnel and qualifications", "الكوادر والمؤهلات"),
+    "standard": ("Applicable standards", "المعايير المطبقة"),
+    "capability": ("Inspection and testing capabilities", "قدرات الفحص والاختبار"),
+    "procedure": ("Procedures and work instructions", "الإجراءات وتعليمات العمل"),
+    "equipment": ("Equipment and resources", "المعدات والموارد"),
+    "project": ("Project assignments", "التكليفات بالمشروعات"),
+    "report": ("Technical reports", "التقارير الفنية"),
+    "history": ("Historical records", "السجلات التاريخية"),
+    "knowledge": ("Knowledge documents", "الوثائق المعرفية"),
+}
+
+
+def division_detail_kind_label(kind: str, *, language: str = "en") -> str:
+    """The readable label of a divisional detail kind (its own key if unknown)."""
+    labels = DIVISION_DETAIL_LABELS.get(kind)
+    if labels is None:
+        return kind
+    return labels[1] if language == "ar" else labels[0]
 
 
 class WorkplaceService:
@@ -334,6 +419,173 @@ class WorkplaceService:
         disciplines = sum(area.discipline_count for area in TAXONOMY)
         return f"{areas} areas, {disciplines} disciplines"
 
+    # -- divisional profile (the brief's §3) ------------------------------
+
+    def division_profile(self, record_id: str) -> DivisionProfile:
+        """A division's full technical profile, grouped by kind."""
+        self.open()
+        summary = self.division(record_id)
+        if summary is None:
+            raise WorkplaceError(f"No division with id {record_id!r}.")
+        rows = self.repository.list_details(division_id=record_id)
+        details = [self._summarise_detail(row) for row in rows]
+        return DivisionProfile(division=summary, details=details)
+
+    def add_division_detail(
+        self,
+        *,
+        division_id: str,
+        kind: str,
+        title: str = "",
+        detail: str = "",
+        reference: str = "",
+    ) -> DivisionDetailSummary:
+        """Add one item to a division's profile (no source change)."""
+        if kind not in DIVISION_DETAIL_KINDS:
+            raise WorkplaceError(
+                f"Unknown detail kind {kind!r}; expected one of "
+                f"{', '.join(DIVISION_DETAIL_KINDS)}."
+            )
+        if not (title.strip() or detail.strip()):
+            raise WorkplaceError("A profile item needs a title or a detail.")
+        self.open()
+        if self.repository.get_division(division_id) is None:
+            raise WorkplaceError(f"No division with id {division_id!r}.")
+        order = len(self.repository.list_details(division_id=division_id, include_inactive=True)) + 1
+        record = self.repository.create_detail(
+            division_id=division_id, kind=kind, title=title.strip(),
+            detail=detail.strip(), reference=reference.strip(), order=order,
+            metadata={"source": "user", "note": "Added by the user in the Workplace."},
+        )
+        return self._summarise_detail(record)
+
+    def remove_division_detail(self, record_id: str) -> DivisionDetailSummary:
+        """Deactivate a profile item (the soft delete); history survives."""
+        self.open()
+        updated = self.repository.deactivate_detail(record_id)
+        if updated is None:
+            raise WorkplaceError(f"No profile item with id {record_id!r}.")
+        return self._summarise_detail(updated)
+
+    def detail_kind_labels(self, *, language: str = "en") -> list[tuple[str, str]]:
+        """Every kind with its readable label, for a picker."""
+        return [
+            (kind, division_detail_kind_label(kind, language=language))
+            for kind in DIVISION_DETAIL_KINDS
+        ]
+
+    # -- taxonomy editing (the brief's §4) --------------------------------
+
+    def taxonomy_tree(self, *, include_inactive: bool = False) -> list[TaxonomyNode]:
+        """The stored taxonomy's areas, each with its disciplines in ``metadata``.
+
+        The stored nodes are returned as-is (a flat list of areas, each carrying a
+        ``disciplines`` list in its metadata), so a surface can draw the tree and
+        an administrator can edit it. When nothing is stored yet the shipped
+        :data:`~core.workplace.taxonomy.TAXONOMY` is used, so the tree is never
+        empty.
+        """
+        self.open()
+        areas = self.repository.list_taxonomy_nodes(include_inactive=include_inactive)
+        areas = [node for node in areas if node.kind == "area"]
+        if not areas:
+            return []
+        out: list[TaxonomyNode] = []
+        for area in areas:
+            disciplines = self.repository.list_taxonomy_nodes(
+                parent_id=area.record_id, include_inactive=include_inactive
+            )
+            metadata = dict(area.metadata)
+            metadata["disciplines"] = [node.name for node in disciplines]
+            metadata["discipline_ids"] = [node.record_id for node in disciplines]
+            out.append(
+                TaxonomyNode(
+                    record_id=area.record_id, created_at=area.created_at,
+                    updated_at=area.updated_at, active=area.active, parent_id="",
+                    kind="area", key=area.key, name=area.name, name_ar=area.name_ar,
+                    summary=area.summary, order=area.order, proposed=area.proposed,
+                    metadata=metadata,
+                )
+            )
+        return out
+
+    def add_taxonomy_area(
+        self, *, name: str, name_ar: str = "", key: str = "", summary: str = ""
+    ) -> TaxonomyNode:
+        """Add a taxonomy area (no source change)."""
+        if not name.strip():
+            raise WorkplaceError("A taxonomy area needs a name.")
+        self.open()
+        chosen_key = key.strip() or _slugify(name)
+        if self.repository.taxonomy_node_by_key(chosen_key) is not None:
+            raise WorkplaceError(f"A taxonomy node with key {chosen_key!r} already exists.")
+        order = len(self.repository.list_taxonomy_nodes()) + 1
+        return self.repository.create_taxonomy_node(
+            kind="area", key=chosen_key, name=name.strip(), name_ar=name_ar.strip(),
+            summary=summary.strip(), order=order, proposed=False,
+            metadata={"source": "user", "note": "Added by the user in the Workplace."},
+        )
+
+    def add_taxonomy_discipline(
+        self, *, area_id: str, name: str, name_ar: str = ""
+    ) -> TaxonomyNode:
+        """Add a sub-discipline under a taxonomy area (no source change)."""
+        if not name.strip():
+            raise WorkplaceError("A discipline needs a name.")
+        self.open()
+        area = self.repository.get_taxonomy_node(area_id)
+        if area is None or area.kind != "area":
+            raise WorkplaceError(f"No taxonomy area with id {area_id!r}.")
+        siblings = self.repository.list_taxonomy_nodes(parent_id=area_id)
+        return self.repository.create_taxonomy_node(
+            kind="discipline", parent_id=area_id,
+            key=f"{area.key}:{_slugify(name)}", name=name.strip(), name_ar=name_ar.strip(),
+            order=len(siblings) + 1, proposed=False,
+            metadata={"source": "user", "note": "Added by the user in the Workplace."},
+        )
+
+    def rename_taxonomy_node(self, record_id: str, *, name: str, name_ar: str = "") -> TaxonomyNode:
+        """Rename a taxonomy area or discipline (no source change)."""
+        if not name.strip():
+            raise WorkplaceError("A taxonomy node needs a name.")
+        self.open()
+        node = self.repository.get_taxonomy_node(record_id)
+        if node is None:
+            raise WorkplaceError(f"No taxonomy node with id {record_id!r}.")
+        changes: dict[str, object] = {"name": name.strip()}
+        if name_ar:
+            changes["name_ar"] = name_ar.strip()
+        return self.repository.save_taxonomy_node(node.touch(**changes))
+
+    def remove_taxonomy_node(self, record_id: str) -> TaxonomyNode:
+        """Deactivate a taxonomy node (the soft delete)."""
+        self.open()
+        updated = self.repository.deactivate_taxonomy_node(record_id)
+        if updated is None:
+            raise WorkplaceError(f"No taxonomy node with id {record_id!r}.")
+        return updated
+
+    # -- settings ---------------------------------------------------------
+
+    def settings(self) -> WorkplaceSettings:
+        """The saved Workplace settings (defaults when none are stored)."""
+        return load_settings(self.root)
+
+    def update_settings(self, **changes: object) -> WorkplaceSettings:
+        """Save a settings change and return the settings in force."""
+        current = self.settings()
+        if "language" in changes:
+            current = current.with_language(str(changes["language"]))
+        if "rtl" in changes:
+            current = current.with_rtl(bool(changes["rtl"]))
+        if "default_institution" in changes:
+            current = current.with_default_institution(str(changes["default_institution"]))
+        if "show_proposed" in changes:
+            current = current.with_show_proposed(bool(changes["show_proposed"]))
+        if not save_settings(current, self.root):
+            raise WorkplaceError("Could not save the Workplace settings (read-only folder?).")
+        return current
+
     # -- backup -----------------------------------------------------------
 
     def backup(self, destination: Path | None = None) -> str:
@@ -372,6 +624,18 @@ class WorkplaceService:
             unit_name=unit_name,
         )
 
+    @staticmethod
+    def _summarise_detail(detail: DivisionDetail) -> DivisionDetailSummary:
+        return DivisionDetailSummary(
+            record_id=detail.record_id,
+            kind=detail.kind,
+            title=detail.title,
+            detail=detail.detail,
+            reference=detail.reference,
+            order=detail.order,
+            active=detail.active,
+        )
+
 
 def _slugify(text: str) -> str:
     """A stable key from a division name (lower-case, hyphenated)."""
@@ -381,9 +645,13 @@ def _slugify(text: str) -> str:
 
 
 __all__ = [
+    "DIVISION_DETAIL_LABELS",
+    "DivisionDetailSummary",
+    "DivisionProfile",
     "DivisionSummary",
     "HierarchyView",
     "WorkplaceError",
     "WorkplaceService",
     "WorkplaceStatus",
+    "division_detail_kind_label",
 ]

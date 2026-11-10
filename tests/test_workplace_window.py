@@ -118,6 +118,53 @@ def test_the_taxonomy_is_listed(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_division_profile_is_shown(tmp_path: Path) -> None:
+    root, dialog, _service = _dialog(tmp_path)
+    try:
+        dialog._division_list.selection_clear(0, "end")
+        dialog._division_list.selection_set(0)
+        dialog._on_division_selected()
+        text = dialog._profile_text.get("1.0", "end")
+        assert "Scope of services" in text
+        assert "Engineering Services" in dialog._profile_title.cget("text")
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_adding_a_profile_item_updates_the_profile(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        dialog._division_list.selection_clear(0, "end")
+        dialog._division_list.selection_set(0)
+        dialog._on_division_selected()
+        division = dialog._selected_division()
+        service.add_division_detail(
+            division_id=division.record_id, kind="standard", title="API 1104"
+        )
+        dialog._refresh_profile()
+        assert "API 1104" in dialog._profile_text.get("1.0", "end")
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_language_and_direction_controls_reflect_and_change_settings(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        assert dialog._language.get() == "en"
+        dialog._language.set("ar")
+        dialog._on_language()
+        assert service.settings().language == "ar"
+        assert service.settings().rtl is True
+        dialog._rtl.set(False)
+        dialog._on_rtl()
+        assert service.settings().rtl is False
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_deactivating_a_division_updates_the_list(tmp_path: Path) -> None:
     root, dialog, _service = _dialog(tmp_path)
     try:

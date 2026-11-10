@@ -22,9 +22,11 @@ from core.workplace.model import (
     INSTITUTION_KIND,
     UNIT_KIND,
     Division,
+    DivisionDetail,
     Institution,
     OrganisationalUnit,
     RecordBase,
+    TaxonomyNode,
     make_id,
 )
 
@@ -34,6 +36,8 @@ T = TypeVar("T", bound=RecordBase)
 INSTITUTIONS = "institutions"
 UNITS = "organisational_units"
 DIVISIONS = "divisions"
+DIVISION_DETAILS = "division_details"
+TAXONOMY_NODES = "taxonomy_nodes"
 
 
 class WorkplaceRepository:
@@ -180,6 +184,116 @@ class WorkplaceRepository:
         """Insert several records at once (used by the seed loader)."""
         return self.db.upsert_many(table, records)
 
+    # -- divisional detail (the brief's §3) -------------------------------
+
+    def create_detail(
+        self, *, division_id: str, kind: str, title: str = "", **fields: Any
+    ) -> DivisionDetail:
+        """Add one item to a division's technical profile."""
+        record = DivisionDetail(
+            record_id=make_id("division_detail"),
+            division_id=division_id,
+            kind=kind,
+            title=title,
+            **fields,
+        )
+        self.db.upsert(DIVISION_DETAILS, record)
+        return record
+
+    def get_detail(self, record_id: str) -> DivisionDetail | None:
+        return self.db.get(DIVISION_DETAILS, record_id)  # type: ignore[return-value]
+
+    def list_details(
+        self,
+        *,
+        division_id: str | None = None,
+        kind: str | None = None,
+        include_inactive: bool = False,
+    ) -> list[DivisionDetail]:
+        """A division's profile items, optionally filtered to one ``kind``."""
+        clauses = []
+        params: list[Any] = []
+        if division_id is not None:
+            clauses.append("division_id = ?")
+            params.append(division_id)
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(kind)
+        rows = self.db.list_records(
+            DIVISION_DETAILS,
+            where=" AND ".join(clauses),
+            params=tuple(params),
+            include_inactive=include_inactive,
+        )
+        rows.sort(key=lambda row: (row.kind, row.order, row.title))
+        return rows
+
+    def save_detail(self, record: DivisionDetail) -> DivisionDetail:
+        self.db.upsert(DIVISION_DETAILS, record)
+        return record
+
+    def deactivate_detail(self, record_id: str) -> DivisionDetail | None:
+        detail = self.get_detail(record_id)
+        if detail is None:
+            return None
+        updated = detail.deactivate()
+        self.db.upsert(DIVISION_DETAILS, updated)
+        return updated  # type: ignore[return-value]
+
+    def detail_kinds(self) -> list[str]:
+        """The kinds of detail this Workplace actually holds, in use."""
+        seen = {row.kind for row in self.db.list_records(DIVISION_DETAILS, include_inactive=True)}
+        return sorted(seen)
+
+    # -- stored taxonomy (the brief's §4) ---------------------------------
+
+    def create_taxonomy_node(
+        self, *, kind: str = "area", parent_id: str = "", **fields: Any
+    ) -> TaxonomyNode:
+        record = TaxonomyNode(
+            record_id=make_id("taxonomy"), kind=kind, parent_id=parent_id, **fields
+        )
+        self.db.upsert(TAXONOMY_NODES, record)
+        return record
+
+    def get_taxonomy_node(self, record_id: str) -> TaxonomyNode | None:
+        return self.db.get(TAXONOMY_NODES, record_id)  # type: ignore[return-value]
+
+    def taxonomy_node_by_key(self, key: str) -> TaxonomyNode | None:
+        rows = self.db.list_records(
+            TAXONOMY_NODES, where="key = ?", params=(key,), limit=1
+        )
+        return rows[0] if rows else None
+
+    def list_taxonomy_nodes(
+        self, *, parent_id: str | None = None, include_inactive: bool = False
+    ) -> list[TaxonomyNode]:
+        if parent_id is None:
+            rows = self.db.list_records(TAXONOMY_NODES, include_inactive=include_inactive)
+        else:
+            rows = self.db.list_records(
+                TAXONOMY_NODES,
+                where="parent_id = ?",
+                params=(parent_id,),
+                include_inactive=include_inactive,
+            )
+        rows.sort(key=lambda row: (row.order, row.name))
+        return rows
+
+    def save_taxonomy_node(self, record: TaxonomyNode) -> TaxonomyNode:
+        self.db.upsert(TAXONOMY_NODES, record)
+        return record
+
+    def deactivate_taxonomy_node(self, record_id: str) -> TaxonomyNode | None:
+        node = self.get_taxonomy_node(record_id)
+        if node is None:
+            return None
+        updated = node.deactivate()
+        self.db.upsert(TAXONOMY_NODES, updated)
+        return updated  # type: ignore[return-value]
+
+    # -- bulk -------------------------------------------------------------
+
     def load_report(self) -> WorkplaceLoadReport:
         """A fresh load report the caller can pass to a read for corruption counts."""
         return WorkplaceLoadReport()
@@ -187,7 +301,9 @@ class WorkplaceRepository:
 
 __all__ = [
     "DIVISIONS",
+    "DIVISION_DETAILS",
     "INSTITUTIONS",
+    "TAXONOMY_NODES",
     "UNITS",
     "WorkplaceRepository",
 ]

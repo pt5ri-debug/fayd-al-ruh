@@ -27,6 +27,8 @@ _PREFIXES = {
     "institution": "INST",
     "unit": "UNIT",
     "division": "DIV",
+    "division_detail": "DET",
+    "taxonomy": "TAX",
 }
 
 #: The kinds whose records carry the institutional hierarchy (this phase).
@@ -152,23 +154,90 @@ class Division(RecordBase):
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
+#: The kinds of divisional detail a division carries (the brief's §3). Each is one
+#: row in ``division_details``, so a division's technical profile is *data* -- a
+#: new kind is added without changing the schema.
+DIVISION_DETAIL_KINDS = (
+    "discipline",       # a technical discipline the division covers
+    "personnel",        # a person and their qualification
+    "standard",         # an applicable standard (see the technical library)
+    "capability",       # an inspection / testing capability
+    "procedure",        # a procedure or work instruction
+    "equipment",        # equipment or a resource
+    "project",          # a project assignment
+    "report",           # a technical report
+    "history",          # a historical record
+    "knowledge",        # a knowledge document
+)
+
+
+@dataclass(frozen=True)
+class DivisionDetail(RecordBase):
+    """One item of a division's technical profile (the brief's §3).
+
+    A division must support its description and scope, its technical disciplines,
+    available personnel and qualifications, applicable standards, inspection and
+    testing capabilities, procedures, equipment, project assignments, technical
+    reports, historical records, and knowledge documents. Rather than ten
+    separate tables (and a schema change for the eleventh), every item is one row
+    here, typed by ``kind`` -- so the profile is fully configurable and a new kind
+    needs no migration. ``reference`` is an optional pointer (a standard number, a
+    project number, a file path), and ``metadata`` carries kind-specific fields.
+    """
+
+    division_id: str = ""
+    kind: str = ""
+    title: str = ""
+    detail: str = ""
+    reference: str = ""
+    order: int = 0
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TaxonomyNode(RecordBase):
+    """A stored node of the professional knowledge taxonomy (the brief's §4).
+
+    The shipped taxonomy (:mod:`core.workplace.taxonomy`) is the *default* set;
+    once stored it is editable -- an administrator adds an area or a sub-discipline
+    without touching source code. A node is either an ``area`` (``parent_id``
+    empty) or a ``discipline`` (``parent_id`` = its area's id), so the taxonomy is
+    a two-level tree in one table and can grow a third level later.
+    """
+
+    parent_id: str = ""
+    kind: str = "area"
+    key: str = ""
+    name: str = ""
+    name_ar: str = ""
+    summary: str = ""
+    order: int = 0
+    proposed: bool = True
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
 #: The record classes this phase's repository knows how to store, by table name.
 RECORD_TYPES: dict[str, type[RecordBase]] = {
     "institutions": Institution,
     "organisational_units": OrganisationalUnit,
     "divisions": Division,
+    "division_details": DivisionDetail,
+    "taxonomy_nodes": TaxonomyNode,
 }
 
 
 __all__ = [
+    "DIVISION_DETAIL_KINDS",
     "DIVISION_KIND",
     "INSTITUTION_KIND",
     "RECORD_TYPES",
     "UNIT_KIND",
     "Division",
+    "DivisionDetail",
     "Institution",
     "OrganisationalUnit",
     "RecordBase",
+    "TaxonomyNode",
     "WorkplaceRecord",
     "make_id",
     "utc_now",
