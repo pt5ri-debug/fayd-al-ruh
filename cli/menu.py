@@ -385,6 +385,11 @@ def run_scene3d(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.scene3d", argv)
 
 
+def run_workplace(argv: Sequence[str] = ()) -> int:
+    """The Workplace: EPRI/TSTC's digital office (projects, staff, documents)."""
+    return _run_module("cli.workplace", argv)
+
+
 def run_model_chat(argv: Sequence[str] = ()) -> int:
     """Inspect and set a model's own chat profile: name, logo, voice, model."""
     return _run_module("cli.model_chat", argv)
@@ -660,6 +665,9 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ),
     ("Scene Studio: build, pose, and render a 3D figure locally", run_scene3d, ("status",)),
     ("Scene Studio: render the built-in figure to a PNG", run_scene3d, ("render",)),
+    ("Workplace: EPRI/TSTC's digital office (projects, staff, documents)", run_workplace, ("status",)),
+    ("Workplace: the institution tree and its divisions", run_workplace, ("hierarchy",)),
+    ("Workplace: the professional knowledge taxonomy", run_workplace, ("taxonomy",)),
     ("Model chat windows: each model's own name, logo, voice, and model", run_model_chat, ("mouths",)),
     ("Model Manager: every language model the program can run", run_models, ("list",)),
     ("Model Manager: what the local runtimes can do here", run_models, ("runtimes",)),
@@ -964,5 +972,6 @@ __all__ = [
     "run_voice",
     "run_voice_studio",
     "run_web",
+    "run_workplace",
     "visible_menu",
 ]

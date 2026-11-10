@@ -1095,6 +1095,7 @@ class FaydGUI:
             "_docs_studio_dialog",
             "_scene_studio_dialog",
             "_code_studio_dialog",
+            "_workplace_dialog",
         ):
             dialog = getattr(self, attr, None)
             if dialog is not None:
@@ -3055,6 +3056,15 @@ class FaydGUI:
             options=[("Open the Code Studio…", self._open_code_studio)],
             tip="Code Studio: edit and merge the project's own code",
         )
+        # The Workplace pill, immediately beside Code Studio: one click opens the
+        # institute's digital office (EPRI/TSTC). It is a *view* of the real
+        # control (the sidebar entry opens the same window), not a second source
+        # of truth, so the two can never disagree about what the Workplace does.
+        self._workplace_mode_selector = self._composer.add_mode_selector(
+            icon="🏢", label="Workplace",
+            options=[("Open the Workplace…", self._open_workplace)],
+            tip="Workplace: EPRI/TSTC's digital office (projects, staff, documents)",
+        )
         # The Training Center pill, beside Code Studio: one click opens the
         # learning-and-training workspace. It is a *view* of the real control (the
         # window's own sidebar entry opens the same window), not a second source of
@@ -3424,6 +3434,10 @@ class FaydGUI:
         menu.add_command(
             label="Code Studio — edit and merge the project's own code…",
             command=self._open_code_studio,
+        )
+        menu.add_command(
+            label="Workplace — EPRI/TSTC's digital office…",
+            command=self._open_workplace,
         )
         menu.add_command(
             label="Training Center — learn, build datasets, train, and evaluate…",
@@ -4163,6 +4177,39 @@ class FaydGUI:
             on_close=lambda: setattr(self, "_code_studio_dialog", None),
         )
 
+    def _open_workplace(self) -> None:
+        """Open the Workplace: EPRI/TSTC's digital office.
+
+        The Workplace is the institute's own workspace -- the institutional
+        hierarchy and its configurable divisions, the professional taxonomy, and
+        (in later phases) projects, staff, standards, documents, and inspections.
+        It drives its own Tk-free service (:class:`gui.workplace.WorkplaceService`),
+        the same one ``python -m cli workplace`` drives, so the window and the CLI
+        share one database. One window is kept and reused.
+        """
+        existing = getattr(self, "_workplace_dialog", None)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:  # the window was closed out from under us
+                self._workplace_dialog = None
+
+        from gui.workplace import WorkplaceService
+        from gui.workplace_dialog import WorkplaceDialog
+
+        self._workplace_dialog = WorkplaceDialog(
+            self.root,
+            WorkplaceService(root=self.service.data_root),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
+            on_close=lambda: setattr(self, "_workplace_dialog", None),
+        )
+
     def _select_ultron_mouth(self) -> None:
         """Switch this chat to the Ultron mouth from the sidebar action.
 
@@ -4387,6 +4434,10 @@ class FaydGUI:
         # opens it rather than running the headless status command.
         if action.key == "code-studio":
             self._open_code_studio()
+            return
+        # The Workplace likewise has its own window and service.
+        if action.key == "workplace":
+            self._open_workplace()
             return
         # The Training Center likewise has its own window and service.
         if action.key == "training-center":
