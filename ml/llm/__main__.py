@@ -347,6 +347,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--generate", type=str, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.8,
+        help="Sampling temperature for --generate (0 is greedy/deterministic).",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=0,
+        help="Keep only the k highest-probability tokens when generating (0 disables).",
+    )
+    parser.add_argument(
+        "--top-p",
+        type=float,
+        default=1.0,
+        help="Nucleus sampling: keep the smallest token set reaching this cumulative "
+        "probability when generating (1.0 disables).",
+    )
+    parser.add_argument(
+        "--repetition-penalty",
+        type=float,
+        default=1.0,
+        help="Penalise recently emitted tokens when generating (1.0 disables; the "
+        "usual value is about 1.1).",
+    )
+    parser.add_argument(
         "--weight-decay",
         type=float,
         default=0.0,
@@ -411,7 +437,17 @@ def main(argv: list[str] | None = None) -> int:
             args.tokenizer or Path(args.checkpoint).with_suffix(".tokenizer.json")
         )
         generator = LocalGenerator(model, tokenizer=tokenizer)
-        print(generator.generate(args.generate, max_new_tokens=args.max_new_tokens, seed=args.seed))
+        print(
+            generator.generate(
+                args.generate,
+                max_new_tokens=args.max_new_tokens,
+                temperature=args.temperature,
+                seed=args.seed,
+                top_k=args.top_k,
+                top_p=args.top_p,
+                repetition_penalty=args.repetition_penalty,
+            )
+        )
     return 0
 
 

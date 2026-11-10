@@ -36,6 +36,9 @@ class LocalLanguageModel(CallableModel):
         max_new_tokens: int = 96,
         temperature: float = 0.7,
         seed: int | None = None,
+        top_k: int = 0,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.0,
         max_string_bytes: int = 32,
     ) -> None:
         path = Path(checkpoint) if checkpoint is not None else DEFAULT_CHECKPOINT
@@ -52,6 +55,9 @@ class LocalLanguageModel(CallableModel):
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.seed = seed
+        self.top_k = top_k
+        self.top_p = top_p
+        self.repetition_penalty = repetition_penalty
         self.max_string_bytes = max_string_bytes
         super().__init__(f"fayd-local-llm:{path.stem}", self._generate_prompt)
 
@@ -61,6 +67,9 @@ class LocalLanguageModel(CallableModel):
             max_new_tokens=self.max_new_tokens,
             temperature=self.temperature,
             seed=self.seed,
+            top_k=self.top_k,
+            top_p=self.top_p,
+            repetition_penalty=self.repetition_penalty,
         )
         # The generator returns prompt + continuation; a model response is the
         # continuation only, so callers never see their own prompt echoed back.

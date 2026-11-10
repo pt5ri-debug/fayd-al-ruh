@@ -69,6 +69,9 @@ def load_mind_model(
     temperature: float = 0.0,
     seed: int = 0,
     max_new_tokens: int = 96,
+    top_k: int = 0,
+    top_p: float = 1.0,
+    repetition_penalty: float = 1.0,
 ):
     """Load the trained language model as the answering engine.
 
@@ -84,6 +87,9 @@ def load_mind_model(
         temperature=temperature,
         seed=seed,
         max_new_tokens=max_new_tokens,
+        top_k=top_k,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
     )
 
 
@@ -176,6 +182,9 @@ class MindAssistant:
         max_new_tokens: int = 96,
         temperature: float | None = None,
         seed: int | None = None,
+        top_k: int = 0,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.0,
         header: str = MIND_HEADER,
     ) -> None:
         self.model = model
@@ -187,6 +196,11 @@ class MindAssistant:
         # still sample.
         self.temperature = getattr(model, "temperature", 0.0) if temperature is None else temperature
         self.seed = getattr(model, "seed", None) if seed is None else seed
+        # The decoding filters default to off, so a caller that sets none keeps
+        # exactly the previous behaviour; a small model reads better with them on.
+        self.top_k = top_k
+        self.top_p = top_p
+        self.repetition_penalty = repetition_penalty
         self.header = header
         self.memory = None
 
@@ -259,6 +273,9 @@ class MindAssistant:
             max_new_tokens=self.max_new_tokens,
             temperature=self.temperature,
             seed=self.seed,
+            top_k=self.top_k,
+            top_p=self.top_p,
+            repetition_penalty=self.repetition_penalty,
         )
         return full[len(prompt):].strip()
 

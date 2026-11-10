@@ -55,6 +55,9 @@ def build_mouth(
     *,
     model_key: str | None = None,
     max_new_tokens: int = 96,
+    top_k: int = 0,
+    top_p: float = 1.0,
+    repetition_penalty: float = 1.0,
     **kwargs: Any,
 ):
     """Build the assistant for ``mouth``, honouring ``model_key`` when offered.
@@ -74,7 +77,13 @@ def build_mouth(
     path = choice.path if choice is not None else None
 
     if mouth == catalog.MOUTH_MODEL:
-        return mind_module.load_mind_model(path, max_new_tokens=max_new_tokens)
+        return mind_module.load_mind_model(
+            path,
+            max_new_tokens=max_new_tokens,
+            top_k=top_k,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+        )
     if mouth == catalog.MOUTH_ULTRON:
         return ultron_mouth.load_ultron_assistant(path, **kwargs)
     if mouth == catalog.MOUTH_VISION:

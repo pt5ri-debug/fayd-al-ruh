@@ -335,6 +335,9 @@ class _FakeMindModel:
                 max_new_tokens: int = 64,
                 temperature: float = 0.8,
                 seed: int | None = None,
+                top_k: int = 0,
+                top_p: float = 1.0,
+                repetition_penalty: float = 1.0,
             ) -> str:
                 return prompt + self._continuation
 
