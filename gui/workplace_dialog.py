@@ -491,6 +491,58 @@ class WorkplaceDialog(ThemedDialog):
             fill="x", pady=2
         )
 
+        # The Workplace assistant (the brief's §10): a specialised assistant over
+        # the Workplace's own records, retrieved and cited through the project's
+        # existing RAG. The knowledge is cumulative -- a new project or an approved
+        # document becomes citable the next time the corpus is rebuilt.
+        assistant = column.add("assistant", "Assistant", icon="🤖")
+        self._assistant_status_label = tk.Label(
+            assistant, text="", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=270,
+        )
+        self._assistant_status_label.pack(fill="x", padx=14, pady=(6, 4))
+
+        tk.Label(
+            assistant, text="Assistant profile", bg=theme.surface,
+            fg=theme.text_dim, font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(4, 2))
+        self._assistant_profile = tk.StringVar(value="petroleum")
+        profile_menu = tk.OptionMenu(
+            assistant, self._assistant_profile, *[key for key, _n, _s in self.service.assistant_profiles()],
+        )
+        profile_menu.configure(
+            bg=theme.surface_raised, fg=theme.foreground, activebackground=theme.interactive_active,
+            activeforeground=theme.foreground, relief="flat", highlightthickness=0,
+            borderwidth=0, font=self._type.font("2xs"), anchor="w", padx=8,
+        )
+        profile_menu["menu"].configure(
+            bg=theme.surface_raised, fg=theme.foreground,
+            activebackground=theme.primary, activeforeground=theme.primary_foreground,
+            font=self._type.font("2xs"),
+        )
+        profile_menu.pack(fill="x", padx=14, pady=(0, 4))
+
+        tk.Label(
+            assistant, text="Ask the Workplace", bg=theme.surface,
+            fg=theme.text_dim, font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(4, 2))
+        self._assistant_entry = tk.Entry(
+            assistant, relief="flat", borderwidth=0, highlightthickness=1,
+            highlightbackground=theme.border_subtle, highlightcolor=theme.primary,
+            bg=theme.surface_raised, fg=theme.foreground, insertbackground=theme.foreground,
+            font=self._type.font("xs"),
+        )
+        self._assistant_entry.pack(fill="x", padx=14, pady=(0, 4), ipady=4)
+        self._assistant_entry.bind("<Return>", lambda _e: self._on_ask_assistant())
+        assistant_buttons = tk.Frame(assistant, bg=theme.surface)
+        assistant_buttons.pack(fill="x", padx=14, pady=(0, 12))
+        self._button(assistant_buttons, "Ask the assistant", self._on_ask_assistant).pack(
+            fill="x", pady=2
+        )
+        self._button(assistant_buttons, "Rebuild the corpus", self._on_refresh_corpus).pack(
+            fill="x", pady=2
+        )
+
         # Settings (database, appearance, backup, defaults).
         settings = column.add("settings", "Settings", icon="⚙", open=False)
         self._db_label = tk.Label(
@@ -647,7 +699,17 @@ class WorkplaceDialog(ThemedDialog):
         self._refresh_records()
         self._refresh_work()
         self._refresh_library()
+        self._refresh_assistant()
         self._refresh_settings()
+
+    def _refresh_assistant(self) -> None:
+        """Show the assistant's honest status (rebuilding the corpus first)."""
+        try:
+            report = self.service.refresh_assistant()
+        except Exception as error:  # a build failure is reported, never hidden
+            self._assistant_status_label.configure(text=f"Assistant unavailable: {error}")
+            return
+        self._assistant_status_label.configure(text=report.describe())
 
     def _refresh_dashboard(self) -> None:
         status = self.service.status()
@@ -982,6 +1044,46 @@ class WorkplaceDialog(ThemedDialog):
             for row in rows
         ]
         self._add_message("workplace", "\n".join(lines), title="Audit trail (newest first)")
+
+    # -- the Workplace assistant (the brief's §10) -----------------------
+
+    def _on_ask_assistant(self) -> None:
+        question = self._assistant_entry.get().strip()
+        if not question:
+            self._add_message("note", "Type a question first.", title="Assistant")
+            return
+        profile = self._assistant_profile.get()
+        self._assistant_entry.delete(0, "end")
+        self._add_message("user", question, title="You")
+        self._run_background(
+            "Asking the Workplace assistant…",
+            lambda: self.service.ask_workplace(question, profile=profile),
+            self._finish_assistant,
+        )
+
+    def _finish_assistant(self, answer: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._add_message("note", str(error), title="Assistant")
+            return
+        self._add_message("workplace", str(answer), title="Workplace assistant")
+
+    def _on_refresh_corpus(self) -> None:
+        self._run_background(
+            "Rebuilding the assistant's corpus…",
+            self.service.refresh_assistant,
+            self._finish_corpus,
+        )
+
+    def _finish_corpus(self, report: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._add_message("note", str(error), title="Assistant")
+            return
+        self._assistant_status_label.configure(text=report.describe())
+        self._add_message(
+            "workplace",
+            f"Rebuilt the assistant's corpus: {report.describe()}.",
+            title="Workplace assistant",
+        )
 
     # -- projects & personnel (the brief's §6 and §8) --------------------
 

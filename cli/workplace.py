@@ -18,6 +18,10 @@
     python -m cli workplace add-taxonomy-discipline TAX-… "New Discipline"
     python -m cli workplace settings --language ar
     python -m cli workplace backup            # a consistent copy of the database
+    python -m cli workplace profiles          # the eleven assistant profiles (§10)
+    python -m cli workplace corpus            # rebuild the assistant's corpus
+    python -m cli workplace ask "what coating applies to the flowline?" --profile coating
+    python -m cli workplace assistant-status
 
 This is the headless twin of the Workplace window: it drives the *same*
 :class:`gui.workplace.WorkplaceService`, so the CLI and the window share one
@@ -276,6 +280,20 @@ def _build_parser() -> argparse.ArgumentParser:
     audit = _sub(sub, "audit", help="The append-only audit trail.")
     audit.add_argument("--for", dest="for_id", default="", help="Only rows about one record id.")
     audit.add_argument("--limit", type=int, default=50, help="How many rows (newest first).")
+
+    # -- the Workplace assistant (the brief's §10) ------------------------
+    profiles = _sub(sub, "profiles", help="The selectable Workplace assistant profiles.")
+    profiles.add_argument("--language", choices=("en", "ar"), default="en", help="The label language.")
+
+    ask = _sub(sub, "ask", help="Ask the Workplace assistant (answers cite the records).")
+    ask.add_argument("question", help="The question.")
+    ask.add_argument("--profile", default="petroleum", help="The assistant profile (see `profiles`).")
+    ask.add_argument("--limit", type=int, default=4, help="How many records to cite.")
+
+    corpus = _sub(sub, "corpus", help="Rebuild the assistant's corpus from the records.")
+    corpus.add_argument("--refresh", action="store_true", help="Rebuild (the default).")
+
+    _sub(sub, "assistant-status", help="An honest status of the Workplace assistant.")
 
     return parser
 
@@ -1167,6 +1185,63 @@ def _record_payload(record: object) -> dict[str, object]:
     return payload
 
 
+def run_profiles(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.assistant_profiles(language=args.language)
+    if args.as_json:
+        print(json.dumps(
+            [{"key": key, "name": name, "specialization": spec} for key, name, spec in rows],
+            ensure_ascii=False, indent=2,
+        ))
+        return EXIT_OK
+    print("Workplace assistant profiles:")
+    for key, name, spec in rows:
+        print(f"  {key:20}  {name} -- {spec}")
+    return EXIT_OK
+
+
+def run_ask(args: argparse.Namespace) -> int:
+    service = _service(args)
+    service.refresh_assistant()
+    answer = service.ask_workplace(args.question, profile=args.profile, limit=args.limit)
+    if args.as_json:
+        print(json.dumps({"profile": args.profile, "answer": answer}, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(answer)
+    return EXIT_OK
+
+
+def run_corpus(args: argparse.Namespace) -> int:
+    service = _service(args)
+    report = service.refresh_assistant()
+    if args.as_json:
+        print(json.dumps(
+            {
+                "documents": report.documents,
+                "by_kind": report.by_kind,
+                "withheld": report.withheld,
+                "unreadable": report.unreadable,
+            },
+            ensure_ascii=False, indent=2,
+        ))
+        return EXIT_OK
+    print(f"Rebuilt the Workplace assistant's corpus: {report.describe()}.")
+    for kind, count in sorted(report.by_kind.items()):
+        print(f"  {kind:16} {count}")
+    return EXIT_OK
+
+
+def run_assistant_status(args: argparse.Namespace) -> int:
+    service = _service(args)
+    service.refresh_assistant()
+    status = service.assistant_status()
+    if args.as_json:
+        print(json.dumps({"status": status}, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print(status)
+    return EXIT_OK
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else sys.argv[1:])
     handlers = {
@@ -1216,6 +1291,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "update": run_domain_update,
         "deactivate": run_domain_deactivate,
         "audit": run_audit,
+        "profiles": run_profiles,
+        "ask": run_ask,
+        "corpus": run_corpus,
+        "assistant-status": run_assistant_status,
     }
     handler = handlers.get(args.command)
     if handler is None:

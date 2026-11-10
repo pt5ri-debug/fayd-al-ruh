@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.paths import workplace_db_path
+from core.workplace.assistant import CorpusReport, WorkplaceAssistant
 from core.workplace.database import WorkplaceDatabase
 from core.workplace.documents import (
     DocumentManager,
@@ -305,6 +306,7 @@ class WorkplaceService:
         self._personnel: PersonnelDirectory | None = None
         self._library: TechnicalLibrary | None = None
         self._documents: DocumentManager | None = None
+        self._assistant: WorkplaceAssistant | None = None
         self._documents_dir = (
             Path(root) / "workplace" / "documents" if root is not None else None
         )
@@ -665,6 +667,37 @@ class WorkplaceService:
     def document_types(self, *, language: str = "en") -> list[tuple[str, str]]:
         """Every document type with its readable label, for a picker."""
         return self.document_manager.types(language=language)
+
+    # -- the Workplace assistant (the brief's §10) ------------------------
+
+    @property
+    def assistant(self) -> WorkplaceAssistant:
+        """The Workplace assistant over the records (the brief's §10)."""
+        if self._assistant is None:
+            self._assistant = WorkplaceAssistant(
+                self.repository,
+                domain=self.domain,
+                documents=self.document_manager,
+            )
+        return self._assistant
+
+    def assistant_profiles(self, *, language: str = "en") -> list[tuple[str, str, str]]:
+        """``(key, name, specialization)`` for every selectable assistant profile."""
+        return self.assistant.profile_summaries(language=language)
+
+    def ask_workplace(
+        self, question: str, *, profile: str = "petroleum", limit: int = 4
+    ) -> str:
+        """Answer a Workplace question in the chosen profile, with the disclaimer."""
+        return self.assistant.answer_text(question, profile=profile, limit=limit)
+
+    def refresh_assistant(self) -> CorpusReport:
+        """Rebuild the assistant's corpus from the records (cumulative knowledge)."""
+        return self.assistant.refresh()
+
+    def assistant_status(self, *, language: str = "en") -> str:
+        """An honest one-line status of the Workplace assistant."""
+        return self.assistant.status(language=language)
 
     # -- institution hierarchy -------------------------------------------
 
