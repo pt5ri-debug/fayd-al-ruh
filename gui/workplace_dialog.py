@@ -109,6 +109,7 @@ class WorkplaceDialog(ThemedDialog):
         self._people_ids: list[str] = []
         self._library_ids: list[str] = []
         self._document_ids: list[str] = []
+        self._report_ids: list[str] = []
         self._results: queue.Queue[tuple[Callable[[Any, Exception | None], None], Any, Exception | None]] = queue.Queue()
 
         self.window = tk.Toplevel(parent)
@@ -543,6 +544,41 @@ class WorkplaceDialog(ThemedDialog):
             fill="x", pady=2
         )
 
+        # Reporting & proposals (the brief's §9, §10, §13): draft a report from
+        # the selected project's own records, move it through its lifecycle, and
+        # issue a deliverable -- which can only happen after a *person* approves
+        # it, never the AI. The draft's AI-written sections are marked as advice.
+        reports = column.add("reports", "Reports & proposals", icon="📝")
+        self._reports_status_label = tk.Label(
+            reports, text="", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=270,
+        )
+        self._reports_status_label.pack(fill="x", padx=14, pady=(6, 4))
+        self._report_list = tk.Listbox(
+            reports, height=5, bg=theme.surface_raised, fg=theme.foreground,
+            selectbackground=theme.primary, selectforeground=theme.primary_foreground,
+            relief="flat", borderwidth=0, highlightthickness=0, font=self._type.font("2xs"),
+            activestyle="none",
+        )
+        self._report_list.pack(fill="x", padx=14, pady=(0, 4))
+        report_buttons = tk.Frame(reports, bg=theme.surface)
+        report_buttons.pack(fill="x", padx=14, pady=(0, 12))
+        self._button(report_buttons, "Draft a report…", self._on_draft_report).pack(
+            fill="x", pady=2
+        )
+        self._button(report_buttons, "Show the report", self._on_show_report).pack(
+            fill="x", pady=2
+        )
+        self._button(report_buttons, "Submit for approval", self._on_submit_report).pack(
+            fill="x", pady=2
+        )
+        self._button(report_buttons, "Approve…", self._on_approve_report).pack(
+            fill="x", pady=2
+        )
+        self._button(report_buttons, "Issue the deliverable", self._on_issue_report).pack(
+            fill="x", pady=2
+        )
+
         # Settings (database, appearance, backup, defaults).
         settings = column.add("settings", "Settings", icon="⚙", open=False)
         self._db_label = tk.Label(
@@ -700,7 +736,31 @@ class WorkplaceDialog(ThemedDialog):
         self._refresh_work()
         self._refresh_library()
         self._refresh_assistant()
+        self._refresh_reports()
         self._refresh_settings()
+
+    def _refresh_reports(self) -> None:
+        """List the selected project's reports and an honest one-line status."""
+        project = self._selected_project()
+        self._report_list.delete(0, "end")
+        self._report_ids = []
+        if project is None:
+            self._reports_status_label.configure(
+                text="Select a project to see its reports and proposals."
+            )
+            return
+        try:
+            rows = self.service.project_reports(project.project.record_id)
+        except Exception as error:  # a read failure is reported, never hidden
+            self._reports_status_label.configure(text=f"Reports unavailable: {error}")
+            return
+        for report in rows:
+            number = report.number or report.record_id
+            self._report_list.insert("end", f"{number} — {report.title} [{report.status}]")
+            self._report_ids.append(report.record_id)
+        self._reports_status_label.configure(
+            text=f"{len(rows)} report(s) for this project. Issuing needs a person's approval."
+        )
 
     def _refresh_assistant(self) -> None:
         """Show the assistant's honest status (rebuilding the corpus first)."""
@@ -1115,8 +1175,10 @@ class WorkplaceDialog(ThemedDialog):
         view = self._selected_project()
         if view is None:
             self._set_text(self._project_text, "No project selected.")
+            self._refresh_reports()
             return
         self._set_text(self._project_text, view.describe())
+        self._refresh_reports()
 
     def _selected_project(self):
         selection = self._project_list.curselection()
@@ -1130,6 +1192,118 @@ class WorkplaceDialog(ThemedDialog):
             self._add_message("note", "Select a project first.", title="Projects")
             return
         self._add_message("workplace", view.describe(), title="Project")
+
+    # -- reporting & proposals (the brief's §9, §10, §13) ----------------
+
+    def _selected_report(self):
+        selection = self._report_list.curselection()
+        if not selection or selection[0] >= len(self._report_ids):
+            return None
+        return self.service.report_record(self._report_ids[selection[0]])
+
+    def _on_draft_report(self) -> None:
+        project = self._selected_project()
+        if project is None:
+            self._add_message("note", "Select a project first.", title="Reports")
+            return
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "report draft",
+            ["kind (technical_report, inspection_report, progress_report, "
+             "management_summary, method_statement, proposal, correspondence)",
+             "title (optional)", "number (optional)"],
+        )
+        if fields is None:
+            return
+        raw_kind = fields.get("kind", "").strip()
+        kind = raw_kind.split()[0] if raw_kind else "technical_report"
+        try:
+            draft = self.service.draft_report(
+                project.project.record_id,
+                kind=kind,
+                title=fields.get("title", ""),
+            )
+            report = self.service.save_report_draft(
+                project.project.record_id, draft, number=fields.get("number", "")
+            )
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message("workplace", draft.to_text(), title="Report draft")
+        self._add_message(
+            "note", f"Saved as **{report.record_id}** (draft).", title="Reports"
+        )
+        self._refresh_reports()
+
+    def _on_show_report(self) -> None:
+        report = self._selected_report()
+        if report is None:
+            self._add_message("note", "Select a report first.", title="Reports")
+            return
+        number = report.number or report.record_id
+        body = report.body or "(no body)"
+        self._add_message(
+            "workplace", f"**{number} — {report.title}** [{report.status}]\n\n{body}",
+            title="Report",
+        )
+
+    def _on_submit_report(self) -> None:
+        report = self._selected_report()
+        if report is None:
+            self._add_message("note", "Select a report first.", title="Reports")
+            return
+        try:
+            updated = self.service.submit_report(report.record_id)
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message("note", f"Report is now **{updated.status}**.", title="Reports")
+        self._refresh_reports()
+
+    def _on_approve_report(self) -> None:
+        report = self._selected_report()
+        if report is None:
+            self._add_message("note", "Select a report first.", title="Reports")
+            return
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "approval",
+            ["approved by (a person's name)", "role (optional)", "note (optional)"],
+        )
+        if fields is None:
+            return
+        approved_by = fields.get("approved by (a person's name)", "").strip()
+        if not approved_by:
+            self._add_message("note", "An approval must name a person.", title="Approval")
+            return
+        try:
+            updated = self.service.approve_report(
+                report.record_id,
+                approved_by=approved_by,
+                role=fields.get("role (optional)", ""),
+                note=fields.get("note (optional)", ""),
+            )
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message(
+            "note", f"Approved by {approved_by}; status **{updated.status}**.", title="Approval"
+        )
+        self._refresh_reports()
+
+    def _on_issue_report(self) -> None:
+        report = self._selected_report()
+        if report is None:
+            self._add_message("note", "Select a report first.", title="Reports")
+            return
+        try:
+            deliverable = self.service.issue_report(report.record_id)
+        except Exception as error:
+            self._add_message("note", str(error), title="Problem")
+            return
+        self._add_message(
+            "workplace", f"Issued deliverable: {deliverable.describe()}", title="Deliverable"
+        )
+        self._refresh_reports()
+        self._refresh_work()
 
     def _on_person_selected(self) -> None:
         profile = self._selected_person()

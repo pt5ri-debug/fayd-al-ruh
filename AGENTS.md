@@ -2186,6 +2186,38 @@ Arabic is kept as secondary aliases where useful.
   `profiles`/`ask`/`corpus`/`assistant-status` (each `--json`), with three new menu
   entries. `docs/workplace/WORKPLACE_PHASE7_ASSISTANT.md` is the report and
   `tests/test_workplace_phase7.py` (19 tests) plus one window test pin it.
+  **Phase 8 adds the reporting and proposal workflows** (the brief's §9, §10, §13).
+  `core/workplace/reporting.py`'s `ReportingWorkflow` **drafts** a report from the
+  records the project already holds (`draft(project_id, kind=, use_assistant=)`):
+  the overview, the scope, the applicable standards (the ITP references, the test
+  standards, and the division's own standard profile items), the inspections, the
+  tests, the findings, the assigned personnel, the reference documents, the
+  deliverables, and the contractual basis -- in one of seven kinds
+  (`REPORT_KINDS`: technical_report, inspection_report, progress_report,
+  management_summary, method_statement, proposal, correspondence). **Nothing is
+  invented**: an empty section reports `(nothing on file)`, and with
+  `use_assistant=True` each section is filled with the assistant's *cited* answer
+  and marked `ai=True` (an assistant failure never breaks a draft -- the section
+  keeps its deterministic lines). A report then moves through a closed state
+  machine (`REPORT_TRANSITIONS`/`can_transition`), and the key invariant is that it
+  reaches `issued` **only through `approved`**: `approve(report_id, approved_by=)`
+  refuses a blank approver, records the approval as a **new** `Approval` row through
+  the audited domain service, and `issue(...)` is refused until the report is
+  approved -- so the §13 rule (an AI recommendation is never an approved
+  engineering decision) is **structural**, not a convention. `issue(...)` registers
+  the deliverable through the Workplace's **own** `DocumentManager`, so it lives in
+  the same registry every other Workplace document lives in (no second store).
+  `WorkplaceService` gains `reporting`/`report_kinds`/`report_statuses`/
+  `draft_report`/`save_report_draft`/`create_report`/`project_reports`/
+  `report_record`/`submit_report`/`reject_report`/`approve_report`/`issue_report`/
+  `supersede_report`/`report_approvals`/`project_deliverables`; the window gains a
+  **Reports & proposals** sidebar section (a report list and Draft/Show/Submit/
+  Approve/Issue); and the CLI gains `report-kinds`/`report-statuses`/
+  `draft-report`/`reports`/`report`/`submit-report`/`reject-report`/
+  `approve-report`/`issue-report`/`supersede-report`/`report-approvals`/
+  `deliverables` (each `--json`), with three new menu entries.
+  `docs/workplace/WORKPLACE_PHASE8_REPORTING.md` is the report and
+  `tests/test_workplace_phase8.py` (33 tests) plus two window tests pin it.
 - `ingest/` — the **local-first ingestion subsystem**: a separate pipeline that
   turns *sources* into the same on-disk knowledge store without ever loading a
   whole dataset into RAM. `ingest.records` holds the contracts (`SourceSpec`,

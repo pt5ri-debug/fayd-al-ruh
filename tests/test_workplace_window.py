@@ -331,3 +331,58 @@ def test_the_assistant_block_asks_and_answers(tmp_path: Path) -> None:
         assert "AI-generated technical guidance" in text
     finally:
         _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_reports_block_drafts_and_lists(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        project = service.domain.create_project(
+            number="TSTC-2026-900", title="Flowline coating", status="active"
+        )
+        # Refresh the project list so the project is selected, then the reports.
+        dialog._refresh_work()
+        assert dialog._project_list.size() == 1
+        dialog._project_list.selection_clear(0, "end")
+        dialog._project_list.selection_set(0)
+        dialog._on_project_selected()
+        assert "report" in dialog._reports_status_label.cget("text").lower()
+        # Saving a draft directly makes it appear in the report list.
+        draft = service.draft_report(project.record_id, kind="technical_report")
+        service.save_report_draft(project.record_id, draft)
+        dialog._refresh_reports()
+        assert dialog._report_list.size() == 1
+        assert "draft" in dialog._report_list.get(0).lower()
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_reports_block_issues_only_after_approval(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        project = service.domain.create_project(
+            number="TSTC-2026-901", title="Issued deliverable", status="active"
+        )
+        report = service.create_report(project.record_id, title="Final report", body="Body.")
+        dialog._refresh_work()
+        dialog._project_list.selection_clear(0, "end")
+        dialog._project_list.selection_set(0)
+        dialog._on_project_selected()
+        # Issuing an unapproved report is refused in the transcript, not a crash.
+        dialog._report_list.selection_clear(0, "end")
+        dialog._report_list.selection_set(0)
+        dialog._on_issue_report()
+        text = "\n".join(w.get("1.0", "end") for w in _all_text_widgets(dialog._transcript))
+        assert "approved" in text.lower()
+        # After an approval the same button issues the deliverable.
+        service.submit_report(report.record_id)
+        service.approve_report(report.record_id, approved_by="Dr. Ahmed")
+        dialog._refresh_reports()
+        dialog._report_list.selection_clear(0, "end")
+        dialog._report_list.selection_set(0)
+        dialog._on_issue_report()
+        text = "\n".join(w.get("1.0", "end") for w in _all_text_widgets(dialog._transcript))
+        assert "Issued deliverable" in text
+    finally:
+        _close_window(root, dialog)
