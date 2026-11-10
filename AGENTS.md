@@ -2093,6 +2093,35 @@ Arabic is kept as secondary aliases where useful.
   entity, add one, show the audit trail); the CLI gains `dashboard`/`entities`/
   `add`/`list`/`show`/`update`/`deactivate`/`audit`. Later phases add the assistant
   and security, each additive.
+  **Phase 5 adds project and personnel management** (the brief's §6 and §8), over
+  those same records and with no new table or migration.
+  `core/workplace/projects.py`'s `ProjectManager` is the read-only project view:
+  `resolve(project_id)` returns a `ProjectSummary` with the client/contractor/
+  consultant/division/manager resolved to the records they point at (or `None` --
+  never a fabricated name) plus its contracts, inspections, tests, documents,
+  reports, correspondence, assignments, findings, approvals, and knowledge
+  records; `open_findings`/`reports_awaiting_approval`/`planned_inspections` are
+  honest sub-views computed from the project's own rows (an *answered* NCR is
+  still open), `counts()` is the one place they are computed, and `approvals`
+  resolves to the project's own approvals *plus* those recorded against its
+  reports/documents/findings. `rows(status=, division_id=)` is the light listing
+  (each `ProjectRow` carries its own real counts), `documents(project_id,
+  doc_type=)` the project's own document repository, and `project_by_number` a
+  lookup by number. `core/workplace/personnel.py`'s `PersonnelDirectory` is the
+  personnel side: `people`/`profile`/`disciplines`, a `CompetencyMatrix`
+  (people × qualification titles, with `coverage()`), and an **explainable**
+  `select(skills=, qualifications=, ...)` whose score is the share of the required
+  items a person's own record carries (role, discipline, and qualification titles),
+  ranking by score then name and naming each candidate's matched and missing items.
+  Writes (`add_person`/`add_qualification`/`assign`) go through the audited
+  `WorkplaceDomain`; a directory built without one is read-only. `WorkplaceService`
+  gains `projects`/`personnel` plus `project_rows`/`project_view`/
+  `project_documents`/`project_assignments`/`assign_person`/`personnel_people`/
+  `person_view`/`competency_matrix`/`select_personnel`; the window gains a
+  **Projects & personnel** sidebar section and the CLI gains `projects`/`project`/
+  `people`/`person`/`matrix`/`select` (each `--json`). It reuses the project's
+  existing document reader and knowledge base -- `WorkplaceDocument`/
+  `KnowledgeRecord` stay registry rows -- per the brief's §11.
 - `ingest/` — the **local-first ingestion subsystem**: a separate pipeline that
   turns *sources* into the same on-disk knowledge store without ever loading a
   whole dataset into RAM. `ingest.records` holds the contracts (`SourceSpec`,

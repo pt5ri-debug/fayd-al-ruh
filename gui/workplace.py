@@ -36,6 +36,9 @@ from core.workplace.model import (
     OrganisationalUnit,
     TaxonomyNode,
 )
+from core.workplace.personnel import Candidate, CompetencyMatrix, PersonnelDirectory, PersonProfile
+from core.workplace.projects import ProjectManager, ProjectRow, ProjectSummary
+from core.workplace.records import Assignment, Person
 from core.workplace.repository import WorkplaceRepository
 from core.workplace.seed import SeedReport, seed_workplace
 from core.workplace.settings import (
@@ -286,6 +289,8 @@ class WorkplaceService:
         self._db: WorkplaceDatabase | None = None
         self._repo: WorkplaceRepository | None = None
         self._domain: WorkplaceDomain | None = None
+        self._projects: ProjectManager | None = None
+        self._personnel: PersonnelDirectory | None = None
         self._actor = "system"
         self._seed_report: SeedReport | None = None
         self._auto_seed = auto_seed
@@ -328,6 +333,20 @@ class WorkplaceService:
         self._actor = actor or "system"
         if self._domain is not None:
             self._domain.actor = self._actor
+
+    @property
+    def projects(self) -> ProjectManager:
+        """The read-only project views (the brief's §6)."""
+        if self._projects is None:
+            self._projects = ProjectManager(self.repository)
+        return self._projects
+
+    @property
+    def personnel(self) -> PersonnelDirectory:
+        """The personnel directory, matrix, and selection (the brief's §8)."""
+        if self._personnel is None:
+            self._personnel = PersonnelDirectory(self.repository, self.domain)
+        return self._personnel
 
     def seed(self, *, force: bool = False) -> SeedReport:
         """Install (or reset) the Workplace defaults."""
@@ -389,6 +408,78 @@ class WorkplaceService:
             standards=len(repo.list_domain("standards")),
             knowledge_records=len(repo.list_domain("knowledge_records")),
             divisions=len(repo.list_divisions()),
+        )
+
+    # -- projects & personnel (the brief's §6 and §8) ---------------------
+
+    def project_rows(
+        self, *, status: str | None = None, division_id: str | None = None
+    ) -> list[ProjectRow]:
+        """A light project listing with each project's own real counts."""
+        self.open()
+        return self.projects.rows(status=status, division_id=division_id)
+
+    def project_view(self, project_id: str) -> ProjectSummary | None:
+        """The full view of one project (every reference resolved), or ``None``."""
+        self.open()
+        return self.projects.resolve(project_id)
+
+    def project_documents(self, project_id: str, *, doc_type: str | None = None):
+        """The project's own document registry, optionally narrowed to one type."""
+        self.open()
+        return self.projects.documents(project_id, doc_type=doc_type)
+
+    def project_assignments(self, project_id: str) -> list[Assignment]:
+        """The people assigned to a project, with their role resolved."""
+        self.open()
+        return self.repository.list_domain(
+            "assignments", where="project_id = ?", params=(project_id,)
+        )
+
+    def assign_person(
+        self, *, project_id: str, person_id: str, role: str = "", **fields: object
+    ) -> Assignment:
+        """Assign a person to a project (audited through the domain service)."""
+        self.open()
+        return self.personnel.assign(
+            project_id=project_id, person_id=person_id, role=role, **fields
+        )
+
+    def personnel_people(
+        self,
+        *,
+        division_id: str | None = None,
+        discipline: str | None = None,
+        available_only: bool = False,
+    ) -> list[Person]:
+        self.open()
+        return self.personnel.people(
+            division_id=division_id, discipline=discipline, available_only=available_only
+        )
+
+    def person_view(self, person_id: str) -> PersonProfile | None:
+        self.open()
+        return self.personnel.profile(person_id)
+
+    def competency_matrix(self, *, division_id: str | None = None) -> CompetencyMatrix:
+        self.open()
+        return self.personnel.competency_matrix(division_id=division_id)
+
+    def select_personnel(
+        self,
+        *,
+        skills: tuple[str, ...] = (),
+        qualifications: tuple[str, ...] = (),
+        division_id: str | None = None,
+        limit: int = 5,
+    ) -> list[Candidate]:
+        """Rank the people who can cover the required skills/qualifications."""
+        self.open()
+        return self.personnel.select(
+            skills=skills,
+            qualifications=qualifications,
+            division_id=division_id,
+            limit=limit,
         )
 
     # -- institution hierarchy -------------------------------------------
@@ -759,10 +850,15 @@ def _slugify(text: str) -> str:
 
 __all__ = [
     "DIVISION_DETAIL_LABELS",
+    "Candidate",
+    "CompetencyMatrix",
     "DivisionDetailSummary",
     "DivisionProfile",
     "DivisionSummary",
     "HierarchyView",
+    "PersonProfile",
+    "ProjectRow",
+    "ProjectSummary",
     "WorkplaceDashboard",
     "WorkplaceDomainError",
     "WorkplaceError",

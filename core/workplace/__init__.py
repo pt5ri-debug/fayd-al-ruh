@@ -53,6 +53,17 @@ from core.workplace.model import (
     WorkplaceRecord,
     make_id,
 )
+from core.workplace.personnel import (
+    Candidate,
+    CompetencyMatrix,
+    PersonnelDirectory,
+    PersonProfile,
+)
+from core.workplace.projects import (
+    ProjectManager,
+    ProjectRow,
+    ProjectSummary,
+)
 from core.workplace.records import (
     CONFIDENTIALITY_LEVELS,
     DOCUMENT_TYPES,
@@ -79,10 +90,17 @@ __all__ = [
     "REFERENCE_KINDS",
     "SCHEMA_VERSION",
     "TAXONOMY",
+    "Candidate",
+    "CompetencyMatrix",
     "Division",
     "DivisionDetail",
     "Institution",
     "OrganisationalUnit",
+    "PersonProfile",
+    "PersonnelDirectory",
+    "ProjectManager",
+    "ProjectRow",
+    "ProjectSummary",
     "RecordBase",
     "SeedReport",
     "TaxonomyArea",

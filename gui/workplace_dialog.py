@@ -104,6 +104,8 @@ class WorkplaceDialog(ThemedDialog):
         self._row_frames: list[tuple[str, str, tk.Frame, tk.Text, RoundedBox | None]] = []
         self._division_ids: list[str] = []
         self._profile_ids: list[str] = []
+        self._project_ids: list[str] = []
+        self._people_ids: list[str] = []
         self._results: queue.Queue[tuple[Callable[[Any, Exception | None], None], Any, Exception | None]] = queue.Queue()
 
         self.window = tk.Toplevel(parent)
@@ -371,6 +373,64 @@ class WorkplaceDialog(ThemedDialog):
             fill="x", pady=2
         )
 
+        # Projects & personnel (the brief's §6 and §8).
+        work = column.add("work", "Projects & personnel", icon="🗃", open=False)
+        tk.Label(
+            work, text="Projects (real records)", bg=theme.surface,
+            fg=theme.text_dim, font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(6, 2))
+        self._project_list = tk.Listbox(
+            work, height=7, activestyle="none", relief="flat", borderwidth=0,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            selectbackground=theme.primary, selectforeground=theme.primary_foreground,
+            font=self._list_type.font("xs"), exportselection=False,
+        )
+        self._project_list.pack(fill="x", padx=14, pady=(0, 4))
+        self._project_list.bind("<<ListboxSelect>>", lambda _e: self._on_project_selected())
+        project_buttons = tk.Frame(work, bg=theme.surface)
+        project_buttons.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(project_buttons, "Show the project…", self._on_show_project).pack(
+            fill="x", pady=2
+        )
+        self._project_text = tk.Text(
+            work, height=6, wrap="word", relief="flat", borderwidth=0,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            font=self._type.font("xs"), padx=10, pady=8, cursor="xterm", takefocus=1,
+        )
+        self._project_text.pack(fill="x", padx=14, pady=(0, 6))
+        self._project_text.configure(state="disabled")
+
+        tk.Label(
+            work, text="Personnel", bg=theme.surface,
+            fg=theme.text_dim, font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(fill="x", padx=14, pady=(6, 2))
+        self._people_list = tk.Listbox(
+            work, height=7, activestyle="none", relief="flat", borderwidth=0,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            selectbackground=theme.primary, selectforeground=theme.primary_foreground,
+            font=self._list_type.font("xs"), exportselection=False,
+        )
+        self._people_list.pack(fill="x", padx=14, pady=(0, 4))
+        self._people_list.bind("<<ListboxSelect>>", lambda _e: self._on_person_selected())
+        people_buttons = tk.Frame(work, bg=theme.surface)
+        people_buttons.pack(fill="x", padx=14, pady=(0, 4))
+        self._button(people_buttons, "Show the profile…", self._on_show_person).pack(
+            fill="x", pady=2
+        )
+        self._button(people_buttons, "Select personnel…", self._on_select_personnel).pack(
+            fill="x", pady=2
+        )
+        self._button(people_buttons, "Competency matrix", self._on_show_matrix).pack(
+            fill="x", pady=2
+        )
+        self._person_text = tk.Text(
+            work, height=6, wrap="word", relief="flat", borderwidth=0,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            font=self._type.font("xs"), padx=10, pady=8, cursor="xterm", takefocus=1,
+        )
+        self._person_text.pack(fill="x", padx=14, pady=(0, 12))
+        self._person_text.configure(state="disabled")
+
         # Settings (database, appearance, backup, defaults).
         settings = column.add("settings", "Settings", icon="⚙", open=False)
         self._db_label = tk.Label(
@@ -525,6 +585,7 @@ class WorkplaceDialog(ThemedDialog):
         self._refresh_profile()
         self._refresh_taxonomy()
         self._refresh_records()
+        self._refresh_work()
         self._refresh_settings()
 
     def _refresh_dashboard(self) -> None:
@@ -860,6 +921,99 @@ class WorkplaceDialog(ThemedDialog):
             for row in rows
         ]
         self._add_message("workplace", "\n".join(lines), title="Audit trail (newest first)")
+
+    # -- projects & personnel (the brief's §6 and §8) --------------------
+
+    def _refresh_work(self) -> None:
+        rows = self.service.project_rows()
+        self._project_list.delete(0, "end")
+        self._project_ids = []
+        for row in rows:
+            self._project_list.insert("end", row.describe())
+            self._project_ids.append(row.project.record_id)
+        if rows:
+            self._project_list.selection_set(0)
+        self._on_project_selected()
+
+        people = self.service.personnel_people()
+        self._people_list.delete(0, "end")
+        self._people_ids = []
+        for person in people:
+            mark = "" if person.available else "  (not available)"
+            self._people_list.insert(
+                "end", f"{person.name} — {person.role or person.discipline or '—'}{mark}"
+            )
+            self._people_ids.append(person.record_id)
+        if people:
+            self._people_list.selection_set(0)
+        self._on_person_selected()
+
+    def _on_project_selected(self) -> None:
+        view = self._selected_project()
+        if view is None:
+            self._set_text(self._project_text, "No project selected.")
+            return
+        self._set_text(self._project_text, view.describe())
+
+    def _selected_project(self):
+        selection = self._project_list.curselection()
+        if not selection or selection[0] >= len(self._project_ids):
+            return None
+        return self.service.project_view(self._project_ids[selection[0]])
+
+    def _on_show_project(self) -> None:
+        view = self._selected_project()
+        if view is None:
+            self._add_message("note", "Select a project first.", title="Projects")
+            return
+        self._add_message("workplace", view.describe(), title="Project")
+
+    def _on_person_selected(self) -> None:
+        profile = self._selected_person()
+        if profile is None:
+            self._set_text(self._person_text, "No person selected.")
+            return
+        self._set_text(self._person_text, profile.describe())
+
+    def _selected_person(self):
+        selection = self._people_list.curselection()
+        if not selection or selection[0] >= len(self._people_ids):
+            return None
+        return self.service.person_view(self._people_ids[selection[0]])
+
+    def _on_show_person(self) -> None:
+        profile = self._selected_person()
+        if profile is None:
+            self._add_message("note", "Select a person first.", title="Personnel")
+            return
+        self._add_message("workplace", profile.describe(), title="Personnel profile")
+
+    def _on_show_matrix(self) -> None:
+        matrix = self.service.competency_matrix()
+        self._add_message("workplace", matrix.describe(), title="Competency matrix", mono_body=True)
+
+    def _on_select_personnel(self) -> None:
+        fields = _prompt_record(
+            self.window, self.theme, self._type, "personnel selection",
+            ["skill", "qualification"],
+        )
+        if fields is None:
+            return
+        skills = tuple(part.strip() for part in fields.get("skill", "").split(",") if part.strip())
+        qualifications = tuple(
+            part.strip() for part in fields.get("qualification", "").split(",") if part.strip()
+        )
+        if not skills and not qualifications:
+            self._add_message("note", "Enter at least one skill or qualification.", title="Selection")
+            return
+        candidates = self.service.select_personnel(
+            skills=skills, qualifications=qualifications
+        )
+        if not candidates:
+            self._add_message("note", "No personnel to select from yet.", title="Selection")
+            return
+        lines = [candidate.describe() for candidate in candidates]
+        self._add_message("workplace", "\n".join(lines), title="Ranked candidates")
 
     # -- settings actions -------------------------------------------------
 
