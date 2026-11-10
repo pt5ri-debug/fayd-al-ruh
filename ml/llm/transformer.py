@@ -131,6 +131,29 @@ def _layer_norm_backward(
 
 
 @dataclass
+class KVCache:
+    """Per-layer keys and values for incremental (cached) generation.
+
+    Generation used to recompute the whole window for every new token, which is
+    quadratic in the sequence length: a 100-token answer ran the forward pass 100
+    times over growing windows. A cache holds each layer's keys and values from
+    the tokens already seen, so one new token costs one token's work. It is
+    inference-only (dropout is never applied through it) and it is exact: the
+    logits it produces are the ones the full forward pass produces, which
+    ``tests/test_llm_kv_cache.py`` proves to machine precision.
+    """
+
+    keys: list[np.ndarray] = field(default_factory=list)
+    values: list[np.ndarray] = field(default_factory=list)
+    length: int = 0
+
+    def reset(self) -> None:
+        self.keys = []
+        self.values = []
+        self.length = 0
+
+
+@dataclass
 class _LayerParams:
     ln1_w: np.ndarray
     ln1_b: np.ndarray
@@ -280,6 +303,78 @@ class TransformerLM:
         cache["normed_final"] = final_normed
         self._cache = cache
         return logits
+
+    def forward_incremental(self, idx: np.ndarray, cache: KVCache) -> np.ndarray:
+        """Return next-token logits for new tokens, reusing cached keys/values.
+
+        ``idx`` holds only the *new* tokens (the generator feeds one at a time).
+        The cache is extended in place and the logits for the new positions are
+        returned -- exactly the logits :meth:`forward` would return for the whole
+        sequence, but computed in time linear in the sequence length rather than
+        quadratic. Inference only: dropout is never applied through it, so it must
+        not be called while ``train(True)``.
+        """
+        idx = np.asarray(idx, dtype=np.int64)
+        if idx.ndim == 1:
+            idx = idx[None, :]
+        _batch, new = idx.shape
+        start = cache.length
+        total = start + new
+        if total > self.config.block_size:
+            raise ValueError(
+                f"Sequence length {total} exceeds block_size {self.config.block_size}."
+            )
+        positions = np.arange(start, total)
+        x = self.token_embedding[idx] + self.position_embedding[positions][None, :, :]
+        if not cache.keys:
+            cache.keys = [None] * len(self.layers)  # type: ignore[list-item]
+            cache.values = [None] * len(self.layers)  # type: ignore[list-item]
+        for index, layer in enumerate(self.layers):
+            residual = x
+            normed1, _ = _layer_norm(x, layer.ln1_w, layer.ln1_b)
+            attn_out, keys, values = self._attention_step(normed1, layer, cache.keys[index], cache.values[index])
+            cache.keys[index] = keys
+            cache.values[index] = values
+            x = residual + attn_out
+            residual = x
+            normed2, _ = _layer_norm(x, layer.ln2_w, layer.ln2_b)
+            x = residual + _gelu(normed2 @ layer.fc_w + layer.fc_b) @ layer.fc2_w + layer.fc2_b
+        cache.length = total
+        final_normed, _ = _layer_norm(x, self.ln_f_w, self.ln_f_b)
+        return final_normed @ self.head
+
+    def _attention_step(self, x, layer, cached_keys, cached_values):
+        """One attention step over ``x`` appended to the cache's keys/values.
+
+        Returns the attention output for the new positions plus the extended
+        key/value tensors, shaped ``(batch, n_head, seq, head_dim)``.
+        """
+        batch, seq, n_embd = x.shape
+        n_head = self.config.n_head
+        head_dim = n_embd // n_head
+        qkv = x @ layer.attn_w + layer.attn_b
+        q, k, v = np.split(qkv, 3, axis=-1)
+
+        def split(a):
+            return a.reshape(batch, seq, n_head, head_dim).transpose(0, 2, 1, 3)
+
+        q, k, v = split(q), split(k), split(v)
+        if cached_keys is not None:
+            k = np.concatenate([cached_keys, k], axis=2)
+            v = np.concatenate([cached_values, v], axis=2)
+        scores = (q @ k.transpose(0, 1, 3, 2)) / np.sqrt(head_dim)
+        # A causal mask against the *whole* cached length: the new positions may
+        # attend to every earlier position but never to a later one.
+        total = k.shape[2]
+        query_positions = np.arange(total - seq, total)[:, None]
+        key_positions = np.arange(total)[None, :]
+        mask = key_positions > query_positions
+        scores = np.where(mask, -np.inf, scores)
+        weights = _softmax_rows(scores)
+        attn = weights @ v
+        merged = attn.transpose(0, 2, 1, 3).reshape(batch, seq, n_embd)
+        out = merged @ layer.proj_w + layer.proj_b
+        return out, k, v
 
     def _dropout(self, x: np.ndarray, p: float) -> tuple[np.ndarray, np.ndarray | None]:
         """Inverted dropout: scale by ``1/(1-p)`` so evaluation needs no change."""

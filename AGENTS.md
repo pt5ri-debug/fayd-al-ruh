@@ -212,7 +212,14 @@ Arabic is kept as secondary aliases where useful.
   `learning_rates`). New config fields persist in save/load. `train_language_model`
   also takes `optimizer`/`start_step`, and `train_and_save` exposes `--resume`: it
   loads the checkpoint weights + saved tokenizer and continues instead of starting
-  over, extending the schedule to `start_step + steps`.
+  over, extending the schedule to `start_step + steps`. `TransformerLM.forward_incremental`
+  plus the `KVCache` dataclass make decoding incremental: a token costs one token's
+  work instead of a full pass over the whole window (the previous behaviour, which
+  was quadratic in the answer length), and the logits are *exactly* the full pass's
+  (pinned to 1e-15 by `tests/test_llm_kv_cache.py`; measured ~77x faster on a
+  200-token `release-1` answer). `LocalGenerator` and `StructuredDecoder` use it,
+  falling back to the sliding-window full pass once the context passes `block_size`
+  (the cache is append-only), so the output is identical either way.
 - `ml/llm/schedule.py` — the sharded, resumable schedule. By default a `--resume`
   replays the same corpus, so more steps deepen the fit rather than reaching new
   material; `--llm-shards N` (in `ml/llm` and `ml.release`) instead splits the

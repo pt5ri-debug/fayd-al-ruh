@@ -16,7 +16,7 @@ import json
 import numpy as np
 
 from ml.llm.tokenizer import BOS_ID, ByteTokenizer, sample
-from ml.llm.transformer import TransformerLM
+from ml.llm.transformer import KVCache, TransformerLM
 
 _STRING_STOP = frozenset({'"', "\n", "\r", "\t"})
 _NUMBERS = ("0.4", "0.5", "0.6", "0.7", "0.8", "0.9")
@@ -29,16 +29,42 @@ class StructuredDecoder:
     Works with any tokenizer exposing ``encode``/``decode``: the running buffer
     is text, re-encoded before each step, so a multi-byte UTF-8 character is
     never split and the same code path serves the byte and BPE tokenizers.
+
+    The forward pass is cached: the skeleton only ever *appends* text, so when the
+    new encoding begins with the previous token ids (always true for the byte
+    tokenizer, and the common case for BPE) only the new tokens are run through
+    the model. When the encoding is not a simple extension -- a merge rewrote the
+    boundary -- the cache is rebuilt from scratch, so the logits are exactly the
+    ones a full recompute would give.
     """
 
     def __init__(self, model: TransformerLM, tokenizer=None) -> None:
         self.model = model
         self.tokenizer = tokenizer or ByteTokenizer()
+        self._cache = KVCache()
+        self._tokens: list[int] = []
 
     def _logits(self, prefix: str) -> np.ndarray:
         tokens = self.tokenizer.encode(prefix, bos=False)
-        window = tokens[-self.model.config.block_size :]
-        return self.model.forward(np.array(window, dtype=np.int64))[0, -1]
+        block = self.model.config.block_size
+        if len(tokens) > block:
+            # The window slides, which the append-only cache cannot express.
+            self._cache = KVCache()
+            self._tokens = []
+            return self.model.forward(np.array(tokens[-block:], dtype=np.int64))[0, -1]
+        reuse = (
+            self._tokens
+            and len(tokens) > len(self._tokens)
+            and tokens[: len(self._tokens)] == self._tokens
+        )
+        if reuse:
+            new = tokens[len(self._tokens) :]
+            logits = self.model.forward_incremental(np.array(new, dtype=np.int64), self._cache)
+            self._tokens = tokens
+            return logits[0, -1]
+        self._cache = KVCache()
+        self._tokens = tokens
+        return self.model.forward_incremental(np.array(tokens, dtype=np.int64), self._cache)[0, -1]
 
     def _string(self, prefix: str, rng, temperature: float, max_tokens: int) -> str:
         """Sample a string leaf; stops at a closing quote or control character."""
