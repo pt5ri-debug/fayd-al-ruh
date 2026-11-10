@@ -311,3 +311,23 @@ def test_the_document_registry_and_verification(tmp_path: Path) -> None:
         assert "matches" in text
     finally:
         _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_assistant_block_asks_and_answers(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        # The status line reflects a real corpus build (never fabricated figures).
+        assert "citable documents" in dialog._assistant_status_label.cget("text")
+        # The profile picker offers the eleven assistants.
+        keys = [k for k, _n, _s in service.assistant_profiles()]
+        assert dialog._assistant_profile.get() == "petroleum"
+        assert len(keys) == 11
+        # A question is answered in the transcript, with the honesty disclaimer.
+        dialog._assistant_entry.insert(0, "what is the institution?")
+        dialog._on_ask_assistant()
+        assert _wait_until(root, lambda: not dialog._busy)
+        text = "\n".join(w.get("1.0", "end") for w in _all_text_widgets(dialog._transcript))
+        assert "AI-generated technical guidance" in text
+    finally:
+        _close_window(root, dialog)

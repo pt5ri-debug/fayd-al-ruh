@@ -2156,6 +2156,36 @@ Arabic is kept as secondary aliases where useful.
   `document-text`/`register-document` (each `--json`), with two new menu entries.
   `docs/workplace/WORKPLACE_PHASE6_LIBRARY_DOCUMENTS.md` is the report and
   `tests/test_workplace_phase6.py` (29 tests) plus three window tests pin it.
+  **Phase 7 adds the Workplace assistant** (the brief's §10) -- a *thin layer* over
+  the systems the project already has, never a second RAG or document engine (the
+  brief's §11). `core/workplace/assistant.py`'s `build_workplace_documents(repository,
+  documents=, clearance=, report=)` turns every Workplace record into one citable
+  `core.documents.Document` -- a **view** over a row (institution, units, divisions
+  + their profiles, standards, clients, projects, contracts, people +
+  qualifications, procedures, inspections, tests, findings, reports,
+  correspondence, knowledge records, assignments, and a registered document's own
+  text read through the project's own reader) -- so exactly one copy of the facts
+  exists. `WorkplaceAssistant` joins those records to the **project's own corpus**
+  (`core.documents.build_document_store(extra=...)`, the brief's "controlled reuse
+  of shared knowledge") and answers through the project's own `core.rag.RagRetriever`
+  + `core.assistant.GroundedAssistant`, so every answer carries its citations, falls
+  back to the extractive path with no model, and passes the groundedness gate. It is
+  **cumulative** (a project or document added since the last build becomes citable
+  on `refresh()`) and **honest**: a record above the caller's `clearance`
+  (`DEFAULT_CLEARANCE`) is withheld and counted, a document with no readable text is
+  skipped and counted (`CorpusReport`), and every answer carries `DISCLAIMER` -- the
+  AI advises, it never *decides* (the brief's §13). `PROFILES` ships the eleven
+  selectable assistants (petroleum, welding, coating, civil, electrical, qa-qc,
+  surveillance, project-management, tender, contract, research), each a
+  `WorkplaceProfile` whose `system_instruction(base)` lays its own instruction over
+  the project's (never replacing it); `profile_for` maps an unknown key to the
+  default. `WorkplaceService` gains `assistant`/`assistant_profiles`/`ask_workplace`/
+  `refresh_assistant`/`assistant_status`; the window gains an **Assistant** sidebar
+  section (corpus status, the eleven-profile picker, a question box, *Ask the
+  assistant*, *Rebuild the corpus*); and the CLI gains
+  `profiles`/`ask`/`corpus`/`assistant-status` (each `--json`), with three new menu
+  entries. `docs/workplace/WORKPLACE_PHASE7_ASSISTANT.md` is the report and
+  `tests/test_workplace_phase7.py` (19 tests) plus one window test pin it.
 - `ingest/` — the **local-first ingestion subsystem**: a separate pipeline that
   turns *sources* into the same on-disk knowledge store without ever loading a
   whole dataset into RAM. `ingest.records` holds the contracts (`SourceSpec`,
