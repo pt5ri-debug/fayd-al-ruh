@@ -2121,7 +2121,41 @@ Arabic is kept as secondary aliases where useful.
   **Projects & personnel** sidebar section and the CLI gains `projects`/`project`/
   `people`/`person`/`matrix`/`select` (each `--json`). It reuses the project's
   existing document reader and knowledge base -- `WorkplaceDocument`/
-  `KnowledgeRecord` stay registry rows -- per the brief's §11.
+  `KnowledgeRecord` stay registry rows -- per the brief's §11. **Phase 6** adds the
+  technical library (the brief's §7) and the document registry (§9), again as
+  *views* over the same repository. `core/workplace/library.py`'s `TechnicalLibrary`
+  reads the `standards` rows: `standards(body=, reference_kind=, query=)`,
+  `standard(id)`, `revisions(body=, number=)` (ordered by publication date),
+  `current`, and `compare_revisions` (a `RevisionComparison` whose `changes()`
+  reports the metadata fields that differ -- the brief's §10 revision comparison).
+  `REFERENCE_KINDS` keeps the four kinds apart -- an *official standard*, an
+  *internal procedure*, a *project specification*, and *technical guidance* -- and
+  `STANDARD_BODIES` names the issuing bodies the brief lists (API, ASME, ASTM, ISO,
+  AWS, AMPP/NACE, DNV, EN, IEC, …), each offered even when the library holds nothing
+  of it (`bodies()` reports the honest `0`). It stores a standard's **metadata**
+  (number, title, edition, revision, date, source, applicability), never its text:
+  it does not reproduce a copyrighted standard and never fabricates a requirement.
+  `core/workplace/documents.py`'s `DocumentManager` is the **registry** (not a
+  store): `register_file` copies a file into the git-ignored
+  `data/workplace/documents` content-addressed by its `blake2b` hash, `register_text`
+  registers supplied text, `documents`/`document`/`history` list and walk a
+  revision chain (`revision` + `supersedes_id`, so a revision is a new row and the
+  original is never mutated), `read_text`/`chunks` reuse the project's *existing*
+  `core.document_reader.read_document` and `core.knowledge_base.chunk_text`,
+  `verify` re-hashes the stored file (an integrity check, not an assumption), and
+  `find_by_hash` reports a duplicate. `DOCUMENT_TYPES`/`document_type_label` label
+  every document type (English + Arabic). Both views write through the *same*
+  audited `WorkplaceDomain`, so a change is recorded in the audit trail.
+  `WorkplaceService` exposes `library`/`document_manager` and the `library_*`/
+  `standard_*`/`document_*` methods; the window gains a **Technical library** sidebar
+  section (the standards list with the four-kind counts, Show the revisions…,
+  Compare revisions…, Add a reference…; the document list with Register a file…,
+  Read the document, Verify the file, Revision history…); and the CLI gains
+  `library`/`library-bodies`/`library-kinds`/`standard-revisions`/`compare-standards`/
+  `add-standard`/`documents`/`document`/`document-history`/`verify-document`/
+  `document-text`/`register-document` (each `--json`), with two new menu entries.
+  `docs/workplace/WORKPLACE_PHASE6_LIBRARY_DOCUMENTS.md` is the report and
+  `tests/test_workplace_phase6.py` (29 tests) plus three window tests pin it.
 - `ingest/` — the **local-first ingestion subsystem**: a separate pipeline that
   turns *sources* into the same on-disk knowledge store without ever loading a
   whole dataset into RAM. `ingest.records` holds the contracts (`SourceSpec`,
