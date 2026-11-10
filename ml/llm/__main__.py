@@ -106,6 +106,7 @@ def train_and_save(
     weight_decay: float = 0.0,
     lr_schedule: str = "cosine",
     restore_best: bool = False,
+    accum_steps: int = 1,
     resume: bool = False,
     state_path: Path | None = None,
     verbose: bool = True,
@@ -237,6 +238,7 @@ def train_and_save(
         weight_decay=weight_decay,
         lr_schedule=lr_schedule,
         restore_best=restore_best,
+        accum_steps=accum_steps,
         progress=progress,
     )
     model.save(checkpoint)
@@ -392,6 +394,14 @@ def main(argv: list[str] | None = None) -> int:
         "checkpoint.",
     )
     parser.add_argument(
+        "--accum-steps",
+        type=int,
+        default=1,
+        help="Accumulate this many micro-batches before one optimiser step, so a "
+        "large effective batch fits a small one (the update matches a single "
+        "batch of batch_size*accum_steps).",
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Print only the final summary, not the live progress lines.",
@@ -421,6 +431,7 @@ def main(argv: list[str] | None = None) -> int:
         weight_decay=args.weight_decay,
         lr_schedule=args.lr_schedule,
         restore_best=args.restore_best,
+        accum_steps=args.accum_steps,
         kb_max_chunks=args.kb_max_chunks,
         include_runtime=not args.no_runtime_docs,
         include_sessions=args.llm_sessions,

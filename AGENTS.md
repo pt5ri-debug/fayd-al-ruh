@@ -255,6 +255,15 @@ Arabic is kept as secondary aliases where useful.
   them, and the CLI exposes `--top-k`/`--top-p`/`--repetition-penalty` on
   `python -m ml.llm --generate` and `--mind-top-k`/`--mind-top-p`/
   `--mind-repetition-penalty` on `python -m cli chat`.
+  **Gradient accumulation** lets a large *effective* batch fit the memory of a
+  single micro-batch: `accum_steps` (>= 1) sums the gradients of that many
+  micro-batches and scales by `1/accum_steps` before one optimiser step, so
+  `accum_steps=k, batch_size=b` makes the **same update** a single `b*k` batch
+  would (pinned to 1e-12 by `tests/test_llm_grad_accum.py`, which trains the real
+  model both ways). Clipping is applied to the accumulated gradient. `accum_steps`
+  defaults to 1 (the original loop); the CLI exposes `--accum-steps`. Measured on
+  the project corpus (200 optimizer steps, `modern`): effective batch 16 through
+  accumulation reaches val loss 2.814 vs effective batch 2's 3.295.
 - `ml/llm/schedule.py` — the sharded, resumable schedule. By default a `--resume`
   replays the same corpus, so more steps deepen the fit rather than reaching new
   material; `--llm-shards N` (in `ml/llm` and `ml.release`) instead splits the
