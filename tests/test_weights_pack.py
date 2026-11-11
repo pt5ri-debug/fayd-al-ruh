@@ -32,6 +32,7 @@ from core.weights_pack import (
     file_digest,
     generate_manifest,
     install_pack,
+    integrity_report,
     load_pack,
     pack_status,
     verify_entry,
@@ -673,6 +674,63 @@ def test_cli_show_prints_the_provenance(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "language-model" in out
     assert cli_main(["show", "nope", "--root", str(root)]) == 3
+
+
+# -------------------------------------------------------- integrity (Phase 5)
+
+
+def test_integrity_is_incomplete_until_installed(tmp_path):
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    root = _write_pack(tmp_path / "weights", [_language_row(checkpoint)])
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(tmp_path / "data")}):
+        before = integrity_report(root)
+        assert before.available
+        assert before.total == 1 and before.verified == 1
+        assert not before.complete
+        install_pack(load_pack(root), keys=("fayd-llm",))
+        after = integrity_report(root)
+        assert after.complete and after.present == 1
+
+
+def test_integrity_reports_a_tampered_entry(tmp_path):
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    root = _write_pack(tmp_path / "weights", [_language_row(checkpoint)])
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(tmp_path / "data")}):
+        checkpoint.write_bytes(checkpoint.read_bytes() + b"x")
+        report = integrity_report(root)
+        assert not report.complete
+        assert [item.entry.key for item in report.failed] == ["fayd-llm"]
+
+
+def test_integrity_never_calls_a_partial_check_complete(tmp_path):
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    root = _write_pack(tmp_path / "weights", [_language_row(checkpoint)])
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(tmp_path / "data")}):
+        install_pack(load_pack(root), keys=("fayd-llm",))
+        partial = integrity_report(pack=load_pack(root), verifications=())
+        assert not partial.complete
+        assert partial.unverified_keys == ("fayd-llm",)
+
+
+def test_integrity_reports_a_missing_pack(tmp_path):
+    report = integrity_report(tmp_path / "absent")
+    assert not report.available
+    assert not report.complete
+    assert report.describe()
+
+
+def test_cli_integrity_reports_and_exits(tmp_path, capsys):
+    from cli.weights import main as cli_main
+
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    root = _write_pack(tmp_path / "weights", [_language_row(checkpoint)])
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(tmp_path / "data")}):
+        assert cli_main(["integrity", "--root", str(root)]) == 4
+        assert "incomplete" in capsys.readouterr().out
+        install_pack(load_pack(root), keys=("fayd-llm",))
+        assert cli_main(["integrity", "--root", str(root), "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["complete"] is True and payload["total"] == 1
 
 
 # --------------------------------------------------------------------- menu

@@ -804,6 +804,119 @@ def pack_status(root: Path | str | None = None) -> PackStatus:
     return PackStatus(pack=pack, verifications=verifications, installed=names)
 
 
+# --------------------------------------------------------------- integrity
+
+
+@dataclass(frozen=True)
+class IntegrityReport:
+    """A whole-pack integrity verdict: is *every* entry verified and installed?
+
+    ``verify`` answers "is this file what the pack says it is"; ``pack_status``
+    answers "what does the pack offer and what is installed". This is the third
+    question a clean clone asks -- *is the whole pack intact and ready* -- and it
+    answers it as a single verdict over every entry, so a caller (and the
+    evaluation gate) can require the pack be **complete**, not merely non-empty.
+
+    A pack with a *partial* verification tuple (a caller that verified only some
+    entries) is reported as ``complete=False`` with the missing keys named, so a
+    half-checked pack is never mistaken for a whole one.
+    """
+
+    pack: WeightsPack
+    verifications: tuple[Verification, ...] = ()
+    installed: tuple[str, ...] = ()
+    detail: str = ""
+
+    @property
+    def total(self) -> int:
+        """How many entries the pack declares."""
+        return len(self.pack.entries)
+
+    @property
+    def available(self) -> bool:
+        """Whether a real manifest was read (a missing pack is not available)."""
+        return self.pack.available
+
+    @property
+    def verified(self) -> int:
+        """How many entries verify cleanly."""
+        return sum(1 for item in self.verifications if item.ok)
+
+    @property
+    def failed(self) -> tuple[Verification, ...]:
+        """The entries that did not verify, in manifest order."""
+        return tuple(item for item in self.verifications if not item.ok)
+
+    @property
+    def unverified_keys(self) -> tuple[str, ...]:
+        """Entries the caller did not verify (a partial check), in manifest order."""
+        checked = {item.entry.key for item in self.verifications}
+        return tuple(entry.key for entry in self.pack.entries if entry.key not in checked)
+
+    @property
+    def complete(self) -> bool:
+        """Whether the pack is available, every entry verified, and all installed."""
+        return (
+            self.available
+            and self.total > 0
+            and self.verified == self.total
+            and not self.unverified_keys
+            and self.present == self.total
+        )
+
+    @property
+    def present(self) -> int:
+        """How many entries are already installed for the trainers."""
+        return len(self.installed)
+
+    def describe(self) -> str:
+        if not self.pack.available:
+            return self.detail or self.pack.detail or "No weights pack was found."
+        verdict = "complete" if self.complete else "incomplete"
+        lines = [
+            f"Weights pack integrity: {verdict}",
+            f"  {self.verified}/{self.total} entries verify cleanly, "
+            f"{self.present}/{self.total} installed",
+        ]
+        for item in self.failed:
+            lines.append(f"  ! {item.entry.key}: {item.status}")
+        if self.unverified_keys:
+            lines.append("  not checked: " + ", ".join(self.unverified_keys))
+        return "\n".join(lines)
+
+    def to_primitive(self) -> dict[str, Any]:
+        return {
+            "available": self.pack.available,
+            "complete": self.complete,
+            "total": self.total,
+            "verified": self.verified,
+            "present": self.present,
+            "unverified": list(self.unverified_keys),
+            "failed": [item.to_primitive() for item in self.failed],
+            "detail": self.detail,
+        }
+
+
+def integrity_report(
+    root: Path | str | None = None,
+    *,
+    pack: WeightsPack | None = None,
+    verifications: tuple[Verification, ...] | None = None,
+) -> IntegrityReport:
+    """Report whether the whole pack verifies and is installed.
+
+    Reads (and, unless a caller supplies them, verifies) the pack once. A caller
+    that already verified some entries may pass them in, and any entry it did not
+    check is reported as unverified rather than assumed good.
+    """
+    loaded = pack if pack is not None else load_pack(root)
+    if not loaded.available:
+        return IntegrityReport(pack=loaded, detail=loaded.detail)
+    checks = verifications if verifications is not None else verify_pack(loaded)
+    installed = tuple(entry.key for entry in loaded.entries if _is_installed(entry))
+    return IntegrityReport(pack=loaded, verifications=checks, installed=installed)
+
+
 # ------------------------------------------------------------- generation
 
 
@@ -1014,6 +1127,7 @@ __all__ = [
     "STATUS_UNREADABLE",
     "STATUS_WRONG_KIND",
     "InstallOutcome",
+    "IntegrityReport",
     "PackEntry",
     "PackInstallReport",
     "PackStatus",
@@ -1025,6 +1139,7 @@ __all__ = [
     "install_entry",
     "install_pack",
     "installed_destination",
+    "integrity_report",
     "load_pack",
     "pack_status",
     "verify_entry",

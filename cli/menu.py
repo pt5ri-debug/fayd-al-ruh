@@ -650,6 +650,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         ("status",),
     ),
     (
+        "Weights pack: check that the whole pack is intact and ready",
+        run_weights,
+        ("integrity",),
+    ),
+    (
         "Weights pack: install the shipped weights into the trainer's folder",
         run_weights,
         ("install", "--all", "--force"),
