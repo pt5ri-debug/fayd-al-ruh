@@ -141,10 +141,35 @@ def _plan(root: str = "", key: str = "", as_json: bool = False) -> int:
     print(f"{entry.title} ({entry.kind})")
     print(f"  file: {entry.path}")
     print(f"  resumable: {'yes' if entry.resumable else 'no'}")
+    provenance = entry.provenance_line()
+    if provenance:
+        print(f"  provenance: {provenance}")
     if entry.continue_command:
         print(f"  continue with: {entry.continue_command}")
     if entry.notes:
         print(f"  {entry.notes}")
+    return 0
+
+
+def _show(root: str = "", key: str = "", as_json: bool = False) -> int:
+    """Print one entry's full description, including its provenance."""
+    pack = load_pack(root or None)
+    if not pack.available:
+        print(pack.detail, file=sys.stderr)
+        return 3
+    entry = pack.get(key)
+    if entry is None:
+        print(
+            f"No pack entry named {key!r}. Available: {', '.join(pack.keys())}.",
+            file=sys.stderr,
+        )
+        return 3
+    if as_json:
+        payload = entry.to_primitive()
+        payload["origin"] = entry.origin
+        _print_json(payload)
+        return 0
+    print(entry.describe())
     return 0
 
 
@@ -258,6 +283,11 @@ def _build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--root", help="the pack folder (default: weights/)")
     plan.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
 
+    show = sub.add_parser("show", help="one entry in full, with its provenance")
+    show.add_argument("key", help="the entry key")
+    show.add_argument("--root", help="the pack folder (default: weights/)")
+    show.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
+
     generate = sub.add_parser("generate", help="(re)build the manifest from the weights on disk")
     generate.add_argument("--root", help="the pack folder (default: weights/)")
     generate.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
@@ -302,6 +332,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "plan":
             return _plan(root, args.key, as_json)
+        if args.command == "show":
+            return _show(root, args.key, as_json)
         if args.command == "generate":
             return _generate(root, as_json)
         if args.command == "continue":

@@ -74,6 +74,30 @@ STATUS_WRONG_KIND = "wrong-kind"
 STATUS_INCOMPATIBLE = "incompatible"
 STATUS_UNREADABLE = "unreadable"
 
+#: The provenance fields an entry may carry, in the order a reader sees them. A
+#: pack entry records *how its weights were produced* -- the trainer, its
+#: parameters, the corpus and seed, and the licence -- so a reader can trust the
+#: file rather than take it on faith. An absent field is left out of the readable
+#: line (never shown as a blank "unknown").
+PROVENANCE_LABELS: dict[str, str] = {
+    "producer": "producer",
+    "source": "source",
+    "task": "task",
+    "corpus": "corpus",
+    "seed": "seed",
+    "steps": "steps",
+    "episodes": "episodes",
+    "digest_algorithm": "digest",
+    "license": "license",
+    "created_at": "created",
+    "version": "version",
+    "checkpoint": "checkpoint",
+    "notes": "notes",
+}
+#: The provenance keys that name *where the weights came from*, so a caller can
+#: tell a project-trained entry from an externally provided one.
+PROVENANCE_ORIGIN_KEYS = ("producer", "source")
+
 
 class WeightsPackError(RuntimeError):
     """The pack could not be read or an entry could not be acted on."""
@@ -128,6 +152,30 @@ class PackEntry:
         """Whether a project trainer can *continue* this entry's weights."""
         return self.kind in (KIND_LANGUAGE, KIND_POLICY)
 
+    @property
+    def origin(self) -> str:
+        """Where the weights came from, in the producer's own words (or ``""``)."""
+        for key in PROVENANCE_ORIGIN_KEYS:
+            value = self.provenance.get(key)
+            if value:
+                return str(value)
+        return ""
+
+    def provenance_line(self) -> str:
+        """The provenance as one readable line, absent fields left out.
+
+        Only the fields the manifest actually records are shown, in
+        :data:`PROVENANCE_LABELS` order, so a reader sees exactly what the pack
+        claims about a file's origin -- never a fabricated "unknown".
+        """
+        parts: list[str] = []
+        for key, label in PROVENANCE_LABELS.items():
+            value = self.provenance.get(key)
+            if value in (None, "", [], {}):
+                continue
+            parts.append(f"{label}: {value}")
+        return " · ".join(parts)
+
     def describe(self) -> str:
         bits = [f"{self.key}: {self.kind}"]
         if self.path.name:
@@ -142,7 +190,13 @@ class PackEntry:
                 f"vocab {self.architecture.get('vocab_size')}"
             )
         head = " · ".join(bits)
-        return f"{head}\n  {self.notes}" if self.notes else head
+        lines = [head]
+        provenance = self.provenance_line()
+        if provenance:
+            lines.append(f"  {provenance}")
+        if self.notes:
+            lines.append(f"  {self.notes}")
+        return "\n".join(lines)
 
     def to_primitive(self) -> dict[str, Any]:
         return {
@@ -761,6 +815,19 @@ def _relative_to_base(path: Path, base: Path) -> str:
         return str(path)
 
 
+def _file_timestamp(path: Path) -> str:
+    """The file's own modification time as a UTC ISO string (a fact, not "now").
+
+    Reading the weight's mtime rather than the moment the manifest was generated
+    keeps the provenance a property of the file, so regenerating the manifest does
+    not rewrite it just because time passed.
+    """
+    try:
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(path.stat().st_mtime))
+    except OSError:
+        return ""
+
+
 def _language_entry(base: Path, checkpoint: Path, *, key: str, title: str) -> PackEntry:
     """Build a language-model entry from a checkpoint on disk (digest read from it)."""
     info = read_weight_info(checkpoint)
@@ -791,8 +858,12 @@ def _language_entry(base: Path, checkpoint: Path, *, key: str, title: str) -> Pa
         digest=file_digest(checkpoint),
         architecture=architecture,
         provenance={
-            "source": "the project's own trainer",
+            "producer": "the project's own trainer (ml.llm)",
+            "source": _relative_to_base(checkpoint, base),
             "checkpoint": _relative_to_base(checkpoint, base),
+            "digest_algorithm": DIGEST_ALGORITHM,
+            "license": "MIT (this project)",
+            "created_at": _file_timestamp(checkpoint),
         },
         continue_command="python -m cli llm --resume",
         notes=(
@@ -813,7 +884,14 @@ def _policy_entry(base: Path, policy: Path) -> PackEntry:
         path=policy,
         digest=file_digest(policy),
         task=task,
-        provenance={"source": "the project's own trainer", "task": task},
+        provenance={
+            "producer": "the project's own trainer (ml.petroleum)",
+            "source": _relative_to_base(policy, base),
+            "task": task,
+            "digest_algorithm": DIGEST_ALGORITHM,
+            "license": "MIT (this project)",
+            "created_at": _file_timestamp(policy),
+        },
         continue_command="python -m cli petroleum --resume",
         notes=(
             "A Q-learning policy for one task; continue it with `python -m cli "
@@ -927,6 +1005,8 @@ __all__ = [
     "DIGEST_ALGORITHM",
     "MANIFEST_NAME",
     "MANIFEST_VERSION",
+    "PROVENANCE_LABELS",
+    "PROVENANCE_ORIGIN_KEYS",
     "STATUS_DIGEST_MISMATCH",
     "STATUS_INCOMPATIBLE",
     "STATUS_MISSING",

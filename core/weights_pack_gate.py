@@ -35,13 +35,16 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from core.checkpoint_import import KIND_POLICY
 from core.weights_pack import (
     MANIFEST_NAME,
     MANIFEST_VERSION,
     STATUS_DIGEST_MISMATCH,
     STATUS_INCOMPATIBLE,
     STATUS_OK,
+    PackEntry,
     file_digest,
+    generate_manifest,
     install_pack,
     load_pack,
     verify_entry,
@@ -251,6 +254,26 @@ def _run_checks(root: Path) -> tuple[PackJudgement, ...]:
             "an unknown key was refused and an existing file was backed up, not clobbered"
             if refused_unknown and untouched and backup_ok
             else "an unknown key was accepted or a file was clobbered",
+        )
+    )
+
+    # 6. Provenance is recorded and surfaced honestly: a described entry carries a
+    #    readable provenance line naming its origin, and an entry with no
+    #    provenance renders no line (never a fabricated "unknown").
+    generated = generate_manifest(root=root / "generated", checkpoint=checkpoint, include_policies=False)
+    entry_with_provenance = generated.get("fayd-llm")
+    described = entry_with_provenance is not None and bool(entry_with_provenance.provenance_line())
+    origin_named = entry_with_provenance is not None and "trainer" in entry_with_provenance.origin
+    bare = PackEntry(key="k", title="t", kind=KIND_POLICY, path=checkpoint)
+    no_line = bare.provenance_line() == "" and bare.origin == ""
+    provenance_ok = described and origin_named and no_line
+    out.append(
+        PackJudgement(
+            "provenance_is_recorded_and_surfaced_without_inventing_a_field",
+            provenance_ok,
+            "a generated entry named its origin and a bare entry invented no provenance"
+            if provenance_ok
+            else "provenance was missing from a generated entry or fabricated for a bare one",
         )
     )
 
