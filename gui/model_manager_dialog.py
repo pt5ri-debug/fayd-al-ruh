@@ -31,6 +31,7 @@ import queue
 import threading
 import tkinter as tk
 from collections.abc import Callable
+from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any, Literal
 
@@ -259,6 +260,29 @@ class ModelManagerDialog(ThemedDialog):
         )
         self._trained_button.pack(fill="x", padx=12, pady=(0, 8))
 
+        weights = column.add("weights", "Import weights", icon="📥")
+        self._weights_label = tk.Label(
+            weights, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._weights_label.pack(fill="x", padx=14, pady=(4, 4))
+        self._import_weights_button = self._button(
+            weights, "Import a .npz weight file…", self._on_import_weights
+        )
+        self._import_weights_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._import_force_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            weights, text="Replace an existing file (keep a backup)",
+            variable=self._import_force_var, bg=theme.surface, fg=theme.text_secondary,
+            activebackground=theme.surface, activeforeground=theme.foreground,
+            selectcolor=theme.base, font=self._type.font("2xs"), anchor="w",
+            highlightthickness=0, borderwidth=0,
+        ).pack(fill="x", padx=12, pady=(0, 4))
+        self._import_kinds_button = self._button(
+            weights, "Which kinds can be imported", self._on_import_kinds
+        )
+        self._import_kinds_button.pack(fill="x", padx=12, pady=(0, 8))
+
         diagnostics = column.add("diagnostics", "Diagnostics", icon="🩺")
         self._diagnostics_button = self._button(
             diagnostics, "Run diagnostics", self._on_diagnostics
@@ -462,6 +486,23 @@ class ModelManagerDialog(ThemedDialog):
         self._sources_label.configure(text=self._sources_text())
         self._resources_label.configure(text=self._resources_text())
         self._trained_label.configure(text=self._trained_text())
+        self._weights_label.configure(text=self._weights_text())
+
+    def _weights_text(self) -> str:
+        """The weight files the project's trainers can continue right now."""
+        try:
+            installed = self.service.installed_weights()
+        except Exception as error:
+            return f"Could not read the installed weights: {error}"
+        if not installed:
+            return (
+                "No weight file is installed yet. Import a .npz to continue "
+                "training from it."
+            )
+        lines = [f"{len(installed)} weight file(s) ready to continue:"]
+        for item in installed[:6]:
+            lines.append(f"• {item.path.name} ({item.kind})")
+        return "\n".join(lines)
 
     def _sources_text(self) -> str:
         try:
@@ -656,6 +697,69 @@ class ModelManagerDialog(ThemedDialog):
             return
         self._reload()
         self._set_status(f"Registered {len(records)} trained model(s).")
+
+    def _on_import_weights(self) -> None:
+        """Import a ``.npz`` weight file so the project's trainers continue it.
+
+        The file's own structure is read **first**, so the kind is reported before
+        anything is written; the import then runs on a worker thread and posts its
+        report -- the exact folder it installed to, the backup it kept, and the
+        command that continues it.
+        """
+        path = filedialog.askopenfilename(
+            parent=self.window,
+            title="Choose a .npz weight file",
+            filetypes=[("Numpy weights", "*.npz"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            info = self.service.importable_weights(path)
+        except Exception as error:
+            self._set_status(f"Could not read {path}: {error}")
+            return
+        if not getattr(info, "valid", False):
+            self._set_detail(info.describe())
+            self._set_status(f"{Path(path).name}: {info.detail or 'not a usable weight file'}")
+            return
+        force = bool(self._import_force_var.get())
+        task = info.task or ""
+        self._run_background(
+            f"Importing {Path(path).name} ({info.kind})…",
+            lambda: self.service.import_weights(path, task=task, force=force),
+            self._finish_import_weights,
+        )
+
+    def _finish_import_weights(self, report: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not import the weights: {error}")
+            return
+        if report is None:
+            self._set_status("The import produced no report.")
+            return
+        self._set_detail(report.describe())
+        self._refresh_environment()
+        if report.installed:
+            command = report.plan.command if report.plan is not None else ""
+            self._set_status(
+                f"Imported {report.info.kind}."
+                + (f" Continue with: {command}" if command else "")
+            )
+        else:
+            self._set_status(f"Not imported: {report.detail}")
+
+    def _on_import_kinds(self) -> None:
+        """Explain which ``.npz`` kinds this build imports and how each continues."""
+        from core.checkpoint_import import KIND_BLURBS, KINDS, resume_plan
+
+        lines = ["Weight kinds this build imports:", ""]
+        for kind in KINDS:
+            lines.append(f"• {kind}: {KIND_BLURBS.get(kind, '')}")
+            command = resume_plan(kind).command
+            if command:
+                lines.append(f"    continue with: {command}")
+        self._set_detail("\n".join(lines))
+        self._set_status("Import a .npz with “Import a .npz weight file…”.")
 
     def _dashboard_text(self, snapshot: ManagerSnapshot) -> str:
         """The one-line-per-fact dashboard body: active models, errors, machine.
@@ -1088,6 +1192,7 @@ class ModelManagerDialog(ThemedDialog):
             self._register_button,
             self._discover_button,
             self._import_button,
+            self._import_weights_button,
             self._diagnostics_button,
         ):
             button.configure(state=state)

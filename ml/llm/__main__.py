@@ -338,6 +338,23 @@ def main(argv: list[str] | None = None) -> int:
         "scratch.",
     )
     parser.add_argument(
+        "--import-checkpoint",
+        type=Path,
+        default=None,
+        metavar="WEIGHTS.npz",
+        help="Import ready-made .npz weights into --checkpoint before training, then "
+        "resume from them. The file's own structure is validated first (a checkpoint "
+        "and, when present, its tokenizer and optimiser-state sidecars travel with "
+        "it), and any checkpoint it replaces is backed up rather than lost. Implies "
+        "--resume.",
+    )
+    parser.add_argument(
+        "--import-force",
+        action="store_true",
+        help="With --import-checkpoint, replace an existing checkpoint (a backup is "
+        "kept).",
+    )
+    parser.add_argument(
         "--llm-shards",
         type=int,
         default=0,
@@ -414,6 +431,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.import_checkpoint is not None:
+        from core.checkpoint_import import install_weights
+
+        report = install_weights(
+            args.import_checkpoint,
+            destination=args.checkpoint,
+            force=args.import_force,
+        )
+        print(report.describe())
+        if not report.installed:
+            print("The import did not install the weights; training was not started.")
+            return 3
+
     model = train_and_save(
         steps=args.steps,
         repeats=args.repeats,
@@ -438,7 +468,7 @@ def main(argv: list[str] | None = None) -> int:
         include_characters=args.llm_characters,
         include_character_knowledge=args.llm_character_corpus,
         character_knowledge_chunks=args.character_corpus_chunks,
-        resume=bool(args.resume) and not args.fresh,
+        resume=(bool(args.resume) and not args.fresh) or args.import_checkpoint is not None,
         shard_count=args.llm_shards,
         progress_every=args.progress_every,
         verbose=not args.quiet,

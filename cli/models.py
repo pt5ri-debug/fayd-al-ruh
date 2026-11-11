@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from core.model_files import ModelFileError
@@ -691,6 +692,63 @@ def _cmd_trained_register(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_import_weights(args: argparse.Namespace) -> int:
+    """Install a ready-made ``.npz`` weight file so the trainers continue it."""
+    mgr = _manager()
+    if not Path(args.path).exists():
+        print(f"No file at {args.path}.", file=sys.stderr)
+        return 3
+    report = mgr.import_weights(
+        args.path,
+        kind=args.kind or "",
+        task=args.task or "",
+        name=args.name or "",
+        force=args.force,
+        backup=not args.no_backup,
+    )
+    if args.json:
+        print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))
+    else:
+        print(report.describe())
+    if report.installed:
+        return 0
+    return 3 if not report.info.valid else 4
+
+
+def _cmd_installed_weights(args: argparse.Namespace) -> int:
+    """Every weight file the project's trainers can continue, read from disk."""
+    mgr = _manager()
+    installed = mgr.installed_weights()
+    if args.json:
+        print(json.dumps([item.to_primitive() for item in installed], ensure_ascii=False, indent=2))
+        return 0 if installed else 3
+    if not installed:
+        print("No weight file is installed yet. Import one with `models import-weights`.")
+        return 3
+    for item in installed:
+        print(f"  - {item.describe()}")
+    return 0
+
+
+def _cmd_weight_kinds(args: argparse.Namespace) -> int:
+    """The ``.npz`` kinds this build imports, and the trainer that continues each."""
+    from core.checkpoint_import import KIND_BLURBS, KINDS, resume_plan
+
+    rows = [
+        {"kind": kind, "blurb": KIND_BLURBS.get(kind, ""), "command": resume_plan(kind).command}
+        for kind in KINDS
+    ]
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    print("Weight kinds this build imports (and the trainer that continues each):")
+    for row in rows:
+        print(f"  {row['kind']:<16} {row['blurb']}")
+        if row["command"]:
+            print(f"      continue with: {row['command']}")
+    return 0
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     mgr = _manager()
     events = mgr.log_tail(args.limit)
@@ -1019,6 +1077,28 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     trained_register.add_argument("--json", action="store_true", help="print JSON")
 
+    import_weights = sub.add_parser(
+        "import-weights",
+        help="import a ready-made .npz weight file so the project's trainers continue it",
+    )
+    import_weights.add_argument("path", help="the .npz file to import")
+    import_weights.add_argument("--kind", help="force the kind (default: detect it)")
+    import_weights.add_argument("--task", help="the task a policy belongs to")
+    import_weights.add_argument("--name", help="the file name for a small model")
+    import_weights.add_argument("--force", action="store_true", help="replace an existing file")
+    import_weights.add_argument("--no-backup", action="store_true", help="do not keep a backup")
+    import_weights.add_argument("--json", action="store_true", help="print JSON")
+
+    installed = sub.add_parser(
+        "installed-weights", help="the weight files the trainers can continue"
+    )
+    installed.add_argument("--json", action="store_true", help="print JSON")
+
+    weight_kinds = sub.add_parser(
+        "weight-kinds", help="the .npz kinds this build imports, and the trainer for each"
+    )
+    weight_kinds.add_argument("--json", action="store_true", help="print JSON")
+
     return parser
 
 
@@ -1055,6 +1135,9 @@ _HANDLERS = {
     "stop-processes": _cmd_stop_processes,
     "trained": _cmd_trained,
     "trained-register": _cmd_trained_register,
+    "import-weights": _cmd_import_weights,
+    "installed-weights": _cmd_installed_weights,
+    "weight-kinds": _cmd_weight_kinds,
 }
 
 

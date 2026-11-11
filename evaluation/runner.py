@@ -29,6 +29,7 @@ from core.character_identity_gate import character_identity_accuracy
 from core.character_isolation_gate import character_isolation_accuracy
 from core.character_knowledge_gate import character_knowledge_accuracy
 from core.character_memory_gate import memory_seeding_accuracy
+from core.checkpoint_import_gate import checkpoint_import_accuracy
 from core.cognition_catalog import catalog_accuracy
 from core.cognitive_controller import CognitiveController
 from core.cognitive_core_gate import knowledge_validation_accuracy
@@ -286,6 +287,15 @@ class EvaluationMetrics:
     is loaded rather than retrained; a partial run continues to the same policy an
     uninterrupted run reaches; and the language model's own resume still raises the
     cumulative step count (Phase: resumable training)."""
+
+    checkpoint_import_accuracy: float
+    """The share of held-out checkpoint-import judgements satisfied: a ready-made
+    ``.npz`` weight file is recognised by its own array names (a checkpoint with
+    its tokenizer and optimiser-state sidecars) while a random archive is reported
+    unknown; the real trainer continues the imported weights; an existing
+    checkpoint is backed up rather than clobbered; a policy goes to its task's own
+    file and an unnamed one is refused; a fetch is gated; and an unreadable input
+    is refused (Phase: import ready-made weights)."""
 
     training_accuracy: float
     """The share of held-out Phase-6 training judgements satisfied: dataset
@@ -1317,6 +1327,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # training). Held-out judgements with negative controls, run on the real trainers.
     resume_value = training_resume_accuracy()
 
+    # Importing ready-made weights: a .npz trained elsewhere is recognised by its
+    # own array names and installed into the exact folder a trainer resumes from, so
+    # the project's own tools continue it. Held-out judgements with negative controls
+    # (a random archive is refused, an existing checkpoint is backed up not clobbered,
+    # an unnamed policy and an unapproved fetch are refused), run on the real engine.
+    checkpoint_import_value = checkpoint_import_accuracy()
+
     # Perception (Phase 7): a perceived artifact must reach the answer path as
     # *evidence* with its provenance, never as a verified fact. Held-out judgements
     # over the real detector, pipelines, schema, validator, and bridge -- with
@@ -1449,6 +1466,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         training_value,
         training_center_value,
         resume_value,
+        checkpoint_import_value,
         perception_value,
         planning_value,
         self_improvement_value,
@@ -1524,6 +1542,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         training_accuracy=round(training_value, 6),
         training_center_accuracy=round(training_center_value, 6),
         training_resume_accuracy=round(resume_value, 6),
+        checkpoint_import_accuracy=round(checkpoint_import_value, 6),
         perception_bridge_accuracy=round(perception_value, 6),
         task_execution_accuracy=round(planning_value, 6),
         self_improvement_loop_accuracy=round(self_improvement_value, 6),

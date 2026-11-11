@@ -202,6 +202,35 @@ class StubService:
     def register_trained(self):
         return ()
 
+    def importable_weights(self, path):
+        from pathlib import Path
+
+        from core.checkpoint_import import KIND_LANGUAGE, WeightInfo
+
+        return WeightInfo(path=Path(path), kind=KIND_LANGUAGE, valid=True, detail="ok")
+
+    def import_weights(self, path, *, kind="", task="", name="", force=False, backup=True):
+        from pathlib import Path
+
+        from core.checkpoint_import import (
+            KIND_LANGUAGE,
+            ImportReport,
+            WeightInfo,
+            resume_plan,
+        )
+
+        target = Path("/models/fayd-llm.npz")
+        return ImportReport(
+            source=Path(path),
+            info=WeightInfo(path=Path(path), kind=KIND_LANGUAGE, valid=True),
+            destination=target,
+            installed=True,
+            plan=resume_plan(KIND_LANGUAGE, path=target),
+        )
+
+    def installed_weights(self):
+        return ()
+
 
 class _FakeSource:
     """A stand-in source: a key, a title, and whether it can be used here."""
@@ -610,6 +639,56 @@ def test_registering_the_trained_checkpoint_is_honest_when_absent() -> None:
             if "trained" in dialog._status_label.cget("text").lower():
                 break
         assert "No trained checkpoint" in dialog._status_label.cget("text")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_import_weights_section_is_present() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        assert dialog._import_weights_button.cget("text") == "Import a .npz weight file…"
+        assert dialog._import_kinds_button.cget("text") == "Which kinds can be imported"
+        # The honest empty state names the next step rather than showing nothing.
+        assert "No weight file" in dialog._weights_label.cget("text")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_import_kinds_explains_each_kind_and_its_trainer() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._on_import_kinds()
+        body = dialog._detail_text.get("1.0", "end")
+        assert "language-model" in body
+        assert "python -m cli llm --resume" in body
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_importing_a_weight_file_posts_the_report() -> None:
+    import tkinter as tk
+    from unittest import mock
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        with mock.patch("gui.model_manager_dialog.filedialog.askopenfilename", return_value="/tmp/w.npz"):
+            dialog._on_import_weights()
+        for _ in range(200):
+            dialog._pump_results()
+            if "Imported" in dialog._status_label.cget("text"):
+                break
+        assert "Imported" in dialog._status_label.cget("text")
+        assert "continue with" in dialog._detail_text.get("1.0", "end")
     finally:
         root.destroy()
 
