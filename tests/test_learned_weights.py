@@ -527,3 +527,55 @@ def test_build_learned_flag_refuses_an_unknown_tier(capsys):
     assert main(["--build-learned", "enormous"]) == 3
     assert "Unknown learned tier" in capsys.readouterr().err
 
+
+
+# ------------------------------------------------------------------ the gate
+
+
+def test_the_gate_is_one_hundred_percent_on_the_shipped_wiring():
+    from core.learned_weights_gate import learned_weights_accuracy
+
+    assert learned_weights_accuracy() == 1.0
+
+
+def test_the_gate_reports_every_judgement():
+    from core.learned_weights_gate import judgements
+
+    results = judgements()
+    assert results
+    assert all(item.passed for item in results)
+    # Each judgement names itself and carries a readable detail.
+    assert all(item.name and item.detail for item in results)
+
+
+def test_an_empty_catalogue_scores_zero(monkeypatch):
+    from core import learned_weights_gate as gate
+
+    monkeypatch.setattr(gate, "judgements", lambda: ())
+    assert gate.learned_weights_accuracy() == 0.0
+
+
+def test_the_gate_discriminates_when_the_larger_tier_is_not_larger(monkeypatch):
+    # A negative control: if the XL tier were not larger, the gate's first
+    # judgement fails -- so a broken capacity tier cannot pass silently.
+    from dataclasses import replace as _replace
+
+    from core import learned_weights_gate as gate
+
+    broken = {
+        key: _replace(tier, preset="learned-large")
+        for key, tier in gate.LEARNED_TIERS.items()
+    }
+    monkeypatch.setattr(gate, "LEARNED_TIERS", broken)
+    results = gate.judgements()
+    first = next(item for item in results if "larger" in item.name)
+    assert not first.passed
+
+
+def test_the_gate_metric_is_wired_into_the_evaluation():
+    from evaluation.benchmark import METRIC_SPECS
+    from evaluation.runner import EvaluationMetrics
+
+    names = {spec.name for spec in METRIC_SPECS}
+    assert "learned_weights_accuracy" in names
+    assert "learned_weights_accuracy" in EvaluationMetrics.__dataclass_fields__

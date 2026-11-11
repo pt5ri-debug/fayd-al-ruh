@@ -42,6 +42,7 @@ from core.grounding import grounding_accuracy
 from core.hypothesis_reasoning import hypothesis_accuracy
 from core.improvement.gate import self_improvement_loop_accuracy
 from core.knowledge_carry import knowledge_carry_accuracy
+from core.learned_weights_gate import learned_weights_accuracy
 from core.learning_gate import learning_accuracy
 from core.memory_gate import memory_architecture_accuracy
 from core.observation import Observation
@@ -306,6 +307,16 @@ class EvaluationMetrics:
     refused; the real trainer resumes from an installed entry; an unknown key is
     refused; and an existing file is backed up rather than clobbered (Phase: the
     committed weights pack)."""
+
+    learned_weights_accuracy: float
+    """The share of held-out learned-weights judgements satisfied: each learned
+    capacity tier names a real preset and the larger tier really is larger
+    (measured), building a tier writes the checkpoint, its tokenizer sidecar, and
+    honest provenance, a second build does not retrain over an existing checkpoint
+    without --force (negative control), listing reads the checkpoints from their
+    own structure and reports a foreign file as unusable, the pack packs a tier
+    under its own key and installs it beside the base checkpoint, and an unknown
+    tier is refused (Phase: learned capacity tiers)."""
 
     training_accuracy: float
     """The share of held-out Phase-6 training judgements satisfied: dataset
@@ -1351,6 +1362,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # controls, run on the real pack engine.
     weights_pack_value = weights_pack_accuracy()
 
+    # The learned capacity tiers: each tier names a real preset and the larger tier
+    # really is larger, a build writes honest provenance and does not retrain over
+    # an existing checkpoint without --force, and the pack packs a tier under its
+    # own key and installs it beside the base checkpoint. Held-out judgements with
+    # negative controls, run on the real learned-weights engine and pack.
+    learned_weights_value = learned_weights_accuracy()
+
     # Perception (Phase 7): a perceived artifact must reach the answer path as
     # *evidence* with its provenance, never as a verified fact. Held-out judgements
     # over the real detector, pipelines, schema, validator, and bridge -- with
@@ -1485,6 +1503,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         resume_value,
         checkpoint_import_value,
         weights_pack_value,
+        learned_weights_value,
         perception_value,
         planning_value,
         self_improvement_value,
@@ -1562,6 +1581,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         training_resume_accuracy=round(resume_value, 6),
         checkpoint_import_accuracy=round(checkpoint_import_value, 6),
         weights_pack_accuracy=round(weights_pack_value, 6),
+        learned_weights_accuracy=round(learned_weights_value, 6),
         perception_bridge_accuracy=round(perception_value, 6),
         task_execution_accuracy=round(planning_value, 6),
         self_improvement_loop_accuracy=round(self_improvement_value, 6),
