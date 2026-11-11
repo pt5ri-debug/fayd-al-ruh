@@ -112,6 +112,49 @@ class TrainingConfig:
     measure_perplexity: bool = False
     resume: bool = False
     shard_count: int = 0
+    # The training upgrades a serious release applies by default: AdamW weight
+    # decay, a warmup+cosine schedule, and keeping the best held-out checkpoint.
+    # ``ml.llm`` shipped these off; a *release* turns them on so the committed
+    # checkpoint is the good one, and records them in the manifest.
+    weight_decay: float = 0.01
+    lr_schedule: str = "cosine"
+    restore_best: bool = True
+    accum_steps: int = 1
+    warmup: int = 40
+    max_grad_norm: float = 1.0
+
+
+def _config_manifest(config: TrainingConfig) -> Manifest:
+    """The recorded training configuration, shared by every manifest path."""
+    return {
+        "episodes": config.episodes,
+        "llm_steps": config.llm_steps,
+        "llm_repeats": config.llm_repeats,
+        "llm_structured_repeats": config.llm_structured_repeats,
+        "seed": config.seed,
+        "replay_batch": config.replay_batch,
+        "include_base": config.include_base,
+        "llm_preset": config.llm_preset,
+        "tokenizer_kind": config.tokenizer_kind,
+        "tokenizer_vocab_size": config.tokenizer_vocab_size,
+        "kb_max_chunks": config.kb_max_chunks,
+        "kb_repeats": config.kb_repeats,
+        "include_runtime": config.include_runtime,
+        "include_sessions": config.include_sessions,
+        "include_characters": config.include_characters,
+        "include_character_knowledge": config.include_character_knowledge,
+        "character_knowledge_chunks": config.character_knowledge_chunks,
+        "include_procedural": config.include_procedural,
+        "max_procedural": config.max_procedural,
+        "resume": config.resume,
+        "shard_count": config.shard_count,
+        "weight_decay": config.weight_decay,
+        "lr_schedule": config.lr_schedule,
+        "restore_best": config.restore_best,
+        "accum_steps": config.accum_steps,
+        "warmup": config.warmup,
+        "max_grad_norm": config.max_grad_norm,
+    }
 
 
 def _git_revision() -> str:
@@ -400,29 +443,7 @@ def train_release(
         "version": __version__,
         "trained_at": datetime.now(UTC).isoformat(),
         "git_revision": _git_revision(),
-        "config": {
-            "episodes": config.episodes,
-            "llm_steps": config.llm_steps,
-            "llm_repeats": config.llm_repeats,
-            "llm_structured_repeats": config.llm_structured_repeats,
-            "seed": config.seed,
-            "replay_batch": config.replay_batch,
-            "include_base": config.include_base,
-            "llm_preset": config.llm_preset,
-            "tokenizer_kind": config.tokenizer_kind,
-            "tokenizer_vocab_size": config.tokenizer_vocab_size,
-            "kb_max_chunks": config.kb_max_chunks,
-            "kb_repeats": config.kb_repeats,
-            "include_runtime": config.include_runtime,
-            "include_sessions": config.include_sessions,
-            "include_characters": config.include_characters,
-            "include_character_knowledge": config.include_character_knowledge,
-            "character_knowledge_chunks": config.character_knowledge_chunks,
-            "include_procedural": config.include_procedural,
-            "max_procedural": config.max_procedural,
-            "resume": config.resume,
-            "shard_count": config.shard_count,
-        },
+        "config": _config_manifest(config),
         "knowledge": knowledge_summary(),
         "corpus": corpus_summary(config),
         "artifacts": {
@@ -469,6 +490,12 @@ def train_release(
         preset=config.llm_preset,
         resume=config.resume,
         shard_count=config.shard_count,
+        weight_decay=config.weight_decay,
+        lr_schedule=config.lr_schedule,
+        restore_best=config.restore_best,
+        accum_steps=config.accum_steps,
+        warmup=config.warmup,
+        max_grad_norm=config.max_grad_norm,
         verbose=verbose,
     )
     manifest["language_model"] = describe_checkpoint(
@@ -654,6 +681,43 @@ def main(argv: list[str] | None = None) -> int:
         "consumed shard so a later --resume reaches new material (0 keeps the "
         "whole-corpus behaviour)",
     )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=0.01,
+        help="AdamW decoupled weight decay for the language model (default 0.01).",
+    )
+    parser.add_argument(
+        "--lr-schedule",
+        choices=("cosine", "linear", "constant"),
+        default="cosine",
+        help="The language model's learning-rate decay shape (default: cosine).",
+    )
+    parser.add_argument(
+        "--no-restore-best",
+        action="store_true",
+        help="Ship the final step's weights instead of the lowest held-out loss "
+        "step (the default keeps the best checkpoint).",
+    )
+    parser.add_argument(
+        "--accum-steps",
+        type=int,
+        default=1,
+        help="Gradient-accumulation micro-batches per optimiser step for the "
+        "language model (a larger effective batch; default 1).",
+    )
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=40,
+        help="Language-model warmup steps before the decay schedule (default 40).",
+    )
+    parser.add_argument(
+        "--max-grad-norm",
+        type=float,
+        default=1.0,
+        help="Gradient-clipping norm for the language model (0 disables it).",
+    )
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--quiet",
@@ -682,6 +746,12 @@ def main(argv: list[str] | None = None) -> int:
         measure_perplexity=args.measure_perplexity,
         resume=bool(args.resume) and not args.fresh,
         shard_count=args.llm_shards,
+        weight_decay=args.weight_decay,
+        lr_schedule=args.lr_schedule,
+        restore_best=not args.no_restore_best,
+        accum_steps=args.accum_steps,
+        warmup=args.warmup,
+        max_grad_norm=args.max_grad_norm,
     )
 
     if args.manifest_only:
@@ -690,29 +760,7 @@ def main(argv: list[str] | None = None) -> int:
             "version": __version__,
             "trained_at": datetime.now(UTC).isoformat(),
             "git_revision": _git_revision(),
-            "config": {
-                "episodes": config.episodes,
-                "llm_steps": config.llm_steps,
-                "llm_repeats": config.llm_repeats,
-                "llm_structured_repeats": config.llm_structured_repeats,
-                "seed": config.seed,
-                "replay_batch": config.replay_batch,
-                "include_base": config.include_base,
-                "llm_preset": config.llm_preset,
-                "tokenizer_kind": config.tokenizer_kind,
-                "tokenizer_vocab_size": config.tokenizer_vocab_size,
-                "kb_max_chunks": config.kb_max_chunks,
-                "kb_repeats": config.kb_repeats,
-                "include_runtime": config.include_runtime,
-                "include_sessions": config.include_sessions,
-                "include_characters": config.include_characters,
-                "include_character_knowledge": config.include_character_knowledge,
-                "character_knowledge_chunks": config.character_knowledge_chunks,
-                "include_procedural": config.include_procedural,
-                "max_procedural": config.max_procedural,
-                "resume": config.resume,
-                "shard_count": config.shard_count,
-            },
+            "config": _config_manifest(config),
             "knowledge": knowledge_summary(),
             "corpus": corpus_summary(config),
             "language_model": describe_checkpoint(
