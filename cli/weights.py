@@ -157,6 +157,70 @@ def _generate(root: str = "", as_json: bool = False) -> int:
     return 0 if pack.entries else 3
 
 
+def _continue(
+    root: str = "",
+    key: str = "",
+    *,
+    run: bool = False,
+    force: bool = False,
+    as_json: bool = False,
+) -> int:
+    """Install one entry, then name (or run) the command that continues it.
+
+    The one-step path a clean clone uses: verify the entry against the pack's
+    own digest, install it into the exact folder the trainer resumes from, and
+    hand back the command -- so continuing the project's own trained model is
+    ``python -m cli weights continue fayd-llm`` rather than reading the docs.
+    """
+    import shlex
+    import subprocess
+
+    pack = load_pack(root or None)
+    if not pack.available:
+        print(pack.detail, file=sys.stderr)
+        return 3
+    entry = pack.get(key)
+    if entry is None:
+        print(
+            f"No pack entry named {key!r}. Available: {', '.join(pack.keys())}.",
+            file=sys.stderr,
+        )
+        return 3
+    if not entry.continue_command:
+        print(
+            f"The pack entry {key!r} names no trainer to continue it; install it "
+            "with `python -m cli weights install`.",
+            file=sys.stderr,
+        )
+        return 3
+    report = install_pack(pack, keys=(key,), force=force, backup=True)
+    if not report.ok:
+        if as_json:
+            _print_json(report.to_primitive())
+        else:
+            print(report.describe(), file=sys.stderr)
+        return 4
+    payload = {
+        "key": key,
+        "installed": report.installed,
+        "command": entry.continue_command,
+        "ran": False,
+    }
+    if run:
+        print(f"Continuing: {entry.continue_command}", flush=True)
+        argv = shlex.split(entry.continue_command)
+        completed = subprocess.run(argv)
+        payload["ran"] = True
+        payload["returncode"] = completed.returncode
+        return completed.returncode
+    if as_json:
+        _print_json(payload)
+    else:
+        print(report.describe())
+        print(f"\nContinue with:\n  {entry.continue_command}")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="weights",
@@ -198,6 +262,20 @@ def _build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--root", help="the pack folder (default: weights/)")
     generate.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
 
+    cont = sub.add_parser(
+        "continue",
+        help="install an entry, then name (or run) the command that continues it",
+    )
+    cont.add_argument("key", help="the entry key (e.g. fayd-llm)")
+    cont.add_argument("--root", help="the pack folder (default: weights/)")
+    cont.add_argument("--force", action="store_true", help="replace an existing file")
+    cont.add_argument(
+        "--run",
+        action="store_true",
+        help="also run the trainer command (it continues the weights it just installed)",
+    )
+    cont.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
+
     return parser
 
 
@@ -226,6 +304,14 @@ def main(argv: list[str] | None = None) -> int:
             return _plan(root, args.key, as_json)
         if args.command == "generate":
             return _generate(root, as_json)
+        if args.command == "continue":
+            return _continue(
+                root,
+                args.key,
+                run=getattr(args, "run", False),
+                force=getattr(args, "force", False),
+                as_json=as_json,
+            )
     except WeightsPackError as error:
         print(f"error: {error}", file=sys.stderr)
         return 4

@@ -217,7 +217,33 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print only the final report, not the live progress lines.",
     )
+    parser.add_argument(
+        "--install-weights",
+        action="store_true",
+        help="Install the committed weights pack's policy entries into --save-dir "
+        "(or the default artifacts folder) before training, then continue from them. "
+        "Each entry is verified first (digest, kind, architecture), so a clean clone "
+        "can continue the project's own trained policies without naming a file.",
+    )
     args = parser.parse_args(argv)
+
+    if args.install_weights:
+        from core.paths import artifacts_dir
+        from core.weights_pack import KIND_POLICY, install_pack, load_pack, select_keys
+
+        save_dir = args.save_dir or (artifacts_dir() / "petroleum")
+        save_dir.mkdir(parents=True, exist_ok=True)
+        args.save_dir = save_dir
+        pack = load_pack()
+        keys = select_keys(pack, KIND_POLICY)
+        if not keys:
+            print("The weights pack holds no policy entries to install.")
+            return 3
+        install_report = install_pack(pack, keys=keys)
+        print(install_report.describe())
+        if not install_report.ok:
+            print("Some pack policies did not install; training was not started.")
+            return 4
 
     # With --json, stdout must stay pure JSON, so live progress goes to stderr.
     show_progress = not args.quiet

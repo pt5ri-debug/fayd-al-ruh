@@ -459,7 +459,29 @@ def main(argv: list[str] | None = None) -> int:
         help="Ignore any saved progress and retrain every task from scratch "
         "(default is to continue from what a previous run left in --save-dir).",
     )
+    parser.add_argument(
+        "--install-weights",
+        action="store_true",
+        help="Install the committed weights pack's policy entries into --save-dir "
+        "before training, then continue from them. Each entry is verified first "
+        "(digest, kind, architecture), so a clean clone can continue the project's "
+        "own trained policies without naming a file. Implies --resume.",
+    )
     args = parser.parse_args(argv)
+
+    if args.install_weights:
+        from core.weights_pack import KIND_POLICY, install_pack, load_pack, select_keys
+
+        pack = load_pack()
+        keys = select_keys(pack, KIND_POLICY)
+        if not keys:
+            print("The weights pack holds no policy entries to install.")
+            return 3
+        install_report = install_pack(pack, keys=keys)
+        print(install_report.describe())
+        if not install_report.ok:
+            print("Some pack policies did not install; training was not started.")
+            return 4
 
     report = train_petroleum(
         episodes=args.episodes,

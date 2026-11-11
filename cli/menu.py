@@ -654,6 +654,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         run_weights,
         ("install", "--all", "--force"),
     ),
+    (
+        "Weights pack: continue the shipped model (install, then name the trainer)",
+        run_weights,
+        ("continue", "fayd-llm"),
+    ),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
