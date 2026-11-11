@@ -231,6 +231,57 @@ class StubService:
     def installed_weights(self):
         return ()
 
+    # -- weights pack -----------------------------------------------------
+
+    def weights_pack_status(self, root=None):
+        from pathlib import Path
+
+        from core.weights_pack import PackEntry, PackStatus, Verification, WeightsPack
+
+        entry = PackEntry(
+            key="fayd-llm",
+            kind="language-model",
+            title="Fayd Al-Ruh language model",
+            path=Path("/weights/fayd-llm.npz"),
+            digest="abc",
+            continue_command="python -m cli llm --resume",
+        )
+        pack = WeightsPack(root=Path("/weights"), version=1, project_version="2.3.0", entries=(entry,))
+        verification = Verification(entry=entry, detail="ok")
+        return PackStatus(pack=pack, verifications=(verification,), installed=("fayd-llm",))
+
+    def weights_pack(self, root=None):
+        return self.weights_pack_status(root).pack
+
+    def verify_weights_pack(self, root=None):
+        return self.weights_pack_status(root).verifications
+
+    def weights_pack_rows(self, root=None):
+        return (
+            {
+                "key": "fayd-llm",
+                "kind": "language-model",
+                "task": "",
+                "file": "fayd-llm.npz",
+                "title": "Fayd Al-Ruh language model",
+                "verified": True,
+                "installed": True,
+                "continue_command": "python -m cli llm --resume",
+            },
+        )
+
+    def install_weights_pack(self, keys=None, *, root=None, force=False, backup=True):
+        from core.weights_pack import InstallOutcome, PackInstallReport
+
+        entry = self.weights_pack_status(root).pack.entries[0]
+        outcome = InstallOutcome(
+            entry=entry,
+            verification=self.weights_pack_status(root).verifications[0],
+            installed=True,
+            continue_command=entry.continue_command,
+        )
+        return PackInstallReport(outcomes=(outcome,))
+
 
 class _FakeSource:
     """A stand-in source: a key, a title, and whether it can be used here."""
@@ -715,5 +766,77 @@ def test_resuming_a_download_says_there_is_none() -> None:
         dialog = _dialog(root, StubService())
         dialog._on_resume_download()
         assert "No partial download" in dialog._status_label.cget("text")
+    finally:
+        root.destroy()
+
+
+def _wait_for_pump(dialog, timeout: float = 5.0) -> None:
+    """Drain the worker queue until the job's result lands (or the timeout passes)."""
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        dialog._pump_results()
+        if not dialog._busy:
+            return
+        time.sleep(0.02)
+    dialog._pump_results()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_window_has_a_weights_pack_section() -> None:
+    """The pack section reports what the pack offers and what is installed."""
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        body = dialog._pack_label.cget("text")
+        assert "verify cleanly" in body
+        assert "fayd-llm.npz" in body
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_verifying_the_pack_reports_every_entry() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._on_verify_pack()
+        _wait_for_pump(dialog)
+        assert "1/1 pack entries verify cleanly" in dialog._status_label.cget("text")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_listing_the_pack_names_the_continue_command() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._on_list_pack()
+        detail = dialog._detail_text.get("1.0", "end")
+        assert "fayd-llm" in detail
+        assert "python -m cli llm --resume" in detail
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_installing_the_pack_reports_the_continue_command() -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        dialog = _dialog(root, StubService())
+        dialog._on_install_pack()
+        _wait_for_pump(dialog)
+        assert "Installed 1 pack entry" in dialog._status_label.cget("text")
+        assert "python -m cli llm --resume" in dialog._status_label.cget("text")
     finally:
         root.destroy()

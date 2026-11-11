@@ -283,6 +283,37 @@ class ModelManagerDialog(ThemedDialog):
         )
         self._import_kinds_button.pack(fill="x", padx=12, pady=(0, 8))
 
+        pack = column.add("weights_pack", "Weights pack", icon="📦")
+        self._pack_label = tk.Label(
+            pack, text="", bg=theme.surface, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
+        )
+        self._pack_label.pack(fill="x", padx=14, pady=(4, 4))
+        self._pack_verify_button = self._button(
+            pack, "Verify the pack", self._on_verify_pack
+        )
+        self._pack_verify_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._pack_list_button = self._button(
+            pack, "List the entries", self._on_list_pack
+        )
+        self._pack_list_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._pack_install_button = self._button(
+            pack, "Install the chosen entry", self._on_install_pack
+        )
+        self._pack_install_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._pack_install_all_button = self._button(
+            pack, "Install the whole pack", self._on_install_pack_all
+        )
+        self._pack_install_all_button.pack(fill="x", padx=12, pady=(0, 4))
+        self._pack_force_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            pack, text="Replace an existing file (keep a backup)",
+            variable=self._pack_force_var, bg=theme.surface, fg=theme.text_secondary,
+            activebackground=theme.surface, activeforeground=theme.foreground,
+            selectcolor=theme.base, font=self._type.font("2xs"), anchor="w",
+            highlightthickness=0, borderwidth=0,
+        ).pack(fill="x", padx=12, pady=(0, 8))
+
         diagnostics = column.add("diagnostics", "Diagnostics", icon="🩺")
         self._diagnostics_button = self._button(
             diagnostics, "Run diagnostics", self._on_diagnostics
@@ -487,6 +518,27 @@ class ModelManagerDialog(ThemedDialog):
         self._resources_label.configure(text=self._resources_text())
         self._trained_label.configure(text=self._trained_text())
         self._weights_label.configure(text=self._weights_text())
+        self._pack_label.configure(text=self._pack_text())
+
+    def _pack_text(self) -> str:
+        """What the committed weights pack offers and how much is installed."""
+        try:
+            status = self.service.weights_pack_status()
+        except Exception as error:
+            return f"Could not read the weights pack: {error}"
+        if not status.pack.available:
+            return status.detail or "No weights pack ships with this build."
+        lines = [
+            f"Pack v{status.pack.version}: {status.ready}/{len(status.verifications)} "
+            f"entries verify cleanly, {status.present} installed."
+        ]
+        example = next((entry for entry in status.pack.entries), None)
+        if example is not None:
+            lines.append(
+                f"The pack indexes the weights the project ships (e.g. {example.path.name}); "
+                "installing copies one into the folder its trainer reads from."
+            )
+        return "\n".join(lines)
 
     def _weights_text(self) -> str:
         """The weight files the project's trainers can continue right now."""
@@ -760,6 +812,100 @@ class ModelManagerDialog(ThemedDialog):
                 lines.append(f"    continue with: {command}")
         self._set_detail("\n".join(lines))
         self._set_status("Import a .npz with “Import a .npz weight file…”.")
+
+    def _on_verify_pack(self) -> None:
+        """Verify every pack entry against the file on disk (reads only)."""
+        self._run_background(
+            "Verifying the weights pack…",
+            self.service.verify_weights_pack,
+            self._finish_verify_pack,
+        )
+
+    def _finish_verify_pack(self, verifications: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not verify the weights pack: {error}")
+            return
+        verifications = tuple(verifications or ())
+        if not verifications:
+            self._set_status("No weights pack ships with this build.")
+            return
+        self._set_detail("\n".join(item.describe() for item in verifications))
+        good = sum(1 for item in verifications if item.ok)
+        self._set_status(f"{good}/{len(verifications)} pack entries verify cleanly.")
+        self._refresh_environment()
+
+    def _on_list_pack(self) -> None:
+        """List the pack's entries and the command that continues each."""
+        try:
+            rows = self.service.weights_pack_rows()
+        except Exception as error:
+            self._set_status(f"Could not read the weights pack: {error}")
+            return
+        if not rows:
+            self._set_status("No weights pack ships with this build.")
+            return
+        lines = [f"{len(rows)} pack entries:", ""]
+        for row in rows:
+            mark = "installed" if row["installed"] else ("ready" if row["verified"] else "unusable")
+            lines.append(f"• {row['key']} ({row['kind']}, {mark})")
+            if row["continue_command"]:
+                lines.append(f"    continue with: {row['continue_command']}")
+        self._set_detail("\n".join(lines))
+        self._set_status("Choose a pack entry, then “Install the chosen entry”.")
+
+    def _selected_pack_key(self) -> str:
+        """The pack entry the table's selected row names, or ``""``.
+
+        The table lists *models*, not pack entries, so the selection is matched to a
+        pack entry by key when one exists; otherwise the pack's own example entry is
+        used so a one-click install still has a target.
+        """
+        try:
+            rows = self.service.weights_pack_rows()
+        except Exception:
+            return ""
+        selected = self._selected_id or ""
+        for row in rows:
+            if row["key"] == selected:
+                return str(row["key"])
+        return str(rows[0]["key"]) if rows else ""
+
+    def _on_install_pack(self) -> None:
+        """Install the chosen pack entry (verified first, backed up if replacing)."""
+        key = self._selected_pack_key()
+        if not key:
+            self._set_status("No weights pack ships with this build.")
+            return
+        self._install_pack_keys((key,))
+
+    def _on_install_pack_all(self) -> None:
+        """Install the whole pack (verified entry by entry)."""
+        self._install_pack_keys(())
+
+    def _install_pack_keys(self, keys: tuple[str, ...]) -> None:
+        force = bool(self._pack_force_var.get())
+        what = ", ".join(keys) if keys else "the whole pack"
+        self._run_background(
+            f"Installing {what}…",
+            lambda: self.service.install_weights_pack(keys, force=force),
+            self._finish_install_pack,
+        )
+
+    def _finish_install_pack(self, report: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not install the pack: {error}")
+            return
+        if report is None:
+            self._set_status("The install produced no report.")
+            return
+        self._set_detail(report.describe())
+        self._refresh_environment()
+        if report.detail:
+            self._set_status(report.detail)
+            return
+        commands = [item.continue_command for item in report.outcomes if item.continue_command]
+        note = f" Continue with: {commands[0]}" if commands else ""
+        self._set_status(f"Installed {report.installed} pack entry(ies).{note}")
 
     def _dashboard_text(self, snapshot: ManagerSnapshot) -> str:
         """The one-line-per-fact dashboard body: active models, errors, machine.
