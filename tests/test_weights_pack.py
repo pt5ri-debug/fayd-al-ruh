@@ -499,6 +499,140 @@ def test_cli_status_reports_a_missing_pack(tmp_path, capsys):
     assert cli_main(["status", "--root", str(tmp_path / "absent")]) == 3
 
 
+# -------------------------------------------------------- continue (Phase 3)
+
+
+def test_cli_continue_installs_then_names_the_trainer(tmp_path, capsys):
+    from cli.weights import main as cli_main
+
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    root = _write_pack(tmp_path / "weights", [_language_row(checkpoint)])
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(tmp_path / "data")}):
+        assert cli_main(["continue", "fayd-llm", "--root", str(root)]) == 0
+        out = capsys.readouterr().out
+        assert "installed" in out
+        assert "--resume" in out
+        destination = tmp_path / "data" / "ml" / "llm" / "checkpoints" / "fayd-llm.npz"
+        assert destination.exists()
+
+
+def test_cli_continue_json_names_the_command(tmp_path, capsys):
+    from cli.weights import main as cli_main
+
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    root = _write_pack(tmp_path / "weights", [_language_row(checkpoint)])
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(tmp_path / "data")}):
+        assert cli_main(["continue", "fayd-llm", "--root", str(root), "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["key"] == "fayd-llm"
+        assert payload["command"] == "python -m cli llm --resume"
+        assert payload["ran"] is False
+
+
+def test_cli_continue_refuses_an_unknown_key(tmp_path, capsys):
+    from cli.weights import main as cli_main
+
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    root = _write_pack(tmp_path / "weights", [_language_row(checkpoint)])
+    assert cli_main(["continue", "nope", "--root", str(root)]) == 3
+
+
+def test_cli_continue_refuses_a_tampered_entry(tmp_path, capsys):
+    from cli.weights import main as cli_main
+
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    root = _write_pack(tmp_path / "weights", [_language_row(checkpoint)])
+    checkpoint.write_bytes(checkpoint.read_bytes() + b"tampered")
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(tmp_path / "data")}):
+        assert cli_main(["continue", "fayd-llm", "--root", str(root)]) == 4
+
+
+def test_select_keys_filters_by_kind(tmp_path):
+    from core.weights_pack import select_keys
+
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    policy = _train_policy(tmp_path / "artifacts", "complete-well")
+    root = _write_pack(
+        tmp_path / "weights",
+        [
+            _language_row(checkpoint),
+            {
+                "key": "policy-complete-well",
+                "title": "Policy: complete well",
+                "kind": "policy",
+                "path": str(policy),
+                "digest": file_digest(policy),
+                "task": "complete-well",
+                "continue_command": "python -m cli petroleum --resume",
+            },
+        ],
+    )
+    pack = load_pack(root)
+    assert select_keys(pack, "language-model") == ("fayd-llm",)
+    assert select_keys(pack, "policy") == ("policy-complete-well",)
+    assert select_keys(pack, "model") == ()
+
+
+def test_llm_trainer_refuses_an_unknown_pack_entry_before_training(capsys):
+    """--install-weights installs a *named* entry, refusing an unknown key."""
+    from ml.llm.__main__ import main as llm_main
+
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(Path.cwd() / "nope")}):
+        assert llm_main(["--install-weights", "definitely-not-a-key"]) == 3
+    assert "No weights-pack entry" in capsys.readouterr().out
+
+
+def test_petroleum_trainer_installs_the_policy_entries(tmp_path, capsys):
+    """--install-weights installs every policy into --save-dir, then trains."""
+    from ml import petroleum
+
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    policy = _train_policy(tmp_path / "artifacts", "complete-well")
+    _write_pack(
+        tmp_path / "weights",
+        [
+            _language_row(checkpoint),
+            {
+                "key": "policy-complete-well",
+                "title": "Policy: complete well",
+                "kind": "policy",
+                "path": str(policy),
+                "digest": file_digest(policy),
+                "task": "complete-well",
+                "continue_command": "python -m cli petroleum --resume",
+            },
+        ],
+    )
+
+    class _Report:
+        def as_dict(self):
+            return {"stub": True}
+
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(tmp_path / "data")}), mock.patch(
+        "core.paths.weights_pack_dir", return_value=tmp_path / "weights"
+    ), mock.patch.object(petroleum, "train_petroleum", return_value=_Report()):
+        assert petroleum.main(["--install-weights", "--json"]) == 0
+        installed = (
+            tmp_path / "data" / "ml" / "artifacts" / "petroleum" / "policy_complete-well.npz"
+        )
+        assert installed.exists()
+
+
+def test_the_base_trainer_exposes_the_install_weights_flag():
+    import contextlib
+    import io
+
+    from ml.__main__ import main as ml_main
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        try:
+            ml_main(["--help"])
+        except SystemExit:
+            pass
+    assert "--install-weights" in buffer.getvalue()
+
+
 # --------------------------------------------------------------------- menu
 
 

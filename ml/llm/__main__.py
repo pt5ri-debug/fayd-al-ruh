@@ -355,6 +355,17 @@ def main(argv: list[str] | None = None) -> int:
         "kept).",
     )
     parser.add_argument(
+        "--install-weights",
+        nargs="?",
+        const="fayd-llm",
+        default=None,
+        metavar="KEY",
+        help="Install the committed weights pack's entry (default: fayd-llm) into "
+        "--checkpoint before training, then resume from it. The pack entry is "
+        "verified first (digest, kind, architecture), so a clean clone can continue "
+        "the project's own trained model without naming a file. Implies --resume.",
+    )
+    parser.add_argument(
         "--llm-shards",
         type=int,
         default=0,
@@ -444,6 +455,25 @@ def main(argv: list[str] | None = None) -> int:
             print("The import did not install the weights; training was not started.")
             return 3
 
+    if args.install_weights is not None:
+        # Install a *verified* pack entry into the checkpoint the trainer reads, so a
+        # clean clone can continue the project's own model without naming a file.
+        from core.weights_pack import install_pack, load_pack
+
+        pack = load_pack()
+        entry = pack.get(args.install_weights)
+        if entry is None:
+            print(
+                f"No weights-pack entry named {args.install_weights!r}. "
+                f"Available: {', '.join(pack.keys()) or '(none)'}."
+            )
+            return 3
+        outcome = install_pack(pack, keys=(args.install_weights,), force=args.import_force)
+        print(outcome.describe())
+        if not outcome.ok:
+            print("The pack entry did not install; training was not started.")
+            return 4
+
     model = train_and_save(
         steps=args.steps,
         repeats=args.repeats,
@@ -468,7 +498,11 @@ def main(argv: list[str] | None = None) -> int:
         include_characters=args.llm_characters,
         include_character_knowledge=args.llm_character_corpus,
         character_knowledge_chunks=args.character_corpus_chunks,
-        resume=(bool(args.resume) and not args.fresh) or args.import_checkpoint is not None,
+        resume=(
+            (bool(args.resume) and not args.fresh)
+            or args.import_checkpoint is not None
+            or args.install_weights is not None
+        ),
         shard_count=args.llm_shards,
         progress_every=args.progress_every,
         verbose=not args.quiet,
