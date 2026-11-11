@@ -10,7 +10,8 @@
 
 The headless twin of the weights-pack engine. It drives the *same*
 :mod:`core.weights_pack` engine, which in turn installs through
-:mod:`core.checkpoint_import`, so the CLI and any later window can never disagree
+:mod:`core.checkpoint_import`, so the CLI and the Model Manager window (its
+*Weights pack* section, and the ``models weights-pack`` twin) can never disagree
 about what the pack holds, what a file is, or where it goes.
 
 Nothing here trains: it verifies a file against the pack's digest, kind, and

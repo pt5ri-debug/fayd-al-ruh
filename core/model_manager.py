@@ -1330,6 +1330,94 @@ class ModelManager:
 
         return list_installed()
 
+    # ----------------------------------------------------- weights pack
+
+    def weights_pack(self, root: Path | str | None = None) -> Any:
+        """The committed, ready-made weight pack that ships with the project.
+
+        A thin delegation to :func:`core.weights_pack.load_pack`, so the window, the
+        CLI, and the gate all read the *same* manifest. The pack *indexes* the
+        weights the project already commits (no second copy); an entry names the
+        file, its digest, its kind and architecture, and the command that continues
+        it.
+        """
+        from core.weights_pack import load_pack
+
+        return load_pack(root)
+
+    def weights_pack_status(self, root: Path | str | None = None) -> Any:
+        """How much of the pack is installed where its trainer reads from."""
+        from core.weights_pack import pack_status
+
+        return pack_status(root)
+
+    def verify_weights_pack(self, root: Path | str | None = None) -> tuple[Any, ...]:
+        """Verify every pack entry against the file on disk.
+
+        Each entry's file must exist, hash to its recorded digest, classify to its
+        recorded kind, and carry its recorded architecture (a missing sidecar is
+        reported too). Nothing is installed by verifying.
+        """
+        from core.weights_pack import verify_pack
+
+        return verify_pack(self.weights_pack(root))
+
+    def verify_weight_entry(self, key: str, root: Path | str | None = None) -> Any:
+        """Verify one pack entry by key, refusing an unknown key."""
+        from core.weights_pack import WeightsPackError, verify_entry
+
+        pack = self.weights_pack(root)
+        entry = pack.get(key)
+        if entry is None:
+            raise WeightsPackError(f"no pack entry named {key!r}")
+        return verify_entry(entry)
+
+    def install_weights_pack(
+        self,
+        keys: Any = None,
+        *,
+        root: Path | str | None = None,
+        force: bool = False,
+        backup: bool = True,
+    ) -> Any:
+        """Install verified pack entries into the folders their trainers read from.
+
+        Installation goes through :mod:`core.checkpoint_import`, so a pack entry
+        lands in exactly the file a trainer resumes from -- there is no second copy
+        path. An empty ``keys`` installs every entry; an unknown key is refused. An
+        existing file is backed up unless ``force`` is set and ``backup`` is off.
+        The result is a :class:`core.weights_pack.PackInstallReport`.
+        """
+        from core.weights_pack import install_pack
+
+        pack = self.weights_pack(root)
+        report = install_pack(
+            pack,
+            keys=tuple(keys or ()),
+            force=force,
+            backup=backup,
+        )
+        self.log.append(
+            OP_DOWNLOAD if report.installed else OP_FAILURE,
+            display_name="weights pack",
+            ok=report.ok,
+            message=(
+                f"weights pack: installed {report.installed} of "
+                f"{len(report.outcomes)}, refused {report.refused}"
+            ),
+        )
+        return report
+
+    def continue_command(self, key: str, root: Path | str | None = None) -> str:
+        """The command that continues a pack entry's training, or ``""``."""
+        from core.weights_pack import WeightsPackError
+
+        pack = self.weights_pack(root)
+        entry = pack.get(key)
+        if entry is None:
+            raise WeightsPackError(f"no pack entry named {key!r}")
+        return entry.continue_command
+
     def _fail(self, operation: str, record: ModelRecord, detail: str) -> OperationResult:
         """Record a failure and return it, so no caller has to catch."""
         self.log.append(

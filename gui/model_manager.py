@@ -516,6 +516,68 @@ class ModelManagerService:
         """Every weight file the project's trainers can continue, read from disk."""
         return self.manager.installed_weights()
 
+    # ---------------------------------------------------- weights pack
+
+    def weights_pack(self, root: Path | str | None = None) -> Any:
+        """The committed, ready-made weight pack that ships with the project."""
+        return self.manager.weights_pack(root)
+
+    def weights_pack_status(self, root: Path | str | None = None) -> Any:
+        """How much of the pack is installed where its trainer reads from."""
+        return self.manager.weights_pack_status(root)
+
+    def verify_weights_pack(self, root: Path | str | None = None) -> tuple[Any, ...]:
+        """Verify every pack entry against the file on disk."""
+        return self.manager.verify_weights_pack(root)
+
+    def verify_weight_entry(self, key: str, root: Path | str | None = None) -> Any:
+        """Verify one pack entry by key, refusing an unknown key."""
+        return self.manager.verify_weight_entry(key, root)
+
+    def install_weights_pack(
+        self,
+        keys: Any = None,
+        *,
+        root: Path | str | None = None,
+        force: bool = False,
+        backup: bool = True,
+    ) -> Any:
+        """Install verified pack entries into the folders their trainers read from."""
+        return self.manager.install_weights_pack(
+            keys, root=root, force=force, backup=backup
+        )
+
+    def continue_command(self, key: str, root: Path | str | None = None) -> str:
+        """The command that continues a pack entry's training, or ``""``."""
+        return self.manager.continue_command(key, root)
+
+    def weights_pack_rows(self, root: Path | str | None = None) -> tuple[dict[str, Any], ...]:
+        """One plain row per pack entry, for a table or a listing.
+
+        Each row carries the key, kind, file name, whether the file verifies, and
+        whether it is already installed for its trainer -- read from the real pack,
+        never fabricated.
+        """
+        status = self.weights_pack_status(root)
+        rows: list[dict[str, Any]] = []
+        by_key = {item.key: item for item in status.verifications}
+        installed = set(status.installed)
+        for entry in status.pack.entries:
+            verification = by_key.get(entry.key)
+            rows.append(
+                {
+                    "key": entry.key,
+                    "kind": entry.kind,
+                    "task": entry.task,
+                    "file": entry.path.name,
+                    "title": entry.title,
+                    "verified": bool(verification.ok) if verification else False,
+                    "installed": entry.key in installed,
+                    "continue_command": entry.continue_command,
+                }
+            )
+        return tuple(rows)
+
     # -------------------------------------------------------------- settings
 
     def settings(self, model_id: str) -> Any:

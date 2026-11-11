@@ -730,6 +730,85 @@ def _cmd_installed_weights(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_weights_pack(args: argparse.Namespace) -> int:
+    """The committed pack: what it offers and whether it is installed."""
+    mgr = _manager()
+    if args.pack_list:
+        pack = mgr.weights_pack()
+        if not pack.available:
+            print(pack.detail, file=sys.stderr)
+            return 3
+        rows = [entry.to_primitive() for entry in pack.entries]
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=2))
+            return 0
+        for entry in pack.entries:
+            command = f"  → {entry.continue_command}" if entry.continue_command else ""
+            print(f"{entry.key}\t{entry.kind}\t{entry.path}{command}")
+        return 0
+    status = mgr.weights_pack_status()
+    if args.json:
+        print(json.dumps(status.to_primitive(), ensure_ascii=False, indent=2))
+        return 0 if status.pack.available else 3
+    print(status.describe())
+    return 0 if status.pack.available else 3
+
+
+def _cmd_verify_weights(args: argparse.Namespace) -> int:
+    """Verify the whole pack (or one entry) against the file on disk."""
+    mgr = _manager()
+    if args.key:
+        try:
+            verifications = (mgr.verify_weight_entry(args.key),)
+        except Exception as exc:
+            print(str(exc), file=sys.stderr)
+            return 3
+    else:
+        verifications = mgr.verify_weights_pack()
+    if args.json:
+        print(json.dumps([item.to_primitive() for item in verifications], ensure_ascii=False, indent=2))
+    else:
+        for item in verifications:
+            print(item.describe())
+    return 0 if all(item.ok for item in verifications) else 4
+
+
+def _cmd_install_pack(args: argparse.Namespace) -> int:
+    """Install verified pack entries so the trainers continue them."""
+    mgr = _manager()
+    keys = tuple(args.keys or ())
+    if args.all:
+        keys = ()
+    report = mgr.install_weights_pack(
+        keys, force=args.force, backup=not args.no_backup
+    )
+    if args.json:
+        print(json.dumps(report.to_primitive(), ensure_ascii=False, indent=2))
+    else:
+        print(report.describe())
+    if report.detail:
+        return 3
+    return 0 if report.installed else 4
+
+
+def _cmd_continue_weights(args: argparse.Namespace) -> int:
+    """Print the command that continues a pack entry's training."""
+    mgr = _manager()
+    try:
+        command = mgr.continue_command(args.key)
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        return 3
+    if args.json:
+        print(json.dumps({"key": args.key, "command": command}, ensure_ascii=False, indent=2))
+    elif command:
+        print(command)
+    else:
+        print(f"No continue command is recorded for {args.key!r}.", file=sys.stderr)
+        return 3
+    return 0
+
+
 def _cmd_weight_kinds(args: argparse.Namespace) -> int:
     """The ``.npz`` kinds this build imports, and the trainer that continues each."""
     from core.checkpoint_import import KIND_BLURBS, KINDS, resume_plan
@@ -1099,6 +1178,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     weight_kinds.add_argument("--json", action="store_true", help="print JSON")
 
+    weights_pack = sub.add_parser(
+        "weights-pack", help="the committed weights pack: what it offers and what is installed"
+    )
+    weights_pack.add_argument("--list", dest="pack_list", action="store_true", help="list the entries")
+    weights_pack.add_argument("--json", action="store_true", help="print JSON")
+
+    verify_weights = sub.add_parser(
+        "verify-weights", help="verify the pack (or one entry) against the file on disk"
+    )
+    verify_weights.add_argument("key", nargs="?", default="", help="a single entry key")
+    verify_weights.add_argument("--json", action="store_true", help="print JSON")
+
+    install_pack = sub.add_parser(
+        "install-pack", help="install verified pack entries so the trainers continue them"
+    )
+    install_pack.add_argument("keys", nargs="*", help="entry keys (default: the whole pack)")
+    install_pack.add_argument("--all", action="store_true", help="install every entry")
+    install_pack.add_argument("--force", action="store_true", help="replace an existing file")
+    install_pack.add_argument("--no-backup", action="store_true", help="do not keep a backup")
+    install_pack.add_argument("--json", action="store_true", help="print JSON")
+
+    continue_weights = sub.add_parser(
+        "continue-weights", help="print the command that continues a pack entry"
+    )
+    continue_weights.add_argument("key", help="the entry key")
+    continue_weights.add_argument("--json", action="store_true", help="print JSON")
+
     return parser
 
 
@@ -1138,6 +1244,10 @@ _HANDLERS = {
     "import-weights": _cmd_import_weights,
     "installed-weights": _cmd_installed_weights,
     "weight-kinds": _cmd_weight_kinds,
+    "weights-pack": _cmd_weights_pack,
+    "verify-weights": _cmd_verify_weights,
+    "install-pack": _cmd_install_pack,
+    "continue-weights": _cmd_continue_weights,
 }
 
 

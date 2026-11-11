@@ -487,6 +487,99 @@ def test_models_cli_import_weights_missing_file(tmp_path, capsys):
     assert "No file" in capsys.readouterr().err
 
 
+# --------------------------------------------------- weights pack (Phase 2)
+
+
+def _write_pack(tmp_path):
+    """Write a tiny real pack manifest over a real weight file."""
+    import json
+
+    from core.checkpoint_import import KIND_LANGUAGE
+    from core.weights_pack import MANIFEST_NAME, file_digest
+
+    source = _train_checkpoint(tmp_path / "run")
+    root = tmp_path / "weights"
+    root.mkdir()
+    digest = file_digest(source)
+    manifest = {
+        "version": 1,
+        "project_version": "test",
+        "entries": [
+            {
+                "key": "fayd-llm",
+                "kind": KIND_LANGUAGE,
+                "title": "Fayd Al-Ruh language model",
+                "path": str(source),
+                "digest": digest,
+                "continue_command": "python -m cli llm --resume",
+            }
+        ],
+    }
+    (root / MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
+    return root
+
+
+def test_model_manager_reads_the_weights_pack(tmp_path):
+    from core.model_manager import ModelManager
+
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(tmp_path / "data")}):
+        root = _write_pack(tmp_path)
+        manager = ModelManager(tmp_path)
+        pack = manager.weights_pack(root)
+        assert pack.available
+        assert pack.get("fayd-llm") is not None
+        assert manager.continue_command("fayd-llm", root) == "python -m cli llm --resume"
+        status = manager.weights_pack_status(root)
+        assert status.ready == 1
+        verifications = manager.verify_weights_pack(root)
+        assert verifications and verifications[0].ok
+        assert manager.verify_weight_entry("fayd-llm", root).ok
+
+
+def test_model_manager_refuses_an_unknown_pack_entry(tmp_path):
+    from core.model_manager import ModelManager
+    from core.weights_pack import WeightsPackError
+
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(tmp_path / "data")}):
+        root = _write_pack(tmp_path)
+        manager = ModelManager(tmp_path)
+        try:
+            manager.verify_weight_entry("nope", root)
+        except WeightsPackError:
+            pass
+        else:  # pragma: no cover - the refusal is the point
+            raise AssertionError("an unknown key must be refused")
+
+
+def test_models_cli_reads_the_shipped_weights_pack(capsys):
+    """The CLI's pack commands read the *shipped* pack read-only."""
+    from cli.models import main as models_main
+
+    # The repo ships `weights/manifest.json`, so this exercises the real path.
+    assert models_main(["weights-pack", "--list"]) == 0
+    out = capsys.readouterr().out
+    assert "fayd-llm" in out
+    assert models_main(["verify-weights", "fayd-llm"]) == 0
+    assert "OK" in capsys.readouterr().out
+    assert models_main(["continue-weights", "fayd-llm"]) == 0
+    assert "cli llm --resume" in capsys.readouterr().out
+    assert models_main(["continue-weights", "nope"]) == 3
+
+
+def test_models_cli_pack_commands_exist():
+    from cli.models import _build_parser
+
+    parser = _build_parser()
+    for command in (
+        "weights-pack",
+        "verify-weights",
+        "install-pack",
+        "continue-weights",
+    ):
+        argv = [command, "fayd-llm"] if command == "continue-weights" else [command]
+        assert parser.parse_args(argv).command == command
+
+
 # ------------------------------------------------------------------- gate
 
 
