@@ -470,3 +470,60 @@ def test_the_menu_offers_the_learned_entries():
     build_rows = [args for label, _action, args in MENU if "train the large tier" in label]
     assert build_rows and build_rows[0] == ("build-learned", "learned-large")
 
+
+
+# -------------------------------------------------------- --build-learned flag
+
+
+def test_the_trainer_cli_exposes_build_learned(tmp_path, monkeypatch, capsys):
+    # The flag parses with no value (defaulting to learned-large) and with a value;
+    # the parser is built inside main(), so this checks behaviour, not internals.
+    from ml.llm import __main__ as llm_main
+
+    seen: list[str] = []
+
+    def fake_build(tier, **_kwargs):
+        seen.append(tier)
+        return BuildReport(
+            tier=resolve_tier(tier), checkpoint=tmp_path / "x.npz", built=True, steps=1
+        )
+
+    monkeypatch.setattr("core.learned_weights.build_learned", fake_build)
+    assert llm_main.main(["--build-learned"]) == 0
+    assert llm_main.main(["--build-learned", "learned-xl"]) == 0
+    assert seen == ["learned-large", "learned-xl"]
+    assert "built" in capsys.readouterr().out
+
+
+def test_build_learned_flag_trains_through_the_real_engine(tmp_path, monkeypatch):
+    from ml.llm import __main__ as llm_main
+
+    captured: dict[str, object] = {}
+
+    def fake_build(tier, **kwargs):
+        captured["tier"] = tier
+        captured.update(kwargs)
+        return BuildReport(
+            tier=resolve_tier(tier),
+            checkpoint=tmp_path / "fayd-llm-large.npz",
+            built=True,
+            steps=5,
+        )
+
+    monkeypatch.setattr("core.learned_weights.build_learned", fake_build)
+    # The tier's own budget is used unless --steps is passed explicitly.
+    code = llm_main.main(["--build-learned", "learned-large"])
+    assert code == 0
+    assert captured["tier"] == "learned-large"
+    assert captured["steps"] is None
+    code = llm_main.main(["--build-learned", "learned-xl", "--steps", "7"])
+    assert code == 0
+    assert captured["steps"] == 7
+
+
+def test_build_learned_flag_refuses_an_unknown_tier(capsys):
+    from ml.llm.__main__ import main
+
+    assert main(["--build-learned", "enormous"]) == 3
+    assert "Unknown learned tier" in capsys.readouterr().err
+
