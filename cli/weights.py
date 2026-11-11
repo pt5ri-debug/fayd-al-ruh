@@ -260,6 +260,77 @@ def _continue(
     return 0
 
 
+def _learned_tiers(as_json: bool = False) -> int:
+    """Every learned capacity tier the project can build, described."""
+    from core.learned_weights import LEARNED_TIERS, describe_tiers
+
+    if as_json:
+        _print_json([tier.to_primitive() for tier in LEARNED_TIERS.values()])
+        return 0
+    print(describe_tiers())
+    return 0
+
+
+def _learned_list(root: str = "", as_json: bool = False) -> int:
+    """The learned checkpoints already built, read from their own structure."""
+    from core.learned_weights import describe_learned, learned_dir, list_learned
+
+    checkpoints = list_learned(root or None)
+    if as_json:
+        _print_json([item.to_primitive() for item in checkpoints])
+        return 0
+    if not checkpoints:
+        print(describe_learned(root or None))
+        return 0
+    print(f"Learned checkpoints in {learned_dir(root or None)}")
+    for item in checkpoints:
+        print("  " + item.describe().replace("\n", "\n  "))
+    return 0
+
+
+def _build_learned(
+    tier: str = "",
+    root: str = "",
+    *,
+    steps: int = 0,
+    repeats: int = 0,
+    structured_repeats: int = 0,
+    seed: int = 0,
+    force: bool = False,
+    quiet: bool = False,
+    as_json: bool = False,
+) -> int:
+    """Train one learned tier into the pack folder and record its provenance."""
+    from core.learned_weights import LearnedWeightsError, build_learned
+
+    if not tier:
+        print(
+            "Name a learned tier to build (for example `build-learned learned-large`). "
+            "Run `learned-tiers` to see them.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        report = build_learned(
+            tier,
+            root=root or None,
+            steps=steps or None,
+            repeats=repeats or None,
+            structured_repeats=structured_repeats or None,
+            seed=seed,
+            force=force,
+            verbose=not quiet,
+        )
+    except LearnedWeightsError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 3
+    if as_json:
+        _print_json(report.to_primitive())
+    else:
+        print(report.describe())
+    return 0 if report.built else 4
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="weights",
@@ -326,6 +397,30 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     cont.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
 
+    tiers = sub.add_parser(
+        "learned-tiers", help="the learned capacity tiers this build can train"
+    )
+    tiers.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
+
+    learned_list = sub.add_parser(
+        "learned-list", help="the learned checkpoints already built"
+    )
+    learned_list.add_argument("--root", help="the learned folder (default: weights/learned)")
+    learned_list.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
+
+    build = sub.add_parser(
+        "build-learned", help="train one learned tier into the pack folder"
+    )
+    build.add_argument("tier", nargs="?", default="", help="the tier key (e.g. learned-large)")
+    build.add_argument("--root", help="the learned folder (default: weights/learned)")
+    build.add_argument("--steps", type=int, default=0, help="training steps (default: the tier's own)")
+    build.add_argument("--repeats", type=int, default=0, help="corpus repeats")
+    build.add_argument("--structured-repeats", type=int, default=0, help="structured-block repeats")
+    build.add_argument("--seed", type=int, default=0, help="the training seed")
+    build.add_argument("--force", action="store_true", help="retrain over an existing checkpoint")
+    build.add_argument("--quiet", action="store_true", help="print only the final summary")
+    build.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
+
     return parser
 
 
@@ -364,6 +459,22 @@ def main(argv: list[str] | None = None) -> int:
                 args.key,
                 run=getattr(args, "run", False),
                 force=getattr(args, "force", False),
+                as_json=as_json,
+            )
+        if args.command == "learned-tiers":
+            return _learned_tiers(as_json)
+        if args.command == "learned-list":
+            return _learned_list(root, as_json)
+        if args.command == "build-learned":
+            return _build_learned(
+                args.tier,
+                root,
+                steps=args.steps,
+                repeats=args.repeats,
+                structured_repeats=args.structured_repeats,
+                seed=args.seed,
+                force=getattr(args, "force", False),
+                quiet=getattr(args, "quiet", False),
                 as_json=as_json,
             )
     except WeightsPackError as error:

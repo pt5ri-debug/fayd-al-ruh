@@ -664,6 +664,21 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         run_weights,
         ("continue", "fayd-llm"),
     ),
+    (
+        "Learned weights: the larger capacity tiers this build can train",
+        run_weights,
+        ("learned-tiers",),
+    ),
+    (
+        "Learned weights: the learned checkpoints already built",
+        run_weights,
+        ("learned-list",),
+    ),
+    (
+        "Learned weights: train the large tier into the pack folder",
+        run_weights,
+        ("build-learned", "learned-large"),
+    ),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
