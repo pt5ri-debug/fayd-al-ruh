@@ -7357,3 +7357,35 @@ regression monitor each can refuse a change.
   `tests/test_checkpoint_import.py` (41 tests) pins the recognition, the
   installation and backups, the fetch gate, the listing, the CLI, the trainer
   flag, the Model Manager delegation, and the gate.
+
+- The **committed weights pack** (`core/weights_pack.py`, Phase 1) and the
+  **one-step continue workflow** (Phase 3): the project ships a curated,
+  committed set of ready-made `.npz` weights -- the language-model checkpoint
+  (with its tokenizer and optimiser-state sidecars) and the 67 petroleum
+  policies -- described by a small JSON manifest (`weights/manifest.json`: key,
+  kind, file, sidecars, sha256 digest, architecture, provenance, and the command
+  that continues it), and a clean clone can continue any of them without naming a
+  file. `load_pack`/`generate_manifest` read and (re)build the manifest (paths
+  resolved against the repository root, so the pack **indexes** what ships with no
+  second copy); `verify_entry` checks a file against the pack's own digest, kind,
+  architecture, and sidecars (a tampered file, a mismatched architecture, a
+  missing sidecar, and a wrong kind are each **refused**); `install_pack`/
+  `install_entry` verify first and install through the same
+  `core.checkpoint_import.install_weights`, so an installed entry lands in exactly
+  the file the trainer reads (and never clobbers without `--force`, keeping a
+  backup when forced); `select_keys(pack, kind)` is a trainer's own filter;
+  `pack_status` reports what the pack offers and what is installed. The **continue**
+  path ties it together: `python -m cli weights continue KEY [--run]` verifies and
+  installs the entry, then names (or runs) the trainer command, and the trainers
+  gained a bootstrap flag -- `python -m ml.llm --install-weights [KEY]`,
+  `python -m ml.petroleum --install-weights`, and `python -m ml --install-weights`
+  each install the pack's own entries (language model / policies) into the folder
+  they resume from and then continue, so a fresh checkout is one command from
+  training. Reachable headless as `python -m cli weights
+  status|list|verify|install|plan|generate|continue` (`cli/weights.py`), the Model
+  Manager window's **Weights pack** section and `python -m cli models
+  weights-pack|verify-weights|install-pack|continue-weights`, and the menu. The
+  held-out gate `core/weights_pack_gate.py`'s `weights_pack_accuracy` (negative
+  controls, run on the real engine) is a metric in `evaluation`;
+  `tests/test_weights_pack.py` pins the engine, the CLI (including `continue`),
+  the trainer bootstrap, the shipped pack, and the gate.

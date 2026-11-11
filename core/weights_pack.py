@@ -650,6 +650,16 @@ def install_pack(
     return PackInstallReport(outcomes=outcomes)
 
 
+def select_keys(pack: WeightsPack, kind: str) -> tuple[str, ...]:
+    """The keys of every entry of one kind, in pack order (a trainer's own filter).
+
+    Lets a trainer install exactly the weights *it* resumes from -- a language
+    trainer the ``language-model`` entry, a petroleum trainer every ``policy`` --
+    without naming each key or installing an entry it does not use.
+    """
+    return tuple(entry.key for entry in pack.entries if entry.kind == kind)
+
+
 # ------------------------------------------------------------------- status
 
 
