@@ -318,6 +318,35 @@ are committed to git on purpose for a release, so the repository carries a
 ready-trained state that needs no retraining on the user's machine. Training is
 deterministic for a fixed seed, so the manifest can be reproduced and verified.
 
+### The committed weights pack
+
+Those committed weights are also described by a **pack**: `weights/manifest.json`
+indexes the language-model checkpoint (with its tokenizer and optimiser-state
+sidecars) and the petroleum policies, each with its **sha256 digest**, the
+**architecture** it must carry, its **provenance** (the trainer that produced it,
+the source file, the digest algorithm, and the licence), and the **command that
+continues it**. `core/weights_pack.py` verifies a file against the pack before it
+is used -- a tampered file, a mismatched architecture, a missing sidecar, and a
+wrong kind are each refused -- and installs a *verified* entry into exactly the
+file the trainer resumes from. So a fresh clone continues the project's own
+trained model in one command:
+
+```
+python -m cli weights status                 # what the pack offers, verified
+python -m cli weights show fayd-llm          # one entry in full, with its provenance
+python -m cli weights continue fayd-llm      # verify + install + name the trainer
+python -m cli weights continue fayd-llm --run  # ...and run it
+
+python -m cli llm --install-weights          # the language trainer: install the pack's
+                                             # checkpoint, then resume
+python -m ml.petroleum --install-weights     # every policy, then resume
+```
+
+`python -m cli models weights-pack|verify-weights|install-pack|continue-weights`
+and the Model Manager window's **Weights pack** section reach the same engine, and
+the pack is verified by the held-out gate `weights_pack_accuracy` in the
+evaluation.
+
 ## Inference over the ontology
 
 The seeded ontology is not static data. `core/ontology_reasoner.py` derives

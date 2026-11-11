@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-11-11T10:41:45Z",
+  "created_at": "2026-11-11T12:50:44Z",
   "digest_algorithm": "sha256",
   "entries": [
     {
@@ -23,7 +23,11 @@
       "path": "ml/llm/checkpoints/fayd-llm.npz",
       "provenance": {
         "checkpoint": "ml/llm/checkpoints/fayd-llm.npz",
-        "source": "the project's own trainer"
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.llm)",
+        "source": "ml/llm/checkpoints/fayd-llm.npz"
       },
       "task": "",
       "title": "Fayd Al-Ruh language model"
@@ -38,7 +42,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_complete-shale-well.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_complete-shale-well.npz",
         "task": "complete-shale-well"
       },
       "task": "complete-shale-well",
@@ -54,7 +62,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_complete-well.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_complete-well.npz",
         "task": "complete-well"
       },
       "task": "complete-well",
@@ -70,7 +82,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_control-kick.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_control-kick.npz",
         "task": "control-kick"
       },
       "task": "control-kick",
@@ -86,7 +102,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_core-analysis.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_core-analysis.npz",
         "task": "core-analysis"
       },
       "task": "core-analysis",
@@ -102,7 +122,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_drill-well.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_drill-well.npz",
         "task": "drill-well"
       },
       "task": "drill-well",
@@ -118,7 +142,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_enhanced-recovery.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_enhanced-recovery.npz",
         "task": "enhanced-recovery"
       },
       "task": "enhanced-recovery",
@@ -134,7 +162,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_field-economics.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_field-economics.npz",
         "task": "field-economics"
       },
       "task": "field-economics",
@@ -150,7 +182,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_flow-assurance.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_flow-assurance.npz",
         "task": "flow-assurance"
       },
       "task": "flow-assurance",
@@ -166,7 +202,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_gas-processing.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_gas-processing.npz",
         "task": "gas-processing"
       },
       "task": "gas-processing",
@@ -182,7 +222,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_install-gas-lift.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_install-gas-lift.npz",
         "task": "install-gas-lift"
       },
       "task": "install-gas-lift",
@@ -198,7 +242,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_log-interpretation.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_log-interpretation.npz",
         "task": "log-interpretation"
       },
       "task": "log-interpretation",
@@ -214,7 +262,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_matrix-acidizing.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_matrix-acidizing.npz",
         "task": "matrix-acidizing"
       },
       "task": "matrix-acidizing",
@@ -230,7 +282,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_pressure-transient-test.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_pressure-transient-test.npz",
         "task": "pressure-transient-test"
       },
       "task": "pressure-transient-test",
@@ -246,7 +302,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_primary-cementing.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_primary-cementing.npz",
         "task": "primary-cementing"
       },
       "task": "primary-cementing",
@@ -262,7 +322,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-advanced_eor_methods.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-advanced_eor_methods.npz",
         "task": "procedure-advanced_eor_methods"
       },
       "task": "procedure-advanced_eor_methods",
@@ -278,7 +342,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-artificial_lift_selection.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-artificial_lift_selection.npz",
         "task": "procedure-artificial_lift_selection"
       },
       "task": "procedure-artificial_lift_selection",
@@ -294,7 +362,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-carbon_capture_and_storage.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-carbon_capture_and_storage.npz",
         "task": "procedure-carbon_capture_and_storage"
       },
       "task": "procedure-carbon_capture_and_storage",
@@ -310,7 +382,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-casing_and_cementing_design.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-casing_and_cementing_design.npz",
         "task": "procedure-casing_and_cementing_design"
       },
       "task": "procedure-casing_and_cementing_design",
@@ -326,7 +402,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-data_analytics_and_ml.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-data_analytics_and_ml.npz",
         "task": "procedure-data_analytics_and_ml"
       },
       "task": "procedure-data_analytics_and_ml",
@@ -342,7 +422,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-directional_drilling.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-directional_drilling.npz",
         "task": "procedure-directional_drilling"
       },
       "task": "procedure-directional_drilling",
@@ -358,7 +442,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-drilling_fluids.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-drilling_fluids.npz",
         "task": "procedure-drilling_fluids"
       },
       "task": "procedure-drilling_fluids",
@@ -374,7 +462,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-enhanced_oil_recovery.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-enhanced_oil_recovery.npz",
         "task": "procedure-enhanced_oil_recovery"
       },
       "task": "procedure-enhanced_oil_recovery",
@@ -390,7 +482,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-facilities_and_transport.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-facilities_and_transport.npz",
         "task": "procedure-facilities_and_transport"
       },
       "task": "procedure-facilities_and_transport",
@@ -406,7 +502,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-field_development_planning.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-field_development_planning.npz",
         "task": "procedure-field_development_planning"
       },
       "task": "procedure-field_development_planning",
@@ -422,7 +522,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-field_development_planning_advanced.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-field_development_planning_advanced.npz",
         "task": "procedure-field_development_planning_advanced"
       },
       "task": "procedure-field_development_planning_advanced",
@@ -438,7 +542,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-flow_assurance.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-flow_assurance.npz",
         "task": "procedure-flow_assurance"
       },
       "task": "procedure-flow_assurance",
@@ -454,7 +562,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-fluid_flow_in_porous_media.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-fluid_flow_in_porous_media.npz",
         "task": "procedure-fluid_flow_in_porous_media"
       },
       "task": "procedure-fluid_flow_in_porous_media",
@@ -470,7 +582,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-formation_evaluation.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-formation_evaluation.npz",
         "task": "procedure-formation_evaluation"
       },
       "task": "procedure-formation_evaluation",
@@ -486,7 +602,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-gas_processing_and_lng.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-gas_processing_and_lng.npz",
         "task": "procedure-gas_processing_and_lng"
       },
       "task": "procedure-gas_processing_and_lng",
@@ -502,7 +622,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-geomechanics_and_wellbore_stability.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-geomechanics_and_wellbore_stability.npz",
         "task": "procedure-geomechanics_and_wellbore_stability"
       },
       "task": "procedure-geomechanics_and_wellbore_stability",
@@ -518,7 +642,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-hydraulic_fracturing.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-hydraulic_fracturing.npz",
         "task": "procedure-hydraulic_fracturing"
       },
       "task": "procedure-hydraulic_fracturing",
@@ -534,7 +662,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-log_interpretation_workflow.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-log_interpretation_workflow.npz",
         "task": "procedure-log_interpretation_workflow"
       },
       "task": "procedure-log_interpretation_workflow",
@@ -550,7 +682,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-logging_tools.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-logging_tools.npz",
         "task": "procedure-logging_tools"
       },
       "task": "procedure-logging_tools",
@@ -566,7 +702,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-material_balance.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-material_balance.npz",
         "task": "procedure-material_balance"
       },
       "task": "procedure-material_balance",
@@ -582,7 +722,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-matrix_acidizing.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-matrix_acidizing.npz",
         "task": "procedure-matrix_acidizing"
       },
       "task": "procedure-matrix_acidizing",
@@ -598,7 +742,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-multiphase_flow.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-multiphase_flow.npz",
         "task": "procedure-multiphase_flow"
       },
       "task": "procedure-multiphase_flow",
@@ -614,7 +762,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-offshore_operations.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-offshore_operations.npz",
         "task": "procedure-offshore_operations"
       },
       "task": "procedure-offshore_operations",
@@ -630,7 +782,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-petroleum_economics_npv.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-petroleum_economics_npv.npz",
         "task": "procedure-petroleum_economics_npv"
       },
       "task": "procedure-petroleum_economics_npv",
@@ -646,7 +802,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-petroleum_system.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-petroleum_system.npz",
         "task": "procedure-petroleum_system"
       },
       "task": "procedure-petroleum_system",
@@ -662,7 +822,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-pressure_transient_testing.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-pressure_transient_testing.npz",
         "task": "procedure-pressure_transient_testing"
       },
       "task": "procedure-pressure_transient_testing",
@@ -678,7 +842,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-primary_cementing.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-primary_cementing.npz",
         "task": "procedure-primary_cementing"
       },
       "task": "procedure-primary_cementing",
@@ -694,7 +862,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-process_safety.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-process_safety.npz",
         "task": "procedure-process_safety"
       },
       "task": "procedure-process_safety",
@@ -710,7 +882,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-process_safety_management.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-process_safety_management.npz",
         "task": "procedure-process_safety_management"
       },
       "task": "procedure-process_safety_management",
@@ -726,7 +902,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-production_optimisation.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-production_optimisation.npz",
         "task": "procedure-production_optimisation"
       },
       "task": "procedure-production_optimisation",
@@ -742,7 +922,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-professional_ethics.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-professional_ethics.npz",
         "task": "procedure-professional_ethics"
       },
       "task": "procedure-professional_ethics",
@@ -758,7 +942,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-project_management.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-project_management.npz",
         "task": "procedure-project_management"
       },
       "task": "procedure-project_management",
@@ -774,7 +962,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-reservoir_drive_mechanisms.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-reservoir_drive_mechanisms.npz",
         "task": "procedure-reservoir_drive_mechanisms"
       },
       "task": "procedure-reservoir_drive_mechanisms",
@@ -790,7 +982,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-reservoir_fluid_properties.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-reservoir_fluid_properties.npz",
         "task": "procedure-reservoir_fluid_properties"
       },
       "task": "procedure-reservoir_fluid_properties",
@@ -806,7 +1002,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-reservoir_rock_properties.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-reservoir_rock_properties.npz",
         "task": "procedure-reservoir_rock_properties"
       },
       "task": "procedure-reservoir_rock_properties",
@@ -822,7 +1022,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-reservoir_simulation_modelling.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-reservoir_simulation_modelling.npz",
         "task": "procedure-reservoir_simulation_modelling"
       },
       "task": "procedure-reservoir_simulation_modelling",
@@ -838,7 +1042,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-rock_mechanics.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-rock_mechanics.npz",
         "task": "procedure-rock_mechanics"
       },
       "task": "procedure-rock_mechanics",
@@ -854,7 +1062,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-saturation_height.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-saturation_height.npz",
         "task": "procedure-saturation_height"
       },
       "task": "procedure-saturation_height",
@@ -870,7 +1082,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-seismic_interpretation.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-seismic_interpretation.npz",
         "task": "procedure-seismic_interpretation"
       },
       "task": "procedure-seismic_interpretation",
@@ -886,7 +1102,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-subsea_and_deepwater.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-subsea_and_deepwater.npz",
         "task": "procedure-subsea_and_deepwater"
       },
       "task": "procedure-subsea_and_deepwater",
@@ -902,7 +1122,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-surface_facilities.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-surface_facilities.npz",
         "task": "procedure-surface_facilities"
       },
       "task": "procedure-surface_facilities",
@@ -918,7 +1142,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-unconventional_resources.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-unconventional_resources.npz",
         "task": "procedure-unconventional_resources"
       },
       "task": "procedure-unconventional_resources",
@@ -934,7 +1162,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-volumetric_reserves.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-volumetric_reserves.npz",
         "task": "procedure-volumetric_reserves"
       },
       "task": "procedure-volumetric_reserves",
@@ -950,7 +1182,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-waterflood_management.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-waterflood_management.npz",
         "task": "procedure-waterflood_management"
       },
       "task": "procedure-waterflood_management",
@@ -966,7 +1202,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-well_completions_design.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-well_completions_design.npz",
         "task": "procedure-well_completions_design"
       },
       "task": "procedure-well_completions_design",
@@ -982,7 +1222,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-well_control_kicks.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-well_control_kicks.npz",
         "task": "procedure-well_control_kicks"
       },
       "task": "procedure-well_control_kicks",
@@ -998,7 +1242,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-well_decommissioning.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-well_decommissioning.npz",
         "task": "procedure-well_decommissioning"
       },
       "task": "procedure-well_decommissioning",
@@ -1014,7 +1262,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_procedure-well_integrity_management.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_procedure-well_integrity_management.npz",
         "task": "procedure-well_integrity_management"
       },
       "task": "procedure-well_integrity_management",
@@ -1030,7 +1282,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_process-safety-review.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_process-safety-review.npz",
         "task": "process-safety-review"
       },
       "task": "process-safety-review",
@@ -1046,7 +1302,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_reservoir-appraisal.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_reservoir-appraisal.npz",
         "task": "reservoir-appraisal"
       },
       "task": "reservoir-appraisal",
@@ -1062,7 +1322,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_restore-production.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_restore-production.npz",
         "task": "restore-production"
       },
       "task": "restore-production",
@@ -1078,7 +1342,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_seismic-interpretation.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_seismic-interpretation.npz",
         "task": "seismic-interpretation"
       },
       "task": "seismic-interpretation",
@@ -1094,7 +1362,11 @@
       "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
       "path": "ml/artifacts/petroleum/policy_well-integrity-check.npz",
       "provenance": {
-        "source": "the project's own trainer",
+        "created_at": "2026-11-11T10:21:21Z",
+        "digest_algorithm": "sha256",
+        "license": "MIT (this project)",
+        "producer": "the project's own trainer (ml.petroleum)",
+        "source": "ml/artifacts/petroleum/policy_well-integrity-check.npz",
         "task": "well-integrity-check"
       },
       "task": "well-integrity-check",
