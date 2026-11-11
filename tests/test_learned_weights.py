@@ -399,3 +399,74 @@ def test_generate_manifest_without_learned_leaves_the_base_only(tmp_path):
     assert "fayd-llm" in pack.keys()
 
 
+
+
+# --------------------------------------------------------------- CLI commands
+
+
+def test_cli_lists_the_learned_tiers(capsys):
+    from cli.weights import main
+
+    assert main(["learned-tiers"]) == 0
+    out = capsys.readouterr().out
+    assert "learned-large" in out and "learned-xl" in out
+
+
+def test_cli_lists_tiers_as_json(capsys):
+    import json as _json
+
+    from cli.weights import main
+
+    assert main(["learned-tiers", "--json"]) == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert {row["key"] for row in payload} == set(TIER_KEYS)
+
+
+def test_cli_learned_list_reports_an_empty_folder(tmp_path, capsys):
+    from cli.weights import main
+
+    assert main(["learned-list", "--root", str(tmp_path)]) == 0
+    assert "No learned checkpoints" in capsys.readouterr().out
+
+
+def test_cli_builds_a_learned_tier_with_an_injected_config(tmp_path, monkeypatch, capsys):
+    # The CLI uses the tier's real config (too slow for a test), so the engine's
+    # build is exercised through a monkeypatched trainer that writes a tiny model.
+    from cli.weights import main
+    from core import learned_weights as lw
+
+    def tiny_trainer(**kwargs):
+        model = TransformerLM(_TINY, seed=0)
+        model.save(kwargs["checkpoint"])
+        return model
+
+    monkeypatch.setattr(lw, "_default_trainer", tiny_trainer)
+    assert main(["build-learned", "learned-large", "--root", str(tmp_path), "--quiet"]) == 0
+    assert (tmp_path / "fayd-llm-large.npz").exists()
+    assert "built" in capsys.readouterr().out
+
+
+def test_cli_build_learned_needs_a_tier(capsys):
+    from cli.weights import main
+
+    assert main(["build-learned"]) == 2
+    assert "tier" in capsys.readouterr().err.lower()
+
+
+def test_cli_build_learned_refuses_an_unknown_tier(tmp_path, capsys):
+    from cli.weights import main
+
+    assert main(["build-learned", "huge", "--root", str(tmp_path)]) == 3
+    assert "Unknown learned tier" in capsys.readouterr().err
+
+
+
+def test_the_menu_offers_the_learned_entries():
+    from cli.menu import MENU
+
+    labels = [label for label, _action, _args in MENU]
+    assert any("Learned weights" in label for label in labels)
+    # The build entry points at the CLI's own build-learned command.
+    build_rows = [args for label, _action, args in MENU if "train the large tier" in label]
+    assert build_rows and build_rows[0] == ("build-learned", "learned-large")
+
