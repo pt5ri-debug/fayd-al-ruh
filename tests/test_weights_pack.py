@@ -633,6 +633,48 @@ def test_the_base_trainer_exposes_the_install_weights_flag():
     assert "--install-weights" in buffer.getvalue()
 
 
+# ------------------------------------------------------ provenance (Phase 4)
+
+
+def test_generated_entries_record_provenance(tmp_path):
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    pack = generate_manifest(
+        root=tmp_path / "weights", checkpoint=checkpoint, include_policies=False
+    )
+    entry = pack.get("fayd-llm")
+    assert entry is not None
+    assert entry.origin.startswith("the project's own trainer")
+    assert entry.provenance["digest_algorithm"] == "sha256"
+    assert "MIT" in entry.provenance["license"]
+    line = entry.provenance_line()
+    assert "producer:" in line and "license:" in line
+    # The generated manifest on disk keeps the provenance.
+    on_disk = load_pack(tmp_path / "weights").get("fayd-llm")
+    assert on_disk is not None and on_disk.provenance["producer"] == entry.provenance["producer"]
+
+
+def test_provenance_line_leaves_absent_fields_out():
+    bare = PackEntry(key="k", title="t", kind="policy", path=Path("/x"))
+    assert bare.provenance_line() == ""
+    assert bare.origin == ""
+    partial = PackEntry(
+        key="k", title="t", kind="policy", path=Path("/x"), provenance={"seed": 7}
+    )
+    assert partial.provenance_line() == "seed: 7"
+    assert partial.origin == ""
+
+
+def test_cli_show_prints_the_provenance(tmp_path, capsys):
+    from cli.weights import main as cli_main
+
+    checkpoint = _train_checkpoint(tmp_path / "run")
+    root = _write_pack(tmp_path / "weights", [_language_row(checkpoint)])
+    assert cli_main(["show", "fayd-llm", "--root", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "language-model" in out
+    assert cli_main(["show", "nope", "--root", str(root)]) == 3
+
+
 # --------------------------------------------------------------------- menu
 
 

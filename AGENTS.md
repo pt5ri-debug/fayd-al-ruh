@@ -7389,3 +7389,22 @@ regression monitor each can refuse a change.
   controls, run on the real engine) is a metric in `evaluation`;
   `tests/test_weights_pack.py` pins the engine, the CLI (including `continue`),
   the trainer bootstrap, the shipped pack, and the gate.
+- The weights pack's **provenance and a `show` view** (Phase 4). Every pack entry
+  records *how its weights were produced*, and the pack surfaces it rather than
+  taking the file on faith. `PackEntry.provenance` carries the producer (the
+  trainer), the source file, the task, the digest algorithm, the licence, and the
+  file's **own** modification time (read from the file, never "now", so
+  regenerating the manifest does not rewrite a fact); `PackEntry.origin` names
+  where the weights came from (producer, else source) and
+  `PackEntry.provenance_line()` renders the fields the manifest actually records,
+  in `PROVENANCE_LABELS` order, leaving an absent field out (never a fabricated
+  "unknown"). `_language_entry`/`_policy_entry` fill it in `generate_manifest`,
+  and `PackEntry.describe()` prints the provenance line under the entry's head.
+  `python -m cli weights show KEY [--json]` prints one entry in full (its kind,
+  file, architecture, provenance, and continue command); `plan` now prints the
+  provenance too. The held-out gate gains a judgement
+  (`provenance_is_recorded_and_surfaced_without_inventing_a_field`): a generated
+  entry must name its origin, and a bare entry must invent none.
+  `tests/test_weights_pack.py` pins the recorded provenance, the absent-field
+  rule, and the `show` command; the README documents the pack and the one-step
+  continue workflow.
