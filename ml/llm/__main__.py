@@ -12,6 +12,7 @@ project has a working language model without any external service.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from core.paths import checkpoints_dir
@@ -351,8 +352,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--import-force",
         action="store_true",
-        help="With --import-checkpoint, replace an existing checkpoint (a backup is "
-        "kept).",
+        help="With --import-checkpoint (or --build-learned), replace an existing "
+        "checkpoint (a backup is kept).",
     )
     parser.add_argument(
         "--install-weights",
@@ -430,6 +431,17 @@ def main(argv: list[str] | None = None) -> int:
         "batch of batch_size*accum_steps).",
     )
     parser.add_argument(
+        "--build-learned",
+        nargs="?",
+        const="learned-large",
+        default=None,
+        metavar="TIER",
+        help="Train a *learned* capacity tier (learned-large by default, or "
+        "learned-xl) into the weights pack folder with its provenance, then stop "
+        "-- a way to produce the larger checkpoint the pack can ship. Pass "
+        "--force to retrain an existing one; --steps/--repeats tune the run.",
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Print only the final summary, not the live progress lines.",
@@ -473,6 +485,37 @@ def main(argv: list[str] | None = None) -> int:
         if not outcome.ok:
             print("The pack entry did not install; training was not started.")
             return 4
+
+    if args.build_learned is not None:
+        # Train a *learned* capacity tier into the pack folder with its provenance,
+        # then stop: this is how the larger checkpoint the pack can ship is produced.
+        from core.learned_weights import LearnedWeightsError, build_learned
+
+        raw_argv = sys.argv[1:] if argv is None else list(argv)
+        # The tier carries its own sensible budget, so --steps/--repeats override it
+        # only when the user actually passed them (the parser's own defaults are for
+        # the base training run, not a learned tier).
+        explicit = {
+            flag
+            for flag in ("--steps", "--repeats", "--structured-repeats")
+            if flag in raw_argv
+        }
+        try:
+            learned = build_learned(
+                args.build_learned,
+                steps=args.steps if "--steps" in explicit else None,
+                repeats=args.repeats if "--repeats" in explicit else None,
+                structured_repeats=args.structured_repeats if "--structured-repeats" in explicit else None,
+                seed=args.seed,
+                force=args.import_force,
+                verbose=not args.quiet,
+                progress_every=args.progress_every,
+            )
+        except LearnedWeightsError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 3
+        print(learned.describe())
+        return 0 if learned.built else 4
 
     model = train_and_save(
         steps=args.steps,
