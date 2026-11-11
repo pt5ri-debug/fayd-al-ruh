@@ -60,6 +60,7 @@ from core.relation_polarity import polarity_accuracy
 from core.state import State
 from core.tool_agent import tool_selection_accuracy
 from core.training_center.gate import training_center_accuracy
+from core.weights_pack_gate import weights_pack_accuracy
 from core.workplace.phase10_gate import workplace_phase10_accuracy
 from core.workplace.phase11_gate import workplace_phase11_accuracy
 from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
@@ -296,6 +297,15 @@ class EvaluationMetrics:
     checkpoint is backed up rather than clobbered; a policy goes to its task's own
     file and an unnamed one is refused; a fetch is gated; and an unreadable input
     is refused (Phase: import ready-made weights)."""
+
+    weights_pack_accuracy: float
+    """The share of held-out weights-pack judgements satisfied: the committed
+    pack's manifest is read into entries and a missing or newer pack is reported;
+    an entry verifies against its recorded digest, kind, and architecture while a
+    tampered file, a mismatched architecture, and a missing sidecar are each
+    refused; the real trainer resumes from an installed entry; an unknown key is
+    refused; and an existing file is backed up rather than clobbered (Phase: the
+    committed weights pack)."""
 
     training_accuracy: float
     """The share of held-out Phase-6 training judgements satisfied: dataset
@@ -1334,6 +1344,13 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # an unnamed policy and an unapproved fetch are refused), run on the real engine.
     checkpoint_import_value = checkpoint_import_accuracy()
 
+    # The committed weights pack: the manifest the repository ships is read and
+    # verified entry by entry, an installed entry is continued by the *real*
+    # trainer, and a tampered file, a mismatched architecture, an unknown key, and a
+    # clobber without --force are each refused. Held-out judgements with negative
+    # controls, run on the real pack engine.
+    weights_pack_value = weights_pack_accuracy()
+
     # Perception (Phase 7): a perceived artifact must reach the answer path as
     # *evidence* with its provenance, never as a verified fact. Held-out judgements
     # over the real detector, pipelines, schema, validator, and bridge -- with
@@ -1467,6 +1484,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         training_center_value,
         resume_value,
         checkpoint_import_value,
+        weights_pack_value,
         perception_value,
         planning_value,
         self_improvement_value,
@@ -1543,6 +1561,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         training_center_accuracy=round(training_center_value, 6),
         training_resume_accuracy=round(resume_value, 6),
         checkpoint_import_accuracy=round(checkpoint_import_value, 6),
+        weights_pack_accuracy=round(weights_pack_value, 6),
         perception_bridge_accuracy=round(perception_value, 6),
         task_execution_accuracy=round(planning_value, 6),
         self_improvement_loop_accuracy=round(self_improvement_value, 6),
