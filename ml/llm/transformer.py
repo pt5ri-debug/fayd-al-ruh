@@ -129,6 +129,34 @@ PRESETS: dict[str, dict] = {
         "position": "rope",
         "activation": "swiglu",
     },
+    # The learned tiers: the modern primitives at a genuinely larger capacity, so
+    # a longer run has somewhere to put what it learns. ``learned-large`` is the
+    # tier a release trains and ships (a wider 4-layer model with a longer
+    # context); ``learned-xl`` is the stronger option a user with time may build.
+    # Both keep the same architecture family as ``modern`` -- only the capacity
+    # changes -- so a comparison isolates size, not a different model.
+    "learned-large": {
+        "n_layer": 4,
+        "n_head": 8,
+        "n_embd": 256,
+        "block_size": 256,
+        "dropout": 0.1,
+        "tie_weights": True,
+        "norm": "rms",
+        "position": "rope",
+        "activation": "swiglu",
+    },
+    "learned-xl": {
+        "n_layer": 8,
+        "n_head": 8,
+        "n_embd": 320,
+        "block_size": 256,
+        "dropout": 0.1,
+        "tie_weights": True,
+        "norm": "rms",
+        "position": "rope",
+        "activation": "swiglu",
+    },
 }
 
 

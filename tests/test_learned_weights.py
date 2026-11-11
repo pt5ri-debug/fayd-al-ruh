@@ -1,0 +1,308 @@
+"""The learned capacity tiers and the generator that builds them.
+
+These pin the two halves of the learned-weights work: the **tiers** (the larger
+capacity presets of the modern architecture, named and described in one registry)
+and the **generator** (``core.learned_weights``) that trains a tier through the
+project's own trainer, records its provenance, and lists what is on disk.
+
+The negative controls matter as much as the happy paths: an unknown tier, a
+second build without ``force``, and a folder with no checkpoint must each be
+*reported* rather than fabricated or silently overwritten.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import io
+from pathlib import Path
+
+import pytest
+from core.learned_weights import (
+    LEARNED_SUBDIR,
+    LEARNED_TIERS,
+    TIER_KEYS,
+    BuildReport,
+    LearnedCheckpoint,
+    LearnedTier,
+    LearnedWeightsError,
+    build_learned,
+    describe_learned,
+    describe_tiers,
+    learned_dir,
+    list_learned,
+    load_provenance,
+    provenance_path,
+    resolve_tier,
+    tier_keys,
+    tier_summaries,
+)
+from ml.llm.transformer import PRESETS, TransformerConfig, TransformerLM
+
+#: A tiny, fast config so the tests exercise the real trainer without a long run.
+_TINY = TransformerConfig(
+    vocab_size=257,
+    n_layer=2,
+    n_head=2,
+    n_embd=32,
+    block_size=32,
+    tie_weights=True,
+    norm="rms",
+    position="rope",
+    activation="swiglu",
+)
+
+
+def _build(root: Path, tier: str = "learned-large", *, force: bool = False) -> BuildReport:
+    with contextlib.redirect_stdout(io.StringIO()):
+        return build_learned(
+            tier,
+            root=root,
+            steps=2,
+            repeats=1,
+            structured_repeats=1,
+            config=_TINY,
+            force=force,
+            verbose=False,
+        )
+
+
+# ------------------------------------------------------------------- presets
+
+
+def test_the_learned_presets_are_defined_and_larger_than_the_base():
+    assert "learned-large" in PRESETS and "learned-xl" in PRESETS
+    base = TransformerLM(TransformerConfig.preset("release-1")).parameters()
+    large = TransformerLM(TransformerConfig.preset("learned-large")).parameters()
+    xl = TransformerLM(TransformerConfig.preset("learned-xl")).parameters()
+    base_params = sum(p.size for p in base)
+    assert sum(p.size for p in large) > base_params
+    assert sum(p.size for p in xl) > sum(p.size for p in large)
+    # They keep the modern architecture family, so a comparison isolates capacity.
+    for name in ("learned-large", "learned-xl"):
+        config = TransformerConfig.preset(name)
+        assert config.norm == "rms" and config.position == "rope"
+        assert config.activation == "swiglu"
+        assert config.tie_weights is True
+
+
+def test_the_learned_presets_are_selectable_by_the_cli_and_have_sidecars():
+    # The trainer's --preset choices come straight from PRESETS, so a tier is
+    # reachable the moment it is defined.
+    for key in TIER_KEYS:
+        assert LEARNED_TIERS[key].preset in PRESETS
+
+
+# --------------------------------------------------------------------- tiers
+
+
+def test_tier_registry_is_ordered_and_described():
+    assert tier_keys() == TIER_KEYS
+    assert TIER_KEYS == ("learned-large", "learned-xl")
+    rows = tier_summaries()
+    assert [row[0] for row in rows] == list(TIER_KEYS)
+    assert all(row[1] and row[2] for row in rows)
+    described = describe_tiers()
+    for key in TIER_KEYS:
+        assert key in described
+
+
+def test_resolve_tier_accepts_a_key_or_a_preset():
+    assert resolve_tier("learned-large").key == "learned-large"
+    assert resolve_tier("learned-xl").preset == "learned-xl"
+    # A preset name resolves to the same tier as its key.
+    assert resolve_tier("learned-large") is LEARNED_TIERS["learned-large"]
+
+
+def test_resolve_tier_refuses_an_unknown_name_with_the_real_list():
+    with pytest.raises(LearnedWeightsError) as error:
+        resolve_tier("enormous")
+    assert "learned-large" in str(error.value)
+    assert "learned-xl" in str(error.value)
+
+
+def test_tier_dimensions_and_command_are_real():
+    tier = LEARNED_TIERS["learned-large"]
+    assert tier.dimensions().startswith("4L/256w/")
+    command = tier.continue_command()
+    assert command.startswith("python -m cli llm")
+    assert tier.filename in command
+    primitive = tier.to_primitive()
+    assert primitive["key"] == "learned-large"
+    assert primitive["preset"] == "learned-large"
+
+
+# ------------------------------------------------------------------- folder
+
+
+def test_learned_dir_defaults_to_the_pack_subfolder():
+    from core.paths import weights_pack_dir
+
+    assert learned_dir() == weights_pack_dir() / LEARNED_SUBDIR
+    # A caller passing a folder gets exactly that folder.
+    assert learned_dir("/tmp/scratch") == Path("/tmp/scratch")
+
+
+def test_provenance_path_is_beside_the_checkpoint():
+    assert provenance_path("/x/fayd-llm-large.npz").name == "fayd-llm-large.npz.learned.json"
+
+
+# ------------------------------------------------------------------- building
+
+
+def test_build_trains_a_tier_and_records_provenance(tmp_path):
+    report = _build(tmp_path)
+    assert report.built
+    assert report.checkpoint.exists()
+    assert report.parameters > 0
+    assert report.size_bytes > 0
+    assert report.steps == 2
+    # The tokenizer sidecar travels with the checkpoint, so a resume encodes the
+    # same way.
+    assert report.checkpoint.with_suffix(".tokenizer.json").exists()
+    provenance = load_provenance(report.checkpoint)
+    assert provenance["preset"] == "learned-large"
+    assert provenance["steps"] == 2
+    assert provenance["producer"].startswith("the project's own trainer")
+    assert provenance_path(report.checkpoint).exists()
+
+
+def test_build_is_refused_without_force(tmp_path):
+    first = _build(tmp_path)
+    assert first.built
+    bytes_before = first.checkpoint.read_bytes()
+    second = _build(tmp_path)
+    assert not second.built
+    assert "already exists" in second.detail
+    # The existing checkpoint is untouched.
+    assert first.checkpoint.read_bytes() == bytes_before
+
+
+def test_build_with_force_replaces_the_checkpoint(tmp_path):
+    first = _build(tmp_path)
+    assert first.built
+    second = _build(tmp_path, force=True)
+    assert second.built
+
+
+def test_build_refuses_a_non_positive_step_budget(tmp_path):
+    with pytest.raises(LearnedWeightsError):
+        with contextlib.redirect_stdout(io.StringIO()):
+            build_learned("learned-large", root=tmp_path, steps=0, config=_TINY, verbose=False)
+
+
+def test_build_refuses_an_unknown_tier(tmp_path):
+    with pytest.raises(LearnedWeightsError):
+        with contextlib.redirect_stdout(io.StringIO()):
+            build_learned("nope", root=tmp_path, steps=2, config=_TINY, verbose=False)
+
+
+def test_build_reports_when_the_trainer_writes_nothing(tmp_path):
+    def silent_trainer(**_kwargs):
+        return None
+
+    report = build_learned(
+        "learned-large",
+        root=tmp_path,
+        steps=2,
+        config=_TINY,
+        verbose=False,
+        trainer=silent_trainer,
+    )
+    assert not report.built
+    assert "wrote no checkpoint" in report.detail
+
+
+def test_build_uses_an_injected_trainer_seam(tmp_path):
+    seen: dict[str, object] = {}
+
+    def trainer(**kwargs):
+        seen.update(kwargs)
+        # Write a real checkpoint so the report can measure it.
+        model = TransformerLM(kwargs["config"], seed=0)
+        model.save(kwargs["checkpoint"])
+        return model
+
+    report = build_learned(
+        "learned-large",
+        root=tmp_path,
+        steps=3,
+        config=_TINY,
+        verbose=False,
+        trainer=trainer,
+    )
+    assert report.built
+    assert seen["steps"] == 3
+    assert seen["weight_decay"] == 0.01
+    assert seen["restore_best"] is True
+
+
+# ------------------------------------------------------------------ listing
+
+
+def test_list_and_describe_report_what_is_on_disk(tmp_path):
+    assert list_learned(tmp_path) == ()
+    assert "No learned checkpoints" in describe_learned(tmp_path)
+    _build(tmp_path)
+    found = list_learned(tmp_path)
+    assert len(found) == 1
+    assert isinstance(found[0], LearnedCheckpoint)
+    assert found[0].tier_key == "learned-large"
+    assert found[0].usable
+    described = describe_learned(tmp_path)
+    assert "learned-large" in described
+
+
+def test_list_excludes_the_optimiser_state_sidecar(tmp_path):
+    _build(tmp_path)
+    names = {item.path.name for item in list_learned(tmp_path)}
+    assert "fayd-llm-large.state.npz" not in names
+
+
+def test_list_reports_an_unusable_file_rather_than_hiding_it(tmp_path):
+    folder = learned_dir(tmp_path)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "broken.npz").write_bytes(b"not a numpy archive")
+    found = list_learned(tmp_path)
+    assert len(found) == 1
+    assert not found[0].usable
+
+
+def test_provenance_of_a_missing_or_corrupt_record_reads_empty(tmp_path):
+    assert load_provenance(tmp_path / "absent.npz") == {}
+    broken = tmp_path / "x.npz"
+    broken.write_bytes(b"x")
+    provenance_path(broken).write_text("{not json", encoding="utf-8")
+    assert load_provenance(broken) == {}
+
+
+# ------------------------------------------------------------------ reports
+
+
+def test_build_report_round_trips_through_primitive(tmp_path):
+    report = _build(tmp_path)
+    primitive = report.to_primitive()
+    assert primitive["built"] is True
+    assert primitive["tier"] == "learned-large"
+    assert primitive["parameters"] > 0
+    assert primitive["continue_command"].startswith("python -m cli llm")
+    assert "built" in report.describe()
+
+
+def test_a_not_built_report_names_the_real_next_step(tmp_path):
+    _build(tmp_path)
+    report = _build(tmp_path)
+    described = report.describe()
+    assert "not built" in described
+    assert "force" in described
+
+
+def test_learned_tier_describe_includes_its_dimensions():
+    text = LEARNED_TIERS["learned-xl"].describe()
+    assert "learned-xl" in text
+    assert "8L/320w" in text
+
+
+def test_tier_is_a_frozen_dataclass():
+    tier = LearnedTier(key="k", title="t", preset="modern", filename="f.npz", summary="s")
+    with pytest.raises(Exception):
+        tier.key = "other"  # type: ignore[misc]
