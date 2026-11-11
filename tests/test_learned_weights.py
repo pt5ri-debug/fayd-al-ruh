@@ -306,3 +306,96 @@ def test_tier_is_a_frozen_dataclass():
     tier = LearnedTier(key="k", title="t", preset="modern", filename="f.npz", summary="s")
     with pytest.raises(Exception):
         tier.key = "other"  # type: ignore[misc]
+
+
+# ------------------------------------------------------------ pack integration
+
+
+def _pack_with_a_learned_tier(tmp_path: Path):
+    """Build a tiny learned tier and pack it (no policies), returning the pack."""
+    from core.weights_pack import generate_manifest, load_pack
+
+    folder = tmp_path / "learned"
+    _build(folder)
+    manifest_root = tmp_path / "pack"
+    generate_manifest(
+        root=manifest_root,
+        checkpoint=tmp_path / "absent-base.npz",
+        learned_dir=folder,
+        include_policies=False,
+    )
+    return load_pack(manifest_root)
+
+
+def test_generate_manifest_packs_a_learned_tier_under_its_key(tmp_path):
+    pack = _pack_with_a_learned_tier(tmp_path)
+    assert pack.available
+    assert "learned-large" in pack.keys()
+    entry = pack.get("learned-large")
+    assert entry is not None
+    assert entry.kind == "language-model"
+    assert entry.resumable
+    # Its architecture is read from the file, not assumed.
+    assert entry.architecture.get("n_layer") == 2
+
+
+def test_a_learned_entry_installs_beside_the_base_checkpoint(tmp_path):
+    from core.weights_pack import installed_destination
+
+    pack = _pack_with_a_learned_tier(tmp_path)
+    entry = pack.get("learned-large")
+    assert entry is not None
+    destination = installed_destination(entry)
+    assert destination is not None
+    # It installs under its own name, never over the base checkpoint.
+    assert destination.name == "fayd-llm-large.npz"
+    assert entry.destination_name == "fayd-llm-large.npz"
+
+
+def test_a_learned_entry_verifies_cleanly(tmp_path):
+    from core.weights_pack import verify_entry
+
+    pack = _pack_with_a_learned_tier(tmp_path)
+    entry = pack.get("learned-large")
+    assert entry is not None
+    assert verify_entry(entry).ok
+
+
+def test_destination_name_round_trips_through_the_manifest(tmp_path):
+    from core.weights_pack import generate_manifest, load_pack
+
+    folder = tmp_path / "learned"
+    _build(folder)
+    manifest_root = tmp_path / "pack"
+    generate_manifest(
+        root=manifest_root,
+        checkpoint=tmp_path / "absent.npz",
+        learned_dir=folder,
+        include_policies=False,
+    )
+    reloaded = load_pack(manifest_root).get("learned-large")
+    assert reloaded is not None
+    assert reloaded.destination_name == "fayd-llm-large.npz"
+
+
+def test_generate_manifest_without_learned_leaves_the_base_only(tmp_path):
+    from core.weights_pack import generate_manifest
+
+    folder = tmp_path / "learned"
+    _build(folder)
+    base = tmp_path / "fayd-llm.npz"
+    # A real base checkpoint so the pack has at least one entry.
+    from ml.llm.transformer import TransformerLM
+
+    TransformerLM(_TINY, seed=0).save(base)
+    pack = generate_manifest(
+        root=tmp_path / "pack",
+        checkpoint=base,
+        learned_dir=folder,
+        include_learned=False,
+        include_policies=False,
+    )
+    assert "learned-large" not in pack.keys()
+    assert "fayd-llm" in pack.keys()
+
+

@@ -378,6 +378,7 @@ def build_learned(
         tokenizer_kind=TOKENIZER_KIND,
         vocab_size=BYTE_VOCAB_SIZE,
         config=model_config,
+        preset=resolved.preset,
         log_every=0,
         val_every=0,
         weight_decay=0.01,
