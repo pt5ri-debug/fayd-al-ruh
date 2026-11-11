@@ -3,6 +3,7 @@
     python -m cli weights status                     # what the pack offers, verified
     python -m cli weights list                        # the entries, one per line
     python -m cli weights verify [KEY]                # check a file against the pack
+    python -m cli weights integrity                    # is the *whole* pack intact and ready?
     python -m cli weights install [KEY ...]           # install into the trainer's folder
     python -m cli weights install --all --force       # every entry, replacing with a backup
     python -m cli weights plan KEY                    # the command that continues it
@@ -35,6 +36,7 @@ from core.weights_pack import (
     WeightsPackError,
     generate_manifest,
     install_pack,
+    integrity_report,
     load_pack,
     pack_status,
     verify_entry,
@@ -52,6 +54,18 @@ def _status(root: str = "", as_json: bool = False) -> int:
         return 0 if status.pack.available else 3
     print(status.describe())
     return 0 if status.pack.available else 3
+
+
+def _integrity(root: str = "", as_json: bool = False) -> int:
+    """Whether the whole pack verifies and is installed -- one verdict."""
+    report = integrity_report(root or None)
+    if as_json:
+        _print_json(report.to_primitive())
+        return 0 if report.complete else 4
+    print(report.describe())
+    if not report.pack.available:
+        return 3
+    return 0 if report.complete else 4
 
 
 def _list(root: str = "", as_json: bool = False) -> int:
@@ -265,6 +279,12 @@ def _build_parser() -> argparse.ArgumentParser:
     listing.add_argument("--root", help="the pack folder (default: weights/)")
     listing.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
 
+    integrity = sub.add_parser(
+        "integrity", help="whether the whole pack verifies and is installed"
+    )
+    integrity.add_argument("--root", help="the pack folder (default: weights/)")
+    integrity.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
+
     verify = sub.add_parser("verify", help="check a file against the pack")
     verify.add_argument("key", nargs="?", default="", help="one entry key (default: all)")
     verify.add_argument("--root", help="the pack folder (default: weights/)")
@@ -319,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
             return _status(root, as_json)
         if args.command == "list":
             return _list(root, as_json)
+        if args.command == "integrity":
+            return _integrity(root, as_json)
         if args.command == "verify":
             return _verify(root, args.key, as_json)
         if args.command == "install":

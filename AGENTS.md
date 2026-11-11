@@ -7408,3 +7408,24 @@ regression monitor each can refuse a change.
   `tests/test_weights_pack.py` pins the recorded provenance, the absent-field
   rule, and the `show` command; the README documents the pack and the one-step
   continue workflow.
+
+- The weights pack's **whole-pack integrity verdict** (Phase 5). `verify` answers
+  "is this file what the pack says it is" and `pack_status` answers "what does the
+  pack offer and what is installed"; the third question a clean clone asks -- *is
+  the whole pack intact and ready* -- is now answered by
+  `core.weights_pack.integrity_report(root)`'s `IntegrityReport`. It reads (and,
+  unless a caller supplies them, verifies) the pack once, and `complete` is true
+  **only** when the pack is available, every entry verified, and every entry
+  installed; `failed`/`unverified_keys` name what did not pass or was not checked,
+  so a *partial* verification tuple is reported `complete=False` with the missing
+  keys named -- a half-checked pack is never mistaken for a whole one.
+  `describe()` prints one verdict line; `to_primitive()` is the machine shape.
+  Reachable headless as `python -m cli weights integrity [--root R] [--json]`
+  (exit `0` complete, `4` incomplete, `3` no pack), the menu entry *Weights pack:
+  check that the whole pack is intact and ready*, and the held-out gate's new
+  judgement
+  (`the_integrity_verdict_is_complete_only_when_every_entry_is_verified_and_installed`,
+  with negative controls: an uninstalled pack is incomplete, an installed one
+  complete, a partial check never complete). `tests/test_weights_pack.py` pins the
+  verdict, the tampered-entry report, the partial-check rule, the missing pack,
+  and the CLI.

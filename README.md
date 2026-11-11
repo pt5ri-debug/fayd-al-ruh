@@ -333,6 +333,7 @@ trained model in one command:
 
 ```
 python -m cli weights status                 # what the pack offers, verified
+python -m cli weights integrity              # is the *whole* pack intact and ready?
 python -m cli weights show fayd-llm          # one entry in full, with its provenance
 python -m cli weights continue fayd-llm      # verify + install + name the trainer
 python -m cli weights continue fayd-llm --run  # ...and run it
@@ -341,6 +342,10 @@ python -m cli llm --install-weights          # the language trainer: install the
                                              # checkpoint, then resume
 python -m ml.petroleum --install-weights     # every policy, then resume
 ```
+
+`integrity` answers one question over every entry: the pack is `complete` only
+when the whole pack verifies **and** is installed, so a clean clone can prove its
+weights are intact before continuing them.
 
 `python -m cli models weights-pack|verify-weights|install-pack|continue-weights`
 and the Model Manager window's **Weights pack** section reach the same engine, and

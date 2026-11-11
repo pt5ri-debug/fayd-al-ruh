@@ -46,6 +46,7 @@ from core.weights_pack import (
     file_digest,
     generate_manifest,
     install_pack,
+    integrity_report,
     load_pack,
     verify_entry,
 )
@@ -274,6 +275,29 @@ def _run_checks(root: Path) -> tuple[PackJudgement, ...]:
             "a generated entry named its origin and a bare entry invented no provenance"
             if provenance_ok
             else "provenance was missing from a generated entry or fabricated for a bare one",
+        )
+    )
+
+    # 7. The pack-wide integrity verdict is honest: an incomplete pack (an entry
+    #    not installed) is reported incomplete, a fully verified+installed pack is
+    #    complete, and a *partial* verification tuple is never called complete.
+    _write_pack(weights, [entry_row])
+    empty_data = root / "integrity-data"
+    with mock.patch.dict(os.environ, {"FAYD_DATA_DIR": str(empty_data)}):
+        not_installed = integrity_report(weights)
+        incomplete_ok = (not not_installed.complete) and not_installed.verified == 1
+        installed_report = install_pack(load_pack(weights), keys=("fayd-llm",))
+        after = integrity_report(weights)
+        complete_ok = installed_report.ok and after.complete and after.present == 1
+    partial = integrity_report(pack=load_pack(weights), verifications=())
+    partial_ok = (not partial.complete) and partial.unverified_keys == ("fayd-llm",)
+    out.append(
+        PackJudgement(
+            "the_integrity_verdict_is_complete_only_when_every_entry_is_verified_and_installed",
+            incomplete_ok and complete_ok and partial_ok,
+            "an uninstalled pack was incomplete, an installed one complete, a partial check not complete"
+            if incomplete_ok and complete_ok and partial_ok
+            else "the integrity verdict called an unready pack complete",
         )
     )
 
