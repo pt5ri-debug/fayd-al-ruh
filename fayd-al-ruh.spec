@@ -19,6 +19,8 @@ PROJECT_ROOT = Path(SPECPATH).resolve()
 # Data the program reads at runtime and cannot regenerate on a fresh machine.
 datas = [
     (str(PROJECT_ROOT / "ml" / "llm" / "checkpoints"), "ml/llm/checkpoints"),
+    (str(PROJECT_ROOT / "ml" / "artifacts" / "petroleum"), "ml/artifacts/petroleum"),
+    (str(PROJECT_ROOT / "weights"), "weights"),
 ]
 
 # These modules are imported dynamically (importlib in cli/menu.py) or are

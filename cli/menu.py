@@ -172,6 +172,11 @@ def run_checkpoints(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.checkpoints", argv)
 
 
+def run_weights(argv: Sequence[str] = ()) -> int:
+    """The committed weights pack: verify and install what the project ships."""
+    return _run_module("cli.weights", argv)
+
+
 def run_chat(argv: Sequence[str] = ()) -> int:
     """Talk with the AI in text, like Jarvis without the voice."""
     return _run_module("ai.chat", argv)
@@ -639,6 +644,16 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         run_checkpoints,
         ("kinds",),
     ),
+    (
+        "Weights pack: what the project ships and can continue",
+        run_weights,
+        ("status",),
+    ),
+    (
+        "Weights pack: install the shipped weights into the trainer's folder",
+        run_weights,
+        ("install", "--all", "--force"),
+    ),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
@@ -1007,6 +1022,7 @@ __all__ = [
     "run_voice",
     "run_voice_studio",
     "run_web",
+    "run_weights",
     "run_workplace",
     "visible_menu",
 ]

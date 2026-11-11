@@ -499,6 +499,19 @@ def checkpoint_import_dir() -> Path:
     return data_dir() / "checkpoint_import"
 
 
+def weights_pack_dir() -> Path:
+    """The committed, ready-made weight pack that ships with a clone (``weights/``).
+
+    Unlike the git-ignored ``data/`` folder, this one is *tracked*: it holds the
+    curated, resumable ``.npz`` weights the project ships on purpose (a stronger
+    language-model checkpoint and the petroleum policies), so a fresh clone can
+    install them and continue training instead of starting from nothing. It is
+    read-only at run time -- installing a pack entry copies it into ``data/``
+    through :mod:`core.weights_pack`.
+    """
+    return bundle_root() / "weights"
+
+
 def bundled_artifacts_dir() -> Path:
     """Read-only artifacts inside the code or bundle, used as a fallback."""
     return bundle_root() / "ml" / "artifacts"
@@ -672,6 +685,7 @@ __all__ = [
     "training_runs_dir",
     "ultron_models_dir",
     "vision_models_dir",
+    "weights_pack_dir",
     "workplace_backups_dir",
     "workplace_db_path",
     "workplace_dir",

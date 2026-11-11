@@ -119,6 +119,7 @@
     "training_accuracy": 1.0,
     "training_center_accuracy": 1.0,
     "training_resume_accuracy": 1.0,
+    "weights_pack_accuracy": 1.0,
     "workplace_phase10_accuracy": 1.0,
     "workplace_phase11_accuracy": 1.0
   },

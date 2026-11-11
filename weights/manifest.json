@@ -1,0 +1,1106 @@
+{
+  "created_at": "2026-11-11T10:41:45Z",
+  "digest_algorithm": "sha256",
+  "entries": [
+    {
+      "architecture": {
+        "block_size": 128,
+        "dropout": 0.1,
+        "n_embd": 128,
+        "n_head": 8,
+        "n_layer": 4,
+        "tie_weights": true,
+        "vocab_size": 257
+      },
+      "companions": [
+        "ml/llm/checkpoints/fayd-llm.tokenizer.json"
+      ],
+      "continue_command": "python -m cli llm --resume",
+      "digest": "fcb4bcc66804e2cc9ae015e2b4c8f9e3e19ce397a9263dbc9728db4c7fd6a46f",
+      "key": "fayd-llm",
+      "kind": "language-model",
+      "notes": "A language-model checkpoint; continue it with `python -m cli llm --resume`. Install it so the trainer resumes from these weights.",
+      "path": "ml/llm/checkpoints/fayd-llm.npz",
+      "provenance": {
+        "checkpoint": "ml/llm/checkpoints/fayd-llm.npz",
+        "source": "the project's own trainer"
+      },
+      "task": "",
+      "title": "Fayd Al-Ruh language model"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "409ad3310973da5be735aedb7664d5d4f5acb267f9bb45a2155d99eccd0e569f",
+      "key": "policy-complete-shale-well",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_complete-shale-well.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "complete-shale-well"
+      },
+      "task": "complete-shale-well",
+      "title": "Policy for complete-shale-well"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "cf1b3aa89ffa7528c6ad6f4036f82f765af98fa3b28e6927f9dfd95bc8d64032",
+      "key": "policy-complete-well",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_complete-well.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "complete-well"
+      },
+      "task": "complete-well",
+      "title": "Policy for complete-well"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "5d19b60e46042f86e8cc2f7b47d1c9f06f83c64da4693578d523b3046ee1e811",
+      "key": "policy-control-kick",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_control-kick.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "control-kick"
+      },
+      "task": "control-kick",
+      "title": "Policy for control-kick"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "069f8c5d208d5bc9446d890aa6c367fc52b06c6d7036986d36141c5c5e7422eb",
+      "key": "policy-core-analysis",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_core-analysis.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "core-analysis"
+      },
+      "task": "core-analysis",
+      "title": "Policy for core-analysis"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "6fffb23426329a706a973e0dc1dd32fac16e99d85ff2ec306dd42bad7f5a275b",
+      "key": "policy-drill-well",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_drill-well.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "drill-well"
+      },
+      "task": "drill-well",
+      "title": "Policy for drill-well"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "9cccc79c7cf7ce49d6f7c8797250a8a426be5679963f9cc5638c33eb7cce558c",
+      "key": "policy-enhanced-recovery",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_enhanced-recovery.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "enhanced-recovery"
+      },
+      "task": "enhanced-recovery",
+      "title": "Policy for enhanced-recovery"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "b4fc8b6c69a9c0ed53077d5c99f86081d2a576b50ef28282afa6efa81a4f5ee0",
+      "key": "policy-field-economics",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_field-economics.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "field-economics"
+      },
+      "task": "field-economics",
+      "title": "Policy for field-economics"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "79e5f6dfaf74598c93de573d37f1c2af2ed5662c7fee7a83adb091fdb23accbf",
+      "key": "policy-flow-assurance",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_flow-assurance.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "flow-assurance"
+      },
+      "task": "flow-assurance",
+      "title": "Policy for flow-assurance"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "44c38aa5f55426ff6a476c322cc84a356ca7b44a326d1046216ca7986c064c04",
+      "key": "policy-gas-processing",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_gas-processing.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "gas-processing"
+      },
+      "task": "gas-processing",
+      "title": "Policy for gas-processing"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "be6b0269445dff594f3581b4cd10e578ae73a262f7099245404395a71a4d5a1f",
+      "key": "policy-install-gas-lift",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_install-gas-lift.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "install-gas-lift"
+      },
+      "task": "install-gas-lift",
+      "title": "Policy for install-gas-lift"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "a517405408997f8d574a402719a1f651647e6b802a2d31b291a4ff2802598df7",
+      "key": "policy-log-interpretation",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_log-interpretation.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "log-interpretation"
+      },
+      "task": "log-interpretation",
+      "title": "Policy for log-interpretation"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "d50883289135ebf84758dce70181277df79fa5ac2b8c68b7350ff86f66bbe5e0",
+      "key": "policy-matrix-acidizing",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_matrix-acidizing.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "matrix-acidizing"
+      },
+      "task": "matrix-acidizing",
+      "title": "Policy for matrix-acidizing"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "eee32a307b78a263648ebbc20d70cd5a3b40bb27e13e6462fe675d706a816543",
+      "key": "policy-pressure-transient-test",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_pressure-transient-test.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "pressure-transient-test"
+      },
+      "task": "pressure-transient-test",
+      "title": "Policy for pressure-transient-test"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "3b0ed5576a3b1bd2fe96f77c5d0c30f5414d4a1282fa9d1c8d26fe4829144edb",
+      "key": "policy-primary-cementing",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_primary-cementing.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "primary-cementing"
+      },
+      "task": "primary-cementing",
+      "title": "Policy for primary-cementing"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "335ccc94584c9e52767d21537bad469e6c5f94de38fedf9bef50fd52f91b42c9",
+      "key": "policy-procedure-advanced_eor_methods",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-advanced_eor_methods.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-advanced_eor_methods"
+      },
+      "task": "procedure-advanced_eor_methods",
+      "title": "Policy for procedure-advanced_eor_methods"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "5ac41445580c44822115500be3d61778d4b370aac972b2e4f02aa209d8e92414",
+      "key": "policy-procedure-artificial_lift_selection",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-artificial_lift_selection.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-artificial_lift_selection"
+      },
+      "task": "procedure-artificial_lift_selection",
+      "title": "Policy for procedure-artificial_lift_selection"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "d2f7182722ed3077aa6073cee96cb02ccd84e40875476dcaf95a71101d049073",
+      "key": "policy-procedure-carbon_capture_and_storage",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-carbon_capture_and_storage.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-carbon_capture_and_storage"
+      },
+      "task": "procedure-carbon_capture_and_storage",
+      "title": "Policy for procedure-carbon_capture_and_storage"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "a5446519926018e75a50fa84eba8941a8e33939e1dd24dde256404cedbf7e3ea",
+      "key": "policy-procedure-casing_and_cementing_design",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-casing_and_cementing_design.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-casing_and_cementing_design"
+      },
+      "task": "procedure-casing_and_cementing_design",
+      "title": "Policy for procedure-casing_and_cementing_design"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "e395bd81e2d224e205c05bb86fc9f26974701065d09631c4ccfca007c9bc34c0",
+      "key": "policy-procedure-data_analytics_and_ml",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-data_analytics_and_ml.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-data_analytics_and_ml"
+      },
+      "task": "procedure-data_analytics_and_ml",
+      "title": "Policy for procedure-data_analytics_and_ml"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "6fc38028b6cdb247b7018f6153a16f6408b4ce1f208acbb52b4825e0be53fd8f",
+      "key": "policy-procedure-directional_drilling",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-directional_drilling.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-directional_drilling"
+      },
+      "task": "procedure-directional_drilling",
+      "title": "Policy for procedure-directional_drilling"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "448cee148dbd1d7dd31f9344f199856c4dd25af3b1c6f83535cee614bdd16ea5",
+      "key": "policy-procedure-drilling_fluids",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-drilling_fluids.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-drilling_fluids"
+      },
+      "task": "procedure-drilling_fluids",
+      "title": "Policy for procedure-drilling_fluids"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "815ba19f14cf57ad12fc27aac2c79a3560af3ec5343a2e5868f69d5b191487a1",
+      "key": "policy-procedure-enhanced_oil_recovery",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-enhanced_oil_recovery.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-enhanced_oil_recovery"
+      },
+      "task": "procedure-enhanced_oil_recovery",
+      "title": "Policy for procedure-enhanced_oil_recovery"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "2bc0f20bd7e3aed1a42155740fdc83ea32889f5263afbdf5042c0b9dbe8b88e6",
+      "key": "policy-procedure-facilities_and_transport",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-facilities_and_transport.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-facilities_and_transport"
+      },
+      "task": "procedure-facilities_and_transport",
+      "title": "Policy for procedure-facilities_and_transport"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "561bd544704d01cb0b102527205c3863683494b2d5599c4238a9ea38a07bf0d9",
+      "key": "policy-procedure-field_development_planning",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-field_development_planning.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-field_development_planning"
+      },
+      "task": "procedure-field_development_planning",
+      "title": "Policy for procedure-field_development_planning"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "ba4013b59f826863bbbf2d6c283c405052d5942a6454373b376be53fa7359d8b",
+      "key": "policy-procedure-field_development_planning_advanced",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-field_development_planning_advanced.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-field_development_planning_advanced"
+      },
+      "task": "procedure-field_development_planning_advanced",
+      "title": "Policy for procedure-field_development_planning_advanced"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "2e5f51f7e5b5a71ebd10725095e449545510d9254fded6f1811d2427cfafb8c5",
+      "key": "policy-procedure-flow_assurance",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-flow_assurance.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-flow_assurance"
+      },
+      "task": "procedure-flow_assurance",
+      "title": "Policy for procedure-flow_assurance"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "12b9f8f48950f8c526bf5e7d05dab3da3a4b5b235e0c090959906937a2b19498",
+      "key": "policy-procedure-fluid_flow_in_porous_media",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-fluid_flow_in_porous_media.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-fluid_flow_in_porous_media"
+      },
+      "task": "procedure-fluid_flow_in_porous_media",
+      "title": "Policy for procedure-fluid_flow_in_porous_media"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "a4a807ab2ce21989f6793adafd795b8bd2d1e4460ff93e6a44183a0ea58b5e75",
+      "key": "policy-procedure-formation_evaluation",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-formation_evaluation.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-formation_evaluation"
+      },
+      "task": "procedure-formation_evaluation",
+      "title": "Policy for procedure-formation_evaluation"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "dbecb587923c54a0312f84038903d05543134c109f7e01620ed90116311c0708",
+      "key": "policy-procedure-gas_processing_and_lng",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-gas_processing_and_lng.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-gas_processing_and_lng"
+      },
+      "task": "procedure-gas_processing_and_lng",
+      "title": "Policy for procedure-gas_processing_and_lng"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "5b7624800ea82c32c0e481d04a0ddb231cd930dc0f889405861827e71a32a815",
+      "key": "policy-procedure-geomechanics_and_wellbore_stability",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-geomechanics_and_wellbore_stability.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-geomechanics_and_wellbore_stability"
+      },
+      "task": "procedure-geomechanics_and_wellbore_stability",
+      "title": "Policy for procedure-geomechanics_and_wellbore_stability"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "c8458f8ea36ef967d8bdbab079a6c75ca33367edd891a766236da00e1cc59f92",
+      "key": "policy-procedure-hydraulic_fracturing",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-hydraulic_fracturing.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-hydraulic_fracturing"
+      },
+      "task": "procedure-hydraulic_fracturing",
+      "title": "Policy for procedure-hydraulic_fracturing"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "02683d0adb60fad13c44a342c32477fcb02d46e06121d3a6b31785188595ea8b",
+      "key": "policy-procedure-log_interpretation_workflow",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-log_interpretation_workflow.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-log_interpretation_workflow"
+      },
+      "task": "procedure-log_interpretation_workflow",
+      "title": "Policy for procedure-log_interpretation_workflow"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "36445aa320b2d0398622df2462ed1cacb054cea5fb3677a790e01e213e244f64",
+      "key": "policy-procedure-logging_tools",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-logging_tools.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-logging_tools"
+      },
+      "task": "procedure-logging_tools",
+      "title": "Policy for procedure-logging_tools"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "e395bd81e2d224e205c05bb86fc9f26974701065d09631c4ccfca007c9bc34c0",
+      "key": "policy-procedure-material_balance",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-material_balance.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-material_balance"
+      },
+      "task": "procedure-material_balance",
+      "title": "Policy for procedure-material_balance"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "8ecf7c5fba98153b5664025b8d967ef899b24306537fa378de655cdab361d314",
+      "key": "policy-procedure-matrix_acidizing",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-matrix_acidizing.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-matrix_acidizing"
+      },
+      "task": "procedure-matrix_acidizing",
+      "title": "Policy for procedure-matrix_acidizing"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "835cf113486d4e4e6bdf14be60dd5f9472fa8019f4d3e4a918af3cb1689bb8ff",
+      "key": "policy-procedure-multiphase_flow",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-multiphase_flow.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-multiphase_flow"
+      },
+      "task": "procedure-multiphase_flow",
+      "title": "Policy for procedure-multiphase_flow"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "0cd33b1adaa71ac12c5b95930b196613d88200055d545164a431f1d082e871ad",
+      "key": "policy-procedure-offshore_operations",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-offshore_operations.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-offshore_operations"
+      },
+      "task": "procedure-offshore_operations",
+      "title": "Policy for procedure-offshore_operations"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "ae670a688a8a25285bf8113e602b897d545eb5abd45803b7de95b646ddbd0f3b",
+      "key": "policy-procedure-petroleum_economics_npv",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-petroleum_economics_npv.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-petroleum_economics_npv"
+      },
+      "task": "procedure-petroleum_economics_npv",
+      "title": "Policy for procedure-petroleum_economics_npv"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "209eb08b160488a59fed8470c7f9447fb04c55d52f899366306b1fd1b655f355",
+      "key": "policy-procedure-petroleum_system",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-petroleum_system.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-petroleum_system"
+      },
+      "task": "procedure-petroleum_system",
+      "title": "Policy for procedure-petroleum_system"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "dd72d1615f181caf34d00df8e4700628fdfd7344211b1f8296af06c4d849b695",
+      "key": "policy-procedure-pressure_transient_testing",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-pressure_transient_testing.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-pressure_transient_testing"
+      },
+      "task": "procedure-pressure_transient_testing",
+      "title": "Policy for procedure-pressure_transient_testing"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "0af6939088bacc9064dcfa597d85b49dcd3bc2faaf27136585075bb690d4cd0c",
+      "key": "policy-procedure-primary_cementing",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-primary_cementing.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-primary_cementing"
+      },
+      "task": "procedure-primary_cementing",
+      "title": "Policy for procedure-primary_cementing"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "5d41e975923274a3bc256f10e161fa0afb978af35310d820808ebe8d34cd38bd",
+      "key": "policy-procedure-process_safety",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-process_safety.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-process_safety"
+      },
+      "task": "procedure-process_safety",
+      "title": "Policy for procedure-process_safety"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "88640592859d44f70cecc4721f11f22f0a4e745cb090baad5de28279e620342d",
+      "key": "policy-procedure-process_safety_management",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-process_safety_management.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-process_safety_management"
+      },
+      "task": "procedure-process_safety_management",
+      "title": "Policy for procedure-process_safety_management"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "4f55e85b1ec39086c09b4435e6cef87cf30ec24c48f020661c650b544d13df74",
+      "key": "policy-procedure-production_optimisation",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-production_optimisation.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-production_optimisation"
+      },
+      "task": "procedure-production_optimisation",
+      "title": "Policy for procedure-production_optimisation"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "0b89b4bb80f359c7e71fa5e66f5eaa936f203997034bfbab3cc3a341772bde0a",
+      "key": "policy-procedure-professional_ethics",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-professional_ethics.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-professional_ethics"
+      },
+      "task": "procedure-professional_ethics",
+      "title": "Policy for procedure-professional_ethics"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "b81fe991fca01bfa3d20648104c7982d859a4ea92ff1446080560452ff0d604f",
+      "key": "policy-procedure-project_management",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-project_management.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-project_management"
+      },
+      "task": "procedure-project_management",
+      "title": "Policy for procedure-project_management"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "f25f9074b68ad515f339cccf3033b6c824b215921aed4c0a02dcfc194fdfa275",
+      "key": "policy-procedure-reservoir_drive_mechanisms",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-reservoir_drive_mechanisms.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-reservoir_drive_mechanisms"
+      },
+      "task": "procedure-reservoir_drive_mechanisms",
+      "title": "Policy for procedure-reservoir_drive_mechanisms"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "a9b32748c66cfe1bc65121aee77df0e785e1c38c5aaa812418ab847d5c2ab373",
+      "key": "policy-procedure-reservoir_fluid_properties",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-reservoir_fluid_properties.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-reservoir_fluid_properties"
+      },
+      "task": "procedure-reservoir_fluid_properties",
+      "title": "Policy for procedure-reservoir_fluid_properties"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "a69b31d767218316014894db649620f054a327af6b81d9e6b9d8bc09d777c281",
+      "key": "policy-procedure-reservoir_rock_properties",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-reservoir_rock_properties.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-reservoir_rock_properties"
+      },
+      "task": "procedure-reservoir_rock_properties",
+      "title": "Policy for procedure-reservoir_rock_properties"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "5dc4029ed4f0c600e7a9edf5cb75230ce5ab77790f31273eb48c520e97d6c8bc",
+      "key": "policy-procedure-reservoir_simulation_modelling",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-reservoir_simulation_modelling.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-reservoir_simulation_modelling"
+      },
+      "task": "procedure-reservoir_simulation_modelling",
+      "title": "Policy for procedure-reservoir_simulation_modelling"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "bc0fca9a9c2063b002105e184ff8b21caa329fa19dd04cdec2b6fccc1feaea6d",
+      "key": "policy-procedure-rock_mechanics",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-rock_mechanics.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-rock_mechanics"
+      },
+      "task": "procedure-rock_mechanics",
+      "title": "Policy for procedure-rock_mechanics"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "e706f9d0ebab62e67b698020e7c6be5c7abff087fe755c27f0eea0687d635892",
+      "key": "policy-procedure-saturation_height",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-saturation_height.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-saturation_height"
+      },
+      "task": "procedure-saturation_height",
+      "title": "Policy for procedure-saturation_height"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "9d8d9ad480c6e2e376abc88c3b26c29ac2e5b2b3e2d3354d043086583ff9d36d",
+      "key": "policy-procedure-seismic_interpretation",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-seismic_interpretation.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-seismic_interpretation"
+      },
+      "task": "procedure-seismic_interpretation",
+      "title": "Policy for procedure-seismic_interpretation"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "6cc682863bc544c81492c27518a6d687be91ddba3c7f6ad6382dfa8d75fde942",
+      "key": "policy-procedure-subsea_and_deepwater",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-subsea_and_deepwater.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-subsea_and_deepwater"
+      },
+      "task": "procedure-subsea_and_deepwater",
+      "title": "Policy for procedure-subsea_and_deepwater"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "a4ff11a35b833cd5bbb350962e44c10c29d8e1dfd10c8211cc6a468ba6323854",
+      "key": "policy-procedure-surface_facilities",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-surface_facilities.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-surface_facilities"
+      },
+      "task": "procedure-surface_facilities",
+      "title": "Policy for procedure-surface_facilities"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "3cc49c45c58ac544d0238bfd7866f0634e7988cc4ccde8b7b6e850f640794b35",
+      "key": "policy-procedure-unconventional_resources",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-unconventional_resources.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-unconventional_resources"
+      },
+      "task": "procedure-unconventional_resources",
+      "title": "Policy for procedure-unconventional_resources"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "209eb08b160488a59fed8470c7f9447fb04c55d52f899366306b1fd1b655f355",
+      "key": "policy-procedure-volumetric_reserves",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-volumetric_reserves.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-volumetric_reserves"
+      },
+      "task": "procedure-volumetric_reserves",
+      "title": "Policy for procedure-volumetric_reserves"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "5d41e975923274a3bc256f10e161fa0afb978af35310d820808ebe8d34cd38bd",
+      "key": "policy-procedure-waterflood_management",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-waterflood_management.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-waterflood_management"
+      },
+      "task": "procedure-waterflood_management",
+      "title": "Policy for procedure-waterflood_management"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "dc25eee235ff8bad7e04c677fca2147621a9f8b60d9fa387f21c80b1fdfe37c9",
+      "key": "policy-procedure-well_completions_design",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-well_completions_design.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-well_completions_design"
+      },
+      "task": "procedure-well_completions_design",
+      "title": "Policy for procedure-well_completions_design"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "636019c9247d70a3e751cd2be83aba7d878589c81a25530715fd00d9c3ded657",
+      "key": "policy-procedure-well_control_kicks",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-well_control_kicks.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-well_control_kicks"
+      },
+      "task": "procedure-well_control_kicks",
+      "title": "Policy for procedure-well_control_kicks"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "335ccc94584c9e52767d21537bad469e6c5f94de38fedf9bef50fd52f91b42c9",
+      "key": "policy-procedure-well_decommissioning",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-well_decommissioning.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-well_decommissioning"
+      },
+      "task": "procedure-well_decommissioning",
+      "title": "Policy for procedure-well_decommissioning"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "a69b31d767218316014894db649620f054a327af6b81d9e6b9d8bc09d777c281",
+      "key": "policy-procedure-well_integrity_management",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_procedure-well_integrity_management.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "procedure-well_integrity_management"
+      },
+      "task": "procedure-well_integrity_management",
+      "title": "Policy for procedure-well_integrity_management"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "3105762448f738c859da2ecd3a843666d498a4aa4c94a04261067f6d8d152d6e",
+      "key": "policy-process-safety-review",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_process-safety-review.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "process-safety-review"
+      },
+      "task": "process-safety-review",
+      "title": "Policy for process-safety-review"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "391be18260dbe0238fa8517af020a58ba839c4dc6f4e4261046351a640ff3903",
+      "key": "policy-reservoir-appraisal",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_reservoir-appraisal.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "reservoir-appraisal"
+      },
+      "task": "reservoir-appraisal",
+      "title": "Policy for reservoir-appraisal"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "4f8b5be5857ffe829ce62c10f3f5ec2ab661c19bd9ebb2ec80793bf17f1374d1",
+      "key": "policy-restore-production",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_restore-production.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "restore-production"
+      },
+      "task": "restore-production",
+      "title": "Policy for restore-production"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "b951f49432166c8b5102cc4d6cbd4e9a112b6c00bf5def8a8f3eefc611cd213a",
+      "key": "policy-seismic-interpretation",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_seismic-interpretation.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "seismic-interpretation"
+      },
+      "task": "seismic-interpretation",
+      "title": "Policy for seismic-interpretation"
+    },
+    {
+      "architecture": {},
+      "companions": [],
+      "continue_command": "python -m cli petroleum --resume",
+      "digest": "feb743ec36332305d684a71237704d3864123028f94bde8f17399215b8616cd2",
+      "key": "policy-well-integrity-check",
+      "kind": "policy",
+      "notes": "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
+      "path": "ml/artifacts/petroleum/policy_well-integrity-check.npz",
+      "provenance": {
+        "source": "the project's own trainer",
+        "task": "well-integrity-check"
+      },
+      "task": "well-integrity-check",
+      "title": "Policy for well-integrity-check"
+    }
+  ],
+  "project_version": "2.3.0",
+  "version": 1
+}

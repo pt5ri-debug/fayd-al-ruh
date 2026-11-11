@@ -38,6 +38,8 @@ Usage:
     python -m cli checkpoints          # import ready-made .npz weights so training continues
     python -m cli checkpoints install WEIGHTS.npz  # install into the trainer's own folder
     python -m cli checkpoints fetch https://…/w.npz --approve  # fetch and install
+    python -m cli weights status       # the committed weights pack: verify what ships
+    python -m cli weights install --all --force  # install the pack into the trainer's folder
     python -m cli chat                # chat with the AI in text (Jarvis, no voice)
     python -m cli chat --ultron       # chat answering from Ultron (general local model)
     python -m cli chat --vision       # chat answering from Vision (petroleum local model)
@@ -172,6 +174,7 @@ from cli.menu import (
     run_voice,
     run_voice_studio,
     run_web,
+    run_weights,
     run_workplace,
 )
 
@@ -245,7 +248,8 @@ _COMMANDS = {
     "models": run_models,
     "model-manager": run_models,
     "checkpoints": run_checkpoints,
-    "weights": run_checkpoints,
+    "weights-pack": run_weights,
+    "weights": run_weights,
     "model-chat": run_model_chat,
     "mouths": run_model_chat,
     "voice-studio": run_voice_studio,
