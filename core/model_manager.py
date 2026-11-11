@@ -1268,6 +1268,68 @@ class ModelManager:
 
         return register_trained_models(self, replace_existing=replace_existing)
 
+    # -------------------------------------------------- imported weights
+
+    def importable_weights(self, path: Path | str) -> Any:
+        """What a ``.npz`` weight file *is*, read from the file itself.
+
+        A thin delegation to :func:`core.checkpoint_import.read_weight_info`, so
+        the window and the CLI describe a file the same way. It reads the array
+        names out of the archive with the standard library only, so a file is never
+        guessed to be something it is not.
+        """
+        from core.checkpoint_import import read_weight_info
+
+        return read_weight_info(path)
+
+    def import_weights(
+        self,
+        path: Path | str,
+        *,
+        kind: str = "",
+        task: str = "",
+        name: str = "",
+        destination: Path | str | None = None,
+        force: bool = False,
+        backup: bool = True,
+    ) -> Any:
+        """Install a ``.npz`` weight file into the folder the trainer resumes from.
+
+        Validation happens first, so an unreadable or unrecognised file is refused
+        with its reason and nothing is written; an existing checkpoint is backed up
+        before it is replaced and the backup's path is reported. The result is an
+        :class:`core.checkpoint_import.ImportReport` -- the same object the CLI and
+        the window post.
+        """
+        from core.checkpoint_import import install_weights
+
+        report = install_weights(
+            path,
+            kind=kind,
+            task=task,
+            name=name,
+            destination=destination,
+            force=force,
+            backup=backup,
+        )
+        self.log.append(
+            OP_DOWNLOAD if report.installed else OP_FAILURE,
+            display_name=report.source.name,
+            ok=report.installed,
+            message=(
+                f"import weights: installed {report.info.kind} at {report.destination}"
+                if report.installed
+                else f"import weights: {report.detail}"
+            ),
+        )
+        return report
+
+    def installed_weights(self) -> tuple[Any, ...]:
+        """Every weight file the project's trainers can continue, read from disk."""
+        from core.checkpoint_import import list_installed
+
+        return list_installed()
+
     def _fail(self, operation: str, record: ModelRecord, detail: str) -> OperationResult:
         """Record a failure and return it, so no caller has to catch."""
         self.log.append(

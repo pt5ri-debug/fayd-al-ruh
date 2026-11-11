@@ -491,6 +491,31 @@ class ModelManagerService:
         """Register the project's own trained checkpoint as an ordinary record."""
         return self.manager.register_trained()
 
+    # ------------------------------------------------- imported weights
+
+    def importable_weights(self, path: Path | str) -> Any:
+        """What a ``.npz`` weight file is, read from the file itself."""
+        return self.manager.importable_weights(path)
+
+    def import_weights(
+        self,
+        path: Path | str,
+        *,
+        kind: str = "",
+        task: str = "",
+        name: str = "",
+        force: bool = False,
+        backup: bool = True,
+    ) -> Any:
+        """Install a ``.npz`` weight file into the folder the trainer resumes from."""
+        return self.manager.import_weights(
+            path, kind=kind, task=task, name=name, force=force, backup=backup
+        )
+
+    def installed_weights(self) -> tuple[Any, ...]:
+        """Every weight file the project's trainers can continue, read from disk."""
+        return self.manager.installed_weights()
+
     # -------------------------------------------------------------- settings
 
     def settings(self, model_id: str) -> Any:

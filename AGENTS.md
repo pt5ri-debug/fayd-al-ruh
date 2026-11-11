@@ -7313,3 +7313,47 @@ regression monitor each can refuse a change.
   CLI-title tests; `tests/test_presentation_window.py` gained the chat-paste
   build and the question-is-not-a-schedule negative control. Gates: ruff clean,
   mypy 1088 files OK, evaluation PASS (`overall` 0.9909 unchanged).
+
+- Importing **ready-made `.npz` weights** so the project's own training tools
+  continue them. A user who has a `.npz` trained elsewhere (a checkpoint, a
+  petroleum policy, a small model, or an optimiser-state sidecar) can hand it to
+  the project and resume with the existing trainers, instead of only being able to
+  continue the committed checkpoints. `core/checkpoint_import.py` is the engine,
+  dependency-free and reading the file's own structure (never guessing):
+  `npy_members` lists the arrays inside the archive, `classify_members` orders the
+  test **most-specific-first** (`language` if `config`+`p0`; `state` if
+  `steps`+`t`+`m0`; `policy` if `W`+`epsilon`; `model` if `kind`; `unknown`
+  otherwise), and `read_weight_info` returns a `WeightInfo` (`valid`, `kind`,
+  `resumable`, the parsed `checkpoint` header via `core.model_files`, the
+  `task` a policy names, and the tokenizer/state sidecar paths). `destination_for`
+  resolves a kind to the **exact folder the trainer reads from** --
+  `checkpoints_dir()/fayd-llm.npz` and `fayd-llm.state.npz` for the language
+  model, `artifacts_dir()/petroleum/policy_<task>.npz` for a policy (refused when
+  no task is named), `artifacts_dir()/<name>` for a small model -- so an imported
+  file is one the trainer finds without a flag. `install_weights` copies
+  **atomically** (a temp file renamed into place, so a crash leaves no half-file),
+  **refuses to clobber** an existing file without `force` (and, when forced, keeps
+  a timestamped `<name>.bak` whose bytes equal what it replaced), and installs a
+  language checkpoint's `.tokenizer.json` and `.state.npz` sidecars beside it (so
+  a resume encodes with the right token index space and continues its optimiser
+  moments). `fetch_weights` is the governed network path: it refuses anything but
+  HTTPS (and a non-`.npz` name) and needs `approved=True`, then stages the file
+  under `core.paths.checkpoint_import_dir()` before installing it. `resume_plan`
+  names, as a **string**, the command that continues each kind
+  (`python -m cli llm --resume`, `python -m cli petroleum --resume`, `python -m
+  cli ml`) -- deliberately not an action, because continuing training is the
+  existing trainer's job. `list_installed` reads the project's own folders and
+  reports what is ready to continue. Reachable headless as `python -m cli
+  checkpoints status|install|fetch|list|kinds|plan|inspect` (`cli/checkpoints.py`,
+  alias `weights`; `install` exits `4` on a clobber refusal, `fetch` needs
+  `--approve`), the trainer's own flag `python -m ml.llm --import-checkpoint F`
+  (which installs the file, then sets `resume` so the run continues from it), the
+  Model Manager (`importable_weights`/`import_weights`/`installed_weights`, its
+  window's **Import weights** section, and `python -m cli models
+  import-weights|installed-weights|weight-kinds`), and the menu's two entries. The
+  held-out gate `core/checkpoint_import_gate.py`'s `checkpoint_import_accuracy`
+  (six judgements with **negative controls**, run on the real engine and the real
+  trainer) is a metric in `evaluation` (`overall` 0.9912 → 0.9913):
+  `tests/test_checkpoint_import.py` (41 tests) pins the recognition, the
+  installation and backups, the fetch gate, the listing, the CLI, the trainer
+  flag, the Model Manager delegation, and the gate.

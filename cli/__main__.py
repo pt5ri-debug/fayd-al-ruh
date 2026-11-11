@@ -35,6 +35,9 @@ Usage:
     python -m cli shared-models status # what is in data/shared_models, and the next step
     python -m cli shared-models download-all --approve  # fetch the small general models
     python -m cli shared-models migrate # move a legacy model from Natasha's folder
+    python -m cli checkpoints          # import ready-made .npz weights so training continues
+    python -m cli checkpoints install WEIGHTS.npz  # install into the trainer's own folder
+    python -m cli checkpoints fetch https://…/w.npz --approve  # fetch and install
     python -m cli chat                # chat with the AI in text (Jarvis, no voice)
     python -m cli chat --ultron       # chat answering from Ultron (general local model)
     python -m cli chat --vision       # chat answering from Vision (petroleum local model)
@@ -113,6 +116,7 @@ from cli.menu import (
     run_banner_chat,
     run_characters,
     run_chat,
+    run_checkpoints,
     run_cloud,
     run_cloud_chat,
     run_code_studio,
@@ -240,6 +244,8 @@ _COMMANDS = {
     "character": run_characters,
     "models": run_models,
     "model-manager": run_models,
+    "checkpoints": run_checkpoints,
+    "weights": run_checkpoints,
     "model-chat": run_model_chat,
     "mouths": run_model_chat,
     "voice-studio": run_voice_studio,

@@ -488,6 +488,17 @@ def backups_dir() -> Path:
     return data_dir() / "backups"
 
 
+def checkpoint_import_dir() -> Path:
+    """Where a fetched weight file is staged before it is installed (``data/checkpoint_import``).
+
+    Git-ignored and ``FAYD_DATA_DIR``-aware like every other writable folder, so a
+    downloaded ``.npz`` never dirties the working tree. It is a *staging* folder
+    only: :func:`core.checkpoint_import.install_weights` then copies the file into
+    the exact folder the trainer reads from.
+    """
+    return data_dir() / "checkpoint_import"
+
+
 def bundled_artifacts_dir() -> Path:
     """Read-only artifacts inside the code or bundle, used as a fallback."""
     return bundle_root() / "ml" / "artifacts"
@@ -623,6 +634,7 @@ __all__ = [
     "character_learning_dir",
     "character_learning_store_dir",
     "characters_dir",
+    "checkpoint_import_dir",
     "checkpoints_dir",
     "coder_models_dir",
     "config_dir",

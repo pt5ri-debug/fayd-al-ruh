@@ -167,6 +167,11 @@ def run_shared_models(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.shared_models", argv)
 
 
+def run_checkpoints(argv: Sequence[str] = ()) -> int:
+    """Import ready-made .npz weights so the project's trainers continue them."""
+    return _run_module("cli.checkpoints", argv)
+
+
 def run_chat(argv: Sequence[str] = ()) -> int:
     """Talk with the AI in text, like Jarvis without the voice."""
     return _run_module("ai.chat", argv)
@@ -624,6 +629,16 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
         run_shared_models,
         ("migrate",),
     ),
+    (
+        "Import ready-made .npz weights (continue training from them)",
+        run_checkpoints,
+        ("status",),
+    ),
+    (
+        "The weight kinds an import accepts, and the trainer for each",
+        run_checkpoints,
+        ("kinds",),
+    ),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
     ("Continuous learning and regression gate", run_learn, ()),
@@ -944,6 +959,7 @@ __all__ = [
     "run_banner_chat",
     "run_characters",
     "run_chat",
+    "run_checkpoints",
     "run_choice",
     "run_cloud",
     "run_cloud_chat",
