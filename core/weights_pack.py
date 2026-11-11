@@ -145,6 +145,10 @@ class PackEntry:
     provenance: dict[str, Any] = field(default_factory=dict)
     #: The command that continues the weights once installed.
     continue_command: str = ""
+    #: A file name to install *as* inside the kind's folder. Empty means the
+    #: kind's default file (the base checkpoint's own name). A learned tier sets
+    #: it so it installs beside the base checkpoint rather than over it.
+    destination_name: str = ""
     notes: str = ""
 
     @property
@@ -211,6 +215,7 @@ class PackEntry:
             "provenance": dict(self.provenance),
             "continue_command": self.continue_command,
             "notes": self.notes,
+            "destination_name": self.destination_name,
             "resumable": self.resumable,
         }
 
@@ -247,6 +252,7 @@ def _entry_from_dict(base: Path, data: dict[str, Any]) -> PackEntry:
         architecture=dict(data.get("architecture", {}) or {}),
         provenance=dict(data.get("provenance", {}) or {}),
         continue_command=str(data.get("continue_command", "")).strip(),
+        destination_name=str(data.get("destination_name", "")).strip(),
         notes=str(data.get("notes", "")).strip(),
     )
 
@@ -650,6 +656,7 @@ def install_entry(
         entry.path,
         kind=entry.kind,
         task=entry.task,
+        destination=installed_destination(entry),
         force=force,
         backup=backup,
     )
@@ -766,14 +773,19 @@ def installed_destination(entry: PackEntry) -> Path | None:
     """The file the entry installs to for the trainers, or ``None`` when it cannot.
 
     A policy with no task, or an unknown kind, has no destination -- reported as
-    ``None`` rather than a made-up path.
+    ``None`` rather than a made-up path. An entry that names its own
+    ``destination_name`` (a learned tier, which installs beside the base
+    checkpoint under its own name) resolves to that file inside the kind's folder.
     """
     from core.checkpoint_import import destination_for
 
     try:
-        return destination_for(entry.kind, task=entry.task)
+        default = destination_for(entry.kind, task=entry.task)
     except Exception:
         return None
+    if entry.destination_name:
+        return default.with_name(entry.destination_name)
+    return default
 
 
 def _is_installed(entry: PackEntry) -> bool:
@@ -986,6 +998,105 @@ def _language_entry(base: Path, checkpoint: Path, *, key: str, title: str) -> Pa
     )
 
 
+def _learned_entries(base: Path, folder: Path | str | None) -> list[PackEntry]:
+    """Pack entries for every learned checkpoint present, one per tier on disk.
+
+    The folder defaults to the pack's own ``learned`` sub-folder; a caller may
+    point it elsewhere (a scratch folder in a test). Each file is matched to its
+    tier by name so the entry's key is the tier's own key, and a file that is not
+    a language checkpoint is skipped -- ``read_weight_info`` classifies it, and a
+    non-language file is not packed as a language model.
+    """
+    from core.learned_weights import LEARNED_TIERS, learned_dir
+
+    resolved = Path(folder).expanduser() if folder is not None else learned_dir()
+    if not resolved.is_dir():
+        return []
+    by_filename = {tier.filename: tier for tier in LEARNED_TIERS.values()}
+    entries: list[PackEntry] = []
+    for path in sorted(resolved.glob("*.npz")):
+        if path.name.endswith(".state.npz"):
+            continue
+        tier = by_filename.get(path.name)
+        if tier is None:
+            continue
+        info = read_weight_info(path)
+        if not info.valid or info.kind != KIND_LANGUAGE:
+            continue
+        entries.append(
+            _learned_entry(base, path, tier_key=tier.key, tier_title=tier.title)
+        )
+    return entries
+
+
+def _learned_entry(base: Path, checkpoint: Path, *, tier_key: str, tier_title: str) -> PackEntry:
+    """Build a pack entry for one *learned* checkpoint, from the file on disk.
+
+    A learned checkpoint is a language model of a larger capacity tier, produced
+    by :mod:`core.learned_weights` and shipped under ``weights/learned``. Its
+    entry is an ordinary language-model entry -- so it installs, verifies, and
+    continues exactly like the base checkpoint -- with the tier's own key and
+    title and the provenance the build recorded beside it.
+    """
+    from core.learned_weights import load_provenance
+
+    info = read_weight_info(checkpoint)
+    architecture: dict[str, Any] = {}
+    if info.checkpoint is not None:
+        architecture = {
+            "vocab_size": info.checkpoint.vocab_size,
+            "n_layer": info.checkpoint.n_layer,
+            "n_head": info.checkpoint.n_head,
+            "n_embd": info.checkpoint.n_embd,
+            "block_size": info.checkpoint.block_size,
+            "dropout": info.checkpoint.dropout,
+            "tie_weights": info.checkpoint.tie_weights,
+        }
+    companions: list[Path] = []
+    tokenizer = checkpoint.with_suffix(".tokenizer.json")
+    if tokenizer.exists():
+        companions.append(tokenizer)
+    state = checkpoint.with_suffix(".state.npz")
+    if state.exists():
+        companions.append(state)
+    # The provenance the build wrote beside the file is the honest record; the
+    # pack adds only the fields a reader needs to locate and trust the entry.
+    recorded = load_provenance(checkpoint)
+    provenance: dict[str, Any] = {
+        "producer": str(recorded.get("producer", "the project's own trainer (ml.llm)")),
+        "source": _relative_to_base(checkpoint, base),
+        "checkpoint": _relative_to_base(checkpoint, base),
+        "digest_algorithm": DIGEST_ALGORITHM,
+        "license": str(recorded.get("license", "MIT (this project)")),
+        "created_at": str(recorded.get("created_at", _file_timestamp(checkpoint))),
+    }
+    if recorded.get("preset"):
+        provenance["version"] = str(recorded["preset"])
+    if recorded.get("steps"):
+        provenance["steps"] = recorded["steps"]
+    return PackEntry(
+        key=tier_key,
+        title=tier_title,
+        kind=KIND_LANGUAGE,
+        path=checkpoint,
+        companions=tuple(companions),
+        digest=file_digest(checkpoint),
+        architecture=architecture,
+        provenance=provenance,
+        destination_name=checkpoint.name,
+        continue_command=(
+            "python -m cli llm --checkpoint "
+            f"data/ml/llm/checkpoints/{checkpoint.stem}.npz --resume"
+        ),
+        notes=(
+            "A learned language-model checkpoint of a larger capacity tier; "
+            "continue it with `python -m cli llm --checkpoint <installed path> "
+            "--resume` (the command above installs to the data folder under this "
+            "tier's own name)."
+        ),
+    )
+
+
 def _policy_entry(base: Path, policy: Path) -> PackEntry:
     """Build a policy entry from a ``policy_<task>.npz`` file on disk."""
     info = read_weight_info(policy)
@@ -1018,7 +1129,9 @@ def generate_manifest(
     root: Path | str | None = None,
     checkpoint: Path | str | None = None,
     policy_dir: Path | str | None = None,
+    learned_dir: Path | str | None = None,
     include_policies: bool = True,
+    include_learned: bool = True,
     write: bool = True,
 ) -> WeightsPack:
     """(Re)build the pack manifest from the weights already on disk.
@@ -1032,7 +1145,9 @@ def generate_manifest(
     The default sources are the **committed** weights (``ml/llm/checkpoints`` and
     ``ml/artifacts/petroleum`` inside the checkout), because those are what a
     fresh clone ships; pass ``checkpoint``/``policy_dir`` to pack weights the user
-    trained into the writable ``data/`` folder instead.
+    trained into the writable ``data/`` folder instead. The learned capacity tiers
+    built under ``weights/learned`` are packed too when present (``include_learned``),
+    each under its own tier key, so a built tier is one ``install`` away.
     """
     from core.paths import bundle_root, weights_pack_dir
     from core.version import __version__
@@ -1055,6 +1170,8 @@ def generate_manifest(
         entries.append(
             _language_entry(base, source_checkpoint, key="fayd-llm", title="Fayd Al-Ruh language model")
         )
+    if include_learned:
+        entries.extend(_learned_entries(base, learned_dir))
     if include_policies and source_policy_dir.is_dir():
         for policy in sorted(source_policy_dir.glob("policy_*.npz")):
             entries.append(_policy_entry(base, policy))
@@ -1095,6 +1212,7 @@ def _write_manifest(pack: WeightsPack) -> Path:
                 "provenance": dict(entry.provenance),
                 "continue_command": entry.continue_command,
                 "notes": entry.notes,
+                "destination_name": entry.destination_name,
             }
             for entry in pack.entries
         ],
