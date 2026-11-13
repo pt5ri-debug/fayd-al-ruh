@@ -10,11 +10,17 @@ run ever happens.
 from __future__ import annotations
 
 import time
-import tkinter as tk
 
 import pytest
 
+try:
+    import tkinter as tk
+except ImportError:  # pragma: no cover - no libtk on this machine
+    tk = None  # type: ignore[assignment]
+
 from tests.test_gui_design import _display_available
+
+pytestmark = pytest.mark.skipif(tk is None, reason="Tk is unavailable")
 
 
 class StubService:

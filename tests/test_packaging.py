@@ -36,6 +36,31 @@ def test_console_script_points_at_an_importable_callable():
     assert callable(getattr(module, attribute))
 
 
+def test_read_only_assets_ship_with_the_wheel():
+    """The assets the code reads at run time must be declared in the build.
+
+    ``bundled_config_dir()`` (the shipped character defaults),
+    ``weights_pack_dir()`` (the committed weights pack) and
+    ``bundled_knowledge_dir()`` (the promoted learned statements) resolve through
+    ``core.paths``, which searches the source/bundle root *and* the install
+    prefix. A wheel installs the *code* into ``site-packages`` but places those
+    folders at the prefix, so each must be declared -- ``data-files`` for the
+    prefix-level folders and ``package-data`` for the model files that travel
+    inside the ``ml`` package. Without them a wheel installs a program that
+    cannot load its trained model or its character defaults.
+    """
+    data = _pyproject()["tool"]["setuptools"]
+    data_files = data["data-files"]
+    # A per-directory key is required: one key flattens subdirectories.
+    assert "config" in data_files and data_files["config"] == ["config/*.json"]
+    assert data_files["config/characters"] == ["config/characters/*.json"]
+    assert data_files["weights"] == ["weights/*.json"]
+    assert data_files["knowledge"] == ["knowledge/*.json"]
+    package_data = data["package-data"]
+    assert package_data["ml.llm"] == ["checkpoints/*"]
+    assert "**/*.npz" in package_data["ml.artifacts"]
+
+
 def test_discovery_covers_every_real_package_and_skips_the_tests():
     include = _pyproject()["tool"]["setuptools"]["packages"]["find"]["include"]
     patterns = {pattern.rstrip("*") for pattern in include}

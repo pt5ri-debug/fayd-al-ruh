@@ -19,7 +19,6 @@ from __future__ import annotations
 from typing import Any, cast
 
 import pytest
-from gui import rich_text
 from gui.typography import SCALE, for_root, resolve
 from gui.typography_settings import (
     ALIGNMENT_NOTE,
@@ -749,6 +748,8 @@ def test_a_chat_alignment_reaches_the_bubble_and_the_markdown(tmp_path, monkeypa
         widgets = _bubble_widgets(app._transcript)
         user = next(w for w in widgets if "المسامية" in w.get("1.0", "end-1c"))
         answer = next(w for w in widgets if "density log" in w.get("1.0", "end-1c"))
+        from gui import rich_text
+
         # The plain bubble carries the alignment tag over its whole content.
         assert user.tag_cget(rich_text.ALIGN_TAG, "justify") == "center"
         # The Markdown answer carries it on its own paragraph tag.

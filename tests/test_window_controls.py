@@ -12,18 +12,25 @@ Two levels are tested, matching how the module is built:
 
 from __future__ import annotations
 
-import tkinter as tk
 from typing import Any
 
 import pytest
-from gui.window_controls import (
-    _CLOSE_GLYPH,
-    _HELP_GLYPH,
-    _MAXIMIZE_GLYPH,
-    _RESTORE_GLYPH,
-    WindowControls,
-    install_window_controls,
-)
+
+try:
+    import tkinter as tk
+
+    from gui.window_controls import (
+        _CLOSE_GLYPH,
+        _HELP_GLYPH,
+        _MAXIMIZE_GLYPH,
+        _RESTORE_GLYPH,
+        WindowControls,
+        install_window_controls,
+    )
+except ImportError:  # pragma: no cover - no libtk on this machine
+    tk = None  # type: ignore[assignment]
+
+pytestmark = pytest.mark.skipif(tk is None, reason="Tk is unavailable")
 
 
 class FakeButton:

@@ -46,24 +46,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from gui.design import RADIUS, SIZE, SPACE
+from gui.design import (
+    BUTTON_VARIANTS,
+    RADIUS,
+    SIZE,
+    SPACE,
+    VARIANT_DANGER,
+    VARIANT_GHOST,
+    VARIANT_PRIMARY,
+    VARIANT_SECONDARY,
+)
 
 #: Tk's anchor values, narrowed so a widget construction type-checks.
 Anchor = Literal["nw", "n", "ne", "w", "center", "e", "sw", "s", "se"]
-
-#: The button variants. ``primary`` is the one call to action on a screen (a gold
-#: fill); ``secondary`` is the ordinary raised-surface button; ``ghost`` is a
-#: borderless button for a toolbar; ``danger`` is the destructive one.
-VARIANT_PRIMARY = "primary"
-VARIANT_SECONDARY = "secondary"
-VARIANT_GHOST = "ghost"
-VARIANT_DANGER = "danger"
-BUTTON_VARIANTS: tuple[str, ...] = (
-    VARIANT_PRIMARY,
-    VARIANT_SECONDARY,
-    VARIANT_GHOST,
-    VARIANT_DANGER,
-)
 
 
 def _token(theme: Any, name: str) -> str:

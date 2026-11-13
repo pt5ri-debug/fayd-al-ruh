@@ -33,6 +33,8 @@ from gui.import_center import (
 )
 from ingest.metadata import DocumentMetadataStore, metadata_path
 
+from tests.conftest import TK_AVAILABLE
+
 from . import docx_fixtures, pdf_fixtures
 
 
@@ -366,6 +368,7 @@ def test_service_exposes_the_import_center(tmp_path: Path) -> None:
     assert service.import_stats()["store"]["chunks"] >= 1
 
 
+@pytest.mark.skipif(not TK_AVAILABLE, reason="Tk is unavailable")
 def test_dialog_labels_match_the_import_center() -> None:
     # The dialog module is Tk-only; importing it must not require a display.
     from gui import import_dialog

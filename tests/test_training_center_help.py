@@ -10,7 +10,6 @@ without a display, exactly like the other window tests.
 from __future__ import annotations
 
 import json
-import tkinter as tk
 from pathlib import Path
 
 import pytest
@@ -24,6 +23,11 @@ from core.training_center.help import (
     help_title,
     resolve_language,
 )
+
+try:
+    import tkinter as tk
+except ImportError:  # pragma: no cover - no libtk on this machine
+    tk = None  # type: ignore[assignment]
 
 from tests.test_gui_design import _display_available
 

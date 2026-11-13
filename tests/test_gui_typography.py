@@ -7,14 +7,23 @@ window tests.
 
 from __future__ import annotations
 
-import tkinter as tk
-
 import pytest
-from gui import rich_text
 from gui import typography as ty
+
+# ``gui.rich_text`` imports tkinter at module level; import it only when Tk can
+# load, so the pure-arithmetic half of this file still runs without a display.
+try:
+    import tkinter as tk
+
+    from gui import rich_text
+except ImportError:  # pragma: no cover - no libtk on this machine
+    tk = None  # type: ignore[assignment]
+    rich_text = None  # type: ignore[assignment]
 
 
 def _display_available() -> bool:
+    if tk is None:
+        return False
     try:
         root = tk.Tk()
     except tk.TclError:

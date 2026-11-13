@@ -22,14 +22,19 @@ from pathlib import Path
 
 from core.acceptance_policy import sanitize_statement
 from core.documents import Document
-from core.paths import bundle_root
+from core.paths import bundled_knowledge_dir
 
 LEARNED_FILENAME = "learned_petroleum.json"
 
 
 def learned_path() -> Path:
-    """Where the promoted knowledge file lives (inside the bundled project)."""
-    return bundle_root() / "knowledge" / LEARNED_FILENAME
+    """Where the promoted knowledge file lives (inside the bundled project).
+
+    Resolved across the source/bundle root *and* the install prefix (see
+    :func:`core.paths.bundled_knowledge_dir`), so a wheel install finds the
+    promoted statements the project ships.
+    """
+    return bundled_knowledge_dir() / LEARNED_FILENAME
 
 
 def learned_documents() -> list[Document]:

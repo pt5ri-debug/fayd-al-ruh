@@ -21,6 +21,8 @@ from gui import modes
 from gui.modes import HistoryItem
 from gui.service import ChatService
 
+from tests.conftest import TK_AVAILABLE
+
 
 class FakeSession:
     """A minimal stand-in for ``JarvisMode`` with a real sandboxed router."""
@@ -1531,6 +1533,7 @@ def test_shared_composer_disabled_send_does_not_lighten_on_hover() -> None:
         root.destroy()
 
 
+@pytest.mark.skipif(not TK_AVAILABLE, reason="Tk is unavailable")
 def test_composer_hover_blend_derives_from_the_theme_colour() -> None:
     """``_blend`` mixes toward the other colour and passes odd input through."""
     from gui.chat_composer import _blend
@@ -1545,6 +1548,7 @@ def test_composer_hover_blend_derives_from_the_theme_colour() -> None:
 # --- the composer's model-switch row --------------------------------------
 
 
+@pytest.mark.skipif(not TK_AVAILABLE, reason="Tk is unavailable")
 def test_model_button_catalog_is_the_requested_order() -> None:
     """The row names the seven mouths in the order asked for, left to right."""
     from gui.app import MODEL_BUTTONS
@@ -1847,6 +1851,7 @@ def test_window_remembers_its_size(tmp_path) -> None:
     assert (width, height) == (900, 640)
 
 
+@pytest.mark.skipif(not TK_AVAILABLE, reason="Tk is unavailable")
 def test_saved_geometry_rejects_an_unusable_size(tmp_path) -> None:
     """A saved size below the usable minimum falls back to the default opening size."""
     from gui.app import _DEFAULT_WINDOW_SIZE, load_window_geometry
