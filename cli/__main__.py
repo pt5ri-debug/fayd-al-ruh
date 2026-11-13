@@ -88,10 +88,11 @@ Usage:
     python -m cli paths               # show asset/data locations
     python -m cli demo                # local cognitive demo
     python -m cli ml --episodes 60    # ML pipeline
-    python -m cli llm --steps 200     # language-model trainer
+    python -m cli training-center lm-train    # language-model trainer (one home)
+    python -m cli training-center lm-settings # every language-model option
     python -m cli petroleum           # petroleum-engineering task training
     python -m cli curriculum          # show the seeded degree curriculum
-    python -m cli release             # train everything for a release
+    python -m cli training-center lm-release  # train everything for a release
     python -m cli eval                # evaluation suite
     python -m cli update              # check GitHub for program updates
     python -m cli update --apply      # download and apply available updates

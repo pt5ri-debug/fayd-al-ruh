@@ -156,27 +156,24 @@ def test_release_config_carries_the_flag(mouths):
     assert off["session_sentences"] == 0
 
 
-def test_cli_menu_offers_both_session_training_entries():
-    from cli.menu import run_llm, run_release, visible_menu
+def test_the_training_center_exposes_the_session_switch():
+    """Training on the mouths' own chats is a Training Center setting now."""
+    from cli.menu import MENU, run_training_center
+    from gui.actions import run_training_center as gui_run_training_center
 
-    entries = [(title, action, tuple(argv)) for title, action, argv in visible_menu()]
-    assert (
-        "Train the language model on the local mouths' own chats",
-        run_llm,
-        ("--llm-sessions", "--steps", "4000"),
-    ) in entries
-    assert (
-        "Train everything for a release (including the local mouths' chats)",
-        run_release,
-        ("--llm-sessions",),
-    ) in entries
+    by_label = {title: (action, tuple(argv)) for title, action, argv in MENU}
+    action, argv = by_label["Train the language model on the local mouths' own chats"]
+    assert action is run_training_center
+    assert argv == ("lm-train", "--sessions")
+    release, rargv = by_label["Train everything for a release (including the local mouths' chats)"]
+    assert release is run_training_center
+    assert rargv == ("lm-release", "--sessions")
+    assert gui_run_training_center is run_training_center
 
 
-def test_gui_sidebar_offers_both_session_training_actions():
-    from gui.actions import run_llm, run_release, visible_actions
+def test_include_sessions_is_a_training_center_setting(tmp_path):
+    from core.training_center.language_model import LanguageModelSettings
 
-    by_key = {action.key: action for action in visible_actions()}
-    assert by_key["llm-sessions"].command is run_llm
-    assert by_key["llm-sessions"].argv == ("--llm-sessions", "--steps", "4000")
-    assert by_key["release-sessions"].command is run_release
-    assert by_key["release-sessions"].argv == ("--llm-sessions",)
+    settings = LanguageModelSettings()
+    assert settings.include_sessions is False  # off by default: a transcript is personal
+    assert settings.with_values(include_sessions=True).include_sessions is True

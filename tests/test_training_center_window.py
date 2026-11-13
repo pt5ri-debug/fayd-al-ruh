@@ -279,9 +279,9 @@ def test_window_builds_every_section() -> None:
         dialog = _dialog(root, StubService())
         keys = set(dialog._sidebar_column.sections)
         assert {"dashboard", "sources", "knowledge", "qa", "datasets"} <= keys
-        assert {"jobs", "finetune", "pretrain", "evaluation"} <= keys
+        assert {"jobs", "finetune", "pretrain", "language_model", "evaluation"} <= keys
         assert {"kb", "pipelines", "history", "resources", "settings"} <= keys
-        assert len(SECTIONS) == 14
+        assert len(SECTIONS) == 15
     finally:
         root.destroy()
 

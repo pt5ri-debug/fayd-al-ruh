@@ -344,7 +344,7 @@ class IncrementalTrainer:
         if not plan.base.exists():
             return TrainingOutcome(
                 plan=plan, version=None, accepted=False,
-                reason=f"no base model at {plan.base}; train one with `python -m ml.llm`",
+                reason=f"no base model at {plan.base}; train one with `python -m cli training-center lm-train`",
             )
 
         note(f"preparing data ({plan.dataset_chars} chars, {plan.examples} example(s))")

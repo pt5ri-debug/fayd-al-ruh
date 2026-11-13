@@ -214,37 +214,62 @@ def test_cli_petroleum_command_dispatches(monkeypatch) -> None:
     assert calls == [["--episodes", "5"]]
 
 
-def test_run_release_adds_default_save_dir(monkeypatch, tmp_path) -> None:
+def test_run_release_routes_into_the_training_center(monkeypatch) -> None:
+    """The release run is a Training Center capability now, not a scattered command."""
     captured: dict[str, Sequence[str]] = {}
 
-    def fake_run_module(name: str, argv: Sequence[str]) -> int:
-        captured["name"] = name
-        captured["argv"] = argv
+    def fake_run_training_center(argv: Sequence[str]) -> int:
+        captured["argv"] = list(argv)
         return 0
 
-    monkeypatch.setattr(menu, "_run_module", fake_run_module)
-    monkeypatch.setattr(menu, "artifacts_dir", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr(menu, "run_training_center", fake_run_training_center)
+    menu.run_release(["--episodes", "5", "--save-dir", "/tmp/ignored"])
+    assert captured["argv"][0] == "lm-release"
+    # The Training Center resolves its own destination, so --save-dir is dropped.
+    assert "--save-dir" not in captured["argv"]
 
-    menu.run_release(["--episodes", "5"])
-    assert captured["name"] == "ml.release"
+
+def test_run_release_passes_the_sessions_switch(monkeypatch) -> None:
+    captured: dict[str, Sequence[str]] = {}
+
+    def fake_run_training_center(argv: Sequence[str]) -> int:
+        captured["argv"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(menu, "run_training_center", fake_run_training_center)
+    menu.run_release(["--llm-sessions"])
+    assert captured["argv"] == ["lm-release", "--sessions"]
+
+
+def test_run_llm_maps_old_flags_onto_the_training_center(monkeypatch) -> None:
+    captured: dict[str, Sequence[str]] = {}
+
+    def fake_run_training_center(argv: Sequence[str]) -> int:
+        captured["argv"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(menu, "run_training_center", fake_run_training_center)
+    menu.run_llm(["--resume", "--steps", "200", "--llm-shards", "4", "--llm-characters"])
     assert captured["argv"] == [
-        "--episodes",
-        "5",
-        "--save-dir",
-        str(tmp_path / "artifacts"),
+        "lm-train",
+        "--steps",
+        "200",
+        "--shards",
+        "4",
+        "--include-characters",
     ]
 
 
-def test_run_release_respects_explicit_save_dir(monkeypatch, tmp_path) -> None:
+def test_run_llm_maps_fresh(monkeypatch) -> None:
     captured: dict[str, Sequence[str]] = {}
 
-    def fake_run_module(name: str, argv: Sequence[str]) -> int:
-        captured["argv"] = argv
+    def fake_run_training_center(argv: Sequence[str]) -> int:
+        captured["argv"] = list(argv)
         return 0
 
-    monkeypatch.setattr(menu, "_run_module", fake_run_module)
-    menu.run_release(["--save-dir", str(tmp_path / "explicit")])
-    assert captured["argv"].count("--save-dir") == 1
+    monkeypatch.setattr(menu, "run_training_center", fake_run_training_center)
+    menu.run_llm(["--fresh", "--steps=10"])
+    assert captured["argv"] == ["lm-train", "--steps=10", "--fresh"]
 
 
 def test_cli_release_command_dispatches(monkeypatch) -> None:

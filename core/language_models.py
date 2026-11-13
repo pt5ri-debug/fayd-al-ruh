@@ -384,7 +384,7 @@ def _trained_model() -> LanguageModel:
         summary="The small in-project language model trained on the project's own corpus.",
         available=present,
         detail=(
-            "train one with `python -m cli release` (or `python -m ml.llm`) — "
+            "train one with `python -m cli training-center lm-train` — "
             f"no checkpoint was found at {checkpoint}."
         ),
         path=checkpoint if present else None,

@@ -224,17 +224,14 @@ def test_cli_llm_shards_flag_is_wired(tmp_path, capsys):
     assert "shard 1/4" in out
 
 
-def test_menu_and_gui_training_entries_use_the_sharded_schedule():
-    from cli import menu
-    from gui import actions
+def test_training_center_language_model_offers_the_sharded_schedule():
+    """The sharded schedule is a Training Center setting, not a scattered flag."""
+    from core.training_center.language_model import LanguageModelSettings
 
-    by_label = {label: argv for label, _action, argv in menu.MENU}
-    assert "--llm-shards" in by_label["Train the language model from all repositories"]
-    assert "--llm-shards" in by_label["Train everything for a release"]
-
-    by_key = {action.key: action.argv for action in actions.ACTIONS}
-    assert "--llm-shards" in by_key["llm"]
-    assert "--llm-shards" in by_key["release"]
+    settings = LanguageModelSettings()
+    assert settings.shard_count == 0  # whole corpus by default
+    assert settings.with_values(shard_count=4).shard_count == 4
+    assert "shard_count" in settings.to_primitive()
 
 
 def test_schedule_state_rejects_a_nonpositive_count():

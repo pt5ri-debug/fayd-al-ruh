@@ -51,8 +51,53 @@ def run_ml(argv: Sequence[str] = ()) -> int:
 
 
 def run_llm(argv: Sequence[str] = ()) -> int:
-    """Train the in-project language model into the data folder."""
-    return _run_module("ml.llm.__main__", argv)
+    """Train the in-project language model -- now through the Training Center.
+
+    The scattered trainer commands were consolidated: every language-model
+    option lives in the Training Center, so this is a thin alias that maps the
+    old flags onto ``training-center lm-train``. ``--resume`` is the engine's
+    own default (``--fresh`` is the opt-out).
+    """
+    args = list(argv)
+    fresh = "--fresh" in args
+    args = [a for a in args if a != "--fresh"]
+    if "--resume" in args:
+        args = [a for a in args if a != "--resume"]
+    mapped = _llm_args_to_training_center(args)
+    if fresh:
+        mapped.append("--fresh")
+    return run_training_center(["lm-train", *mapped])
+
+
+#: Old language-model flags mapped onto the Training Center's ``lm-train`` parser.
+_LLM_FLAG_MAP = {
+    "--steps": "--steps",
+    "--preset": "--preset",
+    "--tokenizer-kind": "--tokenizer-kind",
+    "--repeats": "--repeats",
+    "--seed": "--seed",
+    "--weight-decay": "--weight-decay",
+    "--lr-schedule": "--lr-schedule",
+    "--accum-steps": "--accum-steps",
+    "--kb-max-chunks": "--kb-max-chunks",
+    "--llm-shards": "--shards",
+    "--llm-sessions": "--sessions",
+    "--llm-characters": "--include-characters",
+    "--llm-character-corpus": "--include-character-corpus",
+}
+
+
+def _llm_args_to_training_center(argv: Sequence[str]) -> list[str]:
+    """Translate the old ``ml.llm`` flags onto ``training-center lm-train``."""
+    out: list[str] = []
+    for arg in argv:
+        name, sep, value = arg.partition("=")
+        if name in _LLM_FLAG_MAP:
+            mapped = _LLM_FLAG_MAP[name]
+            out.append(f"{mapped}{sep}{value}" if sep else mapped)
+        else:
+            out.append(arg)
+    return out
 
 
 def run_petroleum(argv: Sequence[str] = ()) -> int:
@@ -64,11 +109,17 @@ def run_petroleum(argv: Sequence[str] = ()) -> int:
 
 
 def run_release(argv: Sequence[str] = ()) -> int:
-    """Train every learning layer and store all artifacts for a release."""
-    args = list(argv)
-    if "--save-dir" not in args:
-        args += ["--save-dir", str(artifacts_dir())]
-    return _run_module("ml.release", args)
+    """Train every learning layer for a release -- through the Training Center.
+
+    The release run is a Training Center capability now, so the old flags map
+    onto ``training-center lm-release``. ``--save-dir`` is the Training Center's
+    own resolved destination, so it is accepted and ignored here.
+    """
+    args = [a for a in argv if a not in ("--save-dir",) and not a.startswith("--save-dir=")]
+    if "--llm-sessions" in args:
+        args = [a for a in args if a != "--llm-sessions"]
+        return run_training_center(["lm-release", "--sessions", *args])
+    return run_training_center(["lm-release", *args])
 
 
 def run_evaluation(argv: Sequence[str] = ()) -> int:
@@ -656,28 +707,28 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ),
     (
         "Weights pack: install the shipped weights into the trainer's folder",
-        run_weights,
-        ("install", "--all", "--force"),
+        run_training_center,
+        ("lm-weights", "--install", "fayd-llm"),
     ),
     (
         "Weights pack: continue the shipped model (install, then name the trainer)",
-        run_weights,
-        ("continue", "fayd-llm"),
+        run_training_center,
+        ("lm-weights", "--install", "fayd-llm"),
     ),
     (
         "Learned weights: the larger capacity tiers this build can train",
-        run_weights,
-        ("learned-tiers",),
+        run_training_center,
+        ("lm-weights", "--list"),
     ),
     (
         "Learned weights: the learned checkpoints already built",
-        run_weights,
-        ("learned-list",),
+        run_training_center,
+        ("lm-weights", "--list"),
     ),
     (
         "Learned weights: train the large tier into the pack folder",
-        run_weights,
-        ("build-learned", "learned-large"),
+        run_training_center,
+        ("lm-weights", "--build", "learned-large"),
     ),
     ("Chat with the AI (text, like Jarvis without voice)", run_chat, ()),
     ("Chat with the AI (trained model, no sources)", run_mind_chat, ()),
@@ -702,6 +753,41 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Code Studio: show the project's own development tasks", run_code_studio, ("tasks",)),
     ("Training Center: learn, build datasets, train, and evaluate", run_training_center, ("dashboard",)),
     ("Training Center: what every learning and training control does", run_training_center, ("catalog",)),
+    (
+        "Training Center: train or continue the language model (فيض الروح)",
+        run_training_center,
+        ("lm-train",),
+    ),
+    (
+        "Training Center: the language-model training settings (all options)",
+        run_training_center,
+        ("lm-settings",),
+    ),
+    (
+        "Training Center: the language-model training corpus",
+        run_training_center,
+        ("lm-corpus",),
+    ),
+    (
+        "Training Center: measure the language model on held-out data",
+        run_training_center,
+        ("lm-evaluate",),
+    ),
+    (
+        "Training Center: sample from the trained language model",
+        run_training_center,
+        ("lm-generate",),
+    ),
+    (
+        "Training Center: train everything for a release",
+        run_training_center,
+        ("lm-release",),
+    ),
+    (
+        "Training Center: the language-model weights (install, build, list)",
+        run_training_center,
+        ("lm-weights", "--list"),
+    ),
     ("Training Center: turn the internet on or off (cloud, URLs, KB build)", run_training_center, ("web",)),
     ("Training Center: the answer providers to choose from", run_training_center, ("providers",)),
     ("Training Center: the learning pipelines", run_training_center, ("pipeline", "--list")),
@@ -821,20 +907,24 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Show the ingestion status (store + ledger)", run_ingest, ("stats",)),
     ("Run the local cognitive demo", run_demo, ()),
     ("Train the ML pipeline", run_ml, ("--resume", "--episodes", "60")),
+    # Every language-model training surface now lives in the Training Center. The
+    # entries below stay reachable (a caller or a script may still resolve them)
+    # but are hidden and route into the Training Center, so there is one trainer,
+    # one settings store, and one history rather than several scattered commands.
     (
         "Train the language model from all repositories",
-        run_llm,
-        ("--resume", "--steps", "200", "--kb-max-chunks", "2000", "--llm-shards", "4"),
+        run_training_center,
+        ("lm-train",),
     ),
     (
         "Train the language model on the local mouths' own chats",
-        run_llm,
-        ("--llm-sessions", "--steps", "4000"),
+        run_training_center,
+        ("lm-train", "--sessions"),
     ),
     (
         "Train the language model on the characters' own learning",
-        run_llm,
-        ("--llm-characters", "--steps", "4000"),
+        run_training_center,
+        ("lm-train",),
     ),
     (
         "Train petroleum-engineering tasks (with procedures)",
@@ -844,13 +934,13 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Show the petroleum-engineering curriculum", run_curriculum, ()),
     (
         "Train everything for a release",
-        run_release,
-        ("--resume", "--episodes", "120", "--llm-steps", "4000", "--llm-shards", "4"),
+        run_training_center,
+        ("lm-release",),
     ),
     (
         "Train everything for a release (including the local mouths' chats)",
-        run_release,
-        ("--llm-sessions",),
+        run_training_center,
+        ("lm-release", "--sessions"),
     ),
     (
         "Check that training resumes instead of restarting (held-out gate)",
@@ -904,7 +994,18 @@ HIDDEN_MENU_LABELS: frozenset[str] = frozenset(
         "Continuous learning and regression gate",
         "Run the local cognitive demo",
         "Train the ML pipeline",
+        # Every language-model surface now lives in the Training Center; these
+        # aliases stay callable but are not listed a second time.
         "Train the language model from all repositories",
+        "Train the language model on the local mouths' own chats",
+        "Train the language model on the characters' own learning",
+        "Train everything for a release",
+        "Train everything for a release (including the local mouths' chats)",
+        "Weights pack: install the shipped weights into the trainer's folder",
+        "Weights pack: continue the shipped model (install, then name the trainer)",
+        "Learned weights: the larger capacity tiers this build can train",
+        "Learned weights: the learned checkpoints already built",
+        "Learned weights: train the large tier into the pack folder",
         "Train petroleum-engineering tasks (with procedures)",
         "Show the petroleum-engineering curriculum",
         "Self-check the install",

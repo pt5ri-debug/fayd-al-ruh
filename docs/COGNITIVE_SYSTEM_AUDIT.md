@@ -32,7 +32,7 @@ Total: **1,004 Python files**.
 - **GUI:** `python -m cli gui` → `python -m gui` → `gui/app.py:FaydGUI`.
 - **CLI menu:** `python -m cli` → `cli/__main__.py` → `cli/menu.py:MENU`.
 - **Demo:** `python -m cli demo` → `main.py`.
-- **Training:** `python -m cli release` → `ml/release.py`.
+- **Training:** `python -m cli training-center lm-release` → `ml/release.py`.
 
 ## 3. Cognitive core
 

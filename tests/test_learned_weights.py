@@ -124,7 +124,7 @@ def test_tier_dimensions_and_command_are_real():
     tier = LEARNED_TIERS["learned-large"]
     assert tier.dimensions().startswith("4L/256w/")
     command = tier.continue_command()
-    assert command.startswith("python -m cli llm")
+    assert command.startswith("python -m cli training-center lm-weights")
     assert tier.filename in command
     primitive = tier.to_primitive()
     assert primitive["key"] == "learned-large"
@@ -284,7 +284,7 @@ def test_build_report_round_trips_through_primitive(tmp_path):
     assert primitive["built"] is True
     assert primitive["tier"] == "learned-large"
     assert primitive["parameters"] > 0
-    assert primitive["continue_command"].startswith("python -m cli llm")
+    assert primitive["continue_command"].startswith("python -m cli training-center lm-weights")
     assert "built" in report.describe()
 
 
@@ -466,9 +466,9 @@ def test_the_menu_offers_the_learned_entries():
 
     labels = [label for label, _action, _args in MENU]
     assert any("Learned weights" in label for label in labels)
-    # The build entry points at the CLI's own build-learned command.
+    # The build entry routes into the Training Center's own weights command.
     build_rows = [args for label, _action, args in MENU if "train the large tier" in label]
-    assert build_rows and build_rows[0] == ("build-learned", "learned-large")
+    assert build_rows and build_rows[0] == ("lm-weights", "--build", "learned-large")
 
 
 

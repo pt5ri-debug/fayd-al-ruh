@@ -308,6 +308,7 @@ class TrainingCenterDialog(ThemedDialog):
         self._build_jobs_section(column)
         self._build_finetune_section(column)
         self._build_pretrain_section(column)
+        self._build_language_model_section(column)
         self._build_evaluation_section(column)
         self._build_kb_section(column)
         self._build_pipelines_section(column)
@@ -379,6 +380,26 @@ class TrainingCenterDialog(ThemedDialog):
         self._cap_button(section, "pretrain.status", self._on_pretrain_status)
         self._cap_button(section, "pretrain.estimate", self._on_estimate)
         self._cap_button(section, "pretrain.continue", self._on_continue_training)
+
+    def _build_language_model_section(self, column: SidebarColumn) -> None:
+        section = column.add("language_model", "Language Model (Fayd Al-Ruh)", icon="🧠")
+        self._section_note(section, "language_model")
+        self._cap_button(section, "lm.status", self._on_lm_status)
+        self._cap_button(section, "lm.corpus", self._on_lm_corpus)
+        self._cap_button(section, "lm.settings.show", self._on_lm_settings)
+        self._cap_button(section, "lm.settings.set", self._on_lm_set_setting)
+        self._cap_button(section, "lm.train", self._on_lm_train)
+        self._cap_button(section, "lm.train.fresh", self._on_lm_train_fresh)
+        self._cap_button(section, "lm.train.sharded", self._on_lm_train_sharded)
+        self._cap_button(section, "lm.release", self._on_lm_release)
+        self._cap_button(section, "lm.evaluate", self._on_lm_evaluate)
+        self._cap_button(section, "lm.generate", self._on_lm_generate)
+        self._cap_button(section, "lm.weights.install", self._on_lm_install_pack)
+        self._cap_button(section, "lm.weights.import", self._on_lm_import_weights)
+        self._cap_button(section, "lm.weights.fetch", self._on_lm_fetch_weights)
+        self._cap_button(section, "lm.weights.build", self._on_lm_build_learned)
+        self._cap_button(section, "lm.weights.learned", self._on_lm_learned)
+        self._cap_button(section, "lm.plan", self._on_lm_plan)
 
     def _build_evaluation_section(self, column: SidebarColumn) -> None:
         section = column.add("evaluation", "Evaluation & Benchmarking", icon="📈")
@@ -1363,6 +1384,223 @@ class TrainingCenterDialog(ThemedDialog):
             return self._describe_handle(handle)
 
         self._run(f"Continuing training on {dataset_id!r}…", job)
+
+    # -- the language model (every training surface in one place) ----------
+
+    def _on_lm_status(self) -> None:
+        self._run("Reading the model and its corpus…", self.service.lm_status)
+
+    def _on_lm_corpus(self) -> None:
+        self._run("Reading the training corpus…", self.service.lm_corpus)
+
+    def _on_lm_settings(self) -> None:
+        self._add_message("assistant", self.service.lm_settings_text())
+
+    def _on_lm_set_setting(self) -> None:
+        key = self._choose(
+            "Change a training setting",
+            "Which option?",
+            values=self.service.lm_settings_keys(),
+        )
+        if not key:
+            return
+        key = key.strip()
+        if key not in self.service.lm_settings_keys():
+            self._add_message("error", f"Unknown option {key!r}.")
+            return
+        current = getattr(self.service.lm_settings(), key, "")
+        value = self._choose(
+            "Value",
+            f"New value for {key}:",
+            values=self.service.lm_settings_values(key),
+            initial=str(current),
+        )
+        if value == "":
+            return
+        parsed: object = value
+        lowered = value.strip().lower()
+        if lowered in ("true", "false"):
+            parsed = lowered == "true"
+        else:
+            try:
+                parsed = int(value)
+            except ValueError:
+                try:
+                    parsed = float(value)
+                except ValueError:
+                    parsed = value
+        try:
+            self.service.lm_set_setting(key, parsed)
+        except KeyError as error:
+            self._add_message("error", str(error))
+            return
+        self._add_message("ok", f"{key} = {parsed}\n\n{self.service.lm_settings_text()}")
+
+    def _on_lm_train(self) -> None:
+        self._start_lm_train(fresh=False, shards=None)
+
+    def _on_lm_train_fresh(self) -> None:
+        self._start_lm_train(fresh=True, shards=None)
+
+    def _on_lm_train_sharded(self) -> None:
+        value = self._choose(
+            "Continue the next corpus shard",
+            "How many shards should the corpus be split into?",
+            values=("2", "4", "8", "16"),
+            initial="4",
+        )
+        if not value:
+            return
+        try:
+            shards = int(value)
+        except ValueError:
+            self._add_message("error", f"Not a number: {value!r}")
+            return
+        self._start_lm_train(fresh=False, shards=shards)
+
+    def _start_lm_train(self, *, fresh: bool, shards: int | None) -> None:
+        settings = self.service.lm_settings()
+        label = "from scratch" if fresh else "continuing the checkpoint"
+        if shards:
+            label += f", next of {shards} shards"
+        if not messagebox.askyesno(
+            "Train the language model",
+            f"Train the project's own language model ({settings.steps} steps, "
+            f"{settings.preset}, {label})?\n\nIt runs on a worker thread and streams "
+            "its progress into this chat area.",
+            parent=self.window,
+        ):
+            return
+
+        def job() -> str:
+            outcome = self.service.lm_train(
+                fresh=fresh,
+                shards=shards,
+                on_line=self._stream_line,
+                on_step=self._lm_step,
+            )
+            return outcome.describe()
+
+        self._run(f"Training the language model ({label})…", job)
+
+    def _lm_step(self, step: int, loss: float, total: int) -> None:
+        """Queue one live step line from the training thread (Tk-safe)."""
+        percent = (step / total * 100) if total else 0.0
+        self._stream_line(f"step {step}/{total} ({percent:.0f}%) · loss {loss:.4f}")
+
+    def _on_lm_release(self) -> None:
+        if not messagebox.askyesno(
+            "Train everything for a release",
+            "Train every learning layer — the base pipeline, the petroleum tasks, and "
+            "the language model — and write the release manifest?\n\nIt is a long run.",
+            parent=self.window,
+        ):
+            return
+
+        def job() -> str:
+            outcome = self.service.lm_release(on_line=self._stream_line)
+            return outcome.describe()
+
+        self._run("Training every learning layer for a release…", job)
+
+    def _on_lm_evaluate(self) -> None:
+        def job() -> str:
+            return self.service.lm_evaluate(on_line=self._stream_line).describe()
+
+        self._run("Measuring the model on held-out data…", job)
+
+    def _on_lm_generate(self) -> None:
+        prompt = self._choose(
+            "Sample from the model",
+            "The prompt to continue from:",
+            initial="porosity",
+        )
+        if not prompt:
+            return
+
+        def job() -> str:
+            text = self.service.lm_generate(prompt)
+            return f"{prompt}{text}"
+
+        self._run(f"Sampling from the model with {prompt!r}…", job)
+
+    def _on_lm_install_pack(self) -> None:
+        key = self._choose(
+            "Install the committed weights",
+            "Which weights-pack entry?",
+            values=self.service.lm_pack_choices(),
+            initial="fayd-llm",
+        )
+        if not key:
+            return
+        key = key.strip()
+        if not messagebox.askyesno(
+            "Install weights",
+            f"Install the pack entry {key!r} into the folder the trainer reads? "
+            "An existing checkpoint is kept as a backup.",
+            parent=self.window,
+        ):
+            return
+        self._run(
+            f"Installing the {key!r} weights…",
+            lambda: self.service.lm_install_pack(key).describe(),
+        )
+
+    def _on_lm_import_weights(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self.window, title="Choose a .npz weight file",
+            filetypes=[("NumPy weights", "*.npz"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        self._run(
+            f"Importing weights from {path}…",
+            lambda: self.service.lm_import_weights(path).describe(),
+        )
+
+    def _on_lm_fetch_weights(self) -> None:
+        url = simpledialog.askstring(
+            "Fetch weights", "The HTTPS URL of the .npz weight file:", parent=self.window
+        )
+        if not url:
+            return
+        if not messagebox.askyesno(
+            "Fetch weights",
+            f"Fetch weights from\n\n{url}\n\nThis leaves this machine and needs approval.",
+            parent=self.window,
+        ):
+            return
+        self._run(
+            "Fetching weights…",
+            lambda: self.service.lm_fetch_weights(url, approved=True).describe(),
+        )
+
+    def _on_lm_build_learned(self) -> None:
+        tier = self._choose(
+            "Train a larger capacity tier",
+            "Which tier?",
+            values=self.service.lm_tier_choices(),
+            initial="learned-large",
+        )
+        if not tier:
+            return
+        if not messagebox.askyesno(
+            "Train a larger tier",
+            f"Train the {tier!r} tier? It is a long run into the pack folder.",
+            parent=self.window,
+        ):
+            return
+
+        def job() -> str:
+            return self.service.lm_build_learned(tier, on_line=self._stream_line).describe()
+
+        self._run(f"Training the {tier!r} tier…", job)
+
+    def _on_lm_learned(self) -> None:
+        self._run("Listing the learned tiers…", self.service.lm_learned_text)
+
+    def _on_lm_plan(self) -> None:
+        self._add_message("assistant", self.service.language_model.plan())
 
     # -- evaluation -------------------------------------------------------
 

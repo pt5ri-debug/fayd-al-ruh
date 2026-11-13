@@ -94,7 +94,7 @@ def _language_row(checkpoint: Path, *, key: str = "fayd-llm") -> dict[str, objec
             "n_embd": 96,
             "block_size": 64,
         },
-        "continue_command": "python -m cli llm --resume",
+        "continue_command": "python -m cli training-center lm-train --resume",
         "notes": "test entry",
     }
 
@@ -169,7 +169,7 @@ def test_entry_round_trips_through_primitive(tmp_path):
     assert primitive["key"] == "fayd-llm"
     assert primitive["kind"] == "language-model"
     assert primitive["resumable"] is True
-    assert primitive["continue_command"] == "python -m cli llm --resume"
+    assert primitive["continue_command"] == "python -m cli training-center lm-train --resume"
 
 
 # --------------------------------------------------------------- verification
@@ -422,7 +422,7 @@ def test_the_shipped_language_entry_is_resumable():
     assert entry is not None
     assert entry.kind == "language-model"
     assert entry.resumable
-    assert entry.continue_command == "python -m cli llm --resume"
+    assert entry.continue_command == "python -m cli training-center lm-train --resume"
 
 
 # ---------------------------------------------------------------------- CLI
@@ -526,7 +526,7 @@ def test_cli_continue_json_names_the_command(tmp_path, capsys):
         assert cli_main(["continue", "fayd-llm", "--root", str(root), "--json"]) == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["key"] == "fayd-llm"
-        assert payload["command"] == "python -m cli llm --resume"
+        assert payload["command"] == "python -m cli training-center lm-train --resume"
         assert payload["ran"] is False
 
 

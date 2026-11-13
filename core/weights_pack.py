@@ -990,9 +990,9 @@ def _language_entry(base: Path, checkpoint: Path, *, key: str, title: str) -> Pa
             "license": "MIT (this project)",
             "created_at": _file_timestamp(checkpoint),
         },
-        continue_command="python -m cli llm --resume",
+        continue_command="python -m cli training-center lm-train --resume",
         notes=(
-            "A language-model checkpoint; continue it with `python -m cli llm "
+            "A language-model checkpoint; continue it with `python -m cli training-center lm-train "
             "--resume`. Install it so the trainer resumes from these weights."
         ),
     )

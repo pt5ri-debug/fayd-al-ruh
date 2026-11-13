@@ -15,11 +15,11 @@
       "companions": [
         "ml/llm/checkpoints/fayd-llm.tokenizer.json"
       ],
-      "continue_command": "python -m cli llm --resume",
+      "continue_command": "python -m cli training-center lm-train --resume",
       "digest": "fcb4bcc66804e2cc9ae015e2b4c8f9e3e19ce397a9263dbc9728db4c7fd6a46f",
       "key": "fayd-llm",
       "kind": "language-model",
-      "notes": "A language-model checkpoint; continue it with `python -m cli llm --resume`. Install it so the trainer resumes from these weights.",
+      "notes": "A language-model checkpoint; continue it with `python -m cli training-center lm-train --resume`. Install it so the trainer resumes from these weights.",
       "path": "ml/llm/checkpoints/fayd-llm.npz",
       "provenance": {
         "checkpoint": "ml/llm/checkpoints/fayd-llm.npz",

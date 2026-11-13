@@ -63,7 +63,7 @@ KINDS: tuple[str, ...] = (KIND_LANGUAGE, KIND_STATE, KIND_POLICY, KIND_MODEL)
 
 #: A short, honest sentence per kind, so no surface overstates what a file is.
 KIND_BLURBS: dict[str, str] = {
-    KIND_LANGUAGE: "The project's transformer language-model checkpoint; continue it with `python -m cli llm --resume`.",
+    KIND_LANGUAGE: "The project's transformer language-model checkpoint; continue it with `python -m cli training-center lm-train --resume`.",
     KIND_STATE: "An optimiser-state sidecar (Adam's moments and the step count); install it beside the checkpoint it belongs to.",
     KIND_POLICY: "A Q-learning policy for one task; continue it with `python -m cli petroleum --resume`.",
     KIND_MODEL: "A small learned model (an MLP classifier or regressor); retrain it with `python -m cli ml`.",
@@ -373,7 +373,7 @@ def resume_plan(kind: str, *, path: Path | str | None = None, task: str = "") ->
         return ResumePlan(
             kind=kind,
             path=target,
-            command="python -m cli llm --resume",
+            command="python -m cli training-center lm-train --resume",
             tool="ml.llm",
             notes=tuple(notes),
         )
@@ -395,7 +395,7 @@ def resume_plan(kind: str, *, path: Path | str | None = None, task: str = "") ->
         return ResumePlan(
             kind=kind,
             path=target,
-            command="python -m cli llm --resume",
+            command="python -m cli training-center lm-train --resume",
             tool="ml.llm",
             notes=(
                 "The state sidecar belongs to the checkpoint beside it; run the "

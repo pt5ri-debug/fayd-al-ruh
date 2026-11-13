@@ -626,7 +626,7 @@ def _cmd_teach(args: argparse.Namespace) -> int:
 
     student, teacher = build_backends()
     if not student.available():
-        print("The student model is not available; train one with `python -m ml.llm`.")
+        print("The student model is not available; train one with `python -m cli training-center lm-train`.")
         return 3
     system = TeacherStudentSystem(student, teacher, ontology=_controller().ontology)
     outcome = system.teach(args.question)

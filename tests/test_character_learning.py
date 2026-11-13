@@ -492,22 +492,23 @@ def test_release_config_carries_the_character_flag(data_root) -> None:
 
 
 def test_cli_menu_offers_the_character_training_entry() -> None:
-    from cli.menu import run_llm, visible_menu
+    """Training on the characters' learning is a Training Center setting now."""
+    from cli.menu import MENU, run_training_center
 
-    entries = [(title, action, tuple(argv)) for title, action, argv in visible_menu()]
-    assert (
-        "Train the language model on the characters' own learning",
-        run_llm,
-        ("--llm-characters", "--steps", "4000"),
-    ) in entries
+    by_label = {title: (action, tuple(argv)) for title, action, argv in MENU}
+    assert "Train the language model on the characters' own learning" in by_label
+    action, argv = by_label["Train the language model on the characters' own learning"]
+    assert action is run_training_center
+    assert argv == ("lm-train",)
 
 
 def test_gui_sidebar_offers_the_character_training_action() -> None:
-    from gui.actions import run_llm, visible_actions
+    from gui.actions import run_training_center, visible_actions
 
     by_key = {action.key: action for action in visible_actions()}
-    assert by_key["llm-characters"].command is run_llm
-    assert by_key["llm-characters"].argv == ("--llm-characters", "--steps", "4000")
+    assert by_key["llm"].command is run_training_center
+    assert by_key["llm"].argv == ("lm-train",)
+    assert by_key["llm-fresh"].argv == ("lm-train", "--fresh")
 
 
 # --- character activation: personality, memory, and the prompt override -----
