@@ -550,7 +550,7 @@ def _print_switch(kind: str, *, as_json: bool) -> None:
 _MOUTH_FAILURE = {
     MOUTH_MODEL: (
         "Could not load the trained model: {error}",
-        "Train it first with `python -m cli llm` (or point --model-checkpoint at one).",
+        "Train it first with `python -m cli training-center lm-train` (or point --model-checkpoint at one).",
     ),
     MOUTH_ULTRON: (
         "Could not load Ultron: {error}",

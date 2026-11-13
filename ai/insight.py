@@ -174,7 +174,7 @@ def format_learning_report(manifest: dict[str, Any] | None) -> str:
     lines = ["How well the project learns"]
     if manifest is None:
         lines.append(f"  No release manifest at {manifest_path()}.")
-        lines.append("  Train one with `python -m ml.release` to record real results here.")
+        lines.append("  Train one with `python -m cli training-center lm-release` to record real results here.")
         return "\n".join(lines)
 
     rows = learning_rows(manifest)

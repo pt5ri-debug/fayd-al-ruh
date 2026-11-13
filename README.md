@@ -269,8 +269,7 @@ Before releasing, a single command gathers **every learning layer** and pins its
 outputs inside the project:
 
 ```bash
-python -m cli release                       # train everything and write the manifest
-python -m cli release --episodes 120 --llm-steps 4000
+python -m cli training-center lm-release     # train everything and write the manifest
 python -m ml.release --manifest-only        # rewrite the manifest without retraining
 ```
 
@@ -338,8 +337,8 @@ python -m cli weights show fayd-llm          # one entry in full, with its prove
 python -m cli weights continue fayd-llm      # verify + install + name the trainer
 python -m cli weights continue fayd-llm --run  # ...and run it
 
-python -m cli llm --install-weights          # the language trainer: install the pack's
-                                             # checkpoint, then resume
+python -m cli training-center lm-weights --install fayd-llm   # install the pack's
+                                             # checkpoint, then continue training
 python -m ml.petroleum --install-weights     # every policy, then resume
 ```
 
@@ -756,7 +755,7 @@ Every such answer is labelled `[mind] answered from the trained model only; not
 grounded in cited sources.` — it is the model's own prose, not a cited extract,
 and it is never checked against sources. That is the point: it measures the
 model. A missing checkpoint is reported plainly, with the command to train one
-(`python -m cli llm`).
+(`python -m cli training-center lm-train`).
 
 Inside an interactive session you can switch mouths without restarting: type
 `from the model` to answer from the model, `from ultron` for the general local
@@ -2129,7 +2128,7 @@ python -m cli            # interactive numbered menu
 python -m cli gui        # open the ChatGPT-style graphical interface
 python -m cli demo       # local demo
 python -m cli ml --episodes 60
-python -m cli llm --steps 4000
+python -m cli training-center lm-train        # train the language model (one home)
 python -m cli eval
 python -m cli jarvis "What is the relationship between porosity and permeability?"   # cited, source-grounded answer
 python -m cli jarvis "list the files in notes/"    # Jarvis mode: route, act, and answer
@@ -2377,4 +2376,4 @@ of the application and the user.
 - License: MIT — see `LICENSE.txt`
 - The release is trained and ready: all outputs are inside `ml/artifacts/` and
   `ml/llm/checkpoints/`, described by `ml/artifacts/release_manifest.json`.
-  Reproduce them with `python -m cli release`.
+  Reproduce them with `python -m cli training-center lm-release`.

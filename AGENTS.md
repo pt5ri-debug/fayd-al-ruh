@@ -7340,9 +7340,9 @@ regression monitor each can refuse a change.
   HTTPS (and a non-`.npz` name) and needs `approved=True`, then stages the file
   under `core.paths.checkpoint_import_dir()` before installing it. `resume_plan`
   names, as a **string**, the command that continues each kind
-  (`python -m cli llm --resume`, `python -m cli petroleum --resume`, `python -m
-  cli ml`) -- deliberately not an action, because continuing training is the
-  existing trainer's job. `list_installed` reads the project's own folders and
+  (`python -m cli training-center lm-train --resume`, `python -m cli petroleum
+  --resume`, `python -m cli ml`) -- deliberately not an action, because
+  continuing training is the existing trainer's job. `list_installed` reads the project's own folders and
   reports what is ready to continue. Reachable headless as `python -m cli
   checkpoints status|install|fetch|list|kinds|plan|inspect` (`cli/checkpoints.py`,
   alias `weights`; `install` exits `4` on a clobber refusal, `fetch` needs

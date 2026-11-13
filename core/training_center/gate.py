@@ -292,6 +292,60 @@ def _judgement_stage_spec_unknown() -> GateJudgement:
     )
 
 
+def _judgement_one_home_for_language_model_training() -> GateJudgement:
+    """Every language-model training entry routes through the Training Center.
+
+    The scattered trainers (``run_llm``/``run_release``) used to be their own menu
+    entries. They are one home now: the menu's language-model entries all point at
+    the Training Center, and the old runners are thin aliases into it, so a
+    regression that re-scattered them fails here.
+    """
+    from cli import menu
+
+    problems: list[str] = []
+    # The menu's language-model entries all resolve to the Training Center.
+    for label in (
+        "Train the language model from all repositories",
+        "Train the language model on the local mouths' own chats",
+        "Train the language model on the characters' own learning",
+        "Train everything for a release",
+        "Train everything for a release (including the local mouths' chats)",
+    ):
+        match = [action for name, action, _argv in menu.MENU if name == label]
+        if not match or match[0] is not menu.run_training_center:
+            problems.append(label)
+    # The visible menu offers the language-model controls.
+    visible = {name for name, _a, _v in menu.visible_menu()}
+    if not any("language model" in name.lower() for name in visible):
+        problems.append("no visible language-model entry")
+    # The old runners map onto the Training Center, not the scattered modules.
+    captured: dict[str, object] = {}
+
+    def _capture(argv):
+        captured["argv"] = list(argv)
+        return 0
+
+    original = menu.run_training_center
+    menu.run_training_center = _capture  # type: ignore[assignment]
+    try:
+        menu.run_llm(["--resume", "--steps", "5", "--llm-shards", "4"])
+        if captured.get("argv") != ["lm-train", "--steps", "5", "--shards", "4"]:
+            problems.append("run_llm mapping")
+        captured.clear()
+        menu.run_release(["--llm-sessions"])
+        if captured.get("argv") != ["lm-release", "--sessions"]:
+            problems.append("run_release mapping")
+    finally:
+        menu.run_training_center = original  # type: ignore[assignment]
+    return GateJudgement(
+        "one-home-for-language-model-training",
+        not problems,
+        "every language-model entry routes through the Training Center"
+        if not problems
+        else f"scattered: {', '.join(problems)}",
+    )
+
+
 JUDGEMENTS: tuple[str, ...] = (
     "review-status-governs-export",
     "refuses-unreviewed-example",
@@ -307,6 +361,7 @@ JUDGEMENTS: tuple[str, ...] = (
     "pipeline-store-roundtrip",
     "unavailable-stage-names-next-step",
     "unknown-stage-is-none",
+    "one-home-for-language-model-training",
 )
 
 
@@ -327,6 +382,7 @@ def run_judgements() -> tuple[GateJudgement, ...]:
         _judgement_pipeline_store_roundtrip(),
         _judgement_unavailable_stage_note(),
         _judgement_stage_spec_unknown(),
+        _judgement_one_home_for_language_model_training(),
     )
 
 

@@ -568,7 +568,7 @@ class CognitiveService:
             return OperationReport(
                 ok=False,
                 title="The student model is not available.",
-                detail="Train one first: python -m ml.llm  (or the Training tab here).",
+                detail="Train one first: python -m cli training-center lm-train  (or the Training tab here).",
             )
         system = TeacherStudentSystem(student, teacher, ontology=self.controller.ontology)
         outcome = system.teach(question)

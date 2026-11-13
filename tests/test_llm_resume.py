@@ -176,22 +176,33 @@ def test_cli_resume_flag_is_wired(tmp_path, capsys):
     assert "fresh run" in capsys.readouterr().out
 
 
-def test_menu_llm_and_release_entries_resume_by_default():
-    """The numbered menu's training entries must ask to resume, or they restart."""
+def test_menu_and_gui_training_entries_route_through_the_training_center():
+    """Every language-model entry now goes through the Training Center, which resumes by default."""
     from cli import menu
-
-    by_label = {label: argv for label, _action, argv in menu.MENU}
-    assert "--resume" in by_label["Train the language model from all repositories"]
-    assert "--resume" in by_label["Train everything for a release"]
-
-
-def test_gui_llm_and_release_actions_resume_by_default():
-    """The GUI sidebar shares the CLI menu's arguments, so it must resume too."""
     from gui import actions
 
-    by_key = {action.key: action.argv for action in actions.ACTIONS}
-    assert "--resume" in by_key["llm"]
-    assert "--resume" in by_key["release"]
+    by_label = {label: (action, tuple(argv)) for label, action, argv in menu.MENU}
+    entry = by_label["Train the language model from all repositories"]
+    assert entry[0] is menu.run_training_center
+    assert entry[1] == ("lm-train",)  # resume is the engine's own default
+    release = by_label["Train everything for a release"]
+    assert release[0] is menu.run_training_center
+    assert release[1] == ("lm-release",)
+    assert "Train the language model from all repositories" in menu.HIDDEN_MENU_LABELS
+
+    by_key = {action.key: action for action in actions.ACTIONS}
+    assert by_key["llm"].command is actions.run_training_center
+    assert by_key["llm"].argv == ("lm-train",)
+    assert by_key["release"].command is actions.run_training_center
+    assert by_key["release"].argv == ("lm-release",)
+    assert by_key["llm-fresh"].argv == ("lm-train", "--fresh")
+
+
+def test_the_engine_resumes_by_default():
+    """The Training Center's own language-model engine resumes unless asked not to."""
+    from core.training_center.language_model import LanguageModelSettings
+
+    assert LanguageModelSettings().resume is True
 
 
 def test_describe_checkpoint_reports_cumulative_steps_when_resumed(tmp_path):

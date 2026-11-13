@@ -244,7 +244,7 @@ class StubService:
             title="Fayd Al-Ruh language model",
             path=Path("/weights/fayd-llm.npz"),
             digest="abc",
-            continue_command="python -m cli llm --resume",
+            continue_command="python -m cli training-center lm-train --resume",
         )
         pack = WeightsPack(root=Path("/weights"), version=1, project_version="2.3.0", entries=(entry,))
         verification = Verification(entry=entry, detail="ok")
@@ -266,7 +266,7 @@ class StubService:
                 "title": "Fayd Al-Ruh language model",
                 "verified": True,
                 "installed": True,
-                "continue_command": "python -m cli llm --resume",
+                "continue_command": "python -m cli training-center lm-train --resume",
             },
         )
 
@@ -719,7 +719,7 @@ def test_import_kinds_explains_each_kind_and_its_trainer() -> None:
         dialog._on_import_kinds()
         body = dialog._detail_text.get("1.0", "end")
         assert "language-model" in body
-        assert "python -m cli llm --resume" in body
+        assert "python -m cli training-center lm-train --resume" in body
     finally:
         root.destroy()
 
@@ -822,7 +822,7 @@ def test_listing_the_pack_names_the_continue_command() -> None:
         dialog._on_list_pack()
         detail = dialog._detail_text.get("1.0", "end")
         assert "fayd-llm" in detail
-        assert "python -m cli llm --resume" in detail
+        assert "python -m cli training-center lm-train --resume" in detail
     finally:
         root.destroy()
 
@@ -837,6 +837,6 @@ def test_installing_the_pack_reports_the_continue_command() -> None:
         dialog._on_install_pack()
         _wait_for_pump(dialog)
         assert "Installed 1 pack entry" in dialog._status_label.cget("text")
-        assert "python -m cli llm --resume" in dialog._status_label.cget("text")
+        assert "python -m cli training-center lm-train --resume" in dialog._status_label.cget("text")
     finally:
         root.destroy()

@@ -37,6 +37,8 @@ SECTION_HISTORY = "history"
 SECTION_RESOURCES = "resources"
 SECTION_SETTINGS = "settings"
 SECTION_PIPELINES = "pipelines"
+#: The one home of every language-model training option.
+SECTION_LANGUAGE_MODEL = "language_model"
 
 SECTIONS: tuple[str, ...] = (
     SECTION_DASHBOARD,
@@ -47,6 +49,7 @@ SECTIONS: tuple[str, ...] = (
     SECTION_JOBS,
     SECTION_FINETUNE,
     SECTION_PRETRAIN,
+    SECTION_LANGUAGE_MODEL,
     SECTION_EVALUATION,
     SECTION_KB,
     SECTION_PIPELINES,
@@ -64,6 +67,7 @@ SECTION_TITLES: dict[str, str] = {
     SECTION_JOBS: "Training Jobs",
     SECTION_FINETUNE: "Model Fine-Tuning",
     SECTION_PRETRAIN: "Pretraining & Continued Training",
+    SECTION_LANGUAGE_MODEL: "Language Model (Fayd Al-Ruh)",
     SECTION_EVALUATION: "Evaluation & Benchmarking",
     SECTION_KB: "Knowledge Base Management",
     SECTION_PIPELINES: "Learning Pipelines",
@@ -81,6 +85,7 @@ SECTION_TITLES_AR: dict[str, str] = {
     SECTION_JOBS: "مهام التدريب",
     SECTION_FINETUNE: "الضبط الدقيق للنموذج",
     SECTION_PRETRAIN: "التدريب المسبق والمستمر",
+    SECTION_LANGUAGE_MODEL: "الموديل اللغوي (فيض الروح)",
     SECTION_EVALUATION: "التقييم والمقارنة",
     SECTION_KB: "إدارة قاعدة المعرفة",
     SECTION_PIPELINES: "خطوط التعلّم",
@@ -107,6 +112,11 @@ SECTION_SUMMARIES: dict[str, str] = {
     "(LoRA over the in-project transformer, or the optional transformers path).",
     SECTION_PRETRAIN: "Train a small language model from scratch, or continue training "
     "an existing checkpoint, with a resource estimate before anything starts.",
+    SECTION_LANGUAGE_MODEL: "The one professional home of every way the project trains "
+    "Fayd Al-Ruh's own language model: its architecture, its corpus, its schedule and "
+    "optimiser, resuming and sharded training, the whole-project release run, ready-made "
+    "weights to import or continue, larger capacity tiers, held-out evaluation, and "
+    "sampling from the trained model.",
     SECTION_EVALUATION: "Measure a model on held-out data -- loss, perplexity, bits per "
     "byte, and instruction-following -- and compare before and after.",
     SECTION_KB: "The bulk knowledge base: build it, index it, search it, and report "
@@ -580,6 +590,155 @@ CAPABILITIES: tuple[Capability, ...] = (
         "python -m cli training-center catalog",
         title_ar="اعرض كل الأدوات", summary_ar="اطبع هذا الدليل: ما تفعله كل أداة وما تُرجعه وأمرها.",
     ),
+    # -- language model ---------------------------------------------------
+    _cap(
+        "lm.status", "Read the model and its corpus", SECTION_LANGUAGE_MODEL,
+        "Read the checkpoint the project trains (its steps, size, architecture, and "
+        "tokenizer) and the corpus a run would use, so the workspace opens on facts.",
+        "A checkpoint report and the corpus summary.",
+        "python -m cli training-center lm-status",
+        title_ar="اقرأ الموديل ومجموعة نصوصه",
+        summary_ar="اقرأ نقطة الحفظ التي يدرّبها المشروع ومجموعة النصوص المستخدمة.",
+    ),
+    _cap(
+        "lm.settings.show", "Show the training settings", SECTION_LANGUAGE_MODEL,
+        "Show every option a run accepts — architecture, corpus sources, schedule, "
+        "optimiser, resuming, shards, and sampling — and which are in force.",
+        "The settings in force.",
+        "python -m cli training-center lm-settings",
+        title_ar="اعرض إعدادات التدريب", summary_ar="اعرض كل خيار يقبله التشغيل وما هو سارٍ منه.",
+    ),
+    _cap(
+        "lm.settings.set", "Change one training setting", SECTION_LANGUAGE_MODEL,
+        "Change one option of the language-model run and persist it, so the next run "
+        "uses it. An unknown option is refused rather than stored.",
+        "The saved settings.",
+        "python -m cli training-center lm-settings --set preset=release-1",
+        writes=True,
+        title_ar="غيّر إعداد تدريب", summary_ar="غيّر خيارًا واحدًا في تشغيل الموديل اللغوي واحفظه.",
+    ),
+    _cap(
+        "lm.train", "Train or continue the model", SECTION_LANGUAGE_MODEL,
+        "Train the project's own language model — from scratch, or continuing the "
+        "checkpoint when resuming is on — streaming its live progress into the chat "
+        "area. This is the whole trainer: every option above is in force.",
+        "A training outcome: loss, best held-out loss, parameters, tokens, and the "
+        "saved checkpoint.",
+        "python -m cli training-center lm-train",
+        governed=True, writes=True,
+        title_ar="درّب الموديل أو أكمل تدريبه",
+        summary_ar="درّب الموديل اللغوي من الصفر أو أكمل من نقطة الحفظ، مع بثّ التقدّم مباشرة.",
+    ),
+    _cap(
+        "lm.train.fresh", "Train from scratch", SECTION_LANGUAGE_MODEL,
+        "Train a brand-new model from step zero, ignoring any existing checkpoint — "
+        "the explicit opt-out of resuming.",
+        "A training outcome.",
+        "python -m cli training-center lm-train --fresh",
+        governed=True, writes=True,
+        title_ar="درّب من الصفر", summary_ar="درّب موديلًا جديدًا من الخطوة صفر وتجاهل نقطة الحفظ.",
+    ),
+    _cap(
+        "lm.train.sharded", "Continue the next corpus shard", SECTION_LANGUAGE_MODEL,
+        "Split the corpus into deterministic shards and train the next unconsumed "
+        "one, so a resumed run reaches new material instead of deepening the same fit.",
+        "A training outcome over the next shard.",
+        "python -m cli training-center lm-train --shards 4",
+        governed=True, writes=True,
+        title_ar="أكمل الجزء التالي من النصوص",
+        summary_ar="قسّم النصوص أجزاءً ثابتة ودرّب الجزء التالي غير المستخدم.",
+    ),
+    _cap(
+        "lm.corpus", "Show the training corpus", SECTION_LANGUAGE_MODEL,
+        "Report exactly how many documents, chunks, sentences, and characters a run "
+        "would train on, broken down by source, before anything starts.",
+        "The corpus summary, source by source.",
+        "python -m cli training-center lm-corpus",
+        title_ar="اعرض مجموعة النصوص", summary_ar="أبلغ عن عدد المستندات والأجزاء والحروف قبل البدء.",
+    ),
+    _cap(
+        "lm.release", "Train everything for a release", SECTION_LANGUAGE_MODEL,
+        "Train every learning layer at once — the base pipeline, the petroleum tasks, "
+        "and the language model — and write the release manifest that records them.",
+        "The release manifest: every layer, its figures, and the manifest path.",
+        "python -m cli training-center lm-release",
+        governed=True, writes=True,
+        title_ar="درّب كل الطبقات لإصدار",
+        summary_ar="درّب كل طبقات التعلّم معًا واكتب بيان الإصدار.",
+    ),
+    _cap(
+        "lm.evaluate", "Measure the model on held-out data", SECTION_LANGUAGE_MODEL,
+        "Evaluate the checkpoint on held-out text: perplexity on train, validation, "
+        "and test, plus bits per byte — the honest measure of what it learned.",
+        "An evaluation report: perplexity and bits per byte.",
+        "python -m cli training-center lm-evaluate",
+        title_ar="قِس الموديل على بيانات محتجزة",
+        summary_ar="احسب الحيرة على بيانات محتجزة وبتات لكل بايت.",
+    ),
+    _cap(
+        "lm.generate", "Sample from the trained model", SECTION_LANGUAGE_MODEL,
+        "Sample a continuation from the checkpoint with the saved temperature, top-k, "
+        "top-p, and repetition penalty — the model's own words, not a retrieval.",
+        "The sampled continuation.",
+        "python -m cli training-center lm-generate --prompt \"porosity\"",
+        title_ar="ولّد نصًا من الموديل المدرَّب",
+        summary_ar="ولّد تكملة من نقطة الحفظ بدرجة الحرارة والترشيح المحفوظين.",
+    ),
+    _cap(
+        "lm.weights.install", "Install the committed weights", SECTION_LANGUAGE_MODEL,
+        "Install the ready-made weights the project ships into the folder the trainer "
+        "reads, so a clean clone can continue training without naming a file.",
+        "An install report naming what was installed and how to continue.",
+        "python -m cli training-center lm-weights --install fayd-llm",
+        governed=True, writes=True,
+        title_ar="ثبّت الأوزان المرفقة",
+        summary_ar="ثبّت الأوزان الجاهزة التي يشحنها المشروع في مجلد المدرّب.",
+    ),
+    _cap(
+        "lm.weights.import", "Import ready-made weights", SECTION_LANGUAGE_MODEL,
+        "Install a ready-made .npz weight file into the trainer's folder, validating "
+        "it first and never replacing an existing checkpoint without a backup.",
+        "An import report naming the file, its kind, and any backup.",
+        "python -m cli training-center lm-weights --import FILE.npz",
+        governed=True, writes=True,
+        title_ar="استورد أوزانًا جاهزة",
+        summary_ar="ثبّت ملف أوزان .npz في مجلد المدرّب بعد التحقق منه.",
+    ),
+    _cap(
+        "lm.weights.fetch", "Fetch weights from a URL", SECTION_LANGUAGE_MODEL,
+        "Fetch a weight file over HTTPS and install it — a governed action that needs "
+        "approval, because it leaves this machine.",
+        "An import report.",
+        "python -m cli training-center lm-weights --fetch URL --approve",
+        governed=True, writes=True,
+        title_ar="اجلب أوزانًا من رابط",
+        summary_ar="اجلب ملف أوزان عبر HTTPS وثبّته؛ يحتاج موافقة لأنه يخرج من الجهاز.",
+    ),
+    _cap(
+        "lm.weights.build", "Train a larger capacity tier", SECTION_LANGUAGE_MODEL,
+        "Train one of the larger learned capacity tiers into the pack folder, with its "
+        "provenance recorded, for a machine with time to spare.",
+        "A build report naming the checkpoint and how to continue it.",
+        "python -m cli training-center lm-weights --build learned-large",
+        governed=True, writes=True,
+        title_ar="درّب طبقة سعة أكبر",
+        summary_ar="درّب طبقة سعة أكبر في مجلد الحزمة مع تسجيل مصدرها.",
+    ),
+    _cap(
+        "lm.weights.learned", "List the learned tiers", SECTION_LANGUAGE_MODEL,
+        "List the learned capacity tiers and what has already been trained of them.",
+        "The learned-tier listing.",
+        "python -m cli training-center lm-weights --list",
+        title_ar="اعرض الطبقات المدرَّبة", summary_ar="اعرض طبقات السعة وما دُرِّب منها.",
+    ),
+    _cap(
+        "lm.plan", "Show the exact command", SECTION_LANGUAGE_MODEL,
+        "Render the real headless command equivalent to the settings in force, so the "
+        "window and the CLI can never describe a run differently.",
+        "The command string.",
+        "python -m cli training-center lm-plan",
+        title_ar="اعرض الأمر الصريح", summary_ar="اعرض أمر سطر الأوامر المكافئ للإعدادات السارية.",
+    ),
 )
 
 _BY_KEY: dict[str, Capability] = {cap.key: cap for cap in CAPABILITIES}
@@ -634,6 +793,7 @@ __all__ = [
     "SECTION_JOBS",
     "SECTION_KB",
     "SECTION_KNOWLEDGE",
+    "SECTION_LANGUAGE_MODEL",
     "SECTION_PIPELINES",
     "SECTION_PRETRAIN",
     "SECTION_QA",

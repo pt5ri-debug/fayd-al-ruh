@@ -520,7 +520,7 @@ def test_main_mind_missing_checkpoint_exits_cleanly(tmp_path, monkeypatch, capsy
     assert chat.main(["--mind", "hello"]) == 1
     out = capsys.readouterr().out
     assert "Could not load the trained model" in out
-    assert "python -m cli llm" in out
+    assert "python -m cli training-center lm-train" in out
 
 
 def test_main_mind_answers_from_the_model(tmp_path, monkeypatch, capsys) -> None:

@@ -197,8 +197,8 @@ def test_destination_for_refuses_an_unknown_kind():
 
 
 def test_resume_plan_names_the_trainer_per_kind():
-    assert resume_plan(KIND_LANGUAGE).command == "python -m cli llm --resume"
-    assert resume_plan(KIND_STATE).command == "python -m cli llm --resume"
+    assert resume_plan(KIND_LANGUAGE).command == "python -m cli training-center lm-train --resume"
+    assert resume_plan(KIND_STATE).command == "python -m cli training-center lm-train --resume"
     assert resume_plan(KIND_POLICY, task="x").command == "python -m cli petroleum --resume"
     assert resume_plan(KIND_MODEL).command == "python -m cli ml"
     # An unknown kind names no command rather than inventing one.
@@ -511,7 +511,7 @@ def _write_pack(tmp_path):
                 "title": "Fayd Al-Ruh language model",
                 "path": str(source),
                 "digest": digest,
-                "continue_command": "python -m cli llm --resume",
+                "continue_command": "python -m cli training-center lm-train --resume",
             }
         ],
     }
@@ -528,7 +528,7 @@ def test_model_manager_reads_the_weights_pack(tmp_path):
         pack = manager.weights_pack(root)
         assert pack.available
         assert pack.get("fayd-llm") is not None
-        assert manager.continue_command("fayd-llm", root) == "python -m cli llm --resume"
+        assert manager.continue_command("fayd-llm", root) == "python -m cli training-center lm-train --resume"
         status = manager.weights_pack_status(root)
         assert status.ready == 1
         verifications = manager.verify_weights_pack(root)
@@ -562,7 +562,7 @@ def test_models_cli_reads_the_shipped_weights_pack(capsys):
     assert models_main(["verify-weights", "fayd-llm"]) == 0
     assert "OK" in capsys.readouterr().out
     assert models_main(["continue-weights", "fayd-llm"]) == 0
-    assert "cli llm --resume" in capsys.readouterr().out
+    assert "training-center lm-train --resume" in capsys.readouterr().out
     assert models_main(["continue-weights", "nope"]) == 3
 
 

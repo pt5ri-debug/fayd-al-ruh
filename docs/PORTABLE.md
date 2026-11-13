@@ -74,7 +74,7 @@ FAYD_DATA_DIR=/path/to/data ./fayd-al-ruh paths
 | `python -m cli` | interactive numbered menu |
 | `python -m cli demo` | local cognitive-cycle demo |
 | `python -m cli ml --episodes 60` | machine-learning pipeline |
-| `python -m cli llm --steps 4000` | train the in-project language model |
+| `python -m cli training-center lm-train` | train the in-project language model |
 | `python -m cli eval` | the scientific evaluation suite |
 | `python -m cli paths` | where assets are read and data is written |
 | `python -m cli selfcheck` | verify the bundled model loads |

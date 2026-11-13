@@ -102,7 +102,7 @@ class LearnedTier:
         default one -- a learned tier and the base checkpoint coexist.
         """
         stem = Path(self.filename).stem
-        return f"python -m cli llm --checkpoint data/ml/llm/checkpoints/{stem}.npz --resume"
+        return f"python -m cli training-center lm-weights --import data/ml/llm/checkpoints/{stem}.npz"
 
     def describe(self) -> str:
         lines = [f"{self.key}: {self.title} (preset {self.preset}, {self.dimensions()})"]

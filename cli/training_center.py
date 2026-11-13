@@ -25,6 +25,18 @@ Commands:
 * ``resources`` -- this machine's own figures;
 * ``gate`` -- the held-out gate report.
 
+The **language model** (the one home of every training surface):
+
+* ``lm-status`` -- the checkpoint the project trains and the corpus it uses;
+* ``lm-settings [--set K=V] [--reset]`` -- the whole training option set;
+* ``lm-corpus`` -- how much text a run would train on, source by source;
+* ``lm-train [--approve] [--fresh] [--shards N] [overrides…]`` -- train or continue;
+* ``lm-evaluate`` -- perplexity and bits per byte on held-out data;
+* ``lm-generate --prompt P`` -- sample a continuation from the model;
+* ``lm-release [--approve]`` -- train every learning layer and write the manifest;
+* ``lm-weights --install KEY | --import FILE | --fetch URL | --build TIER | --list``;
+* ``lm-plan`` -- the headless command equal to the settings in force.
+
 Exit codes: ``0`` success, ``2`` invalid arguments, ``3`` the model, dataset, or
 run is unknown, ``4`` a gate refused the operation, ``5`` an unexpected failure.
 """
@@ -33,9 +45,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+#: The real stdout, captured before any trainer redirects it, so a live progress
+#: line reaches the terminal instead of being swallowed by the redirect.
+_STDOUT = sys.stdout
 
 if TYPE_CHECKING:
     from gui.training_center import TrainingCenterService
@@ -170,6 +187,75 @@ def build_parser() -> argparse.ArgumentParser:
     p_gate = sub.add_parser("gate", help="the held-out gate report")
     p_gate.add_argument("--json", action="store_true")
     p_gate.set_defaults(func=_cmd_gate)
+
+    # -- the language model (every training surface in one place) ----------
+    p_lm_status = sub.add_parser("lm-status", help="the checkpoint and the corpus it trains on")
+    p_lm_status.add_argument("--json", action="store_true")
+    p_lm_status.set_defaults(func=_cmd_lm_status)
+
+    p_lm_settings = sub.add_parser("lm-settings", help="the language-model training settings")
+    p_lm_settings.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
+    p_lm_settings.add_argument("--reset", action="store_true")
+    p_lm_settings.add_argument("--json", action="store_true")
+    p_lm_settings.set_defaults(func=_cmd_lm_settings)
+
+    p_lm_corpus = sub.add_parser("lm-corpus", help="how much text a run would train on")
+    p_lm_corpus.add_argument("--json", action="store_true")
+    p_lm_corpus.set_defaults(func=_cmd_lm_corpus)
+
+    p_lm_train = sub.add_parser("lm-train", help="train or continue the project's own model")
+    p_lm_train.add_argument("--steps", type=int, default=None)
+    p_lm_train.add_argument("--preset", default="")
+    p_lm_train.add_argument("--tokenizer-kind", default="", choices=["", "byte", "bpe"])
+    p_lm_train.add_argument("--repeats", type=int, default=None)
+    p_lm_train.add_argument("--seed", type=int, default=None)
+    p_lm_train.add_argument("--weight-decay", type=float, default=None)
+    p_lm_train.add_argument("--lr-schedule", default="", choices=["", "cosine", "linear", "constant"])
+    p_lm_train.add_argument("--accum-steps", type=int, default=None)
+    p_lm_train.add_argument("--kb-max-chunks", type=int, default=None)
+    p_lm_train.add_argument("--shards", type=int, default=None)
+    p_lm_train.add_argument("--sessions", action="store_true", help="train on the local mouths' own chats")
+    p_lm_train.add_argument("--include-sessions", action="store_true", default=None)
+    p_lm_train.add_argument("--include-characters", action="store_true", default=None)
+    p_lm_train.add_argument("--include-character-corpus", action="store_true", default=None)
+    p_lm_train.add_argument("--no-runtime", action="store_true")
+    p_lm_train.add_argument("--fresh", action="store_true", help="start from step zero (the opt-out of resuming)")
+    p_lm_train.add_argument("--approve", action="store_true", help="confirm the training run")
+    p_lm_train.add_argument("--json", action="store_true")
+    p_lm_train.set_defaults(func=_cmd_lm_train)
+
+    p_lm_eval = sub.add_parser("lm-evaluate", help="measure the checkpoint on held-out data")
+    p_lm_eval.add_argument("--json", action="store_true")
+    p_lm_eval.set_defaults(func=_cmd_lm_evaluate)
+
+    p_lm_gen = sub.add_parser("lm-generate", help="sample a continuation from the model")
+    p_lm_gen.add_argument("--prompt", required=True)
+    p_lm_gen.add_argument("--max-new-tokens", type=int, default=None)
+    p_lm_gen.add_argument("--temperature", type=float, default=None)
+    p_lm_gen.add_argument("--seed", type=int, default=None)
+    p_lm_gen.add_argument("--json", action="store_true")
+    p_lm_gen.set_defaults(func=_cmd_lm_generate)
+
+    p_lm_release = sub.add_parser("lm-release", help="train every learning layer for a release")
+    p_lm_release.add_argument("--sessions", action="store_true", help="include the local mouths' own chats")
+    p_lm_release.add_argument("--approve", action="store_true", help="confirm the release run")
+    p_lm_release.add_argument("--json", action="store_true")
+    p_lm_release.set_defaults(func=_cmd_lm_release)
+
+    p_lm_weights = sub.add_parser("lm-weights", help="ready-made weights: install, import, fetch, build")
+    p_lm_weights.add_argument("--install", default="", help="install a committed weights-pack entry by key")
+    p_lm_weights.add_argument("--import", dest="import_path", default="", metavar="FILE", help="install a .npz file")
+    p_lm_weights.add_argument("--fetch", default="", metavar="URL", help="fetch weights over HTTPS (needs --approve)")
+    p_lm_weights.add_argument("--build", default="", metavar="TIER", help="train a learned capacity tier")
+    p_lm_weights.add_argument("--list", action="store_true", help="list the learned tiers")
+    p_lm_weights.add_argument("--force", action="store_true", help="replace an existing file (a backup is kept)")
+    p_lm_weights.add_argument("--approve", action="store_true")
+    p_lm_weights.add_argument("--json", action="store_true")
+    p_lm_weights.set_defaults(func=_cmd_lm_weights)
+
+    p_lm_plan = sub.add_parser("lm-plan", help="the headless command equal to the settings in force")
+    p_lm_plan.add_argument("--json", action="store_true")
+    p_lm_plan.set_defaults(func=_cmd_lm_plan)
 
     return parser
 
@@ -529,6 +615,202 @@ def _cmd_gate(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
         return EXIT_OK
     print(describe())
+    return EXIT_OK
+
+
+# -- the language model ---------------------------------------------------
+
+
+def _coerce(value: str) -> object:
+    """Read a ``--set`` value as the type it looks like, so a switch really flips."""
+    lowered = value.strip().lower()
+    if lowered in ("true", "false"):
+        return lowered == "true"
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _cmd_lm_status(args: argparse.Namespace) -> int:
+    service = _service(args.root)
+    if args.json:
+        payload = {
+            "checkpoint": service.lm_checkpoint().to_primitive(),
+            "corpus": service.language_model.corpus_summary(),
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return EXIT_OK
+    print(service.lm_status())
+    return EXIT_OK
+
+
+def _cmd_lm_settings(args: argparse.Namespace) -> int:
+    service = _service(args.root)
+    if args.reset:
+        service.lm_reset_settings()
+    for pair in args.set:
+        if "=" not in pair:
+            return _fail(f"invalid: expected KEY=VALUE, got {pair!r}", EXIT_USAGE)
+        key, _, value = pair.partition("=")
+        try:
+            service.lm_set_setting(key.strip(), _coerce(value))
+        except KeyError as error:
+            return _fail(f"invalid: {error}", EXIT_USAGE)
+    if args.json:
+        print(json.dumps(service.lm_settings().to_primitive(), indent=2, ensure_ascii=False))
+        return EXIT_OK
+    print(service.lm_settings_text())
+    return EXIT_OK
+
+
+def _cmd_lm_corpus(args: argparse.Namespace) -> int:
+    service = _service(args.root)
+    if args.json:
+        print(json.dumps(service.language_model.corpus_summary(), indent=2, ensure_ascii=False))
+        return EXIT_OK
+    print(service.lm_corpus())
+    return EXIT_OK
+
+
+def _cmd_lm_train(args: argparse.Namespace) -> int:
+    service = _service(args.root)
+    settings = service.lm_settings()
+    overrides: dict[str, object] = {}
+    for field, value in (
+        ("steps", args.steps),
+        ("preset", args.preset or None),
+        ("tokenizer_kind", args.tokenizer_kind or None),
+        ("repeats", args.repeats),
+        ("seed", args.seed),
+        ("weight_decay", args.weight_decay),
+        ("lr_schedule", args.lr_schedule or None),
+        ("accum_steps", args.accum_steps),
+        ("kb_max_chunks", args.kb_max_chunks),
+    ):
+        if value is not None:
+            overrides[field] = value
+    if args.include_sessions or args.sessions:
+        overrides["include_sessions"] = True
+    if args.include_characters:
+        overrides["include_characters"] = True
+    if args.include_character_corpus:
+        overrides["include_character_corpus"] = True
+    if args.no_runtime:
+        overrides["include_runtime"] = False
+    if overrides:
+        settings = settings.with_values(**overrides)
+    if not args.approve:
+        print("Dry run. This would train with:")
+        print(settings.describe())
+        print("\nRe-run with --approve to train.")
+        return EXIT_OK
+
+    def on_line(line: str) -> None:
+        # The engine captures stdout while the trainer runs, so a live line must
+        # go to the *real* stream to be seen now rather than swallowed.
+        print(line, file=_STDOUT, flush=True)
+
+    outcome = service.lm_train(settings=settings, fresh=args.fresh, shards=args.shards, on_line=on_line)
+    if args.json:
+        print(json.dumps(outcome.to_primitive(), indent=2, ensure_ascii=False))
+        return EXIT_OK if outcome.ok else EXIT_FAILURE
+    print()
+    print(outcome.describe())
+    return EXIT_OK if outcome.ok else EXIT_FAILURE
+
+
+def _cmd_lm_evaluate(args: argparse.Namespace) -> int:
+    report = _service(args.root).lm_evaluate()
+    if args.json:
+        print(json.dumps(report.to_primitive(), indent=2, ensure_ascii=False))
+        return EXIT_OK if report.ok else EXIT_UNAVAILABLE
+    print(report.describe())
+    return EXIT_OK if report.ok else EXIT_UNAVAILABLE
+
+
+def _cmd_lm_generate(args: argparse.Namespace) -> int:
+    service = _service(args.root)
+    try:
+        text = service.lm_generate(
+            args.prompt,
+            max_new_tokens=args.max_new_tokens,
+            temperature=args.temperature,
+            seed=args.seed,
+        )
+    except FileNotFoundError as error:
+        return _fail(f"not available: {error}", EXIT_UNAVAILABLE)
+    if args.json:
+        print(json.dumps({"prompt": args.prompt, "continuation": text}, indent=2, ensure_ascii=False))
+        return EXIT_OK
+    print(text)
+    return EXIT_OK
+
+
+def _cmd_lm_release(args: argparse.Namespace) -> int:
+    service = _service(args.root)
+    if getattr(args, "sessions", False):
+        service.lm_set_setting("include_sessions", True)
+    if not args.approve:
+        print("Dry run. This would train every learning layer and write the release manifest.")
+        print(service.lm_settings_text())
+        print("\nRe-run with --approve to run it.")
+        return EXIT_OK
+
+    def on_line(line: str) -> None:
+        # The engine captures stdout while the trainer runs, so a live line must
+        # go to the *real* stream to be seen now rather than swallowed.
+        print(line, file=_STDOUT, flush=True)
+
+    outcome = service.lm_release(on_line=on_line)
+    if args.json:
+        print(json.dumps(outcome.to_primitive(), indent=2, ensure_ascii=False))
+        return EXIT_OK if outcome.ok else EXIT_FAILURE
+    print()
+    print(outcome.describe())
+    return EXIT_OK if outcome.ok else EXIT_FAILURE
+
+
+def _cmd_lm_weights(args: argparse.Namespace) -> int:
+    service = _service(args.root)
+    if args.list:
+        text = service.lm_learned_text()
+        if args.json:
+            print(json.dumps({"learned": list(service.language_model.list_learned())}, indent=2, ensure_ascii=False))
+            return EXIT_OK
+        print(text)
+        return EXIT_OK
+    if args.install:
+        report = service.lm_install_pack(args.install, force=args.force)
+    elif args.import_path:
+        report = service.lm_import_weights(args.import_path, force=args.force)
+    elif args.fetch:
+        report = service.lm_fetch_weights(args.fetch, approved=args.approve)
+    elif args.build:
+        report = service.lm_build_learned(args.build, force=args.force)
+    else:
+        return _fail(
+            "invalid: name an action — --install KEY, --import FILE, --fetch URL, "
+            "--build TIER, or --list",
+            EXIT_USAGE,
+        )
+    if args.json:
+        print(json.dumps(report.to_primitive(), indent=2, ensure_ascii=False))
+        return EXIT_OK if report.ok else EXIT_GATE
+    print(report.describe())
+    return EXIT_OK if report.ok else EXIT_GATE
+
+
+def _cmd_lm_plan(args: argparse.Namespace) -> int:
+    plan = _service(args.root).language_model.plan()
+    if args.json:
+        print(json.dumps({"command": plan}, indent=2, ensure_ascii=False))
+        return EXIT_OK
+    print(plan)
     return EXIT_OK
 
 

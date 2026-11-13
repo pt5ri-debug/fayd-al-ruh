@@ -45,7 +45,7 @@ class LocalLanguageModel(CallableModel):
         if not path.exists():
             raise FileNotFoundError(
                 f"No local language model at {path}. Train one with "
-                "`python -m ml.llm` (see docs)."
+                "`python -m cli training-center lm-train` (see docs)."
             )
         self.model = TransformerLM.load(path)
         tokenizer_path = Path(tokenizer) if tokenizer is not None else path.with_suffix(".tokenizer.json")

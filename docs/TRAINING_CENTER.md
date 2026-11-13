@@ -37,7 +37,7 @@ twin can never describe a control differently. A control that is *governed*
 (asks for confirmation and/or writes) says so; a control that is *unavailable*
 says so with the real next step rather than pretending.
 
-The fourteen sidebar sections are:
+The fifteen sidebar sections are:
 
 1. **Dashboard** — every figure read from the real stores, with charts.
 2. **Learning Sources** — databases, the internet, Gemini/cloud, local models,
@@ -52,13 +52,23 @@ The fourteen sidebar sections are:
    really support (a GGUF is never a training base; QLoRA needs a CUDA GPU).
 8. **Pretraining and Continued Training** — from-scratch and continued training
    with compatibility validation and resource estimates.
-9. **Evaluation and Benchmarking** — held-out evaluation with honest metrics.
-10. **Knowledge Base Management** — the bulk knowledge base: build, index,
+9. **Language Model (Fayd Al-Ruh)** — **the one home of every way the project
+   trains its own language model**: read the checkpoint and its corpus, show and
+   change every training setting, train or continue (from scratch, or the next
+   shard), train everything for a release, evaluate on held-out data, sample from
+   the trained model, and install / import / fetch / build / list the ready-made
+   weights — with the exact headless command for the settings in force. The CLI
+   entries that used to train the language model (`python -m cli llm`,
+   `python -m cli release`, and the weights-pack shortcuts) are thin aliases into
+   this section now, so there is one trainer, one settings store, and one
+   history rather than several scattered commands.
+10. **Evaluation and Benchmarking** — held-out evaluation with honest metrics.
+11. **Knowledge Base Management** — the bulk knowledge base: build, index,
     search, report.
-11. **Training History** — the joined, searchable timeline.
-12. **Resource Monitor** — this machine's own CPU/RAM/disk, honestly.
-13. **Settings** — the Training Center's own preferences.
-14. **Pipelines** — the visual learning-pipeline builder and runner.
+12. **Learning Pipelines** — the visual learning-pipeline builder and runner.
+13. **Training History** — the joined, searchable timeline.
+14. **Resource Monitor** — this machine's own CPU/RAM/disk, honestly.
+15. **Settings** — the Training Center's own preferences.
 
 ## Live training details in the chat area
 
@@ -103,6 +113,13 @@ python -m cli training-center evaluate <run_id>
 python -m cli training-center pipeline --run <id> --approve
 python -m cli training-center history --kind import
 python -m cli training-center resources
+python -m cli training-center lm-status          # the model and its corpus
+python -m cli training-center lm-settings        # every training option
+python -m cli training-center lm-train           # train or continue (one home)
+python -m cli training-center lm-evaluate        # perplexity on held-out data
+python -m cli training-center lm-generate --prompt "porosity"
+python -m cli training-center lm-release         # train everything for a release
+python -m cli training-center lm-weights --install fayd-llm
 python -m cli training-center web --on             # the internet switch
 python -m cli training-center providers            # the choices a dropdown offers
 python -m cli training-center gate               # the held-out gate report

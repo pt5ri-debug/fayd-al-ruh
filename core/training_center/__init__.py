@@ -35,6 +35,9 @@ The modules are:
   bounded runner.
 * :mod:`core.training_center.history` -- the durable history of everything.
 * :mod:`core.training_center.dashboard` -- the dashboard's real statistics.
+* :mod:`core.training_center.language_model` -- the one engine that drives every
+  way the project trains its own language model (``ml.llm``), so the whole
+  training surface lives in one professional place instead of scattered commands.
 * :mod:`core.training_center.gate` -- the held-out gate for the whole feature.
 
 Nothing here imports Tk, loads a model, or reaches the network on import.

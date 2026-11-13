@@ -88,7 +88,7 @@ def test_learning_rows_mean_aggregates_multiple_tasks() -> None:
 def test_format_learning_report_without_manifest() -> None:
     text = insight.format_learning_report(None)
     assert "How well the project learns" in text
-    assert "python -m ml.release" in text
+    assert "python -m cli training-center lm-release" in text
 
 
 def test_format_learning_report_marks_a_manifest_only_stub() -> None:

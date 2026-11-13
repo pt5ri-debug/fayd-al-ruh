@@ -30,6 +30,15 @@ from core.training_center.dashboard import DashboardSnapshot, build_dashboard
 from core.training_center.datasets import DatasetRow, DatasetStudio, ExportReport
 from core.training_center.history import HistoryLine, TrainingHistory
 from core.training_center.jobs import JobHandle, JobView, TrainingJobManager
+from core.training_center.language_model import (
+    CheckpointReport,
+    EvaluationReport,
+    LanguageModelEngine,
+    LanguageModelSettings,
+    ReleaseOutcome,
+    TrainOutcome,
+    WeightActionReport,
+)
 from core.training_center.pipelines import (
     LearningPipeline,
     PipelineReport,
@@ -127,6 +136,7 @@ class TrainingCenterService:
         pipelines: PipelineStore | None = None,
         providers: dict[str, LearningProvider] | None = None,
         coordinator: Any = None,
+        language_model: LanguageModelEngine | None = None,
     ) -> None:
         self.root = Path(root) if root is not None else data_dir()
         self._store = JsonStore(self.root)
@@ -139,6 +149,7 @@ class TrainingCenterService:
         self.history = history or TrainingHistory(root=self.root)
         self.pipelines = pipelines or PipelineStore(root=self.root)
         self._providers: dict[str, LearningProvider] = dict(providers or {})
+        self.language_model = language_model or LanguageModelEngine(root)
 
     # -- settings ----------------------------------------------------------
     def settings(self) -> dict[str, Any]:
@@ -742,6 +753,130 @@ class TrainingCenterService:
         return estimate_training(
             parameter_count=parameter_count, rank=rank, batch_size=batch_size, grad_accum=grad_accum,
         )
+
+    # -- the language model (every training surface in one place) ----------
+    def lm_checkpoint(self) -> CheckpointReport:
+        """Read the checkpoint the project trains, from the file itself."""
+        return self.language_model.checkpoint_report()
+
+    def lm_status(self) -> str:
+        """The checkpoint report followed by the corpus a run would use."""
+        return self.lm_checkpoint().describe() + "\n\n" + self.lm_corpus()
+
+    def lm_settings(self) -> LanguageModelSettings:
+        return self.language_model.settings()
+
+    def lm_settings_text(self) -> str:
+        return self.language_model.settings().describe()
+
+    def lm_set_setting(self, key: str, value: Any) -> LanguageModelSettings:
+        """Persist one training option; the history records the change."""
+        settings = self.language_model.set_setting(key, value)
+        self.history.record("settings", f"language_model.{key} = {value}")
+        return settings
+
+    def lm_reset_settings(self) -> LanguageModelSettings:
+        settings = self.language_model.reset_settings()
+        self.history.record("settings", "language_model reset to the shipped defaults")
+        return settings
+
+    def lm_corpus(self) -> str:
+        return self.language_model.describe_corpus()
+
+    def lm_plan(self) -> str:
+        return self.language_model.plan() if hasattr(self.language_model, "plan") else ""
+
+    def lm_preset_choices(self) -> tuple[tuple[str, str], ...]:
+        return self.language_model.preset_choices()
+
+    def lm_tokenizer_choices(self) -> tuple[tuple[str, str], ...]:
+        return self.language_model.tokenizer_choices()
+
+    def lm_schedule_choices(self) -> tuple[str, ...]:
+        return self.language_model.lr_schedule_choices()
+
+    def lm_tier_choices(self) -> tuple[str, ...]:
+        return self.language_model.learned_tier_choices()
+
+    def lm_pack_choices(self) -> tuple[tuple[str, str], ...]:
+        return self.language_model.pack_choices()
+
+    def lm_settings_keys(self) -> tuple[str, ...]:
+        return tuple(LanguageModelSettings.__dataclass_fields__)
+
+    def lm_settings_values(self, key: str) -> tuple[str, ...]:
+        """The offered values for a choice-like option, empty for a free field."""
+        if key == "preset":
+            return tuple(name for name, _label in self.language_model.preset_choices())
+        if key == "tokenizer_kind":
+            return tuple(name for name, _label in self.language_model.tokenizer_choices())
+        if key == "lr_schedule":
+            return self.language_model.lr_schedule_choices()
+        return ()
+
+    def lm_train(
+        self,
+        *,
+        settings: LanguageModelSettings | None = None,
+        fresh: bool = False,
+        shards: int | None = None,
+        on_line: Any = None,
+        on_step: Any = None,
+    ) -> TrainOutcome:
+        """Train (or continue) the model; ``fresh`` is the opt-out of resuming."""
+        active = settings or self.lm_settings()
+        if fresh:
+            active = active.with_values(resume=False)
+        if shards is not None:
+            active = active.with_values(shard_count=max(0, int(shards)))
+        self.history.record(
+            "train",
+            f"language model: {active.steps} steps, preset {active.preset}, "
+            f"{'resume' if active.resume else 'fresh'}"
+            + (f", {active.shard_count} shards" if active.shard_count else ""),
+        )
+        return self.language_model.train(active, on_line=on_line, on_step=on_step)
+
+    def lm_evaluate(self, *, on_line: Any = None) -> EvaluationReport:
+        return self.language_model.evaluate(on_line=on_line)
+
+    def lm_generate(
+        self,
+        prompt: str,
+        *,
+        max_new_tokens: int | None = None,
+        temperature: float | None = None,
+        seed: int | None = None,
+    ) -> str:
+        return self.language_model.generate(
+            prompt, max_new_tokens=max_new_tokens, temperature=temperature, seed=seed
+        )
+
+    def lm_release(self, *, on_line: Any = None) -> ReleaseOutcome:
+        self.history.record("train", "release: every learning layer")
+        return self.language_model.release(on_line=on_line)
+
+    def lm_install_pack(self, key: str, *, force: bool = False) -> WeightActionReport:
+        report = self.language_model.install_pack_entry(key, force=force)
+        self.history.record("settings", f"language model: install weights {key}")
+        return report
+
+    def lm_import_weights(self, path: str | Path, *, force: bool = False) -> WeightActionReport:
+        report = self.language_model.import_checkpoint(path, force=force)
+        self.history.record("settings", f"language model: import weights {path}")
+        return report
+
+    def lm_fetch_weights(self, url: str, *, approved: bool = False) -> WeightActionReport:
+        report = self.language_model.fetch_weights(url, approved=approved)
+        self.history.record("settings", f"language model: fetch weights from {url}")
+        return report
+
+    def lm_build_learned(self, tier: str, *, force: bool = False, on_line: Any = None) -> WeightActionReport:
+        self.history.record("train", f"language model: build the {tier} tier")
+        return self.language_model.build_learned(tier, force=force, on_line=on_line)
+
+    def lm_learned_text(self) -> str:
+        return self.language_model.describe_learned()
 
     def model_choices(self) -> tuple[tuple[str, str], ...]:
         """The models a training run may use here, as ``(id, label)`` rows.
