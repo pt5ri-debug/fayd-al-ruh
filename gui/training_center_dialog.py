@@ -38,6 +38,7 @@ from collections.abc import Callable
 from tkinter import filedialog, messagebox, simpledialog
 from typing import Any
 
+from core.best_effort import best_effort
 from core.training_center import catalog
 from core.training_center.catalog import capability
 
@@ -147,7 +148,9 @@ class TrainingCenterDialog(ThemedDialog):
 
         The busy indicator is a *text* label ("working…"), not a progressbar, so
         it is drawn through the header's ``extra`` slot and ``self._spinner`` still
-        points at the label the rest of the window configures.
+        points at the label the rest of the window configures. The band also
+        carries the **?** help control beside the trio, which opens this window's
+        own bilingual guide (:mod:`gui.training_center_help`).
         """
         from gui.components import DialogHeader
 
@@ -160,9 +163,32 @@ class TrainingCenterDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window, title=TITLE, subtitle=SUBTITLE, theme=self.theme,
-            typography=self._type, on_close=self._close, show_spinner=False, extra=_extra,
+            typography=self._type, on_close=self._close, on_help=self.open_help,
+            show_spinner=False, extra=_extra,
         )
         self._window_controls = header.controls
+
+    def open_help(self) -> None:
+        """Open (or raise) this window's bilingual help window.
+
+        One window is kept and reused, exactly like every other secondary window
+        the program opens, so pressing **?** twice does not stack copies.
+        """
+        existing = getattr(self, "_help_window", None)
+        if existing is not None:
+            try:
+                if existing.window.winfo_exists():
+                    existing.window.lift()
+                    existing.window.focus_set()
+                    return
+            except tk.TclError:
+                pass
+        from gui.training_center_help import TrainingCenterHelpDialog
+
+        self._help_window: Any = TrainingCenterHelpDialog(
+            self.window, theme=self.theme, font=self.font, mono=self.mono,
+            overrides=self._overrides, list_overrides=self._list_overrides,
+        )
 
     def _button(self, parent: tk.Misc, text: str, command: Any) -> tk.Button:
         """A themed flat button (the shared :func:`gui.components.button`)."""
@@ -1797,6 +1823,13 @@ class TrainingCenterDialog(ThemedDialog):
         if self._closed:
             return
         self._closed = True
+        # Close the help window this one opened (if any) so it does not outlive its
+        # parent; a failure there must never stop this window closing.
+        help_window = getattr(self, "_help_window", None)
+        if help_window is not None:
+            with best_effort("close the Training Center's help window"):
+                help_window._close()
+            self._help_window = None
         if self._pump_after is not None:
             try:
                 self.window.after_cancel(self._pump_after)

@@ -350,6 +350,7 @@ class DialogHeader:
         theme: Any,
         typography: Any,
         on_close: Callable[[], None] | None = None,
+        on_help: Callable[[], None] | None = None,
         spinner_length: int = SIZE.spinner,
         show_spinner: bool = True,
         extra: Callable[[tk.Frame], None] | None = None,
@@ -398,7 +399,8 @@ class DialogHeader:
                 variant="secondary", small=True,
             )
         self.controls = install_window_controls(
-            window, inner, theme=theme, typography=typography, on_close=on_close
+            window, inner, theme=theme, typography=typography, on_close=on_close,
+            on_help=on_help,
         )
         self.inner = inner
         if extra is not None:
@@ -442,6 +444,7 @@ class HeroHeader:
         theme: Any,
         typography: Any,
         on_close: Callable[[], None] | None = None,
+        on_help: Callable[[], None] | None = None,
         padx: int = 20,
         wraplength: int = 980,
         extra: Callable[[tk.Frame], None] | None = None,
@@ -460,7 +463,8 @@ class HeroHeader:
         )
         self.title_label.pack(side="left")
         self.controls = install_window_controls(
-            window, title_row, theme=theme, typography=typography, on_close=on_close
+            window, title_row, theme=theme, typography=typography, on_close=on_close,
+            on_help=on_help,
         )
         self.subtitle_label: tk.Label | None = None
         if subtitle:
