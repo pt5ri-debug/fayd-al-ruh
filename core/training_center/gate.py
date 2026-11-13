@@ -346,6 +346,35 @@ def _judgement_one_home_for_language_model_training() -> GateJudgement:
     )
 
 
+def _judgement_help_matches_catalog() -> GateJudgement:
+    """The **?** guide must document exactly what the catalogue lists.
+
+    The guide is generated from the catalogue, so it can never describe a control
+    differently from the window that draws it. This judgement is the drift guard:
+    the guide must name every capability's title (English *and* Arabic), and its
+    capability count must equal the catalogue's own -- so adding a control without
+    explaining it, or renaming one in only one place, fails the gate.
+    """
+    from core.training_center.help import help_capability_count, help_text
+
+    english = help_text("en")
+    arabic = help_text("ar")
+    missing: list[str] = []
+    for cap in CAPABILITIES:
+        if cap.title not in english:
+            missing.append(f"en:{cap.key}")
+        if cap.title_ar and cap.title_ar not in arabic:
+            missing.append(f"ar:{cap.key}")
+    count_ok = help_capability_count() == len(CAPABILITIES)
+    passed = not missing and count_ok
+    detail = (
+        f"the guide documents all {len(CAPABILITIES)} controls in both languages"
+        if passed
+        else f"missing={missing[:5]} count_ok={count_ok}"
+    )
+    return GateJudgement("help-matches-catalog", passed, detail)
+
+
 JUDGEMENTS: tuple[str, ...] = (
     "review-status-governs-export",
     "refuses-unreviewed-example",
@@ -362,6 +391,7 @@ JUDGEMENTS: tuple[str, ...] = (
     "unavailable-stage-names-next-step",
     "unknown-stage-is-none",
     "one-home-for-language-model-training",
+    "help-matches-catalog",
 )
 
 
@@ -383,6 +413,7 @@ def run_judgements() -> tuple[GateJudgement, ...]:
         _judgement_unavailable_stage_note(),
         _judgement_stage_spec_unknown(),
         _judgement_one_home_for_language_model_training(),
+        _judgement_help_matches_catalog(),
     )
 
 

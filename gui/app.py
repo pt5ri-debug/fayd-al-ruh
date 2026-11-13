@@ -1104,6 +1104,13 @@ class FaydGUI:
             mapping = getattr(self, mapping_attr, None)
             if isinstance(mapping, dict):
                 dialogs.extend(mapping.values())
+        # A dialog may itself open a child window (the Training Center's own Help
+        # window); it is re-themed and re-typed with everything else so one switch
+        # reaches it too.
+        for dialog in list(dialogs):
+            child = getattr(dialog, "_help_window", None)
+            if child is not None:
+                dialogs.append(child)
         return dialogs
 
     def _rebuild_preserving_transcript(self) -> None:

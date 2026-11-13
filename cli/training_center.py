@@ -92,6 +92,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_cat.add_argument("--json", action="store_true")
     p_cat.set_defaults(func=_cmd_catalog)
 
+    p_help = sub.add_parser("help", help="the complete guide, in Arabic or English")
+    p_help.add_argument(
+        "--lang", choices=("ar", "en"), default="ar", help="the guide's language (default: ar)"
+    )
+    p_help.add_argument("--json", action="store_true")
+    p_help.set_defaults(func=_cmd_help)
+
     p_set = sub.add_parser("settings", help="the Training Center's own preferences")
     p_set.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
     p_set.add_argument("--json", action="store_true")
@@ -275,6 +282,24 @@ def _cmd_dashboard(args: argparse.Namespace) -> int:
         print("\nRecent activity:")
         for line in snapshot.recent_history:
             print(f"  {line}")
+    return EXIT_OK
+
+
+def _cmd_help(args: argparse.Namespace) -> int:
+    """The complete guide, the same text the window's **?** control shows."""
+    from core.training_center.help import help_capability_count, help_text, help_title
+
+    language = getattr(args, "lang", "ar")
+    if args.json:
+        payload = {
+            "capabilities": help_capability_count(),
+            "language": language,
+            "text": help_text(language),
+            "title": help_title(language),
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return EXIT_OK
+    print(help_text(language))
     return EXIT_OK
 
 

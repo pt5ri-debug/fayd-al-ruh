@@ -4231,20 +4231,34 @@ Arabic is kept as secondary aliases where useful.
   root); `catalog.py` (the one source of truth for what every control does -- a
   `Capability` per control with its title, summary, what it returns, whether it is
   governed, and the exact headless CLI command, in English and Arabic, grouped into
-  the fourteen sections); and `gate.py` (the held-out gate
+  the fifteen sections); `help.py` (the **bilingual guide** the window's **?**
+  control shows, *generated from the catalogue* so it can never describe a control
+  differently -- `help_text`/`help_title`/`resolve_language`/`help_capability_count`
+  in Arabic and English, the same text the CLI's `training-center help` prints, and
+  the gate's `help-matches-catalog` judgement fails if the two drift); and `gate.py`
+  (the held-out gate
   `training_center_accuracy` with negative controls -- an unreviewed example is
   refused, an empty dataset is refused, a governed pipeline stage is refused
   without approval, an unavailable capability is reported unavailable, an
   unapproved cloud provider names the real next step, an unreportable resource
-  stays ``None``, and every catalogue CLI command resolves against the real
-  parser -- a metric in `evaluation`). The window
+  stays ``None``, every catalogue CLI command resolves against the real
+  parser, and the help guide documents every control in both languages -- a metric
+  in `evaluation`). The window
   (`gui/training_center_dialog.py`) is built the way every other window is built
   (the shared `Theme` tokens, `RoundedBox`, `gui.rich_text`, the shared
-  `gui.chat_composer.ChatComposer`, the three `gui.window_controls` title-bar
-  buttons, a `SidebarColumn` of the fourteen collapsible sections, and a
+  `gui.chat_composer.ChatComposer`, the `gui.window_controls` title-bar buttons --
+  the minimize/maximize/close trio **plus a `?` help control** -- a `SidebarColumn`
+  of the fifteen collapsible sections, and a
   worker-thread/queue the UI thread drains), and every button's label, one-line
   hint, and hover tooltip come *from the catalogue*, so the window and the
-  catalogue can never disagree. Every long operation **streams its detail into the
+  catalogue can never disagree. The **?** control opens
+  `gui/training_center_help.py`'s `TrainingCenterHelpDialog` -- one window kept and
+  reused, rebuilt in place by its language switch, right-aligned in Arabic -- and
+  `gui.window_controls.install_window_controls` gained an optional `on_help`
+  handler (a window that passes nothing keeps exactly the three controls it had,
+  so every other window is unchanged); a dialog that opens a child window (this
+  help window) is re-themed and re-typed with everything else, and the Training
+  Center closes its help window when it closes. Every long operation **streams its detail into the
   window's own chat area while it runs** (never only at the end), exactly like the
   main window: a worker thread only queues each line on a `queue.Queue`, and the UI
   thread's pump drains it into one growing message at a bounded rate (~0.15 s), so

@@ -252,6 +252,30 @@ In the window, the same sequence is the *Question-and-Answer Learning* →
 *Dataset Studio* → *Training Jobs* → *Evaluation* sections, and the *Pipelines*
 section chains the stages into one named, re-runnable workflow.
 
+## The bilingual help window (the **?** control)
+
+The window's title bar carries a **?** control beside the minimize / maximize /
+close trio. Pressing it opens the **complete guide** to the Training Center, in
+**Arabic and English**, with a language switch that toggles the whole window in
+place. It answers the three questions a reader has before pressing anything:
+
+* **What is this place for?** — the Training Center in two paragraphs.
+* **How does it work, in order?** — the six steps from a source to a trained,
+  measured model, so a newcomer knows where to start and what follows what.
+* **What does this control do?** — every section and all sixty-four controls, each
+  with its one-line summary, what it returns, whether it asks for confirmation,
+  whether it writes, and the equivalent command.
+
+The text is **generated from the catalogue** (`core/training_center/help.py`), so
+it can never describe a control differently from the window that draws it; the
+held-out gate's `help-matches-catalog` judgement fails if the two drift. The same
+guide is reachable headless as
+`python -m cli training-center help [--lang ar|en] [--json]`.
+
+The **?** control is added by the shared `gui.window_controls.install_window_controls`
+through its optional `on_help` handler: a window that passes nothing keeps exactly
+the three controls it had, so every other window in the project is unchanged.
+
 ## Known limitations
 
 - A cloud provider and the web need explicit approval (and, for a cloud model, a
@@ -275,3 +299,7 @@ section chains the stages into one named, re-runnable workflow.
 - `tests/test_training_center_choices.py` — the editable dropdown: the label/value
   resolution (headless) and the window's switch and dropdown wiring (skips with no
   display).
+- `tests/test_training_center_help.py` — the bilingual guide (complete, bilingual,
+  its count equal to the catalogue's), the CLI `help` command, and the **?** window
+  (the header control, one window reused, the language switch, and the rendered
+  Markdown).

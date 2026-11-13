@@ -42,8 +42,13 @@ _MAXIMIZE_GLYPH = "\u25a1"  # white square
 _RESTORE_GLYPH = "\u2750"  # upper right shadowed white square
 _CLOSE_GLYPH = "\u2715"  # multiplication x
 
-#: Hover fills: a quiet grey for minimize/maximize, the standard red for close --
-#: the one title-bar affordance every desktop user already recognises.
+#: The optional **help** control. A window that can explain itself passes an
+#: ``on_help`` callback and this glyph is drawn to the left of the trio; a window
+#: with nothing to explain simply does not pass one and the glyph never appears.
+_HELP_GLYPH = "?"
+
+#: Hover fills: a quiet grey for minimize/maximize/help, the standard red for close
+#: -- the one title-bar affordance every desktop user already recognises.
 _BUTTON_HOVER = "hover"
 _CLOSE_HOVER = "close"
 
@@ -187,11 +192,13 @@ class WindowControls:
         *,
         close: Callable[[], None] | None = None,
         close_button: tk.Button | None = None,
+        help_button: tk.Button | None = None,
     ) -> None:
         self.window = window
         self.frame = frame
         self.maximize_button = maximize_button
         self.close_button = close_button
+        self.help_button = help_button
         self._close = close
         self._fullscreen = False
         self._zoomed = False
@@ -214,7 +221,7 @@ class WindowControls:
         """
         try:
             self.frame.bind("<Destroy>", self._on_destroy, add="+")
-            for button in (self.maximize_button, self.close_button):
+            for button in (self.maximize_button, self.close_button, self.help_button):
                 if button is not None:
                     button.bind("<Destroy>", self._on_button_destroy, add="+")
         except (tk.TclError, AttributeError):
@@ -226,8 +233,9 @@ class WindowControls:
         self._close = None
 
     def _on_button_destroy(self, event: tk.Event) -> None:
-        # Bound only to the two buttons, so the widget is a Button; the narrowing
-        # is explicit because a Tk event carries its widget as a generic Misc.
+        # Bound only to the trio (plus the optional help button), so the widget is
+        # a Button; the narrowing is explicit because a Tk event carries its widget
+        # as a generic Misc.
         widget = event.widget
         if not isinstance(widget, tk.Button):
             return
@@ -348,6 +356,7 @@ def install_window_controls(
     theme: Any,
     typography: Any,
     on_close: Callable[[], None] | None = None,
+    on_help: Callable[[], None] | None = None,
     pack_side: Literal["left", "right", "top", "bottom"] = "right",
     padx: int = 4,
 ) -> WindowControls:
@@ -361,13 +370,22 @@ def install_window_controls(
 
     ``on_close``, when given, is wired to the window's close protocol as well, so
     the ✕ button and the window manager's own close both take one path.
+
+    ``on_help``, when given, adds a **?** button to the left of the trio; pressing
+    it runs the caller's explanation handler. A window with nothing to explain
+    passes nothing and keeps exactly the three controls it had, so this is
+    additive for every existing caller.
     """
     controls = tk.Frame(header, bg=theme.titlebar)
     controls.pack(side=pack_side, padx=(0, padx))
 
     button_font = typography.font("sm", weight="bold")
+    help_button: tk.Button | None = None
+    if on_help is not None:
+        help_button = _control_button(controls, _HELP_GLYPH, theme, button_font)
+        help_button.pack(side="left")
     minimize_button = _control_button(controls, _MINIMIZE_GLYPH, theme, button_font)
-    minimize_button.pack(side="left")
+    minimize_button.pack(side="left", padx=(2, 0) if help_button is not None else 0)
     maximize_button = _control_button(controls, _MAXIMIZE_GLYPH, theme, button_font)
     maximize_button.pack(side="left", padx=(2, 0))
     close_button = _control_button(
@@ -376,8 +394,11 @@ def install_window_controls(
     close_button.pack(side="left", padx=(2, 0))
 
     controller = WindowControls(
-        window, controls, maximize_button, close=on_close, close_button=close_button
+        window, controls, maximize_button, close=on_close, close_button=close_button,
+        help_button=help_button,
     )
+    if help_button is not None and on_help is not None:
+        help_button.configure(command=on_help)
     minimize_button.configure(command=controller.minimize)
     maximize_button.configure(command=controller.toggle)
     close_button.configure(command=controller.close)

@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 from gui.window_controls import (
     _CLOSE_GLYPH,
+    _HELP_GLYPH,
     _MAXIMIZE_GLYPH,
     _RESTORE_GLYPH,
     WindowControls,
@@ -328,6 +329,42 @@ def test_install_builds_the_buttons_and_wires_close() -> None:
         assert window.protocol("WM_DELETE_WINDOW")
         # Escape closes the window, the standard keyboard affordance.
         assert window.bind("<Escape>")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_install_adds_a_help_button_only_when_asked() -> None:
+    from gui.app import DARK_THEME
+    from gui.typography import for_root
+
+    root = tk.Tk()
+    try:
+        root.withdraw()
+        window = tk.Toplevel(root)
+        header = tk.Frame(window)
+        header.pack(fill="x")
+        # Without a handler there is no fourth button, so a window with nothing to
+        # explain keeps exactly the trio it had.
+        plain = install_window_controls(
+            window, header, theme=DARK_THEME, typography=for_root(root)
+        )
+        root.update()
+        assert plain.help_button is None
+        assert len(plain.frame.winfo_children()) == 3
+
+        # With a handler the ? control is added *left of* the trio and runs it.
+        pressed: list[int] = []
+        with_help = install_window_controls(
+            window, header, theme=DARK_THEME, typography=for_root(root),
+            on_help=lambda: pressed.append(1),
+        )
+        root.update()
+        assert with_help.help_button is not None
+        assert with_help.help_button.cget("text") == _HELP_GLYPH
+        assert len(with_help.frame.winfo_children()) == 4
+        with_help.help_button.invoke()
+        assert pressed == [1]
     finally:
         root.destroy()
 
