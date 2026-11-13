@@ -754,6 +754,11 @@ MENU: tuple[tuple[str, Action, Sequence[str]], ...] = (
     ("Training Center: learn, build datasets, train, and evaluate", run_training_center, ("dashboard",)),
     ("Training Center: what every learning and training control does", run_training_center, ("catalog",)),
     (
+        "Training Center: the complete guide (Arabic and English)",
+        run_training_center,
+        ("help",),
+    ),
+    (
         "Training Center: train or continue the language model (فيض الروح)",
         run_training_center,
         ("lm-train",),

@@ -109,6 +109,16 @@ def test_cli_help_json_is_machine_readable(tmp_path: Path, capsys) -> None:
     assert payload["text"] == help_text("en")
 
 
+def test_the_menu_carries_the_guide_entry() -> None:
+    from cli.menu import MENU, run_training_center
+
+    titles = [title for title, _action, _args in MENU]
+    assert any("complete guide" in title for title in titles)
+    entry = next(e for e in MENU if "complete guide" in e[0])
+    assert entry[1] is run_training_center
+    assert entry[2] == ("help",)
+
+
 # -- the window -----------------------------------------------------------
 
 
