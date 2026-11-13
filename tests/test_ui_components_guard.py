@@ -12,6 +12,10 @@ from __future__ import annotations
 import ast
 import pathlib
 
+import pytest
+
+from tests.conftest import TK_AVAILABLE
+
 GUI = pathlib.Path(__file__).resolve().parent.parent / "gui"
 
 
@@ -60,6 +64,8 @@ def test_no_dialog_reimplements_a_section() -> None:
 
 
 def test_components_module_exposes_the_library() -> None:
+    if not TK_AVAILABLE:
+        pytest.skip("Tk is unavailable")
     from gui import components
 
     for name in (

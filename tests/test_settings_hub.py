@@ -10,10 +10,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from gui import settings_hub
+
+from tests.conftest import TK_AVAILABLE
+
+#: ``settings_hub.resolve`` reaches ``gui.app``'s readers/writers, and
+#: ``gui.app`` imports tkinter at module level -- so the tests that resolve a
+#: real reader/writer are skipped where Tk cannot load, while the pure catalogue
+#: tests still run.
+needs_tk = pytest.mark.skipif(not TK_AVAILABLE, reason="Tk is unavailable")
 
 # ------------------------------------------------------- one authoritative home
 
+@needs_tk
 def test_every_entry_names_a_real_reader_and_writer() -> None:
     for entry in settings_hub.SETTINGS_ENTRIES:
         assert settings_hub.resolve(entry.reader) is not None, entry.reader
@@ -130,6 +140,7 @@ def test_the_chat_session_reads_the_one_shared_switch(tmp_path: Path, monkeypatc
 # ------------------------------------------------------------- the live values
 
 
+@needs_tk
 def test_current_values_reads_every_global_setting(tmp_path: Path) -> None:
     values = settings_hub.current_values(tmp_path)
     for entry in settings_hub.SETTINGS_ENTRIES:
@@ -137,6 +148,7 @@ def test_current_values_reads_every_global_setting(tmp_path: Path) -> None:
         assert values[entry.key] != ""  # never blank; "unknown" is the honest value
 
 
+@needs_tk
 def test_describe_lists_every_setting_and_its_writer(tmp_path: Path) -> None:
     text = settings_hub.describe(tmp_path)
     for entry in settings_hub.SETTINGS_ENTRIES:
@@ -145,6 +157,7 @@ def test_describe_lists_every_setting_and_its_writer(tmp_path: Path) -> None:
     assert "Context-dependent" in text
 
 
+@needs_tk
 def test_a_broken_store_still_reports_unknown_never_raises(tmp_path: Path) -> None:
     """A corrupt preferences file must not stop the Settings page from opening."""
     (tmp_path / "jarvis").mkdir(parents=True, exist_ok=True)

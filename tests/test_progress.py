@@ -9,8 +9,8 @@ from __future__ import annotations
 import io
 import queue
 
+import pytest
 from core.progress import ProgressCallback, ProgressReporter, format_duration, null_reporter
-from gui.app import LineStream
 
 
 def test_format_duration_units() -> None:
@@ -80,6 +80,12 @@ def test_reporter_satisfies_the_callback_protocol() -> None:
 
 
 def test_line_stream_forwards_complete_lines() -> None:
+    # ``LineStream`` lives in ``gui.app``, which imports tkinter; guard it so the
+    # stdlib half of this file still runs where Tk cannot be loaded.
+    try:
+        from gui.app import LineStream
+    except Exception as exc:  # tkinter itself can fail to load (no libtk)
+        pytest.skip(f"Tk is unavailable: {exc}")
     lines: queue.Queue[str] = queue.Queue()
     stream = LineStream(lines)
     stream.write("a\nb\npart")

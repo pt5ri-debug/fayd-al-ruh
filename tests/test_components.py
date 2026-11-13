@@ -6,32 +6,40 @@ without one (or under Xvfb, exactly like the other window tests).
 
 from __future__ import annotations
 
-import tkinter as tk
-
 import pytest
-from gui import components
+from gui import design
 from gui.design import RADIUS, SIZE, SPACE, SPACING_STEPS, space
 from gui.themes import DARK_THEME
 from gui.typography import DEFAULT_TYPOGRAPHY
+
+try:
+    import tkinter as tk
+
+    from gui import components
+except ImportError:  # pragma: no cover - no libtk on this machine
+    tk = None  # type: ignore[assignment]
+    components = None  # type: ignore[assignment]
 
 
 class _Root:
     """A hidden Tk root, or a skip when there is no display."""
 
     def __init__(self) -> None:
+        if tk is None:
+            pytest.skip("Tk is unavailable")
         try:
             self.root = tk.Tk()
         except tk.TclError as exc:  # pragma: no cover - depends on the display
             pytest.skip(f"no display: {exc}")
         self.root.withdraw()
 
-    def __enter__(self) -> tk.Tk:
+    def __enter__(self):
         return self.root
 
     def __exit__(self, *_exc: object) -> None:
         try:
             self.root.destroy()
-        except tk.TclError:
+        except Exception:
             pass
 
 
@@ -64,7 +72,10 @@ def test_radii_and_sizes_are_the_shipped_values() -> None:
 
 
 def test_button_variants_are_the_closed_set() -> None:
-    assert components.BUTTON_VARIANTS == ("primary", "secondary", "ghost", "danger")
+    assert design.BUTTON_VARIANTS == ("primary", "secondary", "ghost", "danger")
+    # ``gui.components`` re-exports the same tuple, so the two cannot drift.
+    if components is not None:
+        assert components.BUTTON_VARIANTS == design.BUTTON_VARIANTS
 
 
 def test_button_rejects_an_unknown_variant() -> None:

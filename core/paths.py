@@ -371,9 +371,53 @@ def character_config_dir() -> Path:
     return config_dir() / "characters"
 
 
+def _asset_roots() -> tuple[Path, ...]:
+    """Every place a bundled read-only asset may live, most specific first.
+
+    In a source checkout there is exactly one root (the repository). A wheel
+    installs the *code* into ``site-packages`` but places the ``data-files``
+    assets (``config/``, ``weights/``, ``knowledge/``) under the **install
+    prefix** -- ``sys.prefix`` for a venv, the base prefix for a user/system
+    install -- which is *not* :func:`bundle_root`. Both are therefore searched,
+    so an asset is found whether the program runs from source, from a wheel, or
+    from a PyInstaller bundle. A root that does not exist is still returned
+    (callers fall back to the built-in default), and duplicates are dropped so a
+    prefix that equals the source root is searched once.
+    """
+    roots: list[Path] = [bundle_root()]
+    prefix = Path(sys.prefix)
+    if prefix not in roots:
+        roots.append(prefix)
+    # A venv's `data/` sits beside the code but its assets are one level up at
+    # the prefix; also honour the base prefix for a `--user` install.
+    base_prefix = Path(getattr(sys, "base_prefix", sys.prefix))
+    if base_prefix not in roots:
+        roots.append(base_prefix)
+    return tuple(roots)
+
+
+def _first_asset(*relative: str) -> Path:
+    """The first existing ``root/relative`` across :func:`_asset_roots`.
+
+    Falls back to the source/bundle root when nothing exists yet, so a caller
+    that only *writes* to the returned path (or checks ``.exists()``) sees an
+    honest, canonical location rather than ``None``.
+    """
+    roots = _asset_roots()
+    for root in roots:
+        candidate = root.joinpath(*relative)
+        if candidate.exists():
+            return candidate
+    return roots[0].joinpath(*relative)
+
+
 def bundled_config_dir() -> Path:
-    """The shipped, read-only character configuration inside the code or bundle."""
-    return bundle_root() / "config"
+    """The shipped, read-only character configuration inside the code or bundle.
+
+    Resolved across the source/bundle root *and* the install prefix, because a
+    wheel puts ``config/`` at the prefix while the code sits in ``site-packages``.
+    """
+    return _first_asset("config")
 
 
 def learning_root_dir() -> Path:
@@ -508,17 +552,35 @@ def weights_pack_dir() -> Path:
     install them and continue training instead of starting from nothing. It is
     read-only at run time -- installing a pack entry copies it into ``data/``
     through :mod:`core.weights_pack`.
+
+    Resolved across the source/bundle root *and* the install prefix, because a
+    wheel places ``weights/`` at the prefix while the code sits in
+    ``site-packages``.
     """
-    return bundle_root() / "weights"
+    return _first_asset("weights")
 
 
 def bundled_artifacts_dir() -> Path:
     """Read-only artifacts inside the code or bundle, used as a fallback."""
-    return bundle_root() / "ml" / "artifacts"
+    return _first_asset("ml", "artifacts")
+
+
+def bundled_knowledge_dir() -> Path:
+    """The committed, read-only learned knowledge the project ships (``knowledge/``).
+
+    Resolved across the source/bundle root *and* the install prefix, because a
+    wheel places ``knowledge/`` at the prefix while the code sits in
+    ``site-packages``.
+    """
+    return _first_asset("knowledge")
 
 
 def bundled_checkpoints_dir() -> Path:
-    """Read-only language-model checkpoints inside the code or bundle."""
+    """Read-only language-model checkpoints inside the code or bundle.
+
+    ``ml/llm/checkpoints`` ships as *package data* inside the ``ml`` package, so
+    the source/bundle root finds it directly and no prefix search is needed.
+    """
     return bundle_root() / "ml" / "llm" / "checkpoints"
 
 
@@ -643,6 +705,7 @@ __all__ = [
     "bundled_artifacts_dir",
     "bundled_checkpoints_dir",
     "bundled_config_dir",
+    "bundled_knowledge_dir",
     "character_config_dir",
     "character_learning_dir",
     "character_learning_store_dir",

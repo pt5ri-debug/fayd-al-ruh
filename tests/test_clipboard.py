@@ -12,13 +12,19 @@ like ``tests/test_gui.py``.
 
 from __future__ import annotations
 
-import tkinter as tk
-from tkinter import ttk
-
 import pytest
-from gui import clipboard
+
+try:
+    import tkinter as tk
+    from tkinter import ttk
+
+    from gui import clipboard
+except ImportError:  # pragma: no cover - no libtk on this machine
+    tk = None  # type: ignore[assignment]
 
 from tests.test_gui_design import _display_available
+
+pytestmark = pytest.mark.skipif(tk is None, reason="Tk is unavailable")
 
 
 def _press(widget: tk.Misc, root: tk.Misc, key: str) -> None:

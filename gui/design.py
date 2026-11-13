@@ -94,11 +94,33 @@ def space(step: str) -> int:
     return int(getattr(SPACE, step))
 
 
+#: The button variants. ``primary`` is the one call to action on a screen (a gold
+#: fill); ``secondary`` is the ordinary raised-surface button; ``ghost`` is a
+#: borderless button for a toolbar; ``danger`` is the destructive one. They live
+#: here, beside the other non-colour tokens, so a headless caller can read them
+#: without importing Tk -- ``gui.components`` re-exports them unchanged.
+VARIANT_PRIMARY = "primary"
+VARIANT_SECONDARY = "secondary"
+VARIANT_GHOST = "ghost"
+VARIANT_DANGER = "danger"
+BUTTON_VARIANTS: tuple[str, ...] = (
+    VARIANT_PRIMARY,
+    VARIANT_SECONDARY,
+    VARIANT_GHOST,
+    VARIANT_DANGER,
+)
+
+
 __all__ = [
+    "BUTTON_VARIANTS",
     "RADIUS",
     "SIZE",
     "SPACE",
     "SPACING_STEPS",
+    "VARIANT_DANGER",
+    "VARIANT_GHOST",
+    "VARIANT_PRIMARY",
+    "VARIANT_SECONDARY",
     "Radii",
     "Sizes",
     "Spacing",

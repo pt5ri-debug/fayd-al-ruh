@@ -64,6 +64,7 @@ from core.training_center.gate import training_center_accuracy
 from core.weights_pack_gate import weights_pack_accuracy
 from core.workplace.phase10_gate import workplace_phase10_accuracy
 from core.workplace.phase11_gate import workplace_phase11_accuracy
+from core.workplace.security_gate import security_accuracy
 from ml.petroleum import petroleum_generalisation_accuracy, petroleum_learning_accuracy
 from ml.resume_gate import training_resume_accuracy
 from ml.training.gate import training_accuracy
@@ -392,6 +393,19 @@ class EvaluationMetrics:
     listing's per-project counts are correct and gathered with a bounded number of
     reads (the N+1 fix) -- each on the real search engine and repository, with
     negative controls."""
+
+    workplace_security_accuracy: float
+    """The share of held-out Workplace security judgements satisfied: a role cannot
+    perform a permission it does not hold, a per-user grant only narrows a role and
+    never widens it, an unknown role falls back to least privilege, a
+    department-scoped user cannot reach another division's record, a project-scoped
+    user cannot reach a project they are not a member of, a record above the user's
+    clearance is withheld and counted, an administrator is still bound by
+    confidentiality, an approved record is read-only until reopened, the AI can
+    never be recorded as an approver, and a refusal leaves an audit row -- each on
+    the real :class:`~core.workplace.security.SecurityManager` over a real database,
+    with negative controls, so an over-permissive policy fails as surely as an
+    over-restrictive one (Phase 9)."""
 
     knowledge_validation_accuracy: float
     """The share of held-out cognitive-core judgements satisfied: the event bus
@@ -1418,6 +1432,16 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # held-out judgement over the real capture engine, with negative controls.
     workplace_knowledge_value = workplace_phase11_accuracy()
 
+    # The Workplace security layer (Phase 9): role-based access, per-user grants
+    # that only narrow a role, department/project scope, confidentiality, read-only
+    # approved records, an append-only refusal audit, and the rule that the AI can
+    # never be an approver -- each a held-out judgement over the real
+    # SecurityManager and a real database, with negative controls (an
+    # over-permissive policy fails as surely as an over-restrictive one). It was
+    # measured by its own module but *not* wired into this gate, so a regression in
+    # access control could not fail the build.
+    security_value = security_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1509,6 +1533,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         self_improvement_value,
         workplace_value,
         workplace_knowledge_value,
+        security_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1587,6 +1612,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         self_improvement_loop_accuracy=round(self_improvement_value, 6),
         workplace_phase10_accuracy=round(workplace_value, 6),
         workplace_phase11_accuracy=round(workplace_knowledge_value, 6),
+        workplace_security_accuracy=round(security_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

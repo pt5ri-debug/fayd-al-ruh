@@ -8,13 +8,19 @@ happens here -- the window is opened with a stand-in service.
 
 from __future__ import annotations
 
-import tkinter as tk
-
 import pytest
-from gui.choice_dialog import display_for, normalise_choices, resolve_choice
+
+try:
+    import tkinter as tk
+
+    from gui.choice_dialog import display_for, normalise_choices, resolve_choice
+except ImportError:  # pragma: no cover - no libtk on this machine
+    tk = None  # type: ignore[assignment]
 
 from tests.test_gui_design import _display_available
 from tests.test_training_center_window import StubService, _dialog
+
+pytestmark = pytest.mark.skipif(tk is None, reason="Tk is unavailable")
 
 # -- the pure label/value resolution --------------------------------------
 

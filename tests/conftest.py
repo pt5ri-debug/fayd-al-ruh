@@ -28,14 +28,33 @@ import pytest
 _tk_roots_created = 0
 
 
+def _tk_importable() -> bool:
+    """True when ``tkinter`` (and its ``libtk`` shared library) can be imported.
+
+    A machine can have the ``tkinter`` *package* but not the ``libtk8.6.so`` it
+    loads at import time; the ``ImportError`` that raises is not the
+    ``ModuleNotFoundError`` ``pytest.importorskip`` catches, so a test module that
+    imports ``tkinter`` at the top level fails at **collection** and takes its
+    headless tests down with it. Test modules can call this to guard a top-level
+    import, and :func:`pytest.importorskip` is not enough on its own.
+    """
+    try:
+        import tkinter  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+TK_AVAILABLE = _tk_importable()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _count_tk_roots():
     """Count ``tkinter.Tk`` constructions so only those tests collect."""
-    try:
-        import tkinter
-    except Exception:  # pragma: no cover - no Tk on this machine
+    if not TK_AVAILABLE:
         yield
         return
+    import tkinter
 
     original_init = tkinter.Tk.__init__
 

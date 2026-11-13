@@ -23,6 +23,8 @@ from gui.actions import (
 )
 from gui.service import ChatService
 
+from tests.conftest import TK_AVAILABLE
+
 
 class FakeSession:
     """A minimal stand-in for ``JarvisMode`` (enough for the window to build)."""
@@ -159,6 +161,7 @@ def test_sidebar_labels_are_short_and_keep_the_full_name() -> None:
 # ------------------------------------------------------------- the persistence
 
 
+@pytest.mark.skipif(not TK_AVAILABLE, reason="Tk is unavailable")
 def test_sidebar_sections_round_trip_through_the_store(tmp_path) -> None:
     from gui.app import load_sidebar_sections, save_sidebar_sections
 
@@ -167,6 +170,7 @@ def test_sidebar_sections_round_trip_through_the_store(tmp_path) -> None:
     assert load_sidebar_sections(tmp_path) == {"chats": True, "settings": False}
 
 
+@pytest.mark.skipif(not TK_AVAILABLE, reason="Tk is unavailable")
 def test_a_broken_sections_record_reads_as_empty(tmp_path) -> None:
     from gui.app import load_sidebar_sections
 
@@ -463,6 +467,7 @@ def test_opening_the_settings_section_by_click_builds_it(tmp_path) -> None:
 # --------------------------------------------------------- the shared column
 
 
+@pytest.mark.skipif(not TK_AVAILABLE, reason="Tk is unavailable")
 def test_column_section_states_round_trip_and_ignore_a_corrupt_record(tmp_path) -> None:
     from gui.sidebar import load_section_states, save_section_states
 

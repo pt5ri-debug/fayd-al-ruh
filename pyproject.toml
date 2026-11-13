@@ -33,6 +33,30 @@ exclude = ["tests*", "data*", "docs*", "knowledge*"]
 [tool.setuptools]
 py-modules = ["main"]
 
+# Read-only assets a `pip install .` must carry. Without these a wheel installs
+# the *code* but not the data the code reads: `bundled_config_dir()` (the shipped
+# character defaults), `weights_pack_dir()` (the committed weights pack), and
+# `bundled_knowledge_dir()` (the promoted learned statements) all resolve through
+# `core.paths`, which searches the source/bundle root *and* the install prefix --
+# so each folder must be placed at the prefix by name. `data-files` does that; a
+# per-directory key is required because a single key flattens subdirectories
+# (`config/characters/*.json` would land directly in `config/`).
+#
+# The trained language model (`ml/llm/checkpoints`) and the petroleum policies
+# (`ml/artifacts`) are declared as *package data* instead, so they travel inside
+# the `ml` package tree -- which is exactly where `core.paths.bundle_root()`
+# looks. This mirrors `fayd-al-ruh.spec` (PyInstaller), which bundles the same
+# files for the portable build, so source, wheel, and bundle agree on what ships.
+[tool.setuptools.data-files]
+"config" = ["config/*.json"]
+"config/characters" = ["config/characters/*.json"]
+"weights" = ["weights/*.json"]
+"knowledge" = ["knowledge/*.json"]
+
+[tool.setuptools.package-data]
+"ml.llm" = ["checkpoints/*"]
+"ml.artifacts" = ["**/*.npz", "**/*.json"]
+
 [project.optional-dependencies]
 # PDF ingestion is optional: the reader imports pypdf lazily and reports a clear
 # message when it is absent, so the base install stays dependency-light.
