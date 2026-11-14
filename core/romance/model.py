@@ -109,6 +109,12 @@ class CompanionCharacter(RecordBase):
     ``fictional_age`` is ``None`` when the character's age is unspecified, which
     the safety layer treats as age-ambiguous and refuses for adult content.
     ``adult_eligible`` is ``True`` only after an explicit, recorded confirmation.
+
+    ``kinship`` names the relationship *degree* the character holds toward the
+    user (``mother``, ``father``, ``sister``, ``brother``, ``friend``, ``lover``,
+    ``colleague``, ...), so the character addresses the user and speaks in a way
+    that fits the relation, and so the Studio can show it. It is free text and
+    defaults to empty (an ordinary, unlabelled companion).
     """
 
     owner: str = ""
@@ -123,6 +129,7 @@ class CompanionCharacter(RecordBase):
     appearance: str = ""
     avatar_path: str = ""
     relationship_style: str = ""
+    kinship: str = ""
     default_mode: str = "general"
     model_key: str = ""
     tags: tuple[str, ...] = ()
@@ -137,7 +144,13 @@ class CharacterPersonality(RecordBase):
     """The character's editable personality dials (0..1) plus free instructions.
 
     Every dial is *guidance for how to speak*, never a widening of what the
-    character may claim; the rendered block states that in its own text.
+    character may claim; the rendered block states that in its own text. The last
+    four dials are the character's own romantic reach -- ``boldness`` (how directly
+    it says the daring thing), ``passion`` (the intensity of its longing),
+    ``sensuality`` (the openness of its wording) and ``escalation`` (whether it may
+    let the register build) -- the same reach the companion Natasha has. They shape
+    *how* a character speaks, never the floor: adults only, consent explicit and
+    revocable, no coercion.
     """
 
     character_id: str = ""
@@ -151,6 +164,10 @@ class CharacterPersonality(RecordBase):
     affection: float = 0.5
     romantic_intensity: float = 0.5
     formality: float = 0.5
+    boldness: float = 0.6
+    passion: float = 0.6
+    sensuality: float = 0.4
+    escalation: float = 0.5
     response_length: str = "balanced"
     dialect: str = ""
     traits: tuple[str, ...] = ()

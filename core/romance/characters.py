@@ -68,6 +68,7 @@ _CHARACTER_FIELDS: tuple[str, ...] = (
     "appearance",
     "avatar_path",
     "relationship_style",
+    "kinship",
     "default_mode",
     "model_key",
     "tags",
@@ -95,6 +96,7 @@ class CharacterDraft:
     appearance: str = ""
     avatar_path: str = ""
     relationship_style: str = ""
+    kinship: str = ""
     default_mode: str = DEFAULT_MODE
     model_key: str = ""
     tags: tuple[str, ...] = ()

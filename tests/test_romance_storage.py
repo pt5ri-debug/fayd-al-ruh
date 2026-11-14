@@ -93,6 +93,41 @@ def test_a_newer_schema_is_refused(tmp_path: Path):
         RomanceDatabase(path)
 
 
+def test_a_version_1_database_migrates_to_the_current_version(tmp_path: Path):
+    """A v1 file (no kinship, no reach dials) is upgraded in place, keeping rows."""
+    path = tmp_path / "romance.db"
+    RomanceDatabase(path).migrate()
+    connection = sqlite3.connect(path)
+    for column in ("boldness", "passion", "sensuality", "escalation"):
+        connection.execute(f"ALTER TABLE character_personalities DROP COLUMN {column}")
+    connection.execute("ALTER TABLE companion_characters DROP COLUMN kinship")
+    connection.execute("UPDATE meta SET value='1' WHERE key='schema_version'")
+    connection.execute(
+        "INSERT INTO companion_characters"
+        "(record_id, owner, name, created_at, updated_at, active, metadata) "
+        "VALUES('CHR-1','natasha','Old One','2020-01-01T00:00:00+00:00',"
+        "'2020-01-01T00:00:00+00:00',1,'{}')"
+    )
+    connection.commit()
+    connection.close()
+
+    migrated = RomanceDatabase(path)
+    assert migrated.schema_version() == SCHEMA_VERSION
+    # The migration is idempotent and the pre-existing row survives it.
+    assert migrated.migrate() == SCHEMA_VERSION
+    read = migrated._connect()
+    try:
+        row = read.execute(
+            "SELECT name, kinship FROM companion_characters WHERE record_id='CHR-1'"
+        ).fetchone()
+        assert row["name"] == "Old One"
+        assert row["kinship"] == ""
+        personality = {r["name"] for r in read.execute("PRAGMA table_info(character_personalities)")}
+    finally:
+        read.close()
+    assert {"boldness", "passion", "sensuality", "escalation"} <= personality
+
+
 def test_a_failed_write_rolls_back(storage: CompanionStorageService):
     character = storage.domain.create("companion_characters", owner="natasha", name="Layla")
     conversation = storage.domain.create(

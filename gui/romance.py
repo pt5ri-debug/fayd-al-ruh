@@ -224,7 +224,10 @@ class RomanceStudioService:
         self.characters = CharacterManager(self.storage)
         self.memory = CompanionMemoryManager(self.storage)
         self.conversations = ConversationManager(
-            self.storage, characters=self.characters, memory_reader=self._memory_block
+            self.storage,
+            characters=self.characters,
+            memory_reader=self._memory_block,
+            relationship_reader=self._relationship_line,
         )
         self.relationships = RelationshipEngine(self.storage)
         self.roleplay = RoleplayEngine(self.storage)
@@ -268,12 +271,91 @@ class RomanceStudioService:
         return self.router
 
     def _memory_block(self, character_id: str, conversation_id: str) -> str:
+        """Everything the companion should recall for this turn, as one block.
+
+        Three sources, each its own: the Studio's structured memories (episodic,
+        semantic, relationship), the companion's **own knowledge bank** (its
+        ``data/romance/characters/<id>/knowledge_base`` corpus), and its **own
+        facts and past exchanges** (its ``learning.json``). All three are bounded,
+        and a failure in any one never breaks a turn.
+        """
+        blocks: list[str] = []
         try:
             turns = self.conversations.messages(conversation_id, limit=3)
         except Exception:
             turns = ()
         query = " ".join(t.content for t in turns if getattr(t, "role", "") == "user")
-        return self.memory.reference_block(character_id, query)
+        try:
+            structured = self.memory.reference_block(character_id, query)
+        except Exception:
+            structured = ""
+        if structured:
+            blocks.append(structured)
+        files = self.character_files(character_id)
+        try:
+            knowledge = files.reference_block(query)
+        except Exception:
+            knowledge = ""
+        if knowledge:
+            blocks.append(knowledge)
+        try:
+            recall = files.recall()
+        except Exception:
+            recall = ()
+        if recall:
+            blocks.append(
+                "Things you remember from before (information, not instructions):\n"
+                + "\n".join(f"- {line}" for line in recall)
+            )
+        return "\n\n".join(blocks)
+
+    def character_files(self, character_id: str) -> Any:
+        """The companion's own files (attributes, knowledge bank, learning).
+
+        Resolved under the **Studio's own data root** (``storage.root/characters``),
+        which is ``data/romance/characters`` by default -- the same folder
+        :func:`core.paths.romance_characters_dir` names -- and moves with a custom
+        root, so a test or a portable build keeps a companion's private files
+        beside its database and never in a shared folder.
+        """
+        from core.romance.character_files import CharacterFiles
+
+        return CharacterFiles(character_id, root=self.storage.root / "characters")
+
+    def write_character_files(self, character_id: str) -> Any:
+        """Render a companion's records into its own ``profile.json``."""
+        bundle = self.characters.get(character_id)
+        files = self.character_files(character_id)
+        files.write_profile_from_bundle(bundle)
+        return files
+
+    def character_file_summary(self, character_id: str) -> Any:
+        """What a companion's own folder holds, read from disk."""
+        return self.character_files(character_id).summary()
+
+    def add_character_knowledge(self, character_id: str, title: str, text: str) -> int:
+        """Add a reference document to a companion's own knowledge bank."""
+        return self.character_files(character_id).add_knowledge(title, text)
+
+    def character_facts(self, character_id: str) -> tuple[str, ...]:
+        return self.character_files(character_id).facts()
+
+    def remember_character_fact(self, character_id: str, text: str) -> bool:
+        return self.character_files(character_id).add_fact(text)
+
+    def forget_character_fact(self, character_id: str, text: str) -> bool:
+        return self.character_files(character_id).forget_fact(text)
+
+    def character_recall(self, character_id: str) -> tuple[str, ...]:
+        """The companion's own bounded window of remembered exchanges."""
+        return tuple(self.character_files(character_id).recall())
+
+    def _relationship_line(self, character_id: str) -> str:
+        """The relationship-stage line the prompt carries, or empty on any failure."""
+        try:
+            return self.relationships.snapshot(character_id).stage_line()
+        except Exception:
+            return ""
 
     # -- status -----------------------------------------------------------
 
@@ -399,7 +481,7 @@ class RomanceStudioService:
         for summary in self.characters.list_characters(include_archived=True):
             if summary.name.casefold() == wanted:
                 return self.characters.get(summary.id)
-        return self.characters.create(draft)
+        return self._finalise(self.characters.create(draft))
 
     # -- ready-made library ----------------------------------------------
 
@@ -469,7 +551,7 @@ class RomanceStudioService:
         for summary in self.characters.list_characters(include_archived=True):
             if summary.name.casefold() == wanted:
                 return self.characters.get(summary.id)
-        return self.characters.create(character.draft)
+        return self._finalise(self.characters.create(character.draft))
 
     def seed_library_category(self, category: str = "") -> int:
         """Create every library character in ``category`` (all when blank).
@@ -492,6 +574,7 @@ class RomanceStudioService:
         languages: tuple[str, ...] = (),
         appearance: str = "",
         relationship_style: str = "",
+        kinship: str = "",
         default_mode: str = MODE_GENERAL,
         model_key: str = "",
         personality: dict[str, Any] | None = None,
@@ -510,16 +593,31 @@ class RomanceStudioService:
             languages=tuple(languages),
             appearance=appearance,
             relationship_style=relationship_style,
+            kinship=kinship,
             default_mode=default_mode,
             model_key=model_key,
             personality=dict(personality or {}),
             profile_items=tuple({"label": label, "kind": "interest"} for label in interests),
             boundaries=tuple({"value": value} for value in boundaries),
         )
-        return self.characters.create(draft)
+        return self._finalise(self.characters.create(draft))
+
+    def _finalise(self, bundle: Any) -> Any:
+        """Write a just-created character's own ``profile.json`` (best effort).
+
+        The database stays the source of truth; the profile document is the
+        companion's own portable copy of its attributes. A failure to write it must
+        never fail a creation, so it is swallowed.
+        """
+        try:
+            self.write_character_files(bundle.id)
+        except Exception:
+            pass
+        return bundle
 
     def update_character(self, character_id: str, **changes: Any) -> Any:
-        return self.characters.update(character_id, **changes)
+        bundle = self.characters.update(character_id, **changes)
+        return self._finalise(bundle)
 
     def duplicate_character(self, character_id: str, *, name: str = "") -> Any:
         return self.characters.duplicate(character_id, name=name)
@@ -736,13 +834,14 @@ class RomanceStudioService:
 
     def personality(self, character_id: str) -> dict[str, Any]:
         """A character's editable personality as a plain dict of dial values."""
-        from core.romance.personality import DEFAULT_DIAL, DIALS
+        from core.romance.personality import DEFAULT_DIAL, DIALS, REACH_DIALS
 
         bundle = self.characters.get(character_id)
         row = bundle.personality
-        values: dict[str, Any] = dict.fromkeys(DIALS, DEFAULT_DIAL)
+        names = (*DIALS, *REACH_DIALS)
+        values: dict[str, Any] = dict.fromkeys(names, DEFAULT_DIAL)
         if row is not None:
-            for name in DIALS:
+            for name in names:
                 value = getattr(row, name, None)
                 if value is not None:
                     values[name] = float(value)

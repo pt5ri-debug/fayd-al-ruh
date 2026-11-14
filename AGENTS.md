@@ -1234,6 +1234,47 @@ Arabic is kept as secondary aliases where useful.
   final deliverables beside it (`USER_GUIDE.md`, `FEATURE_MATRIX.md`,
   `CHARACTER_SYSTEM.md`, `INSTALLATION.md`, `TEST_REPORT.md`).
   It loads no model and reaches no network on import.
+  **Each companion's own files (Phase 11)** give every character the private
+  folder Natasha has: `core/romance/character_files.py`'s `CharacterFiles` keeps
+  three things together under `data/romance/characters/<character_id>`
+  (`core.paths.romance_characters_dir`, git-ignored) — `profile.json` (the
+  character as one portable document, a *view* written from the database rows via
+  `write_profile_from_bundle`, never a second source of truth), `knowledge_base/`
+  (a real `core.knowledge_base.KnowledgeBaseStore` indexed with
+  `core.knowledge_index.KnowledgeTextIndex`, so a companion has its own reference
+  bank and `reference_block` renders the top passages as a bounded, labelled
+  block), and `learning.json` (the durable facts it was told and the exchanges it
+  took part in — the same record `core.character_learning.CharacterLearning`
+  keeps). The folder is resolved under the Studio's **own** data root
+  (`storage.root/characters`), a character id is sanitised to a filesystem-safe
+  name, and one companion's folder is never reachable from another's; nothing here
+  loads a model or reaches the network. `CharacterManager` gained
+  `write_character_files`/`character_file_summary` (and writes the profile on
+  create, best-effort); `ConversationManager` gained a `relationship_reader` and
+  `_record_exchange` writes each turn into the companion's own `learning.json`
+  (failure swallowed, so a read-only folder never breaks a chat). The character
+  model gained a **`kinship`** (the relation it holds toward the user, e.g.
+  `mother`/`partner`/`companion`) and `CharacterPersonalityEngine`'s dials grew to
+  **fourteen** — the last four (`boldness`/`passion`/`sensuality`/`escalation`)
+  are the character's own **romantic reach**, rendered as tone guidance only, so
+  the safety floor holds at every value; `ModeContext` carries both the tone dials
+  and the reach block into the prompt. The library gained a **Parents** archetype
+  and every archetype carries a default kinship and reach
+  (`_KINSHIP_BY_CATEGORY`/`_REACH_BY_CATEGORY`), and every shipped library
+  character is `adult_eligible=True` at the source (its age is stated), while the
+  adult *mode* stays off by default. `RomanceStudioService` exposes the whole
+  surface (`character_files`/`character_file_summary`/`add_character_knowledge`/
+  `character_facts`/`remember_character_fact`/`forget_character_fact`/
+  `character_recall`); the Studio window's right panel gained an **own-files**
+  block (*Add knowledge…*, *Tell a fact…*, *What she remembers…*, *Open the
+  folder…*) and the editor gained the four reach dials; and the CLI gained
+  `files`/`knowledge`/`facts`/`remember-fact`/`forget-fact`. The gate grew to **78
+  judgements** (the two new ones: a companion's own files round-trip and reach the
+  block its prompt is built from, and a **negative control** — one companion can
+  never read another's files). Schema version 2 (an idempotent `_migration_2` adds
+  `kinship` and the four reach columns, so a fresh file and an upgraded one end in
+  the same shape). Docs: `docs/romance_companion/DATABASE_SCHEMA.md` and
+  `CHARACTER_LIBRARY_AND_UI_REPORT.md`.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
   theme=, typography=, on_close=)` builds one frame of three buttons into the

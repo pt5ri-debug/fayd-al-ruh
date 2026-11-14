@@ -424,3 +424,40 @@ def test_the_header_stats_and_avatar_follow_the_real_state(tmp_path: Path) -> No
         assert "27" in dialog._char_subtitle.cget("text")
     finally:
         _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_own_files_panel_reports_and_adds_knowledge_and_facts(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        bundle = service.create_character("Huda", fictional_age=38)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        # The panel reads the companion's own folder: the profile is written.
+        text = dialog._own_text.get("1.0", "end")
+        assert "Profile written: yes" in text
+        assert "Facts she was told: 0" in text
+        # Adding knowledge and a fact is reflected in the panel (through the
+        # service, the same path the window's own dialogs call).
+        assert service.add_character_knowledge(bundle.id, "Work", "She is a marine biologist.") >= 1
+        assert service.remember_character_fact(bundle.id, "She loves the sea")
+        dialog._refresh_own_panel()
+        text = dialog._own_text.get("1.0", "end")
+        assert "Knowledge bank: 1 chunk(s)" in text
+        assert "Facts she was told: 1" in text
+        assert "She loves the sea" in text
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_window_offers_the_own_files_controls(tmp_path: Path) -> None:
+    root, dialog, _service = _dialog(tmp_path)
+    try:
+        # The section is present and its four real controls are wired to methods.
+        assert dialog._own_text is not None
+        for name in ("_add_own_knowledge", "_tell_own_fact", "_show_own_recall", "_open_own_folder"):
+            assert callable(getattr(dialog, name))
+    finally:
+        _close_window(root, dialog)

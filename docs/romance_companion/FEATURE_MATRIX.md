@@ -21,11 +21,14 @@ reports the real next step. "Requires a voice engine" is the same for speech.
 |---|---|
 | Create / edit / duplicate / export / import / archive / restore / delete | ✅ |
 | Independent persistent identity (id, name, nickname, fictional age, gender, bio, nationality, languages, appearance, relationship style) | ✅ |
+| Kinship (the relation a character holds toward the user: parent, sibling, partner, lover, colleague, friend, …) | ✅ |
 | Adult-eligibility flag (off unless a fictional age ≥ 18 is set) | ✅ |
 | Personality dials (introversion, playfulness, warmth, expressiveness, confidence, humor, initiative, affection, romantic intensity, response length, formality, Arabic dialect) | ✅ |
+| Romantic-reach dials (boldness, passion, sensuality, escalation — tone only; the adults-only/consent floor is restated in the block's own text) | ✅ |
 | Editable natural-language instructions | ✅ |
 | Discover Characters (shipped, clearly-labelled example companions, added one at a time) | ✅ |
-| Ready-made character library (≈50 fully-specified adults across 7 relationship archetypes, browsable by archetype and search, added one at a time or a whole archetype at once) | ✅ |
+| Ready-made character library (54 fully-specified adults across 8 relationship archetypes, browsable by archetype and search, added one at a time or a whole archetype at once) | ✅ |
+| A companion's own files (its `profile.json`, its own knowledge bank, and its `learning.json` facts/exchanges), private per character | ✅ |
 | Delete with explicit retention choice (keep / purge / anonymize) | ✅ |
 
 ## Conversation

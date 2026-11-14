@@ -24,8 +24,9 @@ Three columns, each collapsible:
 - **Centre** — the selected character's avatar, name, summary, and relationship
   stage, the conversation transcript, and the message composer.
 - **Right panel** — *Profile*, *Personality & Interests*, *Relationship* (with a
-  closeness bar), *Milestones*, *Important Memories*, *Voice Configuration*, and
-  *Active Scenario*. The header's **Right panel** control collapses it.
+  closeness bar), *Milestones*, *Important Memories*, *Voice Configuration*,
+  *Her Own Knowledge & Memory*, and *Active Scenario*. The header's **Right
+  panel** control collapses it.
 
 An honest disclosure sits at the top of the transcript, **outside the fiction**:
 *these are fictional AI companions, not real people; everything stays on this
@@ -110,6 +111,25 @@ offers the full lifecycle: `memories`, `recall`, `remember`, `forget`,
 character's memories are never visible to another. A memory carries its kind
 (*episodic*, *semantic personal*, *relationship*, *character*), an importance
 score, and a source-message reference.
+
+## A companion's own files
+
+Beyond the database, each companion owns a private folder
+(`data/romance/characters/<id>/`) holding three files: its **`profile.json`**
+(the character as a portable document), its **knowledge bank** (reference
+documents it may draw on), and its **`learning.json`** (the durable facts it was
+told and the exchanges it took part in). The right panel's *Her Own Knowledge &
+Memory* block reports that folder at a glance and offers four controls:
+
+- **Add knowledge…** adds a reference document to this companion's own bank.
+- **Tell a fact…** records a durable fact about the user that this companion
+  keeps (de-duplicated, and bounded).
+- **What she remembers…** shows the bounded window of past exchanges it recalls.
+- **Open the folder…** reveals the companion's own folder in the file manager.
+
+The same actions are headless: `python -m cli romance files|knowledge|facts|
+remember-fact|forget-fact <character>`. One companion's files are never visible
+to another, and the folder moves with the Studio's data root.
 
 ## Voice
 

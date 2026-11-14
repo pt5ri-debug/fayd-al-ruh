@@ -243,3 +243,51 @@ def test_cli_seeds_a_category(capsys, tmp_path: Path):
     assert "Created" in capsys.readouterr().out
     service = RomanceStudioService(root=tmp_path)
     assert len(service.character_rows()) == len(library_by_category("escorts"))
+
+
+def test_cli_creates_a_character_with_a_kinship(capsys, tmp_path: Path):
+    code = cli.main([
+        "--data-root", str(tmp_path), "new", "Hala", "--age", "34",
+        "--kinship", "partner", "--json",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    service = RomanceStudioService(root=tmp_path)
+    bundle = service.character(payload["character_id"])
+    assert bundle.character.kinship == "partner"
+
+
+def test_cli_reports_the_companions_own_files(capsys, tmp_path: Path):
+    service = RomanceStudioService(root=tmp_path)
+    bundle = service.create_character("Sara", fictional_age=30)
+    code = cli.main(["--data-root", str(tmp_path), "files", bundle.id, "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["profile"] is True
+    assert payload["character_id"] == bundle.id
+
+
+def test_cli_adds_knowledge_and_facts(capsys, tmp_path: Path):
+    service = RomanceStudioService(root=tmp_path)
+    bundle = service.create_character("Huda", fictional_age=41)
+    assert cli.main([
+        "--data-root", str(tmp_path), "knowledge", bundle.id,
+        "She teaches Arabic literature at the university.", "--json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["chunks"] >= 1
+    assert cli.main([
+        "--data-root", str(tmp_path), "remember-fact", bundle.id, "She loves jasmine tea",
+    ]) == 0
+    assert "Remembered" in capsys.readouterr().out
+    assert cli.main(["--data-root", str(tmp_path), "facts", bundle.id, "--json"]) == 0
+    facts = json.loads(capsys.readouterr().out)
+    assert facts == ["She loves jasmine tea"]
+    # A repeat is refused, and forgetting removes it.
+    assert cli.main([
+        "--data-root", str(tmp_path), "remember-fact", bundle.id, "she loves jasmine tea",
+    ]) == 0
+    assert "Already known" in capsys.readouterr().out
+    assert cli.main([
+        "--data-root", str(tmp_path), "forget-fact", bundle.id, "She loves jasmine tea",
+    ]) == 0
+    assert "Forgotten" in capsys.readouterr().out

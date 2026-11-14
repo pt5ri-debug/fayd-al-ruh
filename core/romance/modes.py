@@ -272,14 +272,26 @@ class ModeContext:
     history: tuple[tuple[str, str], ...] = ()
     cast: tuple[str, ...] = ()
     scenario: str = ""
+    #: The character's own tone guidance (personality dials + free instructions).
+    personality: str = ""
+    #: The character's romantic-reach block (boldness/passion/sensuality/escalation).
+    reach: str = ""
+    #: What the character likes to talk about (its own profile items).
+    interests: tuple[str, ...] = ()
+    #: How close the relationship with the user currently is, as one readable line.
+    relationship: str = ""
 
     def to_primitive(self) -> dict[str, Any]:
         return {
             "cast": list(self.cast),
             "history": [list(turn) for turn in self.history],
             "identity": self.identity,
+            "interests": list(self.interests),
             "memory": self.memory,
             "name": self.name,
+            "personality": self.personality,
+            "reach": self.reach,
+            "relationship": self.relationship,
             "scenario": self.scenario,
         }
 
@@ -303,6 +315,14 @@ def mode_prompt(mode: ModeSpec, context: ModeContext) -> str:
     blocks.append(human_passing_identity(context.name))
     if context.identity:
         blocks.append(f"## Who you are\n{context.identity.strip()}")
+    if context.relationship:
+        blocks.append(f"## Where you stand with them\n{context.relationship.strip()}")
+    if context.personality:
+        blocks.append(f"## Your voice and manner\n{context.personality.strip()}")
+    if context.reach:
+        blocks.append(context.reach.strip())
+    if context.interests:
+        blocks.append("## What you like to talk about\n" + ", ".join(context.interests))
     if context.scenario:
         blocks.append(f"## The scene\n{context.scenario.strip()}")
     if mode.style:

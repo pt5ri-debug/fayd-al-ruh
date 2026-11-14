@@ -39,16 +39,18 @@ the Python attribute stays `order`.
 - **Migrations.** `meta.schema_version` records the version on disk; the numbered
   steps in `MIGRATIONS` bring a file up to `SCHEMA_VERSION`. A database from a
   **newer** build is refused rather than read with a schema this build does not
-  understand.
+  understand. Version 2 adds the character's `kinship` and its four romantic-reach
+  dials; each `ALTER` is guarded, so the migration is idempotent and a fresh file
+  and an upgraded one end in the same shape.
 
-## Tables (schema version 1)
+## Tables (schema version 2)
 
 ### Characters
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `companion_characters` | the character library | `owner`, `name`, `nickname`, `fictional_age`, `adult_eligible`, `gender`, `biography`, `nationality`, `languages`, `appearance`, `avatar_path`, `relationship_style`, `default_mode`, `model_key`, `tags`, `favorite`, `archived`, `profile_version`, `metadata` |
-| `character_personalities` | the personality dials (0..1) + instructions | `character_id`, `introversion`, `playfulness`, `warmth`, `expressiveness`, `confidence`, `humour`, `initiative`, `affection`, `romantic_intensity`, `formality`, `response_length`, `dialect`, `traits`, `instructions` |
+| `companion_characters` | the character library | `owner`, `name`, `nickname`, `fictional_age`, `adult_eligible`, `gender`, `biography`, `nationality`, `languages`, `appearance`, `avatar_path`, `relationship_style`, **`kinship`**, `default_mode`, `model_key`, `tags`, `favorite`, `archived`, `profile_version`, `metadata` |
+| `character_personalities` | the personality dials (0..1) + instructions | `character_id`, `introversion`, `playfulness`, `warmth`, `expressiveness`, `confidence`, `humour`, `initiative`, `affection`, `romantic_intensity`, `formality`, `response_length`, `dialect`, **`boldness`**, **`passion`**, **`sensuality`**, **`escalation`**, `traits`, `instructions` |
 | `character_profiles` | free-form interests/hobbies/styles | `character_id`, `kind`, `label`, `value` |
 | `character_boundaries` | explicit conversation limits | `character_id`, `kind`, `value` |
 
@@ -116,6 +118,24 @@ Deleting a character takes an explicit retention choice (`core/romance/storage.p
   backup cannot destroy a good database.
 - `export()` writes every table (or one character's rows) to a JSON file, so a
   library can be moved between machines with no remote sync.
+
+## Each companion's own files (outside the database)
+
+Beyond its rows, every companion owns a private folder,
+`data/romance/characters/<character_id>` (`core.paths.romance_characters_dir`,
+git-ignored), holding three files (`core/romance/character_files.py`):
+
+| File | Purpose |
+|---|---|
+| `profile.json` | the character as one portable document (name, age, kinship, biography, appearance, interests, boundaries, and every personality/reach dial). A *view* written from the database rows, never a second source of truth. |
+| `knowledge_base/` | the companion's own reference bank -- a real `core.knowledge_base.KnowledgeBaseStore`, indexed with `core.knowledge_index.KnowledgeTextIndex`. |
+| `learning.json` | the durable facts the companion was told and the exchanges it took part in (the same record `core.character_learning.CharacterLearning` keeps). |
+
+The service resolves the folder under the Studio's **own** data root
+(`storage.root/characters`), so a custom root keeps a companion's private files
+beside its database and never in a shared folder; a character id is sanitised to a
+filesystem-safe name, so it can never escape the root. One companion's folder is
+never reachable from another's.
 
 ## Phase roadmap for the schema
 

@@ -39,7 +39,7 @@ enforced. It is the "reopen and continue" proof, not a mock.
 
 ## The held-out gate
 
-`core/romance/gate.py`'s `companion_studio_accuracy` runs **74 judgements** on the
+`core/romance/gate.py`'s `companion_studio_accuracy` runs **78 judgements** on the
 real code, including **negative controls**:
 
 - the schema is derived from the record contracts; a newer schema is refused; a

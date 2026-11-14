@@ -299,5 +299,7 @@ def test_the_studio_gate_covers_the_character_work_and_scores_full():
         "negative-adult-age",
         "human-passing",
         "safety-floor",
+        "own-files-round-trip",
+        "negative-own-files-isolated",
     ):
         assert required in kinds

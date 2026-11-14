@@ -375,6 +375,19 @@ def romance_backups_dir() -> Path:
     return romance_dir() / "backups"
 
 
+def romance_characters_dir() -> Path:
+    """Where each companion keeps its **own** files (``data/romance/characters``).
+
+    One sub-folder per companion holds its attributes (``profile.json``), its
+    knowledge bank (``knowledge_base/``), and its learning record
+    (``learning.json``) -- see :mod:`core.romance.character_files`. Keeping them
+    together under the Studio's git-ignored data means a companion's private
+    material never dirties the working tree, and one companion's folder can never
+    reach another's. ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return romance_dir() / "characters"
+
+
 def config_dir() -> Path:
     """Where the user's saved character configuration lives (``data/config``).
 
