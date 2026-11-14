@@ -276,3 +276,109 @@ def test_end_to_end_workflow_across_a_restart():
         assert after.dimensions["familiarity"] >= relationship.dimensions["familiarity"]
         # 14: local-only is enforced on the reopened studio.
         assert reopened.safety_status()["local_only"] is True
+
+
+# -- the interactive service additions ------------------------------------
+
+
+def test_the_service_exposes_the_models_the_project_really_has():
+    with _service() as service:
+        choices = service.model_choices()
+        assert choices, "the project ships a language-model catalog"
+        # Every entry is named and carries a real availability flag.
+        for choice in choices:
+            assert choice.key
+            assert choice.label()
+            assert isinstance(choice.available, bool)
+        # A model assigned to a character is remembered and resolved back.
+        bundle = service.create_character("Layla", fictional_age=27)
+        service.assign_model(bundle.id, choices[0].key)
+        assert service.model_key(bundle.id) == choices[0].key
+
+
+def test_a_setting_is_clamped_to_its_documented_range():
+    with _service() as service:
+        assert service.set_setting("temperature", "1.5") == "1.5"
+        assert service.set_setting("temperature", "99") == "2"
+        assert service.set_setting("temperature", "-5") == "0"
+        assert service.set_setting("max_tokens", "abc") == "512"
+        assert service.set_setting("context_length", "999999") == "32768"
+        # A non-numeric setting passes through unchanged.
+        assert service.set_setting("default_mode", "romantic") == "romantic"
+        assert service.settings()["default_mode"] == "romantic"
+
+
+def test_resetting_the_settings_returns_the_defaults():
+    with _service() as service:
+        service.set_setting("temperature", "0.1")
+        service.set_setting("default_mode", "adult")
+        service.reset_settings()
+        values = service.settings()
+        assert values["temperature"] == "0.8"
+        assert values["default_mode"] == "general"
+
+
+def test_setting_choices_are_the_real_ones():
+    with _service() as service:
+        modes = dict(service.setting_choices("default_mode"))
+        assert "romantic" in modes and "adult" in modes
+        models = dict(service.setting_choices("default_model_key"))
+        assert set(models) == {c.key for c in service.model_choices()}
+        engines = dict(service.setting_choices("voice_engine"))
+        assert set(engines) == set(service.voice_engines())
+
+
+def test_the_personality_round_trips_through_the_service():
+    with _service() as service:
+        bundle = service.create_character("Layla", fictional_age=27)
+        current = service.personality(bundle.id)
+        assert current["warmth"] == 0.5
+        current["warmth"] = 0.9
+        current["response_length"] = "detailed"
+        service.set_personality(bundle.id, current)
+        after = service.personality(bundle.id)
+        assert round(after["warmth"], 2) == 0.90
+        assert after["response_length"] == "detailed"
+
+
+def test_interests_and_boundaries_are_managed_per_character():
+    with _service() as service:
+        bundle = service.create_character("Layla", fictional_age=27)
+        service.add_interest(bundle.id, "coffee")
+        assert service.character(bundle.id).interests() == ("coffee",)
+        item_id = service.character(bundle.id).profile_items[0].record_id
+        service.remove_interest(bundle.id, item_id)
+        assert service.character(bundle.id).interests() == ()
+        boundary = service.add_boundary(bundle.id, "no politics")
+        assert [b.value for b in service.boundaries(bundle.id)] == ["no politics"]
+        service.remove_boundary(boundary.record_id)
+        assert service.boundaries(bundle.id) == ()
+
+
+def test_a_conversation_can_be_deleted():
+    with _service() as service:
+        bundle = service.create_character("Layla", fictional_age=27)
+        conversation = service.start_conversation(bundle.id, mode="general")
+        service.send(conversation.record_id, "Hello there, nice to meet you.")
+        assert service.conversations_for(bundle.id)
+        service.delete_conversation(conversation.record_id)
+        assert service.conversations_for(bundle.id) == ()
+
+
+def test_the_relationship_dimensions_are_editable_and_resettable():
+    with _service() as service:
+        bundle = service.create_character("Layla", fictional_age=27)
+        dimensions = service.relationship_dimensions()
+        assert "trust" in dimensions
+        service.set_relationship(bundle.id, trust=0.9)
+        assert service.relationship(bundle.id).dimensions["trust"] == 0.9
+        service.reset_relationship(bundle.id)
+        assert service.relationship(bundle.id).dimensions["trust"] < 0.9
+
+
+def test_the_studio_status_describes_what_is_installed():
+    with _service() as service:
+        status = service.status()
+        text = status.describe()
+        assert "Characters:" in text
+        assert "Local only: yes" in text

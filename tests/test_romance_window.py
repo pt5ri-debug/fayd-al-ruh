@@ -173,3 +173,194 @@ def test_the_discover_section_adds_one_example(tmp_path: Path) -> None:
         assert dialog._example_list.get(0).startswith("✓")
     finally:
         _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_model_picker_lists_the_project_models(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        # The picker offers every model the project knows, each labelled with
+        # its real availability -- it is not a decorative dropdown.
+        choices = service.model_choices()
+        assert len(dialog._model_keys) == len(choices)
+        assert dialog._model_menu["menu"].index("end") + 1 == len(choices)
+        assert "ready" in dialog._model_note.cget("text")
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_assigning_a_model_persists_on_the_character(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        bundle = service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        key = dialog._model_keys[0]
+        dialog._model_var.set(dialog._model_labels[key])
+        dialog._assign_model()
+        root.update()
+        assert service.character(bundle.id).character.model_key == key
+        assert "Model:" in dialog._profile_text.get("1.0", "end")
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_settings_window_writes_a_real_setting(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        dialog._open_settings()
+        settings = dialog._settings_dialog
+        assert settings is not None
+        settings._store("temperature", "1.5")
+        assert service.settings()["temperature"] == "1.5"
+        # A hand-typed value beyond the documented range is clamped.
+        settings._store("temperature", "99")
+        assert service.settings()["temperature"] == "2"
+        settings._store("max_tokens", "abc")
+        assert service.settings()["max_tokens"] == "512"
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_editor_creates_and_edits_a_character(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        dialog._open_editor("")
+        editor = dialog._editors[-1]
+        editor.window.update()
+        editor._vars["name"].set("Mona")
+        editor._vars["age"].set("29")
+        editor._vars["nationality"].set("Egyptian")
+        editor._combo_set("default_mode", "romantic")
+        editor._dial_scales["warmth"].set(0.9)
+        editor._save()
+        root.update()
+        rows = service.character_rows()
+        assert [r.name for r in rows] == ["Mona"]
+        bundle = service.character(rows[0].character_id)
+        assert bundle.character.nationality == "Egyptian"
+        assert bundle.character.default_mode == "romantic"
+        assert round(service.personality(rows[0].character_id)["warmth"], 2) == 0.90
+        # The Studio reflects the new character at once.
+        assert dialog._char_list.size() == 1
+        assert dialog._selected_character == rows[0].character_id
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_editor_refuses_a_character_with_no_name(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        dialog._open_editor("")
+        editor = dialog._editors[-1]
+        editor.window.update()
+        editor._vars["name"].set("   ")
+        editor._save()
+        root.update()
+        assert list(service.character_rows()) == []
+        assert "name" in editor._status_label.cget("text").lower()
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_editor_adds_and_removes_a_boundary(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        bundle = service.create_character("Layla", fictional_age=27)
+        dialog._open_editor(bundle.id)
+        editor = dialog._editors[-1]
+        editor.window.update()
+        editor._boundary_entry.insert(0, "no politics")
+        editor._add_boundary()
+        root.update()
+        assert [b.value for b in service.boundaries(bundle.id)] == ["no politics"]
+        assert editor._boundary_list.size() == 1
+        editor._boundary_list.selection_set(0)
+        editor._remove_boundary()
+        root.update()
+        assert service.boundaries(bundle.id) == ()
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_relationship_can_be_edited_and_reset(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        bundle = service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        service.set_relationship(bundle.id, trust=0.9)
+        dialog._refresh_character_panels()
+        assert "trust 0.90" in dialog._relationship_text.get("1.0", "end")
+        service.reset_relationship(bundle.id)
+        dialog._refresh_character_panels()
+        assert "trust 0.90" not in dialog._relationship_text.get("1.0", "end")
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_a_memory_is_added_listed_and_forgotten(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        bundle = service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        service.add_memory(bundle.id, "semantic_personal", "Layla loves jasmine tea")
+        dialog._refresh_character_panels()
+        assert dialog._memory_list.size() == 1
+        assert "jasmine tea" in dialog._memory_list.get(0)
+        dialog._memory_list.selection_set(0)
+        dialog._forget_memory()
+        root.update()
+        assert dialog._memory_list.size() == 0
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_a_scenario_is_created_and_a_participant_added(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        bundle = service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        scenario = service.create_scenario("Coffee shop", category="coffee_shop", location="Cairo")
+        service.add_participant(scenario.record_id, bundle.id)
+        dialog._refresh_scenarios()
+        assert dialog._scenario_list.size() == 1
+        dialog._scenario_list.selection_set(0)
+        dialog._on_scenario_selected(0)
+        panel = dialog._scenario_text.get("1.0", "end")
+        assert "Coffee shop" in panel
+        assert "Layla" in panel
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_changing_the_mode_updates_its_note(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        dialog._new_conversation()
+        dialog._mode_var.set("flirting_playful")
+        root.update()
+        assert "playful" in dialog._mode_note.cget("text").lower()
+        assert service.modes()  # the menu was filled from the real modes
+        assert dialog._mode_menu["menu"].index("end") + 1 == len(service.modes())
+    finally:
+        _close_window(root, dialog)

@@ -38,6 +38,93 @@ from core.romance.voice import CompanionVoiceAdapter
 
 DEFAULT_CHARACTER_OWNER = "natasha"
 
+#: The Studio settings keys and their human labels (the *Settings* window).
+SETTING_DEFAULT_MODEL = "default_model_key"
+SETTING_DEFAULT_MODE = "default_mode"
+SETTING_DEFAULT_CONTENT_LEVEL = "default_content_level"
+SETTING_CONTEXT_LENGTH = "context_length"
+SETTING_MAX_TOKENS = "max_tokens"
+SETTING_TEMPERATURE = "temperature"
+SETTING_MEMORY_LIMIT = "memory_limit"
+SETTING_VOICE_ENABLED = "voice_enabled"
+SETTING_VOICE_ENGINE = "voice_engine"
+SETTING_INTERFACE_LANGUAGE = "interface_language"
+SETTING_ADULT_MODE = "adult_mode_enabled"
+
+SETTING_LABELS: tuple[tuple[str, str, str], ...] = (
+    (SETTING_DEFAULT_MODEL, "Default language model", "the model a new character starts on"),
+    (SETTING_DEFAULT_MODE, "Default conversation mode", "the mode a new conversation opens in"),
+    (SETTING_DEFAULT_CONTENT_LEVEL, "Default content level", "general, romantic, or adult"),
+    (SETTING_CONTEXT_LENGTH, "Context length (tokens)", "how much of the conversation the model reads"),
+    (SETTING_MAX_TOKENS, "Answer limit (tokens)", "the longest answer the model may write"),
+    (SETTING_TEMPERATURE, "Temperature", "0 = focused, 1 = more varied"),
+    (SETTING_MEMORY_LIMIT, "Memories recalled per turn", "how many stored memories the prompt may use"),
+    (SETTING_VOICE_ENABLED, "Speak answers aloud", "on or off for new characters"),
+    (SETTING_VOICE_ENGINE, "Default voice engine", "auto, espeak, piper, qwen3-tts, or audio.cpp"),
+    (SETTING_INTERFACE_LANGUAGE, "Interface language", "en or ar"),
+)
+
+#: The Studio setting keys that hold a numeric value, with their safe bounds.
+_NUMERIC_SETTINGS: dict[str, tuple[float, float, float]] = {
+    SETTING_CONTEXT_LENGTH: (512.0, 32768.0, 4096.0),
+    SETTING_MAX_TOKENS: (32.0, 4096.0, 512.0),
+    SETTING_TEMPERATURE: (0.0, 2.0, 0.8),
+    SETTING_MEMORY_LIMIT: (0.0, 20.0, 6.0),
+}
+
+#: The Studio setting keys that hold an on/off value.
+_BOOL_SETTINGS: tuple[str, ...] = (SETTING_VOICE_ENABLED,)
+
+
+def _clamp_setting(key: str, value: str) -> str:
+    """Clamp a numeric setting to its documented range; pass anything else through."""
+    spec = _NUMERIC_SETTINGS.get(key)
+    if spec is None:
+        return value
+    low, high, _default = spec
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return _format_number(spec[2])
+    return _format_number(max(low, min(high, number)))
+
+
+def _format_number(value: float) -> str:
+    """A whole number reads as ``4096``, a fractional one keeps its digits."""
+    return str(int(value)) if float(value).is_integer() else str(value)
+
+
+def _default_setting(key: str) -> str:
+    """The documented default of a Studio setting, so a fresh Studio is sensible."""
+    if key in _NUMERIC_SETTINGS:
+        return _format_number(_NUMERIC_SETTINGS[key][2])
+    if key in _BOOL_SETTINGS:
+        return "off"
+    if key == SETTING_DEFAULT_MODE:
+        return MODE_GENERAL
+    if key == SETTING_DEFAULT_CONTENT_LEVEL:
+        return "general"
+    if key == SETTING_VOICE_ENGINE:
+        return "auto"
+    if key == SETTING_INTERFACE_LANGUAGE:
+        return "en"
+    return ""
+
+
+@dataclass(frozen=True)
+class ModelChoice:
+    """One language model a character may be assigned, with its honest readiness."""
+
+    key: str
+    title: str
+    engine: str = ""
+    available: bool = False
+    detail: str = ""
+
+    def label(self) -> str:
+        mark = "●" if self.available else "○"
+        return f"{mark} {self.title or self.key}" + (f"  · {self.engine}" if self.engine else "")
+
 
 @dataclass(frozen=True)
 class StudioStatus:
@@ -363,6 +450,15 @@ class RomanceStudioService:
     def set_mode(self, conversation_id: str, mode: str) -> Any:
         return self.conversations.set_mode(conversation_id, mode)
 
+    def delete_conversation(self, conversation_id: str) -> None:
+        """Deactivate a conversation and its messages (a soft delete)."""
+        domain = self.storage.domain
+        for message in domain.list_records(
+            "companion_messages", where="conversation_id = ?", params=(conversation_id,)
+        ):
+            domain.deactivate("companion_messages", message.record_id)
+        domain.deactivate("companion_conversations", conversation_id)
+
     def send(self, conversation_id: str, message: str, *, mode: str = "") -> TurnResult:
         return self.orchestrator.send(conversation_id, message, mode=mode)
 
@@ -430,10 +526,146 @@ class RomanceStudioService:
     def export_memories(self, character_id: str) -> Any:
         return self.memory.export(character_id)
 
+    def voice_engines(self) -> tuple[str, ...]:
+        """The voice engines the Studio can name (``auto`` first)."""
+        from core.romance.voice import ENGINE_NAMES
+
+        return tuple(ENGINE_NAMES)
+
+    # -- models -----------------------------------------------------------
+
+    def model_choices(self) -> tuple[ModelChoice, ...]:
+        """Every language model a character may be assigned, with its readiness.
+
+        Read from the project's own catalog through the router, so the Studio can
+        never disagree with the Model Manager about what exists. With no Model
+        Manager available the result is an empty tuple (the window then says so).
+        """
+        router = self.model_router()
+        if router is None:
+            return ()
+        try:
+            return tuple(
+                ModelChoice(
+                    key=resolved.key,
+                    title=resolved.title or resolved.key,
+                    engine=resolved.engine,
+                    available=bool(resolved.available and resolved.path is not None),
+                    detail=resolved.detail,
+                )
+                for resolved in router.choices()
+            )
+        except Exception:
+            return ()
+
+    def model_key(self, character_id: str) -> str:
+        """The model a character is assigned, or ``""`` for the Studio default."""
+        try:
+            return str(self.characters.get(character_id).character.model_key or "")
+        except Exception:
+            return ""
+
+    def assign_model(self, character_id: str, model_key: str) -> Any:
+        """Assign a language model to a character (persisted on its record)."""
+        return self.characters.set_model(character_id, model_key=model_key)
+
+    # -- studio settings --------------------------------------------------
+
+    def settings(self) -> dict[str, str]:
+        """Every Studio setting, with its documented default filled in."""
+        values: dict[str, str] = {}
+        for key, _label, _hint in SETTING_LABELS:
+            values[key] = self.storage.get_setting(key, _default_setting(key))
+        return values
+
+    def setting(self, key: str, default: str = "") -> str:
+        return self.storage.get_setting(key, default or _default_setting(key))
+
+    def set_setting(self, key: str, value: str) -> str:
+        """Write one Studio setting, clamped to its documented range."""
+        if key not in {k for k, _l, _h in SETTING_LABELS}:
+            raise ValueError(f"unknown Studio setting {key!r}")
+        clean = _clamp_setting(key, str(value))
+        self.storage.set_setting(key, clean)
+        return clean
+
+    def update_settings(self, **values: str) -> dict[str, str]:
+        """Write several settings at once and return the whole map."""
+        for key, value in values.items():
+            self.set_setting(key, value)
+        return self.settings()
+
+    def reset_settings(self) -> dict[str, str]:
+        """Return every Studio setting to its documented default."""
+        for key, _label, _hint in SETTING_LABELS:
+            self.storage.set_setting(key, _default_setting(key))
+        return self.settings()
+
+    def setting_choices(self, key: str) -> tuple[tuple[str, str], ...]:
+        """The real choices for a dropdown setting, ``(value, label)`` pairs."""
+        if key == SETTING_DEFAULT_MODEL:
+            return tuple((choice.key, choice.label()) for choice in self.model_choices())
+        if key == SETTING_DEFAULT_MODE:
+            return tuple((k, title) for k, title, _s in self.modes())
+        if key == SETTING_DEFAULT_CONTENT_LEVEL:
+            from core.romance.roleplay import CONTENT_LEVELS
+
+            return tuple((level, level) for level in CONTENT_LEVELS)
+        if key == SETTING_VOICE_ENGINE:
+            return tuple((engine, engine) for engine in self.voice_engines())
+        if key == SETTING_INTERFACE_LANGUAGE:
+            return (("en", "English"), ("ar", "العربية"))
+        return ()
+
+    # -- personality, profile items, boundaries ---------------------------
+
+    def personality(self, character_id: str) -> dict[str, Any]:
+        """A character's editable personality as a plain dict of dial values."""
+        from core.romance.personality import DEFAULT_DIAL, DIALS
+
+        bundle = self.characters.get(character_id)
+        row = bundle.personality
+        values: dict[str, Any] = dict.fromkeys(DIALS, DEFAULT_DIAL)
+        if row is not None:
+            for name in DIALS:
+                value = getattr(row, name, None)
+                if value is not None:
+                    values[name] = float(value)
+            values["response_length"] = getattr(row, "response_length", "balanced")
+            values["dialect"] = getattr(row, "dialect", "")
+            values["instructions"] = getattr(row, "instructions", "")
+        else:
+            values["response_length"] = "balanced"
+            values["dialect"] = ""
+            values["instructions"] = ""
+        return values
+
+    def set_personality(self, character_id: str, values: dict[str, Any]) -> Any:
+        return self.characters.set_personality(character_id, values)
+
+    def add_interest(self, character_id: str, label: str, *, kind: str = "interest") -> Any:
+        return self.characters.add_profile_item(character_id, kind=kind, label=label)
+
+    def remove_interest(self, character_id: str, item_id: str) -> Any:
+        return self.characters.remove_profile_item(character_id, item_id)
+
+    def add_boundary(self, character_id: str, value: str, *, kind: str = "topic") -> Any:
+        return self.safety.add_boundary(character_id, value, kind=kind)
+
+    def remove_boundary(self, boundary_id: str) -> Any:
+        return self.safety.remove_boundary(boundary_id)
+
+    def boundaries(self, character_id: str) -> tuple[Any, ...]:
+        """A character's explicit conversation limits (the safety floor's list)."""
+        return self.safety.boundaries(character_id)
+
     # -- roleplay / scenarios --------------------------------------------
 
     def scenarios(self, *, category: str | None = None) -> tuple[Any, ...]:
         return self.roleplay.summaries(category=category)
+
+    def scenario(self, scenario_id: str) -> Any:
+        return self.roleplay.get_scenario(scenario_id)
 
     def create_scenario(self, title: str, **fields: Any) -> Any:
         return self.roleplay.create_scenario(title, **fields)
@@ -443,10 +675,53 @@ class RomanceStudioService:
 
         return tuple((key, CATEGORY_LABELS.get(key, key)) for key in CATEGORIES)
 
+    def content_levels(self) -> tuple[str, ...]:
+        from core.romance.roleplay import CONTENT_LEVELS
+
+        return tuple(CONTENT_LEVELS)
+
+    def add_participant(self, scenario_id: str, character_id: str, *, role: str = "") -> Any:
+        return self.roleplay.add_participant(scenario_id, character_id, role=role)
+
+    def remove_participant(self, participant_id: str) -> Any:
+        return self.roleplay.remove_participant(participant_id)
+
+    def scenario_participants(self, scenario_id: str) -> tuple[Any, ...]:
+        return self.roleplay.participants(scenario_id)
+
     def start_scenario(self, scenario_id: str, *, character_id: str = "") -> Any:
         return self.roleplay.start(scenario_id, character_id=character_id)
 
-    # -- voice ------------------------------------------------------------
+    def scenario_sessions(self, scenario_id: str) -> tuple[Any, ...]:
+        return self.roleplay.sessions(scenario_id)
+
+    def pause_scenario(self, session_id: str) -> Any:
+        return self.roleplay.pause(session_id)
+
+    def resume_scenario(self, session_id: str) -> Any:
+        return self.roleplay.resume(session_id)
+
+    def end_scenario(self, session_id: str) -> Any:
+        return self.roleplay.end(session_id)
+
+    def branch_scenario(self, session_id: str) -> Any:
+        return self.roleplay.branch(session_id)
+
+    def restart_scenario(self, session_id: str) -> Any:
+        return self.roleplay.restart(session_id)
+
+    # -- relationship editing --------------------------------------------
+
+    def set_relationship(self, character_id: str, **dimensions: float) -> Any:
+        """Set one or more relationship dimensions directly (an explicit edit)."""
+        return self.relationships.edit(character_id, **dimensions)  # type: ignore[arg-type]
+
+    def relationship_dimensions(self) -> tuple[str, ...]:
+        from core.romance.relationship import DIMENSIONS
+
+        return tuple(DIMENSIONS)
+
+    # -- voices -----------------------------------------------------------
 
     def voices(self, *, engine: str | None = None, language: str | None = None) -> tuple[Any, ...]:
         return self.voice.available_voices(engine=engine, language=language)
@@ -475,11 +750,15 @@ class RomanceStudioService:
     def set_adult_mode(self, enabled: bool, *, confirmed: bool = False) -> bool:
         return bool(self.safety.set_adult_mode(enabled, confirmed=confirmed))
 
-    def add_boundary(self, character_id: str, value: str, *, kind: str = "topic") -> Any:
-        return self.safety.add_boundary(character_id, value, kind=kind)
+    def confirm_eligibility(self, character_id: str) -> Any:
+        """Record an explicit adult-eligibility confirmation for a character."""
+        return self.safety.confirm_eligibility(character_id)
 
-    def boundaries(self, character_id: str) -> tuple[Any, ...]:
-        return self.safety.boundaries(character_id)
+    def character_is_eligible(self, character_id: str) -> bool:
+        return bool(self.safety.character_is_eligible(character_id))
+
+    def character_is_adult(self, character_id: str) -> bool:
+        return bool(self.safety.character_is_adult(character_id))
 
 
-__all__ = ["CharacterRow", "RomanceStudioService", "StudioStatus"]
+__all__ = ["CharacterRow", "ModelChoice", "RomanceStudioService", "StudioStatus"]

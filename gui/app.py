@@ -1096,6 +1096,7 @@ class FaydGUI:
             "_scene_studio_dialog",
             "_code_studio_dialog",
             "_workplace_dialog",
+            "_romance_dialog",
         ):
             dialog = getattr(self, attr, None)
             if dialog is not None:
