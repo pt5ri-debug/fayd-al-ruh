@@ -1098,10 +1098,36 @@ Arabic is kept as secondary aliases where useful.
   clearly-labelled **example** characters (`SEED_MARKER`, all known adults; no real
   person is depicted) created only on an explicit `seed_examples()` call. The gate
   grew to 34 judgements (the Phase-2 ones include the human-passing identity, the
-  safety floor, the adult-age negative control, and the import refusal). Later
-  phases add the conversation modes, the relationship engine, the memory manager,
-  the roleplay engine, the model router, the voice adapter, the safety manager,
-  the orchestrator, and the window + CLI.
+  safety floor, the adult-age negative control, and the import refusal). **Phase 3
+  (local model integration)** adds the router and the evaluation facility, both
+  thin delegations over the existing Model Manager — the Studio owns no downloader,
+  registry, or runtime. `core/romance/routing.py` is `CompanionModelRouter`:
+  `resolve(key)` maps a character's or a mode's assigned model to the exact file
+  the manager already knows (an unknown or stale key falls back to the first
+  *available* model, never a crash), `status()`/`health()` report whether it is
+  loaded and ready **read from the manager's own state**, `load`/`unload`/`test`
+  drive the manager (a failed load is an `OperationResult`, not an exception),
+  `memory_estimate`/`preflight`/`resources` return the manager's estimates with
+  their uncertainty and an honest `None`, `rank`/`fallback_plan` use the manager's
+  explainable ranking against the `companion` task, `download_hint` returns the
+  **governed command as a string** (the router never fetches), and
+  `begin_generation`/`should_stop` provide a cancellable, expiring handle. Safe
+  defaults are CPU-first and bounded (`SAFE_CONTEXT` 4096, `SAFE_MAX_TOKENS` 512,
+  `gpu_layers=0`). A `catalog` seam (a callable) lets a test drive the whole router
+  with a fake catalog and a fake runtime through the manager's own
+  `adapter_factory`. `core/romance/model_eval.py` is `ModelEvaluator`: a small,
+  fixed probe battery (Arabic and English quality, personality consistency,
+  emotional coherence, long context, roleplay continuity, latency, memory,
+  stability) run through an injectable `runner`, reporting **measured on this
+  machine** numbers — and `not measured` with the real next step when no model is
+  installed, never a fabricated score; `compare()` renders a comparative report.
+  The gate grew to **41 judgements** (Phase-3 ones include two negative controls —
+  no model must not be reported ready, a failed load must be reported not raised —
+  and the evaluation's not-measured control). Docs:
+  `docs/romance_companion/MODEL_INTEGRATION.md` and `HARDWARE_COMPATIBILITY.md`.
+  Later phases add the conversation modes, the relationship engine, the memory
+  manager, the roleplay engine, the voice adapter, the safety manager, the
+  orchestrator, and the window + CLI.
   It loads no model and reaches no network on import.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,

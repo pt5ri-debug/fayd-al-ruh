@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.model_manager import ModelManager
 from core.romance import (
     RECORDS,
     RETENTION_ANONYMIZE,
@@ -44,6 +45,7 @@ from core.romance import (
 from core.romance.characters import CharacterDraft, CharacterError, CharacterManager
 from core.romance.database import RomanceLoadReport
 from core.romance.model import CompanionMemory, CompanionMessage, utc_now
+from core.romance.model_eval import ModelEvaluator
 from core.romance.personality import (
     SAFETY_FLOOR,
     CharacterPersonalityEngine,
@@ -142,6 +144,38 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "safety-floor",
     ),
     StudioJudgement("the seeded examples are labelled and all adults", "seed-examples"),
+    # -- Phase 3: the model router and the evaluation facility ----------------
+    StudioJudgement(
+        "the router resolves a model choice through the manager",
+        "router-resolves",
+    ),
+    StudioJudgement(
+        "the router reports honestly when no model is installed",
+        "negative-no-model",
+        note="negative control: no model must not be reported as ready",
+    ),
+    StudioJudgement(
+        "a failed load is reported, never raised",
+        "negative-load-failure",
+        note="negative control: a load that fails returns an honest OperationResult",
+    ),
+    StudioJudgement(
+        "the safe settings are CPU-first and bounded",
+        "router-safe-settings",
+    ),
+    StudioJudgement(
+        "the evaluation reports not-measured when no model is present",
+        "negative-eval-no-model",
+        note="negative control: no model must not print a fabricated score",
+    ),
+    StudioJudgement(
+        "a measured evaluation scores every dimension",
+        "eval-measured",
+    ),
+    StudioJudgement(
+        "a generation handle can be cancelled and times out",
+        "router-cancel",
+    ),
 )
 
 
@@ -157,6 +191,98 @@ def _new_character(storage: CompanionStorageService, name: str = "Layla") -> Any
 
 def _manager(storage: CompanionStorageService) -> CharacterManager:
     return CharacterManager(storage)
+
+
+@contextmanager
+def _router(*, available: bool = True, fail_load: bool = False) -> Iterator[Any]:
+    """A router on a throwaway data folder with a fake runtime and a fake catalog.
+
+    The real :class:`~core.model_manager.ModelManager` is used (with a fake adapter
+    through its own ``adapter_factory`` seam), so the registration, listing, load,
+    and unload paths are the real ones -- only the engine is faked.
+    """
+    from core.romance.routing import CompanionModelRouter
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        model_path: Path | None = None
+        if available:
+            model_path = root / "model.gguf"
+            model_path.write_bytes(b"GGUF\x00\x00\x00\x00" + b"\x00" * 64)
+        adapter = _FakeAdapter(fail_load=fail_load)
+        manager = ModelManager(root / "data", adapter_factory=lambda runtime: adapter)
+        models = (
+            _FakeCatalogModel(
+                "natasha-default", title="Companion", path=model_path, available=available
+            ),
+        )
+        yield CompanionModelRouter(
+            manager, catalog=lambda: models, default_key="natasha-default"
+        )
+
+
+@dataclass
+class _FakeCatalogModel:
+    """A catalog entry shaped like ``core.language_models.LanguageModel``."""
+
+    key: str
+    title: str = ""
+    engine: str = "natasha"
+    path: Path | None = None
+    available: bool = False
+    detail: str = ""
+    download_command: str = ""
+
+
+class _FakeAdapter:
+    """A runtime adapter that loads and answers without a real engine."""
+
+    name = "fayd-inprocess"
+
+    def __init__(self, *, fail_load: bool = False) -> None:
+        self._loaded: Path | None = None
+        self._fail_load = fail_load
+
+    def capabilities(self) -> Any:
+        from core.model_runtime import RuntimeCapabilities
+
+        return RuntimeCapabilities(can_load=True, can_unload=True, can_infer=True)
+
+    def status(self) -> Any:
+        from core.model_runtime import RuntimeStatus
+
+        return RuntimeStatus(runtime=self.name, available=True)
+
+    def validate(self, probe: Any) -> tuple[bool, str]:
+        return True, ""
+
+    def discover(self) -> tuple[str, ...]:
+        return ()
+
+    def load(self, model_path: Path, *, settings: Any = None) -> Any:
+        from core.model_runtime import LoadResult
+
+        if self._fail_load:
+            return LoadResult(ok=False, runtime=self.name, detail="simulated load failure")
+        self._loaded = Path(model_path)
+        return LoadResult(ok=True, runtime=self.name, model_path=Path(model_path))
+
+    def unload(self) -> Any:
+        from core.model_runtime import LoadResult
+
+        self._loaded = None
+        return LoadResult(ok=True, runtime=self.name)
+
+    def loaded(self) -> bool:
+        return self._loaded is not None
+
+    def loaded_path(self) -> Path | None:
+        return self._loaded
+
+    def infer(self, prompt: str, *, settings: Any = None) -> Any:
+        from core.model_runtime import InferenceResult
+
+        return InferenceResult(ok=True, runtime=self.name, text="hello", seconds=0.01)
 
 
 def _judgement_holds(judgement: StudioJudgement) -> bool:
@@ -549,6 +675,63 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
                 for bundle in examples
             )
             return labelled and adults
+
+    # -- Phase 3: the model router and the evaluation facility ------------
+    if kind == "router-resolves":
+        with _router() as router:
+            resolved = router.resolve("natasha-default")
+            return resolved.key == "natasha-default" and resolved.available is True
+
+    if kind == "negative-no-model":
+        with _router(available=False) as router:
+            resolved = router.resolve()
+            health = router.status()
+            return resolved.available is False and health.ready is False
+
+    if kind == "negative-load-failure":
+        with _router(fail_load=True) as router:
+            result = router.load("natasha-default")
+            return result.ok is False and "load failure" in result.detail
+
+    if kind == "router-safe-settings":
+        from core.romance.routing import SAFE_CONTEXT, SAFE_MAX_TOKENS
+
+        with _router() as router:
+            settings = router.safe_settings()
+            return (
+                settings.context == SAFE_CONTEXT
+                and settings.max_tokens == SAFE_MAX_TOKENS
+                and settings.gpu_layers == 0
+            )
+
+    if kind == "negative-eval-no-model":
+        with _router(available=False) as router:
+            evaluation = ModelEvaluator(router).evaluate()
+            return evaluation.measured is False and evaluation.overall() == 0.0
+
+    if kind == "eval-measured":
+        with _router() as router:
+            evaluation = ModelEvaluator(router, runner=lambda prompt: "a warm reply").evaluate()
+            dimensions = {score.dimension for score in evaluation.scores}
+            return (
+                evaluation.measured is True
+                and "english_quality" in dimensions
+                and "latency" in dimensions
+                and evaluation.overall() > 0.0
+            )
+
+    if kind == "router-cancel":
+        import time
+
+        with _router() as router:
+            handle = router.begin_generation("natasha-default", timeout_seconds=5)
+            first = router.should_stop(handle) is False
+            handle.cancel()
+            second = router.should_stop(handle) is True
+            expired = router.begin_generation("natasha-default", timeout_seconds=0.01)
+            time.sleep(0.02)
+            third = router.should_stop(expired) is True
+            return first and second and third
 
     return False
 
