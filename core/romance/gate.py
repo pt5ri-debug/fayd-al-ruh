@@ -41,8 +41,15 @@ from core.romance import (
     RomanceDatabase,
     RomanceDatabaseError,
 )
+from core.romance.characters import CharacterDraft, CharacterError, CharacterManager
 from core.romance.database import RomanceLoadReport
 from core.romance.model import CompanionMemory, CompanionMessage, utc_now
+from core.romance.personality import (
+    SAFETY_FLOOR,
+    CharacterPersonalityEngine,
+    human_passing_identity,
+)
+from core.romance.seed import SEED_MARKER, seed_examples
 
 
 @dataclass(frozen=True)
@@ -101,6 +108,40 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "isolation",
         note="a second character's memory is never returned for the first",
     ),
+    # -- Phase 2: the Character Studio ----------------------------------------
+    StudioJudgement("a character is created and read back whole", "character-round-trip"),
+    StudioJudgement("personality dials are validated and clamped", "personality-validated"),
+    StudioJudgement(
+        "the tone block says it shapes the voice, never the claims",
+        "personality-tone-only",
+    ),
+    StudioJudgement(
+        "an adult-eligible character needs a known age of 18 or more",
+        "negative-adult-age",
+        note="negative control: an unknown or under-18 age cannot be adult-eligible",
+    ),
+    StudioJudgement("a duplicate copies the source's children", "character-duplicate"),
+    StudioJudgement("a character export/import round-trips", "character-export-import"),
+    StudioJudgement(
+        "a foreign file is refused on import",
+        "negative-import",
+        note="negative control: a non-character file must not be half-read",
+    ),
+    StudioJudgement("archiving hides a character and restoring shows it", "character-archive"),
+    StudioJudgement(
+        "deleting a character requires an explicit retention choice",
+        "character-delete-retention",
+    ),
+    StudioJudgement(
+        "the human-passing identity is a person and never an AI",
+        "human-passing",
+        note="the owner's decision: in-conversation the character stays in character",
+    ),
+    StudioJudgement(
+        "the safety floor names adults and revocable consent",
+        "safety-floor",
+    ),
+    StudioJudgement("the seeded examples are labelled and all adults", "seed-examples"),
 )
 
 
@@ -112,6 +153,10 @@ def _storage() -> Iterator[CompanionStorageService]:
 
 def _new_character(storage: CompanionStorageService, name: str = "Layla") -> Any:
     return storage.domain.create("companion_characters", owner="natasha", name=name)
+
+
+def _manager(storage: CompanionStorageService) -> CharacterManager:
+    return CharacterManager(storage)
 
 
 def _judgement_holds(judgement: StudioJudgement) -> bool:
@@ -344,6 +389,166 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
                 "companion_memories", where="character_id = ?", params=(first.record_id,)
             )
             return len(mine) == 1 and mine[0].content == "tea"
+
+    if kind == "character-round-trip":
+        with _storage() as storage:
+            manager = _manager(storage)
+            created = manager.create(
+                CharacterDraft(
+                    owner="natasha",
+                    name="Layla",
+                    fictional_age=27,
+                    personality={"warmth": 0.9, "response_length": "brief"},
+                    profile_items=({"kind": "interest", "label": "poetry"},),
+                    boundaries=({"kind": "topic", "value": "no politics"},),
+                )
+            )
+            reloaded = manager.get(created.id)
+            return (
+                reloaded.name == "Layla"
+                and reloaded.personality is not None
+                and reloaded.personality.warmth == 0.9
+                and reloaded.interests() == ("poetry",)
+                and len(reloaded.boundaries) == 1
+            )
+
+    if kind == "personality-validated":
+        from core.romance.personality import PersonalityError
+
+        engine = CharacterPersonalityEngine()
+        clean = engine.validate({"warmth": 5, "response_length": "brief"})
+        personality_refused = False
+        try:
+            engine.validate({"nonsense": 1})
+        except PersonalityError:
+            personality_refused = True
+        return clean["warmth"] == 1.0 and personality_refused
+
+    if kind == "personality-tone-only":
+        from core.romance.model import CharacterPersonality
+
+        block = CharacterPersonalityEngine().render(
+            CharacterPersonality(record_id="PER-1", character_id="CHR-1", warmth=0.9)
+        )
+        return "tone guidance" in block and "never what you" in block
+
+    if kind == "negative-adult-age":
+        with _storage() as storage:
+            manager = _manager(storage)
+            age_refusals = 0
+            for candidate_age in (None, 17):
+                try:
+                    manager.create(
+                        CharacterDraft(owner="natasha", name="X", fictional_age=candidate_age, adult_eligible=True)
+                    )
+                except CharacterError:
+                    age_refusals += 1
+            ok = manager.create(
+                CharacterDraft(owner="natasha", name="Ok", fictional_age=18, adult_eligible=True)
+            )
+            return age_refusals == 2 and ok.character.adult_eligible is True
+
+    if kind == "character-duplicate":
+        with _storage() as storage:
+            manager = _manager(storage)
+            source = manager.create(
+                CharacterDraft(
+                    owner="natasha",
+                    name="Layla",
+                    fictional_age=27,
+                    personality={"warmth": 0.8},
+                    profile_items=({"kind": "interest", "label": "poetry"},),
+                )
+            )
+            copy = manager.duplicate(source.id)
+            return (
+                copy.id != source.id
+                and copy.interests() == ("poetry",)
+                and copy.personality is not None
+                and copy.personality.warmth == 0.8
+            )
+
+    if kind == "character-export-import":
+        with _storage() as storage:
+            manager = _manager(storage)
+            source = manager.create(
+                CharacterDraft(
+                    owner="natasha",
+                    name="Layla",
+                    fictional_age=27,
+                    personality={"playfulness": 0.7},
+                    profile_items=({"kind": "interest", "label": "poetry"},),
+                )
+            )
+            target = Path(storage.root) / "layla.json"
+            manager.export_character(source.id, target)
+            imported = manager.import_character(target, name="Layla 2")
+            return (
+                imported.name == "Layla 2"
+                and imported.interests() == ("poetry",)
+                and imported.personality is not None
+                and imported.personality.playfulness == 0.7
+            )
+
+    if kind == "negative-import":
+        with _storage() as storage:
+            manager = _manager(storage)
+            bad = Path(storage.root) / "bad.json"
+            bad.write_text('{"format": "something-else"}', encoding="utf-8")
+            try:
+                manager.import_character(bad)
+            except CharacterError:
+                return True
+            return False
+
+    if kind == "character-archive":
+        with _storage() as storage:
+            manager = _manager(storage)
+            made = manager.create(CharacterDraft(owner="natasha", name="Layla", fictional_age=27))
+            manager.archive(made.id)
+            hidden = manager.list_characters() == []
+            shown = len(manager.list_characters(include_archived=True)) == 1
+            manager.restore_from_archive(made.id)
+            return hidden and shown and len(manager.list_characters()) == 1
+
+    if kind == "character-delete-retention":
+        with _storage() as storage:
+            manager = _manager(storage)
+            made = manager.create(CharacterDraft(owner="natasha", name="Layla", fictional_age=27))
+            delete_refused = False
+            try:
+                manager.delete(made.id, choice="whatever")
+            except CharacterError:
+                delete_refused = True
+            report = manager.delete(made.id, choice=RETENTION_PURGE)
+            return delete_refused and report.deactivated
+
+    if kind == "human-passing":
+        text = human_passing_identity("Layla", biography="a designer")
+        return (
+            "You are a person" in text
+            and "never describe yourself as a program" in text
+            and "a designer" in text
+        )
+
+    if kind == "safety-floor":
+        return "18 or older" in SAFETY_FLOOR and "consent" in SAFETY_FLOOR
+
+    if kind == "seed-examples":
+        with _storage() as storage:
+            manager = _manager(storage)
+            examples = seed_examples(manager)
+            if not examples:
+                return False
+            labelled = all(
+                bundle.character.metadata.get("seed") == SEED_MARKER for bundle in examples
+            )
+            adults = all(
+                isinstance(bundle.character.fictional_age, int)
+                and bundle.character.fictional_age >= 18
+                for bundle in examples
+            )
+            return labelled and adults
 
     return False
 

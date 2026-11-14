@@ -22,6 +22,17 @@ Public surface for Phase 1 (foundation and database)::
 
 from __future__ import annotations
 
+from core.romance.characters import (
+    CHARACTER_EXPORT_FORMAT,
+    CHARACTER_EXPORT_VERSION,
+    DEFAULT_MODE,
+    PROFILE_ITEM_KINDS,
+    CharacterBundle,
+    CharacterDraft,
+    CharacterError,
+    CharacterManager,
+    CharacterSummary,
+)
 from core.romance.database import (
     BackupReport,
     RomanceDatabase,
@@ -53,6 +64,14 @@ from core.romance.model import (
     make_id,
     utc_now,
 )
+from core.romance.personality import (
+    DIALS,
+    RESPONSE_LENGTHS,
+    SAFETY_FLOOR,
+    CharacterPersonalityEngine,
+    PersonalityError,
+    human_passing_identity,
+)
 from core.romance.repository import PREFIXES, RomanceRepository
 from core.romance.schema import MIGRATIONS, SCHEMA_VERSION, TABLES, Column, TableSpec
 from core.romance.storage import (
@@ -66,20 +85,33 @@ from core.romance.storage import (
 )
 
 __all__ = [
+    "CHARACTER_EXPORT_FORMAT",
+    "CHARACTER_EXPORT_VERSION",
+    "DEFAULT_MODE",
+    "DIALS",
     "ENTITY_NAMES",
     "MIGRATIONS",
     "PREFIXES",
+    "PROFILE_ITEM_KINDS",
     "RECORDS",
+    "RESPONSE_LENGTHS",
     "RETENTION_ANONYMIZE",
     "RETENTION_CHOICES",
     "RETENTION_KEEP",
     "RETENTION_PURGE",
+    "SAFETY_FLOOR",
     "SCHEMA_VERSION",
     "TABLES",
     "BackupReport",
     "CharacterBoundary",
+    "CharacterBundle",
+    "CharacterDraft",
+    "CharacterError",
+    "CharacterManager",
     "CharacterPersonality",
+    "CharacterPersonalityEngine",
     "CharacterProfileItem",
+    "CharacterSummary",
     "CharacterVoiceProfile",
     "Column",
     "CompanionAuditEntry",
@@ -94,6 +126,7 @@ __all__ = [
     "CompanionStorageService",
     "DeleteReport",
     "ExportBundle",
+    "PersonalityError",
     "RecordBase",
     "RelationshipEventRecord",
     "RelationshipState",
@@ -107,6 +140,7 @@ __all__ = [
     "ScenarioParticipant",
     "ScenarioSession",
     "TableSpec",
+    "human_passing_identity",
     "make_id",
     "utc_now",
 ]
