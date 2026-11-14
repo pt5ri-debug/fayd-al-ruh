@@ -1125,9 +1125,28 @@ Arabic is kept as secondary aliases where useful.
   no model must not be reported ready, a failed load must be reported not raised —
   and the evaluation's not-measured control). Docs:
   `docs/romance_companion/MODEL_INTEGRATION.md` and `HARDWARE_COMPATIBILITY.md`.
-  Later phases add the conversation modes, the relationship engine, the memory
-  manager, the roleplay engine, the voice adapter, the safety manager, the
-  orchestrator, and the window + CLI.
+  **Phase 4 (conversation modes)** adds `core/romance/modes.py` — nine modes
+  (`general`, `romantic`, `dating_simulation`, `flirting_playful`, `adult`,
+  `emotional_support`, `storytelling`, `character_roleplay`,
+  `multi_character_roleplay`), each a `ModeSpec` carrying a `system_template`, a
+  style line, a `context` rule, a `history_window`, its own `safety` lines, and
+  the `adult`/`multi_character` flags; `mode_prompt(mode, ModeContext)` renders the
+  fixed-order labelled request and **always** appends `SAFETY_FLOOR` and the
+  human-passing identity block, so no mode is reachable without them (the adult
+  mode is flagged and **off by default**); `mode_summaries(language)` is bilingual
+  and `find_mode` falls back to the general mode. `core/romance/conversation.py` is
+  `ConversationManager` over the Phase-1 tables: `start`/`get`/`list_conversations`
+  (message counts gathered in **one pass**, never a query per conversation),
+  `set_mode` (updates only the conversation row), `append` (append-only, recording
+  the **mode in force on each message**, so a mode change never rewrites history),
+  `messages`/`recent_history` (bounded by the mode's own window), `build_prompt`
+  (memory through an injected reader; a failing reader yields no block rather than
+  breaking the turn), and `resume`. The gate grew to **46 judgements** (Phase-4
+  ones include two negative controls — only the adult mode may be flagged adult,
+  and a mode change must not mutate an earlier message). Docs:
+  `docs/romance_companion/CONVERSATION_MODES.md`. Later phases add the relationship
+  engine, the memory manager, the roleplay engine, the voice adapter, the safety
+  manager, the orchestrator, and the window + CLI.
   It loads no model and reaches no network on import.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
