@@ -328,6 +328,16 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "adding one example companion adds only that one and never duplicates it",
         "discover-adds-only-the-chosen",
     ),
+    StudioJudgement(
+        "the ready-made library is complete: every archetype is present and every "
+        "character is a fully-specified adult",
+        "library-is-complete-and-adults-only",
+    ),
+    StudioJudgement(
+        "browsing the library writes nothing and adding one character adds only that one",
+        "negative-library-reads-and-adds-one",
+        note="negative control: a read must create nothing, and an add must add one",
+    ),
 )
 
 
@@ -1346,6 +1356,40 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
             # Adding it again returns the same character, never a second copy.
             again = service.add_example(name)
             return again.id == bundle.id and len(service.character_rows()) == 1
+
+    if kind == "library-is-complete-and-adults-only":
+        from core.romance.library import LIBRARY_CATEGORIES, LIBRARY_CHARACTERS
+
+        engine = CharacterPersonalityEngine()
+        if len(LIBRARY_CATEGORIES) < 5 or len(LIBRARY_CHARACTERS) < 40:
+            return False
+        seen: set[str] = set()
+        for character in LIBRARY_CHARACTERS:
+            draft = character.draft
+            # A real, stated adult age; a name; a biography; valid dials.
+            if not isinstance(character.age, int) or character.age < 18:
+                return False
+            if not draft.name.strip() or not draft.biography.strip():
+                return False
+            if character.category not in {c.key for c in LIBRARY_CATEGORIES}:
+                return False
+            engine.validate(draft.personality)
+            seen.add(character.name.casefold())
+        # Every name is distinct, so the library never collides with itself.
+        return len(seen) == len(LIBRARY_CHARACTERS)
+
+    if kind == "negative-library-reads-and-adds-one":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            library_rows = service.library_rows()
+            # Browsing the whole library is a read: nothing is created.
+            if not library_rows or list(service.character_rows()) != []:
+                return False
+            # Adding exactly one library character creates exactly one.
+            service.add_library_character(library_rows[0].name)
+            return len(service.character_rows()) == 1
 
     return False
 

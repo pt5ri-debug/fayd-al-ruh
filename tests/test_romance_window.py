@@ -364,3 +364,63 @@ def test_changing_the_mode_updates_its_note(tmp_path: Path) -> None:
         assert dialog._mode_menu["menu"].index("end") + 1 == len(service.modes())
     finally:
         _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_library_browser_lists_archetypes_and_previews_a_character(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        # The archetype menu is filled from the service's real categories.
+        categories = service.library_categories()
+        assert dialog._library_category_menu["menu"].index("end") + 1 == len(categories) + 1
+        # The list shows the whole ready-made library without creating anything.
+        assert dialog._example_list.size() == len(service.library_rows())
+        assert service.character_rows() == []
+        dialog._example_list.selection_set(0)
+        dialog._on_library_selected(0)
+        root.update()
+        assert dialog._library_preview.cget("text").strip()
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_filtering_by_archetype_narrows_the_library_and_adds_the_group(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        dialog._library_category_var.set("family")
+        root.update()
+        family = service.library_rows(category="family")
+        assert dialog._example_list.size() == len(family)
+        # "Add the whole group" creates exactly that archetype's characters.
+        dialog._add_library_category()
+        root.update()
+        assert len(service.character_rows()) == len(family)
+        assert dialog._char_list.size() == len(family)
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_header_stats_and_avatar_follow_the_real_state(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        # With nothing yet, the stat strip reads zero and the avatar is neutral.
+        assert dialog._hero_stats["characters"].cget("text") == "0"
+        service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        assert dialog._hero_stats["characters"].cget("text") == "1"
+        assert dialog._char_title.cget("text") == "Layla"
+        # The avatar canvas carries the character's initial.
+        texts = [
+            dialog._avatar.itemcget(i, "text")
+            for i in dialog._avatar.find_all()
+            if dialog._avatar.type(i) == "text"
+        ]
+        assert "L" in texts
+        # The subtitle summarises the character from its real fields.
+        assert "27" in dialog._char_subtitle.cget("text")
+    finally:
+        _close_window(root, dialog)

@@ -16,6 +16,19 @@ from __future__ import annotations
 from typing import Any
 
 from core.romance.characters import CharacterDraft, CharacterManager
+from core.romance.library import (
+    LIBRARY_CATEGORIES,
+    LIBRARY_CHARACTERS,
+    LIBRARY_MARKER,
+    LibraryCategory,
+    LibraryCharacter,
+    category_keys,
+    find_category,
+    find_library_character,
+    library_by_category,
+    library_drafts,
+    seed_library,
+)
 
 #: A marker written onto every seeded character, so an example is always
 #: distinguishable from a character the user made.
@@ -155,4 +168,19 @@ def _draft_fields(draft: CharacterDraft) -> dict[str, Any]:
     return {field.name: getattr(draft, field.name) for field in dataclasses.fields(draft)}
 
 
-__all__ = ["EXAMPLES", "SEED_MARKER", "seed_examples"]
+__all__ = [
+    "EXAMPLES",
+    "LIBRARY_CATEGORIES",
+    "LIBRARY_CHARACTERS",
+    "LIBRARY_MARKER",
+    "SEED_MARKER",
+    "LibraryCategory",
+    "LibraryCharacter",
+    "category_keys",
+    "find_category",
+    "find_library_character",
+    "library_by_category",
+    "library_drafts",
+    "seed_examples",
+    "seed_library",
+]

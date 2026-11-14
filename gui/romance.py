@@ -173,6 +173,42 @@ class CharacterRow:
         return f"{star}{self.name}" + (f" ({self.nickname})" if self.nickname else "")
 
 
+@dataclass(frozen=True)
+class LibraryRow:
+    """One row of the ready-made character library, for the Discover picker."""
+
+    name: str
+    nickname: str = ""
+    category: str = ""
+    category_title: str = ""
+    age: int | None = None
+    gender: str = ""
+    blurb: str = ""
+    mode: str = ""
+    tags: tuple[str, ...] = ()
+    present: bool = False
+
+    def label(self) -> str:
+        mark = "✓ " if self.present else "＋ "
+        who = f"{self.name}" + (f" ({self.nickname})" if self.nickname else "")
+        bits = [b for b in (self.gender, f"{self.age}" if self.age else "") if b]
+        suffix = f" · {' · '.join(bits)}" if bits else ""
+        return f"{mark}{who}{suffix}"
+
+    def describe(self) -> str:
+        lines = [
+            f"{self.name}" + (f" ({self.nickname})" if self.nickname else ""),
+            f"{self.category_title}"
+            + (f" · {self.gender}" if self.gender else "")
+            + (f" · {self.age}" if self.age else ""),
+        ]
+        if self.blurb:
+            lines.append(self.blurb)
+        if self.mode:
+            lines.append(f"Starts in the {self.mode} mode.")
+        return "\n".join(lines)
+
+
 class RomanceStudioService:
     """The Studio's one engine, driven by the window and the CLI alike."""
 
@@ -364,6 +400,85 @@ class RomanceStudioService:
             if summary.name.casefold() == wanted:
                 return self.characters.get(summary.id)
         return self.characters.create(draft)
+
+    # -- ready-made library ----------------------------------------------
+
+    def library_categories(self) -> tuple[tuple[str, str, str, str], ...]:
+        """``(key, title, icon, summary)`` rows for every archetype."""
+        from core.romance.library import LIBRARY_CATEGORIES
+
+        return tuple(
+            (category.key, category.title, category.icon, category.summary)
+            for category in LIBRARY_CATEGORIES
+        )
+
+    def library_rows(
+        self,
+        *,
+        category: str = "",
+        search: str = "",
+    ) -> tuple[LibraryRow, ...]:
+        """The ready-made library, filtered by archetype and a text search.
+
+        A pure read: browsing the library creates nothing.
+        """
+        from core.romance.library import library_by_category
+
+        existing = {
+            summary.name.casefold()
+            for summary in self.characters.list_characters(include_archived=True)
+        }
+        wanted = (search or "").strip().casefold()
+        rows: list[LibraryRow] = []
+        for character in library_by_category(category):
+            draft = character.draft
+            haystack = " ".join(
+                (character.name, draft.nickname, draft.gender, character.blurb, " ".join(draft.tags))
+            ).casefold()
+            if wanted and wanted not in haystack:
+                continue
+            rows.append(
+                LibraryRow(
+                    name=character.name,
+                    nickname=draft.nickname,
+                    category=character.category,
+                    category_title=character.category_title(),
+                    age=character.age,
+                    gender=draft.gender,
+                    blurb=character.blurb,
+                    mode=draft.default_mode,
+                    tags=draft.tags,
+                    present=character.name.casefold() in existing,
+                )
+            )
+        return tuple(rows)
+
+    def add_library_character(self, name: str) -> Any:
+        """Add one ready-made library character by name (the Discover action).
+
+        Creates **only** the chosen character; one already present (by name) is
+        returned rather than duplicated. Raises ``ValueError`` for a name the
+        build does not ship.
+        """
+        from core.romance.library import find_library_character
+
+        character = find_library_character(name)
+        if character is None:
+            raise ValueError(f"no library companion named {name!r}")
+        wanted = character.name.casefold()
+        for summary in self.characters.list_characters(include_archived=True):
+            if summary.name.casefold() == wanted:
+                return self.characters.get(summary.id)
+        return self.characters.create(character.draft)
+
+    def seed_library_category(self, category: str = "") -> int:
+        """Create every library character in ``category`` (all when blank).
+
+        Returns how many were newly created; an existing character is skipped.
+        """
+        from core.romance.library import seed_library
+
+        return len(seed_library(self.characters, category=category))
 
     def create_character(
         self,
@@ -761,4 +876,4 @@ class RomanceStudioService:
         return bool(self.safety.character_is_adult(character_id))
 
 
-__all__ = ["CharacterRow", "ModelChoice", "RomanceStudioService", "StudioStatus"]
+__all__ = ["CharacterRow", "LibraryRow", "ModelChoice", "RomanceStudioService", "StudioStatus"]

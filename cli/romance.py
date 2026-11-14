@@ -128,6 +128,14 @@ def _build_parser() -> argparse.ArgumentParser:
     _sub(sub, "discover", help="The clearly-labelled example companions this build ships.")
     add_example = _sub(sub, "add-example", help="Add one shipped example companion by name.")
     add_example.add_argument("name")
+    _sub(sub, "library-categories", help="The ready-made character archetypes.")
+    library = _sub(sub, "library", help="The ready-made companion library, by archetype.")
+    library.add_argument("--category", default="")
+    library.add_argument("--search", default="")
+    add_library = _sub(sub, "add-library", help="Add one ready-made library companion by name.")
+    add_library.add_argument("name")
+    seed_library = _sub(sub, "seed-library", help="Create every library companion in an archetype.")
+    seed_library.add_argument("--category", default="")
 
     for name, help_text in (
         ("favorite", "Star a character."),
@@ -392,6 +400,46 @@ def run_add_example(args: argparse.Namespace) -> int:
         {"character_id": bundle.id, "name": bundle.name},
         f"Added {bundle.name} ({bundle.id}).",
     )
+    return EXIT_OK
+
+
+def run_library_categories(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.library_categories()
+    payload = [
+        {"key": key, "title": title, "icon": icon, "summary": summary}
+        for key, title, icon, summary in rows
+    ]
+    lines = [f"{icon} {title} [{key}] — {summary}" for key, title, icon, summary in rows]
+    _emit(args, payload, "\n".join(lines) or "No archetypes are shipped.")
+    return EXIT_OK
+
+
+def run_library(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.library_rows(category=args.category, search=args.search)
+    payload = [row.__dict__ for row in rows]
+    lines = [f"{row.label()}\n    {row.blurb}" for row in rows]
+    _emit(args, payload, "\n".join(lines) or "No library companions match.")
+    return EXIT_OK
+
+
+def run_add_library(args: argparse.Namespace) -> int:
+    service = _service(args)
+    bundle = service.add_library_character(args.name)
+    _emit(
+        args,
+        {"character_id": bundle.id, "name": bundle.name},
+        f"Added {bundle.name} ({bundle.id}).",
+    )
+    return EXIT_OK
+
+
+def run_seed_library(args: argparse.Namespace) -> int:
+    service = _service(args)
+    created = service.seed_library_category(args.category)
+    scope = args.category or "every archetype"
+    _emit(args, {"created": created}, f"Created {created} companion(s) for {scope}.")
     return EXIT_OK
 
 
@@ -689,6 +737,10 @@ _HANDLERS = {
     "show": run_show,
     "discover": run_discover,
     "add-example": run_add_example,
+    "library-categories": run_library_categories,
+    "library": run_library,
+    "add-library": run_add_library,
+    "seed-library": run_seed_library,
     "favorite": run_favorite,
     "unfavorite": run_unfavorite,
     "archive": run_archive,
