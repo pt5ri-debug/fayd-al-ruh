@@ -206,7 +206,7 @@ class RoleplayEngine:
             "scenario_participants",
             where="scenario_id = ?",
             params=(scenario_id,),
-            order_by="\"order\", record_id",
+            order_by="sort_order, record_id",
         )
         return tuple(rows)
 

@@ -1181,8 +1181,17 @@ Arabic is kept as secondary aliases where useful.
   creates a **new** session pointing back at the one it forked from, so a story's
   history is never rewritten. The gate grew to **60 judgements** (Phase-7 ones
   include the no-duplicate-cast negative control). Docs:
-  `docs/romance_companion/DATING_AND_ROLEPLAY.md`. Later phases add the voice
-  adapter, the safety manager, the orchestrator, and the window + CLI.
+  `docs/romance_companion/DATING_AND_ROLEPLAY.md`. **Phase 8 (voice)** adds
+  `core/romance/voice.py` — `CompanionVoiceAdapter`, a **thin adapter** over the
+  project's own speech stack (no second TTS/STT engine): each character's own
+  `CharacterVoiceProfile` (engine, voice_key, language, speed/pitch/volume, mood,
+  enabled), `available_voices`/`voices_for_language` built from the project's own
+  `voice_sections` so only voices this machine really has are offered, and
+  `read_aloud`/`speak`/`stop`/`transcribe` through the project's own `TextReader`
+  and recognizer — best-effort, so a missing engine never breaks a scene. The gate
+  grew to **63 judgements** (Phase-8 ones include the no-invented-voice negative
+  control). Docs: `docs/romance_companion/VOICE_INTEGRATION.md`. Later phases add the safety
+  manager, the orchestrator, and the window + CLI.
   It loads no model and reaches no network on import.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
