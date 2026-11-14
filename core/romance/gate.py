@@ -176,6 +176,29 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "a generation handle can be cancelled and times out",
         "router-cancel",
     ),
+    # -- Phase 4: the conversation modes -------------------------------------
+    StudioJudgement(
+        "the nine conversation modes render distinct safety-carrying prompts",
+        "modes-distinct",
+    ),
+    StudioJudgement(
+        "the safety floor is in every mode's prompt",
+        "modes-safety-floor",
+    ),
+    StudioJudgement(
+        "only the adult mode is flagged adult",
+        "negative-only-adult-mode",
+        note="negative control: no other mode may be an adult mode",
+    ),
+    StudioJudgement(
+        "a mode change preserves history and never rewrites a row",
+        "negative-mode-change-preserves-history",
+        note="negative control: switching modes must not mutate an earlier message",
+    ),
+    StudioJudgement(
+        "an unknown mode falls back to the general mode",
+        "modes-unknown-fallback",
+    ),
 )
 
 
@@ -732,6 +755,49 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
             time.sleep(0.02)
             third = router.should_stop(expired) is True
             return first and second and third
+
+    # -- Phase 4: the conversation modes ---------------------------------
+    if kind == "modes-distinct":
+        from core.romance.modes import MODES, ModeContext, mode_prompt
+
+        context = ModeContext(name="Layla")
+        prompts = {key: mode_prompt(spec, context) for key, spec in MODES.items()}
+        return len(set(prompts.values())) == len(MODES) and len(MODES) == 9
+
+    if kind == "modes-safety-floor":
+        from core.romance.modes import MODES, ModeContext, mode_prompt
+        from core.romance.personality import SAFETY_FLOOR as floor
+
+        context = ModeContext(name="Layla")
+        return all(floor in mode_prompt(spec, context) for spec in MODES.values())
+
+    if kind == "negative-only-adult-mode":
+        from core.romance.modes import MODE_ADULT, MODES
+
+        adult_keys = {key for key, spec in MODES.items() if spec.adult}
+        return adult_keys == {MODE_ADULT}
+
+    if kind == "negative-mode-change-preserves-history":
+        from core.romance.conversation import ROLE_USER, ConversationManager
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            chat = ConversationManager(storage)
+            conversation = chat.start(character_id, mode="general")
+            first = chat.append(conversation.record_id, "hello", role=ROLE_USER)
+            chat.set_mode(conversation.record_id, "romantic")
+            chat.append(conversation.record_id, "hi", role="assistant")
+            turns = chat.messages(conversation.record_id)
+            return (
+                turns[0].record_id == first.record_id
+                and turns[0].mode == "general"
+                and turns[1].mode == "romantic"
+            )
+
+    if kind == "modes-unknown-fallback":
+        from core.romance.modes import MODE_GENERAL, find_mode
+
+        return find_mode("does-not-exist").key == MODE_GENERAL and find_mode(None).key == MODE_GENERAL
 
     return False
 
