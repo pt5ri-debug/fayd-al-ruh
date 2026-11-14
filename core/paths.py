@@ -354,6 +354,27 @@ def character_learning_dir() -> Path:
     return characters_dir() / "learning"
 
 
+def romance_dir() -> Path:
+    """Where the Romance & Companion Studio keeps its data (``data/romance``).
+
+    The Studio (see :mod:`core.romance`) stores its relational database and its
+    backups under this folder. It is git-ignored, so private conversations,
+    character libraries, and relationship records never dirty the working tree or
+    bloat a program update. ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "romance"
+
+
+def romance_db_path() -> Path:
+    """The Studio relational database file (``data/romance/romance.db``)."""
+    return romance_dir() / "romance.db"
+
+
+def romance_backups_dir() -> Path:
+    """Where the Studio writes database backups (``data/romance/backups``)."""
+    return romance_dir() / "backups"
+
+
 def config_dir() -> Path:
     """Where the user's saved character configuration lives (``data/config``).
 
@@ -734,6 +755,9 @@ __all__ = [
     "piper_models_dir",
     "presentation_models_dir",
     "qwen_speech_models_dir",
+    "romance_backups_dir",
+    "romance_db_path",
+    "romance_dir",
     "self_improvement_backups_dir",
     "self_improvement_dir",
     "self_improvement_experiments_dir",
