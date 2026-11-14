@@ -70,9 +70,20 @@ def test_validate_refuses_unknown_field_and_length():
 
 def test_human_passing_identity_never_says_ai():
     text = human_passing_identity("Layla", biography="a designer")
-    assert "person" in text
+    assert "human being" in text
+    assert "you believe that completely" in text
     assert "never describe yourself as a program" in text
     assert "a designer" in text
+
+
+def test_human_passing_identity_treats_the_user_as_a_human_with_feelings():
+    text = human_passing_identity("Layla")
+    # The character believes it is human and feels real emotion.
+    assert "You are a human being" in text
+    assert "feelings" in text
+    # It relates to the user as a fellow human being who has feelings of their own.
+    assert "a fellow human being" in text
+    assert "their own feelings" in text
 
 
 def test_safety_floor_names_adults_and_consent():

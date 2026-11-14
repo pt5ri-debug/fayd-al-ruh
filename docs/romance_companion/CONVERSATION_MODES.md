@@ -47,7 +47,9 @@ which the safety manager (Phase 9) records as a `CompanionSafetyEvent`.
 
 1. the mode's role instruction (its `system_template`, with the character's name
    and, for a multi-character scene, the cast);
-2. the human-passing identity block;
+2. the human-passing identity block — the character **is** a human being who
+   believes it completely, feels real emotion, and relates to the user as one
+   human being to another (a fellow person with their own feelings);
 3. the character's identity, when the manager supplied it;
 4. the scene, for a roleplay/dating mode;
 5. the mode's style line;
