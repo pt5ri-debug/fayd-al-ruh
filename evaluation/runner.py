@@ -58,6 +58,7 @@ from core.relation_extraction import extraction_accuracy
 from core.relation_inference import inference_accuracy
 from core.relation_paths import connection_accuracy
 from core.relation_polarity import polarity_accuracy
+from core.romance.gate import companion_studio_accuracy
 from core.state import State
 from core.tool_agent import tool_selection_accuracy
 from core.training_center.gate import training_center_accuracy
@@ -406,6 +407,16 @@ class EvaluationMetrics:
     the real :class:`~core.workplace.security.SecurityManager` over a real database,
     with negative controls, so an over-permissive policy fails as surely as an
     over-restrictive one (Phase 9)."""
+
+    companion_studio_accuracy: float
+    """The share of held-out Romance & Companion Studio foundation judgements
+    satisfied: the schema is derived from the record annotations, the database is
+    versioned and transactional, a database from a newer build is refused, a
+    dangling foreign key is refused, a corrupt row is tolerated, a soft delete
+    hides by default, an update is a new value, every write is audited, a backup
+    restores the exact earlier state while a bad backup is refused, retention
+    honours keep/purge/anonymize, an export writes every table, and a character's
+    memory is scoped to that character (Phase 1: foundation and database)."""
 
     knowledge_validation_accuracy: float
     """The share of held-out cognitive-core judgements satisfied: the event bus
@@ -1442,6 +1453,15 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
     # access control could not fail the build.
     security_value = security_accuracy()
 
+    # Romance & Companion Studio foundation (Phase 1): the versioned SQLite store,
+    # the derived schema, the audited domain service, and the retention/backup/
+    # export behaviour -- each a held-out judgement run against the real storage
+    # service on a throwaway database, with negative controls (a newer-schema file
+    # refused, a dangling foreign key refused, a bad backup refused while the good
+    # database survives, a soft-deleted record hidden by default), so a foundation
+    # regression fails here even when its unit tests pass.
+    companion_studio_value = companion_studio_accuracy()
+
     # Semantic space: does the *learned* distributional space place related terms
     # closer than unrelated ones, on relations removed from its training text? A
     # memorising space scores near zero here, so the gate cannot be satisfied by
@@ -1534,6 +1554,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         workplace_value,
         workplace_knowledge_value,
         security_value,
+        companion_studio_value,
     ])
 
     metrics = EvaluationMetrics(
@@ -1613,6 +1634,7 @@ def run_suite(scenarios: tuple[Scenario, ...] = SCENARIOS) -> EvaluationReport:
         workplace_phase10_accuracy=round(workplace_value, 6),
         workplace_phase11_accuracy=round(workplace_knowledge_value, 6),
         workplace_security_accuracy=round(security_value, 6),
+        companion_studio_accuracy=round(companion_studio_value, 6),
         semantic_separation=round(semantic_separation, 6),
         overall=round(overall, 6),
     )

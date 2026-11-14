@@ -1044,6 +1044,40 @@ Arabic is kept as secondary aliases where useful.
   Hakeem is not a cloud mouth. The runtime is the companion's own `[natasha]`
   extra; `[hakeem]` / `requirements-hakeem.txt` pin the same runtime so a user who
   installs the scholar alone has one obvious command.
+- `core/romance/` + `gui/romance.py` + `gui/romance_dialog.py` + `cli/romance.py`
+  — the **Romance & Companion Studio**: a local-first companion, dating, and
+  roleplay workspace inside Fayd al-Ruh, built as a **domain module over the
+  project's own systems** (the model manager, the speech layer, the memory and
+  isolation policies, the GUI component library) — never a second copy of any of
+  them. **Phase 1 (foundation and database)** ships the storage half:
+  `core/romance/model.py` is the frozen record model (17 tables: characters,
+  personality, profiles, boundaries, relationship states + events, memories,
+  conversations + messages, scenarios + participants + sessions, model/voice
+  profiles, settings, safety events, and the audit trail), each record carrying a
+  stable string id, a `created_at`/`updated_at` audit pair, and an `active`
+  soft-delete flag, exactly like `core/workplace`. `core/romance/schema.py`
+  **derives** each table from the record's own dataclass annotations (so a field's
+  SQL type lives in one place; `tuple` → a JSON array, `dict` → a JSON object,
+  `X | None` → a nullable column), declares the foreign keys
+  (`ON DELETE RESTRICT` everywhere, `CASCADE` only where a child has no meaning
+  without its parent), and carries the numbered `MIGRATIONS`. `core/romance/database.py`
+  is the versioned SQLite store (stdlib `sqlite3`, `PRAGMA foreign_keys=ON`,
+  transactional writes, bounded reads, corrupt-row tolerance, and backup/restore
+  through SQLite's online-backup API with a bad backup **refused** before anything
+  is replaced); `core/romance/repository.py` is the typed CRUD and the append-only
+  audit; `core/romance/domain.py` is the audited create/update/deactivate service
+  (an edit is a **new** value, never a mutation); `core/romance/storage.py` is
+  `CompanionStorageService` (paths under the git-ignored `data/romance`, retention
+  `keep`/`purge`/`anonymize`, JSON export, backup); and `core/romance/gate.py` is
+  the held-out `companion_studio_accuracy` metric (22 judgements, with negative
+  controls: a newer-schema file refused, a dangling foreign key refused, a bad
+  backup refused while the good database survives, a soft-deleted record hidden by
+  default), a metric in `evaluation`. `core/paths.py` gained
+  `romance_dir`/`romance_db_path`/`romance_backups_dir`. Later phases add the
+  character library, the personality engine, the conversation modes, the
+  relationship engine, the memory manager, the roleplay engine, the model router,
+  the voice adapter, the safety manager, the orchestrator, and the window + CLI.
+  It loads no model and reaches no network on import.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
   theme=, typography=, on_close=)` builds one frame of three buttons into the
