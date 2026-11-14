@@ -161,6 +161,28 @@ class CompanionStorageService:
             report.deactivated = False
         return report
 
+    # -- settings ---------------------------------------------------------
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        """Read one Studio setting (``record_id`` **is** the setting key)."""
+        record = self.domain.get("companion_settings", key)
+        return default if record is None else str(record.value)
+
+    def set_setting(self, key: str, value: str) -> Any:
+        """Write one Studio setting, creating it on first use (audited)."""
+        from core.romance.model import CompanionSetting
+
+        existing = self.domain.get("companion_settings", key)
+        if existing is None:
+            record = CompanionSetting(record_id=key, value=value)
+            self.repository.save_record("companion_settings", record)
+            self.repository.audit(
+                actor=self.domain.actor, action="create", entity="companion_settings",
+                entity_id=key,
+            )
+            return record
+        return self.domain.update("companion_settings", key, value=value)
+
     # -- export -----------------------------------------------------------
 
     def export(self, destination: str | Path, *, character_id: str = "") -> ExportBundle:

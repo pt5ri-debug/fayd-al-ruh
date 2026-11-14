@@ -1190,8 +1190,18 @@ Arabic is kept as secondary aliases where useful.
   `read_aloud`/`speak`/`stop`/`transcribe` through the project's own `TextReader`
   and recognizer — best-effort, so a missing engine never breaks a scene. The gate
   grew to **63 judgements** (Phase-8 ones include the no-invented-voice negative
-  control). Docs: `docs/romance_companion/VOICE_INTEGRATION.md`. Later phases add the safety
-  manager, the orchestrator, and the window + CLI.
+  control). Docs: `docs/romance_companion/VOICE_INTEGRATION.md`. **Phase 9
+  (privacy and safety)** adds `core/romance/safety.py` — `CompanionSafetyManager`,
+  the floor made structural: adult content is **off by default** and needs the
+  user's own confirmation *and* an adult-eligible character (an unspecified or
+  under-18 age is refused), a coercion/non-consent marker refuses before any level
+  is considered, boundaries are opt-outs the character must respect, and
+  local-only mode (on by default) refuses a remote provider by name — every
+  confirmation and refusal written as an append-only `CompanionSafetyEvent`. The
+  gate grew to **67 judgements** (Phase-9 ones include the minor-refused and
+  coercion-refused negative controls). Docs:
+  `docs/romance_companion/PRIVACY_AND_SAFETY.md`. Later phases add the
+  orchestrator and the window + CLI.
   It loads no model and reaches no network on import.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
