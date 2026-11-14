@@ -49,6 +49,7 @@ from cli.menu import (
     run_piper_speech,
     run_presentation,
     run_qwen_speech,
+    run_romance,
     run_scene3d,
     run_selfcheck,
     run_shared_models,
@@ -69,6 +70,7 @@ Command = Callable[[Sequence[str]], int]
 SIDEBAR_LABELS: dict[str, str] = {
     "insight": "✨   What the AI can do",
     "workplace": "🏢   Workplace (EPRI/TSTC)",
+    "romance": "❤   Romance & Companion Studio",
     "cognition": "Autonomous mind",
     "cognition-characters": "Evaluate the characters",
     "ask-teacher": "🎓   Learn from a teacher",
@@ -229,6 +231,7 @@ _GROUP_SPECS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "Knowledge & Data",
         "📚",
         (
+            "romance",
             "workplace",
             "learn",
             "internet-learner",
@@ -522,6 +525,12 @@ ACTIONS: tuple[GuiAction, ...] = (
         "workplace",
         "Workplace: EPRI/TSTC's digital office (projects, staff, documents)",
         run_workplace,
+        ("status",),
+    ),
+    GuiAction(
+        "romance",
+        "Romance & Companion Studio: local AI companions, dating, and roleplay",
+        run_romance,
         ("status",),
     ),
     GuiAction(

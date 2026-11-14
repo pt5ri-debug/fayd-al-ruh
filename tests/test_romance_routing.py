@@ -282,3 +282,39 @@ def test_assignment_without_a_writer_is_refused(tmp_path: Path):
     router = CompanionModelRouter(ModelManager(tmp_path / "data"), catalog=lambda: ())
     with pytest.raises(CompanionModelError):
         router.assign_character("CHR-1", "x")
+
+
+# ------------------------------------------------------------------ generate
+
+
+def test_generate_runs_through_the_manager_and_returns_the_result(tmp_path: Path):
+    ready = _gguf(tmp_path)
+    router, _adapter = _router(
+        tmp_path, (FakeModel("natasha-default", path=ready, available=True),),
+        adapter=FakeAdapter(answer="Hello from the model."),
+    )
+    result = router.generate("Say hello.", key="natasha-default")
+    assert result.ok is True
+    assert result.text == "Hello from the model."
+    # The one inference call goes through the manager's own runtime -- the
+    # runtime name is the manager's, never a second engine's.
+    assert result.runtime == "fayd-inprocess"
+
+
+def test_generate_reports_honestly_when_the_model_is_not_installed(tmp_path: Path):
+    router, _adapter = _router(tmp_path, (FakeModel("natasha-default", available=False),))
+    result = router.generate("Say hello.", key="natasha-default")
+    assert result.ok is False
+    assert "not installed" in result.detail
+
+
+def test_generate_honours_a_cancelled_handle_before_it_starts(tmp_path: Path):
+    ready = _gguf(tmp_path)
+    router, _adapter = _router(
+        tmp_path, (FakeModel("natasha-default", path=ready, available=True),)
+    )
+    handle = router.begin_generation("natasha-default", timeout_seconds=5)
+    handle.cancel()
+    result = router.generate("Say hello.", key="natasha-default", handle=handle)
+    assert result.ok is False
+    assert "cancel" in result.detail

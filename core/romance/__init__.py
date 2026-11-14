@@ -138,6 +138,11 @@ from core.romance.routing import (
     ModelHealth,
     ResolvedModel,
 )
+from core.romance.safety import (
+    CompanionSafetyManager,
+    SafetyDecision,
+    SafetyError,
+)
 from core.romance.schema import MIGRATIONS, SCHEMA_VERSION, TABLES, Column, TableSpec
 from core.romance.storage import (
     RETENTION_ANONYMIZE,
@@ -219,7 +224,8 @@ __all__ = [
     "CompanionModelProfile",
     "CompanionModelRouter",
     "CompanionSafetyEvent",
-"CompanionScenario",
+    "CompanionSafetyManager",
+    "CompanionScenario",
     "CompanionSetting",
     "CompanionStorageService",
     "CompanionVoiceAdapter",
@@ -256,7 +262,8 @@ __all__ = [
     "RomanceLoadReport",
     "RomanceRecord",
     "RomanceRepository",
-"SafetyError",
+    "SafetyDecision",
+    "SafetyError",
     "ScenarioParticipant",
     "ScenarioSession",
     "ScenarioSummary",
