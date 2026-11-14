@@ -1073,10 +1073,35 @@ Arabic is kept as secondary aliases where useful.
   controls: a newer-schema file refused, a dangling foreign key refused, a bad
   backup refused while the good database survives, a soft-deleted record hidden by
   default), a metric in `evaluation`. `core/paths.py` gained
-  `romance_dir`/`romance_db_path`/`romance_backups_dir`. Later phases add the
-  character library, the personality engine, the conversation modes, the
-  relationship engine, the memory manager, the roleplay engine, the model router,
-  the voice adapter, the safety manager, the orchestrator, and the window + CLI.
+  `romance_dir`/`romance_db_path`/`romance_backups_dir`. **Phase 2 (Character
+  Studio)** adds the character library over that storage: `core/romance/personality.py`
+  is `CharacterPersonalityEngine` (each bounded `0..1` dial rendered as *tone
+  guidance*, never a bare number, so a model cannot misread `0.8`; the block says
+  outright it shapes the **voice**, never what the character may claim), plus
+  :data:`SAFETY_FLOOR` (adults only, consent explicit and revocable, no coercion,
+  no exploitation, nothing sexual involving a minor or an age-ambiguous
+  participant) and :func:`human_passing_identity` (the owner's decision for the
+  Studio's own characters: inside the conversation the character is **a person** --
+  a life, a past, feelings, opinions -- and never describes itself as a program,
+  assistant, model, or AI, while the *application* still discloses outside the
+  fiction that these are fictional AI companions). `core/romance/characters.py` is
+  `CharacterManager` (`CharacterDraft`/`CharacterBundle`/`CharacterSummary`):
+  create (validating that an **adult-eligible** character has a *known* age of 18+,
+  so an unknown age is refused as age-ambiguous), edit (the character's own
+  fields), `set_personality`/`add_profile_item`/`add_boundary`/`set_voice`/
+  `set_model`, duplicate (copies the source's children), archive/restore,
+  favorite, **delete with an explicit retention choice** (delegating to
+  `CompanionStorageService.delete_character`), and JSON `export_character`/
+  `import_character` (a foreign file refused rather than half-read). `list_characters`
+  gathers each row's conversation/memory counts in **one pass** per supporting
+  table (never a query per character). `core/romance/seed.py` ships three
+  clearly-labelled **example** characters (`SEED_MARKER`, all known adults; no real
+  person is depicted) created only on an explicit `seed_examples()` call. The gate
+  grew to 34 judgements (the Phase-2 ones include the human-passing identity, the
+  safety floor, the adult-age negative control, and the import refusal). Later
+  phases add the conversation modes, the relationship engine, the memory manager,
+  the roleplay engine, the model router, the voice adapter, the safety manager,
+  the orchestrator, and the window + CLI.
   It loads no model and reaches no network on import.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
