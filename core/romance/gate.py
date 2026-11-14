@@ -135,7 +135,8 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "character-delete-retention",
     ),
     StudioJudgement(
-        "the human-passing identity is a person and never an AI",
+        "the human-passing identity is a human being who treats the user as a fellow "
+        "human with feelings, and never an AI",
         "human-passing",
         note="the owner's decision: in-conversation the character stays in character",
     ),
@@ -814,7 +815,9 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
     if kind == "human-passing":
         text = human_passing_identity("Layla", biography="a designer")
         return (
-            "You are a person" in text
+            "You are a human being" in text
+            and "you believe that completely" in text
+            and "a fellow human being" in text
             and "never describe yourself as a program" in text
             and "a designer" in text
         )

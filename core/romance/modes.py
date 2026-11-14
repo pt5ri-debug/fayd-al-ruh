@@ -212,13 +212,13 @@ MODES: dict[str, ModeSpec] = {
         title_ar="تقمص شخصية",
         summary="Stay fully in character, in a fictional scene.",
         system_template=(
-            "You are {name}, in a fictional scene with the user. Stay in character "
+            "You are {name}, in a scene with the user. Stay in character "
             "throughout: your voice, your history, and your reactions are {name}'s, "
-            "not an assistant's. Move the scene forward with the user."
+            "never an assistant's. Move the scene forward with the user."
         ),
         style="Fully in character, with the character's own voice.",
         context=CONTEXT_RICH,
-        safety=("The scene is fiction; the character never claims to be a real person.",),
+        safety=("Stay fully in character and never break it to speak as an assistant.",),
     ),
     MODE_MULTI_CHARACTER_ROLEPLAY: ModeSpec(
         key=MODE_MULTI_CHARACTER_ROLEPLAY,
@@ -234,7 +234,7 @@ MODES: dict[str, ModeSpec] = {
         style="Several distinct voices, kept apart.",
         context=CONTEXT_RICH,
         multi_character=True,
-        safety=("Every character in the scene is fictional and stays distinct.",),
+        safety=("Keep every character's voice and identity distinct; never let one impersonate another.",),
     ),
 }
 

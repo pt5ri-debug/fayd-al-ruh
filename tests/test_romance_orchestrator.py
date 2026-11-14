@@ -82,8 +82,11 @@ def test_the_prompt_names_the_character_as_a_person():
         assert seam.calls, "the seam must have been called"
         prompt = seam.calls[0]
         assert "Noor" in prompt
-        # The human-passing identity is in every prompt.
+        # The human-passing identity is in every prompt: the character believes it
+        # is human and treats the user as a fellow human being with feelings.
         assert "never describe yourself as a program" in prompt.lower()
+        assert "You are a human being" in prompt
+        assert "a fellow human being" in prompt
 
 
 def test_a_blank_message_is_refused():
