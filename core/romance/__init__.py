@@ -64,6 +64,13 @@ from core.romance.model import (
     make_id,
     utc_now,
 )
+from core.romance.model_eval import (
+    MEASURED,
+    NOT_MEASURED,
+    ModelEvaluationReport,
+    ModelEvaluator,
+    Probe,
+)
 from core.romance.personality import (
     DIALS,
     RESPONSE_LENGTHS,
@@ -73,6 +80,16 @@ from core.romance.personality import (
     human_passing_identity,
 )
 from core.romance.repository import PREFIXES, RomanceRepository
+from core.romance.routing import (
+    SAFE_CONTEXT,
+    SAFE_MAX_TOKENS,
+    TASK_COMPANION,
+    CompanionModelError,
+    CompanionModelRouter,
+    GenerationHandle,
+    ModelHealth,
+    ResolvedModel,
+)
 from core.romance.schema import MIGRATIONS, SCHEMA_VERSION, TABLES, Column, TableSpec
 from core.romance.storage import (
     RETENTION_ANONYMIZE,
@@ -90,7 +107,9 @@ __all__ = [
     "DEFAULT_MODE",
     "DIALS",
     "ENTITY_NAMES",
+    "MEASURED",
     "MIGRATIONS",
+    "NOT_MEASURED",
     "PREFIXES",
     "PROFILE_ITEM_KINDS",
     "RECORDS",
@@ -100,8 +119,11 @@ __all__ = [
     "RETENTION_KEEP",
     "RETENTION_PURGE",
     "SAFETY_FLOOR",
+    "SAFE_CONTEXT",
+    "SAFE_MAX_TOKENS",
     "SCHEMA_VERSION",
     "TABLES",
+    "TASK_COMPANION",
     "BackupReport",
     "CharacterBoundary",
     "CharacterBundle",
@@ -119,17 +141,25 @@ __all__ = [
     "CompanionConversation",
     "CompanionMemory",
     "CompanionMessage",
+    "CompanionModelError",
     "CompanionModelProfile",
+    "CompanionModelRouter",
     "CompanionSafetyEvent",
     "CompanionScenario",
     "CompanionSetting",
     "CompanionStorageService",
     "DeleteReport",
     "ExportBundle",
+    "GenerationHandle",
+    "ModelEvaluationReport",
+    "ModelEvaluator",
+    "ModelHealth",
     "PersonalityError",
+    "Probe",
     "RecordBase",
     "RelationshipEventRecord",
     "RelationshipState",
+    "ResolvedModel",
     "RomanceDatabase",
     "RomanceDatabaseError",
     "RomanceDomain",
