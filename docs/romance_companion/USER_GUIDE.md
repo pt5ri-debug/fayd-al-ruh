@@ -18,14 +18,14 @@ Any of these opens the same window:
 
 Three columns, each collapsible:
 
-- **Left sidebar** — *Characters*, *Archived*, *Discover Characters*, *Recent
+- **Left sidebar** — *My Companions*, *Archived*, *Character Library*, *Recent
   Conversations*, *Conversation Mode*, *Dating Scenarios & Roleplay*, *Voice*,
   and *Privacy & Safety*.
-- **Centre** — the selected character's name and relationship stage, the
-  conversation transcript, and the message composer.
-- **Right panel** — *Profile*, *Personality & Interests*, *Relationship*,
-  *Milestones*, *Important Memories*, *Voice Configuration*, and *Active
-  Scenario*. The header's **Right panel** control collapses it.
+- **Centre** — the selected character's avatar, name, summary, and relationship
+  stage, the conversation transcript, and the message composer.
+- **Right panel** — *Profile*, *Personality & Interests*, *Relationship* (with a
+  closeness bar), *Milestones*, *Important Memories*, *Voice Configuration*, and
+  *Active Scenario*. The header's **Right panel** control collapses it.
 
 An honest disclosure sits at the top of the transcript, **outside the fiction**:
 *these are fictional AI companions, not real people; everything stays on this
@@ -34,13 +34,17 @@ an adult (18+)*. A character's own words stay in character.
 
 ## Making a companion
 
-1. **Characters → New…** opens a form: a display name (required), an optional
+1. **My Companions → New…** opens a form: a display name (required), an optional
    nickname, a **fictional age**, gender, biography, nationality, languages,
    appearance, relationship style, and a default conversation mode.
-2. **Discover Characters** lists the clearly-labelled example companions the
-   build ships (Layla, Noor, Salma…). Pick one and press **Add the chosen
-   example** to add just that one; it is marked ✓ once present.
-3. Star a favourite (**Favorite**), move one to the archive (**Archive**) and
+2. **Character Library** offers a large set of ready-made, fully-specified
+   companions grouped by **relationship archetype** — *Family*, *Neighbours*,
+   *Colleagues*, *Romantic partners*, *Courtesans & companions*, *Male escorts*,
+   and *Inclusive & LGBTQ+*. Choose an archetype (and optionally type a search),
+   pick a character to see its preview, then press **Add the chosen** to add just
+   that one — or **Add the whole group** to add the whole archetype at once. Every
+   library character is a stated adult (18+) and no real person is depicted.
+3. Star a favourite (**★ Favorite**), move one to the archive (**Archive**) and
    back (**Restore**), or delete it (**Delete**) with an explicit retention
    choice for its conversations and memories — *keep*, *purge*, or *anonymize*.
 
@@ -135,7 +139,11 @@ and *multi-character stories*.
 
 ```
 python -m cli romance status                 # what the Studio holds right now
-python -m cli romance characters             # the library
+python -m cli romance characters             # your companions
+python -m cli romance library-categories     # the ready-made archetypes
+python -m cli romance library --category lovers   # the library, filtered
+python -m cli romance add-library Ruby       # add one ready-made companion
+python -m cli romance seed-library --category family  # add a whole archetype
 python -m cli romance discover               # the shipped example companions
 python -m cli romance add-example Layla      # add one
 python -m cli romance new "Layla" --age 27 --interest coffee

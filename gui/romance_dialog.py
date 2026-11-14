@@ -37,9 +37,16 @@ from gui.dialog_base import ThemedDialog
 from gui.romance import RomanceStudioService
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
+from gui.window_controls import fit_geometry
 
 TITLE = "Romance & Companion Studio"
 SUBTITLE = "استوديو الرومانسية والرفقة — local AI companions, dating, and roleplay"
+
+#: The window's opening size, clamped to the desktop's own work area.
+DEFAULT_WIDTH = 1280
+DEFAULT_HEIGHT = 800
+MIN_WIDTH = 1000
+MIN_HEIGHT = 660
 
 #: The application's honest disclosure (outside the fiction).
 DISCLOSURE = (
@@ -85,6 +92,7 @@ class RomanceStudioDialog(ThemedDialog):
         self._archive_ids: list[str] = []
         self._conversation_ids: list[str] = []
         self._example_names: list[str] = []
+        self._library_rows: list[Any] = []
         self._mode_keys: list[str] = []
         self._model_keys: list[str] = []
         self._model_labels: dict[str, str] = {}
@@ -93,14 +101,18 @@ class RomanceStudioDialog(ThemedDialog):
         self._memory_ids: list[str] = []
         self._editors: list[Any] = []
         self._settings_dialog: Any = None
+        self._hero_stats: dict[str, tk.Label] = {}
+        self._avatar: Any = None
         self._row_frames: list[tuple[tk.Frame, tk.Text]] = []
         self._results: queue.Queue[tuple[Callable[[Any, Exception | None], None], Any, Exception | None]] = queue.Queue()
 
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("1280x800")
-        self.window.minsize(1000, 660)
+        self.window.geometry(
+            fit_geometry(self.window, DEFAULT_WIDTH, DEFAULT_HEIGHT, min_height=MIN_HEIGHT)
+        )
+        self.window.minsize(MIN_WIDTH, MIN_HEIGHT)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -130,8 +142,7 @@ class RomanceStudioDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window, title=TITLE, subtitle=SUBTITLE, theme=self.theme,
-            typography=self._type, on_close=self._close,
-            extra=self._header_extra,
+            typography=self._type, on_close=self._close, extra=self._header_extra,
         )
         self._spinner = header.spinner
         self._window_controls = header.controls
@@ -139,41 +150,56 @@ class RomanceStudioDialog(ThemedDialog):
     def _header_extra(self, inner: tk.Frame) -> None:
         from gui.components import button
 
-        button(
-            inner, "Right panel", self._toggle_right, theme=self.theme,
-            typography=self._type, variant="secondary", small=True,
-        ).pack(side="right", padx=6)
-        button(
-            inner, "Settings…", self._open_settings, theme=self.theme,
-            typography=self._type, variant="secondary", small=True,
-        ).pack(side="right", padx=6)
-        button(
-            inner, "New companion…", self._create_character, theme=self.theme,
-            typography=self._type, variant="primary", small=True,
-        ).pack(side="right", padx=6)
+        theme = self.theme
+
+        # The live stat strip sits between the title and the window controls.
+        stats = tk.Frame(inner, bg=theme.titlebar)
+        stats.pack(side="left", anchor="w", padx=(22, 0))
+        self._hero_stats = {}
+        for key, label in (("characters", "Companions"), ("conversations", "Chats"),
+                           ("memories", "Memories"), ("scenarios", "Scenarios")):
+            cell = tk.Frame(stats, bg=theme.titlebar)
+            cell.pack(side="left", padx=(0, 16))
+            value = tk.Label(cell, text="0", bg=theme.titlebar, fg=theme.primary,
+                             font=self._type.font("heading4", weight="bold"), anchor="w")
+            value.pack(anchor="w")
+            tk.Label(cell, text=label, bg=theme.titlebar, fg=theme.text_dim,
+                     font=self._type.font("2xs"), anchor="w").pack(anchor="w")
+            self._hero_stats[key] = value
+
+        button(inner, "New companion…", self._create_character, theme=theme,
+               typography=self._type, variant="primary", small=True).pack(side="right", padx=(6, 0))
+        button(inner, "Settings…", self._open_settings, theme=theme,
+               typography=self._type, variant="secondary", small=True).pack(side="right", padx=6)
+        button(inner, "Right panel", self._toggle_right, theme=theme,
+               typography=self._type, variant="secondary", small=True).pack(side="right", padx=6)
 
     # -- sidebar ----------------------------------------------------------
 
     def _build_sidebar(self, parent: tk.Frame) -> None:
         column = SidebarColumn(
-            parent, theme=self.theme, typography=self._type, scope="romance", width=320,
+            parent, theme=self.theme, typography=self._type, scope="romance", width=330,
         )
         self._sidebar_column = column
         self._sidebar = column.body
         theme = self.theme
 
         brand = tk.Frame(column.body, bg=theme.surface)
-        brand.pack(fill="x", padx=14, pady=(14, 4))
-        dot = tk.Canvas(brand, width=26, height=26, bg=theme.surface, highlightthickness=0)
-        dot.create_oval(1, 1, 25, 25, fill=theme.primary, outline="")
-        dot.create_text(13, 14, text="❤", fill=theme.primary_foreground,
+        brand.pack(fill="x", padx=14, pady=(14, 6))
+        dot = tk.Canvas(brand, width=30, height=30, bg=theme.surface, highlightthickness=0)
+        dot.create_oval(1, 1, 29, 29, fill=theme.primary, outline="")
+        dot.create_text(15, 16, text="❤", fill=theme.primary_foreground,
                         font=self._type.font("sm", weight="bold"))
         dot.pack(side="left")
-        tk.Label(brand, text="Companion Studio", bg=theme.surface, fg=theme.contrast,
-                 font=self._type.font("body", weight="bold")).pack(side="left", padx=(8, 0))
+        titles = tk.Frame(brand, bg=theme.surface)
+        titles.pack(side="left", padx=(9, 0))
+        tk.Label(titles, text="Companion Studio", bg=theme.surface, fg=theme.contrast,
+                 font=self._type.font("body", weight="bold"), anchor="w").pack(anchor="w")
+        tk.Label(titles, text="Pick a companion and talk", bg=theme.surface, fg=theme.text_dim,
+                 font=self._type.font("2xs"), anchor="w").pack(anchor="w")
 
         # Characters.
-        chars = column.add("characters", "Characters", icon="👤", open=True)
+        chars = column.add("characters", "My Companions", icon="👤", open=True)
         search_row = tk.Frame(chars, bg=theme.surface)
         search_row.pack(fill="x", pady=(0, 4))
         self._char_search_var = tk.StringVar()
@@ -191,15 +217,15 @@ class RomanceStudioDialog(ThemedDialog):
             selectcolor=theme.base, font=self._type.font("2xs"), anchor="w",
             highlightthickness=0, borderwidth=0, command=self._refresh_characters,
         ).pack(fill="x")
-        self._char_list = self._listbox(chars, height=7, on_select=self._on_character_selected)
+        self._char_list = self._listbox(chars, height=8, on_select=self._on_character_selected)
         row = tk.Frame(chars, bg=theme.surface)
         row.pack(fill="x", pady=(4, 0))
-        self._button(row, "New…", self._create_character)
+        self._button(row, "New…", self._create_character, variant="primary")
         self._button(row, "Edit…", self._edit_character)
         self._button(row, "Duplicate", self._duplicate_character)
         row1 = tk.Frame(chars, bg=theme.surface)
         row1.pack(fill="x")
-        self._button(row1, "Favorite", self._toggle_favorite)
+        self._button(row1, "★ Favorite", self._toggle_favorite)
         self._button(row1, "Archive", self._archive_character)
         self._button(row1, "Delete…", self._delete_character, variant="danger")
         row1b = tk.Frame(chars, bg=theme.surface)
@@ -207,23 +233,48 @@ class RomanceStudioDialog(ThemedDialog):
         self._button(row1b, "Export…", self._export_character)
         self._button(row1b, "Import…", self._import_character)
 
+        # Character Library (ready-made, fully-specified companions).
+        discover = column.add("discover", "Character Library", icon="📚", open=True)
+        tk.Label(
+            discover, text="Ready-made companions — pick an archetype, then add one.",
+            bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
+            anchor="w", justify="left", wraplength=290,
+        ).pack(fill="x", pady=(0, 4))
+        self._library_category_var = tk.StringVar(value="")
+        self._library_category_menu = tk.OptionMenu(discover, self._library_category_var, "")
+        self._style_option(self._library_category_menu)
+        self._library_category_menu.pack(fill="x", pady=2)
+        self._library_category_var.trace_add("write", lambda *_: self._refresh_library())
+        self._library_search_var = tk.StringVar()
+        lib_search = tk.Entry(
+            discover, textvariable=self._library_search_var, relief="flat", borderwidth=1,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            insertbackground=theme.foreground, font=self._type.font("2xs"),
+        )
+        lib_search.pack(fill="x", ipady=3, pady=(2, 4))
+        lib_search.bind("<KeyRelease>", lambda _e: self._refresh_library())
+        self._example_list = self._listbox(discover, height=7, on_select=self._on_library_selected)
+        self._library_preview = tk.Label(
+            discover, text="", bg=theme.surface_raised, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=290,
+            padx=8, pady=6,
+        )
+        self._library_preview.pack(fill="x", pady=(2, 4))
+        lib_row = tk.Frame(discover, bg=theme.surface)
+        lib_row.pack(fill="x")
+        self._button(lib_row, "Add the chosen", self._add_example, variant="primary")
+        self._button(lib_row, "Add the whole group", self._add_library_category)
+
         archive = column.add("archive", "Archived", icon="🗄")
         self._archive_list = self._listbox(archive, height=4, on_select=self._on_character_selected)
         self._button(archive, "Restore", self._restore_character)
-
-        # Discover: the clearly-labelled example companions this build ships.
-        discover = column.add("discover", "Discover Characters", icon="🔎")
-        self._example_list = self._listbox(
-            discover, height=4, on_select=lambda _i: None
-        )
-        self._button(discover, "Add the chosen example", self._add_example)
 
         # Conversations.
         convs = column.add("conversations", "Recent Conversations", icon="💬", open=True)
         self._conv_list = self._listbox(convs, height=6, on_select=self._on_conversation_selected)
         row2 = tk.Frame(convs, bg=theme.surface)
         row2.pack(fill="x", pady=(4, 0))
-        self._button(row2, "New chat", self._new_conversation)
+        self._button(row2, "New chat", self._new_conversation, variant="primary")
         self._button(row2, "Delete chat", self._delete_conversation)
 
         # Modes.
@@ -235,7 +286,7 @@ class RomanceStudioDialog(ThemedDialog):
         self._mode_var.trace_add("write", lambda *_: self._on_mode_changed())
         self._mode_note = tk.Label(
             modes, text="", bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
-            anchor="w", justify="left", wraplength=250,
+            anchor="w", justify="left", wraplength=260,
         )
         self._mode_note.pack(fill="x", pady=(2, 0))
 
@@ -243,7 +294,7 @@ class RomanceStudioDialog(ThemedDialog):
         model = column.add("model", "Language Model", icon="🧩")
         self._model_note = tk.Label(
             model, text="", bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
-            anchor="w", justify="left", wraplength=250,
+            anchor="w", justify="left", wraplength=260,
         )
         self._model_note.pack(fill="x", pady=(0, 4))
         self._model_var = tk.StringVar(value="")
@@ -258,7 +309,7 @@ class RomanceStudioDialog(ThemedDialog):
         row_s = tk.Frame(scenarios, bg=theme.surface)
         row_s.pack(fill="x", pady=(4, 0))
         self._button(row_s, "New scenario…", self._create_scenario)
-        self._button(row_s, "Start", self._start_scenario)
+        self._button(row_s, "Start", self._start_scenario, variant="primary")
         row_s2 = tk.Frame(scenarios, bg=theme.surface)
         row_s2.pack(fill="x")
         self._button(row_s2, "Add character", self._add_scenario_participant)
@@ -285,7 +336,7 @@ class RomanceStudioDialog(ThemedDialog):
         safety = column.add("safety", "Privacy & Safety", icon="🔒", open=True)
         self._safety_label = tk.Label(
             safety, text="", bg=theme.surface, fg=theme.text_dim,
-            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=250,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=260,
         )
         self._safety_label.pack(fill="x", pady=2)
         row4 = tk.Frame(safety, bg=theme.surface)
@@ -310,18 +361,32 @@ class RomanceStudioDialog(ThemedDialog):
         col.grid(row=0, column=1, sticky="nsew")
         self._centre = col
 
-        head = tk.Frame(col, bg=theme.base)
-        head.pack(fill="x", padx=16, pady=(10, 4))
+        # Character banner: avatar + name + stage, on a raised card.
+        head = tk.Frame(col, bg=theme.surface)
+        head.pack(fill="x")
+        head_inner = tk.Frame(head, bg=theme.surface)
+        head_inner.pack(fill="x", padx=16, pady=10)
+        self._avatar = tk.Canvas(head_inner, width=48, height=48, bg=theme.surface, highlightthickness=0)
+        self._avatar.pack(side="left")
+        titles = tk.Frame(head_inner, bg=theme.surface)
+        titles.pack(side="left", padx=(12, 0), anchor="w")
         self._char_title = tk.Label(
-            head, text="No character selected", bg=theme.base, fg=theme.contrast,
+            titles, text="No companion selected", bg=theme.surface, fg=theme.contrast,
             font=self._type.font("heading4", weight="bold"), anchor="w",
         )
-        self._char_title.pack(side="left")
+        self._char_title.pack(anchor="w")
+        self._char_subtitle = tk.Label(
+            titles, text="Pick a companion from the library on the left, or add one.",
+            bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"), anchor="w",
+            justify="left", wraplength=520,
+        )
+        self._char_subtitle.pack(anchor="w")
         self._stage_label = tk.Label(
-            head, text="", bg=theme.base, fg=theme.primary,
+            head_inner, text="", bg=theme.surface, fg=theme.primary,
             font=self._type.font("sm", weight="bold"), anchor="e",
         )
         self._stage_label.pack(side="right")
+        tk.Frame(col, bg=theme.border_subtle, height=1).pack(fill="x")
 
         container = tk.Frame(col, bg=theme.base)
         container.pack(fill="both", expand=True)
@@ -339,17 +404,21 @@ class RomanceStudioDialog(ThemedDialog):
             widget.bind("<Button-4>", self._on_mousewheel)
             widget.bind("<Button-5>", self._on_mousewheel)
 
+        # Composer card.
         composer = tk.Frame(col, bg=theme.base)
-        composer.pack(fill="x", padx=16, pady=(4, 12))
+        composer.pack(fill="x", padx=16, pady=(6, 4))
+        card = tk.Frame(composer, bg=theme.surface_raised, highlightthickness=1,
+                        highlightbackground=theme.border_subtle)
+        card.pack(fill="x")
         self._entry = tk.Text(
-            composer, height=2, wrap="word", relief="flat", borderwidth=1,
-            highlightthickness=0, bg=theme.surface, fg=theme.foreground,
-            insertbackground=theme.foreground, font=self._type.font("body"), padx=10, pady=8,
+            card, height=2, wrap="word", relief="flat", borderwidth=0,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            insertbackground=theme.foreground, font=self._type.font("body"), padx=12, pady=10,
         )
         self._entry.pack(side="left", fill="x", expand=True)
         self._entry.bind("<Return>", self._on_return)
         self._entry.bind("<Shift-Return>", lambda _e: None)
-        self._send_button = self._button(composer, "Send", self._send, anchor="center")
+        self._send_button = self._button(composer, "Send ➤", self._send, anchor="center", variant="primary")
         self._send_button.pack(side="left", padx=(8, 0))
         self._status_line = tk.Label(
             col, text="", bg=theme.base, fg=theme.text_dim, font=self._type.font("2xs"), anchor="w",
@@ -364,7 +433,7 @@ class RomanceStudioDialog(ThemedDialog):
         panel.grid(row=0, column=2, sticky="nsew")
         self._right_panel = panel
         self._right_column = SidebarColumn(
-            panel, theme=self.theme, typography=self._type, scope="romance_info", width=300,
+            panel, theme=self.theme, typography=self._type, scope="romance_info", width=310,
         )
 
         profile = self._right_column.add("profile", "Profile", icon="🪪", open=True)
@@ -376,6 +445,10 @@ class RomanceStudioDialog(ThemedDialog):
 
         relationship = self._right_column.add("relationship", "Relationship", icon="💞", open=True)
         self._relationship_text = self._panel_text(relationship, height=6)
+        self._relationship_bar = tk.Canvas(
+            relationship, height=14, bg=theme.surface, highlightthickness=0,
+        )
+        self._relationship_bar.pack(fill="x", pady=(4, 2))
         rel_row = tk.Frame(relationship, bg=theme.surface)
         rel_row.pack(fill="x", pady=(2, 0))
         self._button(rel_row, "Edit…", self._edit_relationship)
@@ -400,6 +473,30 @@ class RomanceStudioDialog(ThemedDialog):
 
         scenario = self._right_column.add("scenario", "Active Scenario", icon="🎬")
         self._scenario_text = self._panel_text(scenario, height=5)
+
+    def _relationship_closeness(self, snapshot: Any) -> float:
+        """A single 0..1 figure for the progress bar: the mean of the dimensions."""
+        names = ("familiarity", "trust", "closeness", "comfort", "affection",
+                 "shared_experiences")
+        values = [float(getattr(snapshot, name, 0.0) or 0.0) for name in names]
+        return sum(values) / len(values) if values else 0.0
+
+    def _draw_relationship_bar(self, value: float) -> None:
+        """Paint a slim progress bar for the relationship's closeness (0..1)."""
+        canvas = getattr(self, "_relationship_bar", None)
+        if canvas is None:
+            return
+        theme = self.theme
+        try:
+            canvas.delete("all")
+            width = max(canvas.winfo_width(), 200)
+        except tk.TclError:
+            return
+        clamped = max(0.0, min(1.0, float(value)))
+        canvas.create_rectangle(0, 4, width, 12, fill=theme.surface_raised, outline="")
+        filled = int(width * clamped)
+        if filled > 0:
+            canvas.create_rectangle(0, 4, filled, 12, fill=theme.primary, outline="")
 
     # -- small widget helpers --------------------------------------------
 
@@ -465,6 +562,33 @@ class RomanceStudioDialog(ThemedDialog):
         widget.insert("1.0", text or "(nothing yet)")
         widget.configure(state="disabled")
 
+    def _character_subtitle(self, character: Any) -> str:
+        """A one-line readable summary under the character's name."""
+        bits = [
+            f"{character.fictional_age}" if character.fictional_age else "",
+            character.gender,
+            character.nationality,
+            " · ".join(character.languages) if character.languages else "",
+            character.relationship_style,
+        ]
+        line = " · ".join(b for b in bits if b)
+        return line or "A local companion"
+
+    def _draw_avatar(self, name: str) -> None:
+        """Paint a simple circular avatar with the character's initial."""
+        canvas = getattr(self, "_avatar", None)
+        if canvas is None:
+            return
+        theme = self.theme
+        try:
+            canvas.delete("all")
+        except tk.TclError:
+            return
+        canvas.create_oval(2, 2, 46, 46, fill=theme.primary, outline="")
+        initial = (name.strip()[:1] or "❤").upper()
+        canvas.create_text(24, 25, text=initial, fill=theme.primary_foreground,
+                           font=self._type.font("heading4", weight="bold"))
+
     # -- geometry ---------------------------------------------------------
 
     def _toggle_right(self) -> None:
@@ -510,23 +634,25 @@ class RomanceStudioDialog(ThemedDialog):
     def _add_message(self, role: str, text: str, *, title: str = "") -> tk.Text:
         theme = self.theme
         pad = self._column_pad()
+        is_user = role == "user"
         row = tk.Frame(self._transcript, bg=theme.base)
         row.pack(fill="x", padx=(pad, pad), pady=6)
         head = tk.Frame(row, bg=theme.base)
-        head.pack(fill="x", pady=(0, 4))
+        head.pack(fill="x", pady=(0, 3))
         label = title or {"user": "You", "note": "Note"}.get(role, "Companion")
-        colour = theme.primary if role == "user" else theme.text_dim
+        colour = theme.primary if is_user else theme.text_secondary
         tk.Label(
             head, text=label, bg=theme.base, fg=colour,
             font=self._type.font("xs", weight="bold"), anchor="w",
-        ).pack(side="left")
+        ).pack(side="right" if is_user else "left")
         widget = tk.Text(
             row, height=1, wrap="word", relief="flat", borderwidth=0, highlightthickness=0,
-            bg=theme.base, fg=theme.foreground, font=self._type.font("body"),
-            padx=0, pady=0, cursor="xterm", takefocus=1,
+            bg=theme.user_bubble if is_user else theme.surface,
+            fg=theme.user_bubble_fg if is_user else theme.foreground,
+            font=self._type.font("body"), padx=12, pady=8, cursor="xterm", takefocus=1,
         )
         widget.insert("1.0", text)
-        widget.pack(anchor="w", fill="x")
+        widget.pack(anchor="e" if is_user else "w", fill="x")
         self._row_frames.append((row, widget))
         try:
             from gui import clipboard
@@ -557,6 +683,7 @@ class RomanceStudioDialog(ThemedDialog):
 
     def _refresh_all(self) -> None:
         self._refresh_characters()
+        self._refresh_library()
         self._refresh_conversations()
         self._refresh_modes()
         self._refresh_models()
@@ -564,6 +691,25 @@ class RomanceStudioDialog(ThemedDialog):
         self._refresh_voices()
         self._refresh_safety()
         self._refresh_character_panels()
+        self._refresh_hero()
+
+    def _refresh_hero(self) -> None:
+        """The header's live stat strip, read from the Studio's own counts."""
+        try:
+            status = self.service.status()
+        except Exception:
+            return
+        values = {
+            "characters": status.character_count,
+            "conversations": status.conversation_count,
+            "memories": status.memory_count,
+            "scenarios": status.scenario_count,
+        }
+        for key, label in getattr(self, "_hero_stats", {}).items():
+            try:
+                label.configure(text=str(values.get(key, 0)))
+            except tk.TclError:
+                continue
 
     def _refresh_characters(self) -> None:
         search = self._char_search_var.get().strip() if hasattr(self, "_char_search_var") else ""
@@ -579,29 +725,60 @@ class RomanceStudioDialog(ThemedDialog):
             if row.archived:
                 self._archive_ids.append(row.character_id)
                 self._archive_list.insert("end", row.label())
-        self._refresh_examples()
+        self._refresh_library()
+        self._refresh_hero()
 
-    def _refresh_examples(self) -> None:
+    def _refresh_library(self) -> None:
+        """Fill the archetype picker and the ready-made character list."""
+        # The archetype menu (rebuilt only when its contents change).
+        categories = self.service.library_categories()
+        self._library_category_keys = [""] + [key for key, _t, _i, _s in categories]
+        labels = ["All archetypes"] + [f"{icon} {title}" for _k, title, icon, _s in categories]
+        menu = self._library_category_menu["menu"]
+        menu.delete(0, "end")
+        for key, label in zip(self._library_category_keys, labels, strict=True):
+            menu.add_command(label=label, command=lambda k=key: self._library_category_var.set(k))
+
+        search = self._library_search_var.get().strip() if hasattr(self, "_library_search_var") else ""
+        current = self._library_category_var.get()
+        rows = self.service.library_rows(category=current, search=search)
+        self._library_rows = list(rows)
+        self._example_names = [row.name for row in rows]
         self._example_list.delete(0, "end")
-        self._example_names = []
-        for draft, present in self.service.discover_examples():
-            self._example_names.append(draft.name)
-            mark = "✓ " if present else "＋ "
-            self._example_list.insert("end", f"{mark}{draft.name} — {draft.nickname or draft.gender}")
+        for row in rows:
+            self._example_list.insert("end", row.label())
+        if not rows:
+            self._library_preview.configure(text="No companion matches that filter.")
 
-    def _add_example(self) -> None:
-        selection = self._example_list.curselection()
-        if not selection or selection[0] >= len(self._example_names):
-            self._set_status("Choose an example to add.")
-            return
-        name = self._example_names[selection[0]]
+    def _on_library_selected(self, index: int) -> None:
+        rows = getattr(self, "_library_rows", [])
+        if index < len(rows):
+            self._library_preview.configure(text=rows[index].describe())
+
+    def _add_library_category(self) -> None:
+        key = self._library_category_var.get()
         try:
-            self.service.add_example(name)
+            created = self.service.seed_library_category(key)
         except Exception as error:
             self._set_status(str(error))
             return
         self._refresh_characters()
-        self._set_status(f"Added the example companion {name}.")
+        scope = "this archetype" if key else "every archetype"
+        self._set_status(f"Added {created} ready-made companion(s) from {scope}.")
+
+    def _add_example(self) -> None:
+        selection = self._example_list.curselection()
+        if not selection or selection[0] >= len(self._example_names):
+            self._set_status("Choose a companion from the library to add.")
+            return
+        name = self._example_names[selection[0]]
+        try:
+            self.service.add_library_character(name)
+        except Exception as error:
+            self._set_status(str(error))
+            return
+        self._refresh_characters()
+        self._set_status(f"Added {name} to your companions.")
 
     def _refresh_conversations(self) -> None:
         self._conv_list.delete(0, "end")
@@ -696,8 +873,13 @@ class RomanceStudioDialog(ThemedDialog):
             ):
                 self._set_panel(widget, "")
             self._memory_list.delete(0, "end")
-            self._char_title.configure(text="No character selected")
+            self._char_title.configure(text="No companion selected")
             self._stage_label.configure(text="")
+            if hasattr(self, "_char_subtitle"):
+                self._char_subtitle.configure(
+                    text="Pick a companion from the library on the left, or add one."
+                )
+            self._draw_avatar("")
             return
         try:
             bundle = self.service.character(self._selected_character)
@@ -705,6 +887,9 @@ class RomanceStudioDialog(ThemedDialog):
             return
         character = bundle.character
         self._char_title.configure(text=character.name)
+        if hasattr(self, "_char_subtitle"):
+            self._char_subtitle.configure(text=self._character_subtitle(character))
+        self._draw_avatar(character.name)
         model_label = ""
         if character.model_key:
             model_label = self._model_labels.get(character.model_key, character.model_key) \
@@ -741,6 +926,7 @@ class RomanceStudioDialog(ThemedDialog):
             snapshot = self.service.relationship(self._selected_character)
             self._stage_label.configure(text=snapshot.stage_title)
             self._set_panel(self._relationship_text, snapshot.describe())
+            self._draw_relationship_bar(self._relationship_closeness(snapshot))
             events = self.service.relationship_history(self._selected_character)
             self._set_panel(
                 self._milestones_text,
@@ -749,6 +935,7 @@ class RomanceStudioDialog(ThemedDialog):
         except Exception:
             self._set_panel(self._relationship_text, "")
             self._set_panel(self._milestones_text, "")
+            self._draw_relationship_bar(0.0)
         try:
             memories = self.service.memories(self._selected_character)
             self._memory_ids = [m.record_id for m in memories]

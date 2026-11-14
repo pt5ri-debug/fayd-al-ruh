@@ -66,7 +66,7 @@ The choice is honoured by `core/romance/characters.py` and pinned by the gate's
 
 ## Discover Characters
 
-`core/romance/seed.py` ships a small set of **clearly-labelled fictional**
+`core/romance/seed.py` still ships a small set of **clearly-labelled fictional**
 example companions (`SEED_MARKER = "romance-example"`): three adult drafts
 (Layla, Noor, Salma), each with generic interests and no real person's identity.
 They are seeded **only on request**:
@@ -82,6 +82,46 @@ They are seeded **only on request**:
 Two gate judgements pin the honesty: browsing writes nothing
 (`negative-discover-writes-nothing`) and adding one adds only that one and never
 duplicates it (`discover-adds-only-the-chosen`).
+
+## The ready-made character library
+
+`core/romance/library.py` is the large, **fully-specified** companion library a
+new user picks from, grouped by **relationship archetype**
+(`LIBRARY_CATEGORIES`): *Family*, *Neighbours*, *Colleagues*, *Romantic
+partners*, *Courtesans & companions*, *Male escorts*, and *Inclusive & LGBTQ+*.
+Each archetype carries a bilingual title, an icon, and a one-line summary, and
+each of the ~50 characters is a complete `LibraryCharacter`: a name, a nickname,
+a **stated adult age (18+)**, a gender (including transgender and non-binary
+identities), a biography, a nationality, languages, an appearance, a relationship
+style, a default conversation mode, personality dials, interests, boundaries, and
+tags.
+
+Three honesty rules, the same ones the rest of the Studio keeps:
+
+- **Adults only, at the source.** Every library character states a real fictional
+  age of 18 or more, so none is age-ambiguous and none is refused by the safety
+  layer.
+- **Nothing is created behind the user's back.** The library is *data*: reading it
+  writes nothing, and `seed_library` creates a character only when a caller asks —
+  one at a time, or one whole archetype at a time.
+- **Fiction, and fictional people.** Every character is an invented person; no
+  real individual is depicted or imitated.
+
+Wiring (one path shared by the window and the CLI):
+
+- `RomanceStudioService.library_categories()` — the archetype rows.
+- `RomanceStudioService.library_rows(category=, search=)` — the filtered library
+  with each character's `present` flag; **a pure read**.
+- `RomanceStudioService.add_library_character(name)` — create **only** the chosen
+  character (never a duplicate).
+- `RomanceStudioService.seed_library_category(category)` — create a whole
+  archetype at once.
+- CLI: `python -m cli romance library-categories | library [--category K]
+  [--search S] | add-library NAME | seed-library [--category K]`.
+
+Two gate judgements pin the honesty: the library is complete and adults-only
+(`library-is-complete-and-adults-only`), and browsing writes nothing while adding
+one adds exactly one (`negative-library-reads-and-adds-one`).
 
 ## Isolation
 

@@ -25,6 +25,7 @@ reports the real next step. "Requires a voice engine" is the same for speech.
 | Personality dials (introversion, playfulness, warmth, expressiveness, confidence, humor, initiative, affection, romantic intensity, response length, formality, Arabic dialect) | ✅ |
 | Editable natural-language instructions | ✅ |
 | Discover Characters (shipped, clearly-labelled example companions, added one at a time) | ✅ |
+| Ready-made character library (≈50 fully-specified adults across 7 relationship archetypes, browsable by archetype and search, added one at a time or a whole archetype at once) | ✅ |
 | Delete with explicit retention choice (keep / purge / anonymize) | ✅ |
 
 ## Conversation
