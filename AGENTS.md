@@ -1172,9 +1172,17 @@ Arabic is kept as secondary aliases where useful.
   return nothing rather than a weak guess; `memories`/`get`/`edit`/`forget`/
   `export`/`apply_retention` (opt-in) round it out. Isolation is per character.
   The gate grew to **56 judgements** (Phase-6 ones include the memory-dedup
-  negative control). Docs: `docs/romance_companion/MEMORY_SYSTEM.md`. Later phases
-  add the roleplay engine, the voice adapter, the safety manager, the orchestrator,
-  and the window + CLI.
+  negative control). Docs: `docs/romance_companion/MEMORY_SYSTEM.md`. **Phase 7
+  (dating and roleplay)** adds `core/romance/roleplay.py` — `RoleplayEngine`:
+  fictional scenarios (ten categories; `is_real_place` is False by default) with a
+  declarative bundle (title, setting, starting situation, objectives, narrative
+  style, content level, boundaries), an explicit cast that never lists a character
+  twice, and sessions the user can pause/resume/branch/restart — where `branch`
+  creates a **new** session pointing back at the one it forked from, so a story's
+  history is never rewritten. The gate grew to **60 judgements** (Phase-7 ones
+  include the no-duplicate-cast negative control). Docs:
+  `docs/romance_companion/DATING_AND_ROLEPLAY.md`. Later phases add the voice
+  adapter, the safety manager, the orchestrator, and the window + CLI.
   It loads no model and reaches no network on import.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
