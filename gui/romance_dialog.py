@@ -30,6 +30,7 @@ import queue
 import threading
 import tkinter as tk
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from gui.dialog_base import ThemedDialog
@@ -81,9 +82,17 @@ class RomanceStudioDialog(ThemedDialog):
         self._selected_character = ""
         self._selected_conversation = ""
         self._character_ids: list[str] = []
+        self._archive_ids: list[str] = []
         self._conversation_ids: list[str] = []
         self._example_names: list[str] = []
         self._mode_keys: list[str] = []
+        self._model_keys: list[str] = []
+        self._model_labels: dict[str, str] = {}
+        self._voice_options: list[Any] = []
+        self._scenario_rows: list[Any] = []
+        self._memory_ids: list[str] = []
+        self._editors: list[Any] = []
+        self._settings_dialog: Any = None
         self._row_frames: list[tuple[tk.Frame, tk.Text]] = []
         self._results: queue.Queue[tuple[Callable[[Any, Exception | None], None], Any, Exception | None]] = queue.Queue()
 
@@ -134,6 +143,14 @@ class RomanceStudioDialog(ThemedDialog):
             inner, "Right panel", self._toggle_right, theme=self.theme,
             typography=self._type, variant="secondary", small=True,
         ).pack(side="right", padx=6)
+        button(
+            inner, "Settings…", self._open_settings, theme=self.theme,
+            typography=self._type, variant="secondary", small=True,
+        ).pack(side="right", padx=6)
+        button(
+            inner, "New companion…", self._create_character, theme=self.theme,
+            typography=self._type, variant="primary", small=True,
+        ).pack(side="right", padx=6)
 
     # -- sidebar ----------------------------------------------------------
 
@@ -157,12 +174,38 @@ class RomanceStudioDialog(ThemedDialog):
 
         # Characters.
         chars = column.add("characters", "Characters", icon="👤", open=True)
-        self._char_list = self._listbox(chars, height=8, on_select=self._on_character_selected)
+        search_row = tk.Frame(chars, bg=theme.surface)
+        search_row.pack(fill="x", pady=(0, 4))
+        self._char_search_var = tk.StringVar()
+        search = tk.Entry(
+            search_row, textvariable=self._char_search_var, relief="flat", borderwidth=1,
+            highlightthickness=0, bg=theme.surface_raised, fg=theme.foreground,
+            insertbackground=theme.foreground, font=self._type.font("2xs"),
+        )
+        search.pack(fill="x", ipady=3)
+        search.bind("<KeyRelease>", lambda _e: self._refresh_characters())
+        self._favorites_only = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            chars, text="Favorites only", variable=self._favorites_only, bg=theme.surface,
+            fg=theme.text_dim, activebackground=theme.surface, activeforeground=theme.foreground,
+            selectcolor=theme.base, font=self._type.font("2xs"), anchor="w",
+            highlightthickness=0, borderwidth=0, command=self._refresh_characters,
+        ).pack(fill="x")
+        self._char_list = self._listbox(chars, height=7, on_select=self._on_character_selected)
         row = tk.Frame(chars, bg=theme.surface)
         row.pack(fill="x", pady=(4, 0))
         self._button(row, "New…", self._create_character)
-        self._button(row, "Favorite", self._toggle_favorite)
-        self._button(row, "Archive", self._archive_character)
+        self._button(row, "Edit…", self._edit_character)
+        self._button(row, "Duplicate", self._duplicate_character)
+        row1 = tk.Frame(chars, bg=theme.surface)
+        row1.pack(fill="x")
+        self._button(row1, "Favorite", self._toggle_favorite)
+        self._button(row1, "Archive", self._archive_character)
+        self._button(row1, "Delete…", self._delete_character, variant="danger")
+        row1b = tk.Frame(chars, bg=theme.surface)
+        row1b.pack(fill="x")
+        self._button(row1b, "Export…", self._export_character)
+        self._button(row1b, "Import…", self._import_character)
 
         archive = column.add("archive", "Archived", icon="🗄")
         self._archive_list = self._listbox(archive, height=4, on_select=self._on_character_selected)
@@ -181,19 +224,44 @@ class RomanceStudioDialog(ThemedDialog):
         row2 = tk.Frame(convs, bg=theme.surface)
         row2.pack(fill="x", pady=(4, 0))
         self._button(row2, "New chat", self._new_conversation)
+        self._button(row2, "Delete chat", self._delete_conversation)
 
         # Modes.
-        modes = column.add("modes", "Conversation Mode", icon="🎭")
+        modes = column.add("modes", "Conversation Mode", icon="🎭", open=True)
         self._mode_var = tk.StringVar(value="")
         self._mode_menu = tk.OptionMenu(modes, self._mode_var, "")
         self._style_option(self._mode_menu)
         self._mode_menu.pack(fill="x", pady=2)
         self._mode_var.trace_add("write", lambda *_: self._on_mode_changed())
+        self._mode_note = tk.Label(
+            modes, text="", bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
+            anchor="w", justify="left", wraplength=250,
+        )
+        self._mode_note.pack(fill="x", pady=(2, 0))
+
+        # Language model (assigned per character).
+        model = column.add("model", "Language Model", icon="🧩")
+        self._model_note = tk.Label(
+            model, text="", bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
+            anchor="w", justify="left", wraplength=250,
+        )
+        self._model_note.pack(fill="x", pady=(0, 4))
+        self._model_var = tk.StringVar(value="")
+        self._model_menu = tk.OptionMenu(model, self._model_var, "")
+        self._style_option(self._model_menu)
+        self._model_menu.pack(fill="x", pady=2)
+        self._button(model, "Assign to the character", self._assign_model)
 
         # Scenarios.
         scenarios = column.add("scenarios", "Dating Scenarios & Roleplay", icon="📖")
         self._scenario_list = self._listbox(scenarios, height=5, on_select=self._on_scenario_selected)
-        self._button(scenarios, "New scenario…", self._create_scenario)
+        row_s = tk.Frame(scenarios, bg=theme.surface)
+        row_s.pack(fill="x", pady=(4, 0))
+        self._button(row_s, "New scenario…", self._create_scenario)
+        self._button(row_s, "Start", self._start_scenario)
+        row_s2 = tk.Frame(scenarios, bg=theme.surface)
+        row_s2.pack(fill="x")
+        self._button(row_s2, "Add character", self._add_scenario_participant)
 
         # Voice.
         voice = column.add("voice", "Voice", icon="🔊")
@@ -202,9 +270,19 @@ class RomanceStudioDialog(ThemedDialog):
         row3.pack(fill="x", pady=(4, 0))
         self._button(row3, "Speak last reply", self._speak_last)
         self._button(row3, "Stop", self._stop_speaking)
+        self._voice_engine_var = tk.StringVar(value="auto")
+        self._voice_engine_menu = tk.OptionMenu(voice, self._voice_engine_var, "")
+        self._style_option(self._voice_engine_menu)
+        self._voice_engine_menu.pack(fill="x", pady=(4, 0))
+        self._voice_engine_var.trace_add("write", lambda *_: self._on_voice_engine_changed())
+
+        # Settings.
+        settings = column.add("settings", "Studio Settings", icon="⚙")
+        self._button(settings, "Open settings…", self._open_settings)
+        self._button(settings, "Studio summary", self._show_status)
 
         # Safety.
-        safety = column.add("safety", "Privacy & Safety", icon="🔒")
+        safety = column.add("safety", "Privacy & Safety", icon="🔒", open=True)
         self._safety_label = tk.Label(
             safety, text="", bg=theme.surface, fg=theme.text_dim,
             font=self._type.font("2xs"), anchor="w", justify="left", wraplength=250,
@@ -213,6 +291,16 @@ class RomanceStudioDialog(ThemedDialog):
         row4 = tk.Frame(safety, bg=theme.surface)
         row4.pack(fill="x", pady=(4, 0))
         self._button(row4, "Adult mode", self._toggle_adult)
+        self._button(row4, "Confirm 18+", self._confirm_eligibility)
+        self._boundary_entry = tk.Entry(
+            safety, relief="flat", borderwidth=1, highlightthickness=0,
+            bg=theme.surface_raised, fg=theme.foreground,
+            insertbackground=theme.foreground, font=self._type.font("2xs"),
+        )
+        self._boundary_entry.pack(fill="x", pady=(4, 0), ipady=3)
+        row5 = tk.Frame(safety, bg=theme.surface)
+        row5.pack(fill="x")
+        self._button(row5, "Add boundary", self._add_boundary)
 
     # -- centre -----------------------------------------------------------
 
@@ -281,21 +369,34 @@ class RomanceStudioDialog(ThemedDialog):
 
         profile = self._right_column.add("profile", "Profile", icon="🪪", open=True)
         self._profile_text = self._panel_text(profile, height=8)
+        self._button(profile, "Edit the character…", self._edit_character)
 
         traits = self._right_column.add("traits", "Personality & Interests", icon="✨", open=True)
         self._traits_text = self._panel_text(traits, height=8)
 
         relationship = self._right_column.add("relationship", "Relationship", icon="💞", open=True)
         self._relationship_text = self._panel_text(relationship, height=6)
+        rel_row = tk.Frame(relationship, bg=theme.surface)
+        rel_row.pack(fill="x", pady=(2, 0))
+        self._button(rel_row, "Edit…", self._edit_relationship)
+        self._button(rel_row, "Reset", self._reset_relationship)
 
         milestones = self._right_column.add("milestones", "Milestones", icon="🏁")
         self._milestones_text = self._panel_text(milestones, height=6)
 
         memories = self._right_column.add("memories", "Important Memories", icon="🧠")
-        self._memories_text = self._panel_text(memories, height=8)
+        self._memory_list = self._listbox(memories, height=6, on_select=lambda _i: None)
+        mem_row = tk.Frame(memories, bg=theme.surface)
+        mem_row.pack(fill="x", pady=(2, 0))
+        self._button(mem_row, "Remember…", self._add_memory)
+        self._button(mem_row, "Forget", self._forget_memory)
+        mem_row2 = tk.Frame(memories, bg=theme.surface)
+        mem_row2.pack(fill="x")
+        self._button(mem_row2, "Export…", self._export_memories)
 
         voice = self._right_column.add("voice_config", "Voice Configuration", icon="🎙")
         self._voice_text = self._panel_text(voice, height=5)
+        self._button(voice, "Turn voice on/off", self._toggle_voice)
 
         scenario = self._right_column.add("scenario", "Active Scenario", icon="🎬")
         self._scenario_text = self._panel_text(scenario, height=5)
@@ -303,13 +404,14 @@ class RomanceStudioDialog(ThemedDialog):
     # -- small widget helpers --------------------------------------------
 
     def _button(
-        self, parent: tk.Misc, text: str, command: Any, *, anchor: str = "w", small: bool = True
+        self, parent: tk.Misc, text: str, command: Any, *, anchor: str = "w",
+        small: bool = True, variant: str = "secondary",
     ) -> tk.Button:
         from gui.components import button
 
         return button(
             parent, text, command, theme=self.theme, typography=self._type,
-            variant="secondary", small=small, anchor=anchor,  # type: ignore[arg-type]
+            variant=variant, small=small, anchor=anchor,  # type: ignore[arg-type]
         )
 
     def _listbox(self, parent: tk.Misc, *, height: int, on_select: Callable[[int], None]) -> tk.Listbox:
@@ -457,20 +559,25 @@ class RomanceStudioDialog(ThemedDialog):
         self._refresh_characters()
         self._refresh_conversations()
         self._refresh_modes()
+        self._refresh_models()
         self._refresh_scenarios()
         self._refresh_voices()
         self._refresh_safety()
         self._refresh_character_panels()
 
     def _refresh_characters(self) -> None:
+        search = self._char_search_var.get().strip() if hasattr(self, "_char_search_var") else ""
+        favorite = True if getattr(self, "_favorites_only", None) is not None and self._favorites_only.get() else None
         self._char_list.delete(0, "end")
         self._character_ids = []
-        for row in self.service.character_rows():
+        for row in self.service.character_rows(search=search, favorite=favorite):
             self._character_ids.append(row.character_id)
             self._char_list.insert("end", row.label())
         self._archive_list.delete(0, "end")
+        self._archive_ids = []
         for row in self.service.character_rows(include_archived=True):
             if row.archived:
+                self._archive_ids.append(row.character_id)
                 self._archive_list.insert("end", row.label())
         self._refresh_examples()
 
@@ -515,16 +622,65 @@ class RomanceStudioDialog(ThemedDialog):
         menu.delete(0, "end")
         for key, title in zip(self._mode_keys, labels, strict=True):
             menu.add_command(label=title, command=lambda k=key: self._mode_var.set(k))
+        if not self._mode_var.get() and self._mode_keys:
+            self._mode_var.set(self._mode_keys[0])
+        self._update_mode_note()
+
+    def _update_mode_note(self) -> None:
+        mode = self._mode_var.get()
+        summary = next((s for k, _t, s in self.service.modes() if k == mode), "")
+        self._mode_note.configure(text=summary)
+
+    def _refresh_models(self) -> None:
+        """Fill the model picker from the models this machine really has."""
+        choices = self.service.model_choices()
+        menu = self._model_menu["menu"]
+        menu.delete(0, "end")
+        self._model_keys = [choice.key for choice in choices]
+        self._model_labels = {choice.key: choice.label() for choice in choices}
+        for choice in choices:
+            menu.add_command(label=choice.label(), command=lambda k=choice.key: self._model_var.set(k))
+        if not choices:
+            self._model_note.configure(
+                text="No language model is installed. Open the Model Manager to download one."
+            )
+            self._model_var.set("")
+            return
+        ready = sum(1 for c in choices if c.available)
+        self._model_note.configure(text=f"{ready} of {len(choices)} models are installed and ready.")
+        # Preselect the character's own model, else the first ready one, else the first.
+        current = self.service.model_key(self._selected_character) if self._selected_character else ""
+        pick = current or next((c.key for c in choices if c.available), choices[0].key)
+        self._model_var.set(self._model_labels.get(pick, pick))
+
+    def _selected_model_key(self) -> str:
+        shown = self._model_var.get()
+        for key, label in getattr(self, "_model_labels", {}).items():
+            if label == shown:
+                return key
+        return shown if shown in getattr(self, "_model_keys", []) else ""
 
     def _refresh_scenarios(self) -> None:
         self._scenario_list.delete(0, "end")
-        for row in self.service.scenarios():
+        self._scenario_rows = list(self.service.scenarios())
+        for row in self._scenario_rows:
             self._scenario_list.insert("end", f"{row.title} [{row.category_label}]")
 
     def _refresh_voices(self) -> None:
         self._voice_list.delete(0, "end")
-        for option in self.service.voices():
+        self._voice_options = list(self.service.voices())
+        for option in self._voice_options:
             self._voice_list.insert("end", f"{option.label} ({option.source})")
+        menu = self._voice_engine_menu["menu"]
+        menu.delete(0, "end")
+        for engine in self.service.voice_engines():
+            menu.add_command(label=engine, command=lambda e=engine: self._voice_engine_var.set(e))
+        if self._selected_character:
+            try:
+                engine = self.service.voice_profile(self._selected_character).engine or "auto"
+                self._voice_engine_var.set(engine)
+            except Exception:
+                pass
 
     def _refresh_safety(self) -> None:
         status = self.service.safety_status()
@@ -536,10 +692,10 @@ class RomanceStudioDialog(ThemedDialog):
         if not self._selected_character:
             for widget in (
                 self._profile_text, self._traits_text, self._relationship_text,
-                self._milestones_text, self._memories_text, self._voice_text,
-                self._scenario_text,
+                self._milestones_text, self._voice_text, self._scenario_text,
             ):
                 self._set_panel(widget, "")
+            self._memory_list.delete(0, "end")
             self._char_title.configure(text="No character selected")
             self._stage_label.configure(text="")
             return
@@ -549,6 +705,10 @@ class RomanceStudioDialog(ThemedDialog):
             return
         character = bundle.character
         self._char_title.configure(text=character.name)
+        model_label = ""
+        if character.model_key:
+            model_label = self._model_labels.get(character.model_key, character.model_key) \
+                if hasattr(self, "_model_labels") else character.model_key
         profile = [
             f"Name: {character.name}",
             f"Nickname: {character.nickname}" if character.nickname else "",
@@ -558,18 +718,24 @@ class RomanceStudioDialog(ThemedDialog):
             f"Languages: {', '.join(character.languages)}" if character.languages else "",
             f"Relationship style: {character.relationship_style}" if character.relationship_style else "",
             f"Mode: {character.default_mode}",
+            f"Model: {model_label or '(Studio default)'}",
+            "Adult eligible: yes" if character.adult_eligible else "Adult eligible: no",
         ]
         self._set_panel(self._profile_text, "\n".join(p for p in profile if p))
-        personality = bundle.personality
-        traits = []
-        if personality is not None:
-            for name in ("introversion", "playfulness", "warmth", "expressiveness", "confidence", "humor", "initiative", "affection", "romantic_intensity"):
-                value = getattr(personality, name, None)
-                if value is not None:
-                    traits.append(f"{name.replace('_', ' ')}: {float(value):.2f}")
+        dials = self.service.personality(self._selected_character)
+        traits = [
+            f"{name.replace('_', ' ')}: {float(dials.get(name, 0.5)):.2f}"
+            for name in (
+                "introversion", "playfulness", "warmth", "expressiveness", "confidence",
+                "humour", "initiative", "affection", "romantic_intensity", "formality",
+            )
+        ]
         interests = bundle.interests()
         if interests:
             traits.append("Interests: " + ", ".join(interests))
+        boundaries = self.service.boundaries(self._selected_character)
+        if boundaries:
+            traits.append("Boundaries: " + ", ".join(b.value for b in boundaries))
         self._set_panel(self._traits_text, "\n".join(traits))
         try:
             snapshot = self.service.relationship(self._selected_character)
@@ -585,12 +751,13 @@ class RomanceStudioDialog(ThemedDialog):
             self._set_panel(self._milestones_text, "")
         try:
             memories = self.service.memories(self._selected_character)
-            self._set_panel(
-                self._memories_text,
-                "\n".join(f"• [{m.kind}] {m.content}" for m in memories[-12:]),
-            )
+            self._memory_ids = [m.record_id for m in memories]
+            self._memory_list.delete(0, "end")
+            for memory in memories:
+                self._memory_list.insert("end", f"[{memory.kind}] {memory.content}")
         except Exception:
-            self._set_panel(self._memories_text, "")
+            self._memory_ids = []
+            self._memory_list.delete(0, "end")
         try:
             view = self.service.voice_profile(self._selected_character)
             self._set_panel(self._voice_text, view.describe())
@@ -606,7 +773,16 @@ class RomanceStudioDialog(ThemedDialog):
         self._selected_conversation = ""
         self._clear_transcript()
         self._refresh_conversations()
+        self._refresh_models()
         self._refresh_character_panels()
+        self._refresh_voices()
+        # Start the mode selector on the character's own default mode.
+        try:
+            default_mode = self.service.character(self._selected_character).character.default_mode
+        except Exception:
+            default_mode = ""
+        if default_mode:
+            self._mode_var.set(default_mode)
         self._set_status(f"Selected {self._char_title.cget('text')}.")
 
     def _on_conversation_selected(self, index: int) -> None:
@@ -616,16 +792,24 @@ class RomanceStudioDialog(ThemedDialog):
         self._load_conversation()
 
     def _on_scenario_selected(self, index: int) -> None:
-        rows = self.service.scenarios()
+        rows = getattr(self, "_scenario_rows", [])
         if index < len(rows):
             row = rows[index]
+            participants = self.service.scenario_participants(row.scenario_id)
+            names = ", ".join(
+                self.service.character(p.character_id).name
+                for p in participants
+                if p.character_id
+            )
             self._set_panel(
                 self._scenario_text,
-                f"{row.title}\nCategory: {row.category_label}\nLevel: {row.content_level}\nParticipants: {row.participant_count}",
+                f"{row.title}\nCategory: {row.category_label}\n"
+                f"Level: {row.content_level}\nParticipants: {row.participant_count}"
+                + (f" ({names})" if names else ""),
             )
 
     def _on_voice_selected(self, index: int) -> None:
-        options = self.service.voices()
+        options = getattr(self, "_voice_options", [])
         if index >= len(options) or not self._selected_character:
             return
         option = options[index]
@@ -639,7 +823,18 @@ class RomanceStudioDialog(ThemedDialog):
         except Exception as error:
             self._set_status(f"Could not set the voice: {error}")
 
+    def _on_voice_engine_changed(self) -> None:
+        engine = self._voice_engine_var.get()
+        if not engine or not self._selected_character:
+            return
+        try:
+            self.service.set_voice(self._selected_character, engine=engine)
+            self._refresh_character_panels()
+        except Exception as error:
+            self._set_status(f"Could not set the voice engine: {error}")
+
     def _on_mode_changed(self) -> None:
+        self._update_mode_note()
         mode = self._mode_var.get()
         if not mode:
             return
@@ -772,38 +967,329 @@ class RomanceStudioDialog(ThemedDialog):
             self.service.set_adult_mode(False)
             self._set_status("Adult mode is off.")
         else:
+            from tkinter import messagebox
+
+            if not messagebox.askyesno(
+                "Adult content",
+                "Adult content is off by default. Do you confirm you are an adult and "
+                "want to enable it? Every fictional participant must be 18 or older.",
+                parent=self.window,
+            ):
+                return
             try:
                 self.service.set_adult_mode(True, confirmed=True)
                 self._set_status("Adult mode is on.")
             except Exception as error:
-                self._set_status(f"Adult mode needs an adult character: {error}")
+                self._set_status(f"Adult mode could not be enabled: {error}")
         self._refresh_safety()
 
-    def _create_character(self) -> None:
-        values = _prompt_character(self.window, self.theme, self._type)
-        if values is None:
+    def _confirm_eligibility(self) -> None:
+        """Record the selected character's adult-eligibility confirmation."""
+        if not self._selected_character:
+            self._set_status("Select a character first.")
             return
-        name, age = values
         try:
-            bundle = self.service.create_character(name, fictional_age=age)
+            self.service.confirm_eligibility(self._selected_character)
+            self._refresh_character_panels()
+            self._set_status("Confirmed: this character is an adult (18+).")
+        except Exception as error:
+            self._set_status(f"Could not confirm eligibility: {error}")
+
+    def _add_boundary(self) -> None:
+        value = self._boundary_entry.get().strip()
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        if not value:
+            return
+        self._boundary_entry.delete(0, "end")
+        try:
+            self.service.add_boundary(self._selected_character, value)
+            self._refresh_character_panels()
+            self._set_status("Boundary added.")
+        except Exception as error:
+            self._set_status(f"Could not add the boundary: {error}")
+
+    # -- character management --------------------------------------------
+
+    def _create_character(self) -> None:
+        self._open_editor("")
+
+    def _edit_character(self) -> None:
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        self._open_editor(self._selected_character)
+
+    def _open_editor(self, character_id: str) -> None:
+        from gui.romance_editor import CharacterEditorDialog
+
+        dialog = CharacterEditorDialog(
+            self.window, self.service, character_id=character_id,
+            theme=self.theme, font=self.font, mono=self.mono,
+            overrides=self._overrides, list_overrides=self._list_overrides,
+            on_saved=self._on_editor_saved,
+        )
+        self._editors = getattr(self, "_editors", [])
+        self._editors.append(dialog)
+
+    def _on_editor_saved(self, character_id: str) -> None:
+        if character_id:
+            self._selected_character = character_id
+        self._refresh_all()
+
+    def _duplicate_character(self) -> None:
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        try:
+            bundle = self.service.duplicate_character(self._selected_character)
             self._selected_character = bundle.id
             self._refresh_all()
-            self._set_status(f"Created {bundle.name}.")
+            self._set_status(f"Duplicated as {bundle.name}.")
         except Exception as error:
-            self._set_status(f"Could not create the character: {error}")
+            self._set_status(f"Could not duplicate: {error}")
 
-    def _create_scenario(self) -> None:
-        title = _prompt_text(self.window, self.theme, self._type, "Scenario title")
-        if not title:
+    def _delete_character(self) -> None:
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        choice = _ask_retention(self.window, self.theme, self._type)
+        if choice is None:
             return
         try:
-            scenario = self.service.create_scenario(
-                title, category="first_meeting", location="",
+            self.service.delete_character(self._selected_character, choice=choice)
+        except Exception as error:
+            self._set_status(f"Could not delete: {error}")
+            return
+        self._selected_character = ""
+        self._refresh_all()
+        self._set_status("Deleted.")
+
+    def _export_character(self) -> None:
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        from tkinter import filedialog
+
+        path = filedialog.asksaveasfilename(
+            parent=self.window, title="Export the character",
+            defaultextension=".json", filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            self.service.export_character(self._selected_character, path)
+            self._set_status(f"Exported to {path}.")
+        except Exception as error:
+            self._set_status(f"Could not export: {error}")
+
+    def _import_character(self) -> None:
+        from tkinter import filedialog
+
+        path = filedialog.askopenfilename(
+            parent=self.window, title="Import a character",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            bundle = self.service.import_character(path)
+            self._selected_character = bundle.id
+            self._refresh_all()
+            self._set_status(f"Imported {bundle.name}.")
+        except Exception as error:
+            self._set_status(f"Could not import: {error}")
+
+    # -- models, relationship, memory, scenarios, voice, settings --------
+
+    def _assign_model(self) -> None:
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        key = self._selected_model_key()
+        if not key:
+            self._set_status("No language model is available to assign.")
+            return
+        try:
+            self.service.assign_model(self._selected_character, key)
+            self._refresh_character_panels()
+            self._set_status("Model assigned to the character.")
+        except Exception as error:
+            self._set_status(f"Could not assign the model: {error}")
+
+    def _edit_relationship(self) -> None:
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        values = _prompt_dimensions(
+            self.window, self.theme, self._type,
+            self.service.relationship_dimensions(),
+            self.service.relationship(self._selected_character).dimensions,
+        )
+        if values is None:
+            return
+        try:
+            self.service.set_relationship(self._selected_character, **values)
+            self._refresh_character_panels()
+            self._set_status("Relationship updated.")
+        except Exception as error:
+            self._set_status(f"Could not update the relationship: {error}")
+
+    def _reset_relationship(self) -> None:
+        if not self._selected_character:
+            return
+        from tkinter import messagebox
+
+        if not messagebox.askyesno(
+            "Reset the relationship", "Return the relationship to its starting point?", parent=self.window
+        ):
+            return
+        try:
+            self.service.reset_relationship(self._selected_character)
+            self._refresh_character_panels()
+            self._set_status("Relationship reset.")
+        except Exception as error:
+            self._set_status(f"Could not reset: {error}")
+
+    def _add_memory(self) -> None:
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        from core.romance.memory import KIND_LABELS, MEMORY_KINDS
+
+        values = [(kind, KIND_LABELS.get(kind, kind)) for kind in MEMORY_KINDS]
+        content = _prompt_memory(self.window, self.theme, self._type, values)
+        if content is None:
+            return
+        kind, text = content
+        try:
+            self.service.add_memory(self._selected_character, kind, text)
+            self._refresh_character_panels()
+            self._set_status("Memory saved.")
+        except Exception as error:
+            self._set_status(f"Could not save the memory: {error}")
+
+    def _forget_memory(self) -> None:
+        selection = self._memory_list.curselection()
+        if not selection or selection[0] >= len(getattr(self, "_memory_ids", [])):
+            self._set_status("Choose a memory to forget.")
+            return
+        try:
+            self.service.forget_memory(self._memory_ids[selection[0]])
+            self._refresh_character_panels()
+            self._set_status("Memory forgotten.")
+        except Exception as error:
+            self._set_status(f"Could not forget: {error}")
+
+    def _export_memories(self) -> None:
+        if not self._selected_character:
+            return
+        import json
+        from tkinter import filedialog
+
+        path = filedialog.asksaveasfilename(
+            parent=self.window, title="Export the memories",
+            defaultextension=".json", filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            export = self.service.export_memories(self._selected_character)
+            Path(path).write_text(json.dumps(export.to_primitive(), ensure_ascii=False, indent=2), encoding="utf-8")
+            self._set_status(f"Exported the memories to {path}.")
+        except Exception as error:
+            self._set_status(f"Could not export: {error}")
+
+    def _create_scenario(self) -> None:
+        values = _prompt_scenario(self.window, self.theme, self._type, self.service.scenario_categories())
+        if values is None:
+            return
+        title, category, location, level = values
+        try:
+            self.service.create_scenario(
+                title, category=category, location=location, content_level=level,
             )
             self._refresh_scenarios()
-            self._set_status(f"Created scenario {scenario.record_id}.")
+            self._set_status(f"Created the scenario {title}.")
         except Exception as error:
             self._set_status(f"Could not create the scenario: {error}")
+
+    def _start_scenario(self) -> None:
+        selection = self._scenario_list.curselection()
+        rows = getattr(self, "_scenario_rows", [])
+        if not selection or selection[0] >= len(rows):
+            self._set_status("Choose a scenario to start.")
+            return
+        scenario_id = rows[selection[0]].scenario_id
+        try:
+            session = self.service.start_scenario(scenario_id, character_id=self._selected_character)
+            self._set_status(f"Scenario started (session {getattr(session, 'record_id', '')}).")
+            self._on_scenario_selected(selection[0])
+        except Exception as error:
+            self._set_status(f"Could not start the scenario: {error}")
+
+    def _add_scenario_participant(self) -> None:
+        selection = self._scenario_list.curselection()
+        rows = getattr(self, "_scenario_rows", [])
+        if not selection or selection[0] >= len(rows):
+            self._set_status("Choose a scenario first.")
+            return
+        if not self._selected_character:
+            self._set_status("Select a character to add to the scenario.")
+            return
+        try:
+            self.service.add_participant(rows[selection[0]].scenario_id, self._selected_character)
+            self._refresh_scenarios()
+            self._on_scenario_selected(selection[0])
+            self._set_status("Character added to the scenario.")
+        except Exception as error:
+            self._set_status(f"Could not add the character: {error}")
+
+    def _toggle_voice(self) -> None:
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        try:
+            view = self.service.voice_profile(self._selected_character)
+            self.service.set_voice(self._selected_character, enabled=not view.enabled)
+            self._refresh_character_panels()
+            self._set_status("Voice turned on." if not view.enabled else "Voice turned off.")
+        except Exception as error:
+            self._set_status(f"Could not change the voice: {error}")
+
+    def _open_settings(self) -> None:
+        from gui.romance_settings import StudioSettingsDialog
+
+        self._settings_dialog = StudioSettingsDialog(
+            self.window, self.service, theme=self.theme, font=self.font, mono=self.mono,
+            overrides=self._overrides, list_overrides=self._list_overrides,
+            on_applied=self._refresh_all,
+        )
+
+    def _show_status(self) -> None:
+        status = self.service.status()
+        self._add_message("note", status.describe(), title="Studio summary")
+
+    def _delete_conversation(self) -> None:
+        if not self._selected_conversation:
+            self._set_status("Select a conversation first.")
+            return
+        from tkinter import messagebox
+
+        if not messagebox.askyesno(
+            "Delete the conversation", "Delete this conversation and its messages?", parent=self.window
+        ):
+            return
+        try:
+            self.service.delete_conversation(self._selected_conversation)
+        except Exception as error:
+            self._set_status(f"Could not delete the conversation: {error}")
+            return
+        self._selected_conversation = ""
+        self._clear_transcript()
+        self._refresh_conversations()
+        self._set_status("Conversation deleted.")
 
     def _set_status(self, text: str) -> None:
         try:
@@ -847,10 +1333,47 @@ class RomanceStudioDialog(ThemedDialog):
 
     # -- close ------------------------------------------------------------
 
+    def retheme(self, theme: Any) -> None:
+        """Restyle this window (and the editor/settings windows it holds open)."""
+        super().retheme(theme)
+        for dialog in self._child_dialogs():
+            handler = getattr(dialog, "retheme", None)
+            if callable(handler):
+                try:
+                    handler(theme)
+                except Exception:
+                    pass
+
+    def retype(self, overrides: Any = None, list_overrides: Any = None) -> None:
+        """Rebuild this window with new typography (and its child windows)."""
+        super().retype(overrides, list_overrides)
+        for dialog in self._child_dialogs():
+            handler = getattr(dialog, "retype", None)
+            if callable(handler):
+                try:
+                    handler(overrides, list_overrides)
+                except Exception:
+                    pass
+
+    def _child_dialogs(self) -> list[Any]:
+        """The editor/settings windows this Studio currently holds open."""
+        dialogs = [d for d in getattr(self, "_editors", []) if getattr(d, "_closed", False) is False]
+        settings = getattr(self, "_settings_dialog", None)
+        if settings is not None and getattr(settings, "_closed", False) is False:
+            dialogs.append(settings)
+        return dialogs
+
     def _close(self) -> None:
         if self._closed:
             return
         self._closed = True
+        for dialog in self._child_dialogs():
+            handler = getattr(dialog, "_close", None)
+            if callable(handler):
+                try:
+                    handler()
+                except Exception:
+                    pass
         try:
             self.service.voice.stop()
         except Exception:
@@ -862,41 +1385,50 @@ class RomanceStudioDialog(ThemedDialog):
                 self._on_close()
 
 
-def _prompt_character(
-    parent: tk.Misc, theme: Any, typography: Any
-) -> tuple[str, int | None] | None:
-    """A small modal asking for a character's name and (adult) fictional age."""
+def _prompt_scenario(
+    parent: tk.Misc, theme: Any, typography: Any, categories: tuple[tuple[str, str], ...]
+) -> tuple[str, str, str, str] | None:
+    """Ask for a scenario's title, category, location, and content level."""
     dialog = tk.Toplevel(parent)
-    dialog.title("New character")
+    dialog.title("New scenario")
     dialog.configure(bg=theme.base)
     dialog.transient(parent)  # type: ignore[call-overload]
     dialog.grab_set()
-    result: dict[str, tuple[str, int | None] | None] = {"value": None}
-    name_var = tk.StringVar()
-    age_var = tk.StringVar()
-    tk.Label(dialog, text="Name", bg=theme.base, fg=theme.foreground,
-             font=typography.font("sm")).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 2))
-    tk.Entry(dialog, textvariable=name_var, bg=theme.surface, fg=theme.foreground,
-             insertbackground=theme.foreground, relief="flat").grid(row=0, column=1, padx=12, pady=(12, 2))
-    tk.Label(dialog, text="Fictional age (adults only)", bg=theme.base, fg=theme.foreground,
-             font=typography.font("sm")).grid(row=1, column=0, sticky="w", padx=12, pady=2)
-    tk.Entry(dialog, textvariable=age_var, bg=theme.surface, fg=theme.foreground,
-             insertbackground=theme.foreground, relief="flat").grid(row=1, column=1, padx=12, pady=2)
+    result: dict[str, tuple[str, str, str, str] | None] = {"value": None}
+    title_var = tk.StringVar()
+    category_var = tk.StringVar(value=categories[0][1] if categories else "")
+    location_var = tk.StringVar()
+    level_var = tk.StringVar(value="general")
+    rows = (
+        ("Title", title_var, None),
+        ("Category", category_var, [label for _v, label in categories]),
+        ("Location (fictional)", location_var, None),
+        ("Content level", level_var, ["general", "romantic", "adult"]),
+    )
+    for index, (label, variable, values) in enumerate(rows):
+        tk.Label(dialog, text=label, bg=theme.base, fg=theme.foreground,
+                 font=typography.font("sm")).grid(row=index, column=0, sticky="w", padx=12, pady=(8 if index == 0 else 2, 2))
+        if values:
+            from tkinter import ttk
+
+            ttk.Combobox(dialog, textvariable=variable, values=values, state="readonly").grid(
+                row=index, column=1, padx=12, pady=(8 if index == 0 else 2, 2)
+            )
+        else:
+            tk.Entry(dialog, textvariable=variable, bg=theme.surface, fg=theme.foreground,
+                     insertbackground=theme.foreground, relief="flat").grid(
+                row=index, column=1, padx=12, pady=(8 if index == 0 else 2, 2)
+            )
 
     def confirm() -> None:
-        name = name_var.get().strip()
-        age: int | None = None
-        if age_var.get().strip():
-            try:
-                age = int(age_var.get().strip())
-            except ValueError:
-                age = None
-        if name:
-            result["value"] = (name, age)
+        title = title_var.get().strip()
+        if title:
+            category = next((v for v, label in categories if label == category_var.get()), category_var.get())
+            result["value"] = (title, category or "first_meeting", location_var.get().strip(), level_var.get() or "general")
         dialog.destroy()
 
     row = tk.Frame(dialog, bg=theme.base)
-    row.grid(row=2, column=0, columnspan=2, pady=12)
+    row.grid(row=len(rows), column=0, columnspan=2, pady=12)
     tk.Button(row, text="Create", command=confirm, bg=theme.primary, fg=theme.primary_foreground,
               relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
     tk.Button(row, text="Cancel", command=dialog.destroy, bg=theme.surface_raised, fg=theme.foreground,
@@ -905,26 +1437,86 @@ def _prompt_character(
     return result["value"]
 
 
-def _prompt_text(parent: tk.Misc, theme: Any, typography: Any, label: str) -> str:
+def _prompt_dimensions(
+    parent: tk.Misc, theme: Any, typography: Any,
+    dimensions: tuple[str, ...], current: dict[str, float],
+) -> dict[str, float] | None:
+    """Ask for each relationship dimension's value on a 0..1 scale."""
     dialog = tk.Toplevel(parent)
-    dialog.title(label)
+    dialog.title("Edit the relationship")
     dialog.configure(bg=theme.base)
     dialog.transient(parent)  # type: ignore[call-overload]
     dialog.grab_set()
-    result: dict[str, str] = {"value": ""}
-    variable = tk.StringVar()
-    tk.Label(dialog, text=label, bg=theme.base, fg=theme.foreground,
-             font=typography.font("sm")).pack(padx=12, pady=(12, 2))
-    entry = tk.Entry(dialog, textvariable=variable, bg=theme.surface, fg=theme.foreground,
-                     insertbackground=theme.foreground, relief="flat", width=36)
-    entry.pack(padx=12, pady=2)
-    entry.focus_set()
+    result: dict[str, dict[str, float] | None] = {"value": None}
+    variables: dict[str, tk.DoubleVar] = {}
+    for index, name in enumerate(dimensions):
+        tk.Label(dialog, text=name.replace("_", " ").title(), bg=theme.base, fg=theme.foreground,
+                 font=typography.font("sm")).grid(row=index, column=0, sticky="w", padx=12, pady=(8 if index == 0 else 2, 2))
+        variable = tk.DoubleVar(value=float(current.get(name, 0.0)))
+        variables[name] = variable
+        from tkinter import ttk
+
+        ttk.Scale(dialog, from_=0.0, to=1.0, variable=variable, orient="horizontal", length=220).grid(
+            row=index, column=1, padx=12, pady=(8 if index == 0 else 2, 2)
+        )
 
     def confirm() -> None:
-        result["value"] = variable.get().strip()
+        result["value"] = {name: round(float(var.get()), 4) for name, var in variables.items()}
         dialog.destroy()
 
-    tk.Button(dialog, text="OK", command=confirm, bg=theme.primary, fg=theme.primary_foreground,
-              relief="flat", font=typography.font("sm")).pack(pady=12)
+    row = tk.Frame(dialog, bg=theme.base)
+    row.grid(row=len(dimensions), column=0, columnspan=2, pady=12)
+    tk.Button(row, text="Save", command=confirm, bg=theme.primary, fg=theme.primary_foreground,
+              relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
+    tk.Button(row, text="Cancel", command=dialog.destroy, bg=theme.surface_raised, fg=theme.foreground,
+              relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
     dialog.wait_window()
     return result["value"]
+
+
+def _prompt_memory(
+    parent: tk.Misc, theme: Any, typography: Any, kinds: list[tuple[str, str]]
+) -> tuple[str, str] | None:
+    """Ask for a memory's kind and content."""
+    dialog = tk.Toplevel(parent)
+    dialog.title("Remember something")
+    dialog.configure(bg=theme.base)
+    dialog.transient(parent)  # type: ignore[call-overload]
+    dialog.grab_set()
+    result: dict[str, tuple[str, str] | None] = {"value": None}
+    kind_var = tk.StringVar(value=kinds[0][1] if kinds else "")
+    tk.Label(dialog, text="Kind", bg=theme.base, fg=theme.foreground,
+             font=typography.font("sm")).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 2))
+    from tkinter import ttk
+
+    ttk.Combobox(dialog, textvariable=kind_var, values=[label for _k, label in kinds], state="readonly").grid(
+        row=0, column=1, padx=12, pady=(12, 2)
+    )
+    tk.Label(dialog, text="Content", bg=theme.base, fg=theme.foreground,
+             font=typography.font("sm")).grid(row=1, column=0, sticky="nw", padx=12, pady=2)
+    text = tk.Text(dialog, width=44, height=5, wrap="word", bg=theme.surface, fg=theme.foreground,
+                   insertbackground=theme.foreground, relief="flat")
+    text.grid(row=1, column=1, padx=12, pady=2)
+
+    def confirm() -> None:
+        content = text.get("1.0", "end").strip()
+        if content:
+            kind = next((k for k, label in kinds if label == kind_var.get()), kind_var.get())
+            result["value"] = (kind or "semantic", content)
+        dialog.destroy()
+
+    row = tk.Frame(dialog, bg=theme.base)
+    row.grid(row=2, column=0, columnspan=2, pady=12)
+    tk.Button(row, text="Save", command=confirm, bg=theme.primary, fg=theme.primary_foreground,
+              relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
+    tk.Button(row, text="Cancel", command=dialog.destroy, bg=theme.surface_raised, fg=theme.foreground,
+              relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
+    dialog.wait_window()
+    return result["value"]
+
+
+def _ask_retention(parent: tk.Misc, theme: Any, typography: Any) -> str | None:
+    """Ask how a character's data should be handled, returning its retention choice."""
+    from gui.romance_editor import _ask_retention as ask
+
+    return ask(parent, theme, typography)
