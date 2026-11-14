@@ -1144,9 +1144,25 @@ Arabic is kept as secondary aliases where useful.
   breaking the turn), and `resume`. The gate grew to **46 judgements** (Phase-4
   ones include two negative controls — only the adult mode may be flagged adult,
   and a mode change must not mutate an earlier message). Docs:
-  `docs/romance_companion/CONVERSATION_MODES.md`. Later phases add the relationship
-  engine, the memory manager, the roleplay engine, the voice adapter, the safety
-  manager, the orchestrator, and the window + CLI.
+  `docs/romance_companion/CONVERSATION_MODES.md`. **Phase 5 (relationship
+  engine)** adds `core/romance/relationship.py` — `RelationshipEngine`: an
+  independent relationship per character, scored on seven transparent dimensions
+  (`familiarity`, `trust`, `closeness`, `comfort`, `affection`,
+  `shared_experiences`, `stability`). `observe(character_id, kind, message_id=…)`
+  records an explicit event and moves the state by that event's **bounded** deltas
+  (`MAX_STEP` 0.12, `EVENT_EFFECTS`), so no dimension can jump; it is
+  **idempotent** for the same `(kind, message_id)` and requires **evidence** (a
+  milestone with no message id is recorded but moves nothing); a `conflict` moves
+  closeness/trust **down**. The engine has no dependency/possessiveness/jealousy
+  dimension, so it can never reward pressure. `snapshot` reads the state,
+  `stage_for` maps the overall closeness onto the configurable `STAGES`
+  (stranger → … → romantic_partner), `explain` says **why** the relationship is
+  where it is (the events, in order), and `reset`/`edit` are the user's own
+  corrections. The gate grew to **51 judgements** (Phase-5 ones include the
+  no-random-change negative control). Docs:
+  `docs/romance_companion/RELATIONSHIP_ENGINE.md`. Later phases add the memory
+  manager, the roleplay engine, the voice adapter, the safety manager, the
+  orchestrator, and the window + CLI.
   It loads no model and reaches no network on import.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,

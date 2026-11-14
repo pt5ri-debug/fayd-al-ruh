@@ -199,6 +199,28 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "an unknown mode falls back to the general mode",
         "modes-unknown-fallback",
     ),
+    # -- Phase 5: the relationship engine ------------------------------------
+    StudioJudgement(
+        "the relationship moves only from an explicit, bounded event",
+        "relationship-bounded",
+    ),
+    StudioJudgement(
+        "the relationship never changes without an event",
+        "negative-no-random-change",
+        note="negative control: reading the state must not move it",
+    ),
+    StudioJudgement(
+        "a conflict moves the relationship down",
+        "relationship-conflict-down",
+    ),
+    StudioJudgement(
+        "each character has an independent relationship",
+        "relationship-isolated",
+    ),
+    StudioJudgement(
+        "the relationship explanation names the events",
+        "relationship-explains",
+    ),
 )
 
 
@@ -798,6 +820,66 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
         from core.romance.modes import MODE_GENERAL, find_mode
 
         return find_mode("does-not-exist").key == MODE_GENERAL and find_mode(None).key == MODE_GENERAL
+
+    # -- Phase 5: the relationship engine --------------------------------
+    if kind == "relationship-bounded":
+        from core.romance.relationship import MAX_STEP, RelationshipEngine
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            relationship = RelationshipEngine(storage)
+            change = relationship.observe(character_id, "personal_share", message_id="MSG-1")
+            return bool(change.deltas) and all(
+                abs(delta) <= MAX_STEP for delta in change.deltas.values()
+            )
+
+    if kind == "negative-no-random-change":
+        from core.romance.relationship import RelationshipEngine
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            relationship = RelationshipEngine(storage)
+            before = relationship.snapshot(character_id).dimensions
+            for _ in range(5):
+                relationship.snapshot(character_id)
+            return relationship.snapshot(character_id).dimensions == before
+
+    if kind == "relationship-conflict-down":
+        from core.romance.relationship import RelationshipEngine
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            relationship = RelationshipEngine(storage)
+            relationship.observe(character_id, "meaningful_conversation", message_id="MSG-1")
+            relationship.observe(character_id, "meaningful_conversation", message_id="MSG-2")
+            closeness_before = relationship.snapshot(character_id).dimensions["closeness"]
+            relationship.observe(character_id, "conflict", message_id="MSG-3")
+            return relationship.snapshot(character_id).dimensions["closeness"] < closeness_before
+
+    if kind == "relationship-isolated":
+        from core.romance.relationship import RelationshipEngine
+
+        with _storage() as storage:
+            first = _new_character(storage, name="Layla").record_id
+            second = _new_character(storage, name="Karim").record_id
+            relationship = RelationshipEngine(storage)
+            relationship.observe(first, "personal_share", message_id="MSG-1")
+            return (
+                relationship.snapshot(first).dimensions["trust"] > 0.0
+                and relationship.snapshot(second).dimensions["trust"] == 0.0
+            )
+
+    if kind == "relationship-explains":
+        from core.romance.relationship import RelationshipEngine
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            relationship = RelationshipEngine(storage)
+            relationship.observe(
+                character_id, "personal_share", message_id="MSG-1", title="Shared a secret"
+            )
+            text = relationship.explain(character_id)
+            return "Shared a secret" in text
 
     return False
 
