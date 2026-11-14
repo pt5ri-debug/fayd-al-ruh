@@ -221,6 +221,28 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "the relationship explanation names the events",
         "relationship-explains",
     ),
+    # -- Phase 6: the memory system -----------------------------------------
+    StudioJudgement(
+        "a memory is stored per character and isolated",
+        "memory-isolated",
+    ),
+    StudioJudgement(
+        "an identical memory is never stored twice",
+        "negative-memory-dedup",
+        note="negative control: a repeated fact must not fill the log with copies",
+    ),
+    StudioJudgement(
+        "a correction is a new record and the original is preserved",
+        "memory-supersede",
+    ),
+    StudioJudgement(
+        "a memory is never assumed a certain fact",
+        "memory-not-a-fact",
+    ),
+    StudioJudgement(
+        "recall ranks by relevance and returns nothing when empty",
+        "memory-recall",
+    ),
 )
 
 
@@ -880,6 +902,68 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
             )
             text = relationship.explain(character_id)
             return "Shared a secret" in text
+
+    # -- Phase 6: the memory system --------------------------------------
+    if kind == "memory-isolated":
+        from core.romance.memory import KIND_SEMANTIC, CompanionMemoryManager
+
+        with _storage() as storage:
+            first = _new_character(storage, name="Layla").record_id
+            second = _new_character(storage, name="Karim").record_id
+            memory = CompanionMemoryManager(storage)
+            memory.add(first, KIND_SEMANTIC, "The user is a diver.")
+            return (
+                len(memory.memories(first)) == 1
+                and memory.memories(second) == ()
+                and memory.retrieve(second, "diver") == ()
+            )
+
+    if kind == "negative-memory-dedup":
+        from core.romance.memory import KIND_SEMANTIC, CompanionMemoryManager
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            memory = CompanionMemoryManager(storage)
+            first = memory.add(character_id, KIND_SEMANTIC, "The user loves rain.")
+            second = memory.add(character_id, KIND_SEMANTIC, "  the user loves rain.  ")
+            return first.record_id == second.record_id and len(memory.memories(character_id)) == 1
+
+    if kind == "memory-supersede":
+        from core.romance.memory import KIND_SEMANTIC, CompanionMemoryManager
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            memory = CompanionMemoryManager(storage)
+            original = memory.add(character_id, KIND_SEMANTIC, "The user is a teacher.")
+            replacement = memory.supersede(original.record_id, "The user is an engineer.")
+            stored = memory.get(original.record_id)
+            return (
+                replacement.record_id != original.record_id
+                and stored.content == "The user is a teacher."
+                and stored.superseded_by == replacement.record_id
+            )
+
+    if kind == "memory-not-a-fact":
+        from core.romance.memory import KIND_SEMANTIC, CompanionMemoryManager
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            memory = CompanionMemoryManager(storage)
+            stored = memory.add(character_id, KIND_SEMANTIC, "The user is a diver.")
+            # A fresh memory is never assumed certain.
+            return float(stored.confidence) < 1.0
+
+    if kind == "memory-recall":
+        from core.romance.memory import KIND_SEMANTIC, CompanionMemoryManager
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            memory = CompanionMemoryManager(storage)
+            memory.add(character_id, KIND_SEMANTIC, "The user is a diver.", importance=0.5)
+            memory.add(character_id, KIND_SEMANTIC, "The user loves rain.", importance=0.5)
+            top = memory.retrieve(character_id, "diver")
+            empty = memory.retrieve(character_id, "diver", limit=0)
+            return bool(top) and top[0].content == "The user is a diver." and empty == ()
 
     return False
 

@@ -1160,9 +1160,21 @@ Arabic is kept as secondary aliases where useful.
   where it is (the events, in order), and `reset`/`edit` are the user's own
   corrections. The gate grew to **51 judgements** (Phase-5 ones include the
   no-random-change negative control). Docs:
-  `docs/romance_companion/RELATIONSHIP_ENGINE.md`. Later phases add the memory
-  manager, the roleplay engine, the voice adapter, the safety manager, the
-  orchestrator, and the window + CLI.
+  `docs/romance_companion/RELATIONSHIP_ENGINE.md`. **Phase 6 (memory system)**
+  adds `core/romance/memory.py` — `CompanionMemoryManager`: four durable kinds
+  (`episodic`, `semantic_personal`, `relationship`, `character`; short-term is the
+  conversation window, not stored), each memory carrying its `confidence` (never
+  assumed certain), `source`, `source_message_id`, and a `fictional` flag so
+  reality and fiction never mix. `add` de-duplicates an identical memory;
+  `supersede` writes a **new** record and points the old one at it (the original is
+  never mutated); `retrieve`/`reference_block` rank by relevance (the query's own
+  terms), recency (30-day half-life), and importance with documented weights, and
+  return nothing rather than a weak guess; `memories`/`get`/`edit`/`forget`/
+  `export`/`apply_retention` (opt-in) round it out. Isolation is per character.
+  The gate grew to **56 judgements** (Phase-6 ones include the memory-dedup
+  negative control). Docs: `docs/romance_companion/MEMORY_SYSTEM.md`. Later phases
+  add the roleplay engine, the voice adapter, the safety manager, the orchestrator,
+  and the window + CLI.
   It loads no model and reaches no network on import.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
