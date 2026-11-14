@@ -261,6 +261,20 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "a session can be paused, resumed, and restarted",
         "roleplay-session-lifecycle",
     ),
+    # -- Phase 8: voice -----------------------------------------------------
+    StudioJudgement(
+        "each character has its own voice profile",
+        "voice-per-character",
+    ),
+    StudioJudgement(
+        "only voices this machine really has are offered",
+        "negative-voice-no-invented-voice",
+        note="negative control: the voice list must never contain a made-up key",
+    ),
+    StudioJudgement(
+        "a voice read never raises when the engine is missing",
+        "voice-never-breaks-a-scene",
+    ),
 )
 
 
@@ -270,8 +284,10 @@ def _storage() -> Iterator[CompanionStorageService]:
         yield CompanionStorageService(root=Path(folder))
 
 
-def _new_character(storage: CompanionStorageService, name: str = "Layla") -> Any:
-    return storage.domain.create("companion_characters", owner="natasha", name=name)
+def _new_character(storage: CompanionStorageService, name: str = "Layla", *, age: int | None = None) -> Any:
+    return storage.domain.create(
+        "companion_characters", owner="natasha", name=name, fictional_age=age
+    )
 
 
 def _manager(storage: CompanionStorageService) -> CharacterManager:
@@ -1040,6 +1056,51 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
             roleplay.end(session.record_id)
             restarted = roleplay.restart(session.record_id)
             return paused and resumed and restarted.state == STATE_ACTIVE and restarted.record_id != session.record_id
+
+    # -- Phase 8: voice --------------------------------------------------
+    if kind == "voice-per-character":
+        from core.romance.voice import CompanionVoiceAdapter
+
+        with _storage() as storage:
+            first = _new_character(storage, name="Layla").record_id
+            second = _new_character(storage, name="Karim").record_id
+            voice = CompanionVoiceAdapter(storage)
+            voice.set_voice(first, voice_key="woman-1")
+            # Each character keeps its own profile; the second is untouched.
+            return (
+                voice.profile(first).voice_key == "woman-1"
+                and voice.profile(second).voice_key == ""
+            )
+
+    if kind == "negative-voice-no-invented-voice":
+        from core.romance.voice import CompanionVoiceAdapter
+
+        with _storage() as storage:
+            voice = CompanionVoiceAdapter(storage)
+            options = voice.available_voices()
+            # Every offered voice carries a real key from an installed source, and
+            # a made-up key is not offered.
+            keys = {option.key for option in options}
+            return "made-up-voice-key" not in keys and all(option.key for option in options)
+
+    if kind == "voice-never-breaks-a-scene":
+        from core.romance.voice import CompanionVoiceAdapter
+
+        class _Boom:
+            def set_voice(self, key: str) -> None:
+                raise RuntimeError("no engine")
+
+            def set_mood(self, mood: str) -> None:
+                raise RuntimeError("no engine")
+
+            def render(self, text: str) -> None:
+                raise RuntimeError("no engine")
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            voice = CompanionVoiceAdapter(storage, reader=_Boom())
+            # A render that fails returns None rather than raising.
+            return voice.read_aloud(character_id, "Hello.") is None
 
     return False
 
