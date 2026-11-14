@@ -243,6 +243,24 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "recall ranks by relevance and returns nothing when empty",
         "memory-recall",
     ),
+    # -- Phase 7: dating and roleplay ---------------------------------------
+    StudioJudgement(
+        "a scenario is fictional unless the user says otherwise",
+        "roleplay-fictional-default",
+    ),
+    StudioJudgement(
+        "a character cannot join a scenario twice",
+        "negative-roleplay-no-duplicate-cast",
+        note="negative control: the cast must never list a character twice",
+    ),
+    StudioJudgement(
+        "a branch is a new session that never rewrites the original",
+        "roleplay-branch",
+    ),
+    StudioJudgement(
+        "a session can be paused, resumed, and restarted",
+        "roleplay-session-lifecycle",
+    ),
 )
 
 
@@ -964,6 +982,64 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
             top = memory.retrieve(character_id, "diver")
             empty = memory.retrieve(character_id, "diver", limit=0)
             return bool(top) and top[0].content == "The user is a diver." and empty == ()
+
+    # -- Phase 7: dating and roleplay ------------------------------------
+    if kind == "roleplay-fictional-default":
+        from core.romance.roleplay import RoleplayEngine
+
+        with _storage() as storage:
+            roleplay = RoleplayEngine(storage)
+            scenario = roleplay.create_scenario("A café")
+            return scenario.is_real_place is False
+
+    if kind == "negative-roleplay-no-duplicate-cast":
+        from core.romance.roleplay import RoleplayEngine, RoleplayError
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            roleplay = RoleplayEngine(storage)
+            scenario = roleplay.create_scenario("Scene")
+            roleplay.add_participant(scenario.record_id, character_id)
+            try:
+                roleplay.add_participant(scenario.record_id, character_id)
+            except RoleplayError:
+                return roleplay.cast(scenario.record_id) == (character_id,)
+            return False
+
+    if kind == "roleplay-branch":
+        from core.romance.roleplay import RoleplayEngine
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            roleplay = RoleplayEngine(storage)
+            scenario = roleplay.create_scenario("Scene")
+            roleplay.add_participant(scenario.record_id, character_id)
+            original = roleplay.start(scenario.record_id)
+            branch = roleplay.branch(original.record_id)
+            return (
+                branch.record_id != original.record_id
+                and branch.branch_of == original.record_id
+                and roleplay.get_session(original.record_id).branch_of == ""
+            )
+
+    if kind == "roleplay-session-lifecycle":
+        from core.romance.roleplay import (
+            STATE_ACTIVE,
+            STATE_PAUSED,
+            RoleplayEngine,
+        )
+
+        with _storage() as storage:
+            character_id = _new_character(storage).record_id
+            roleplay = RoleplayEngine(storage)
+            scenario = roleplay.create_scenario("Scene")
+            roleplay.add_participant(scenario.record_id, character_id)
+            session = roleplay.start(scenario.record_id)
+            paused = roleplay.pause(session.record_id).state == STATE_PAUSED
+            resumed = roleplay.resume(session.record_id).state == STATE_ACTIVE
+            roleplay.end(session.record_id)
+            restarted = roleplay.restart(session.record_id)
+            return paused and resumed and restarted.state == STATE_ACTIVE and restarted.record_id != session.record_id
 
     return False
 
