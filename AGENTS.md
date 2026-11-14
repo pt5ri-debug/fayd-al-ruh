@@ -1200,8 +1200,39 @@ Arabic is kept as secondary aliases where useful.
   confirmation and refusal written as an append-only `CompanionSafetyEvent`. The
   gate grew to **67 judgements** (Phase-9 ones include the minor-refused and
   coercion-refused negative controls). Docs:
-  `docs/romance_companion/PRIVACY_AND_SAFETY.md`. Later phases add the
-  orchestrator and the window + CLI.
+  `docs/romance_companion/PRIVACY_AND_SAFETY.md`. **Phase 10 (orchestrator,
+  window, CLI)** adds `core/romance/orchestrator.py` — `CompanionOrchestrator`,
+  the one conversation turn: the safety floor is checked **first** (a refusal
+  writes nothing), the user's message is appended before the model runs, the
+  reply is appended only when one was really produced, and the relationship and
+  the memory are observed from the exchange with the message as evidence;
+  `send_multi` draws a **cast** (the user speaks once, each character answers from
+  its own prompt, generation **sequential** so a low-memory machine never runs two
+  models at once, each reply carrying its own character's name as its speaker, so
+  no character impersonates another). A safety check that **raises** fails closed
+  (a refusal, never a crash). The one inference seam is
+  `CompanionModelRouter.generate`, which delegates to the project's existing
+  `ModelManager` runtime — no second runtime, no network. `gui/romance.py` is the
+  Tk-free `RomanceStudioService` the window **and** the CLI both drive (characters,
+  conversations, relationship, memory, scenarios, voice, safety, and an honest
+  status that never overstates); **Discover Characters** is the example library
+  over the shipped drafts — `discover_examples()` is a read that writes nothing
+  and `add_example(name)` creates **only** the chosen draft (returning the
+  existing one when already present, never a duplicate), driven by the window's
+  *Discover* block and the CLI's `discover` / `add-example NAME`;
+  `gui/romance_dialog.py` is the standalone Studio
+  window (left sidebar · centre transcript + composer · right information panel,
+  collapsible), built with the project's shared `Theme`, `DialogHeader`/window
+  controls, `SidebarColumn`, and worker-thread/queue pattern, showing the
+  application's disclosure **outside the fiction** while a character's own words
+  stay in character; `cli/romance.py` is the headless twin. Wired as the sidebar
+  **Romance & Companion Studio** action, the composer's **Companion** pill, the
+  ＋ menu entry, and `python -m cli romance …`. The gate grew to **74 judgements**
+  (Phase-10 ones include the no-repeat-speaker and safety-fails-closed negative
+  controls, plus the Discover pair: browsing writes nothing, and adding one adds
+  only that one). Docs: `docs/romance_companion/PHASE_10_REPORT.md`, and the
+  final deliverables beside it (`USER_GUIDE.md`, `FEATURE_MATRIX.md`,
+  `CHARACTER_SYSTEM.md`, `INSTALLATION.md`, `TEST_REPORT.md`).
   It loads no model and reaches no network on import.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,

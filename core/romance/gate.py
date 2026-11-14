@@ -275,6 +275,58 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "a voice read never raises when the engine is missing",
         "voice-never-breaks-a-scene",
     ),
+    # -- Phase 9: privacy and safety ---------------------------------------
+    StudioJudgement(
+        "adult content is disabled by default",
+        "safety-adult-off-by-default",
+    ),
+    StudioJudgement(
+        "an age-ambiguous or minor character is refused",
+        "negative-safety-minor-refused",
+        note="negative control: an unspecified age must never be treated as adult",
+    ),
+    StudioJudgement(
+        "a coercive request is refused before any level is considered",
+        "negative-safety-coercion-refused",
+        note="negative control: coercion is refused even with the mode on",
+    ),
+    StudioJudgement(
+        "local-only mode refuses a remote provider",
+        "safety-local-only-refuses-remote",
+    ),
+    # -- Phase 10: the orchestrator and the studio service -----------------
+    StudioJudgement(
+        "one turn composes the layers and records the exchange",
+        "orchestrator-turn",
+    ),
+    StudioJudgement(
+        "a multi-character turn keeps one distinct speaker per character",
+        "orchestrator-multi-distinct-speakers",
+        note="each reply is attributed to its own character, never merged",
+    ),
+    StudioJudgement(
+        "a multi-character turn draws characters without repeating one",
+        "negative-orchestrator-no-repeat-speaker",
+        note="negative control: a turn must not have the same character speak twice",
+    ),
+    StudioJudgement(
+        "the safety floor fails closed on a broken check and never crashes a turn",
+        "negative-orchestrator-safety-fails-closed",
+        note="negative control: a broken safety check must refuse, not proceed",
+    ),
+    StudioJudgement(
+        "the studio service is the single headless surface the window and CLI share",
+        "studio-service-shared",
+    ),
+    StudioJudgement(
+        "discovering the example companions writes nothing to the database",
+        "negative-discover-writes-nothing",
+        note="negative control: browsing the library must never create a character",
+    ),
+    StudioJudgement(
+        "adding one example companion adds only that one and never duplicates it",
+        "discover-adds-only-the-chosen",
+    ),
 )
 
 
@@ -282,6 +334,15 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
 def _storage() -> Iterator[CompanionStorageService]:
     with tempfile.TemporaryDirectory() as folder:
         yield CompanionStorageService(root=Path(folder))
+
+
+def _fixed_generator(reply: str) -> Any:
+    """A deterministic generation seam: return ``reply`` without a real model."""
+
+    def generate(prompt: str, key: Any, handle: Any) -> tuple[str, bool, str]:
+        return reply, True, ""
+
+    return generate
 
 
 def _new_character(storage: CompanionStorageService, name: str = "Layla", *, age: int | None = None) -> Any:
@@ -1101,6 +1162,187 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
             voice = CompanionVoiceAdapter(storage, reader=_Boom())
             # A render that fails returns None rather than raising.
             return voice.read_aloud(character_id, "Hello.") is None
+
+    # -- Phase 9: privacy and safety -------------------------------------
+    if kind == "safety-adult-off-by-default":
+        from core.romance.safety import CompanionSafetyManager
+
+        with _storage() as storage:
+            return CompanionSafetyManager(storage).adult_mode_enabled() is False
+
+    if kind == "negative-safety-minor-refused":
+        from core.romance.safety import CONTENT_ADULT, CompanionSafetyManager, SafetyError
+
+        with _storage() as storage:
+            ambiguous = _new_character(storage, name="Unknown").record_id
+            minor = _new_character(storage, name="Sam", age=16).record_id
+            safety = CompanionSafetyManager(storage)
+            safety.set_adult_mode(True, confirmed=True)
+            # Neither an unspecified age nor an under-18 age can be confirmed or
+            # allowed, even with the mode on.
+            try:
+                safety.confirm_eligibility(ambiguous)
+                return False
+            except SafetyError:
+                pass
+            return safety.check_content(ambiguous, CONTENT_ADULT).allowed is False and (
+                safety.check_content(minor, CONTENT_ADULT).allowed is False
+            )
+
+    if kind == "negative-safety-coercion-refused":
+        from core.romance.safety import CONTENT_ADULT, CompanionSafetyManager
+
+        with _storage() as storage:
+            character_id = _new_character(storage, age=27).record_id
+            safety = CompanionSafetyManager(storage)
+            safety.set_adult_mode(True, confirmed=True)
+            safety.confirm_eligibility(character_id)
+            decision = safety.check_content(
+                character_id, CONTENT_ADULT, text="force her to do it"
+            )
+            return decision.allowed is False
+
+    if kind == "safety-local-only-refuses-remote":
+        from core.romance.safety import CompanionSafetyManager, SafetyError
+
+        with _storage() as storage:
+            safety = CompanionSafetyManager(storage)
+            if safety.local_only() is not True:
+                return False
+            try:
+                safety.assert_local_only(mouth="cloud")
+                return False
+            except SafetyError:
+                return True
+
+    # -- Phase 10: the orchestrator and the studio service -----------------
+    if kind == "orchestrator-turn":
+        from core.romance.orchestrator import CompanionOrchestrator
+
+        with _storage() as storage:
+            character = _new_character(storage, "Layla", age=27)
+            orchestrator = CompanionOrchestrator(
+                storage, generator=_fixed_generator("Hello.")
+            )
+            conversation = storage.domain.create(
+                "companion_conversations", character_id=character.record_id, title="t", mode="general"
+            )
+            result = orchestrator.send(conversation.record_id, "Hi there.")
+            if not (result.ok and result.reply == "Hello."):
+                return False
+            messages = storage.domain.list_records(
+                "companion_messages", where="conversation_id = ?", params=(conversation.record_id,)
+            )
+            return [m.role for m in messages] == ["user", "assistant"]
+
+    if kind == "orchestrator-multi-distinct-speakers":
+        from core.romance.orchestrator import CompanionOrchestrator
+
+        with _storage() as storage:
+            first = _new_character(storage, "Layla", age=27)
+            second = _new_character(storage, "Noor", age=26)
+            orchestrator = CompanionOrchestrator(
+                storage, generator=_fixed_generator("Hello.")
+            )
+            conversation = storage.domain.create(
+                "companion_conversations",
+                character_id=first.record_id,
+                title="scene",
+                mode="multi_character",
+            )
+            result = orchestrator.send_multi(
+                conversation.record_id,
+                "Hello both.",
+                cast=(first.record_id, second.record_id),
+            )
+            if not result.ok:
+                return False
+            speakers = list(result.speakers)
+            return len(speakers) == 2 and len(set(speakers)) == 2
+
+    if kind == "negative-orchestrator-no-repeat-speaker":
+        from core.romance.orchestrator import CompanionOrchestrator
+
+        with _storage() as storage:
+            first = _new_character(storage, "Layla", age=27)
+            orchestrator = CompanionOrchestrator(
+                storage, generator=_fixed_generator("Hello.")
+            )
+            conversation = storage.domain.create(
+                "companion_conversations",
+                character_id=first.record_id,
+                title="scene",
+                mode="multi_character",
+            )
+            result = orchestrator.send_multi(
+                conversation.record_id, "Hello.", cast=(first.record_id,)
+            )
+            # A single-character cast must produce exactly one speaker, never a repeat.
+            return result.ok and len(result.speakers) == 1
+
+    if kind == "negative-orchestrator-safety-fails-closed":
+        from core.romance.orchestrator import CompanionOrchestrator
+        from core.romance.safety import CompanionSafetyManager
+
+        with _storage() as storage:
+            character = _new_character(storage, "Layla", age=27)
+            conversation = storage.domain.create(
+                "companion_conversations", character_id=character.record_id, title="t", mode="adult"
+            )
+            orchestrator = CompanionOrchestrator(
+                storage,
+                generator=_fixed_generator("Hello."),
+                safety=CompanionSafetyManager(storage),
+            )
+
+            def broken(character_id, level, text=""):
+                raise RuntimeError("the safety check itself is broken")
+
+            # Break the *underlying* safety manager, so the orchestrator's own
+            # fail-closed guard is what must refuse the turn.
+            orchestrator.safety.check_content = broken  # type: ignore[union-attr,method-assign]
+            result = orchestrator.send(conversation.record_id, "anything at all")
+            # A broken safety check must fail closed: the turn is refused, not run.
+            return result.refused and not result.ok
+
+    if kind == "studio-service-shared":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            bundle = service.create_character("Layla", fictional_age=27)
+            conversation = service.start_conversation(bundle.id)
+            result = service.send(conversation.record_id, "Hello.")
+            # The service exposes the same surface the CLI drives: characters,
+            # conversations, relationship, memory, modes, and an honest status.
+            return (
+                result.ok
+                and service.character(bundle.id).name == "Layla"
+                and service.relationship(bundle.id).dimensions["familiarity"] >= 0.0
+                and len(service.modes()) >= 9
+            )
+
+    if kind == "negative-discover-writes-nothing":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            discovered = service.discover_examples()
+            # Browsing the shipped examples is a read: nothing is created.
+            return bool(discovered) and list(service.character_rows()) == []
+
+    if kind == "discover-adds-only-the-chosen":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            name = service.discover_examples()[0][0].name
+            bundle = service.add_example(name)
+            if len(service.character_rows()) != 1:
+                return False
+            # Adding it again returns the same character, never a second copy.
+            again = service.add_example(name)
+            return again.id == bundle.id and len(service.character_rows()) == 1
 
     return False
 

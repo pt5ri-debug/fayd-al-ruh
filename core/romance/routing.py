@@ -33,6 +33,7 @@ from core.model_manager import (
     STATE_READY,
     ModelManager,
 )
+from core.model_runtime import InferenceResult
 
 #: The default task the router ranks models against (the manager's own task map
 #: names the companion engine for it).
@@ -410,6 +411,43 @@ class CompanionModelRouter:
     def should_stop(self, handle: GenerationHandle) -> bool:
         """Whether a generation should stop (cancelled by the user or timed out)."""
         return handle.cancelled or handle.expired()
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        key: str | None = None,
+        settings: Any = None,
+        handle: GenerationHandle | None = None,
+    ) -> Any:
+        """Run **one** local generation through the manager and return its result.
+
+        This is the Studio's only inference call: it resolves the chosen model,
+        runs the project's existing runtime through the manager (loading it first
+        when nothing is loaded), and returns the manager's own ``InferenceResult``
+        -- never a second runtime, never a network call. A cancelled or expired
+        handle stops the request **before** it starts, so a user's Stop is honoured
+        without a long wait; a failure is returned as ``ok=False`` with the real
+        reason, never raised at the caller.
+        """
+        resolved = self.resolve(key)
+        if handle is not None and self.should_stop(handle):
+            return InferenceResult(
+                ok=False, runtime=resolved.engine, detail="generation cancelled"
+            )
+        if resolved.path is None:
+            return InferenceResult(
+                ok=False,
+                runtime=resolved.engine,
+                detail=f"The model {resolved.key!r} is not installed on this machine.",
+            )
+        entry = self._record_for(resolved)
+        result = self.manager.test(
+            entry.model_id, prompt=prompt, settings=settings or self.safe_settings(resolved)
+        )
+        return result.inference or InferenceResult(
+            ok=False, runtime=resolved.engine, detail=result.detail
+        )
 
 
 def _resolved_from(model: Any) -> ResolvedModel:

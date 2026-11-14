@@ -451,6 +451,11 @@ def run_workplace(argv: Sequence[str] = ()) -> int:
     return _run_module("cli.workplace", argv)
 
 
+def run_romance(argv: Sequence[str] = ()) -> int:
+    """The Romance & Companion Studio: local AI companions, dating, roleplay."""
+    return _run_module("cli.romance", argv)
+
+
 def run_model_chat(argv: Sequence[str] = ()) -> int:
     """Inspect and set a model's own chat profile: name, logo, voice, model."""
     return _run_module("cli.model_chat", argv)

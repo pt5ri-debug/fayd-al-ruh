@@ -3076,6 +3076,11 @@ class FaydGUI:
         # learning-and-training workspace. It is a *view* of the real control (the
         # window's own sidebar entry opens the same window), not a second source of
         # truth, so the two can never disagree about what Training does.
+        self._romance_mode_selector = self._composer.add_mode_selector(
+            icon="❤", label="Companion",
+            options=[("Open the Romance & Companion Studio…", self._open_romance)],
+            tip="Romance & Companion Studio: local AI companions, dating, roleplay",
+        )
         self._training_mode_selector = self._composer.add_mode_selector(
             icon="🎓", label="Training",
             options=[("Open the Training Center…", self._open_training_center)],
@@ -3445,6 +3450,10 @@ class FaydGUI:
         menu.add_command(
             label="Workplace — EPRI/TSTC's digital office…",
             command=self._open_workplace,
+        )
+        menu.add_command(
+            label="Romance & Companion Studio — local AI companions, dating…",
+            command=self._open_romance,
         )
         menu.add_command(
             label="Training Center — learn, build datasets, train, and evaluate…",
@@ -4215,6 +4224,39 @@ class FaydGUI:
             overrides=self._profiles[SCOPE_WINDOWS],
             list_overrides=self._profiles[SCOPE_LISTS],
             on_close=lambda: setattr(self, "_workplace_dialog", None),
+        )
+
+    def _open_romance(self) -> None:
+        """Open the Romance & Companion Studio: local AI companions.
+
+        A standalone professional studio page for the project's local companions --
+        independent fictional characters with persistent personalities, memories,
+        and evolving relationships, plus dating and roleplay. It drives its own
+        Tk-free service (:class:`gui.romance.RomanceStudioService`), the same one
+        ``python -m cli romance`` drives, so the window and the CLI share one
+        database. One window is kept and reused.
+        """
+        existing = getattr(self, "_romance_dialog", None)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:  # the window was closed out from under us
+                self._romance_dialog = None
+
+        from gui.romance import RomanceStudioService
+        from gui.romance_dialog import RomanceStudioDialog
+
+        self._romance_dialog = RomanceStudioDialog(
+            self.root,
+            RomanceStudioService(root=self.service.data_root),
+            theme=self._theme,
+            font=self._font,
+            mono=self._mono,
+            overrides=self._profiles[SCOPE_WINDOWS],
+            list_overrides=self._profiles[SCOPE_LISTS],
+            on_close=lambda: setattr(self, "_romance_dialog", None),
         )
 
     def _select_ultron_mouth(self) -> None:
