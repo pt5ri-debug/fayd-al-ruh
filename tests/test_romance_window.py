@@ -432,7 +432,7 @@ def test_the_composer_sends_to_a_companion_chosen_from_the_library(tmp_path: Pat
         root.update()
         conversations = service.conversations_for(character_id)
         assert conversations, "the turn did not reach the chosen companion"
-        messages = service.messages(conversations[0].record_id)
+        messages = service.messages(conversations[0].conversation_id)
         assert any(m.role == "user" and "Hello" in m.content for m in messages)
     finally:
         _close_window(root, dialog)
