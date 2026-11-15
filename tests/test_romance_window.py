@@ -515,3 +515,26 @@ def test_the_window_offers_the_own_files_controls(tmp_path: Path) -> None:
             assert callable(getattr(dialog, name))
     finally:
         _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_window_offers_the_knowledge_pack_controls(tmp_path: Path) -> None:
+    root, dialog, _service = _dialog(tmp_path)
+    try:
+        # The knowledge-base controls are real methods, and the panel reports the
+        # pack's state (not built yet, until one is).
+        for name in ("_build_own_knowledge_pack", "_show_own_knowledge_status"):
+            assert callable(getattr(dialog, name))
+        bundle = _service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        assert "Her knowledge base: not built yet" in dialog._own_text.get("1.0", "end")
+        # Building through the service is reflected in the panel.
+        _service.build_character_knowledge_pack(bundle.id, target_mb=1.0)
+        dialog._refresh_own_panel()
+        text = dialog._own_text.get("1.0", "end")
+        assert "Her knowledge base:" in text
+        assert "not built yet" not in text
+    finally:
+        _close_window(root, dialog)

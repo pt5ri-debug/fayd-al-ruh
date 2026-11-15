@@ -108,6 +108,7 @@ class RomanceStudioDialog(ThemedDialog):
         self._avatar: Any = None
         self._row_frames: list[tuple[tk.Frame, tk.Text]] = []
         self._results: queue.Queue[tuple[Callable[[Any, Exception | None], None], Any, Exception | None]] = queue.Queue()
+        self._pending_status = ""
 
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
@@ -484,6 +485,10 @@ class RomanceStudioDialog(ThemedDialog):
         own_row2.pack(fill="x")
         self._button(own_row2, "What she remembers…", self._show_own_recall)
         self._button(own_row2, "Open the folder…", self._open_own_folder)
+        own_row3 = tk.Frame(own, bg=theme.surface)
+        own_row3.pack(fill="x")
+        self._button(own_row3, "Build her knowledge base…", self._build_own_knowledge_pack)
+        self._button(own_row3, "Knowledge status…", self._show_own_knowledge_status)
 
         scenario = self._right_column.add("scenario", "Active Scenario", icon="🎬")
         self._scenario_text = self._panel_text(scenario, height=5)
@@ -1011,6 +1016,10 @@ class RomanceStudioDialog(ThemedDialog):
             facts = self.service.character_facts(self._selected_character)
         except Exception:
             facts = ()
+        try:
+            pack = self.service.character_knowledge_pack_stats(self._selected_character)
+        except Exception:
+            pack = {}
         lines = [
             f"Profile written: {'yes' if summary.profile_exists else 'no'}",
             f"Knowledge bank: {summary.knowledge_chunks} chunk(s), "
@@ -1018,6 +1027,14 @@ class RomanceStudioDialog(ThemedDialog):
             f"Facts she was told: {summary.facts}",
             f"Exchanges she remembers: {summary.exchanges}",
         ]
+        if pack.get("present"):
+            lines.append(
+                f"Her knowledge base: {pack.get('size_mb', 0)} MB, "
+                f"{pack.get('documents', 0)} document(s)"
+                f"{' (indexed)' if pack.get('indexed') else ''}"
+            )
+        else:
+            lines.append("Her knowledge base: not built yet")
         if facts:
             lines.append("Latest fact: " + facts[-1])
         self._set_panel(self._own_text, "\n".join(lines))
@@ -1553,6 +1570,75 @@ class RomanceStudioDialog(ThemedDialog):
         else:
             self._set_status(f"Her folder is {summary.directory}.")
 
+    def _build_own_knowledge_pack(self) -> None:
+        """Build the companion's own knowledge base -- her voice and world."""
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        character_id = self._selected_character
+        name = self._char_title.cget("text") or "the companion"
+        target = _ask_pack_target(self.window, self.theme, self._type)
+        if target is None:
+            return
+        self._set_status(f"Building {name}'s knowledge base…")
+
+        def job() -> Any:
+            return self.service.build_character_knowledge_pack(
+                character_id, target_mb=target, progress=self._on_pack_progress
+            )
+
+        def finish(report: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._set_status(f"Could not build her knowledge base: {error}")
+                return
+            self._refresh_own_panel()
+            self._add_message("note", report.describe(), title="Knowledge base built")
+            state = "complete" if report.complete else "partial"
+            self._set_status(
+                f"{name}'s knowledge base: {report.size_mb:.1f} MB "
+                f"({report.chunks} chunk(s), {state})."
+            )
+
+        self._run_background(f"Building {name}'s knowledge base…", job, finish)
+
+    def _on_pack_progress(self, message: str) -> None:
+        """A live line from a pack build (called on the worker thread).
+
+        A plain attribute write is safe here; the UI thread's own pump reads it, so
+        the build reports progress without a Tcl call from a worker thread.
+        """
+        self._pending_status = str(message)
+
+    def _show_own_knowledge_status(self) -> None:
+        """Report what the companion's own knowledge base holds."""
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        try:
+            stats = self.service.character_knowledge_pack_stats(self._selected_character)
+        except Exception as error:
+            self._set_status(f"Could not read her knowledge base: {error}")
+            return
+        if not stats.get("present"):
+            self._add_message(
+                "note",
+                "She has no knowledge base yet. Use “Build her knowledge base…” "
+                "to create one from her own identity and voice.",
+                title="Knowledge base",
+            )
+            return
+        sections = stats.get("sections", {}) or {}
+        lines = [
+            f"Size: {stats.get('size_mb', 0)} MB",
+            f"Chunks: {stats.get('chunks', 0)}",
+            f"Documents: {stats.get('documents', 0)}",
+            f"Languages: {', '.join(stats.get('languages', ())) or '(none)'}",
+            f"Indexed: {'yes' if stats.get('indexed') else 'no'}",
+            "Sections: " + ", ".join(f"{k} {v}" for k, v in sorted(sections.items())),
+            f"Folder: {stats.get('dir', '')}",
+        ]
+        self._add_message("note", "\n".join(lines), title="Knowledge base")
+
     def _create_scenario(self) -> None:
         values = _prompt_scenario(self.window, self.theme, self._type, self.service.scenario_categories())
         if values is None:
@@ -1672,6 +1758,12 @@ class RomanceStudioDialog(ThemedDialog):
         self.window.after(60, self._pump_results)
 
     def _pump_results(self) -> None:
+        # Show any live progress a running job posted (a plain attribute, written
+        # from the worker thread and read here on the UI thread).
+        pending = self._pending_status
+        if pending:
+            self._pending_status = ""
+            self._set_status(pending)
         try:
             finish, result, error = self._results.get_nowait()
         except queue.Empty:
@@ -1819,6 +1911,55 @@ def _prompt_dimensions(
     row = tk.Frame(dialog, bg=theme.base)
     row.grid(row=len(dimensions), column=0, columnspan=2, pady=12)
     tk.Button(row, text="Save", command=confirm, bg=theme.primary, fg=theme.primary_foreground,
+              relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
+    tk.Button(row, text="Cancel", command=dialog.destroy, bg=theme.surface_raised, fg=theme.foreground,
+              relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
+    dialog.wait_window()
+    return result["value"]
+
+
+def _ask_pack_target(parent: tk.Misc, theme: Any, typography: Any) -> float | None:
+    """Ask for the target size of a companion's knowledge base, in megabytes."""
+    from core.romance.knowledge_pack import DEFAULT_TARGET_MB, TARGET_MB_RANGE
+
+    dialog = tk.Toplevel(parent)
+    dialog.title("Build the knowledge base")
+    dialog.configure(bg=theme.base)
+    dialog.transient(parent)  # type: ignore[call-overload]
+    dialog.grab_set()
+    result: dict[str, float | None] = {"value": None}
+
+    tk.Label(
+        dialog,
+        text="How large should this companion's own knowledge base be?",
+        bg=theme.base, fg=theme.foreground, font=typography.font("sm"),
+        wraplength=360, justify="left",
+    ).grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(12, 4))
+    tk.Label(
+        dialog,
+        text=f"Between {TARGET_MB_RANGE[0]:.0f} and {TARGET_MB_RANGE[1]:.0f} MB. "
+        "It is generated locally from the companion's own identity, voice, and world.",
+        bg=theme.base, fg=theme.muted, font=typography.font("xs"),
+        wraplength=360, justify="left",
+    ).grid(row=1, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 6))
+    variable = tk.StringVar(value=str(int(DEFAULT_TARGET_MB)))
+    tk.Entry(
+        dialog, textvariable=variable, bg=theme.surface, fg=theme.foreground,
+        insertbackground=theme.foreground, relief="flat", width=10,
+    ).grid(row=2, column=0, padx=12, pady=4, sticky="w")
+
+    def confirm() -> None:
+        try:
+            value = float(variable.get())
+        except (TypeError, ValueError):
+            value = DEFAULT_TARGET_MB
+        low, high = TARGET_MB_RANGE
+        result["value"] = max(low, min(value, high))
+        dialog.destroy()
+
+    row = tk.Frame(dialog, bg=theme.base)
+    row.grid(row=3, column=0, columnspan=2, pady=12)
+    tk.Button(row, text="Build", command=confirm, bg=theme.primary, fg=theme.primary_foreground,
               relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
     tk.Button(row, text="Cancel", command=dialog.destroy, bg=theme.surface_raised, fg=theme.foreground,
               relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
