@@ -187,6 +187,12 @@ class LibraryRow:
     mode: str = ""
     tags: tuple[str, ...] = ()
     present: bool = False
+    character_id: str = ""
+
+    @property
+    def chat_ready(self) -> bool:
+        """True when the companion already exists and can be chatted with now."""
+        return bool(self.character_id)
 
     def label(self) -> str:
         mark = "✓ " if self.present else "＋ "
@@ -507,7 +513,7 @@ class RomanceStudioService:
         from core.romance.library import library_by_category
 
         existing = {
-            summary.name.casefold()
+            summary.name.casefold(): summary.id
             for summary in self.characters.list_characters(include_archived=True)
         }
         wanted = (search or "").strip().casefold()
@@ -519,6 +525,7 @@ class RomanceStudioService:
             ).casefold()
             if wanted and wanted not in haystack:
                 continue
+            character_id = existing.get(character.name.casefold(), "")
             rows.append(
                 LibraryRow(
                     name=character.name,
@@ -530,7 +537,8 @@ class RomanceStudioService:
                     blurb=character.blurb,
                     mode=draft.default_mode,
                     tags=draft.tags,
-                    present=character.name.casefold() in existing,
+                    present=bool(character_id),
+                    character_id=character_id,
                 )
             )
         return tuple(rows)
@@ -552,6 +560,18 @@ class RomanceStudioService:
             if summary.name.casefold() == wanted:
                 return self.characters.get(summary.id)
         return self._finalise(self.characters.create(character.draft))
+
+    def open_library_character(self, name: str) -> Any:
+        """Bring a ready-made library companion into the Studio and return it.
+
+        The library is a catalogue of *drafts*, so clicking one cannot talk to it
+        until it exists. This is the one action the window calls when a library
+        row is chosen: an already-added companion is returned as it is (never
+        duplicated, so its conversations and memories are preserved), and a
+        not-yet-added one is created once — exactly like **Add the chosen**. The
+        returned bundle is the character the chat area should now select.
+        """
+        return self.add_library_character(name)
 
     def seed_library_category(self, category: str = "") -> int:
         """Create every library character in ``category`` (all when blank).

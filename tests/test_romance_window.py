@@ -379,7 +379,61 @@ def test_the_library_browser_lists_archetypes_and_previews_a_character(tmp_path:
         dialog._example_list.selection_set(0)
         dialog._on_library_selected(0)
         root.update()
+        # The preview is filled, and choosing a library companion brings it into the
+        # Studio and selects it, so the chat area shows its name.
         assert dialog._library_preview.cget("text").strip()
+        assert dialog._selected_character
+        assert dialog._char_title.cget("text") != "No companion selected"
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_choosing_a_library_companion_selects_it_for_the_chat(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        # Nothing is selected, and the chat area says so.
+        assert dialog._selected_character == ""
+        assert dialog._char_title.cget("text") == "No companion selected"
+        # Choosing the first library companion (as a click on the list does) makes it
+        # the selected companion the chat area names -- the reported behaviour.
+        dialog._example_list.selection_set(0)
+        dialog._on_library_selected(0)
+        root.update()
+        rows = service.library_rows()
+        chosen = rows[0]
+        assert dialog._selected_character
+        assert dialog._char_title.cget("text") == chosen.name
+        # It was added exactly once, and is now marked present in the library list.
+        assert len(service.character_rows()) == 1
+        # A second choice of the same companion re-selects it, adding no duplicate.
+        dialog._on_library_selected(0)
+        root.update()
+        assert len(service.character_rows()) == 1
+        assert dialog._char_title.cget("text") == chosen.name
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_composer_sends_to_a_companion_chosen_from_the_library(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        # Choose a library companion, then talk to it straight away -- the turn must
+        # reach that companion (not "select a character first").
+        dialog._example_list.selection_set(0)
+        dialog._on_library_selected(0)
+        root.update()
+        character_id = dialog._selected_character
+        assert character_id
+        dialog._entry.insert("1.0", "Hello, how are you?")
+        dialog._send()
+        _wait_until(root, lambda: not dialog._busy, timeout=20.0)
+        root.update()
+        conversations = service.conversations_for(character_id)
+        assert conversations, "the turn did not reach the chosen companion"
+        messages = service.messages(conversations[0].conversation_id)
+        assert any(m.role == "user" and "Hello" in m.content for m in messages)
     finally:
         _close_window(root, dialog)
 
