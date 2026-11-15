@@ -281,9 +281,10 @@ class RomanceStudioService:
 
         Three sources, each its own: the Studio's structured memories (episodic,
         semantic, relationship), the companion's **own knowledge bank** (its
-        ``data/romance/characters/<id>/knowledge_base`` corpus), and its **own
-        facts and past exchanges** (its ``learning.json``). All three are bounded,
-        and a failure in any one never breaks a turn.
+        ``data/romance/characters/<id>/knowledge_base`` corpus -- which holds the
+        generated knowledge pack of its own voice and world when one is built), and
+        its **own facts and past exchanges** (its ``learning.json``). All three are
+        bounded, and a failure in any one never breaks a turn.
         """
         blocks: list[str] = []
         try:
@@ -298,6 +299,15 @@ class RomanceStudioService:
         if structured:
             blocks.append(structured)
         files = self.character_files(character_id)
+        # The compact voice card first: the companion's own identity, style, and
+        # boundaries, always present and always short, so it keeps its own voice
+        # even before -- or without -- a big knowledge pack.
+        try:
+            voice = files.voice_block()
+        except Exception:
+            voice = ""
+        if voice:
+            blocks.append(voice)
         try:
             knowledge = files.reference_block(query)
         except Exception:
@@ -342,6 +352,38 @@ class RomanceStudioService:
     def add_character_knowledge(self, character_id: str, title: str, text: str) -> int:
         """Add a reference document to a companion's own knowledge bank."""
         return self.character_files(character_id).add_knowledge(title, text)
+
+    def build_character_knowledge_pack(
+        self,
+        character_id: str,
+        *,
+        target_mb: float | None = None,
+        languages: tuple[str, ...] | None = None,
+        reset: bool = False,
+        progress: Any = None,
+    ) -> Any:
+        """Build a companion's **own** knowledge base -- its voice and world.
+
+        The profile is rendered first (from the live records), so the pack is
+        generated from the companion's current identity; then the pack is written
+        into the companion's own knowledge bank and indexed. Returns a
+        :class:`core.romance.knowledge_pack.KnowledgePackReport`. Nothing here loads
+        a model or reaches the network.
+        """
+        bundle = self.characters.get(character_id)
+        files = self.character_files(character_id)
+        files.write_profile_from_bundle(bundle)
+        return files.build_knowledge_pack(
+            target_mb=target_mb, languages=languages, reset=reset, progress=progress
+        )
+
+    def character_knowledge_pack_stats(self, character_id: str) -> dict[str, Any]:
+        """What a companion's generated knowledge pack holds (or ``{}``)."""
+        return self.character_files(character_id).knowledge_pack_stats()
+
+    def character_voice_block(self, character_id: str, *, language: str = "en") -> str:
+        """A companion's compact voice card (its own identity, style, boundaries)."""
+        return self.character_files(character_id).voice_block(language=language)
 
     def character_facts(self, character_id: str) -> tuple[str, ...]:
         return self.character_files(character_id).facts()

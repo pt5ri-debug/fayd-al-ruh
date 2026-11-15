@@ -370,6 +370,58 @@ class CharacterFiles:
                     continue
         return removed
 
+    # -- generated knowledge pack -----------------------------------------
+
+    def build_knowledge_pack(
+        self,
+        *,
+        profile: Any = None,
+        target_mb: float | None = None,
+        languages: tuple[str, ...] | None = None,
+        reset: bool = False,
+        progress: Any = None,
+    ) -> Any:
+        """Build this companion's **own** knowledge base (its voice and world).
+
+        The pack is generated deterministically from the companion's records --
+        the ``profile`` argument, or its written ``profile.json`` -- into its own
+        knowledge bank, and indexed. Returns a
+        :class:`core.romance.knowledge_pack.KnowledgePackReport`. Nothing here
+        loads a model or reaches the network.
+        """
+        from core.romance import knowledge_pack
+
+        document = profile if profile is not None else self.read_profile()
+        if document is None:
+            raise CharacterFilesError(
+                "no profile is written for this companion yet; write its profile "
+                "first (or pass one)."
+            )
+        kwargs: dict[str, Any] = {
+            "reset": reset,
+            "progress": progress,
+        }
+        if target_mb is not None:
+            kwargs["target_mb"] = target_mb
+        if languages is not None:
+            kwargs["languages"] = languages
+        return knowledge_pack.build_knowledge_pack(self.knowledge_dir, document, **kwargs)
+
+    def knowledge_pack_stats(self) -> dict[str, Any]:
+        """What this companion's generated pack holds (or ``{}`` if none)."""
+        from core.romance import knowledge_pack
+
+        return knowledge_pack.pack_stats(self.knowledge_dir)
+
+    def voice_block(self, *, language: str = "en", max_chars: int = 900) -> str:
+        """The companion's compact voice card, for a prompt's standing instruction."""
+        from core.romance import knowledge_pack
+
+        document = self.read_profile()
+        if document is None:
+            return ""
+        return knowledge_pack.voice_block(document, language=language, max_chars=max_chars)
+
     # -- learning (facts + exchanges) -------------------------------------
 
     def _read_learning(self) -> dict[str, Any]:

@@ -34,6 +34,8 @@
     python -m cli romance boundary CHR-… "no politics"
     python -m cli romance files CHR-…            # its own profile/knowledge/learning
     python -m cli romance knowledge CHR-… "text" --title "Her work"
+    python -m cli romance knowledge-pack CHR-… --target-mb 50   # its own knowledge base
+    python -m cli romance knowledge-status CHR-…                # what that base holds
     python -m cli romance facts CHR-…            # the durable facts it was told
     python -m cli romance remember-fact CHR-… "she loves jasmine tea"
     python -m cli romance forget-fact CHR-… "she loves jasmine tea"
@@ -266,6 +268,21 @@ def _build_parser() -> argparse.ArgumentParser:
     knowledge.add_argument("character_id")
     knowledge.add_argument("text")
     knowledge.add_argument("--title", default="note")
+
+    pack = _sub(
+        sub,
+        "knowledge-pack",
+        help="Build a companion's own knowledge base (its voice and world).",
+    )
+    pack.add_argument("character_id")
+    pack.add_argument("--target-mb", type=float, default=None)
+    pack.add_argument("--lang", action="append", default=None, help="en and/or ar.")
+    pack.add_argument("--reset", action="store_true", help="Rebuild from empty.")
+
+    pack_status = _sub(
+        sub, "knowledge-status", help="What a companion's own knowledge base holds."
+    )
+    pack_status.add_argument("character_id")
 
     facts = _sub(sub, "facts", help="The durable facts a companion was told.")
     facts.add_argument("character_id")
@@ -802,6 +819,41 @@ def run_knowledge(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_knowledge_pack(args: argparse.Namespace) -> int:
+    service = _service(args)
+    languages = tuple(args.lang) if args.lang else None
+    report = service.build_character_knowledge_pack(
+        args.character_id,
+        target_mb=args.target_mb,
+        languages=languages,
+        reset=args.reset,
+    )
+    _emit(args, report.as_dict(), report.describe())
+    return EXIT_OK
+
+
+def run_knowledge_status(args: argparse.Namespace) -> int:
+    stats = _service(args).character_knowledge_pack_stats(args.character_id)
+    if not stats.get("present"):
+        _emit(
+            args,
+            {"present": False, "character_id": args.character_id},
+            f"{args.character_id}: no knowledge base yet.",
+        )
+        return EXIT_OK
+    sections = ", ".join(f"{k} {v}" for k, v in sorted((stats.get("sections") or {}).items()))
+    text = (
+        f"{args.character_id}: {stats.get('size_mb', 0)} MB, "
+        f"{stats.get('chunks', 0)} chunk(s), {stats.get('documents', 0)} document(s)"
+        f"{' (indexed)' if stats.get('indexed') else ''}\n"
+        f"  Languages: {', '.join(stats.get('languages', ())) or '(none)'}\n"
+        f"  Sections: {sections}\n"
+        f"  Folder: {stats.get('dir', '')}"
+    )
+    _emit(args, stats, text)
+    return EXIT_OK
+
+
 def run_facts(args: argparse.Namespace) -> int:
     facts = _service(args).character_facts(args.character_id)
     _emit(args, list(facts), "\n".join(f"- {fact}" for fact in facts) or "No facts yet.")
@@ -870,6 +922,8 @@ _HANDLERS = {
     "boundary": run_boundary,
     "files": run_files,
     "knowledge": run_knowledge,
+    "knowledge-pack": run_knowledge_pack,
+    "knowledge-status": run_knowledge_status,
     "facts": run_facts,
     "remember-fact": run_remember_fact,
     "forget-fact": run_forget_fact,

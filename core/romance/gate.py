@@ -42,6 +42,7 @@ from core.romance import (
     RomanceDatabase,
     RomanceDatabaseError,
 )
+from core.romance import knowledge_pack as _knowledge_pack
 from core.romance.characters import CharacterDraft, CharacterError, CharacterManager
 from core.romance.database import RomanceLoadReport
 from core.romance.model import CompanionMemory, CompanionMessage, utc_now
@@ -358,6 +359,21 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "a second copy or losing its conversation",
         "negative-library-open-no-duplicate",
         note="negative control: a second open must not create a duplicate",
+    ),
+    StudioJudgement(
+        "a companion's own knowledge base is generated from its own identity and "
+        "voice, reaches its target, is indexed, and reaches the prompt",
+        "knowledge-pack-builds",
+    ),
+    StudioJudgement(
+        "the knowledge base is deterministic and character-specific, and a rebuild "
+        "adds nothing",
+        "knowledge-pack-deterministic-and-idempotent",
+    ),
+    StudioJudgement(
+        "one companion's knowledge base is never another's",
+        "negative-knowledge-pack-isolated",
+        note="negative control: a pack lives under its own character's folder",
     ),
 )
 
@@ -1502,6 +1518,68 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
                 c.conversation_id == conversation.record_id
                 for c in service.conversations_for(opened.id)
             )
+
+    if kind == "knowledge-pack-builds":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            bundle = service.create_character("Layla", fictional_age=27)
+            report = service.build_character_knowledge_pack(bundle.id, target_mb=1.0)
+            # It reaches the target, is indexed, and names the companion.
+            if not (report.complete and report.index_built and report.chunks > 0):
+                return False
+            if report.size_mb < 1.0:
+                return False
+            stats = service.character_knowledge_pack_stats(bundle.id)
+            if not stats.get("present") or not stats.get("indexed"):
+                return False
+            # The companion's own voice and knowledge reach the prompt.
+            block = service._memory_block(bundle.id, service.start_conversation(bundle.id).record_id)
+            return "Who you are" in block and "Layla" in block
+
+    if kind == "knowledge-pack-deterministic-and-idempotent":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            first = service.create_character("Layla", fictional_age=27)
+            second = service.create_character("Noor", fictional_age=30)
+            a = service.build_character_knowledge_pack(first.id, target_mb=1.0)
+            # A rebuild adds nothing.
+            again = service.build_character_knowledge_pack(first.id, target_mb=1.0)
+            if (again.size_mb, again.chunks) != (a.size_mb, a.chunks):
+                return False
+            # A different companion produces a different pack.
+            b = service.build_character_knowledge_pack(second.id, target_mb=1.0)
+            first_profile = service.character_files(first.id).read_profile()
+            second_profile = service.character_files(second.id).read_profile()
+            first_titles = {
+                title for _s, title, _t in _knowledge_pack.iter_documents(first_profile, "en")
+            }
+            second_titles = {
+                title for _s, title, _t in _knowledge_pack.iter_documents(second_profile, "en")
+            }
+            return first_titles != second_titles and b.chunks > 0
+
+    if kind == "negative-knowledge-pack-isolated":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            first = service.create_character("Layla", fictional_age=27)
+            second = service.create_character("Noor", fictional_age=30)
+            service.build_character_knowledge_pack(first.id, target_mb=1.0)
+            # The second companion has no pack of its own, and its bank is a
+            # different folder from the first's -- so one pack is never another's.
+            if service.character_knowledge_pack_stats(second.id).get("present"):
+                return False
+            first_files = service.character_files(first.id)
+            second_files = service.character_files(second.id)
+            if first_files.knowledge_dir == second_files.knowledge_dir:
+                return False
+            # The first's shards are not reachable as the second's bank.
+            return second_files.knowledge_pack_stats() == {}
 
     return False
 
