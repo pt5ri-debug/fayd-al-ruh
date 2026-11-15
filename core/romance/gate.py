@@ -348,6 +348,17 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "negative-own-files-isolated",
         note="negative control: each companion's folder is its own",
     ),
+    StudioJudgement(
+        "opening a ready-made library companion makes it the selected one the chat "
+        "uses, adding it exactly once and never duplicating it",
+        "library-open-selects-and-adds-once",
+    ),
+    StudioJudgement(
+        "re-opening an already-added library companion re-selects it without adding "
+        "a second copy or losing its conversation",
+        "negative-library-open-no-duplicate",
+        note="negative control: a second open must not create a duplicate",
+    ),
 )
 
 
@@ -1439,6 +1450,57 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
                 return False
             return "She loves the sea" not in service.character_files(second.id).reference_block(
                 "She loves the sea"
+            )
+
+    if kind == "library-open-selects-and-adds-once":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            open_rows = service.library_rows()
+            if not open_rows:
+                return False
+            library_target = open_rows[0]
+            # A row the companion does not yet own carries no character id (so the
+            # window knows it must be opened, not merely previewed).
+            if library_target.chat_ready or library_target.present:
+                return False
+            # Opening it brings it into the Studio and returns the bundle to select.
+            opened = service.open_library_character(library_target.name)
+            if not opened.id:
+                return False
+            # Exactly one character now exists, and it is the opened one.
+            summaries = service.character_rows()
+            if len(summaries) != 1 or summaries[0].character_id != opened.id:
+                return False
+            # The library row now reports the existing id, so a later click re-selects.
+            refreshed = service.library_rows(category=library_target.category)
+            match = next((r for r in refreshed if r.name == library_target.name), None)
+            return match is not None and match.chat_ready and match.character_id == opened.id
+
+    if kind == "negative-library-open-no-duplicate":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            open_rows = service.library_rows()
+            if not open_rows:
+                return False
+            name = open_rows[0].name
+            opened = service.open_library_character(name)
+            # A conversation the companion already has must survive a re-open.
+            conversation = service.start_conversation(opened.id)
+            count_before = len(service.character_rows())
+            # Opening the same companion again re-selects it: no second copy.
+            again = service.open_library_character(name)
+            if again.id != opened.id:
+                return False
+            if len(service.character_rows()) != count_before:
+                return False
+            # Its conversation is intact, so the re-open lost nothing.
+            return any(
+                c.conversation_id == conversation.record_id
+                for c in service.conversations_for(opened.id)
             )
 
     return False

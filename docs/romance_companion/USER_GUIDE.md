@@ -42,9 +42,13 @@ an adult (18+)*. A character's own words stay in character.
    companions grouped by **relationship archetype** — *Family*, *Neighbours*,
    *Colleagues*, *Romantic partners*, *Courtesans & companions*, *Male escorts*,
    and *Inclusive & LGBTQ+*. Choose an archetype (and optionally type a search),
-   pick a character to see its preview, then press **Add the chosen** to add just
-   that one — or **Add the whole group** to add the whole archetype at once. Every
-   library character is a stated adult (18+) and no real person is depicted.
+   then **pick a character** — it is brought into the Studio and selected at once,
+   so the chat area shows its name and you can start talking to it immediately,
+   just like a companion under *My Companions*. Press **Add the whole group** to
+   add the whole archetype at once (each is then selectable the same way). Picking
+   a companion the Studio already holds simply re-selects it, so its conversations
+   and memories are kept. Every library character is a stated adult (18+) and no
+   real person is depicted.
 3. Star a favourite (**★ Favorite**), move one to the archive (**Archive**) and
    back (**Restore**), or delete it (**Delete**) with an explicit retention
    choice for its conversations and memories — *keep*, *purge*, or *anonymize*.

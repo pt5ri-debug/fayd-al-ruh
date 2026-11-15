@@ -90,6 +90,7 @@ class RomanceStudioDialog(ThemedDialog):
         self._right_open = True
         self._selected_character = ""
         self._selected_conversation = ""
+        self._suppress_select = False
         self._character_ids: list[str] = []
         self._archive_ids: list[str] = []
         self._conversation_ids: list[str] = []
@@ -542,6 +543,8 @@ class RomanceStudioDialog(ThemedDialog):
         return widget
 
     def _dispatch_select(self, widget: tk.Listbox, on_select: Callable[[int], None]) -> None:
+        if getattr(self, "_suppress_select", False):
+            return
         selection = widget.curselection()
         if selection:
             on_select(int(selection[0]))
@@ -727,17 +730,22 @@ class RomanceStudioDialog(ThemedDialog):
     def _refresh_characters(self) -> None:
         search = self._char_search_var.get().strip() if hasattr(self, "_char_search_var") else ""
         favorite = True if getattr(self, "_favorites_only", None) is not None and self._favorites_only.get() else None
-        self._char_list.delete(0, "end")
-        self._character_ids = []
-        for row in self.service.character_rows(search=search, favorite=favorite):
-            self._character_ids.append(row.character_id)
-            self._char_list.insert("end", row.label())
-        self._archive_list.delete(0, "end")
-        self._archive_ids = []
-        for row in self.service.character_rows(include_archived=True):
-            if row.archived:
-                self._archive_ids.append(row.character_id)
-                self._archive_list.insert("end", row.label())
+        previous = getattr(self, "_suppress_select", False)
+        self._suppress_select = True
+        try:
+            self._char_list.delete(0, "end")
+            self._character_ids = []
+            for row in self.service.character_rows(search=search, favorite=favorite):
+                self._character_ids.append(row.character_id)
+                self._char_list.insert("end", row.label())
+            self._archive_list.delete(0, "end")
+            self._archive_ids = []
+            for row in self.service.character_rows(include_archived=True):
+                if row.archived:
+                    self._archive_ids.append(row.character_id)
+                    self._archive_list.insert("end", row.label())
+        finally:
+            self._suppress_select = previous
         self._refresh_library()
         self._refresh_hero()
 
@@ -757,16 +765,37 @@ class RomanceStudioDialog(ThemedDialog):
         rows = self.service.library_rows(category=current, search=search)
         self._library_rows = list(rows)
         self._example_names = [row.name for row in rows]
-        self._example_list.delete(0, "end")
-        for row in rows:
-            self._example_list.insert("end", row.label())
+        # Rebuilding the list can emit a spurious select event; never treat it as a
+        # user click (which would open/select a companion).
+        previous = getattr(self, "_suppress_select", False)
+        self._suppress_select = True
+        try:
+            self._example_list.delete(0, "end")
+            for row in rows:
+                self._example_list.insert("end", row.label())
+        finally:
+            self._suppress_select = previous
         if not rows:
             self._library_preview.configure(text="No companion matches that filter.")
 
     def _on_library_selected(self, index: int) -> None:
         rows = getattr(self, "_library_rows", [])
-        if index < len(rows):
-            self._library_preview.configure(text=rows[index].describe())
+        if index >= len(rows):
+            return
+        row = rows[index]
+        # Always preview the row, so a click is never a no-op.
+        self._library_preview.configure(text=row.describe())
+        # Bring the companion into the Studio and select it, so the chat area shows
+        # its name exactly as a companion in "My Companions" does. An already-added
+        # companion is simply re-selected; a new one is created once (no duplicate).
+        try:
+            bundle = self.service.open_library_character(row.name)
+        except Exception as error:
+            self._set_status(str(error))
+            return
+        self._refresh_characters()
+        self._select_character(bundle.id)
+        self._set_status(f"{bundle.name} is ready to talk.")
 
     def _add_library_category(self) -> None:
         key = self._library_category_var.get()
@@ -786,11 +815,12 @@ class RomanceStudioDialog(ThemedDialog):
             return
         name = self._example_names[selection[0]]
         try:
-            self.service.add_library_character(name)
+            bundle = self.service.open_library_character(name)
         except Exception as error:
             self._set_status(str(error))
             return
         self._refresh_characters()
+        self._select_character(bundle.id)
         self._set_status(f"Added {name} to your companions.")
 
     def _refresh_conversations(self) -> None:
@@ -994,10 +1024,17 @@ class RomanceStudioDialog(ThemedDialog):
 
     # -- selection handlers ----------------------------------------------
 
-    def _on_character_selected(self, index: int) -> None:
-        if index >= len(self._character_ids):
+    def _select_character(self, character_id: str) -> None:
+        """Select a character everywhere, so the chat area shows it.
+
+        One routine for every path — a click in **My Companions**, a click in the
+        **Character Library**, or a programmatic selection — so the transcript,
+        the panels, the mode, and the status line can never drift apart. A list
+        selection is kept in step (and does not re-fire the select handler).
+        """
+        if not character_id:
             return
-        self._selected_character = self._character_ids[index]
+        self._selected_character = character_id
         self._selected_conversation = ""
         self._clear_transcript()
         self._refresh_conversations()
@@ -1006,11 +1043,28 @@ class RomanceStudioDialog(ThemedDialog):
         self._refresh_voices()
         # Start the mode selector on the character's own default mode.
         try:
-            default_mode = self.service.character(self._selected_character).character.default_mode
+            default_mode = self.service.character(character_id).character.default_mode
         except Exception:
             default_mode = ""
         if default_mode:
             self._mode_var.set(default_mode)
+        # Keep the "My Companions" list in step without re-dispatching its handler.
+        self._suppress_select = True
+        try:
+            if character_id in getattr(self, "_character_ids", []):
+                index = self._character_ids.index(character_id)
+                self._char_list.selection_clear(0, "end")
+                self._char_list.selection_set(index)
+                self._char_list.see(index)
+        except tk.TclError:
+            pass
+        finally:
+            self._suppress_select = False
+
+    def _on_character_selected(self, index: int) -> None:
+        if index >= len(self._character_ids):
+            return
+        self._select_character(self._character_ids[index])
         self._set_status(f"Selected {self._char_title.cget('text')}.")
 
     def _on_conversation_selected(self, index: int) -> None:

@@ -141,6 +141,11 @@ def _build_parser() -> argparse.ArgumentParser:
     library.add_argument("--search", default="")
     add_library = _sub(sub, "add-library", help="Add one ready-made library companion by name.")
     add_library.add_argument("name")
+    open_library = _sub(
+        sub, "open-library",
+        help="Open a ready-made library companion for talking (adds it once if new).",
+    )
+    open_library.add_argument("name")
     seed_library = _sub(sub, "seed-library", help="Create every library companion in an archetype.")
     seed_library.add_argument("--category", default="")
 
@@ -462,6 +467,17 @@ def run_add_library(args: argparse.Namespace) -> int:
         args,
         {"character_id": bundle.id, "name": bundle.name},
         f"Added {bundle.name} ({bundle.id}).",
+    )
+    return EXIT_OK
+
+
+def run_open_library(args: argparse.Namespace) -> int:
+    service = _service(args)
+    bundle = service.open_library_character(args.name)
+    _emit(
+        args,
+        {"character_id": bundle.id, "name": bundle.name},
+        f"{bundle.name} is ready to talk ({bundle.id}).",
     )
     return EXIT_OK
 
@@ -823,6 +839,7 @@ _HANDLERS = {
     "library-categories": run_library_categories,
     "library": run_library,
     "add-library": run_add_library,
+    "open-library": run_open_library,
     "seed-library": run_seed_library,
     "favorite": run_favorite,
     "unfavorite": run_unfavorite,

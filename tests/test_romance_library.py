@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
 from cli import romance as cli
 from core.romance.characters import CharacterManager
 from core.romance.library import (
@@ -291,3 +292,54 @@ def test_cli_adds_knowledge_and_facts(capsys, tmp_path: Path):
         "--data-root", str(tmp_path), "forget-fact", bundle.id, "She loves jasmine tea",
     ]) == 0
     assert "Forgotten" in capsys.readouterr().out
+
+
+def test_library_rows_carry_the_existing_id_once_added(tmp_path: Path):
+    """A library row reports the real character id once the companion exists."""
+    service = RomanceStudioService(root=tmp_path)
+    first = service.library_rows()[0]
+    # A not-yet-added row carries no id, so the window knows to open it.
+    assert first.chat_ready is False
+    assert first.present is False
+    bundle = service.open_library_character(first.name)
+    # After opening, the row reports the id, so a later click just re-selects it.
+    again = next(
+        row for row in service.library_rows(category=first.category) if row.name == first.name
+    )
+    assert again.chat_ready is True
+    assert again.present is True
+    assert again.character_id == bundle.id
+
+
+def test_open_library_character_adds_once_and_re_selects(tmp_path: Path):
+    """Opening a library companion adds it once and never duplicates it."""
+    service = RomanceStudioService(root=tmp_path)
+    name = service.library_rows()[0].name
+    first = service.open_library_character(name)
+    assert len(service.character_rows()) == 1
+    # A conversation survives a re-open, and no second copy is created.
+    conversation = service.start_conversation(first.id)
+    second = service.open_library_character(name)
+    assert second.id == first.id
+    assert len(service.character_rows()) == 1
+    assert any(
+        c.conversation_id == conversation.record_id for c in service.conversations_for(first.id)
+    )
+
+
+def test_open_library_character_refuses_an_unknown_name(tmp_path: Path):
+    service = RomanceStudioService(root=tmp_path)
+    with pytest.raises(ValueError):
+        service.open_library_character("No Such Companion")
+    assert service.character_rows() == []
+
+
+def test_cli_open_library_selects_the_companion(capsys, tmp_path: Path):
+    service = RomanceStudioService(root=tmp_path)
+    name = service.library_rows()[0].name
+    assert cli.main(["--data-root", str(tmp_path), "open-library", name, "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    # It is now a real, selectable companion.
+    assert payload["name"] == name
+    assert payload["character_id"]
+    assert len(service.character_rows()) == 1

@@ -301,5 +301,7 @@ def test_the_studio_gate_covers_the_character_work_and_scores_full():
         "safety-floor",
         "own-files-round-trip",
         "negative-own-files-isolated",
+        "library-open-selects-and-adds-once",
+        "negative-library-open-no-duplicate",
     ):
         assert required in kinds
