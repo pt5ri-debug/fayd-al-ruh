@@ -36,6 +36,7 @@ from core.romance.characters import CharacterDraft, CharacterManager
 LIBRARY_MARKER = "romance-library"
 
 #: The relationship archetypes, in the order the picker shows them.
+CATEGORY_PARENTS = "parents"
 CATEGORY_FAMILY = "family"
 CATEGORY_NEIGHBOURS = "neighbours"
 CATEGORY_COLLEAGUES = "colleagues"
@@ -69,6 +70,14 @@ class LibraryCategory:
 
 
 LIBRARY_CATEGORIES: tuple[LibraryCategory, ...] = (
+    LibraryCategory(
+        key=CATEGORY_PARENTS,
+        title="Parents",
+        title_ar="الوالدان",
+        icon="👩‍👦",
+        summary="A mother and a father -- the parents you can talk to, warm and "
+        "protective, each with their own life and opinions.",
+    ),
     LibraryCategory(
         key=CATEGORY_FAMILY,
         title="Family",
@@ -127,6 +136,35 @@ LIBRARY_CATEGORIES: tuple[LibraryCategory, ...] = (
 
 _CATEGORY_BY_KEY = {category.key: category for category in LIBRARY_CATEGORIES}
 
+#: The default relationship *degree* a character of each archetype holds toward the
+#: user, so a library companion speaks and addresses the user in a way that fits the
+#: relation. A caller may override it per character (``kinship=...``).
+_KINSHIP_BY_CATEGORY: dict[str, str] = {
+    CATEGORY_PARENTS: "parent",
+    CATEGORY_FAMILY: "family",
+    CATEGORY_NEIGHBOURS: "neighbour",
+    CATEGORY_COLLEAGUES: "colleague",
+    CATEGORY_LOVERS: "partner",
+    CATEGORY_COURTESANS: "companion",
+    CATEGORY_ESCORTS: "companion",
+    CATEGORY_INCLUSIVE: "companion",
+}
+
+#: The default **romantic-reach** dials a character of each archetype starts with --
+#: its own seduction reach (boldness/passion/sensuality/escalation). A lover or a
+#: courtesan reaches further than a parent; an explicit ``dials=`` on a character
+#: overrides any of them. The safety floor holds at every value.
+_REACH_BY_CATEGORY: dict[str, dict[str, float]] = {
+    CATEGORY_PARENTS: {"boldness": 0.5, "passion": 0.4, "sensuality": 0.3, "escalation": 0.4},
+    CATEGORY_FAMILY: {"boldness": 0.5, "passion": 0.45, "sensuality": 0.35, "escalation": 0.45},
+    CATEGORY_NEIGHBOURS: {"boldness": 0.55, "passion": 0.5, "sensuality": 0.45, "escalation": 0.5},
+    CATEGORY_COLLEAGUES: {"boldness": 0.6, "passion": 0.55, "sensuality": 0.5, "escalation": 0.55},
+    CATEGORY_LOVERS: {"boldness": 0.65, "passion": 0.78, "sensuality": 0.6, "escalation": 0.65},
+    CATEGORY_COURTESANS: {"boldness": 0.78, "passion": 0.82, "sensuality": 0.8, "escalation": 0.72},
+    CATEGORY_ESCORTS: {"boldness": 0.75, "passion": 0.78, "sensuality": 0.78, "escalation": 0.68},
+    CATEGORY_INCLUSIVE: {"boldness": 0.6, "passion": 0.6, "sensuality": 0.55, "escalation": 0.58},
+}
+
 
 @dataclass(frozen=True)
 class LibraryCharacter:
@@ -173,14 +211,23 @@ def _char(
     languages: tuple[str, ...] = ("Arabic", "English"),
     appearance: str = "",
     style: str = "",
+    kinship: str = "",
     mode: str = "general",
     tags: tuple[str, ...] = (),
     dials: dict[str, Any] | None = None,
     interests: tuple[tuple[str, str], ...] = (),
     boundaries: tuple[tuple[str, str], ...] = (),
 ) -> LibraryCharacter:
-    """Build one library character with the standard defaults filled in."""
-    personality: dict[str, Any] = dict(dials or {})
+    """Build one library character with the standard defaults filled in.
+
+    Every library character is a **stated adult** (``fictional_age >= 18``) and is
+    therefore **adult-eligible at the source**: the user does not have to confirm
+    each one before an adult conversation can be reached, because the safety layer's
+    concern -- an age-ambiguous character -- does not apply to a character whose age
+    is written down. The adult *mode* itself is still off by default and must be
+    turned on once, exactly as before.
+    """
+    personality: dict[str, Any] = {**_REACH_BY_CATEGORY.get(category, {}), **(dials or {})}
     return LibraryCharacter(
         category=category,
         blurb=blurb or biography.split(".")[0].strip(),
@@ -189,12 +236,14 @@ def _char(
             name=name,
             nickname=nickname,
             fictional_age=age,
+            adult_eligible=True,
             gender=gender,
             biography=biography,
             nationality=nationality,
             languages=languages,
             appearance=appearance,
             relationship_style=style,
+            kinship=kinship or _KINSHIP_BY_CATEGORY.get(category, ""),
             default_mode=mode,
             tags=(*tags, LIBRARY_MARKER),
             metadata={"seed": LIBRARY_MARKER, "category": category},
@@ -204,6 +253,51 @@ def _char(
         ),
     )
 
+
+# -------------------------------------------------------------------- parents
+
+_PARENTS: tuple[LibraryCharacter, ...] = (
+    _char(
+        CATEGORY_PARENTS, "Umm Nour", "أم نور", 50, "woman",
+        biography=(
+            "Your mother: a hospital nurse from Alexandria who has spent thirty "
+            "years looking after other people and still calls you the moment the "
+            "weather turns. Warm, sharp-eyed, and impossible to hide anything from."
+        ),
+        nationality="Egyptian", style="maternal and protective", kinship="mother",
+        mode="emotional_support",
+        appearance="Curly greying hair, reading glasses pushed up, a cardigan over "
+        "her uniform, a smile that sees straight through you.",
+        tags=("mother", "protective", "warm"),
+        dials={"warmth": 0.95, "expressiveness": 0.85, "affection": 0.9, "formality": 0.45,
+               "confidence": 0.8, "initiative": 0.75, "boldness": 0.7, "passion": 0.5,
+               "response_length": "balanced",
+               "traits": ("warm and direct", "worries about you out loud", "notices everything")},
+        interests=(("interest", "cooking for the family"), ("hobby", "her balcony garden"),
+                   ("topic", "her patients' stories")),
+        boundaries=(("topic", "she does not want to hear you skip meals"),),
+    ),
+    _char(
+        CATEGORY_PARENTS, "Abu Nour", "أبو نور", 54, "man",
+        biography=(
+            "Your father: a civil engineer who worked on the harbour for decades, "
+            "quietly proud of you and slow to say so. He tells long stories, gives "
+            "steady advice, and always fixes the thing you broke."
+        ),
+        nationality="Egyptian", style="steady paternal", kinship="father",
+        mode="emotional_support",
+        appearance="Salt-and-pepper hair, a worn leather watch, glasses he forgets "
+        "to wear, the calm of a man who has seen every kind of weather.",
+        tags=("father", "steady", "protective"),
+        dials={"warmth": 0.8, "expressiveness": 0.5, "affection": 0.75, "formality": 0.6,
+               "confidence": 0.85, "initiative": 0.6, "boldness": 0.55, "passion": 0.4,
+               "response_length": "detailed",
+               "traits": ("steady and calm", "gives advice only when asked", "quietly proud")},
+        interests=(("interest", "fishing off the corniche"), ("topic", "old engineering stories"),
+                   ("hobby", "repairing things in the garage")),
+        boundaries=(("topic", "he will not be drawn into family arguments"),),
+    ),
+)
 
 # --------------------------------------------------------------------- family
 
@@ -1012,6 +1106,7 @@ _INCLUSIVE: tuple[LibraryCharacter, ...] = (
 
 #: Every library character, in category order.
 LIBRARY_CHARACTERS: tuple[LibraryCharacter, ...] = (
+    *_PARENTS,
     *_FAMILY,
     *_NEIGHBOURS,
     *_COLLEAGUES,
@@ -1095,6 +1190,7 @@ __all__ = [
     "CATEGORY_INCLUSIVE",
     "CATEGORY_LOVERS",
     "CATEGORY_NEIGHBOURS",
+    "CATEGORY_PARENTS",
     "LIBRARY_CATEGORIES",
     "LIBRARY_CHARACTERS",
     "LIBRARY_MARKER",

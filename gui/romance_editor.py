@@ -58,6 +58,54 @@ RESPONSE_LENGTH_CHOICES: tuple[tuple[str, str], ...] = (
     ("detailed", "Detailed"),
 )
 
+#: The *reach* dials: how the character leads, and how far it may take a romantic
+#: or sensual scene with a consenting adult. Each is tone guidance only -- the
+#: safety floor (adults only, consent, the honesty that she is fictional) holds at
+#: every value.
+REACH_DIAL_ROWS: tuple[tuple[str, str, str, str], ...] = (
+    ("boldness", "Boldness / daring", "bold", "guarded"),
+    ("passion", "Passion / intensity", "ardent", "composed"),
+    ("sensuality", "Sensuality / openness of wording", "direct", "reserved"),
+    ("escalation", "Escalation / lets the register build", "builds", "steady"),
+)
+
+#: The kinship choices: the relationship degree a character holds toward the user.
+KINSHIP_CHOICES: tuple[tuple[str, str], ...] = (
+    ("", "— none —"),
+    ("mother", "Mother"),
+    ("father", "Father"),
+    ("parent", "Parent"),
+    ("son", "Son"),
+    ("daughter", "Daughter"),
+    ("child", "Child"),
+    ("sister", "Sister"),
+    ("brother", "Brother"),
+    ("sibling", "Sibling"),
+    ("wife", "Wife"),
+    ("husband", "Husband"),
+    ("partner", "Partner"),
+    ("fiancé(e)", "Fiancé(e)"),
+    ("girlfriend", "Girlfriend"),
+    ("boyfriend", "Boyfriend"),
+    ("lover", "Lover"),
+    ("grandmother", "Grandmother"),
+    ("grandfather", "Grandfather"),
+    ("aunt", "Aunt"),
+    ("uncle", "Uncle"),
+    ("cousin", "Cousin"),
+    ("niece", "Niece"),
+    ("nephew", "Nephew"),
+    ("friend", "Friend"),
+    ("best friend", "Best friend"),
+    ("colleague", "Colleague"),
+    ("neighbour", "Neighbour"),
+    ("teacher", "Teacher"),
+    ("student", "Student"),
+    ("mentor", "Mentor"),
+    ("companion", "Companion"),
+    ("stranger", "Stranger"),
+)
+
 _RETENTION_CHOICES: tuple[tuple[str, str], ...] = (
     ("keep", "Keep the conversations and memories"),
     ("purge", "Delete the conversations and memories"),
@@ -142,6 +190,7 @@ class CharacterEditorDialog(ThemedDialog):
         self._build_identity()
         self._build_about()
         self._build_personality()
+        self._build_reach()
         self._build_interests()
         self._build_boundaries()
         self._build_model_voice()
@@ -288,6 +337,11 @@ class CharacterEditorDialog(ThemedDialog):
         self._entry(self._row(s, "Gender", hint="optional"), "gender")
         self._entry(self._row(s, "Nationality / culture", hint="optional"), "nationality")
         self._entry(self._row(s, "Languages", hint="comma-separated"), "languages")
+        self._combo(
+            self._row(s, "Kinship", hint="who this character is to you"),
+            "kinship",
+            KINSHIP_CHOICES,
+        )
         self._entry(self._row(s, "Preferred relationship style", hint="optional"), "relationship_style")
 
     def _build_about(self) -> None:
@@ -304,6 +358,16 @@ class CharacterEditorDialog(ThemedDialog):
         self._combo(self._row(s, "Preferred answer length"), "response_length", RESPONSE_LENGTH_CHOICES, initial="Balanced")
         self._entry(self._row(s, "Arabic dialect", hint="optional"), "dialect")
         self._textarea(self._row(s, "Extra instructions", hint="free guidance"), "instructions", height=2)
+
+    def _build_reach(self) -> None:
+        s = self._section(
+            "Romantic reach",
+            "How this character leads, and how far it may take a scene with a "
+            "consenting adult. Tone only — adults only, consent, and the honesty "
+            "that the character is fictional hold at every value.",
+        )
+        for key, label, low, high in REACH_DIAL_ROWS:
+            self._dial(s, key, label, low, high)
 
     def _build_interests(self) -> None:
         s = self._section("Interests & hobbies", "What the character likes to talk about.")
@@ -401,6 +465,7 @@ class CharacterEditorDialog(ThemedDialog):
             self._combo_set("default_mode", "general")
             self._combo_set("response_length", "balanced")
             self._combo_set("voice_engine", "auto")
+            self._combo_set("kinship", "")
             self._set_model_note()
             return
         try:
@@ -415,6 +480,7 @@ class CharacterEditorDialog(ThemedDialog):
         self._vars["gender"].set(character.gender)
         self._vars["nationality"].set(character.nationality)
         self._vars["languages"].set(", ".join(character.languages))
+        self._combo_set("kinship", character.kinship or "")
         self._vars["relationship_style"].set(character.relationship_style)
         self._text_widgets["biography"].delete("1.0", "end")
         self._text_widgets["biography"].insert("1.0", character.biography)
@@ -423,7 +489,7 @@ class CharacterEditorDialog(ThemedDialog):
         self._combo_set("default_mode", character.default_mode or "general")
 
         personality = self.service.personality(self.character_id)
-        for key, _label, _low, _high in DIAL_ROWS:
+        for key, _label, _low, _high in (*DIAL_ROWS, *REACH_DIAL_ROWS):
             self._dial_scales[key].set(float(personality.get(key, 0.5)))
         self._combo_set("response_length", personality.get("response_length", "balanced"))
         self._vars["dialect"].set(personality.get("dialect", ""))
@@ -532,6 +598,7 @@ class CharacterEditorDialog(ThemedDialog):
             "gender": self._vars["gender"].get().strip(),
             "nationality": self._vars["nationality"].get().strip(),
             "languages": languages,
+            "kinship": self._combo_value("kinship").strip(),
             "relationship_style": self._vars["relationship_style"].get().strip(),
             "biography": self._text_widgets["biography"].get("1.0", "end").strip(),
             "appearance": self._text_widgets["appearance"].get("1.0", "end").strip(),
@@ -555,6 +622,7 @@ class CharacterEditorDialog(ThemedDialog):
                     name=values["name"], nickname=values["nickname"],
                     fictional_age=values["fictional_age"], gender=values["gender"],
                     nationality=values["nationality"], languages=values["languages"],
+                    kinship=values["kinship"],
                     relationship_style=values["relationship_style"],
                     biography=values["biography"], appearance=values["appearance"],
                     default_mode=values["default_mode"], model_key=values["model_key"],
@@ -568,6 +636,7 @@ class CharacterEditorDialog(ThemedDialog):
                     nickname=values["nickname"], gender=values["gender"],
                     nationality=values["nationality"], languages=values["languages"],
                     appearance=values["appearance"],
+                    kinship=values["kinship"],
                     relationship_style=values["relationship_style"],
                     default_mode=values["default_mode"], model_key=values["model_key"],
                     biography=values["biography"], personality=values["personality"],

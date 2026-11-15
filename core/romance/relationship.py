@@ -75,6 +75,28 @@ EVENT_KINDS: tuple[str, ...] = tuple(EVENT_EFFECTS)
 
 STAGE_UNKNOWN = "stranger"
 
+#: How each relationship stage reads in the prompt: what the *tone* may be, never a
+#: claim of action and never a widening of the floor. Keyed by stage key.
+_STAGE_GUIDANCE: dict[str, str] = {
+    "stranger": "You are only just meeting; keep it warm but reserved, and let trust "
+    "grow rather than assuming closeness.",
+    "acquaintance": "You are getting to know each other; be friendly and curious, "
+    "still a little careful.",
+    "friend": "You are friends now; you can be relaxed, warm, and openly glad to talk.",
+    "close_friend": "You are close friends; you share things and speak with real warmth "
+    "and affection.",
+    "romantic_interest": "There is romance growing between you; you may be affectionate "
+    "and flirtatious, and you say how you feel.",
+    "romantic_partner": "You are partners; you are openly loving and intimate in your "
+    "words, always led by the other person and always able to step back.",
+}
+
+#: The guidance for a stage this build does not name.
+_STAGE_GUIDANCE_DEFAULT = (
+    "Let how you speak match how close you actually are, and never claim more "
+    "closeness than the relationship has earned."
+)
+
 
 class RelationshipError(RuntimeError):
     """Raised when a relationship operation cannot be carried out as asked."""
@@ -103,6 +125,19 @@ class RelationshipSnapshot:
     def describe(self) -> str:
         parts = ", ".join(f"{name} {self.dimensions[name]:.2f}" for name in DIMENSIONS)
         return f"{self.stage_title} ({self.overall:.2f}) — {parts}"
+
+    def stage_line(self) -> str:
+        """One readable line naming the relationship stage, for a prompt block.
+
+        Says how close the two are and what that permits *in tone* -- never a claim
+        of action, and never a widening of the floor. Deliberately avoids any
+        language of possession or dependence.
+        """
+        guidance = _STAGE_GUIDANCE.get(self.stage, _STAGE_GUIDANCE_DEFAULT)
+        return (
+            f"You and the user are at the '{self.stage_title}' stage of your "
+            f"relationship (closeness {self.overall:.2f} on a 0-1 scale). {guidance}"
+        )
 
 
 @dataclass(frozen=True)

@@ -338,6 +338,16 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "negative-library-reads-and-adds-one",
         note="negative control: a read must create nothing, and an add must add one",
     ),
+    StudioJudgement(
+        "a companion keeps its own files: its profile, its knowledge bank, and its "
+        "durable facts round-trip and reach the prompt",
+        "own-files-round-trip",
+    ),
+    StudioJudgement(
+        "one companion can never read another's files",
+        "negative-own-files-isolated",
+        note="negative control: each companion's folder is its own",
+    ),
 )
 
 
@@ -1390,6 +1400,46 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
             # Adding exactly one library character creates exactly one.
             service.add_library_character(library_rows[0].name)
             return len(service.character_rows()) == 1
+
+    if kind == "own-files-round-trip":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            bundle = service.create_character("Huda", fictional_age=38)
+            # Creating a character writes its own profile document.
+            summary = service.character_file_summary(bundle.id)
+            if not summary.profile_exists:
+                return False
+            # A fact and a reference document are durable and reported back.
+            if not service.remember_character_fact(bundle.id, "She loves the sea"):
+                return False
+            if service.remember_character_fact(bundle.id, "She loves the sea"):
+                return False  # de-duplicated: a second identical fact adds nothing
+            if service.add_character_knowledge(bundle.id, "Work", "She is a marine biologist.") < 1:
+                return False
+            after = service.character_file_summary(bundle.id)
+            if after.facts != 1 or after.knowledge_chunks < 1:
+                return False
+            # The knowledge is retrievable through the companion's own files (the
+            # block the prompt is built from) for a real question.
+            block = service.character_files(bundle.id).reference_block("marine biologist")
+            return "marine biologist" in block
+
+    if kind == "negative-own-files-isolated":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            first = service.create_character("Huda", fictional_age=38)
+            second = service.create_character("Noor", fictional_age=31)
+            service.remember_character_fact(first.id, "She loves the sea")
+            # The fact belongs to the first companion only.
+            if service.character_facts(second.id):
+                return False
+            return "She loves the sea" not in service.character_files(second.id).reference_block(
+                "She loves the sea"
+            )
 
     return False
 

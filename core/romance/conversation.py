@@ -24,6 +24,7 @@ from core.romance.modes import (
     find_mode,
     mode_prompt,
 )
+from core.romance.personality import CharacterPersonalityEngine
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle avoided at runtime
     from core.romance.storage import CompanionStorageService
@@ -86,12 +87,17 @@ class ConversationManager:
         *,
         characters: CharacterManager | None = None,
         memory_reader: Any = None,
+        relationship_reader: Any = None,
     ) -> None:
         self.storage = storage
         self.characters = characters if characters is not None else CharacterManager(storage)
         # A callable ``(character_id, conversation_id) -> str`` returning the memory
         # block; the memory manager supplies a real one in Phase 6. Default: none.
         self._memory_reader = memory_reader
+        # A callable ``(character_id) -> str`` returning the relationship line; the
+        # relationship engine supplies a real one. Default: none (the prompt simply
+        # carries no relationship block).
+        self._relationship_reader = relationship_reader
 
     # -- conversations ----------------------------------------------------
 
@@ -268,6 +274,10 @@ class ConversationManager:
         context = ModeContext(
             name=character.get("name", "your character"),
             identity=character.get("identity", ""),
+            personality=character.get("personality", ""),
+            reach=character.get("reach", ""),
+            interests=character.get("interests", ()),
+            relationship=self._read_relationship(conversation.character_id),
             memory=_clip(memory, DEFAULT_MEMORY_CHARS),
             history=self.recent_history(conversation_id, window=spec.history_window),
             cast=cast,
@@ -282,7 +292,16 @@ class ConversationManager:
             # A memory read must never break a turn; the prompt simply has no block.
             return ""
 
-    def _character_context(self, character_id: str) -> dict[str, str]:
+    def _read_relationship(self, character_id: str) -> str:
+        if self._relationship_reader is None:
+            return ""
+        try:
+            return str(self._relationship_reader(character_id) or "")
+        except Exception:
+            # A relationship read must never break a turn.
+            return ""
+
+    def _character_context(self, character_id: str) -> dict[str, Any]:
         if not character_id:
             return {}
         try:
@@ -291,7 +310,35 @@ class ConversationManager:
             return {}
         name = getattr(bundle.character, "name", "") or "your character"
         identity = getattr(bundle.character, "biography", "") or ""
-        return {"name": name, "identity": identity}
+        appearance = str(getattr(bundle.character, "appearance", "") or "").strip()
+        style = str(getattr(bundle.character, "relationship_style", "") or "").strip()
+        kinship = str(getattr(bundle.character, "kinship", "") or "").strip()
+        if kinship:
+            identity = f"{identity}\nYou are the user's {kinship}.".strip()
+        if appearance:
+            identity = f"{identity}\n{appearance}".strip()
+        if style:
+            identity = f"{identity}\nPreferred relationship style: {style}".strip()
+        personality_block = ""
+        reach_block = ""
+        personality = getattr(bundle, "personality", None)
+        if personality is not None:
+            try:
+                engine = CharacterPersonalityEngine()
+                personality_block = engine.render(personality)
+                reach_block = engine.reach_block(personality)
+            except Exception:
+                personality_block = ""
+                reach_block = ""
+        interests_reader = getattr(bundle, "interests", None)
+        interests = tuple(interests_reader()) if callable(interests_reader) else ()
+        return {
+            "name": name,
+            "identity": identity,
+            "personality": personality_block,
+            "reach": reach_block,
+            "interests": interests,
+        }
 
     # -- restore ----------------------------------------------------------
 

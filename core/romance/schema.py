@@ -31,7 +31,7 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 from core.romance.model import RECORDS
 
 #: The schema version this build writes and understands.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -261,9 +261,37 @@ def _migration_1(connection: Any) -> None:
             execute(statement)
 
 
+def _migration_2(connection: Any) -> None:
+    """Version 2: the character's own romantic-reach dials and its kinship.
+
+    Adds the four columns the personality record gained -- ``boldness``,
+    ``passion``, ``sensuality``, ``escalation`` -- to ``character_personalities``,
+    and the ``kinship`` column the character record gained. A database created by
+    this build already has them (the tables are derived from the records), so each
+    ``ALTER`` is guarded: the migration is idempotent and a fresh v1 file and an
+    upgraded one end in the same shape.
+    """
+    execute = connection.execute
+    existing = {
+        row["name"]
+        for row in execute("PRAGMA table_info(character_personalities)").fetchall()
+    }
+    for column in ("boldness", "passion", "sensuality", "escalation"):
+        if column not in existing:
+            execute(
+                f"ALTER TABLE character_personalities ADD COLUMN {column} REAL NOT NULL DEFAULT 0.5"
+            )
+    character_columns = {
+        row["name"]
+        for row in execute("PRAGMA table_info(companion_characters)").fetchall()
+    }
+    if "kinship" not in character_columns:
+        execute("ALTER TABLE companion_characters ADD COLUMN kinship TEXT NOT NULL DEFAULT ''")
+
+
 #: The numbered migration steps. Each entry is ``(version, callable)``; a callable
 #: runs inside its own transaction and only adds what its version introduces.
-MIGRATIONS: tuple[tuple[int, Any], ...] = ((1, _migration_1),)
+MIGRATIONS: tuple[tuple[int, Any], ...] = ((1, _migration_1), (2, _migration_2))
 
 
 __all__ = [

@@ -27,6 +27,8 @@ are fictional AI companions (the character's own words stay in character).
 from __future__ import annotations
 
 import queue
+import subprocess
+import sys
 import threading
 import tkinter as tk
 from collections.abc import Callable
@@ -471,6 +473,17 @@ class RomanceStudioDialog(ThemedDialog):
         self._voice_text = self._panel_text(voice, height=5)
         self._button(voice, "Turn voice on/off", self._toggle_voice)
 
+        own = self._right_column.add("own_files", "Her Own Knowledge & Memory", icon="📔")
+        self._own_text = self._panel_text(own, height=6)
+        own_row = tk.Frame(own, bg=theme.surface)
+        own_row.pack(fill="x", pady=(2, 0))
+        self._button(own_row, "Add knowledge…", self._add_own_knowledge)
+        self._button(own_row, "Tell a fact…", self._tell_own_fact)
+        own_row2 = tk.Frame(own, bg=theme.surface)
+        own_row2.pack(fill="x")
+        self._button(own_row2, "What she remembers…", self._show_own_recall)
+        self._button(own_row2, "Open the folder…", self._open_own_folder)
+
         scenario = self._right_column.add("scenario", "Active Scenario", icon="🎬")
         self._scenario_text = self._panel_text(scenario, height=5)
 
@@ -870,6 +883,7 @@ class RomanceStudioDialog(ThemedDialog):
             for widget in (
                 self._profile_text, self._traits_text, self._relationship_text,
                 self._milestones_text, self._voice_text, self._scenario_text,
+                self._own_text,
             ):
                 self._set_panel(widget, "")
             self._memory_list.delete(0, "end")
@@ -950,6 +964,33 @@ class RomanceStudioDialog(ThemedDialog):
             self._set_panel(self._voice_text, view.describe())
         except Exception:
             self._set_panel(self._voice_text, "")
+        self._refresh_own_panel()
+
+    def _refresh_own_panel(self) -> None:
+        """Draw the companion's own files: profile, knowledge bank, and memory."""
+        if not self._selected_character:
+            self._set_panel(self._own_text, "")
+            return
+        try:
+            summary = self.service.character_file_summary(self._selected_character)
+        except Exception as error:
+            self._set_panel(self._own_text, f"(could not read her files: {error})")
+            return
+        facts: tuple[str, ...] = ()
+        try:
+            facts = self.service.character_facts(self._selected_character)
+        except Exception:
+            facts = ()
+        lines = [
+            f"Profile written: {'yes' if summary.profile_exists else 'no'}",
+            f"Knowledge bank: {summary.knowledge_chunks} chunk(s), "
+            f"{summary.knowledge_bytes} byte(s)",
+            f"Facts she was told: {summary.facts}",
+            f"Exchanges she remembers: {summary.exchanges}",
+        ]
+        if facts:
+            lines.append("Latest fact: " + facts[-1])
+        self._set_panel(self._own_text, "\n".join(lines))
 
     # -- selection handlers ----------------------------------------------
 
@@ -1388,6 +1429,76 @@ class RomanceStudioDialog(ThemedDialog):
         except Exception as error:
             self._set_status(f"Could not export: {error}")
 
+    # -- the companion's own files ---------------------------------------
+
+    def _add_own_knowledge(self) -> None:
+        """Add a reference document to the companion's own knowledge bank."""
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        values = _prompt_text(self.window, self.theme, self._type, "Add her knowledge", "Title")
+        if values is None:
+            return
+        title, text = values
+        try:
+            chunks = self.service.add_character_knowledge(
+                self._selected_character, title, text
+            )
+            self._refresh_own_panel()
+            self._set_status(f"Added {chunks} knowledge chunk(s) to her own bank.")
+        except Exception as error:
+            self._set_status(f"Could not add the knowledge: {error}")
+
+    def _tell_own_fact(self) -> None:
+        """Tell the companion a durable fact about the user (her own learning)."""
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        values = _prompt_text(self.window, self.theme, self._type, "Tell her a fact", "")
+        if values is None:
+            return
+        _title, text = values
+        try:
+            added = self.service.remember_character_fact(self._selected_character, text)
+            self._refresh_own_panel()
+            self._set_status("She will remember that." if added else "She already knew that.")
+        except Exception as error:
+            self._set_status(f"Could not save the fact: {error}")
+
+    def _show_own_recall(self) -> None:
+        """Show the bounded window of exchanges the companion remembers."""
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        try:
+            recall = self.service.character_recall(self._selected_character)
+        except Exception as error:
+            self._set_status(f"Could not read what she remembers: {error}")
+            return
+        if not recall:
+            self._set_status("She has not remembered any exchange yet.")
+            return
+        self._add_message(
+            "note",
+            "\n".join(f"• {line}" for line in recall),
+            title="What she remembers",
+        )
+
+    def _open_own_folder(self) -> None:
+        """Reveal the companion's own folder in the OS file manager."""
+        if not self._selected_character:
+            self._set_status("Select a character first.")
+            return
+        try:
+            summary = self.service.character_file_summary(self._selected_character)
+        except Exception as error:
+            self._set_status(f"Could not find her folder: {error}")
+            return
+        if _reveal_in_file_manager(summary.directory):
+            self._set_status(f"Opened {summary.directory}.")
+        else:
+            self._set_status(f"Her folder is {summary.directory}.")
+
     def _create_scenario(self) -> None:
         values = _prompt_scenario(self.window, self.theme, self._type, self.service.scenario_categories())
         if values is None:
@@ -1653,6 +1764,61 @@ def _prompt_dimensions(
 
     row = tk.Frame(dialog, bg=theme.base)
     row.grid(row=len(dimensions), column=0, columnspan=2, pady=12)
+    tk.Button(row, text="Save", command=confirm, bg=theme.primary, fg=theme.primary_foreground,
+              relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
+    tk.Button(row, text="Cancel", command=dialog.destroy, bg=theme.surface_raised, fg=theme.foreground,
+              relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
+    dialog.wait_window()
+    return result["value"]
+
+
+def _reveal_in_file_manager(directory: Path) -> bool:
+    """Ask the OS to open a folder. Returns whether the request was made."""
+    try:
+        if sys.platform.startswith("darwin"):
+            subprocess.Popen(["open", str(directory)])
+        elif sys.platform.startswith("win"):
+            subprocess.Popen(["explorer", str(directory)])
+        else:
+            subprocess.Popen(["xdg-open", str(directory)])
+    except Exception:
+        return False
+    return True
+
+
+def _prompt_text(
+    parent: tk.Misc, theme: Any, typography: Any, title: str, label: str
+) -> tuple[str, str] | None:
+    """Ask for an optional title and a body of text. Returns ``(title, text)``."""
+    dialog = tk.Toplevel(parent)
+    dialog.title(title)
+    dialog.configure(bg=theme.base)
+    dialog.transient(parent)  # type: ignore[call-overload]
+    dialog.grab_set()
+    result: dict[str, tuple[str, str] | None] = {"value": None}
+    title_var = tk.StringVar(value="")
+    if label:
+        tk.Label(dialog, text=label, bg=theme.base, fg=theme.foreground,
+                 font=typography.font("sm")).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 2))
+        tk.Entry(dialog, textvariable=title_var, width=44, bg=theme.surface, fg=theme.foreground,
+                 insertbackground=theme.foreground, relief="flat").grid(row=0, column=1, padx=12, pady=(12, 2))
+        body_row = 1
+    else:
+        body_row = 0
+    tk.Label(dialog, text="Text", bg=theme.base, fg=theme.foreground,
+             font=typography.font("sm")).grid(row=body_row, column=0, sticky="nw", padx=12, pady=2)
+    text = tk.Text(dialog, width=44, height=6, wrap="word", bg=theme.surface, fg=theme.foreground,
+                   insertbackground=theme.foreground, relief="flat")
+    text.grid(row=body_row, column=1, padx=12, pady=2)
+
+    def confirm() -> None:
+        content = text.get("1.0", "end").strip()
+        if content:
+            result["value"] = (title_var.get().strip() or "note", content)
+        dialog.destroy()
+
+    row = tk.Frame(dialog, bg=theme.base)
+    row.grid(row=body_row + 1, column=0, columnspan=2, pady=12)
     tk.Button(row, text="Save", command=confirm, bg=theme.primary, fg=theme.primary_foreground,
               relief="flat", font=typography.font("sm")).pack(side="left", padx=6)
     tk.Button(row, text="Cancel", command=dialog.destroy, bg=theme.surface_raised, fg=theme.foreground,

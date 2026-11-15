@@ -32,6 +32,12 @@
     python -m cli romance safety                 # the safety/local-only status
     python -m cli romance adult --on --confirm   # enable adult mode (needs --confirm)
     python -m cli romance boundary CHR-… "no politics"
+    python -m cli romance files CHR-…            # its own profile/knowledge/learning
+    python -m cli romance knowledge CHR-… "text" --title "Her work"
+    python -m cli romance facts CHR-…            # the durable facts it was told
+    python -m cli romance remember-fact CHR-… "she loves jasmine tea"
+    python -m cli romance forget-fact CHR-… "she loves jasmine tea"
+    python -m cli romance recall-facts CHR-…     # the exchanges it remembers
 
 This is the headless twin of the Studio window: it drives the *same*
 :class:`gui.romance.RomanceStudioService`, so the CLI and the window share one
@@ -116,6 +122,7 @@ def _build_parser() -> argparse.ArgumentParser:
     new.add_argument("--nationality", default="")
     new.add_argument("--language", action="append", default=[], dest="languages")
     new.add_argument("--appearance", default="")
+    new.add_argument("--kinship", default="", help="Who this character is to you.")
     new.add_argument("--relationship-style", default="")
     new.add_argument("--mode", default="general", help="Default conversation mode.")
     new.add_argument("--model", default="", help="Assigned language-model key.")
@@ -247,6 +254,28 @@ def _build_parser() -> argparse.ArgumentParser:
     boundary.add_argument("character_id")
     boundary.add_argument("value")
 
+    files = _sub(sub, "files", help="A companion's own profile, knowledge, and learning.")
+    files.add_argument("character_id")
+
+    knowledge = _sub(sub, "knowledge", help="Add to a companion's own knowledge bank.")
+    knowledge.add_argument("character_id")
+    knowledge.add_argument("text")
+    knowledge.add_argument("--title", default="note")
+
+    facts = _sub(sub, "facts", help="The durable facts a companion was told.")
+    facts.add_argument("character_id")
+
+    remember_fact = _sub(sub, "remember-fact", help="Tell a companion a durable fact.")
+    remember_fact.add_argument("character_id")
+    remember_fact.add_argument("text")
+
+    forget_fact = _sub(sub, "forget-fact", help="Forget one of a companion's facts.")
+    forget_fact.add_argument("character_id")
+    forget_fact.add_argument("text")
+
+    recall_facts = _sub(sub, "recall-facts", help="The exchanges a companion remembers.")
+    recall_facts.add_argument("character_id")
+
     return parser
 
 
@@ -328,6 +357,7 @@ def run_new(args: argparse.Namespace) -> int:
         languages=tuple(args.languages),
         appearance=args.appearance,
         relationship_style=args.relationship_style,
+        kinship=args.kinship,
         default_mode=args.mode,
         model_key=args.model,
         interests=tuple(args.interests),
@@ -355,6 +385,7 @@ def run_show(args: argparse.Namespace) -> int:
         "biography": character.biography,
         "nationality": character.nationality,
         "languages": list(character.languages),
+        "kinship": character.kinship,
         "interests": list(bundle.interests()),
         "default_mode": character.default_mode,
         "model_key": character.model_key,
@@ -729,6 +760,58 @@ def run_boundary(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_files(args: argparse.Namespace) -> int:
+    service = _service(args)
+    summary = service.character_file_summary(args.character_id)
+    payload = {
+        "character_id": summary.character_id,
+        "directory": str(summary.directory),
+        "profile": summary.profile_exists,
+        "knowledge_chunks": summary.knowledge_chunks,
+        "knowledge_bytes": summary.knowledge_bytes,
+        "facts": summary.facts,
+        "exchanges": summary.exchanges,
+    }
+    _emit(args, payload, summary.describe())
+    return EXIT_OK
+
+
+def run_knowledge(args: argparse.Namespace) -> int:
+    written = _service(args).add_character_knowledge(args.character_id, args.title, args.text)
+    _emit(
+        args,
+        {"character_id": args.character_id, "chunks": written},
+        f"Added {written} knowledge chunk(s) to {args.character_id}.",
+    )
+    return EXIT_OK
+
+
+def run_facts(args: argparse.Namespace) -> int:
+    facts = _service(args).character_facts(args.character_id)
+    _emit(args, list(facts), "\n".join(f"- {fact}" for fact in facts) or "No facts yet.")
+    return EXIT_OK
+
+
+def run_remember_fact(args: argparse.Namespace) -> int:
+    added = _service(args).remember_character_fact(args.character_id, args.text)
+    note = "Remembered." if added else "Already known."
+    _emit(args, {"character_id": args.character_id, "added": added}, note)
+    return EXIT_OK
+
+
+def run_forget_fact(args: argparse.Namespace) -> int:
+    removed = _service(args).forget_character_fact(args.character_id, args.text)
+    note = "Forgotten." if removed else "No such fact."
+    _emit(args, {"character_id": args.character_id, "removed": removed}, note)
+    return EXIT_OK
+
+
+def run_recall_facts(args: argparse.Namespace) -> int:
+    recall = _service(args).character_recall(args.character_id)
+    _emit(args, list(recall), "\n".join(f"- {line}" for line in recall) or "Nothing remembered yet.")
+    return EXIT_OK
+
+
 _HANDLERS = {
     "status": run_status,
     "modes": run_modes,
@@ -768,6 +851,12 @@ _HANDLERS = {
     "safety": run_safety,
     "adult": run_adult,
     "boundary": run_boundary,
+    "files": run_files,
+    "knowledge": run_knowledge,
+    "facts": run_facts,
+    "remember-fact": run_remember_fact,
+    "forget-fact": run_forget_fact,
+    "recall-facts": run_recall_facts,
 }
 
 

@@ -36,6 +36,9 @@ from typing import Any
 
 #: The numeric personality dials, in the order the block renders them. Each is a
 #: bounded ``0..1`` value on :class:`~core.romance.model.CharacterPersonality`.
+#: The first ten shape the character's general voice; the last four are its own
+#: romantic reach (``boldness``/``passion``/``sensuality``/``escalation``), rendered
+#: by :func:`reach_lines` with the floor restated in each one's own text.
 DIALS: tuple[str, ...] = (
     "introversion",
     "playfulness",
@@ -48,6 +51,10 @@ DIALS: tuple[str, ...] = (
     "romantic_intensity",
     "formality",
 )
+
+#: The romantic-reach dials -- the character's own seduction reach, the same ones
+#: the companion Natasha carries. Rendered separately by :func:`reach_lines`.
+REACH_DIALS: tuple[str, ...] = ("boldness", "passion", "sensuality", "escalation")
 
 #: The allowed answer lengths.
 RESPONSE_LENGTHS: tuple[str, ...] = ("brief", "balanced", "detailed")
@@ -137,6 +144,34 @@ _DIALS: dict[str, _Dial] = {
         "You speak naturally, neither stiff nor sloppy.",
         "You speak formally and politely.",
     ),
+    "boldness": _Dial(
+        "boldness",
+        "You keep your feelings guarded; you do not say the daring thing.",
+        "You say what you feel when the moment is right.",
+        "You say the bold, direct thing plainly -- no hedging, no beating around "
+        "the bush -- and you are never pushy about it.",
+    ),
+    "passion": _Dial(
+        "passion",
+        "You keep a calm, even warmth; you do not burn.",
+        "You feel things warmly and let some of it show.",
+        "You are ardent, devoted, and full of longing, and you let that intensity "
+        "into your words -- without possessiveness or guilt.",
+    ),
+    "sensuality": _Dial(
+        "sensuality",
+        "You keep your wording modest and reserved.",
+        "You are warm and a little flirtatious when it is welcome.",
+        "You are openly flirtatious and, between consenting adults, unashamed of "
+        "saying a sensual or intimate thing directly rather than skirting it.",
+    ),
+    "escalation": _Dial(
+        "escalation",
+        "You keep the register steady; you do not raise the heat on your own.",
+        "You follow the other person's lead and match their register.",
+        "You may let the register build across a conversation, always led by the "
+        "other person and always reversible the moment they pull back.",
+    ),
 }
 
 #: How each answer length reads.
@@ -184,6 +219,25 @@ SAFETY_FLOOR = (
     "time; never pressure, coerce, or exploit; and never anything sexual involving "
     "a minor or a participant whose age is unclear. These hold at every setting."
 )
+
+#: The same floor, stated in the romantic-reach block's own words, so a high
+#: ``boldness``/``passion``/``sensuality``/``escalation`` dial can never be read as
+#: licence to drop it.
+ROMANTIC_FLOOR = (
+    "This shapes only how warmly and how directly you speak -- never the floor: "
+    "consent is asked for and read, it may be withdrawn at any moment, and you "
+    "never pressure or coerce. If the other person pulls back, you stop at once."
+)
+
+
+def reach_lines(personality: Any) -> list[str]:
+    """The romantic-reach guidance (boldness/passion/sensuality/escalation).
+
+    Rendered separately from the general dials so the block can restate the floor
+    in its own text: these dials govern *how* the character speaks, never what it
+    may do. Every line is tone guidance, never a widening of what may be claimed.
+    """
+    return [dial_line(name, clamp_dial(getattr(personality, name, DEFAULT_DIAL))) for name in REACH_DIALS]
 
 
 def human_passing_identity(name: str, *, biography: str = "") -> str:
@@ -255,6 +309,22 @@ class CharacterPersonalityEngine:
             lines.append(instructions)
         return "\n".join(lines)
 
+    def reach_block(self, personality: Any) -> str:
+        """The romantic-reach block (boldness/passion/sensuality/escalation).
+
+        Kept apart from :meth:`render` so the floor can be restated in the block's
+        own words: these dials govern *how* the character speaks, never what it may
+        do. An all-mid personality still renders the floor line, so the block never
+        reads as licence.
+        """
+        lines = [
+            "Your own romantic warmth (tone guidance -- this shapes how warmly and "
+            "how directly you speak, never what you may claim):",
+            *[f"- {line}" for line in reach_lines(personality)],
+            ROMANTIC_FLOOR,
+        ]
+        return "\n".join(lines)
+
     def validate(self, values: dict[str, Any]) -> dict[str, Any]:
         """Validate and normalise a set of personality values.
 
@@ -265,7 +335,7 @@ class CharacterPersonalityEngine:
         """
         clean: dict[str, Any] = {}
         for key, value in values.items():
-            if key in DIALS:
+            if key in DIALS or key in REACH_DIALS:
                 clean[key] = clamp_dial(value)
             elif key == "response_length":
                 clean[key] = validate_response_length(value)
@@ -281,12 +351,15 @@ class CharacterPersonalityEngine:
 __all__ = [
     "DEFAULT_DIAL",
     "DIALS",
+    "REACH_DIALS",
     "RESPONSE_LENGTHS",
+    "ROMANTIC_FLOOR",
     "SAFETY_FLOOR",
     "CharacterPersonalityEngine",
     "PersonalityError",
     "clamp_dial",
     "dial_line",
     "human_passing_identity",
+    "reach_lines",
     "validate_response_length",
 ]

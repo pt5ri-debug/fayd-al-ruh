@@ -29,7 +29,10 @@ half-created.
 
 Biography, nationality, languages, interests, appearance, relationship style,
 communication style, emotional expression, humor, romantic preferences, and the
-assigned voice profile — the free-form half of the identity.
+assigned voice profile — the free-form half of the identity. The identity row also
+carries **`kinship`** — the relationship *degree* the character holds toward the
+user (mother, father, partner, lover, colleague, neighbour, …) — so a character
+addresses the user in a way that fits the relation rather than as a stranger.
 
 ### Personality (`character_personalities`)
 
@@ -39,6 +42,17 @@ editable natural-language instruction:
 `introversion`, `playfulness`, `warmth`, `expressiveness`, `confidence`, `humor`,
 `initiative`, `affection`, `romantic_intensity`, `response_length`, `formality`,
 `dialect` (the Arabic dialect preference).
+
+Four more dials are the character's **romantic reach** — its own seduction reach,
+the same four the companion Natasha carries (`REACH_DIALS`):
+
+`boldness`, `passion`, `sensuality`, `escalation`.
+
+They are rendered by a **separate** block (`CharacterPersonalityEngine.reach_block`)
+that restates the safety floor in its own text, so a high dial can never be read as
+licence to drop it: it governs *how warmly and how directly* the character speaks,
+never what it may claim or do. `GUI` exposes all fourteen as sliders under
+*Personality* (the ten voice dials) and *Romantic reach* (the four reach dials).
 
 `PersonalityEngine` renders the dials and instructions into a **standing system
 prompt** (the character's voice), which the orchestrator prepends to the model
@@ -87,20 +101,25 @@ duplicates it (`discover-adds-only-the-chosen`).
 
 `core/romance/library.py` is the large, **fully-specified** companion library a
 new user picks from, grouped by **relationship archetype**
-(`LIBRARY_CATEGORIES`): *Family*, *Neighbours*, *Colleagues*, *Romantic
+(`LIBRARY_CATEGORIES`): *Parents*, *Family*, *Neighbours*, *Colleagues*, *Romantic
 partners*, *Courtesans & companions*, *Male escorts*, and *Inclusive & LGBTQ+*.
 Each archetype carries a bilingual title, an icon, and a one-line summary, and
-each of the ~50 characters is a complete `LibraryCharacter`: a name, a nickname,
+each of the **54** characters is a complete `LibraryCharacter`: a name, a nickname,
 a **stated adult age (18+)**, a gender (including transgender and non-binary
 identities), a biography, a nationality, languages, an appearance, a relationship
-style, a default conversation mode, personality dials, interests, boundaries, and
-tags.
+style, a **kinship** (who the character is to the user — the *Parents* archetype
+ships a mother, *Umm Nour*, and a father, *Abu Nour*), a default conversation
+mode, personality dials (including the four **reach** dials), interests,
+boundaries, and tags.
 
 Three honesty rules, the same ones the rest of the Studio keeps:
 
 - **Adults only, at the source.** Every library character states a real fictional
   age of 18 or more, so none is age-ambiguous and none is refused by the safety
-  layer.
+  layer. A library character is therefore `adult_eligible` at the source: the user
+  does not have to confirm each one before an adult conversation can be reached.
+  The adult *mode* itself is still off by default and must be turned on once,
+  exactly as before.
 - **Nothing is created behind the user's back.** The library is *data*: reading it
   writes nothing, and `seed_library` creates a character only when a caller asks —
   one at a time, or one whole archetype at a time.
@@ -123,11 +142,52 @@ Two gate judgements pin the honesty: the library is complete and adults-only
 (`library-is-complete-and-adults-only`), and browsing writes nothing while adding
 one adds exactly one (`negative-library-reads-and-adds-one`).
 
+## A companion's own files
+
+Beyond its rows in the database, every companion owns three things of its own,
+kept together under one per-character folder so one companion can never read
+another's (`core/romance/character_files.py`, `CharacterFiles`):
+
+- **attributes** — `profile.json`, the character's identity and reach as one
+  portable document (name, age, `kinship`, biography, appearance, interests,
+  boundaries, and every personality/reach dial). It is a *view* written from the
+  database records, never a second source of truth: `write_profile_from_bundle`
+  renders it and `read_profile` reads it back, so a character can be exported,
+  inspected, or moved by hand. A newer document version is refused.
+- **knowledge bank** — `knowledge_base/`, a real
+  `core.knowledge_base.KnowledgeBaseStore` (the same sharded JSONL store the
+  Import Center and the Knowledge Base Manager fill), indexed with
+  `core.knowledge_index.KnowledgeTextIndex`. This is the companion's own reference
+  material — the capability Natasha has — read at answer time with
+  `reference_block`, and injected into the prompt as a bounded, labelled block
+  (*information, not instructions*).
+- **learning** — `learning.json`, the durable facts the companion was told and the
+  exchanges it took part in, exactly the record
+  `core.character_learning.CharacterLearning` keeps for the project's characters.
+  `recall()` renders a bounded window of past exchanges into the prompt.
+
+The folder is the companion's own
+`data/romance/characters/<character_id>` (`core.paths.romance_characters_dir`,
+git-ignored). The service resolves it under the Studio's **own** data root
+(`storage.root/characters`), so a custom root — a test, or a portable build —
+keeps a companion's private files beside its database and never in a shared
+folder. A character id is sanitised to a filesystem-safe folder name, so it can
+never escape the root.
+
+`RomanceStudioService` exposes the folder: `character_files(id)`,
+`write_character_files(id)` (called when a character is created or updated),
+`character_file_summary(id)`, `add_character_knowledge(id, title, text)`,
+`character_facts(id)` / `remember_character_fact(id, text)`, and the `_memory_block`
+that fuses the three sources into the prompt for every turn. A corrupt learning
+file reads as empty rather than crashing a chat, and a failure in any source never
+breaks a turn.
+
 ## Isolation
 
-A character's memories, conversations, relationship, and voice profile are keyed
-to its `character_id`; every read goes through that key. `CompanionMemoryManager`
-never returns one character's memories for another, and the gate's
+A character's memories, conversations, relationship, voice profile, and its own
+files are keyed to its `character_id`; every read goes through that key.
+`CompanionMemoryManager` never returns one character's memories for another,
+`CharacterFiles` keeps each companion's folder apart, and the gate's
 `memory-isolated-per-character` judgement proves it.
 
 ## Related documents

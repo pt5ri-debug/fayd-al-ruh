@@ -193,6 +193,7 @@ class CompanionOrchestrator:
         reply = self.conversations.append(
             conversation_id, answer, role="assistant", speaker=speaker, mode=effective_mode
         )
+        self._record_exchange(character_id, text, answer)
         return TurnResult(
             ok=True,
             conversation_id=conversation_id,
@@ -250,7 +251,7 @@ class CompanionOrchestrator:
         names = tuple(self._speaker_name(member) for member in members)
         replies: list[Any] = []
         speakers: list[str] = []
-        for _member, name in zip(members, names, strict=True):
+        for member, name in zip(members, names, strict=True):
             prompt = self.conversations.build_prompt(
                 conversation_id, mode=effective_mode, cast=names, scenario=scenario
             )
@@ -275,6 +276,7 @@ class CompanionOrchestrator:
                     mode=effective_mode,
                 )
             )
+            self._record_exchange(member, text, answer)
             speakers.append(name)
         return TurnResult(
             ok=True,
@@ -316,6 +318,22 @@ class CompanionOrchestrator:
             )
         except Exception:
             # A relationship note must never break a turn.
+            return
+
+    def _record_exchange(self, character_id: str, question: str, answer: str) -> None:
+        """Write the turn into the companion's **own** learning file.
+
+        A companion's own memory (its ``learning.json``) is what makes it recall a
+        past exchange later. A failure here must never break the turn, so it is
+        swallowed -- the exchange is a courtesy, not part of the reply.
+        """
+        try:
+            from core.romance.character_files import CharacterFiles
+
+            CharacterFiles(
+                character_id, root=self.storage.root / "characters"
+            ).remember(question, answer, source="model")
+        except Exception:
             return
 
     def _speaker_name(self, character_id: str) -> str:
