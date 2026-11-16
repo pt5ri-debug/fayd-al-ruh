@@ -135,6 +135,34 @@ The same actions are headless: `python -m cli romance files|knowledge|facts|
 remember-fact|forget-fact <character>`. One companion's files are never visible
 to another, and the folder moves with the Studio's data root.
 
+## Your own persona, and each character's avatar
+
+**My Persona (you)** is the other half of the fiction: who *you* are. A persona
+is built from the very same fields a companion is (name, age, story, appearance,
+personality, voice), so the companions can address you by name and know your
+story. Create one with **New persona…**, edit it with **Edit…**, and make one the
+one you speak as with **Speak as this** — exactly one persona is ever active, and
+its name labels your own turns in the transcript (with no persona the label stays
+the plain *You*). The section also carries **Duplicate**, **Export…**,
+**Import…**, and **Delete…**.
+
+Every character — a companion *or* a persona — also has its **Avatar** in its own
+editor window: **Upload a picture…** sets one you chose, **Generate** renders one
+from the character's own description (the built-in renderer needs no download; a
+learned backend is optional), and **Clear** falls back to the initial-letter
+badge. Each avatar lives in the character's own folder, so one character can never
+see another's.
+
+Headless:
+
+```
+python -m cli romance personas               # the personas you have made
+python -m cli romance new-persona "Omar" --age 31 --activate
+python -m cli romance use-persona CHR-…       # make one the one you speak as
+python -m cli romance avatar CHR-… --generate # or --set FILE / --clear
+```
+
+
 ## Voice
 
 The *Voice* block lists the voices this machine really has (via the project's

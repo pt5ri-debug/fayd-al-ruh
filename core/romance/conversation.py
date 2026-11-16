@@ -88,6 +88,7 @@ class ConversationManager:
         characters: CharacterManager | None = None,
         memory_reader: Any = None,
         relationship_reader: Any = None,
+        persona_reader: Any = None,
     ) -> None:
         self.storage = storage
         self.characters = characters if characters is not None else CharacterManager(storage)
@@ -98,6 +99,10 @@ class ConversationManager:
         # relationship engine supplies a real one. Default: none (the prompt simply
         # carries no relationship block).
         self._relationship_reader = relationship_reader
+        # A callable ``() -> dict`` returning the user's own persona (its name and
+        # identity blocks); the Studio supplies one when the user has made a
+        # persona. Default: none, so the prompt says "the user" exactly as before.
+        self._persona_reader = persona_reader
 
     # -- conversations ----------------------------------------------------
 
@@ -282,6 +287,7 @@ class ConversationManager:
             history=self.recent_history(conversation_id, window=spec.history_window),
             cast=cast,
             scenario=scenario,
+            **self._read_persona(),
         )
         return mode_prompt(spec, context)
 
@@ -300,6 +306,27 @@ class ConversationManager:
         except Exception:
             # A relationship read must never break a turn.
             return ""
+
+    def _read_persona(self) -> dict[str, str]:
+        """The user's own persona, as the blocks the prompt renders.
+
+        Empty when the user has made none, so a prompt is exactly what it was
+        before this feature. A reader that fails never breaks a turn: the prompt
+        simply carries no persona block.
+        """
+        if self._persona_reader is None:
+            return {}
+        try:
+            data = self._persona_reader() or {}
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {
+            "user_name": str(data.get("name", "") or ""),
+            "user_identity": str(data.get("identity", "") or ""),
+            "user_voice": str(data.get("voice", "") or ""),
+        }
 
     def _character_context(self, character_id: str) -> dict[str, Any]:
         if not character_id:

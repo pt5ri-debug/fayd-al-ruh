@@ -29,6 +29,8 @@ reports the real next step. "Requires a voice engine" is the same for speech.
 | Discover Characters (shipped, clearly-labelled example companions, added one at a time) | ✅ |
 | Ready-made character library (54 fully-specified adults across 8 relationship archetypes, browsable by archetype and search, added one at a time or a whole archetype at once) | ✅ |
 | A companion's own files (its `profile.json`, its own knowledge bank, and its `learning.json` facts/exchanges), private per character | ✅ |
+| The user's own persona (who the user speaks *as*: the same fields a companion has, exactly one active at a time, its name labelling the user's own turns, rendered into the prompt the companion reads) | ✅ |
+| A per-character avatar (upload a picture, generate one from the character's own description, or clear it), private per character | ✅ |
 | Delete with explicit retention choice (keep / purge / anonymize) | ✅ |
 
 ## Conversation

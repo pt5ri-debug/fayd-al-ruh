@@ -110,6 +110,28 @@ def _build_parser() -> argparse.ArgumentParser:
     _sub(sub, "status", help="What the Studio holds right now.")
     _sub(sub, "modes", help="The conversation modes.")
 
+    _sub(sub, "personas", help="The user's own personas (who you speak as).")
+    persona_new = _sub(sub, "new-persona", help="Create a persona for the user.")
+    persona_new.add_argument("name")
+    persona_new.add_argument("--age", type=int, default=None)
+    persona_new.add_argument("--nickname", default="")
+    persona_new.add_argument("--gender", default="")
+    persona_new.add_argument("--biography", default="")
+    persona_new.add_argument("--nationality", default="")
+    persona_new.add_argument("--appearance", default="")
+    persona_new.add_argument("--kinship", default="", help="Who you are to the companions.")
+    persona_new.add_argument("--activate", action="store_true", help="Speak as it now.")
+    persona_use = _sub(sub, "use-persona", help="Make a persona the one you speak as.")
+    persona_use.add_argument("character_id")
+
+    avatar = _sub(sub, "avatar", help="A character's picture (upload or generate).")
+    avatar.add_argument("character_id")
+    avatar.add_argument("--set", default="", help="Upload a picture from this file.")
+    avatar.add_argument("--generate", action="store_true", help="Generate one.")
+    avatar.add_argument("--backend", default="procedural", choices=("procedural", "diffusion"))
+    avatar.add_argument("--prompt", default="")
+    avatar.add_argument("--clear", action="store_true", help="Remove the picture.")
+
     characters = _sub(sub, "characters", help="The character library.")
     characters.add_argument("--archived", action="store_true", help="Include archived.")
     characters.add_argument("--search", default="", help="Filter by name or tag.")
@@ -321,6 +343,8 @@ def _character_row(row: Any) -> dict[str, Any]:
         "character_id": row.character_id,
         "name": row.name,
         "nickname": row.nickname,
+        "role": getattr(row, "role", "companion"),
+        "is_active": getattr(row, "is_active", False),
         "favorite": row.favorite,
         "archived": row.archived,
         "conversation_count": row.conversation_count,
@@ -393,6 +417,84 @@ def run_new(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_personas(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.persona_rows()
+    active = service.active_persona_name()
+    payload = {
+        "active": active,
+        "personas": [_character_row(row) for row in rows],
+    }
+    if not rows:
+        _emit(args, payload, "No personas yet. Create one with `romance new-persona`.")
+        return EXIT_OK
+    lines = [
+        f"{row.character_id}  {row.label()}" + ("  [active]" if row.is_active else "")
+        for row in rows
+    ]
+    lines.append(f"You are speaking as: {active or 'no persona (the user)'}")
+    _emit(args, payload, "\n".join(lines))
+    return EXIT_OK
+
+
+def run_new_persona(args: argparse.Namespace) -> int:
+    service = _service(args)
+    bundle = service.create_persona(
+        args.name,
+        fictional_age=args.age,
+        nickname=args.nickname,
+        gender=args.gender,
+        biography=args.biography,
+        nationality=args.nationality,
+        appearance=args.appearance,
+        kinship=args.kinship,
+    )
+    if args.activate:
+        service.activate_persona(bundle.id)
+    _emit(
+        args,
+        {"character_id": bundle.id, "name": bundle.name, "active": bool(args.activate)},
+        f"Created persona {bundle.name} ({bundle.id})."
+        + (" Now speaking as it." if args.activate else ""),
+    )
+    return EXIT_OK
+
+
+def run_use_persona(args: argparse.Namespace) -> int:
+    service = _service(args)
+    bundle = service.activate_persona(args.character_id)
+    _emit(
+        args,
+        {"character_id": bundle.id, "name": bundle.name},
+        f"Now speaking as {bundle.name}.",
+    )
+    return EXIT_OK
+
+
+def run_avatar(args: argparse.Namespace) -> int:
+    service = _service(args)
+    if args.clear:
+        service.clear_avatar(args.character_id)
+        _emit(args, {"character_id": args.character_id, "cleared": True}, "Avatar cleared.")
+        return EXIT_OK
+    if args.set:
+        result = service.set_avatar_from_file(args.character_id, args.set)
+    else:
+        result = service.generate_avatar(
+            args.character_id, prompt=args.prompt, backend=args.backend
+        )
+    _emit(
+        args,
+        {
+            "character_id": args.character_id,
+            "path": str(result.path),
+            "source": result.source,
+        },
+        result.describe(),
+    )
+    return EXIT_OK
+
+
 def run_show(args: argparse.Namespace) -> int:
     service = _service(args)
     bundle = service.character(args.character_id)
@@ -401,6 +503,7 @@ def run_show(args: argparse.Namespace) -> int:
         "character_id": bundle.id,
         "name": character.name,
         "nickname": character.nickname,
+        "role": character.role,
         "fictional_age": character.fictional_age,
         "adult_eligible": character.adult_eligible,
         "gender": character.gender,
@@ -925,6 +1028,10 @@ def run_recall_facts(args: argparse.Namespace) -> int:
 _HANDLERS = {
     "status": run_status,
     "modes": run_modes,
+    "personas": run_personas,
+    "new-persona": run_new_persona,
+    "use-persona": run_use_persona,
+    "avatar": run_avatar,
     "characters": run_characters,
     "new": run_new,
     "show": run_show,

@@ -31,7 +31,7 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 from core.romance.model import RECORDS
 
 #: The schema version this build writes and understands.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -173,7 +173,7 @@ _UNIQUES: dict[str, tuple[tuple[str, ...], ...]] = {
 
 #: Indexed columns, ``table -> (columns, ...)``.
 _INDEXES: dict[str, tuple[tuple[str, ...], ...]] = {
-    "companion_characters": (("owner",), ("active",), ("archived",), ("name",)),
+    "companion_characters": (("owner",), ("active",), ("archived",), ("name",), ("role",)),
     "character_personalities": (("character_id",),),
     "character_profiles": (("character_id",), ("kind",)),
     "character_boundaries": (("character_id",),),
@@ -289,9 +289,44 @@ def _migration_2(connection: Any) -> None:
         execute("ALTER TABLE companion_characters ADD COLUMN kinship TEXT NOT NULL DEFAULT ''")
 
 
+def _migration_3(connection: Any) -> None:
+    """Version 3: the character record also carries the user's own persona.
+
+    Adds the two columns the record gained -- ``role`` (``companion`` or
+    ``user``) and ``is_active`` (the one persona the Studio speaks as) -- to
+    ``companion_characters``, plus the index on ``role``. Every existing row is a
+    companion, which is exactly what the column's default says, so an upgraded
+    database and a fresh one end in the same shape; each step is guarded, so the
+    migration is idempotent.
+    """
+    execute = connection.execute
+    existing = {
+        row["name"]
+        for row in execute("PRAGMA table_info(companion_characters)").fetchall()
+    }
+    if "role" not in existing:
+        execute(
+            "ALTER TABLE companion_characters ADD COLUMN role TEXT NOT NULL DEFAULT 'companion'"
+        )
+    if "is_active" not in existing:
+        execute(
+            "ALTER TABLE companion_characters ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0"
+        )
+    indexes = {
+        row["name"]
+        for row in execute("PRAGMA index_list(companion_characters)").fetchall()
+    }
+    if "idx_companion_characters_role" not in indexes:
+        execute("CREATE INDEX IF NOT EXISTS idx_companion_characters_role ON companion_characters(role)")
+
+
 #: The numbered migration steps. Each entry is ``(version, callable)``; a callable
 #: runs inside its own transaction and only adds what its version introduces.
-MIGRATIONS: tuple[tuple[int, Any], ...] = ((1, _migration_1), (2, _migration_2))
+MIGRATIONS: tuple[tuple[int, Any], ...] = (
+    (1, _migration_1),
+    (2, _migration_2),
+    (3, _migration_3),
+)
 
 
 __all__ = [

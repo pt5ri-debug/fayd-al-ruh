@@ -1275,6 +1275,39 @@ Arabic is kept as secondary aliases where useful.
   `kinship` and the four reach columns, so a fresh file and an upgraded one end in
   the same shape). Docs: `docs/romance_companion/DATABASE_SCHEMA.md` and
   `CHARACTER_LIBRARY_AND_UI_REPORT.md`.
+  **The user's own persona and each character's avatar (Phase 12)** complete the
+  two halves the Studio was missing. `core/romance/model.py`'s `CompanionCharacter`
+  gains `role` (`ROLE_COMPANION` / `ROLE_USER`) and `is_active`, so one record
+  shape serves both **who the user talks to** and **who the user talks *as***;
+  `CharacterManager` gains `list_personas`/`active_persona`/`activate_persona`
+  (exactly one persona active at a time -- switching is one atomic call -- and the
+  first persona created becomes the active one), `list_characters(role=...)`
+  keeps the two kinds apart in every listing, and activating a *companion* is
+  refused. The persona reaches the prompt the companion reads:
+  `ConversationManager(persona_reader=...)` renders the user's name and identity
+  as a *"Who you are talking with"* block (`ModeContext.user_name`/`user_identity`/
+  `user_voice`), empty when the user has made none, so a prompt with no persona is
+  exactly what it was. `core/romance/avatar.py` (new) is the one avatar engine --
+  **upload** (a picture copied byte for byte; a non-image extension refused),
+  **generate** (through the project's own `core.imagegen`, procedural by default,
+  learned optional, the prompt built from the character's own profile), and
+  **clear** -- each in the character's own `characters/<id>/` folder, so one
+  character can never reach another's picture; a missing file, a non-image, an
+  unknown character, or an unknown backend is a readable `AvatarError`. The
+  Studio window gained a **My Persona (you)** sidebar section (the list with the
+  active one marked, *New persona…*, *Edit…*, *Speak as this*, *Duplicate*,
+  *Export…*, *Import…*, *Delete…*) and labels the user's own turns with the
+  persona's name (`_user_label()`, else the plain *You*); the editor gained the
+  **Avatar** section (upload / generate / clear / preview), the persona wording,
+  and the "speak as this" switch; and the CLI gained `personas`, `new-persona
+  --activate`, `use-persona`, and `avatar --set|--generate|--clear`. Schema
+  version 3 (an idempotent `_migration_3` adds `role`/`is_active` and the index on
+  `role`). The gate grew to **87 judgements** (the four new ones: the persona
+  round-trips into the prompt, the two roles never leak into each other's listing,
+  the avatar round-trips through upload/generate/clear, and a **negative control**
+  that one character can never read another's avatar).
+  `tests/test_romance_persona_avatar.py` (20 tests) and four window tests pin the
+  persona, the avatar, the prompt wiring, the CLI, and the real Tk windows.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
   theme=, typography=, on_close=)` builds one frame of three buttons into the

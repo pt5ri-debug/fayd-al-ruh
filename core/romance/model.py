@@ -62,6 +62,17 @@ def make_id(kind: str, *, prefix: str | None = None) -> str:
     return f"{tag}-{uuid.uuid4().hex[:8]}"
 
 
+#: The two kinds of record ``companion_characters`` carries. A **companion** is
+#: who the user talks *to*; the **user persona** is who the user talks *as*. Both
+#: are built from the same fields, so a persona is as fully specified as a
+#: companion and is rendered into the prompt the same way.
+ROLE_COMPANION = "companion"
+ROLE_USER = "user"
+
+#: The roles a character record may carry, in display order.
+ROLES: tuple[str, ...] = (ROLE_COMPANION, ROLE_USER)
+
+
 @dataclass(frozen=True)
 class RecordBase:
     """The columns every Studio record carries.
@@ -115,11 +126,22 @@ class CompanionCharacter(RecordBase):
     ``colleague``, ...), so the character addresses the user and speaks in a way
     that fits the relation, and so the Studio can show it. It is free text and
     defaults to empty (an ordinary, unlabelled companion).
+
+    ``role`` distinguishes the two kinds of record this one table carries: a
+    **companion** (``ROLE_COMPANION``, the default -- who the user talks *to*) and
+    the **user's own persona** (``ROLE_USER`` -- who the user talks *as*). A
+    persona is built from the very same fields, the same personality dials, the
+    same interests, boundaries, voice, and model, so the user's own character is
+    as fully specified as a companion and is rendered into the prompt the same
+    way. ``is_active`` marks the **one** persona the Studio currently speaks as;
+    every other persona is kept but inactive. A companion ignores both fields.
     """
 
     owner: str = ""
     name: str = ""
     nickname: str = ""
+    role: str = "companion"
+    is_active: bool = False
     fictional_age: int | None = None
     adult_eligible: bool = False
     gender: str = ""
@@ -418,6 +440,9 @@ RECORDS: dict[str, type[RecordBase]] = {
 
 __all__ = [
     "RECORDS",
+    "ROLES",
+    "ROLE_COMPANION",
+    "ROLE_USER",
     "CharacterBoundary",
     "CharacterPersonality",
     "CharacterProfileItem",

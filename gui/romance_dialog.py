@@ -35,6 +35,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from core.romance.model import ROLE_COMPANION, ROLE_USER
+
 from gui.dialog_base import ThemedDialog
 from gui.romance import RomanceStudioService
 from gui.sidebar import SidebarColumn
@@ -93,9 +95,11 @@ class RomanceStudioDialog(ThemedDialog):
         self._right_open = True
         self._selected_character = ""
         self._selected_conversation = ""
+        self._selected_persona = ""
         self._suppress_select = False
         self._character_ids: list[str] = []
         self._archive_ids: list[str] = []
+        self._persona_ids: list[str] = []
         self._conversation_ids: list[str] = []
         self._example_names: list[str] = []
         self._library_rows: list[Any] = []
@@ -243,6 +247,41 @@ class RomanceStudioDialog(ThemedDialog):
         row1b.pack(fill="x")
         self._button(row1b, "Export…", self._export_character)
         self._button(row1b, "Import…", self._import_character)
+        tk.Label(
+            chars, text="Edit the companion's traits in its own window (Edit…).",
+            bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
+            anchor="w", justify="left", wraplength=290,
+        ).pack(fill="x", pady=(6, 0))
+
+        # My Persona (you) -- the user's own character, edited like a companion.
+        persona = column.add("persona", "My Persona (you)", icon="🙋", open=True)
+        tk.Label(
+            persona,
+            text="Who you are in the story. The companions address you by this "
+            "name and know your story.",
+            bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
+            anchor="w", justify="left", wraplength=290,
+        ).pack(fill="x", pady=(0, 4))
+        self._persona_label = tk.Label(
+            persona, text="", bg=theme.surface, fg=theme.contrast,
+            font=self._type.font("2xs", weight="bold"), anchor="w", justify="left",
+            wraplength=290,
+        )
+        self._persona_label.pack(fill="x", pady=(0, 4))
+        self._persona_list = self._listbox(persona, height=4, on_select=self._on_persona_selected)
+        persona_row = tk.Frame(persona, bg=theme.surface)
+        persona_row.pack(fill="x", pady=(4, 0))
+        self._button(persona_row, "New persona…", self._create_persona, variant="primary")
+        self._button(persona_row, "Edit…", self._edit_persona)
+        persona_row2 = tk.Frame(persona, bg=theme.surface)
+        persona_row2.pack(fill="x")
+        self._button(persona_row2, "Speak as this", self._activate_persona)
+        self._button(persona_row2, "Duplicate", self._duplicate_persona)
+        persona_row3 = tk.Frame(persona, bg=theme.surface)
+        persona_row3.pack(fill="x")
+        self._button(persona_row3, "Export…", self._export_persona)
+        self._button(persona_row3, "Import…", self._import_persona)
+        self._button(persona_row3, "Delete…", self._delete_persona, variant="danger")
 
         # Character Library (ready-made, fully-specified companions).
         discover = column.add("discover", "Character Library", icon="📚", open=True)
@@ -659,6 +698,13 @@ class RomanceStudioDialog(ThemedDialog):
 
     # -- transcript -------------------------------------------------------
 
+    def _user_label(self) -> str:
+        """The label on the user's own turns: the persona's name, else ``You``."""
+        try:
+            return self.service.persona_label()
+        except Exception:
+            return "You"
+
     def _add_message(self, role: str, text: str, *, title: str = "") -> tk.Text:
         theme = self.theme
         pad = self._column_pad()
@@ -667,7 +713,7 @@ class RomanceStudioDialog(ThemedDialog):
         row.pack(fill="x", padx=(pad, pad), pady=6)
         head = tk.Frame(row, bg=theme.base)
         head.pack(fill="x", pady=(0, 3))
-        label = title or {"user": "You", "note": "Note"}.get(role, "Companion")
+        label = title or {"user": self._user_label(), "note": "Note"}.get(role, "Companion")
         colour = theme.primary if is_user else theme.text_secondary
         tk.Label(
             head, text=label, bg=theme.base, fg=colour,
@@ -711,6 +757,7 @@ class RomanceStudioDialog(ThemedDialog):
 
     def _refresh_all(self) -> None:
         self._refresh_characters()
+        self._refresh_personas()
         self._refresh_library()
         self._refresh_conversations()
         self._refresh_modes()
@@ -1163,7 +1210,11 @@ class RomanceStudioDialog(ThemedDialog):
         self._mode_var.set(record.mode)
         for turn in turns:
             role = "user" if turn.role == "user" else "assistant"
-            title = "You" if role == "user" else (getattr(turn, "speaker", "") or "Companion")
+            title = (
+                self._user_label()
+                if role == "user"
+                else (getattr(turn, "speaker", "") or "Companion")
+            )
             self._add_message(role, turn.content, title=title)
 
     # -- actions ----------------------------------------------------------
@@ -1189,7 +1240,7 @@ class RomanceStudioDialog(ThemedDialog):
         if not self._selected_conversation:
             self._new_conversation()
         self._entry.delete("1.0", "end")
-        self._add_message("user", text, title="You")
+        self._add_message("user", text, title=self._user_label())
         mode = self._mode_var.get() or ""
         conversation_id = self._selected_conversation
         speaker = self._character_name()
@@ -1401,11 +1452,11 @@ class RomanceStudioDialog(ThemedDialog):
             return
         self._open_editor(self._selected_character)
 
-    def _open_editor(self, character_id: str) -> None:
+    def _open_editor(self, character_id: str, *, role: str = ROLE_COMPANION) -> None:
         from gui.romance_editor import CharacterEditorDialog
 
         dialog = CharacterEditorDialog(
-            self.window, self.service, character_id=character_id,
+            self.window, self.service, character_id=character_id, role=role,
             theme=self.theme, font=self.font, mono=self.mono,
             overrides=self._overrides, list_overrides=self._list_overrides,
             on_saved=self._on_editor_saved,
@@ -1417,6 +1468,137 @@ class RomanceStudioDialog(ThemedDialog):
         if character_id:
             self._selected_character = character_id
         self._refresh_all()
+
+    # -- the user's own persona -------------------------------------------
+
+    def _refresh_personas(self) -> None:
+        """Fill the persona list and the active-persona line."""
+        widget = getattr(self, "_persona_list", None)
+        if widget is None:
+            return
+        previous = getattr(self, "_suppress_select", False)
+        self._suppress_select = True
+        try:
+            widget.delete(0, "end")
+            self._persona_ids = []
+            for row in self.service.persona_rows():
+                self._persona_ids.append(row.character_id)
+                widget.insert("end", row.label())
+        finally:
+            self._suppress_select = previous
+        try:
+            active = self.service.active_persona_name()
+            self._persona_label.configure(
+                text=(
+                    f"You are speaking as: {active}"
+                    if active
+                    else "No persona yet — the companions address you as \"you\"."
+                )
+            )
+        except tk.TclError:
+            pass
+
+    def _on_persona_selected(self, index: int) -> None:
+        if index >= len(getattr(self, "_persona_ids", [])):
+            return
+        self._selected_persona = self._persona_ids[index]
+        self._set_status(f"Persona selected: {self._selected_persona}.")
+
+    def _create_persona(self) -> None:
+        self._open_editor("", role=ROLE_USER)
+
+    def _edit_persona(self) -> None:
+        character_id = getattr(self, "_selected_persona", "")
+        if not character_id:
+            self._set_status("Select a persona first.")
+            return
+        self._open_editor(character_id, role=ROLE_USER)
+
+    def _activate_persona(self) -> None:
+        character_id = getattr(self, "_selected_persona", "")
+        if not character_id:
+            self._set_status("Select a persona first.")
+            return
+        try:
+            self.service.activate_persona(character_id)
+        except Exception as error:
+            self._set_status(f"Could not activate the persona: {error}")
+            return
+        self._refresh_personas()
+        self._set_status(f"Now speaking as {self.service.active_persona_name()}.")
+
+    def _duplicate_persona(self) -> None:
+        character_id = getattr(self, "_selected_persona", "")
+        if not character_id:
+            self._set_status("Select a persona first.")
+            return
+        try:
+            bundle = self.service.duplicate_character(character_id)
+            self._selected_persona = bundle.id
+            self._refresh_personas()
+            self._set_status(f"Duplicated as {bundle.name}.")
+        except Exception as error:
+            self._set_status(f"Could not duplicate: {error}")
+
+    def _export_persona(self) -> None:
+        from tkinter import filedialog
+
+        character_id = getattr(self, "_selected_persona", "")
+        if not character_id:
+            self._set_status("Select a persona first.")
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self.window, title="Export the persona",
+            defaultextension=".json", filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            self.service.export_character(character_id, path)
+        except Exception as error:
+            self._set_status(str(error))
+            return
+        self._set_status(f"Exported to {path}.")
+
+    def _import_persona(self) -> None:
+        from tkinter import filedialog
+
+        path = filedialog.askopenfilename(
+            parent=self.window, title="Import a persona",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            bundle = self.service.import_character(path)
+        except Exception as error:
+            self._set_status(str(error))
+            return
+        self._selected_persona = bundle.id
+        self._refresh_personas()
+        self._set_status(f"Imported {bundle.name}.")
+
+    def _delete_persona(self) -> None:
+        from tkinter import messagebox
+
+        character_id = getattr(self, "_selected_persona", "")
+        if not character_id:
+            self._set_status("Select a persona first.")
+            return
+        if not messagebox.askyesno(
+            "Delete the persona",
+            "Delete this persona? Its conversations are kept but detached from the name.",
+            parent=self.window,
+        ):
+            return
+        try:
+            self.service.delete_character(character_id, choice="anonymize")
+        except Exception as error:
+            self._set_status(str(error))
+            return
+        self._selected_persona = ""
+        self._refresh_personas()
+        self._set_status("Persona deleted.")
 
     def _duplicate_character(self) -> None:
         if not self._selected_character:

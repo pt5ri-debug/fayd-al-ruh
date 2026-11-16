@@ -20,12 +20,16 @@ from collections.abc import Callable
 from tkinter import filedialog, ttk
 from typing import Any
 
+from core.romance.model import ROLE_USER
+
 from gui.dialog_base import ThemedDialog
 from gui.romance import RomanceStudioService
 from gui.typography import resolve
 
 TITLE_NEW = "New companion"
 TITLE_EDIT = "Edit companion"
+TITLE_NEW_PERSONA = "New persona (you)"
+TITLE_EDIT_PERSONA = "Edit your persona"
 
 
 def _dial_handler(label: tk.Label, var: tk.DoubleVar) -> Callable[[str], None]:
@@ -122,6 +126,7 @@ class CharacterEditorDialog(ThemedDialog):
         service: RomanceStudioService,
         *,
         character_id: str = "",
+        role: str = "companion",
         theme: Any,
         font: str,
         mono: str,
@@ -132,6 +137,10 @@ class CharacterEditorDialog(ThemedDialog):
     ) -> None:
         self.service = service
         self.character_id = character_id
+        #: ``companion`` (who the user talks to) or ``user`` (the user's own
+        #: persona, who the user talks *as*). The same window serves both, because
+        #: a persona carries exactly the same attributes a companion does.
+        self.role = role
         self.theme = theme
         self.font = font
         self.mono = mono
@@ -147,15 +156,21 @@ class CharacterEditorDialog(ThemedDialog):
         self._boundary_ids: list[str] = []
         self._dial_scales: dict[str, tk.DoubleVar] = {}
         self._vars: dict[str, tk.StringVar] = {}
+        self._avatar_photo: Any = None
 
         self.window = tk.Toplevel(parent)
-        self.window.title(TITLE_EDIT if self._editing else TITLE_NEW)
+        self.window.title(self._title())
         self.window.configure(bg=theme.base)
         self.window.geometry("820x760")
         self.window.minsize(680, 560)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
+
+    def _title(self) -> str:
+        if self.role == ROLE_USER:
+            return TITLE_EDIT_PERSONA if self._editing else TITLE_NEW_PERSONA
+        return TITLE_EDIT if self._editing else TITLE_NEW
 
     # -- build ------------------------------------------------------------
 
@@ -164,8 +179,8 @@ class CharacterEditorDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window,
-            title=TITLE_EDIT if self._editing else TITLE_NEW,
-            subtitle="A fictional AI companion — independent identity, memory, and voice.",
+            title=self._title(),
+            subtitle=self._subtitle(),
             theme=self.theme, typography=self._type, on_close=self._close,
             extra=self._header_extra,
         )
@@ -187,6 +202,7 @@ class CharacterEditorDialog(ThemedDialog):
             widget.bind("<Button-4>", self._on_wheel)
             widget.bind("<Button-5>", self._on_wheel)
 
+        self._build_avatar()
         self._build_identity()
         self._build_about()
         self._build_personality()
@@ -196,6 +212,14 @@ class CharacterEditorDialog(ThemedDialog):
         self._build_model_voice()
         self._build_adult()
         self._build_footer()
+
+    def _subtitle(self) -> str:
+        if self.role == ROLE_USER:
+            return (
+                "You — the person the companions talk with. Your name, your story, "
+                "your voice, and your own avatar."
+            )
+        return "A fictional AI companion — independent identity, memory, and voice."
 
     def _header_extra(self, inner: tk.Frame) -> None:
         pass
@@ -329,23 +353,74 @@ class CharacterEditorDialog(ThemedDialog):
 
     # -- the individual sections -----------------------------------------
 
+    def _build_avatar(self) -> None:
+        s = self._section(
+            "Avatar",
+            "Each character has its own picture: upload one, or generate one from "
+            "the character's own description. Clearing it falls back to the "
+            "initial-letter badge.",
+        )
+        row = tk.Frame(s, bg=self.theme.surface)
+        row.pack(fill="x", pady=(0, 6))
+        self._avatar_canvas = tk.Canvas(
+            row, width=72, height=72, bg=self.theme.surface_raised,
+            highlightthickness=0,
+        )
+        self._avatar_canvas.pack(side="left")
+        controls = tk.Frame(row, bg=self.theme.surface)
+        controls.pack(side="left", fill="x", expand=True, padx=(10, 0))
+        self._button(controls, "Upload a picture…", self._upload_avatar).pack(anchor="w")
+        gen_row = tk.Frame(controls, bg=self.theme.surface)
+        gen_row.pack(anchor="w", fill="x", pady=(6, 0))
+        self._button(gen_row, "Generate", self._generate_avatar).pack(side="left")
+        self._combo(
+            gen_row,
+            "avatar_backend",
+            self.service.avatar_backends(),
+            initial="procedural",
+        )
+        self._button(controls, "Clear", self._clear_avatar).pack(anchor="w", pady=(6, 0))
+        self._avatar_note = tk.Label(
+            controls, text="", bg=self.theme.surface, fg=self.theme.text_dim,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=560,
+        )
+        self._avatar_note.pack(fill="x", pady=(6, 0))
+
     def _build_identity(self) -> None:
         s = self._section("Identity", "Who this character is (all fictional).")
         self._entry(self._row(s, "Display name"), "name")
         self._entry(self._row(s, "Nickname", hint="optional"), "nickname")
+        if self.role == ROLE_USER:
+            self._active_var = self._check(
+                s, "persona_active",
+                "Speak as this persona (the companions address you by this name).",
+            )
         self._entry(self._row(s, "Fictional age", hint="adults only (18+)"), "age", width=8)
         self._entry(self._row(s, "Gender", hint="optional"), "gender")
         self._entry(self._row(s, "Nationality / culture", hint="optional"), "nationality")
         self._entry(self._row(s, "Languages", hint="comma-separated"), "languages")
         self._combo(
-            self._row(s, "Kinship", hint="who this character is to you"),
+            self._row(
+                s,
+                "Kinship",
+                hint=(
+                    "who you are to the companions"
+                    if self.role == ROLE_USER
+                    else "who this character is to you"
+                ),
+            ),
             "kinship",
             KINSHIP_CHOICES,
         )
         self._entry(self._row(s, "Preferred relationship style", hint="optional"), "relationship_style")
 
     def _build_about(self) -> None:
-        s = self._section("About", "The character's biography and appearance (its own story).")
+        s = self._section(
+            "About",
+            "Your story and appearance."
+            if self.role == ROLE_USER
+            else "The character's biography and appearance (its own story).",
+        )
         self._textarea(self._row(s, "Biography"), "biography", height=3)
         self._textarea(self._row(s, "Appearance"), "appearance", height=2)
 
@@ -466,7 +541,9 @@ class CharacterEditorDialog(ThemedDialog):
             self._combo_set("response_length", "balanced")
             self._combo_set("voice_engine", "auto")
             self._combo_set("kinship", "")
+            self._combo_set("avatar_backend", "procedural")
             self._set_model_note()
+            self._refresh_avatar()
             return
         try:
             bundle = self.service.character(self.character_id)
@@ -474,6 +551,8 @@ class CharacterEditorDialog(ThemedDialog):
             self._status(str(error))
             return
         character = bundle.character
+        self.role = getattr(character, "role", self.role) or self.role
+        self.window.title(self._title())
         self._vars["name"].set(character.name)
         self._vars["nickname"].set(character.nickname)
         self._vars["age"].set("" if character.fictional_age is None else str(character.fictional_age))
@@ -500,8 +579,12 @@ class CharacterEditorDialog(ThemedDialog):
         self._combo_set("voice_engine", (voice.engine if voice else "") or "auto")
         self._combo_set("model_key", character.model_key or "")
         self._adult_var.set(bool(character.adult_eligible))
+        active_var = getattr(self, "_active_var", None)
+        if active_var is not None:
+            active_var.set(bool(getattr(character, "is_active", False)))
         self._refresh_interests()
         self._refresh_boundaries()
+        self._refresh_avatar()
         self._set_model_note()
 
     def _set_model_note(self) -> None:
@@ -607,7 +690,13 @@ class CharacterEditorDialog(ThemedDialog):
             "voice_engine": self._combo_value("voice_engine") or "auto",
             "personality": personality,
             "adult_eligible": bool(self._adult_var.get()),
+            "persona_active": self._persona_active(),
         }
+
+    def _persona_active(self) -> bool:
+        """Whether the editor's "speak as this" switch is set (companions: never)."""
+        variable = getattr(self, "_active_var", None)
+        return bool(variable.get()) if variable is not None else False
 
     def _save(self) -> None:
         try:
@@ -632,7 +721,8 @@ class CharacterEditorDialog(ThemedDialog):
                 character_id = self.character_id
             else:
                 bundle = self.service.create_character(
-                    values["name"], fictional_age=values["fictional_age"],
+                    values["name"], role=self.role,
+                    fictional_age=values["fictional_age"],
                     nickname=values["nickname"], gender=values["gender"],
                     nationality=values["nationality"], languages=values["languages"],
                     appearance=values["appearance"],
@@ -644,6 +734,13 @@ class CharacterEditorDialog(ThemedDialog):
                 character_id = bundle.id
                 self.character_id = character_id
                 self._editing = True
+            # A persona may be made the one the user speaks as; the switch is one
+            # call, so exactly one persona is ever active.
+            if self.role == ROLE_USER and values.get("persona_active"):
+                try:
+                    self.service.activate_persona(character_id)
+                except Exception as error:
+                    self._status(f"The persona was saved but not activated: {error}")
             # Adult eligibility is a separate, explicit confirmation the safety
             # floor owns: it is only recorded when the age really is 18+.
             if values["adult_eligible"]:
@@ -706,6 +803,78 @@ class CharacterEditorDialog(ThemedDialog):
         return button(
             parent, text, command, theme=self.theme, typography=self._type,
             variant=variant, small=True,
+        )
+
+    # -- avatar -----------------------------------------------------------
+
+    def _upload_avatar(self) -> None:
+        if not self.character_id:
+            self._status("Save the character first, then set its avatar.")
+            return
+        path = filedialog.askopenfilename(
+            parent=self.window, title="Choose a picture",
+            filetypes=[
+                ("Images", "*.png *.jpg *.jpeg *.gif *.bmp *.webp *.ppm"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        try:
+            result = self.service.set_avatar_from_file(self.character_id, path)
+        except Exception as error:
+            self._status(f"Could not set the avatar: {error}")
+            return
+        self._avatar_note.configure(text=result.describe())
+        self._refresh_avatar()
+
+    def _generate_avatar(self) -> None:
+        if not self.character_id:
+            self._status("Save the character first, then generate its avatar.")
+            return
+        backend = self._combo_value("avatar_backend") or "procedural"
+        try:
+            result = self.service.generate_avatar(self.character_id, backend=backend)
+        except Exception as error:
+            self._status(f"Could not generate the avatar: {error}")
+            return
+        self._avatar_note.configure(text=result.describe())
+        self._refresh_avatar()
+
+    def _clear_avatar(self) -> None:
+        if not self.character_id:
+            return
+        try:
+            self.service.clear_avatar(self.character_id)
+        except Exception as error:
+            self._status(str(error))
+            return
+        self._avatar_note.configure(text="Avatar cleared.")
+        self._refresh_avatar()
+
+    def _refresh_avatar(self) -> None:
+        """Draw the character's current picture, or its initial badge."""
+        canvas = getattr(self, "_avatar_canvas", None)
+        if canvas is None:
+            return
+        try:
+            canvas.delete("all")
+        except tk.TclError:
+            return
+        path = self.service.avatar_path(self.character_id) if self.character_id else None
+        if path is not None:
+            try:
+                self._avatar_photo = tk.PhotoImage(file=str(path))
+                canvas.create_image(36, 36, image=self._avatar_photo)
+                return
+            except Exception:
+                self._avatar_photo = None
+        name_var = self._vars.get("name")
+        name = name_var.get().strip() if name_var is not None else ""
+        canvas.create_oval(2, 2, 70, 70, fill=self.theme.primary, outline="")
+        canvas.create_text(
+            36, 37, text=(name[:1] or "❤").upper(),
+            fill=self.theme.primary_foreground, font=self._type.font("heading3", weight="bold"),
         )
 
     def _status(self, text: str) -> None:
