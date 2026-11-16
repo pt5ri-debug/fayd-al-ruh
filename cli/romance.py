@@ -1,6 +1,16 @@
 """CLI for the Romance & Companion Studio, headless.
 
     python -m cli romance status                 # what the Studio holds right now
+    python -m cli romance personas             # the user's own personas (who you speak as)
+    python -m cli romance persona-library      # the ready-made personas to speak as
+    python -m cli romance persona-categories   # the ready-made persona archetypes
+    python -m cli romance add-persona-library "Dr. Salma"   # add one and speak as it
+    python -m cli romance seed-persona-library --category academic
+    python -m cli romance library              # the ready-made companion library
+    python -m cli romance library-categories   # the ready-made companion archetypes
+    python -m cli romance add-library "Farida" # add one ready-made companion
+    python -m cli romance open-library "Farida"  # add it once and make it ready to talk
+    python -m cli romance seed-library --category lovers
     python -m cli romance characters             # the character library
     python -m cli romance characters --archived  # include archived characters
     python -m cli romance new "Layla" --age 27 --interest coffee --interest poetry
@@ -63,6 +73,7 @@ from typing import Any
 
 from core.romance.characters import CharacterError
 from core.romance.memory import MemoryError
+from core.romance.model import ROLE_USER
 from core.romance.orchestrator import OrchestratorError
 from core.romance.relationship import RelationshipError
 from core.romance.roleplay import RoleplayError
@@ -172,6 +183,21 @@ def _build_parser() -> argparse.ArgumentParser:
     open_library.add_argument("name")
     seed_library = _sub(sub, "seed-library", help="Create every library companion in an archetype.")
     seed_library.add_argument("--category", default="")
+
+    _sub(sub, "persona-categories", help="The ready-made persona archetypes.")
+    persona_library = _sub(
+        sub, "persona-library", help="The ready-made personas (who you can be)."
+    )
+    persona_library.add_argument("--category", default="")
+    persona_library.add_argument("--search", default="")
+    add_persona_library = _sub(
+        sub, "add-persona-library", help="Add one ready-made persona by name and speak as it."
+    )
+    add_persona_library.add_argument("name")
+    seed_persona_library = _sub(
+        sub, "seed-persona-library", help="Create every ready-made persona in an archetype."
+    )
+    seed_persona_library.add_argument("--category", default="")
 
     for name, help_text in (
         ("favorite", "Star a character."),
@@ -610,6 +636,47 @@ def run_seed_library(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_persona_categories(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.persona_library_categories()
+    payload = [
+        {"key": key, "title": title, "icon": icon, "summary": summary}
+        for key, title, icon, summary in rows
+    ]
+    lines = [f"{icon} {title} [{key}] — {summary}" for key, title, icon, summary in rows]
+    _emit(args, payload, "\n".join(lines) or "No persona archetypes are shipped.")
+    return EXIT_OK
+
+
+def run_persona_library(args: argparse.Namespace) -> int:
+    service = _service(args)
+    rows = service.library_rows(category=args.category, search=args.search, role=ROLE_USER)
+    payload = [row.__dict__ for row in rows]
+    lines = [f"{row.label()}\n    {row.blurb}" for row in rows]
+    _emit(args, payload, "\n".join(lines) or "No ready-made personas match.")
+    return EXIT_OK
+
+
+def run_add_persona_library(args: argparse.Namespace) -> int:
+    service = _service(args)
+    bundle = service.add_persona_library_character(args.name)
+    service.activate_persona(bundle.id)
+    _emit(
+        args,
+        {"character_id": bundle.id, "name": bundle.name},
+        f"Now speaking as {bundle.name} ({bundle.id}).",
+    )
+    return EXIT_OK
+
+
+def run_seed_persona_library(args: argparse.Namespace) -> int:
+    service = _service(args)
+    created = service.seed_persona_library_category(args.category)
+    scope = args.category or "every archetype"
+    _emit(args, {"created": created}, f"Created {created} persona(s) for {scope}.")
+    return EXIT_OK
+
+
 def run_favorite(args: argparse.Namespace) -> int:
     bundle = _service(args).set_favorite(args.character_id, True)
     _emit(args, {"character_id": bundle.id}, f"Starred {bundle.name}.")
@@ -1042,6 +1109,10 @@ _HANDLERS = {
     "add-library": run_add_library,
     "open-library": run_open_library,
     "seed-library": run_seed_library,
+    "persona-categories": run_persona_categories,
+    "persona-library": run_persona_library,
+    "add-persona-library": run_add_persona_library,
+    "seed-persona-library": run_seed_persona_library,
     "favorite": run_favorite,
     "unfavorite": run_unfavorite,
     "archive": run_archive,

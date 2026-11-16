@@ -1338,6 +1338,38 @@ Arabic is kept as secondary aliases where useful.
   thinking default and opt-in, the chat-template option, the old-build retry, the
   sentence-by-sentence appearance, the placeholder, and the persona negative
   controls.
+
+  **The ready-made persona library and the two managers (Phase 14)** complete the
+  sidebar the user asked for. `core/romance/library.py` gained a second, parallel
+  catalogue -- **`PERSONA_LIBRARY_CHARACTERS`** (14 ready-made personas, all
+  `ROLE_USER`, all stated adults, every name distinct and none clashing with the
+  companion library) grouped by six **persona archetypes**
+  (`PERSONA_CATEGORIES`: *anyone / professional / academic / artist / explorer /
+  seeker*), with the shared accessors `persona_category_keys`/
+  `persona_library_by_category`/`find_persona_library_character` and the
+  role-parameterised `library_by_category_for`/`find_library_character_for`/
+  `library_drafts_for`/`seed_library_for` (so one code path serves both catalogues;
+  `seed_library`/`library_by_category` now delegate). The **"already present"**
+  lookups were made **role-agnostic** (`list_characters(role="")`) -- a real bug:
+  the companion-only check let a persona be added twice. `RomanceStudioService`
+  gained `persona_library_categories`, `library_rows(..., role=)`,
+  `add_library_character(name, role=)`, `add_persona_library_character`,
+  `seed_persona_library_category`, and a `has_avatar` flag on `CharacterRow` (its
+  label now marks a character with a picture). The Studio window's sidebar gained
+  **Ready-made Personas** (an archetype picker, a list, a preview, *Speak as the
+  chosen*, *Add the whole group*) -- picking one adds it, activates it, and the
+  companions address the user by its name -- beside **My Persona Manager…** and
+  **Character Manager…** buttons. `gui/romance_managers.py` (new) is the one
+  window serving both: a left `SidebarColumn` with the character list (search,
+  New/Edit/Duplicate/Export/Import/Delete, *Speak as this* for a persona), the
+  ready-made library, and a right pane holding the **whole profile** (identity,
+  kinship, about, the fourteen personality/reach dials, interests, boundaries,
+  model and voice, the adult flag) plus the **avatar** (upload / generate with a
+  backend picker / clear) -- a *view* over the same `RomanceStudioService`, opened
+  from the sidebar and reused per role, reporting each change back to the Studio.
+  The CLI gained `persona-categories`/`persona-library`/`add-persona-library`/
+  `seed-persona-library`. `tests/test_romance_persona_manager.py` (17 tests) pins
+  the persona data, the service, the CLI, and the two real Tk windows.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
   theme=, typography=, on_close=)` builds one frame of three buttons into the

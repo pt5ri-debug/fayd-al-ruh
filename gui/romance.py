@@ -180,11 +180,13 @@ class CharacterRow:
     memory_count: int = 0
     last_active: str = ""
     stage_title: str = ""
+    has_avatar: bool = False
 
     def label(self) -> str:
         star = "★ " if self.favorite else ""
         active = "● " if self.is_active else ""
-        return f"{star}{active}{self.name}" + (f" ({self.nickname})" if self.nickname else "")
+        picture = "🖼 " if self.has_avatar else ""
+        return f"{star}{active}{picture}{self.name}" + (f" ({self.nickname})" if self.nickname else "")
 
 
 @dataclass(frozen=True)
@@ -641,6 +643,7 @@ class RomanceStudioService:
                     memory_count=summary.memory_count,
                     last_active=summary.last_active,
                     stage_title=stage,
+                    has_avatar=bool(getattr(summary.character, "avatar_path", "")),
                 )
             )
         return rows
@@ -697,25 +700,37 @@ class RomanceStudioService:
             for category in LIBRARY_CATEGORIES
         )
 
+    def persona_library_categories(self) -> tuple[tuple[str, str, str, str], ...]:
+        """``(key, title, icon, summary)`` rows for every persona archetype."""
+        from core.romance.library import PERSONA_CATEGORIES
+
+        return tuple(
+            (category.key, category.title, category.icon, category.summary)
+            for category in PERSONA_CATEGORIES
+        )
+
     def library_rows(
         self,
         *,
         category: str = "",
         search: str = "",
+        role: str = ROLE_COMPANION,
     ) -> tuple[LibraryRow, ...]:
         """The ready-made library, filtered by archetype and a text search.
 
-        A pure read: browsing the library creates nothing.
+        A pure read: browsing the library creates nothing. ``role`` selects which
+        catalogue is read -- the companions the user talks *to*, or the ready-made
+        personas the user talks *as*.
         """
-        from core.romance.library import library_by_category
+        from core.romance.library import library_by_category_for
 
         existing = {
             summary.name.casefold(): summary.id
-            for summary in self.characters.list_characters(include_archived=True)
+            for summary in self.characters.list_characters(role="", include_archived=True)
         }
         wanted = (search or "").strip().casefold()
         rows: list[LibraryRow] = []
-        for character in library_by_category(category):
+        for character in library_by_category_for(role, category):
             draft = character.draft
             haystack = " ".join(
                 (character.name, draft.nickname, draft.gender, character.blurb, " ".join(draft.tags))
@@ -740,20 +755,22 @@ class RomanceStudioService:
             )
         return tuple(rows)
 
-    def add_library_character(self, name: str) -> Any:
+    def add_library_character(self, name: str, *, role: str = ROLE_COMPANION) -> Any:
         """Add one ready-made library character by name (the Discover action).
 
         Creates **only** the chosen character; one already present (by name) is
         returned rather than duplicated. Raises ``ValueError`` for a name the
         build does not ship.
         """
-        from core.romance.library import find_library_character
+        from core.romance.library import find_library_character_for
 
-        character = find_library_character(name)
+        character = find_library_character_for(role, name)
         if character is None:
             raise ValueError(f"no library companion named {name!r}")
         wanted = character.name.casefold()
-        for summary in self.characters.list_characters(include_archived=True):
+        # ``role=""`` matches either kind, so a persona already added is returned
+        # rather than duplicated (and a companion is never mistaken for one).
+        for summary in self.characters.list_characters(role="", include_archived=True):
             if summary.name.casefold() == wanted:
                 return self.characters.get(summary.id)
         return self._finalise(self.characters.create(character.draft))
@@ -770,14 +787,28 @@ class RomanceStudioService:
         """
         return self.add_library_character(name)
 
-    def seed_library_category(self, category: str = "") -> int:
+    def add_persona_library_character(self, name: str) -> Any:
+        """Add one ready-made **persona** by name (the persona Discover action).
+
+        Creates only the chosen persona, with ``role=ROLE_USER``, so choosing one
+        from the picker makes it the person the companions address by name. An
+        already-present persona is returned rather than duplicated.
+        """
+        return self.add_library_character(name, role=ROLE_USER)
+
+    def seed_library_category(self, category: str = "", *, role: str = ROLE_COMPANION) -> int:
         """Create every library character in ``category`` (all when blank).
 
         Returns how many were newly created; an existing character is skipped.
+        ``role`` selects the companion catalogue or the persona catalogue.
         """
-        from core.romance.library import seed_library
+        from core.romance.library import seed_library_for
 
-        return len(seed_library(self.characters, category=category))
+        return len(seed_library_for(self.characters, role=role, category=category))
+
+    def seed_persona_library_category(self, category: str = "") -> int:
+        """Create every ready-made persona in ``category`` (all when blank)."""
+        return self.seed_library_category(category, role=ROLE_USER)
 
     def create_character(
         self,
