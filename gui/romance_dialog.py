@@ -300,8 +300,8 @@ class RomanceStudioDialog(ThemedDialog):
         persona = column.add("persona", "My Persona (you)", icon="🙋", open=True)
         tk.Label(
             persona,
-            text="Who you are in the story. The companions address you by this "
-            "name and know your story.",
+            text="Who you are in the story. Pick a ready-made persona to talk as "
+            "it at once, or open the manager to control every attribute and picture.",
             bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
             anchor="w", justify="left", wraplength=290,
         ).pack(fill="x", pady=(0, 4))
@@ -325,6 +325,42 @@ class RomanceStudioDialog(ThemedDialog):
         self._button(persona_row3, "Export…", self._export_persona)
         self._button(persona_row3, "Import…", self._import_persona)
         self._button(persona_row3, "Delete…", self._delete_persona, variant="danger")
+        self._button(
+            persona, "My Persona Manager…", self._open_persona_manager, variant="primary",
+        ).pack(fill="x", pady=(6, 0))
+
+        # Ready-made personas: pick one and speak as it at once.
+        persona_lib = column.add("persona_library", "Ready-made Personas", icon="🧑", open=True)
+        tk.Label(
+            persona_lib,
+            text="Pick one and it becomes the person the companions address by name.",
+            bg=theme.surface, fg=theme.text_dim, font=self._type.font("2xs"),
+            anchor="w", justify="left", wraplength=290,
+        ).pack(fill="x", pady=(0, 4))
+        self._persona_library_category_var = tk.StringVar(value="")
+        self._persona_library_category_menu = tk.OptionMenu(
+            persona_lib, self._persona_library_category_var, ""
+        )
+        self._style_option(self._persona_library_category_menu)
+        self._persona_library_category_menu.pack(fill="x", pady=2)
+        self._persona_library_category_var.trace_add(
+            "write", lambda *_: self._refresh_persona_library()
+        )
+        self._persona_library_list = self._listbox(
+            persona_lib, height=6, on_select=self._on_persona_library_selected
+        )
+        self._persona_library_preview = tk.Label(
+            persona_lib, text="", bg=theme.surface_raised, fg=theme.text_secondary,
+            font=self._type.font("2xs"), anchor="w", justify="left", wraplength=290,
+            padx=8, pady=6,
+        )
+        self._persona_library_preview.pack(fill="x", pady=(2, 4))
+        persona_lib_row = tk.Frame(persona_lib, bg=theme.surface)
+        persona_lib_row.pack(fill="x")
+        self._button(
+            persona_lib_row, "Speak as the chosen", self._add_persona_library, variant="primary"
+        )
+        self._button(persona_lib_row, "Add the whole group", self._add_persona_library_group)
 
         # Character Library (ready-made, fully-specified companions).
         discover = column.add("discover", "Character Library", icon="📚", open=True)
@@ -357,6 +393,9 @@ class RomanceStudioDialog(ThemedDialog):
         lib_row.pack(fill="x")
         self._button(lib_row, "Add the chosen", self._add_example, variant="primary")
         self._button(lib_row, "Add the whole group", self._add_library_category)
+        self._button(
+            discover, "Character Manager…", self._open_character_manager, variant="primary",
+        ).pack(fill="x", pady=(6, 0))
 
         archive = column.add("archive", "Archived", icon="🗄")
         self._archive_list = self._listbox(archive, height=4, on_select=self._on_character_selected)
@@ -812,6 +851,7 @@ class RomanceStudioDialog(ThemedDialog):
     def _refresh_all(self) -> None:
         self._refresh_characters()
         self._refresh_personas()
+        self._refresh_persona_library()
         self._refresh_library()
         self._refresh_conversations()
         self._refresh_modes()
@@ -1831,6 +1871,112 @@ class RomanceStudioDialog(ThemedDialog):
         self._refresh_personas()
         self._set_status("Persona deleted.")
 
+    # -- the ready-made personas ------------------------------------------
+
+    def _refresh_persona_library(self) -> None:
+        """Fill the persona archetype picker and the ready-made persona list."""
+        menu = getattr(self, "_persona_library_category_menu", None)
+        widget = getattr(self, "_persona_library_list", None)
+        if menu is None or widget is None:
+            return
+        categories = self.service.persona_library_categories()
+        keys = [""] + [key for key, _t, _i, _s in categories]
+        labels = ["All archetypes"] + [f"{icon} {title}" for _k, title, icon, _s in categories]
+        self._persona_library_keys = keys
+        submenu = menu["menu"]
+        submenu.delete(0, "end")
+        for key, label in zip(keys, labels, strict=True):
+            submenu.add_command(
+                label=label, command=lambda k=key: self._persona_library_category_var.set(k)
+            )
+        current = self._persona_library_category_var.get()
+        if current not in keys:
+            self._persona_library_category_var.set("")
+        rows = self.service.library_rows(category=current, role=ROLE_USER)
+        self._persona_library_rows = list(rows)
+        previous = getattr(self, "_suppress_select", False)
+        self._suppress_select = True
+        try:
+            widget.delete(0, "end")
+            for row in rows:
+                widget.insert("end", row.label())
+        finally:
+            self._suppress_select = previous
+        if not rows:
+            self._persona_library_preview.configure(text="No persona matches that filter.")
+
+    def _on_persona_library_selected(self, index: int) -> None:
+        rows = getattr(self, "_persona_library_rows", [])
+        if index >= len(rows):
+            return
+        row = rows[index]
+        self._persona_library_preview.configure(text=row.describe())
+
+    def _add_persona_library(self) -> None:
+        selection = self._persona_library_list.curselection()
+        rows = getattr(self, "_persona_library_rows", [])
+        if not selection or selection[0] >= len(rows):
+            self._set_status("Choose a persona from the list first.")
+            return
+        name = rows[selection[0]].name
+        try:
+            bundle = self.service.add_persona_library_character(name)
+            self.service.activate_persona(bundle.id)
+        except Exception as error:
+            self._set_status(str(error))
+            return
+        self._selected_persona = bundle.id
+        self._refresh_all()
+        self._set_status(f"Now speaking as {bundle.name}.")
+
+    def _add_persona_library_group(self) -> None:
+        key = self._persona_library_category_var.get()
+        try:
+            count = self.service.seed_persona_library_category(key)
+        except Exception as error:
+            self._set_status(str(error))
+            return
+        self._refresh_all()
+        self._set_status(f"Added {count} persona(s).")
+
+    # -- the two managers -------------------------------------------------
+
+    def _open_persona_manager(self) -> None:
+        """Open (or raise) the My Persona Manager window."""
+        from gui.romance_managers import CharacterManagerDialog
+
+        self._open_manager(ROLE_USER, CharacterManagerDialog)
+
+    def _open_character_manager(self) -> None:
+        """Open (or raise) the Character Manager window."""
+        from gui.romance_managers import CharacterManagerDialog
+
+        self._open_manager(ROLE_COMPANION, CharacterManagerDialog)
+
+    def _open_manager(self, role: str, dialog_class: Any) -> None:
+        existing = getattr(self, "_managers", {}).get(role)
+        if existing is not None:
+            try:
+                existing.window.deiconify()
+                existing.window.lift()
+                return
+            except tk.TclError:
+                pass
+        dialog = dialog_class(
+            self.window, self.service, role=role,
+            theme=self.theme, font=self.font, mono=self.mono,
+            overrides=self._overrides, list_overrides=self._list_overrides,
+            on_changed=self._on_manager_changed,
+        )
+        self._managers = getattr(self, "_managers", {})
+        self._managers[role] = dialog
+
+    def _on_manager_changed(self, character_id: str) -> None:
+        """A manager saved or added a character: refresh the Studio behind it."""
+        if character_id and getattr(self, "_selected_persona", "") == character_id:
+            self._selected_persona = character_id
+        self._refresh_all()
+
     def _duplicate_character(self) -> None:
         if not self._selected_character:
             self._set_status("Select a character first.")
@@ -2344,11 +2490,16 @@ class RomanceStudioDialog(ThemedDialog):
                     pass
 
     def _child_dialogs(self) -> list[Any]:
-        """The editor/settings windows this Studio currently holds open."""
+        """The editor/settings/manager windows this Studio currently holds open."""
         dialogs = [d for d in getattr(self, "_editors", []) if getattr(d, "_closed", False) is False]
         settings = getattr(self, "_settings_dialog", None)
         if settings is not None and getattr(settings, "_closed", False) is False:
             dialogs.append(settings)
+        dialogs.extend(
+            manager
+            for manager in getattr(self, "_managers", {}).values()
+            if getattr(manager, "_closed", False) is False
+        )
         return dialogs
 
     def _close(self) -> None:

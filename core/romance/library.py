@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.romance.characters import CharacterDraft, CharacterManager
+from core.romance.model import ROLE_COMPANION, ROLE_USER
 
 #: Written onto every library character, so one is always distinguishable from a
 #: character the user made.
@@ -1117,6 +1118,419 @@ LIBRARY_CHARACTERS: tuple[LibraryCharacter, ...] = (
 )
 
 
+# ------------------------------------------------------- the user's own personas
+#
+# The Studio also offers ready-made **personas** -- who the user talks *as*. They
+# are the same fully-specified drafts as the companions above, but created with
+# ``role=ROLE_USER``, so choosing one from the *My Persona (you)* picker makes it
+# the person the companions address by name at once. Adults only at the source,
+# nothing created until a caller asks, and every one an invented person.
+
+
+@dataclass(frozen=True)
+class LibraryPersonaCategory:
+    """One persona archetype: a key, a bilingual title, and a summary."""
+
+    key: str
+    title: str
+    title_ar: str
+    icon: str
+    summary: str
+
+    def label(self, language: str = "en") -> str:
+        return self.title_ar if language == "ar" else self.title
+
+    def to_primitive(self) -> dict[str, Any]:
+        return {
+            "icon": self.icon,
+            "key": self.key,
+            "summary": self.summary,
+            "title": self.title,
+            "title_ar": self.title_ar,
+        }
+
+
+PERSONA_ANYONE = "anyone"
+PERSONA_PROFESSIONAL = "professional"
+PERSONA_ACADEMIC = "academic"
+PERSONA_ARTIST = "artist"
+PERSONA_EXPLORER = "explorer"
+PERSONA_SEEKER = "seeker"
+
+PERSONA_CATEGORIES: tuple[LibraryPersonaCategory, ...] = (
+    LibraryPersonaCategory(
+        key=PERSONA_ANYONE,
+        title="Anyone",
+        title_ar="أي شخص",
+        icon="🙋",
+        summary="Everyday people you can be -- warm, playful, curious, and unlabelled.",
+    ),
+    LibraryPersonaCategory(
+        key=PERSONA_PROFESSIONAL,
+        title="Professional",
+        title_ar="مهني",
+        icon="💼",
+        summary="Doctors, engineers, teachers, and the ones who run the room.",
+    ),
+    LibraryPersonaCategory(
+        key=PERSONA_ACADEMIC,
+        title="Scholar & student",
+        title_ar="عالم وطالب",
+        icon="🎓",
+        summary="Researchers, students, and the ones who never stop asking why.",
+    ),
+    LibraryPersonaCategory(
+        key=PERSONA_ARTIST,
+        title="Artist & maker",
+        title_ar="فنان وصانع",
+        icon="🎨",
+        summary="Writers, musicians, designers, and the ones who make things with their hands.",
+    ),
+    LibraryPersonaCategory(
+        key=PERSONA_EXPLORER,
+        title="Adventurer",
+        title_ar="مغامر",
+        icon="🧭",
+        summary="Travellers, athletes, and the ones who say yes first.",
+    ),
+    LibraryPersonaCategory(
+        key=PERSONA_SEEKER,
+        title="Quiet soul",
+        title_ar="روح هادئة",
+        icon="🌙",
+        summary="Introverts, readers, and the ones who listen more than they speak.",
+    ),
+)
+
+_PERSONA_CATEGORY_BY_KEY = {category.key: category for category in PERSONA_CATEGORIES}
+
+
+def _persona(
+    category: str,
+    name: str,
+    nickname: str,
+    age: int,
+    gender: str,
+    *,
+    biography: str,
+    blurb: str = "",
+    nationality: str = "",
+    languages: tuple[str, ...] = ("Arabic", "English"),
+    appearance: str = "",
+    style: str = "",
+    kinship: str = "friend",
+    mode: str = "general",
+    tags: tuple[str, ...] = (),
+    dials: dict[str, Any] | None = None,
+    interests: tuple[tuple[str, str], ...] = (),
+) -> LibraryCharacter:
+    """Build one ready-made persona (a ``ROLE_USER`` draft, an invented adult).
+
+    A persona carries the same fields as a companion, so one reader serves both;
+    only ``role`` differs, which is what makes the picker offer it as *who you are*
+    rather than *who you talk to*.
+    """
+    personality: dict[str, Any] = dict(dials or {})
+    return LibraryCharacter(
+        category=category,
+        blurb=blurb or biography.split(".")[0].strip(),
+        draft=CharacterDraft(
+            owner="natasha",
+            role=ROLE_USER,
+            name=name,
+            nickname=nickname,
+            fictional_age=age,
+            adult_eligible=True,
+            gender=gender,
+            biography=biography,
+            nationality=nationality,
+            languages=languages,
+            appearance=appearance,
+            relationship_style=style,
+            kinship=kinship,
+            default_mode=mode,
+            tags=(*tags, LIBRARY_MARKER, "persona"),
+            metadata={"seed": LIBRARY_MARKER, "category": category, "kind": "persona"},
+            personality=personality,
+            profile_items=tuple({"kind": kind, "label": label} for kind, label in interests),
+        ),
+    )
+
+
+_PERSONAS: tuple[LibraryCharacter, ...] = (
+    _persona(
+        PERSONA_ANYONE, "You", "أنت", 30, "woman",
+        biography=(
+            "A warm, curious person from Alexandria who works in the city, keeps a "
+            "few close friends, and takes people at their word."
+        ),
+        nationality="Egyptian", style="warm and direct",
+        appearance="Comfortable clothes, an easy smile, tired but kind eyes.",
+        tags=("everyday", "warm"),
+        dials={"warmth": 0.85, "playfulness": 0.6, "expressiveness": 0.7, "confidence": 0.7,
+               "response_length": "balanced"},
+        interests=(("interest", "long walks by the sea"), ("topic", "the neighbourhood")),
+    ),
+    _persona(
+        PERSONA_ANYONE, "Heba", "هبة", 34, "woman",
+        biography=(
+            "A project manager in Cairo who talks fast, laughs easily, and always "
+            "has a plan and a spare charger in her bag."
+        ),
+        nationality="Egyptian", style="playful and decisive",
+        appearance="Sleek black hair, a smart blazer, a notebook full of lists.",
+        tags=("playful", "organised"),
+        dials={"warmth": 0.7, "playfulness": 0.85, "confidence": 0.85, "humour": 0.8,
+               "response_length": "balanced"},
+        interests=(("hobby", "planning weekend trips"), ("topic", "the best coffee in Cairo")),
+    ),
+    _persona(
+        PERSONA_ANYONE, "Zeyad", "زياد", 31, "man",
+        biography=(
+            "A calm, quietly funny man who grew up in Mansoura, plays football on "
+            "Fridays, and says more with a look than most people do with a speech."
+        ),
+        nationality="Egyptian", style="quiet and steady",
+        appearance="Short hair, a worn watch, the calm of a man who is never in a hurry.",
+        tags=("steady", "dry humour"),
+        dials={"warmth": 0.8, "expressiveness": 0.45, "introversion": 0.65, "confidence": 0.75,
+               "response_length": "balanced"},
+        interests=(("hobby", "Friday football"), ("topic", "old cars")),
+    ),
+    _persona(
+        PERSONA_PROFESSIONAL, "Dr. Salma", "د. سلمى", 38, "woman",
+        biography=(
+            "A physician who works long shifts and still calls her mother every "
+            "night. Sharp, patient, and hard to rattle."
+        ),
+        nationality="Egyptian", style="direct and precise",
+        appearance="Hair tied back, a stethoscope in her bag, reading glasses she loses.",
+        tags=("doctor", "direct"),
+        dials={"warmth": 0.7, "confidence": 0.9, "formality": 0.5, "expressiveness": 0.55,
+               "response_length": "detailed"},
+        interests=(("interest", "medical history"), ("topic", "the ethics of care")),
+    ),
+    _persona(
+        PERSONA_PROFESSIONAL, "Ahmed", "أحمد", 40, "man",
+        biography=(
+            "A petroleum engineer who has spent fifteen years on rigs and still "
+            "loves the smell of a workshop. Practical, patient, and quietly proud."
+        ),
+        nationality="Egyptian", style="practical and patient",
+        appearance="Rugged hands, a sun-worn jacket, a hard hat he forgets to take off.",
+        tags=("engineer", "practical"),
+        dials={"warmth": 0.65, "confidence": 0.85, "formality": 0.55, "response_length": "detailed"},
+        interests=(("topic", "reservoir engineering"), ("hobby", "fixing things in the garage")),
+    ),
+    _persona(
+        PERSONA_ACADEMIC, "Rania", "رانيا", 27, "woman",
+        biography=(
+            "A PhD student in literature who reads three books at once, argues "
+            "about poetry, and forgets to eat when a chapter is going well."
+        ),
+        nationality="Egyptian", style="thoughtful and argumentative",
+        appearance="Ink on her fingers, a stack of paperbacks, glasses always sliding down.",
+        tags=("reader", "curious"),
+        dials={"warmth": 0.7, "introversion": 0.6, "formality": 0.55, "humour": 0.6,
+               "response_length": "detailed"},
+        interests=(("topic", "Arabic poetry"), ("hobby", "second-hand bookshops")),
+    ),
+    _persona(
+        PERSONA_ACADEMIC, "Kareem", "كريم", 22, "man",
+        biography=(
+            "An undergraduate in physics who asks the question everyone else is "
+            "afraid to ask, and laughs at his own jokes before anyone else does."
+        ),
+        nationality="Egyptian", style="curious and earnest",
+        appearance="Messy hair, a hoodie with a hole in it, a notebook of half-finished ideas.",
+        tags=("student", "earnest"),
+        dials={"playfulness": 0.7, "warmth": 0.75, "confidence": 0.55, "humour": 0.7,
+               "response_length": "balanced"},
+        interests=(("topic", "why the sky is blue"), ("hobby", "science videos at 2 a.m.")),
+    ),
+    _persona(
+        PERSONA_ARTIST, "Reem", "ريم", 29, "woman",
+        biography=(
+            "A musician who plays in small rooms and writes songs about the people "
+            "she meets there. Warm, a little chaotic, always humming something."
+        ),
+        nationality="Egyptian", style="warm and expressive",
+        appearance="A guitar pick on a string, curly hair, paint under her fingernails.",
+        tags=("musician", "expressive"),
+        dials={"warmth": 0.85, "expressiveness": 0.9, "playfulness": 0.7, "romantic_intensity": 0.7,
+               "response_length": "balanced"},
+        interests=(("hobby", "writing songs"), ("topic", "the oud and the guitar")),
+    ),
+    _persona(
+        PERSONA_ARTIST, "Mariam", "مريم", 35, "woman",
+        biography=(
+            "A visual artist who paints large, quiet canvases and hates talking about "
+            "her own work. Observant, dry, and unexpectedly funny."
+        ),
+        nationality="Egyptian", style="observant and dry",
+        appearance="A paint-stained shirt, a pencil behind her ear, hands always busy.",
+        tags=("painter", "observant"),
+        dials={"introversion": 0.7, "humour": 0.65, "warmth": 0.7, "formality": 0.45,
+               "response_length": "balanced"},
+        interests=(("hobby", "painting at dawn"), ("topic", "colour and light")),
+    ),
+    _persona(
+        PERSONA_EXPLORER, "Wael", "وائل", 33, "man",
+        biography=(
+            "A travel writer who has crossed three deserts and still gets excited "
+            "about a new city. Bold, restless, and generous with his stories."
+        ),
+        nationality="Egyptian", style="bold and restless",
+        appearance="A dusty backpack, sun-bleached hair, a camera that has seen better days.",
+        tags=("traveller", "bold"),
+        dials={"confidence": 0.85, "boldness": 0.8, "warmth": 0.7, "playfulness": 0.7,
+               "response_length": "detailed"},
+        interests=(("topic", "desert roads"), ("hobby", "photographing strangers")),
+    ),
+    _persona(
+        PERSONA_EXPLORER, "Salma", "سلمى", 26, "woman",
+        biography=(
+            "A rock climber and paramedic who is calm in an emergency and impatient "
+            "everywhere else. Direct, brave, and allergic to small talk."
+        ),
+        nationality="Egyptian", style="direct and brave",
+        appearance="Strong shoulders, a climbing chalk bag, a smile that shows up late.",
+        tags=("athlete", "brave"),
+        dials={"confidence": 0.9, "boldness": 0.85, "expressiveness": 0.5, "formality": 0.35,
+               "response_length": "brief"},
+        interests=(("hobby", "climbing"), ("topic", "first aid in the mountains")),
+    ),
+    _persona(
+        PERSONA_SEEKER, "Farida", "فريدة", 28, "woman",
+        biography=(
+            "A librarian who reads in three languages and prefers one good "
+            "conversation to a crowded room. Gentle, attentive, and quietly stubborn."
+        ),
+        nationality="Egyptian", style="gentle and attentive",
+        appearance="Soft cardigans, a book always within reach, a calm, listening face.",
+        tags=("librarian", "gentle"),
+        dials={"warmth": 0.85, "introversion": 0.75, "expressiveness": 0.55, "formality": 0.5,
+               "response_length": "balanced"},
+        interests=(("hobby", "reading in three languages"), ("topic", "old libraries")),
+    ),
+    _persona(
+        PERSONA_SEEKER, "Fathy", "فتحي", 45, "man",
+        biography=(
+            "A retired teacher who tends a small garden, writes letters by hand, and "
+            "has a story for every plant in it. Patient, warm, and unhurried."
+        ),
+        nationality="Egyptian", style="patient and warm",
+        appearance="Greying hair, soil on his sleeves, reading glasses on a cord.",
+        tags=("teacher", "patient"),
+        dials={"warmth": 0.9, "introversion": 0.6, "formality": 0.6, "expressiveness": 0.5,
+               "response_length": "detailed"},
+        interests=(("hobby", "his balcony garden"), ("topic", "letters to old students")),
+    ),
+    _persona(
+        PERSONA_SEEKER, "Hala", "هالة", 24, "woman",
+        biography=(
+            "A quiet photographer who notices the small things -- a shadow, a "
+            "stranger's hands -- and says almost nothing about her own feelings."
+        ),
+        nationality="Egyptian", style="quiet and observant",
+        appearance="A camera on a worn strap, dark clothes, eyes that are always looking.",
+        tags=("photographer", "quiet"),
+        dials={"introversion": 0.8, "warmth": 0.7, "expressiveness": 0.4, "confidence": 0.6,
+               "response_length": "brief"},
+        interests=(("hobby", "street photography"), ("topic", "light and shadow")),
+    ),
+)
+
+#: Every ready-made persona, in category order.
+PERSONA_LIBRARY_CHARACTERS: tuple[LibraryCharacter, ...] = _PERSONAS
+
+
+def persona_category_keys() -> tuple[str, ...]:
+    """Every persona archetype key, in the order the picker shows them."""
+    return tuple(category.key for category in PERSONA_CATEGORIES)
+
+
+def find_persona_category(key: str) -> LibraryPersonaCategory:
+    """The persona archetype named by ``key``, or a generic one for an unknown key."""
+    return _PERSONA_CATEGORY_BY_KEY.get(
+        (key or "").strip(),
+        LibraryPersonaCategory(
+            key=key or "other", title="Other", title_ar="أخرى", icon="🙋",
+            summary="Personas that fit no single archetype.",
+        ),
+    )
+
+
+def persona_library_by_category(category: str = "") -> tuple[LibraryCharacter, ...]:
+    """The ready-made personas in ``category`` (all of them when it is blank)."""
+    wanted = (category or "").strip()
+    if not wanted:
+        return PERSONA_LIBRARY_CHARACTERS
+    return tuple(c for c in PERSONA_LIBRARY_CHARACTERS if c.category == wanted)
+
+
+def find_persona_library_character(name: str) -> LibraryCharacter | None:
+    """The ready-made persona named ``name`` (case-insensitive), or ``None``."""
+    wanted = (name or "").strip().casefold()
+    return next((c for c in PERSONA_LIBRARY_CHARACTERS if c.name.casefold() == wanted), None)
+
+
+def library_drafts_for(role: str = ROLE_COMPANION) -> tuple[CharacterDraft, ...]:
+    """Every library draft for ``role`` (a read -- nothing is created)."""
+    if role == ROLE_USER:
+        return tuple(character.draft for character in PERSONA_LIBRARY_CHARACTERS)
+    return library_drafts()
+
+
+def library_by_category_for(role: str, category: str = "") -> tuple[LibraryCharacter, ...]:
+    """The library characters for ``role`` in ``category`` (a read)."""
+    if role == ROLE_USER:
+        return persona_library_by_category(category)
+    return library_by_category(category)
+
+
+def find_library_character_for(role: str, name: str) -> LibraryCharacter | None:
+    """The library character for ``role`` named ``name`` (a read)."""
+    if role == ROLE_USER:
+        return find_persona_library_character(name)
+    return find_library_character(name)
+
+
+def seed_library_for(
+    manager: CharacterManager,
+    *,
+    role: str = ROLE_COMPANION,
+    owner: str = "",
+    category: str = "",
+) -> list[Any]:
+    """Create library characters for ``role``, skipping any already present by name.
+
+    The one seeding path for both kinds: a companion list and a persona list are
+    the same drafts with a different ``role``, so an existing character (matched
+    by name, case-insensitive) is left as it is and seeding twice never duplicates.
+    """
+    import dataclasses
+
+    # ``role=""`` lists every record, so a persona is matched as well as a
+    # companion -- otherwise seeding the persona catalogue twice would duplicate it.
+    existing = {
+        summary.name.casefold()
+        for summary in manager.list_characters(role="", include_archived=True)
+    }
+    created: list[Any] = []
+    for character in library_by_category_for(role, category):
+        draft = character.draft
+        if draft.name.casefold() in existing:
+            continue
+        if owner:
+            fields = {f.name: getattr(draft, f.name) for f in dataclasses.fields(draft)}
+            draft = CharacterDraft(**{**fields, "owner": owner})
+        created.append(manager.create(draft))
+        existing.add(character.name.casefold())
+    return created
+
+
+
 def category_keys() -> tuple[str, ...]:
     """Every archetype key, in the order the picker shows them."""
     return tuple(category.key for category in LIBRARY_CATEGORIES)
@@ -1163,23 +1577,7 @@ def seed_library(
     as it is, so seeding twice never duplicates. ``owner`` overrides the draft's
     own isolation key.
     """
-    import dataclasses
-
-    existing = {
-        summary.name.casefold()
-        for summary in manager.list_characters(include_archived=True)
-    }
-    created: list[Any] = []
-    for character in library_by_category(category):
-        draft = character.draft
-        if draft.name.casefold() in existing:
-            continue
-        if owner:
-            fields = {f.name: getattr(draft, f.name) for f in dataclasses.fields(draft)}
-            draft = CharacterDraft(**{**fields, "owner": owner})
-        created.append(manager.create(draft))
-        existing.add(character.name.casefold())
-    return created
+    return seed_library_for(manager, role=ROLE_COMPANION, owner=owner, category=category)
 
 
 __all__ = [
@@ -1194,12 +1592,29 @@ __all__ = [
     "LIBRARY_CATEGORIES",
     "LIBRARY_CHARACTERS",
     "LIBRARY_MARKER",
+    "PERSONA_ACADEMIC",
+    "PERSONA_ANYONE",
+    "PERSONA_ARTIST",
+    "PERSONA_CATEGORIES",
+    "PERSONA_EXPLORER",
+    "PERSONA_LIBRARY_CHARACTERS",
+    "PERSONA_PROFESSIONAL",
+    "PERSONA_SEEKER",
     "LibraryCategory",
     "LibraryCharacter",
+    "LibraryPersonaCategory",
     "category_keys",
     "find_category",
     "find_library_character",
+    "find_library_character_for",
+    "find_persona_category",
+    "find_persona_library_character",
     "library_by_category",
+    "library_by_category_for",
     "library_drafts",
+    "library_drafts_for",
+    "persona_category_keys",
+    "persona_library_by_category",
     "seed_library",
+    "seed_library_for",
 ]
