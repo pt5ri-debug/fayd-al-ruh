@@ -29,6 +29,8 @@ Two honesty rules, carried over from the audit:
 
 from __future__ import annotations
 
+import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -877,6 +879,99 @@ class ModelManager:
             ok=result.ok, operation=OP_TEST, model_id=record.model_id,
             detail=result.detail, inference=result,
         )
+
+    def stream(
+        self,
+        model_id: str,
+        *,
+        prompt: str,
+        settings: ModelSettings | None = None,
+        load_if_needed: bool = True,
+    ) -> Iterator[InferenceResult]:
+        """Yield a reply piece by piece, so a caller can show it as it arrives.
+
+        Every piece is an :class:`InferenceResult` whose ``text`` is that piece,
+        and a failure is a single ``ok=False`` piece rather than an exception, so a
+        caller iterates without a ``try`` around every read. A runtime that cannot
+        stream (``capabilities().streaming`` is false, or it exposes no ``stream``)
+        is called **once** and its whole reply is yielded as one piece -- the honest
+        fallback, never a refusal. This never loads a model it was not asked to
+        load and never reaches the network.
+        """
+        started = time.monotonic()
+        record = self.registry.get(model_id)
+        try:
+            adapter = self.adapter(record.runtime)
+        except RuntimeUnavailable as error:
+            yield self._stream_failure(record, str(error))
+            return
+        if not adapter.capabilities().can_infer:
+            yield self._stream_failure(
+                record, f"The {record.runtime} runtime cannot run inference here."
+            )
+            return
+        resolved = settings or effective_settings(record.identity, root=self.root)
+        if load_if_needed:
+            loaded = getattr(adapter, "loaded", None)
+            if callable(loaded) and not loaded():
+                loaded_result = self.load(model_id, settings=settings)
+                if not loaded_result.ok:
+                    yield self._stream_failure(record, loaded_result.detail)
+                    return
+        pieces = 0
+        try:
+            streamer = getattr(adapter, "stream", None) if adapter.capabilities().streaming else None
+            if callable(streamer):
+                for piece in streamer(prompt, settings=resolved):
+                    if piece:
+                        pieces += 1
+                        yield InferenceResult(
+                            ok=True, runtime=record.runtime, text=str(piece),
+                            seconds=time.monotonic() - started,
+                        )
+            else:
+                result = adapter.infer(prompt, settings=resolved)
+                if not result.ok:
+                    yield self._stream_failure(record, result.detail or "inference failed")
+                    return
+                pieces = 1
+                yield InferenceResult(
+                    ok=True, runtime=record.runtime, text=result.text,
+                    seconds=time.monotonic() - started,
+                )
+        except UnsupportedCapability as error:
+            yield self._stream_failure(record, str(error))
+            return
+        except RuntimeUnavailable as error:
+            yield self._stream_failure(record, str(error))
+            return
+        except Exception as error:
+            yield self._stream_failure(record, f"{type(error).__name__}: {error}")
+            return
+        if pieces == 0:
+            yield self._stream_failure(record, "the model returned an empty reply")
+            return
+        # A reply that stopped because it hit the output cap is the honest answer to
+        # "why is the answer cut off". It is *recorded*, never turned into a failure
+        # piece: the partial reply is real and is kept, not discarded.
+        reason = str(getattr(adapter, "last_finish_reason", "") or "")
+        stopped_early = reason == "length"
+        self.log.append(
+            OP_TEST, model_id=record.model_id, display_name=record.display_name,
+            runtime=record.runtime, ok=True,
+            message=(
+                f"Streamed {pieces} piece(s) in {time.monotonic() - started:.2f}s"
+                + (" (stopped at the output limit)" if stopped_early else "")
+            ),
+        )
+
+    def _stream_failure(self, record: ModelRecord, detail: str) -> InferenceResult:
+        """Record a failed stream and return the one failure piece it yields."""
+        self.log.append(
+            OP_FAILURE, model_id=record.model_id, display_name=record.display_name,
+            runtime=record.runtime, ok=False, message=f"{OP_TEST}: {detail}",
+        )
+        return InferenceResult(ok=False, runtime=record.runtime, detail=detail)
 
     def download_command(self, model_id: str) -> str:
         """The command that fetches a model's weights, or ``""`` when none exists.

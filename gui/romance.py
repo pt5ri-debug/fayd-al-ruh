@@ -21,6 +21,7 @@ voice engine is reported with its real next step, never pretended.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,7 @@ from core.romance.characters import CharacterDraft, CharacterManager
 from core.romance.conversation import ConversationManager
 from core.romance.memory import CompanionMemoryManager
 from core.romance.modes import MODE_GENERAL, mode_summaries
-from core.romance.orchestrator import CompanionOrchestrator, TurnResult
+from core.romance.orchestrator import CompanionOrchestrator, TurnResult, TurnStreamEvent
 from core.romance.relationship import RelationshipEngine
 from core.romance.roleplay import RoleplayEngine
 from core.romance.routing import CompanionModelRouter
@@ -67,7 +68,7 @@ SETTING_LABELS: tuple[tuple[str, str, str], ...] = (
 #: The Studio setting keys that hold a numeric value, with their safe bounds.
 _NUMERIC_SETTINGS: dict[str, tuple[float, float, float]] = {
     SETTING_CONTEXT_LENGTH: (512.0, 32768.0, 4096.0),
-    SETTING_MAX_TOKENS: (32.0, 4096.0, 512.0),
+    SETTING_MAX_TOKENS: (32.0, 4096.0, 1024.0),
     SETTING_TEMPERATURE: (0.0, 2.0, 0.8),
     SETTING_MEMORY_LIMIT: (0.0, 20.0, 6.0),
 }
@@ -225,6 +226,7 @@ class RomanceStudioService:
         router: CompanionModelRouter | None = None,
         safety: Any = None,
         generator: Any = None,
+        stream_generator: Any = None,
     ) -> None:
         self.storage = CompanionStorageService(root=root)
         self.characters = CharacterManager(self.storage)
@@ -255,6 +257,7 @@ class RomanceStudioService:
             safety=self.safety,
             roleplay=self.roleplay,
             generator=generator,
+            stream_generator=stream_generator,
         )
 
     # -- memory reader ----------------------------------------------------
@@ -735,7 +738,51 @@ class RomanceStudioService:
         domain.deactivate("companion_conversations", conversation_id)
 
     def send(self, conversation_id: str, message: str, *, mode: str = "") -> TurnResult:
+        self._apply_model_settings()
         return self.orchestrator.send(conversation_id, message, mode=mode)
+
+    def send_stream(
+        self, conversation_id: str, message: str, *, mode: str = ""
+    ) -> Iterator[TurnStreamEvent]:
+        """One turn, streamed: the reply arrives piece by piece, then the stored turn.
+
+        The window and the CLI drive this, so a reader watches the character answer
+        instead of waiting for the last token. It is the *same* turn as
+        :meth:`send` -- the safety floor first, the reply stored only when it is
+        complete -- and it hands the Studio's own answer-limit, context, and
+        temperature settings to the model, so those controls really shape the reply
+        instead of being saved and ignored.
+        """
+        self._apply_model_settings()
+        return self.orchestrator.send_stream(conversation_id, message, mode=mode)
+
+    def model_settings(self) -> Any:
+        """The generation settings the Studio's own stored choices resolve to."""
+        from core.romance.routing import settings_from
+
+        def _number(key: str) -> float | None:
+            try:
+                return float(self.setting(key))
+            except (TypeError, ValueError):
+                return None
+
+        context = _number(SETTING_CONTEXT_LENGTH)
+        tokens = _number(SETTING_MAX_TOKENS)
+        temperature = _number(SETTING_TEMPERATURE)
+        return settings_from(
+            context=int(context) if context is not None else None,
+            max_tokens=int(tokens) if tokens is not None else None,
+            temperature=temperature,
+        )
+
+    def _apply_model_settings(self) -> None:
+        """Hand the Studio's own settings to the orchestrator before a turn."""
+        try:
+            self.orchestrator.settings = self.model_settings()
+        except Exception:
+            # A malformed setting must never stop a turn: the router's own safe
+            # defaults stay in force.
+            self.orchestrator.settings = None
 
     def send_multi(
         self,

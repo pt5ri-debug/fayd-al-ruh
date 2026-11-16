@@ -58,7 +58,10 @@ DISCLOSURE = (
 )
 
 _COLUMN_MAX = 860
-_MAX_BUBBLE_LINES = 40
+#: How tall a message may grow before it scrolls inside itself. Raised well above
+#: the old 40 lines because a companion answers in paragraphs: a longer reply was
+#: drawn only up to the cap, so a complete answer looked truncated.
+_MAX_BUBBLE_LINES = 400
 
 
 class RomanceStudioDialog(ThemedDialog):
@@ -108,6 +111,10 @@ class RomanceStudioDialog(ThemedDialog):
         self._avatar: Any = None
         self._row_frames: list[tuple[tk.Frame, tk.Text]] = []
         self._results: queue.Queue[tuple[Callable[[Any, Exception | None], None], Any, Exception | None]] = queue.Queue()
+        #: Reply pieces posted by a streaming worker thread, drained on the UI thread.
+        self._stream_queue: queue.Queue[str] = queue.Queue()
+        #: Where a piece of the live reply is written (a widget or ``None``).
+        self._stream_sink: Callable[[str], None] | None = None
         self._pending_status = ""
 
         self.window = tk.Toplevel(parent)
@@ -1185,10 +1192,16 @@ class RomanceStudioDialog(ThemedDialog):
         self._add_message("user", text, title="You")
         mode = self._mode_var.get() or ""
         conversation_id = self._selected_conversation
-        self._run_background(
-            "Thinking…",
-            lambda: self.service.send(conversation_id, text, mode=mode),
-            self._on_reply,
+        speaker = self._character_name()
+        # The reply's own bubble is created empty and filled as the model writes,
+        # so the answer is read sentence by sentence instead of arriving at once.
+        bubble = self._add_message("assistant", "", title=speaker)
+        self._stream_sink = lambda piece: self._append_message(bubble, piece)
+        self._run_stream(
+            "Answering…",
+            lambda: self.service.send_stream(conversation_id, text, mode=mode),
+            self._on_stream_end,
+            bubble,
         )
 
     def _on_return(self, event: tk.Event) -> str:
@@ -1196,6 +1209,74 @@ class RomanceStudioDialog(ThemedDialog):
             return ""
         self._send()
         return "break"
+
+    def _character_name(self) -> str:
+        """The selected character's name, or the honest fallback."""
+        try:
+            return self.service.character(self._selected_character).name or "Companion"
+        except Exception:
+            return "Companion"
+
+    def _append_message(self, widget: tk.Text, piece: str) -> None:
+        """Append a reply piece to a live bubble, keeping it scrolled into view."""
+        if self._closed or not piece:
+            return
+        try:
+            widget.insert("end", piece)
+            self._fit_height(widget)
+            self._scroll_to_bottom()
+        except tk.TclError:
+            return
+
+    def _set_message(self, widget: tk.Text, text: str) -> None:
+        """Replace a bubble's whole text (the finished reply, or an honest note)."""
+        if self._closed:
+            return
+        try:
+            widget.delete("1.0", "end")
+            widget.insert("1.0", text)
+            self._fit_height(widget)
+            self._scroll_to_bottom()
+        except tk.TclError:
+            return
+
+    def _drop_message(self, widget: tk.Text) -> None:
+        """Remove a message row entirely (an empty bubble a failed turn left behind)."""
+        for row, existing in list(self._row_frames):
+            if existing is not widget:
+                continue
+            self._row_frames.remove((row, existing))
+            try:
+                row.destroy()
+            except tk.TclError:
+                pass
+            return
+
+    def _on_stream_end(self, event: Any, error: Exception | None, bubble: tk.Text) -> None:
+        """Finish a streamed turn: keep the stored reply, or report honestly."""
+        if error is not None:
+            self._drop_message(bubble)
+            self._add_message("note", f"The turn failed: {error}")
+            self._set_status("The turn failed.")
+            return
+        kind = getattr(event, "kind", "")
+        if kind == "refused":
+            self._drop_message(bubble)
+            self._add_message("note", f"Refused: {getattr(event, 'reason', '')}")
+            self._set_status("Refused by the safety floor.")
+            return
+        if kind != "done":
+            reason = getattr(event, "reason", "") or "no answer"
+            self._drop_message(bubble)
+            self._add_message("note", f"No answer: {reason}")
+            self._set_status("No model answered — see the note above.")
+            return
+        result = getattr(event, "result", None)
+        # The stored reply is authoritative: it is what the turn recorded, with a
+        # reasoning trace filtered out of it.
+        self._set_message(bubble, getattr(result, "reply", "") or "")
+        self._set_status("")
+        self._refresh_character_panels()
 
     def _on_reply(self, result: Any, error: Exception | None) -> None:
         if error is not None:
@@ -1757,6 +1838,44 @@ class RomanceStudioDialog(ThemedDialog):
         threading.Thread(target=run, daemon=True).start()
         self.window.after(60, self._pump_results)
 
+    def _run_stream(
+        self,
+        message: str,
+        job: Callable[[], Any],
+        finish: Callable[..., None],
+        bubble: tk.Text,
+    ) -> None:
+        """Run a streaming job, writing each piece into the transcript as it arrives.
+
+        The worker thread only *posts* pieces on a queue; the UI thread's pump writes
+        them, because Tk is not thread-safe. The final event (and any exception) is
+        handed to ``finish`` with the bubble, so a caller can keep the stored reply or
+        replace the bubble with an honest note.
+        """
+        self._busy = True
+        self._set_status(message)
+        self._spinner.pack(side="right", padx=8)
+        self._spinner.start(12)
+
+        def run() -> None:
+            try:
+                final: Any = None
+                for event in job():
+                    if getattr(event, "is_delta", False):
+                        self._stream_queue.put(getattr(event, "text", ""))
+                    else:
+                        final = event
+                self._results.put(
+                    ((lambda result, error: finish(result, error, bubble)), final, None)
+                )
+            except Exception as error:
+                self._results.put(
+                    ((lambda result, error: finish(result, error, bubble)), None, error)
+                )
+
+        threading.Thread(target=run, daemon=True).start()
+        self.window.after(60, self._pump_results)
+
     def _pump_results(self) -> None:
         # Show any live progress a running job posted (a plain attribute, written
         # from the worker thread and read here on the UI thread).
@@ -1764,6 +1883,15 @@ class RomanceStudioDialog(ThemedDialog):
         if pending:
             self._pending_status = ""
             self._set_status(pending)
+        # Write every reply piece the worker has posted so far, in order.
+        sink = self._stream_sink
+        while sink is not None:
+            try:
+                piece = self._stream_queue.get_nowait()
+            except queue.Empty:
+                break
+            if piece:
+                sink(piece)
         try:
             finish, result, error = self._results.get_nowait()
         except queue.Empty:
@@ -1773,6 +1901,7 @@ class RomanceStudioDialog(ThemedDialog):
         self._busy = False
         self._spinner.stop()
         self._spinner.pack_forget()
+        self._stream_sink = None
         finish(result, error)
 
     # -- close ------------------------------------------------------------
