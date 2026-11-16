@@ -445,6 +445,46 @@ class LlamaCppAdapter:
         return self._model_path
 
     # --- inference -----------------------------------------------------
+    def stream(self, prompt: str, *, settings: Any = None) -> Iterator[str]:
+        """Yield a reply piece by piece, so a caller can show it as it arrives.
+
+        This is an **optional** capability, reached through ``getattr`` by the
+        manager (the same idiom every runner in this project uses), so a runtime
+        that cannot stream is simply called once instead of failing: a build
+        without ``llama_cpp`` streaming, or a runner a test injected, still
+        answers. A failure is raised as :class:`RuntimeUnavailable` -- before the
+        first piece or during the stream -- so a caller never mistakes a partial
+        reply for a complete one.
+        """
+        text = (prompt or "").strip()
+        if not text:
+            raise RuntimeUnavailable("A streamed reply needs a prompt.")
+        if not self._loaded or self._runner is None:
+            raise RuntimeUnavailable("No model is loaded. Load one first.")
+        options = _inference_options(settings)
+        messages = [{"role": "user", "content": text}]
+        streamer = getattr(self._runner, "stream", None)
+        if not callable(streamer):
+            yield str(self._runner.chat(messages, **options))
+            return
+        try:
+            for piece in streamer(messages, **options):
+                if piece:
+                    yield str(piece)
+        except RuntimeUnavailable:
+            raise
+        except Exception as error:
+            raise RuntimeUnavailable(f"The streamed reply failed: {error}") from error
+
+    @property
+    def last_finish_reason(self) -> str:
+        """Why the last streamed reply stopped, when the runner can say.
+
+        ``"length"`` means the model hit the output cap rather than finishing its
+        sentence, which is the honest answer to "why is the reply cut off".
+        """
+        return str(getattr(self._runner, "last_finish_reason", "") or "")
+
     def infer(self, prompt: str, *, settings: Any = None) -> InferenceResult:
         """One short test reply, so a user can prove the model really answers."""
         started = time.monotonic()
@@ -504,6 +544,8 @@ class _LlamaChatRunner:
 
     def __init__(self, llama: Any) -> None:
         self._llama = llama
+        #: Why the last streamed reply stopped (``"length"`` means it hit the cap).
+        self.last_finish_reason = ""
 
     def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
         result = self._llama.create_chat_completion(messages=messages, **kwargs)
@@ -513,6 +555,23 @@ class _LlamaChatRunner:
             raise RuntimeUnavailable(
                 f"The model returned an unreadable response: {error}"
             ) from error
+
+    def stream(self, messages: list[dict[str, str]], **kwargs: Any) -> Iterator[str]:
+        """Yield the reply's content deltas, remembering why the stream stopped."""
+        self.last_finish_reason = ""
+        for chunk in self._llama.create_chat_completion(messages=messages, stream=True, **kwargs):
+            try:
+                choice = chunk["choices"][0]
+            except (KeyError, IndexError, TypeError) as error:
+                raise RuntimeUnavailable(
+                    f"The model returned an unreadable streamed response: {error}"
+                ) from error
+            reason = choice.get("finish_reason")
+            if reason:
+                self.last_finish_reason = str(reason)
+            piece = (choice.get("delta") or {}).get("content")
+            if piece:
+                yield str(piece)
 
 
 def _inference_options(settings: Any) -> dict[str, Any]:

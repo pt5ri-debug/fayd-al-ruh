@@ -268,6 +268,118 @@ def clean(text: str) -> str:
     return value.strip()
 
 
+# A reasoning model (Qwen3 and its kin) writes a hidden chain of thought before the
+# answer. That trace is not something the character said, so it is never shown to a
+# reader and never stored as the reply. One pattern drops a complete block; the
+# second drops everything after an *unterminated* one (the model ran out of tokens
+# mid-thought, which is exactly how a reply ends up looking cut off).
+_THINKING_BLOCK_RE = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.IGNORECASE | re.DOTALL)
+_OPEN_THINKING_RE = re.compile(r"<think(?:ing)?>.*\Z", re.IGNORECASE | re.DOTALL)
+_THINKING_OPEN_RE = re.compile(r"<think(?:ing)?>", re.IGNORECASE)
+_THINKING_CLOSE_RE = re.compile(r"</think(?:ing)?>", re.IGNORECASE)
+#: The opening tags a model may emit, longest first (a streaming filter holds back
+#: a trailing fragment that could still grow into one of them).
+_THINKING_TAGS = ("<thinking>", "<think>")
+_THINKING_TAG_MAX = max(len(tag) for tag in _THINKING_TAGS)
+#: How much of a piece to retain while inside a block, so a close tag that
+#: straddles two pieces is still recognised.
+_THINKING_KEEP = max(_THINKING_TAG_MAX, len("</thinking>")) + 4
+
+
+def strip_thinking(text: str) -> str:
+    """Remove a reasoning model's `` thinking`` blocks, leaving the answer.
+
+    Shared by every surface that shows or stores model output, so the trace can
+    never reach a reader as though the character had said it. A reply that was
+    *only* reasoning leaves the empty string deliberately: the caller then reports
+    an empty reply honestly instead of presenting the model's inner monologue.
+    """
+    return _OPEN_THINKING_RE.sub("", _THINKING_BLOCK_RE.sub("", text)).strip()
+
+
+def _partial_tag_start(text: str) -> int:
+    """Index of a trailing, possibly-incomplete ``<think…`` tag, or ``-1``."""
+    index = text.rfind("<")
+    if index < 0:
+        return -1
+    tail = text[index:].casefold()
+    return index if any(tag.startswith(tail) for tag in _THINKING_TAGS) else -1
+
+
+class ThinkingFilter:
+    """Drop a reasoning trace from a **streamed** reply, piece by piece.
+
+    A stream arrives in fragments, so a tag can straddle two pieces and a filter
+    that only ran at the end would still flash the trace on screen. This keeps a
+    small buffer: it emits what is certainly the answer, holds back a tail that
+    could still grow into an opening tag, and swallows everything inside a block.
+    :meth:`flush` closes the stream -- a trace left open at the end is dropped, a
+    visible tail is kept.
+    """
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._inside = False
+
+    @property
+    def inside(self) -> bool:
+        """True while the stream is inside a reasoning block."""
+        return self._inside
+
+    def feed(self, piece: str) -> str:
+        """Add one piece and return the visible text it produced (possibly none)."""
+        if not piece:
+            return ""
+        self._buffer += piece
+        if self._inside:
+            match = _THINKING_CLOSE_RE.search(self._buffer)
+            if match is None:
+                # Still reasoning: keep only a tail long enough to complete a tag.
+                self._buffer = self._buffer[-_THINKING_KEEP:]
+                return ""
+            self._buffer = self._buffer[match.end():]
+            self._inside = False
+        visible: list[str] = []
+        while True:
+            match = _THINKING_OPEN_RE.search(self._buffer)
+            if match is None:
+                break
+            visible.append(self._buffer[: match.start()])
+            self._buffer = self._buffer[match.end():]
+            close = _THINKING_CLOSE_RE.search(self._buffer)
+            if close is None:
+                # Inside the block: keep only a tail, so a close tag split across
+                # two pieces is still recognised when the rest of it arrives.
+                self._inside = True
+                self._buffer = self._buffer[-_THINKING_KEEP:]
+                break
+            self._buffer = self._buffer[close.end():]
+        if self._inside:
+            # Still inside a reasoning block: nothing of it is visible.
+            return "".join(visible)
+        hold = _partial_tag_start(self._buffer)
+        if hold >= 0:
+            visible.append(self._buffer[:hold])
+            self._buffer = self._buffer[hold:]
+        else:
+            visible.append(self._buffer)
+            self._buffer = ""
+        return "".join(visible)
+
+    def flush(self) -> str:
+        """End the stream: a trace left open is dropped, a visible tail is kept."""
+        if self._inside:
+            self._buffer = ""
+            self._inside = False
+            return ""
+        # A dangling fragment of an opening tag (the stream ended inside "<thi")
+        # is not something the character said, so it is dropped rather than shown.
+        hold = _partial_tag_start(self._buffer)
+        tail = self._buffer[:hold] if hold >= 0 else self._buffer
+        self._buffer = ""
+        return tail
+
+
 def sentences(text: str) -> list[str]:
     """Split text into clean sentences (order preserved, blanks dropped)."""
     value = clean(text)
@@ -841,6 +953,7 @@ def evidence_summary_sentence(conclusion: str, supporting: int, contradicting: i
 
 __all__ = [
     "Source",
+    "ThinkingFilter",
     "causal_chain_sentence",
     "causal_effect_sentence",
     "clean",

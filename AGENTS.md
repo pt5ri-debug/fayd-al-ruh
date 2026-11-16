@@ -7674,3 +7674,64 @@ regression monitor each can refuse a change.
   complete, a partial check never complete). `tests/test_weights_pack.py` pins the
   verdict, the tampered-entry report, the partial-check rule, the missing pack,
   and the CLI.
+
+- Phase 67 — **the Romance & Companion Studio answers in full, and as it is
+  written**. A reader reported two things about a companion's reply: it was
+  sometimes **cut off**, and it appeared only once it was finished. Both had the
+  same root -- the answer path was a single blocking call whose length was capped
+  by the engine's own default -- so the fix is a raised, *applied* limit plus a
+  streamed turn, built additively over the project's own Model Manager (no second
+  runtime, no duplicate downloader).
+  **(1) The Studio's own controls now reach the model.** `gui/romance.py`'s
+  `RomanceStudioService` resolved an answer limit, a context length, and a
+  temperature but never handed them to the runtime, so the window's **Answer limit
+  (tokens)** control was saved and ignored and a reply was capped at the engine's
+  default. `core/romance/routing.settings_from(context=, max_tokens=,
+  temperature=)` is now the one place those choices are validated (each clamped to
+  `core.model_settings`' own ranges, the answer limit held below the context, an
+  unset field keeping the shipped default), the router exposes it, and
+  `send`/`send_stream` pass it through to the runtime -- pinned end to end by a
+  test that drives Studio -> router -> manager -> adapter and reads the settings
+  the adapter actually received. The shipped default answer limit rose from 512 to
+  **1024** (`core.romance.routing.SAFE_MAX_TOKENS`), because a 512-token cap
+  truncated a long reply.
+  **(2) The reply streams.** `core/model_runtime.LlamaCppAdapter` gained a
+  `stream(prompt, *, settings)` that yields the runner's own content deltas (and
+  records the finish reason, so a reply that hit the cap can be named);
+  `core.model_manager.ModelManager.stream(model_id, *, prompt, settings=,
+  load_if_needed=)` yields one `InferenceResult` per piece and **falls back to a
+  single whole reply** when the runtime declares no streaming capability, so a
+  build without it still answers; `core.romance.routing.CompanionModelRouter.stream`
+  delegates to that manager (never a second runtime);
+  `core.romance.orchestrator.CompanionOrchestrator.send_stream` yields
+  `TurnStreamEvent`s (`KIND_DELTA` per visible piece, then `KIND_DONE` /
+  `KIND_ERROR` / `KIND_REFUSED`) under the *same* rules as `send` -- the safety
+  floor first, the user's message appended before the model runs, the reply
+  appended **only** once complete (a failed or empty turn stores nothing); and
+  `gui.romance.RomanceStudioService.send_stream` is the window's and the CLI's one
+  entry point.
+  **(3) A reasoning trace is filtered as it streams.** `core/composition` gained
+  `ThinkingFilter` (feed/flush), which drops a model's hidden ` thinking…</think>`
+  block piece by piece -- holding back a tail that could still grow into a tag, so
+  a tag split across two pieces is never flashed on screen -- and `strip_thinking`
+  as its one-shot twin. The stored reply is the filtered text, so the trace reaches
+  neither the transcript nor memory.
+  **(4) The window and the CLI show it live.** `gui/romance_dialog.py` creates the
+  reply's bubble empty and fills it as the pieces arrive (the worker thread only
+  *posts* pieces on a queue; the UI thread writes them, because Tk is not
+  thread-safe), and the bubble's line cap rose from 40 to 400 so a long answer is
+  not drawn short. `python -m cli romance chat|send` prints each piece as it is
+  written (and keeps `--json` whole). `core/model_runtime` records `finish_reason`
+  and `ModelManager` logs "stopped at the output limit" when the model really hit
+  the cap, so a genuinely truncated reply is named rather than silently cut.
+  Tests: `tests/test_romance_streaming.py` (22 tests -- the filter's split tags and
+  unterminated traces, the adapter's stream seam, the manager's stream and its
+  one-shot fallback, the router's `settings_from` and its honest uninstalled-model
+  piece, the orchestrator's deltas/done/error/refusal/no-store-on-failure, the
+  settings reaching the runtime, and the CLI's streamed turn);
+  `tests/test_romance_window.py` gained a piece-by-piece draw and a
+  trace-never-shown control; `tests/test_romance_studio.py` and
+  `tests/test_romance_window.py`'s settings assertions were updated to the new
+  default. Docs: `docs/romance_companion/MODEL_INTEGRATION.md` gained a *Streaming
+  turns* section. Gates: pytest 8364 passed / 16 skipped, ruff clean, mypy 1193
+  files OK, evaluation PASS (`overall` 0.9918 unchanged).

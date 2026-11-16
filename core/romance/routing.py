@@ -25,6 +25,7 @@ It imports no runtime directly and loads no model on construction.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -45,7 +46,11 @@ TASK_COMPANION = "companion"
 SAFE_CONTEXT = 4096
 
 #: The most output tokens a safe default asks for (a reply, not a document).
-SAFE_MAX_TOKENS = 512
+#:
+#: Raised from 512 to 1024 because a 512-token cap truncated a long reply: a
+#: companion that answers in paragraphs (or a reasoning model whose trace eats the
+#: budget) ran out of room mid-sentence, which reads as "the answer is cut off".
+SAFE_MAX_TOKENS = 1024
 
 #: When free memory is below this share of total, a load is flagged risky.
 LOW_MEMORY_SHARE = 0.2
@@ -349,6 +354,16 @@ class CompanionModelRouter:
 
         return ModelSettings(context=SAFE_CONTEXT, max_tokens=SAFE_MAX_TOKENS, gpu_layers=0)
 
+    def settings_from(
+        self,
+        *,
+        context: int | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> Any:
+        """The settings a caller's own choices resolve to (see :func:`settings_from`)."""
+        return settings_from(context=context, max_tokens=max_tokens, temperature=temperature)
+
     def memory_estimate(
         self, key: str | None = None, *, context_length: int | None = None
     ) -> Any:
@@ -449,6 +464,93 @@ class CompanionModelRouter:
             ok=False, runtime=resolved.engine, detail=result.detail
         )
 
+    def stream(
+        self,
+        prompt: str,
+        *,
+        key: str | None = None,
+        settings: Any = None,
+        handle: GenerationHandle | None = None,
+    ) -> Iterator[InferenceResult]:
+        """Yield one generation piece by piece, so a caller can show it live.
+
+        The same one inference call as :meth:`generate` -- the manager's own
+        runtime, never a second one -- but streamed: every piece is an
+        :class:`~core.model_runtime.InferenceResult` whose ``text`` is that piece,
+        and any failure (no model, a cancelled handle, a runtime that raised) is a
+        single ``ok=False`` piece instead of an exception. A caller therefore
+        iterates without a ``try``, and a partial reply is never mistaken for a
+        complete one: the failure piece is the last thing yielded.
+        """
+        resolved = self.resolve(key)
+        if handle is not None and self.should_stop(handle):
+            yield InferenceResult(
+                ok=False, runtime=resolved.engine, detail="generation cancelled"
+            )
+            return
+        if resolved.path is None:
+            yield InferenceResult(
+                ok=False,
+                runtime=resolved.engine,
+                detail=f"The model {resolved.key!r} is not installed on this machine.",
+            )
+            return
+        try:
+            entry = self._record_for(resolved)
+        except Exception as error:
+            yield InferenceResult(
+                ok=False, runtime=resolved.engine, detail=f"{type(error).__name__}: {error}"
+            )
+            return
+        yield from self.manager.stream(
+            entry.model_id, prompt=prompt, settings=settings or self.safe_settings(resolved)
+        )
+
+
+def settings_from(
+    *,
+    context: int | None = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+) -> Any:
+    """The generation settings a caller's own choices resolve to, validated.
+
+    A Studio that stores an answer limit, a context length, and a temperature has
+    to hand them to the runtime, or those controls would be saved and ignored --
+    which is exactly how a reply ends up capped at the engine's own default while
+    the window says otherwise. Every value is clamped to what
+    :class:`~core.model_settings.ModelSettings` accepts, and the answer limit is
+    additionally held below the context, because a reply has to fit in the window
+    it is generated in: a caller who sets both is corrected rather than refused.
+    An unset field keeps the shipped default, so a caller that changes one dial
+    never silently resets the others.
+    """
+    from core.model_settings import (
+        CONTEXT_RANGE,
+        MAX_TOKENS_RANGE,
+        TEMPERATURE_RANGE,
+        ModelSettings,
+    )
+
+    def _clamp_int(value: int | None, low: int, high: int, default: int) -> int:
+        if value is None:
+            return default
+        return max(low, min(high, int(value)))
+
+    def _clamp_float(value: float | None, low: float, high: float, default: float) -> float:
+        if value is None:
+            return default
+        return max(low, min(high, float(value)))
+
+    resolved_context = _clamp_int(context, *CONTEXT_RANGE, SAFE_CONTEXT)
+    resolved_tokens = _clamp_int(max_tokens, *MAX_TOKENS_RANGE, SAFE_MAX_TOKENS)
+    return ModelSettings(
+        context=resolved_context,
+        max_tokens=min(resolved_tokens, resolved_context),
+        temperature=_clamp_float(temperature, *TEMPERATURE_RANGE, 0.7),
+        gpu_layers=0,
+    )
+
 
 def _resolved_from(model: Any) -> ResolvedModel:
     """A :class:`ResolvedModel` view of a catalog entry, read defensively.
@@ -478,4 +580,5 @@ __all__ = [
     "GenerationHandle",
     "ModelHealth",
     "ResolvedModel",
+    "settings_from",
 ]

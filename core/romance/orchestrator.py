@@ -22,15 +22,24 @@ Four rules it keeps:
 * **Nothing is invented.** When no model is installed the turn returns honestly
   (``ok=False`` with the router's own reason and next step); a failed generation
   is never written to the transcript as a reply.
+* **A streamed reply is stored only when it completes.** :meth:`send_stream`
+  yields the answer as the model writes it, so a reader sees each finished
+  sentence instead of waiting for the last token, and only the finished answer is
+  written to the transcript -- a stream that fails half-way leaves the user's own
+  message and no partial reply. A reasoning model's `` thinking`` trace is filtered
+  out of the stream, so what appears on screen is what the character said.
 
 It loads no model on construction and reaches no network.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
+from core.composition import ThinkingFilter, strip_thinking
+from core.model_runtime import InferenceResult
 from core.romance.characters import CharacterManager
 from core.romance.conversation import ConversationManager
 from core.romance.memory import CompanionMemoryManager
@@ -75,6 +84,47 @@ class TurnResult:
         return self.reply
 
 
+#: The events a streamed turn yields: a piece of the reply, or the turn's end.
+KIND_DELTA = "delta"
+KIND_DONE = "done"
+KIND_REFUSED = "refused"
+KIND_ERROR = "error"
+
+
+@dataclass(frozen=True)
+class TurnStreamEvent:
+    """One event of a streamed turn.
+
+    ``delta`` carries text exactly as the model produced it, so a caller can show
+    the answer growing sentence by sentence. ``done`` carries the finished
+    :class:`TurnResult` -- the reply as it was actually stored -- while
+    ``refused``/``error`` carry the reason and no reply, because a refused or
+    failed turn writes nothing to the transcript.
+    """
+
+    kind: str
+    text: str = ""
+    result: TurnResult | None = None
+    reason: str = ""
+
+    @property
+    def is_delta(self) -> bool:
+        """True for a piece of the reply, False for the turn's end."""
+        return self.kind == KIND_DELTA
+
+    @property
+    def is_final(self) -> bool:
+        """True for the event that ends the stream."""
+        return self.kind != KIND_DELTA
+
+    def describe(self) -> str:
+        if self.kind == KIND_DELTA:
+            return self.text
+        if self.reason:
+            return f"{self.kind}: {self.reason}"
+        return self.kind
+
+
 class CompanionOrchestrator:
     """Compose the Studio's layers into a single conversation turn."""
 
@@ -90,6 +140,8 @@ class CompanionOrchestrator:
         safety: Any = None,
         roleplay: RoleplayEngine | None = None,
         generator: Any = None,
+        stream_generator: Any = None,
+        settings: Any = None,
     ) -> None:
         self.storage = storage
         self.characters = characters if characters is not None else CharacterManager(storage)
@@ -107,8 +159,15 @@ class CompanionOrchestrator:
         self.router = router
         self.safety = safety
         self.roleplay = roleplay if roleplay is not None else RoleplayEngine(storage)
-        # A generation seam: ``(prompt, key, handle) -> str``. Default: the router.
+        # Generation seams. ``generator`` is the one-shot seam
+        # (``(prompt, key, handle) -> (text, ok, error)``); ``stream_generator`` is
+        # its streaming twin (``(prompt, key, handle) -> Iterator[str|InferenceResult]``).
+        # The default for both is the router.
         self._generator = generator
+        self._stream_generator = stream_generator
+        #: The generation settings the router runs with (a caller's own answer
+        #: limit, context, and temperature), or ``None`` for the router's defaults.
+        self.settings = settings
 
     # -- injection seams --------------------------------------------------
 
@@ -123,10 +182,42 @@ class CompanionOrchestrator:
             return self._generator(prompt, key, handle)
         if self.router is None:
             return "", False, "no language model is wired into this session"
-        result = self.router.generate(prompt, key=key, handle=handle)
+        result = self.router.generate(prompt, key=key, settings=self.settings, handle=handle)
         if not getattr(result, "ok", False):
             return "", False, str(getattr(result, "detail", "") or "generation failed")
         return str(getattr(result, "text", "") or ""), True, ""
+
+    def _stream(
+        self, prompt: str, key: str | None, handle: GenerationHandle | None
+    ) -> Iterator[InferenceResult]:
+        """Run one generation as a stream of pieces, through the seam or the router.
+
+        The streaming twin of :meth:`_generate`: the same one inference call, but
+        read piece by piece. A seam that yields plain strings is accepted (they are
+        wrapped as successful pieces), and the one-shot ``generator`` seam is
+        honoured too -- it yields its whole reply as a single piece -- so a caller
+        that wires only the non-streaming seam still streams, just without the
+        sentence-by-sentence cadence.
+        """
+        if self._stream_generator is not None:
+            for piece in self._stream_generator(prompt, key, handle):
+                if isinstance(piece, InferenceResult):
+                    yield piece
+                else:
+                    yield InferenceResult(ok=True, runtime="seam", text=str(piece))
+            return
+        if self._generator is not None:
+            text, ok, error = self._generator(prompt, key, handle)
+            yield InferenceResult(
+                ok=bool(ok), runtime="seam", text=str(text or ""), detail=str(error or "")
+            )
+            return
+        if self.router is None:
+            yield InferenceResult(
+                ok=False, runtime="", detail="no language model is wired into this session"
+            )
+            return
+        yield from self.router.stream(prompt, key=key, settings=self.settings, handle=handle)
 
     def _memory_block(self, character_id: str, conversation_id: str) -> str:
         """The memory the prompt may use: relevant recall for this conversation."""
@@ -204,6 +295,96 @@ class CompanionOrchestrator:
             speakers=(speaker,),
             relationship=self.relationships.snapshot(character_id),
             model_key=self._model_key(),
+        )
+
+    def send_stream(
+        self,
+        conversation_id: str,
+        message: str,
+        *,
+        mode: str = "",
+        handle: GenerationHandle | None = None,
+    ) -> Iterator[TurnStreamEvent]:
+        """Append the user's message, stream the reply, and record it when complete.
+
+        The same rules as :meth:`send`, in the same order -- the safety floor is
+        checked before anything is written, the user's message is appended before
+        the model runs, and the reply is appended **only** once it is complete --
+        but the answer is yielded as it is written, so a reader watches the
+        character speak instead of waiting for the last token. A reasoning model's
+        `` thinking`` trace is filtered out of what is yielded, and the reply that is
+        stored is that same filtered text.
+        """
+        conversation = self.conversations.get(conversation_id)
+        character_id = str(conversation.character_id)
+        text = (message or "").strip()
+        if not text:
+            raise OrchestratorError("a turn needs a message")
+
+        effective_mode = find_mode(mode or conversation.mode).key
+        refusal = self._safety_refusal(character_id, effective_mode, text)
+        if refusal is not None:
+            yield TurnStreamEvent(kind=KIND_REFUSED, reason=refusal)
+            return
+
+        user_message = self.conversations.append(
+            conversation_id, text, role="user", mode=effective_mode
+        )
+        self._observe_relationship(character_id, conversation_id, user_message)
+
+        prompt = self.conversations.build_prompt(conversation_id, mode=effective_mode)
+        visible = ThinkingFilter()
+        pieces: list[str] = []
+        failure = ""
+        for piece in self._stream(prompt, None, handle):
+            if not getattr(piece, "ok", False):
+                failure = str(getattr(piece, "detail", "") or "generation failed")
+                break
+            shown = visible.feed(str(getattr(piece, "text", "") or ""))
+            if shown:
+                pieces.append(shown)
+                yield TurnStreamEvent(kind=KIND_DELTA, text=shown)
+        if not failure:
+            tail = visible.flush()
+            if tail:
+                pieces.append(tail)
+                yield TurnStreamEvent(kind=KIND_DELTA, text=tail)
+
+        answer = strip_thinking("".join(pieces)).strip() if not failure else ""
+        if failure or not answer:
+            reason = failure or "the model returned an empty reply"
+            yield TurnStreamEvent(
+                kind=KIND_ERROR,
+                reason=reason,
+                result=TurnResult(
+                    ok=False,
+                    error=reason,
+                    conversation_id=conversation_id,
+                    character_id=character_id,
+                    mode=effective_mode,
+                    user_message=user_message,
+                ),
+            )
+            return
+
+        speaker = self._speaker_name(character_id)
+        reply = self.conversations.append(
+            conversation_id, answer, role="assistant", speaker=speaker, mode=effective_mode
+        )
+        self._record_exchange(character_id, text, answer)
+        yield TurnStreamEvent(
+            kind=KIND_DONE,
+            result=TurnResult(
+                ok=True,
+                conversation_id=conversation_id,
+                character_id=character_id,
+                mode=effective_mode,
+                user_message=user_message,
+                replies=(reply,),
+                speakers=(speaker,),
+                relationship=self.relationships.snapshot(character_id),
+                model_key=self._model_key(),
+            ),
         )
 
     def send_multi(
@@ -351,4 +532,13 @@ class CompanionOrchestrator:
             return ""
 
 
-__all__ = ["CompanionOrchestrator", "OrchestratorError", "TurnResult"]
+__all__ = [
+    "KIND_DELTA",
+    "KIND_DONE",
+    "KIND_ERROR",
+    "KIND_REFUSED",
+    "CompanionOrchestrator",
+    "OrchestratorError",
+    "TurnResult",
+    "TurnStreamEvent",
+]

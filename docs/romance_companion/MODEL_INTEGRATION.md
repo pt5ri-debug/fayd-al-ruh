@@ -40,10 +40,43 @@ router is exercised with no weights. The router imports no runtime directly.
 
 ## Safe defaults for this hardware
 
-`SAFE_CONTEXT` (4096) and `SAFE_MAX_TOKENS` (512) are the shipped defaults, and
+`SAFE_CONTEXT` (4096) and `SAFE_MAX_TOKENS` (1024) are the shipped defaults, and
 `gpu_layers` stays `0` unless a caller raises it explicitly. That is the honest
 default for a CPU-first machine: a large enough window for a real conversation,
-small enough that the KV cache does not crowd out the weights.
+small enough that the KV cache does not crowd out the weights. The answer limit
+was raised from 512 to 1024 because a 512-token cap truncated a long reply — a
+companion that answers in paragraphs, or a reasoning model whose hidden trace eats
+the budget, ran out of room mid-sentence, which reads as "the answer is cut off".
+
+## Streaming turns, and why the Studio's controls now matter
+
+A turn can be generated **piece by piece** instead of all at once, so a reader
+watches the character answer rather than waiting for the last token. The path is
+the same at every layer:
+
+- `core.romance.routing.CompanionModelRouter.stream` delegates to the Model
+  Manager's own `stream`, which reads the runtime's optional `stream` capability
+  and **falls back to one whole reply** when the runtime cannot stream — so a build
+  without it still answers.
+- `core.romance.orchestrator.CompanionOrchestrator.send_stream` yields
+  `TurnStreamEvent`s (`KIND_DELTA` for each visible piece, then `KIND_DONE` /
+  `KIND_ERROR` / `KIND_REFUSED`). It keeps the *same* rules as `send`: the safety
+  floor is checked before anything is written, the user's message is appended
+  before the model runs, and the reply is appended **only** once it is complete —
+  a failed or empty turn stores nothing.
+- `core.composition.ThinkingFilter` drops a reasoning model's hidden
+  ` thinking… response` trace **as it streams** (buffering a tag that straddles two
+  pieces), so the trace is never flashed on screen and the stored reply is the
+  filtered text.
+- `gui.romance.RomanceStudioService.send_stream` hands the Studio's own
+  **answer limit, context length, and temperature** to the runtime — those controls
+  used to be saved and ignored, so a reply was capped by the engine's own default
+  no matter what the window said.
+
+The window draws the reply into one bubble that grows as the pieces arrive (the
+worker thread only *posts* pieces on a queue; the UI thread writes them, because
+Tk is not thread-safe), and the CLI (`python -m cli romance chat|send`) prints each
+piece as it is written.
 
 ## The evaluation facility (`core/romance/model_eval.py`)
 

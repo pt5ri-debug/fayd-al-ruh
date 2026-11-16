@@ -297,11 +297,15 @@ def test_the_service_exposes_the_models_the_project_really_has():
 
 
 def test_a_setting_is_clamped_to_its_documented_range():
+    from gui.romance import _default_setting
+
     with _service() as service:
         assert service.set_setting("temperature", "1.5") == "1.5"
         assert service.set_setting("temperature", "99") == "2"
         assert service.set_setting("temperature", "-5") == "0"
-        assert service.set_setting("max_tokens", "abc") == "512"
+        # A value that is not a number falls back to the documented default, so the
+        # assertion reads it from the one place it is declared.
+        assert service.set_setting("max_tokens", "abc") == _default_setting("max_tokens")
         assert service.set_setting("context_length", "999999") == "32768"
         # A non-numeric setting passes through unchanged.
         assert service.set_setting("default_mode", "romantic") == "romantic"

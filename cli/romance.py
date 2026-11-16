@@ -550,6 +550,27 @@ def run_import(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _stream_reply(service: Any, conversation_id: str, message: str, *, mode: str = "") -> Any:
+    """Stream one turn to stdout, so a long answer is read as it is written.
+
+    The headless twin of the window's live bubble: each piece of the reply is
+    written as it arrives (no trailing newline until the turn ends), and the exit
+    code matches the non-streaming path. With ``--json`` the pieces are not
+    interleaved with machine output, so the whole reply is printed once at the end.
+    """
+    final = None
+    printed = False
+    for event in service.send_stream(conversation_id, message, mode=mode):
+        if event.is_delta:
+            print(event.text, end="", flush=True)
+            printed = True
+        else:
+            final = event
+    if printed:
+        print()
+    return final
+
+
 def run_chat(args: argparse.Namespace) -> int:
     service = _service(args)
     conversation_id = args.conversation
@@ -558,6 +579,9 @@ def run_chat(args: argparse.Namespace) -> int:
             args.character_id, title=args.title, mode=args.mode or "general"
         )
         conversation_id = conversation.record_id
+    if not args.as_json:
+        final = _stream_reply(service, conversation_id, args.message, mode=args.mode)
+        return _report_stream(args, final)
     result = service.send(conversation_id, args.message, mode=args.mode)
     if result.refused:
         _emit(args, {"refused": True, "reason": result.reason}, f"Refused: {result.reason}")
@@ -574,8 +598,26 @@ def run_chat(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _report_stream(args: argparse.Namespace, final: Any) -> int:
+    """Report a streamed turn's end honestly and return the CLI exit code."""
+    if final is None:
+        print("No answer: the model returned nothing.")
+        return EXIT_UNAVAILABLE
+    if final.kind == "refused":
+        print(f"\nRefused: {final.reason}")
+        return EXIT_REFUSED
+    if final.kind != "done":
+        print(f"\nNo answer: {final.reason or 'the model returned nothing'}")
+        return EXIT_UNAVAILABLE
+    return EXIT_OK
+
+
 def run_send(args: argparse.Namespace) -> int:
-    result = _service(args).send(args.conversation_id, args.message, mode=args.mode)
+    service = _service(args)
+    if not args.as_json:
+        final = _stream_reply(service, args.conversation_id, args.message, mode=args.mode)
+        return _report_stream(args, final)
+    result = service.send(args.conversation_id, args.message, mode=args.mode)
     if result.refused:
         _emit(args, {"refused": True, "reason": result.reason}, f"Refused: {result.reason}")
         return EXIT_REFUSED

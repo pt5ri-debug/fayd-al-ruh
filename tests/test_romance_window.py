@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 import pytest
-from gui.romance import RomanceStudioService
+from gui.romance import RomanceStudioService, _default_setting
 
 
 def _display_available() -> bool:
@@ -219,8 +219,9 @@ def test_the_settings_window_writes_a_real_setting(tmp_path: Path) -> None:
         # A hand-typed value beyond the documented range is clamped.
         settings._store("temperature", "99")
         assert service.settings()["temperature"] == "2"
+        # A non-numeric value falls back to the setting's documented default.
         settings._store("max_tokens", "abc")
-        assert service.settings()["max_tokens"] == "512"
+        assert service.settings()["max_tokens"] == _default_setting("max_tokens")
     finally:
         _close_window(root, dialog)
 
@@ -536,5 +537,77 @@ def test_the_window_offers_the_knowledge_pack_controls(tmp_path: Path) -> None:
         text = dialog._own_text.get("1.0", "end")
         assert "Her knowledge base:" in text
         assert "not built yet" not in text
+    finally:
+        _close_window(root, dialog)
+
+
+class _StreamingSeam:
+    """A seam that yields the answer in pieces, so the window can show it live."""
+
+    def __init__(self, *pieces: str) -> None:
+        self.pieces = list(pieces) or ["Hello ", "there."]
+
+    def __call__(self, prompt: str, key, handle):
+        yield from self.pieces
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_a_streamed_reply_is_drawn_piece_by_piece(tmp_path: Path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_dialog import RomanceStudioDialog
+
+    service = RomanceStudioService(
+        root=tmp_path, generator=_Seam("unused"), stream_generator=_StreamingSeam()
+    )
+    root = tk.Tk()
+    root.withdraw()
+    dialog = RomanceStudioDialog(
+        root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+    )
+    try:
+        service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        dialog._entry.insert("1.0", "Say hello.")
+        dialog._send()
+        assert _wait_until(root, lambda: not dialog._busy)
+        transcript = "\n".join(w.get("1.0", "end") for _row, w in dialog._row_frames)
+        # The streamed pieces arrived and were joined into one reply.
+        assert "Hello " in transcript
+        assert "Hello there." in transcript
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_a_streamed_reply_never_shows_the_reasoning_trace(tmp_path: Path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_dialog import RomanceStudioDialog
+
+    opener = chr(60) + "thinking" + chr(62)
+    closer = chr(60) + "/thinking" + chr(62)
+    seam = _StreamingSeam("Answer. ", opener + "hidden reasoning", closer + " Done.")
+    service = RomanceStudioService(root=tmp_path, generator=_Seam("unused"), stream_generator=seam)
+    root = tk.Tk()
+    root.withdraw()
+    dialog = RomanceStudioDialog(
+        root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+    )
+    try:
+        service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        dialog._entry.insert("1.0", "Say hello.")
+        dialog._send()
+        assert _wait_until(root, lambda: not dialog._busy)
+        transcript = "\n".join(w.get("1.0", "end") for _row, w in dialog._row_frames)
+        assert "hidden reasoning" not in transcript
+        assert "Answer.  Done." in transcript
     finally:
         _close_window(root, dialog)
