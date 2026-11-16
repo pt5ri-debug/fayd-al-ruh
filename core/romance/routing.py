@@ -348,11 +348,14 @@ class CompanionModelRouter:
         The context is the model's own safe default (:data:`SAFE_CONTEXT`), the
         output is bounded (:data:`SAFE_MAX_TOKENS`), and the GPU layer count stays
         0 unless a caller raises it explicitly -- the honest default for the target
-        hardware.
+        hardware. The hidden reasoning trace is **off**: it is not something the
+        character says, and it spends the answer's own token budget.
         """
         from core.model_settings import ModelSettings
 
-        return ModelSettings(context=SAFE_CONTEXT, max_tokens=SAFE_MAX_TOKENS, gpu_layers=0)
+        return ModelSettings(
+            context=SAFE_CONTEXT, max_tokens=SAFE_MAX_TOKENS, gpu_layers=0, thinking=False
+        )
 
     def settings_from(
         self,
@@ -360,9 +363,12 @@ class CompanionModelRouter:
         context: int | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        thinking: bool | None = None,
     ) -> Any:
         """The settings a caller's own choices resolve to (see :func:`settings_from`)."""
-        return settings_from(context=context, max_tokens=max_tokens, temperature=temperature)
+        return settings_from(
+            context=context, max_tokens=max_tokens, temperature=temperature, thinking=thinking
+        )
 
     def memory_estimate(
         self, key: str | None = None, *, context_length: int | None = None
@@ -512,6 +518,7 @@ def settings_from(
     context: int | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    thinking: bool | None = None,
 ) -> Any:
     """The generation settings a caller's own choices resolve to, validated.
 
@@ -549,6 +556,9 @@ def settings_from(
         max_tokens=min(resolved_tokens, resolved_context),
         temperature=_clamp_float(temperature, *TEMPERATURE_RANGE, 0.7),
         gpu_layers=0,
+        # A conversational surface defaults the hidden reasoning trace *off*: it is
+        # not something the character says, and it eats the answer's own budget.
+        thinking=False if thinking is None else bool(thinking),
     )
 
 

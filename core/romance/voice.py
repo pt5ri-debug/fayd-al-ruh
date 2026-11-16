@@ -39,6 +39,28 @@ class VoiceAdapterError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class SpeakOutcome:
+    """What one attempt to read aloud actually did, with an honest reason.
+
+    ``speak`` used to return the playback handle or ``None``, so a window could
+    not tell a *failed render* from a *silent machine*: both looked like "no
+    voice engine is installed", which is wrong and unhelpful. The outcome keeps
+    the two apart -- ``rendered`` is the clip (or ``None`` when nothing could be
+    made), and ``played`` says whether it actually reached the speakers -- with a
+    readable ``detail`` naming the real next step.
+    """
+
+    rendered: Any = None
+    played: bool = False
+    playback: Any = None
+    detail: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.rendered is not None
+
+
+@dataclass(frozen=True)
 class VoiceOption:
     """One voice that can really be chosen here, with the source it came from."""
 
@@ -215,6 +237,15 @@ class CompanionVoiceAdapter:
         except Exception:
             return False
 
+    def speech_available(self) -> bool:
+        """Whether any speech engine is installed here (the honest yes/no)."""
+        try:
+            from core.speech import speech_available
+
+            return bool(speech_available())
+        except Exception:
+            return False
+
     # -- speaking / listening ---------------------------------------------
 
     def read_aloud(self, character_id: str, text: str) -> Any:
@@ -234,16 +265,54 @@ class CompanionVoiceAdapter:
             return None
 
     def speak(self, character_id: str, text: str) -> Any:
-        """Render and play ``text`` (best-effort; returns the playback or ``None``)."""
+        """Render and play ``text`` (best-effort; returns the playback or ``None``).
+
+        Kept for callers that only need the handle; :meth:`speak_outcome` is the
+        honest form and is what the window uses, so a failed render is not
+        reported as a missing engine.
+        """
+        return self.speak_outcome(character_id, text).playback
+
+    def speak_outcome(self, character_id: str, text: str) -> SpeakOutcome:
+        """Read ``text`` aloud and report exactly what happened.
+
+        Four honest cases, each with its own detail line: the voice is off for
+        this character; the text is empty; the render failed (no engine, or the
+        engine errored); or the clip was made and -- when a player exists -- it
+        is playing. Playback is best-effort, so a machine with no audio player
+        still returns the rendered clip and says the reading was silent.
+        """
+        profile = self.profile(character_id)
+        if not profile.enabled:
+            return SpeakOutcome(detail="Voice is off for this character.")
+        if not (text or "").strip():
+            return SpeakOutcome(detail="There is nothing to read.")
         clip = self.read_aloud(character_id, text)
         if clip is None:
-            return None
+            return SpeakOutcome(
+                detail=(
+                    "No speech engine could read this text here. "
+                    + (
+                        "Install one (espeak-ng, Piper, or Qwen3-TTS)."
+                        if not self.speech_available()
+                        else "The engine could not speak this text."
+                    )
+                )
+            )
         reader = self._get_reader()
         try:
-            self._playback = reader.play(clip)
-            return self._playback
+            playback = reader.play(clip)
         except Exception:
-            return None
+            playback = None
+        if playback is None:
+            self._playback = None
+            return SpeakOutcome(
+                rendered=clip,
+                played=False,
+                detail="The clip was rendered but no audio player is installed, so it was silent.",
+            )
+        self._playback = playback
+        return SpeakOutcome(rendered=clip, played=True, playback=playback, detail="")
 
     def stop(self) -> None:
         """Stop any playback the reader is holding (best-effort)."""
@@ -281,6 +350,27 @@ class CompanionVoiceAdapter:
         except Exception:
             return False
         return True
+
+    def microphone_available(self) -> bool:
+        """Whether a microphone recorder program is installed here."""
+        try:
+            from core.speech import MicrophoneRecorder
+
+            return bool(MicrophoneRecorder().available())
+        except Exception:
+            return False
+
+    def microphone_status(self) -> str:
+        """An honest, readable status of the microphone path and its next step."""
+        try:
+            from core.speech import microphone_install_hint
+        except Exception:
+            microphone_install_hint = lambda: ""  # noqa: E731
+        if not self.microphone_available():
+            return "No microphone recorder is installed. " + microphone_install_hint()
+        if not self.recognizer_available():
+            return "A microphone is available but no speech-to-text engine is installed."
+        return "Listening through the local speech engine."
 
     # -- internals --------------------------------------------------------
 
@@ -344,6 +434,7 @@ __all__ = [
     "ENGINE_AUTO",
     "ENGINE_NAMES",
     "CompanionVoiceAdapter",
+    "SpeakOutcome",
     "VoiceAdapterError",
     "VoiceOption",
     "VoiceProfileView",

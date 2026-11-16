@@ -614,6 +614,149 @@ def test_a_streamed_reply_never_shows_the_reasoning_trace(tmp_path: Path) -> Non
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_a_streamed_reply_appears_one_finished_sentence_at_a_time(tmp_path: Path) -> None:
+    """Each finished sentence is drawn as it lands, not only when the reply ends."""
+    import time as _time
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_dialog import RomanceStudioDialog
+
+    class _SlowSeam:
+        def __call__(self, prompt: str, key, handle):
+            # A fragment first (no sentence yet), then a finished sentence, a pause
+            # long enough for the window to paint, then the rest.
+            yield "Hello there"
+            yield ". How are "
+            _time.sleep(0.8)
+            yield "you today?"
+
+    service = RomanceStudioService(
+        root=tmp_path, generator=_Seam("unused"), stream_generator=_SlowSeam()
+    )
+    root = tk.Tk()
+    root.withdraw()
+    dialog = RomanceStudioDialog(
+        root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+    )
+    try:
+        service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        dialog._entry.insert("1.0", "Say hello.")
+        dialog._send()
+
+        def _shown() -> str:
+            return "\n".join(w.get("1.0", "end") for _row, w in dialog._row_frames)
+
+        # The first sentence is on screen while the model is still writing.
+        assert _wait_until(root, lambda: "Hello there." in _shown(), timeout=6.0)
+        assert "you today?" not in _shown()
+        # And the whole answer is there once the stream ends.
+        assert _wait_until(root, lambda: not dialog._busy)
+        assert "Hello there. How are you today?" in _shown()
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_reply_bubble_shows_a_thinking_placeholder_first(tmp_path: Path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_dialog import _THINKING_PLACEHOLDER, RomanceStudioDialog
+
+    service = RomanceStudioService(
+        root=tmp_path, generator=_Seam("unused"), stream_generator=_StreamingSeam("Hi there.")
+    )
+    root = tk.Tk()
+    root.withdraw()
+    dialog = RomanceStudioDialog(
+        root, service, theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont"
+    )
+    try:
+        service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        # A reply bubble created for a stream starts with the placeholder, so the
+        # wait is visible rather than a blank row under the character's name.
+        bubble = dialog._add_message("assistant", _THINKING_PLACEHOLDER, title="Layla")
+        assert bubble.get("1.0", "end").strip() == _THINKING_PLACEHOLDER
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_window_offers_sound_and_microphone_toggles(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        assert dialog._sound_button is not None
+        assert dialog._mic_button is not None
+        # Sound starts off (the Studio's own default) and the button reflects it.
+        assert service.voice_enabled() is False
+        assert dialog._sound_button.cget("text") == "🔇"
+        dialog._toggle_sound()
+        assert service.voice_enabled() is True
+        assert dialog._sound_button.cget("text") == "🔊"
+        dialog._toggle_sound()
+        assert service.voice_enabled() is False
+        assert dialog._sound_button.cget("text") == "🔇"
+        # The microphone toggle reports honestly (it never claims a recorder that
+        # this machine does not have).
+        dialog._toggle_microphone()
+        assert "icrophone" in dialog._status_line.cget("text")
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_saving_a_persona_does_not_hijack_the_selected_companion(tmp_path: Path) -> None:
+    """A persona is the *user*: saving one must not change who the chat talks to."""
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        companion = service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._select_character(companion.id)
+        root.update()
+        assert dialog._selected_character == companion.id
+
+        dialog._create_persona()
+        root.update()
+        editor = dialog._editors[-1]
+        editor._vars["name"].set("Ahmad")
+        editor._save()
+        root.update()
+
+        # The chat still talks to Layla; the persona did not become the companion.
+        assert dialog._selected_character == companion.id
+        assert dialog._is_companion(dialog._selected_character)
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_selecting_a_persona_never_makes_it_the_chat_companion(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        companion = service.create_character("Layla", fictional_age=27)
+        dialog._refresh_all()
+        dialog._select_character(companion.id)
+        root.update()
+        persona = service.create_persona("Ahmad")
+        dialog._refresh_all()
+        dialog._select_character(persona.id)
+        root.update()
+        # The companion is unchanged and the window says why.
+        assert dialog._selected_character == companion.id
+        assert dialog._selected_persona == persona.id
+        assert "persona" in dialog._status_line.cget("text").lower()
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_the_persona_panel_lists_personas_and_marks_the_active_one(tmp_path: Path) -> None:
     root, dialog, service = _dialog(tmp_path)
     try:
