@@ -53,6 +53,7 @@ SETTING_VOICE_ENABLED = "voice_enabled"
 SETTING_VOICE_ENGINE = "voice_engine"
 SETTING_INTERFACE_LANGUAGE = "interface_language"
 SETTING_ADULT_MODE = "adult_mode_enabled"
+SETTING_MODEL_THINKING = "model_thinking"
 
 SETTING_LABELS: tuple[tuple[str, str, str], ...] = (
     (SETTING_DEFAULT_MODEL, "Default language model", "the model a new character starts on"),
@@ -65,6 +66,11 @@ SETTING_LABELS: tuple[tuple[str, str, str], ...] = (
     (SETTING_VOICE_ENABLED, "Speak answers aloud", "on or off for new characters"),
     (SETTING_VOICE_ENGINE, "Default voice engine", "auto, espeak, piper, qwen3-tts, or audio.cpp"),
     (SETTING_INTERFACE_LANGUAGE, "Interface language", "en or ar"),
+    (
+        SETTING_MODEL_THINKING,
+        "Let the model think before answering",
+        "off keeps the whole answer limit for the reply itself",
+    ),
 )
 
 #: The Studio setting keys that hold a numeric value, with their safe bounds.
@@ -75,8 +81,10 @@ _NUMERIC_SETTINGS: dict[str, tuple[float, float, float]] = {
     SETTING_MEMORY_LIMIT: (0.0, 20.0, 6.0),
 }
 
-#: The Studio setting keys that hold an on/off value.
-_BOOL_SETTINGS: tuple[str, ...] = (SETTING_VOICE_ENABLED,)
+#: The Studio setting keys that hold an on/off value. Thinking defaults to *off*:
+#: a hidden reasoning trace is not something a companion says, and it spends the
+#: answer's own token budget -- the cause of a reply arriving cut short.
+_BOOL_SETTINGS: tuple[str, ...] = (SETTING_VOICE_ENABLED, SETTING_MODEL_THINKING)
 
 
 def _clamp_setting(key: str, value: str) -> str:
@@ -919,6 +927,18 @@ class RomanceStudioService:
             context=int(context) if context is not None else None,
             max_tokens=int(tokens) if tokens is not None else None,
             temperature=temperature,
+            thinking=self.model_thinking(),
+        )
+
+    def model_thinking(self) -> bool:
+        """Whether the model may write its hidden reasoning trace before answering.
+
+        Off by default: the trace is not something the character says, and it
+        spends the answer's own token budget, which is how a reply ends up cut
+        short. A user who wants the deeper reasoning can turn it back on.
+        """
+        return str(self.setting(SETTING_MODEL_THINKING)).strip().lower() in (
+            "on", "1", "true", "yes",
         )
 
     def _apply_model_settings(self) -> None:
@@ -1203,6 +1223,49 @@ class RomanceStudioService:
 
     def speak(self, character_id: str, text: str) -> Any:
         return self.voice.speak(character_id, text)
+
+    def speak_outcome(self, character_id: str, text: str) -> Any:
+        """Read a reply aloud, reporting honestly whether it played or was silent."""
+        return self.voice.speak_outcome(character_id, text)
+
+    def stop_speaking(self) -> None:
+        """Stop any reading in progress (best-effort)."""
+        self.voice.stop()
+
+    def voice_available(self) -> bool:
+        """Whether a speech engine is installed here."""
+        return self.voice.speech_available()
+
+    def voice_status(self) -> tuple[bool, str]:
+        """The Studio's honest voice readiness, as the status line reads it."""
+        return self._voice_status()
+
+    def microphone_available(self) -> bool:
+        """Whether a microphone recorder is installed here."""
+        return self.voice.microphone_available()
+
+    def microphone_status(self) -> str:
+        """An honest, readable status of the microphone path."""
+        return self.voice.microphone_status()
+
+    def transcribe(self, audio: Any) -> Any:
+        """Transcribe a recording with the project's own recognizer."""
+        return self.voice.transcribe(audio)
+
+    def start_recording(self) -> Any:
+        """Begin recording from the microphone (raises when none is installed)."""
+        from core.speech import MicrophoneRecorder
+
+        return MicrophoneRecorder(seconds=120.0).start()
+
+    def voice_enabled(self) -> bool:
+        """Whether replies are read aloud automatically (the Studio's own switch)."""
+        return str(self.setting(SETTING_VOICE_ENABLED)).strip().lower() in ("on", "1", "true", "yes")
+
+    def set_voice_enabled(self, enabled: bool) -> bool:
+        """Turn automatic read-aloud on or off (persisted)."""
+        self.set_setting(SETTING_VOICE_ENABLED, "on" if enabled else "off")
+        return bool(enabled)
 
     # -- safety -----------------------------------------------------------
 

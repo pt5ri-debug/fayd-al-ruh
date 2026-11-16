@@ -29,7 +29,12 @@ from core.romance.orchestrator import (
 )
 from core.romance.routing import CompanionModelRouter, settings_from
 from core.romance.storage import CompanionStorageService
-from gui.romance import SETTING_MAX_TOKENS, RomanceStudioService, _default_setting
+from gui.romance import (
+    SETTING_MAX_TOKENS,
+    SETTING_MODEL_THINKING,
+    RomanceStudioService,
+    _default_setting,
+)
 
 OPEN = chr(60) + "thinking" + chr(62)
 CLOSE = chr(60) + "/thinking" + chr(62)
@@ -188,9 +193,77 @@ def test_settings_from_clamps_and_keeps_the_answer_inside_the_context():
     assert default.context >= default.max_tokens
 
 
+def test_the_hidden_reasoning_trace_is_off_by_default_in_a_conversation():
+    # The trace is not something the character says, and it spends the answer's
+    # own token budget -- the cause of a reply arriving cut short. A conversational
+    # surface therefore turns it off, while the low-level default stays unchanged
+    # so every non-conversational caller is unaffected.
+    assert ModelSettings().thinking is True
+    assert settings_from(max_tokens=256).thinking is False
+    assert CompanionModelRouter().safe_settings().thinking is False
+    assert settings_from(thinking=True).thinking is True
+
+
+def test_thinking_off_asks_the_chat_template_not_to_write_a_trace():
+    from core.model_runtime import _inference_options
+
+    off = _inference_options(settings_from(max_tokens=128))
+    assert off["chat_template_kwargs"] == {"enable_thinking": False}
+    # Thinking on (or an older settings object with no field) adds no such option.
+    assert "chat_template_kwargs" not in _inference_options(ModelSettings())
+    assert "chat_template_kwargs" not in _inference_options(None)
+
+
+def test_the_settings_record_round_trips_the_thinking_choice():
+    on = ModelSettings(thinking=True)
+    off = ModelSettings(thinking=False)
+    assert on.to_primitive()["thinking"] is True
+    assert off.to_primitive()["thinking"] is False
+    assert ModelSettings.from_primitive(off.to_primitive()).thinking is False
+    # A record written before the field existed keeps the safe default.
+    assert ModelSettings.from_primitive({"temperature": 0.5}).thinking is True
+    # A hand-edited string is read, and anything else falls back rather than raising.
+    assert ModelSettings.from_primitive({"thinking": "off"}).thinking is False
+    assert ModelSettings.from_primitive({"thinking": "on"}).thinking is True
+    assert ModelSettings.from_primitive({"thinking": 7}).thinking is True
+    assert "thinking off" in off.describe()
+
+
+def test_the_studio_defaults_thinking_off_and_a_user_can_turn_it_back_on(tmp_path: Path):
+    service = RomanceStudioService(root=tmp_path / "studio")
+    assert service.model_thinking() is False
+    assert service.model_settings().thinking is False
+    service.set_setting(SETTING_MODEL_THINKING, "on")
+    assert service.model_thinking() is True
+    assert service.model_settings().thinking is True
+
+
+def test_the_llama_runner_retries_without_an_option_an_old_build_rejects():
+    from core.model_runtime import _LlamaChatRunner
+
+    class _OldBuild:
+        """A llama-cpp-python that does not accept ``chat_template_kwargs``."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def create_chat_completion(self, messages, **kwargs):
+            self.calls += 1
+            if "chat_template_kwargs" in kwargs:
+                raise TypeError("unexpected keyword argument 'chat_template_kwargs'")
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    build = _OldBuild()
+    runner = _LlamaChatRunner(build)
+    reply = runner.chat([{"role": "user", "content": "hi"}], chat_template_kwargs={"enable_thinking": False})
+    assert reply == "ok"
+    assert build.calls == 2
+
+
 def test_the_router_settings_from_delegates_to_the_module_function():
     router = CompanionModelRouter()
     assert router.settings_from(max_tokens=256).max_tokens == 256
+    assert router.settings_from(max_tokens=256, thinking=True).thinking is True
 
 
 def test_the_router_stream_reports_an_uninstalled_model_honestly(tmp_path: Path):

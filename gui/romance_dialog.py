@@ -65,6 +65,41 @@ _COLUMN_MAX = 860
 #: drawn only up to the cap, so a complete answer looked truncated.
 _MAX_BUBBLE_LINES = 400
 
+#: The characters that end a sentence, in either language, so a live reply can be
+#: written one *finished sentence* at a time instead of a word at a time.
+_SENTENCE_END = ".!?؟…\n"
+_SENTENCE_TRAILERS = "\"')]»”’"
+
+#: Shown in a reply bubble while the model is still thinking, so the wait is
+#: visible and the bubble is never a blank row carrying only its own header.
+_THINKING_PLACEHOLDER = "…"
+
+
+def _split_complete_sentences(text: str) -> tuple[str, str]:
+    """Split ``text`` into the sentences that are finished and the trailing rest.
+
+    A sentence is finished once it ends in ``.!?؟…`` or a newline (optionally
+    followed by a closing quote or bracket) and at least one space or the end of
+    the text. Used to paint a live reply sentence by sentence, so the reader sees
+    each completed sentence appear in turn rather than a growing word stream.
+    """
+    end = -1
+    for index, char in enumerate(text):
+        if char not in _SENTENCE_END:
+            continue
+        following = index + 1
+        while following < len(text) and text[following] in _SENTENCE_TRAILERS:
+            following += 1
+        if following >= len(text):
+            # The boundary is the last character so far: it may still be growing
+            # into a longer mark, so hold it back until the next piece arrives.
+            continue
+        if text[following].isspace():
+            end = following
+    if end <= 0:
+        return "", text
+    return text[:end].rstrip(), text[end:]
+
 
 class RomanceStudioDialog(ThemedDialog):
     """The Romance & Companion Studio page."""
@@ -119,7 +154,15 @@ class RomanceStudioDialog(ThemedDialog):
         self._stream_queue: queue.Queue[str] = queue.Queue()
         #: Where a piece of the live reply is written (a widget or ``None``).
         self._stream_sink: Callable[[str], None] | None = None
+        #: Words received but not yet shown, so only finished sentences are painted.
+        self._stream_buffer = ""
+        #: True once the first finished sentence has replaced the thinking placeholder.
+        self._stream_started = False
         self._pending_status = ""
+        #: The microphone recording in progress, or ``None``.
+        self._recording: Any = None
+        #: The text of the last finished reply, so the sound toggle can read it.
+        self._last_reply = ""
 
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
@@ -470,6 +513,17 @@ class RomanceStudioDialog(ThemedDialog):
         self._entry.bind("<Shift-Return>", lambda _e: None)
         self._send_button = self._button(composer, "Send ➤", self._send, anchor="center", variant="primary")
         self._send_button.pack(side="left", padx=(8, 0))
+        # Two reciprocal toggles beside Send: the microphone (start/stop listening)
+        # and the sound (read every reply aloud, or stay silent). Both report
+        # honestly when their engine is missing rather than pretending.
+        self._mic_button = self._button(
+            composer, "🎤", self._toggle_microphone, anchor="center", variant="secondary",
+        )
+        self._mic_button.pack(side="left", padx=(8, 0))
+        self._sound_button = self._button(
+            composer, "", self._toggle_sound, anchor="center", variant="secondary",
+        )
+        self._sound_button.pack(side="left", padx=(6, 0))
         self._status_line = tk.Label(
             col, text="", bg=theme.base, fg=theme.text_dim, font=self._type.font("2xs"), anchor="w",
         )
@@ -767,6 +821,7 @@ class RomanceStudioDialog(ThemedDialog):
         self._refresh_safety()
         self._refresh_character_panels()
         self._refresh_hero()
+        self._update_sound_button()
 
     def _refresh_hero(self) -> None:
         """The header's live stat strip, read from the Studio's own counts."""
@@ -1105,6 +1160,12 @@ class RomanceStudioDialog(ThemedDialog):
         """
         if not character_id:
             return
+        if not self._is_companion(character_id):
+            # A persona is the *user*: it is selected in the persona panel, never
+            # as the companion the chat is talking to.
+            self._selected_persona = character_id
+            self._set_status("This is your persona, not a companion to chat with.")
+            return
         self._selected_character = character_id
         self._selected_conversation = ""
         self._clear_transcript()
@@ -1246,8 +1307,10 @@ class RomanceStudioDialog(ThemedDialog):
         speaker = self._character_name()
         # The reply's own bubble is created empty and filled as the model writes,
         # so the answer is read sentence by sentence instead of arriving at once.
-        bubble = self._add_message("assistant", "", title=speaker)
-        self._stream_sink = lambda piece: self._append_message(bubble, piece)
+        bubble = self._add_message("assistant", _THINKING_PLACEHOLDER, title=speaker)
+        self._stream_buffer = ""
+        self._stream_started = False
+        self._stream_sink = lambda piece: self._stream_reply(bubble, piece)
         self._run_stream(
             "Answering…",
             lambda: self.service.send_stream(conversation_id, text, mode=mode),
@@ -1278,6 +1341,28 @@ class RomanceStudioDialog(ThemedDialog):
             self._scroll_to_bottom()
         except tk.TclError:
             return
+
+    def _stream_reply(self, widget: tk.Text, piece: str) -> None:
+        """Write a live reply one *finished sentence* at a time.
+
+        The model's deltas arrive word by word; a reader asked to see each
+        completed sentence, so the words are buffered and only the sentences that
+        have really finished are painted. Whatever is left (the sentence still
+        being written) is kept until it finishes or the stream ends, so nothing is
+        shown half-formed.
+        """
+        if self._closed or not piece:
+            return
+        self._stream_buffer += piece
+        ready, rest = _split_complete_sentences(self._stream_buffer)
+        self._stream_buffer = rest
+        if ready:
+            if not self._stream_started:
+                # Replace the thinking placeholder with the first real sentence.
+                self._stream_started = True
+                self._set_message(widget, ready + " ")
+            else:
+                self._append_message(widget, ready + " ")
 
     def _set_message(self, widget: tk.Text, text: str) -> None:
         """Replace a bubble's whole text (the finished reply, or an honest note)."""
@@ -1325,9 +1410,13 @@ class RomanceStudioDialog(ThemedDialog):
         result = getattr(event, "result", None)
         # The stored reply is authoritative: it is what the turn recorded, with a
         # reasoning trace filtered out of it.
-        self._set_message(bubble, getattr(result, "reply", "") or "")
+        reply = getattr(result, "reply", "") or ""
+        self._set_message(bubble, reply)
+        self._last_reply = reply
         self._set_status("")
         self._refresh_character_panels()
+        if reply.strip() and self.service.voice_enabled():
+            self._read_aloud(reply)
 
     def _on_reply(self, result: Any, error: Exception | None) -> None:
         if error is not None:
@@ -1349,7 +1438,7 @@ class RomanceStudioDialog(ThemedDialog):
 
     def _speak_last(self) -> None:
         if not self._selected_character:
-            self._set_status("Select a character first.")
+            self._set_status("Select a companion first.")
             return
         text = ""
         for _row, widget in reversed(self._row_frames):
@@ -1359,15 +1448,141 @@ class RomanceStudioDialog(ThemedDialog):
         if not text:
             self._set_status("There is nothing to read yet.")
             return
-        result = self.service.speak(self._selected_character, text)
-        self._set_status("Speaking…" if result else "No voice engine is installed.")
+        self._read_aloud(text)
+
+    def _read_aloud(self, text: str) -> None:
+        """Read ``text`` in the companion's voice, reporting honestly what happened."""
+        if not text.strip():
+            return
+        if not self.service.voice_available():
+            self._set_status(
+                "No speech engine is installed. Install espeak-ng, Piper, or Qwen3-TTS."
+            )
+            return
+        try:
+            outcome = self.service.speak_outcome(self._selected_character, text)
+        except Exception as error:
+            self._set_status(f"Could not read aloud: {error}")
+            return
+        if getattr(outcome, "played", False):
+            self._set_status("Speaking…")
+        elif getattr(outcome, "ok", False):
+            self._set_status("The clip was rendered but no audio player is installed.")
+        else:
+            self._set_status(getattr(outcome, "detail", "") or "Nothing could be read.")
 
     def _stop_speaking(self) -> None:
         try:
-            self.service.voice.stop()
+            self.service.stop_speaking()
             self._set_status("Stopped.")
         except Exception as error:
             self._set_status(str(error))
+
+    # -- microphone and sound toggles -------------------------------------
+
+    def _toggle_microphone(self) -> None:
+        """Start listening, or stop and transcribe what was heard.
+
+        The reciprocal of the main window's microphone: one click starts a
+        recording, a second stops it and turns the clip into text in the
+        composer. A missing recorder or recognizer is named honestly, never
+        pretended.
+        """
+        if self._recording is not None:
+            self._stop_recording()
+            return
+        if not self.service.microphone_available():
+            self._set_status(self.service.microphone_status())
+            return
+        try:
+            self._recording = self.service.start_recording()
+        except Exception as error:
+            self._recording = None
+            self._set_status(f"Could not start recording: {error}")
+            return
+        self._set_mic_recording(True)
+        self._set_status("Listening… click the microphone again to stop and transcribe.")
+
+    def _stop_recording(self) -> None:
+        recording = self._recording
+        self._recording = None
+        self._set_mic_recording(False)
+        if recording is None:
+            return
+        try:
+            recording.stop()
+        except Exception:
+            pass
+        self._run_background(
+            "Transcribing…",
+            lambda: self._transcribe(recording),
+            self._on_transcript,
+        )
+
+    def _transcribe(self, recording: Any) -> str:
+        """Finish the recording and transcribe it (runs on the worker thread)."""
+        clip = recording.result()
+        return str(self.service.transcribe(clip) or "")
+
+    def _on_transcript(self, result: Any, error: Exception | None) -> None:
+        if error is not None:
+            self._set_status(f"Could not transcribe: {error}")
+            return
+        text = str(result or "").strip()
+        if not text:
+            self._set_status(
+                "Nothing was recognised. Check the microphone, or type your message."
+            )
+            return
+        self._entry.insert("end", text)
+        self._set_status("Ready to send — edit the text or press Send.")
+
+    def _set_mic_recording(self, recording: bool) -> None:
+        button = getattr(self, "_mic_button", None)
+        if button is None:
+            return
+        try:
+            button.configure(
+                text="⏺" if recording else "🎤",
+                bg=self.theme.danger if recording else self.theme.surface_raised,
+                fg=self.theme.primary_foreground if recording else self.theme.foreground,
+            )
+        except tk.TclError:
+            pass
+
+    def _toggle_sound(self) -> None:
+        """Turn automatic read-aloud on or off, and apply it to the last reply."""
+        enabled = not self.service.voice_enabled()
+        self.service.set_voice_enabled(enabled)
+        self._update_sound_button()
+        if enabled:
+            if not self.service.voice_available():
+                self._set_status(
+                    "Sound is on, but no speech engine is installed. "
+                    "Install espeak-ng, Piper, or Qwen3-TTS."
+                )
+                return
+            self._set_status("Sound on — replies are read aloud.")
+            if self._last_reply.strip():
+                self._read_aloud(self._last_reply)
+        else:
+            self._stop_speaking()
+            self._set_status("Sound off.")
+
+    def _update_sound_button(self) -> None:
+        button = getattr(self, "_sound_button", None)
+        if button is None:
+            return
+        try:
+            on = self.service.voice_enabled()
+            available = self.service.voice_available()
+            button.configure(text="🔊" if on else "🔇")
+            if not available:
+                button.configure(state="disabled")
+            else:
+                button.configure(state="normal")
+        except tk.TclError:
+            pass
 
     def _toggle_favorite(self) -> None:
         if not self._selected_character:
@@ -1465,9 +1680,25 @@ class RomanceStudioDialog(ThemedDialog):
         self._editors.append(dialog)
 
     def _on_editor_saved(self, character_id: str) -> None:
-        if character_id:
+        """After the editor saves: keep the chat on a companion, never on a persona.
+
+        A persona is *the user*, not someone to talk to, so saving one must not
+        change which companion the transcript is talking to. Before this guard a
+        saved persona became ``_selected_character``, so the header, the panels,
+        and the composer all switched to a character with no conversation and no
+        voice -- which is exactly what made the window look read-only after the
+        persona feature landed.
+        """
+        if character_id and self._is_companion(character_id):
             self._selected_character = character_id
         self._refresh_all()
+
+    def _is_companion(self, character_id: str) -> bool:
+        """Whether ``character_id`` is someone to chat with (not the user's persona)."""
+        try:
+            return self.service.character(character_id).character.role != ROLE_USER
+        except Exception:
+            return True
 
     # -- the user's own persona -------------------------------------------
 
@@ -2084,6 +2315,8 @@ class RomanceStudioDialog(ThemedDialog):
         self._spinner.stop()
         self._spinner.pack_forget()
         self._stream_sink = None
+        self._stream_buffer = ""
+        self._stream_started = False
         finish(result, error)
 
     # -- close ------------------------------------------------------------
@@ -2130,7 +2363,13 @@ class RomanceStudioDialog(ThemedDialog):
                 except Exception:
                     pass
         try:
-            self.service.voice.stop()
+            if self._recording is not None:
+                self._recording.stop()
+                self._recording = None
+        except Exception:
+            pass
+        try:
+            self.service.stop_speaking()
         except Exception:
             pass
         try:

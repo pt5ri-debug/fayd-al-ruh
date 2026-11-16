@@ -1308,6 +1308,36 @@ Arabic is kept as secondary aliases where useful.
   that one character can never read another's avatar).
   `tests/test_romance_persona_avatar.py` (20 tests) and four window tests pin the
   persona, the avatar, the prompt wiring, the CLI, and the real Tk windows.
+  **Full answers and sentence-by-sentence streaming (Phase 13).** The Studio's
+  chat showed a reply cut short and only appeared once the whole answer had
+  finished; both are fixed. (1) The hidden reasoning trace of a reasoning model
+  (Qwen3 and its kin) is generated *inside* the output token limit, so a long
+  trace left too few tokens for the reply itself -- the cause of "the answer is
+  cut off because of the many thinking words". `ModelSettings` gains a `thinking`
+  field (**on by default**, so every existing caller is unchanged);
+  `core.model_runtime._inference_options` asks the chat template not to write a
+  trace (`chat_template_kwargs={"enable_thinking": False}`) when it is off, and
+  `_LlamaChatRunner.chat`/`.stream` retry with the portable option subset on an
+  older `llama-cpp-python` build that rejects the newer kwarg, so a reply still
+  comes back rather than the turn failing. `core.romance.routing.settings_from`/
+  `safe_settings` default the trace **off** for a conversational surface, and the
+  choice is a persisted Studio setting (`SETTING_MODEL_THINKING`, a checkbox in
+  the Studio's settings window). (2) The live reply is now written one *finished
+  sentence* at a time: `gui/romance_dialog.py`'s `_split_complete_sentences`
+  buffers the model's word-by-word deltas and paints only the sentences that have
+  really finished (Arabic and Latin punctuation -- `. ! ? ؟ …` and newlines,
+  honouring a trailing closing quote/bracket), holding the sentence still being
+  written until it completes, and the reply bubble shows a thinking placeholder
+  until the first sentence lands. Two related fixes came with the same pass: a
+  saved persona no longer hijacks the chat (`_is_companion` guards
+  `_on_editor_saved`/`_select_character`, since a persona is *the user*, never the
+  companion the transcript talks to), and `core/romance/voice.SpeakOutcome`
+  distinguishes a failed render from a silent machine, with sound/microphone
+  toggles on the composer that name the real next step when an engine is missing.
+  `tests/test_romance_streaming.py` and `tests/test_romance_window.py` pin the
+  thinking default and opt-in, the chat-template option, the old-build retry, the
+  sentence-by-sentence appearance, the placeholder, and the persona negative
+  controls.
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
   theme=, typography=, on_close=)` builds one frame of three buttons into the

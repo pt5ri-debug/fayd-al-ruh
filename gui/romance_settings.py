@@ -29,6 +29,7 @@ from gui.romance import (
     SETTING_LABELS,
     SETTING_MAX_TOKENS,
     SETTING_MEMORY_LIMIT,
+    SETTING_MODEL_THINKING,
     SETTING_TEMPERATURE,
     SETTING_VOICE_ENABLED,
     SETTING_VOICE_ENGINE,
@@ -70,7 +71,7 @@ _NUMBER_KEYS: tuple[str, ...] = (
 )
 
 #: The settings rendered as an on/off checkbox.
-_CHECK_KEYS: tuple[str, ...] = (SETTING_VOICE_ENABLED,)
+_CHECK_KEYS: tuple[str, ...] = (SETTING_VOICE_ENABLED, SETTING_MODEL_THINKING)
 
 
 class StudioSettingsDialog(ThemedDialog):

@@ -84,6 +84,12 @@ class ModelSettings:
     max_tokens: int = DEFAULT_MAX_TOKENS
     threads: int = DEFAULT_THREADS
     gpu_layers: int = DEFAULT_GPU_LAYERS
+    #: Whether a reasoning model (Qwen3 and its kin) may write its hidden chain of
+    #: thought first. On by default, so every existing caller is unchanged; a
+    #: conversational surface turns it off, because the trace is not something the
+    #: character says and it consumes the answer's own token budget -- which is
+    #: exactly how a reply ends up cut short with "many thinking words".
+    thinking: bool = True
 
     def __post_init__(self) -> None:
         _check_range("temperature", self.temperature, TEMPERATURE_RANGE)
@@ -92,6 +98,8 @@ class ModelSettings:
         _check_int_range("max_tokens", self.max_tokens, MAX_TOKENS_RANGE)
         _check_int_range("threads", self.threads, THREADS_RANGE)
         _check_int_range("gpu_layers", self.gpu_layers, GPU_LAYERS_RANGE)
+        if not isinstance(self.thinking, bool):
+            raise SettingsError("thinking must be true or false.")
         if self.max_tokens > self.context:
             raise SettingsError(
                 f"max_tokens ({self.max_tokens}) cannot exceed context ({self.context}): "
@@ -109,13 +117,14 @@ class ModelSettings:
         # what actually keeps a bad value out.
         return replace(self, **{field_name: value})  # type: ignore[arg-type]
 
-    def to_primitive(self) -> dict[str, float | int]:
+    def to_primitive(self) -> dict[str, float | int | bool]:
         """A deterministic mapping -- sorted keys, JSON-safe values."""
         return {
             "context": int(self.context),
             "gpu_layers": int(self.gpu_layers),
             "max_tokens": int(self.max_tokens),
             "temperature": float(self.temperature),
+            "thinking": bool(self.thinking),
             "threads": int(self.threads),
             "top_p": float(self.top_p),
         }
@@ -138,6 +147,7 @@ class ModelSettings:
             max_tokens=_clamped_int(data.get("max_tokens"), DEFAULT_MAX_TOKENS, MAX_TOKENS_RANGE),
             threads=_clamped_int(data.get("threads"), DEFAULT_THREADS, THREADS_RANGE),
             gpu_layers=_clamped_int(data.get("gpu_layers"), DEFAULT_GPU_LAYERS, GPU_LAYERS_RANGE),
+            thinking=_as_bool(data.get("thinking"), True),
         )
 
     def describe(self) -> str:
@@ -145,13 +155,27 @@ class ModelSettings:
         return (
             f"temperature {self.temperature:g}, top_p {self.top_p:g}, "
             f"context {self.context}, max_tokens {self.max_tokens}, "
-            f"threads {self.threads or 'auto'}, gpu_layers {self.gpu_layers}"
+            f"threads {self.threads or 'auto'}, gpu_layers {self.gpu_layers}, "
+            f"thinking {'on' if self.thinking else 'off'}"
         )
 
 
 _FIELDS: tuple[str, ...] = (
-    "temperature", "top_p", "context", "max_tokens", "threads", "gpu_layers",
+    "temperature", "top_p", "context", "max_tokens", "threads", "gpu_layers", "thinking",
 )
+
+
+def _as_bool(value: object, fallback: bool) -> bool:
+    """Read a stored on/off value, falling back on anything that is not one."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("on", "true", "1", "yes"):
+            return True
+        if text in ("off", "false", "0", "no"):
+            return False
+    return fallback
 
 
 def _check_range(name: str, value: object, bounds: tuple[float, float]) -> None:

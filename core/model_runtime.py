@@ -548,7 +548,15 @@ class _LlamaChatRunner:
         self.last_finish_reason = ""
 
     def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
-        result = self._llama.create_chat_completion(messages=messages, **kwargs)
+        try:
+            result = self._llama.create_chat_completion(messages=messages, **kwargs)
+        except TypeError:
+            # An older llama-cpp-python that does not accept ``chat_template_kwargs``
+            # (or another option): retry with the portable set so a reply still comes
+            # back rather than the turn failing.
+            result = self._llama.create_chat_completion(
+                messages=messages, **_portable_options(kwargs)
+            )
         try:
             return str(result["choices"][0]["message"]["content"])
         except (KeyError, IndexError, TypeError) as error:
@@ -559,7 +567,13 @@ class _LlamaChatRunner:
     def stream(self, messages: list[dict[str, str]], **kwargs: Any) -> Iterator[str]:
         """Yield the reply's content deltas, remembering why the stream stopped."""
         self.last_finish_reason = ""
-        for chunk in self._llama.create_chat_completion(messages=messages, stream=True, **kwargs):
+        try:
+            chunks = self._llama.create_chat_completion(messages=messages, stream=True, **kwargs)
+        except TypeError:
+            chunks = self._llama.create_chat_completion(
+                messages=messages, stream=True, **_portable_options(kwargs)
+            )
+        for chunk in chunks:
             try:
                 choice = chunk["choices"][0]
             except (KeyError, IndexError, TypeError) as error:
@@ -572,6 +586,19 @@ class _LlamaChatRunner:
             piece = (choice.get("delta") or {}).get("content")
             if piece:
                 yield str(piece)
+
+
+def _portable_options(options: dict[str, Any]) -> dict[str, Any]:
+    """The subset of generation options every llama-cpp-python build accepts.
+
+    Used only as a retry when a build rejects a newer option (``chat_template_kwargs``
+    on an older release): the reply is still produced, just without the newer flag.
+    """
+    return {
+        key: value
+        for key, value in options.items()
+        if key in ("temperature", "top_p", "max_tokens", "stop", "seed", "repeat_penalty")
+    }
 
 
 def _inference_options(settings: Any) -> dict[str, Any]:
@@ -588,6 +615,14 @@ def _inference_options(settings: Any) -> dict[str, Any]:
     max_tokens = getattr(settings, "max_tokens", None)
     if isinstance(max_tokens, int) and max_tokens > 0:
         options["max_tokens"] = int(max_tokens)
+    # A reasoning model writes its hidden chain of thought first, and that trace
+    # consumes the answer's own token budget -- the reason a reply is sometimes
+    # cut short with "many thinking words". When the settings turn thinking off we
+    # ask the chat template not to write it at all (Qwen3 and its kin expose
+    # ``enable_thinking``); a template that ignores the flag simply does not use
+    # it, and the caller's own thinking filter still keeps a trace out of view.
+    if getattr(settings, "thinking", True) is False:
+        options["chat_template_kwargs"] = {"enable_thinking": False}
     return options
 
 
