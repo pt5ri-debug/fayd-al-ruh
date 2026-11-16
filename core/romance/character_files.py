@@ -66,6 +66,7 @@ class CharacterProfileDocument:
     character_id: str
     name: str = ""
     nickname: str = ""
+    role: str = "companion"
     fictional_age: int | None = None
     adult_eligible: bool = False
     gender: str = ""
@@ -73,6 +74,7 @@ class CharacterProfileDocument:
     nationality: str = ""
     languages: tuple[str, ...] = ()
     appearance: str = ""
+    avatar_path: str = ""
     relationship_style: str = ""
     kinship: str = ""
     default_mode: str = "general"
@@ -85,6 +87,7 @@ class CharacterProfileDocument:
         return {
             "adult_eligible": self.adult_eligible,
             "appearance": self.appearance,
+            "avatar_path": self.avatar_path,
             "biography": self.biography,
             "boundaries": list(self.boundaries),
             "character_id": self.character_id,
@@ -99,6 +102,7 @@ class CharacterProfileDocument:
             "nickname": self.nickname,
             "personality": dict(self.personality),
             "relationship_style": self.relationship_style,
+            "role": self.role,
             "version": self.version,
         }
 
@@ -114,6 +118,7 @@ class CharacterProfileDocument:
             character_id=str(data.get("character_id", "")),
             name=str(data.get("name", "")),
             nickname=str(data.get("nickname", "")),
+            role=str(data.get("role", "companion")),
             fictional_age=data.get("fictional_age"),
             adult_eligible=bool(data.get("adult_eligible", False)),
             gender=str(data.get("gender", "")),
@@ -121,6 +126,7 @@ class CharacterProfileDocument:
             nationality=str(data.get("nationality", "")),
             languages=tuple(str(item) for item in data.get("languages", []) or []),
             appearance=str(data.get("appearance", "")),
+            avatar_path=str(data.get("avatar_path", "")),
             relationship_style=str(data.get("relationship_style", "")),
             kinship=str(data.get("kinship", "")),
             default_mode=str(data.get("default_mode", "general")),
@@ -237,6 +243,7 @@ class CharacterFiles:
             character_id=getattr(character, "record_id", self.character_id),
             name=getattr(character, "name", ""),
             nickname=getattr(character, "nickname", ""),
+            role=getattr(character, "role", "companion") or "companion",
             fictional_age=getattr(character, "fictional_age", None),
             adult_eligible=bool(getattr(character, "adult_eligible", False)),
             gender=getattr(character, "gender", ""),
@@ -244,6 +251,7 @@ class CharacterFiles:
             nationality=getattr(character, "nationality", ""),
             languages=tuple(getattr(character, "languages", ()) or ()),
             appearance=getattr(character, "appearance", ""),
+            avatar_path=getattr(character, "avatar_path", ""),
             relationship_style=getattr(character, "relationship_style", ""),
             kinship=getattr(character, "kinship", ""),
             default_mode=getattr(character, "default_mode", "general"),

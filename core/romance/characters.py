@@ -30,6 +30,9 @@ from pathlib import Path
 from typing import Any
 
 from core.romance.model import (
+    ROLE_COMPANION,
+    ROLE_USER,
+    ROLES,
     CharacterBoundary,
     CharacterPersonality,
     CharacterProfileItem,
@@ -59,6 +62,7 @@ _CHARACTER_FIELDS: tuple[str, ...] = (
     "owner",
     "name",
     "nickname",
+    "role",
     "fictional_age",
     "adult_eligible",
     "gender",
@@ -87,6 +91,7 @@ class CharacterDraft:
     owner: str = "natasha"
     name: str = ""
     nickname: str = ""
+    role: str = ROLE_COMPANION
     fictional_age: int | None = None
     adult_eligible: bool = False
     gender: str = ""
@@ -181,12 +186,18 @@ class CharacterManager:
         name = draft.name.strip()
         if not name:
             raise CharacterError("a character needs a name")
+        role = self._check_role(draft.role)
         self._check_age(draft.fictional_age, draft.adult_eligible)
         personality_values = self.personality.validate(draft.personality)
         fields = draft.character_fields()
         fields["name"] = name
+        fields["role"] = role
         character = self.domain.create("companion_characters", **fields)
         self._write_children(character.record_id, personality_values, draft)
+        if role == ROLE_USER and not self.active_persona():
+            # The first persona the user creates becomes the one they speak as,
+            # so the Studio always has a name to address them by.
+            self.activate_persona(character.record_id)
         return self.get(character.record_id)
 
     def get(self, character_id: str) -> CharacterBundle:
@@ -210,12 +221,18 @@ class CharacterManager:
         self,
         *,
         owner: str = "",
+        role: str = ROLE_COMPANION,
         include_archived: bool = False,
         include_inactive: bool = False,
         search: str = "",
         favorite: bool | None = None,
     ) -> list[CharacterSummary]:
         """The character library, newest first, with each row's real counts.
+
+        ``role`` selects which kind of record is listed: a **companion** (the
+        default -- who the user talks to) or the **user persona** (who the user
+        talks as). The two are the same record shape, so one reader serves both;
+        pass ``role=""`` for every record.
 
         The counts are gathered in **one pass** per supporting table (never a
         query per character), so a large library stays cheap.
@@ -225,6 +242,8 @@ class CharacterManager:
         )
         if owner:
             characters = [c for c in characters if c.owner == owner]
+        if role:
+            characters = [c for c in characters if (c.role or ROLE_COMPANION) == role]
         if not include_archived:
             characters = [c for c in characters if not c.archived]
         if favorite is not None:
@@ -261,10 +280,52 @@ class CharacterManager:
             self._check_age(age, eligible)
         if "name" in changes and not str(changes["name"]).strip():
             raise CharacterError("a character needs a name")
+        if "role" in changes:
+            changes["role"] = self._check_role(changes["role"])
         unknown = set(changes) - set(_CHARACTER_FIELDS)
         if unknown:
             raise CharacterError(f"cannot edit field(s): {', '.join(sorted(unknown))}")
         self.domain.update("companion_characters", character_id, **changes)
+        return self.get(character_id)
+
+    # -- the user's own persona -------------------------------------------
+
+    def list_personas(
+        self, *, include_inactive: bool = False, search: str = ""
+    ) -> list[CharacterSummary]:
+        """Every persona the user has made -- who they talk *as*."""
+        return self.list_characters(
+            role=ROLE_USER, include_inactive=include_inactive, search=search
+        )
+
+    def active_persona(self) -> CharacterBundle | None:
+        """The one persona the Studio currently speaks as, or ``None``.
+
+        A persona is marked active **only** while it is still active (not
+        soft-deleted), so a deactivated persona never becomes the name the
+        companions address the user by.
+        """
+        for summary in self.list_personas():
+            if summary.character.is_active:
+                return self.get(summary.id)
+        return None
+
+    def activate_persona(self, character_id: str) -> CharacterBundle:
+        """Make one persona the active one; every other persona becomes inactive.
+
+        Exactly one persona is active at a time -- the Studio's prompt and the
+        transcript's label both read it -- so switching is one atomic call rather
+        than a flag a caller must remember to clear.
+        """
+        bundle = self.get(character_id)
+        if (bundle.character.role or ROLE_COMPANION) != ROLE_USER:
+            raise CharacterError(
+                f"{character_id!r} is a companion, not a persona; only a persona can be active"
+            )
+        for summary in self.list_personas(include_inactive=True):
+            want = summary.id == character_id
+            if summary.character.is_active != want:
+                self.domain.update("companion_characters", summary.id, is_active=want)
         return self.get(character_id)
 
     def set_personality(self, character_id: str, values: dict[str, Any]) -> CharacterBundle:
@@ -340,6 +401,7 @@ class CharacterManager:
             owner=source.character.owner,
             name=new_name,
             nickname=source.character.nickname,
+            role=source.character.role or ROLE_COMPANION,
             fictional_age=source.character.fictional_age,
             adult_eligible=source.character.adult_eligible,
             gender=source.character.gender,
@@ -349,6 +411,7 @@ class CharacterManager:
             appearance=source.character.appearance,
             avatar_path=source.character.avatar_path,
             relationship_style=source.character.relationship_style,
+            kinship=source.character.kinship,
             default_mode=source.character.default_mode,
             model_key=source.character.model_key,
             tags=source.character.tags,
@@ -502,6 +565,15 @@ class CharacterManager:
 
     # -- internals --------------------------------------------------------
 
+    def _check_role(self, role: Any) -> str:
+        """Validate a character's role (``companion`` or ``user``)."""
+        value = str(role or ROLE_COMPANION).strip().lower()
+        if value not in ROLES:
+            raise CharacterError(
+                f"unknown role {role!r}; choose one of {', '.join(ROLES)}"
+            )
+        return value
+
     def _check_age(self, age: Any, eligible: bool) -> None:
         """Refuse an adult-eligible character whose age is unknown or under 18."""
         if not eligible:
@@ -604,6 +676,7 @@ def _character_to_dict(character: CompanionCharacter) -> dict[str, Any]:
         "owner": character.owner,
         "name": character.name,
         "nickname": character.nickname,
+        "role": character.role or ROLE_COMPANION,
         "fictional_age": character.fictional_age,
         "adult_eligible": character.adult_eligible,
         "gender": character.gender,

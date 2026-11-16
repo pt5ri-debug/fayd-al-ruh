@@ -40,16 +40,18 @@ the Python attribute stays `order`.
   steps in `MIGRATIONS` bring a file up to `SCHEMA_VERSION`. A database from a
   **newer** build is refused rather than read with a schema this build does not
   understand. Version 2 adds the character's `kinship` and its four romantic-reach
-  dials; each `ALTER` is guarded, so the migration is idempotent and a fresh file
-  and an upgraded one end in the same shape.
+  dials; version 3 adds the record's `role` (`companion` or `user`) and
+  `is_active` (the one persona the user speaks as). Each `ALTER` is guarded, so a
+  migration is idempotent and a fresh file and an upgraded one end in the same
+  shape.
 
-## Tables (schema version 2)
+## Tables (schema version 3)
 
 ### Characters
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `companion_characters` | the character library | `owner`, `name`, `nickname`, `fictional_age`, `adult_eligible`, `gender`, `biography`, `nationality`, `languages`, `appearance`, `avatar_path`, `relationship_style`, **`kinship`**, `default_mode`, `model_key`, `tags`, `favorite`, `archived`, `profile_version`, `metadata` |
+| `companion_characters` | the character library (companions **and** the user's own personas) | `owner`, `name`, `nickname`, **`role`**, **`is_active`**, `fictional_age`, `adult_eligible`, `gender`, `biography`, `nationality`, `languages`, `appearance`, `avatar_path`, `relationship_style`, **`kinship`**, `default_mode`, `model_key`, `tags`, `favorite`, `archived`, `profile_version`, `metadata` |
 | `character_personalities` | the personality dials (0..1) + instructions | `character_id`, `introversion`, `playfulness`, `warmth`, `expressiveness`, `confidence`, `humour`, `initiative`, `affection`, `romantic_intensity`, `formality`, `response_length`, `dialect`, **`boldness`**, **`passion`**, **`sensuality`**, **`escalation`**, `traits`, `instructions` |
 | `character_profiles` | free-form interests/hobbies/styles | `character_id`, `kind`, `label`, `value` |
 | `character_boundaries` | explicit conversation limits | `character_id`, `kind`, `value` |

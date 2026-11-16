@@ -280,6 +280,13 @@ class ModeContext:
     interests: tuple[str, ...] = ()
     #: How close the relationship with the user currently is, as one readable line.
     relationship: str = ""
+    #: Who the user is *as*, when the user has made their own persona: the name the
+    #: character addresses them by, and the persona's own identity block (its
+    #: appearance, biography, and voice guidance). Empty when the user has no
+    #: persona, in which case the prompt says "the user" exactly as before.
+    user_name: str = ""
+    user_identity: str = ""
+    user_voice: str = ""
 
     def to_primitive(self) -> dict[str, Any]:
         return {
@@ -293,6 +300,9 @@ class ModeContext:
             "reach": self.reach,
             "relationship": self.relationship,
             "scenario": self.scenario,
+            "user_identity": self.user_identity,
+            "user_name": self.user_name,
+            "user_voice": self.user_voice,
         }
 
 
@@ -310,11 +320,20 @@ def mode_prompt(mode: ModeSpec, context: ModeContext) -> str:
         role = mode.system_template.format(name=context.name, cast=cast or context.name)
     except (KeyError, IndexError):
         role = mode.system_template
+    if context.user_name:
+        role = f"{role}\nYou are speaking with {context.user_name}."
 
     blocks: list[str] = [role]
     blocks.append(human_passing_identity(context.name))
     if context.identity:
         blocks.append(f"## Who you are\n{context.identity.strip()}")
+    if context.user_name:
+        who = f"{context.user_name} is the person you are talking with."
+        if context.user_identity:
+            who = f"{who}\n{context.user_identity.strip()}"
+        if context.user_voice:
+            who = f"{who}\n{context.user_voice.strip()}"
+        blocks.append(f"## Who you are talking with\n{who}")
     if context.relationship:
         blocks.append(f"## Where you stand with them\n{context.relationship.strip()}")
     if context.personality:

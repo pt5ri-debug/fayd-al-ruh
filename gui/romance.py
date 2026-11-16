@@ -30,8 +30,10 @@ from core.romance import CompanionStorageService
 from core.romance.characters import CharacterDraft, CharacterManager
 from core.romance.conversation import ConversationManager
 from core.romance.memory import CompanionMemoryManager
+from core.romance.model import ROLE_COMPANION, ROLE_USER
 from core.romance.modes import MODE_GENERAL, mode_summaries
 from core.romance.orchestrator import CompanionOrchestrator, TurnResult, TurnStreamEvent
+from core.romance.personality import CharacterPersonalityEngine
 from core.romance.relationship import RelationshipEngine
 from core.romance.roleplay import RoleplayEngine
 from core.romance.routing import CompanionModelRouter
@@ -162,6 +164,8 @@ class CharacterRow:
     character_id: str
     name: str
     nickname: str = ""
+    role: str = "companion"
+    is_active: bool = False
     favorite: bool = False
     archived: bool = False
     conversation_count: int = 0
@@ -171,7 +175,8 @@ class CharacterRow:
 
     def label(self) -> str:
         star = "★ " if self.favorite else ""
-        return f"{star}{self.name}" + (f" ({self.nickname})" if self.nickname else "")
+        active = "● " if self.is_active else ""
+        return f"{star}{active}{self.name}" + (f" ({self.nickname})" if self.nickname else "")
 
 
 @dataclass(frozen=True)
@@ -236,6 +241,7 @@ class RomanceStudioService:
             characters=self.characters,
             memory_reader=self._memory_block,
             relationship_reader=self._relationship_line,
+            persona_reader=self._persona_context,
         )
         self.relationships = RelationshipEngine(self.storage)
         self.roleplay = RoleplayEngine(self.storage)
@@ -460,6 +466,121 @@ class RomanceStudioService:
             return True, f"{count} voice(s) available"
         return False, "no speech engine is installed (install espeak-ng, Piper, or Qwen3-TTS)"
 
+    # -- the user's own persona -------------------------------------------
+
+    def _persona_context(self) -> dict[str, str]:
+        """The user's own persona, as the blocks a prompt renders.
+
+        Read fresh before every turn, so an edit in the Persona window is in force
+        on the very next answer. Empty when the user has made no persona, in which
+        case the prompt says "the user" exactly as it always did.
+        """
+        try:
+            bundle = self.characters.active_persona()
+        except Exception:
+            return {}
+        if bundle is None:
+            return {}
+        character = bundle.character
+        bits: list[str] = []
+        if character.biography:
+            bits.append(str(character.biography).strip())
+        if character.appearance:
+            bits.append(f"Appearance: {str(character.appearance).strip()}")
+        if character.nationality:
+            bits.append(f"From {character.nationality}.")
+        if character.languages:
+            bits.append(f"Speaks {', '.join(character.languages)}.")
+        voice = ""
+        personality = getattr(bundle, "personality", None)
+        if personality is not None:
+            try:
+                voice = CharacterPersonalityEngine().render(personality)
+            except Exception:
+                voice = ""
+        return {
+            "name": str(character.name or ""),
+            "identity": "\n".join(bits),
+            "voice": voice,
+        }
+
+    def active_persona(self) -> Any:
+        """The persona the Studio currently speaks as, or ``None``."""
+        return self.characters.active_persona()
+
+    def active_persona_name(self) -> str:
+        """The name the companions address the user by (empty when none)."""
+        bundle = self.active_persona()
+        return str(getattr(bundle.character, "name", "") or "") if bundle is not None else ""
+
+    def persona_rows(self, *, search: str = "") -> list[CharacterRow]:
+        """Every persona the user has made, as the same row shape as a companion."""
+        return self._rows_for(ROLE_USER, include_archived=True, search=search)
+
+    def create_persona(self, name: str, **fields: Any) -> Any:
+        """Create a persona for the user (the first one becomes the active one)."""
+        return self.create_character(name, role=ROLE_USER, **fields)
+
+    def activate_persona(self, character_id: str) -> Any:
+        """Make one persona the one the user speaks as."""
+        return self._finalise(self.characters.activate_persona(character_id))
+
+    def persona_label(self) -> str:
+        """The label the transcript puts on the user's own turns.
+
+        The persona's name when there is one, else the plain ``"You"`` -- so a
+        user with no persona sees exactly the label they always saw.
+        """
+        return self.active_persona_name() or "You"
+
+    # -- avatars ----------------------------------------------------------
+
+    def avatar_manager(self) -> Any:
+        """The avatar engine, over this Studio's own data root."""
+        from core.romance.avatar import CharacterAvatarManager
+
+        if getattr(self, "_avatar_manager", None) is None:
+            self._avatar_manager = CharacterAvatarManager(self.storage, root=self.storage.root)
+        return self._avatar_manager
+
+    def avatar_path(self, character_id: str) -> Any:
+        """The picture a character currently has, or ``None``."""
+        try:
+            return self.avatar_manager().current_path(character_id)
+        except Exception:
+            return None
+
+    def set_avatar_from_file(self, character_id: str, source: str | Path) -> Any:
+        """Set a character's avatar from a picture the user chose."""
+        return self.avatar_manager().set_from_file(character_id, source)
+
+    def generate_avatar(
+        self,
+        character_id: str,
+        *,
+        prompt: str = "",
+        backend: str = "procedural",
+        seed: int | None = None,
+    ) -> Any:
+        """Generate a character's avatar (per character, from its own profile)."""
+        return self.avatar_manager().generate(
+            character_id, prompt=prompt, backend=backend, seed=seed
+        )
+
+    def clear_avatar(self, character_id: str) -> Any:
+        """Remove a character's avatar and fall back to its initial badge."""
+        return self.avatar_manager().clear(character_id)
+
+    def avatar_backends(self) -> tuple[tuple[str, str], ...]:
+        """The avatar generators this machine offers, ``(key, label)``."""
+        from core.romance.avatar import AVATAR_BACKENDS, BACKEND_DIFFUSION, BACKEND_PROCEDURAL
+
+        labels = {
+            BACKEND_PROCEDURAL: "Built-in (no download)",
+            BACKEND_DIFFUSION: "Learned (needs the image extra)",
+        }
+        return tuple((key, labels.get(key, key)) for key in AVATAR_BACKENDS)
+
     # -- characters -------------------------------------------------------
 
     def character_rows(
@@ -469,20 +590,43 @@ class RomanceStudioService:
         search: str = "",
         favorite: bool | None = None,
     ) -> list[CharacterRow]:
+        return self._rows_for(
+            ROLE_COMPANION,
+            include_archived=include_archived,
+            search=search,
+            favorite=favorite,
+        )
+
+    def _rows_for(
+        self,
+        role: str,
+        *,
+        include_archived: bool = False,
+        search: str = "",
+        favorite: bool | None = None,
+    ) -> list[CharacterRow]:
         rows: list[CharacterRow] = []
         for summary in self.characters.list_characters(
-            include_archived=include_archived, search=search, favorite=favorite
+            role=role,
+            include_archived=include_archived,
+            search=search,
+            favorite=favorite,
         ):
             stage = ""
-            try:
-                stage = self.relationships.snapshot(summary.id).stage_title
-            except Exception:
-                stage = ""
+            if role == ROLE_COMPANION:
+                # A relationship is between the user and a *companion*; a persona
+                # carries none, so no state row is created for one.
+                try:
+                    stage = self.relationships.snapshot(summary.id).stage_title
+                except Exception:
+                    stage = ""
             rows.append(
                 CharacterRow(
                     character_id=summary.id,
                     name=summary.name,
                     nickname=getattr(summary.character, "nickname", ""),
+                    role=getattr(summary.character, "role", ROLE_COMPANION) or ROLE_COMPANION,
+                    is_active=bool(getattr(summary.character, "is_active", False)),
                     favorite=bool(getattr(summary.character, "favorite", False)),
                     archived=bool(getattr(summary.character, "archived", False)),
                     conversation_count=summary.conversation_count,
@@ -631,6 +775,7 @@ class RomanceStudioService:
         self,
         name: str,
         *,
+        role: str = ROLE_COMPANION,
         fictional_age: int | None = None,
         nickname: str = "",
         gender: str = "",
@@ -651,6 +796,7 @@ class RomanceStudioService:
             owner=owner,
             name=name,
             nickname=nickname,
+            role=role,
             fictional_age=fictional_age,
             gender=gender,
             biography=biography,

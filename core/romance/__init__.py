@@ -60,6 +60,9 @@ from core.romance.memory import (
 )
 from core.romance.model import (
     RECORDS,
+    ROLE_COMPANION,
+    ROLE_USER,
+    ROLES,
     CharacterBoundary,
     CharacterPersonality,
     CharacterProfileItem,
@@ -194,6 +197,9 @@ __all__ = [
     "RETENTION_CHOICES",
     "RETENTION_KEEP",
     "RETENTION_PURGE",
+    "ROLES",
+    "ROLE_COMPANION",
+    "ROLE_USER",
     "SAFETY_FLOOR",
     "SAFE_CONTEXT",
     "SAFE_MAX_TOKENS",

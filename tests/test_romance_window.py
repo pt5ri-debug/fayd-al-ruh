@@ -611,3 +611,153 @@ def test_a_streamed_reply_never_shows_the_reasoning_trace(tmp_path: Path) -> Non
         assert "Answer.  Done." in transcript
     finally:
         _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_persona_panel_lists_personas_and_marks_the_active_one(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        # With no persona the label says so honestly.
+        dialog._refresh_personas()
+        root.update()
+        assert "No persona yet" in dialog._persona_label.cget("text")
+        assert dialog._persona_list.size() == 0
+        # Creating one fills the list and the active line.
+        service.create_persona("Omar", fictional_age=31)
+        dialog._refresh_personas()
+        root.update()
+        assert dialog._persona_list.size() == 1
+        assert "Omar" in dialog._persona_list.get(0)
+        assert "Omar" in dialog._persona_label.cget("text")
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_selecting_and_activating_a_persona_from_the_window(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        first = service.create_persona("Omar", fictional_age=31)
+        second = service.create_persona("Sara", fictional_age=29)
+        dialog._refresh_personas()
+        root.update()
+        # Rows are newest first, so select the row for the persona we want.
+        index = dialog._persona_ids.index(second.id)
+        dialog._on_persona_selected(index)
+        assert dialog._selected_persona == second.id
+        dialog._activate_persona()
+        root.update()
+        assert service.active_persona_name() == "Sara"
+        assert "Sara" in dialog._persona_label.cget("text")
+        assert service.characters.get(first.id).character.is_active is False
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_window_offers_the_persona_controls(tmp_path: Path) -> None:
+    root, dialog, _service = _dialog(tmp_path)
+    try:
+        assert dialog._persona_list is not None
+        assert dialog._persona_label is not None
+        for name in (
+            "_create_persona", "_edit_persona", "_activate_persona",
+            "_duplicate_persona", "_export_persona", "_import_persona", "_delete_persona",
+        ):
+            assert callable(getattr(dialog, name))
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_transcript_labels_the_users_own_turns_with_the_persona_name(tmp_path: Path) -> None:
+    root, dialog, service = _dialog(tmp_path)
+    try:
+        service.create_character("Layla", fictional_age=27)
+        service.create_persona("Omar", fictional_age=31)
+        dialog._refresh_all()
+        dialog._on_character_selected(0)
+        root.update()
+        # The user's own turns are labelled with the persona's name.
+        assert dialog._user_label() == "Omar"
+        dialog._entry.insert("1.0", "Hello there.")
+        dialog._send()
+        assert _wait_until(root, lambda: not dialog._busy)
+        # The label is drawn on the user's turn, not in the body text.
+        labels = [
+            child.cget("text")
+            for row, _widget in dialog._row_frames
+            for child in row.winfo_children()
+            for child in child.winfo_children()
+            if child.winfo_class() == "Label"
+        ]
+        assert "Omar" in labels
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_editor_offers_the_avatar_and_the_role_aware_wording(tmp_path: Path) -> None:
+    import tkinter as tk
+
+    from core.romance.model import ROLE_USER
+    from gui.app import DARK_THEME
+    from gui.romance_editor import CharacterEditorDialog
+
+    service = RomanceStudioService(root=tmp_path, generator=_Seam("Hi."))
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        # A companion's editor: no persona switch, the companion wording.
+        companion = CharacterEditorDialog(
+            root, service, character_id="", role="companion",
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        assert companion.window.title() == "New companion"
+        assert getattr(companion, "_active_var", None) is None
+        assert companion._avatar_canvas is not None
+        for name in ("_upload_avatar", "_generate_avatar", "_clear_avatar", "_refresh_avatar"):
+            assert callable(getattr(companion, name))
+
+        # A persona's editor: the persona wording and the "speak as this" switch.
+        persona = CharacterEditorDialog(
+            root, service, character_id="", role=ROLE_USER,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        assert "persona" in persona.window.title().lower()
+        assert persona._active_var is not None
+    finally:
+        root.destroy()
+        gc.collect()
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_editor_saves_a_persona_and_activates_it(tmp_path: Path) -> None:
+    import tkinter as tk
+
+    from core.romance.model import ROLE_USER
+    from gui.app import DARK_THEME
+    from gui.romance_editor import CharacterEditorDialog
+
+    service = RomanceStudioService(root=tmp_path, generator=_Seam("Hi."))
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        persona = CharacterEditorDialog(
+            root, service, character_id="", role=ROLE_USER,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        persona._vars["name"].set("Omar")
+        persona._vars["age"].set("31")
+        persona._active_var.set(True)
+        persona._save()
+        root.update()
+        assert persona.character_id
+        assert service.active_persona_name() == "Omar"
+        assert service.character(persona.character_id).character.role == ROLE_USER
+    finally:
+        root.destroy()
+        gc.collect()

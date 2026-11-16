@@ -45,6 +45,7 @@ from core.romance import (
 from core.romance import knowledge_pack as _knowledge_pack
 from core.romance.characters import CharacterDraft, CharacterError, CharacterManager
 from core.romance.database import RomanceLoadReport
+from core.romance.model import ROLE_USER as USER_ROLE
 from core.romance.model import CompanionMemory, CompanionMessage, utc_now
 from core.romance.model_eval import ModelEvaluator
 from core.romance.personality import (
@@ -374,6 +375,28 @@ STUDIO_JUDGEMENTS: tuple[StudioJudgement, ...] = (
         "one companion's knowledge base is never another's",
         "negative-knowledge-pack-isolated",
         note="negative control: a pack lives under its own character's folder",
+    ),
+    # -- the user's own persona and the per-character avatar ------------------
+    StudioJudgement(
+        "the user's own persona is created, activated, and rendered into the "
+        "prompt the companion reads",
+        "persona-round-trip",
+    ),
+    StudioJudgement(
+        "a persona is never listed as a companion, and a companion is never a "
+        "persona",
+        "negative-persona-not-a-companion",
+        note="negative control: the two roles are kept apart in every listing",
+    ),
+    StudioJudgement(
+        "each character carries its own avatar, uploaded or generated, and "
+        "clearing it removes the picture",
+        "avatar-round-trip",
+    ),
+    StudioJudgement(
+        "one character can never read another's avatar",
+        "negative-avatar-isolated",
+        note="negative control: an avatar lives in its own character's folder",
     ),
 )
 
@@ -1580,6 +1603,79 @@ def _judgement_holds(judgement: StudioJudgement) -> bool:
                 return False
             # The first's shards are not reachable as the second's bank.
             return second_files.knowledge_pack_stats() == {}
+
+    if kind == "persona-round-trip":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            companion = service.create_character("Layla", fictional_age=27)
+            persona = service.create_persona(
+                "Omar", fictional_age=31, biography="a petroleum engineer",
+                appearance="tall, dark hair",
+            )
+            # The persona carries the user role and, as the only one, is active.
+            if persona.character.role != USER_ROLE or not persona.character.is_active:
+                return False
+            if service.persona_label() != "Omar":
+                return False
+            # It reaches the prompt the companion reads.
+            conversation = service.start_conversation(companion.id)
+            prompt = service.conversations.build_prompt(conversation.record_id)
+            if "Omar" not in prompt:
+                return False
+            # A second persona can be made active, and the first is then not.
+            second = service.create_persona("Sara", fictional_age=29)
+            service.activate_persona(second.id)
+            if service.active_persona_name() != "Sara":
+                return False
+            return not service.characters.get(persona.id).character.is_active
+
+    if kind == "negative-persona-not-a-companion":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            service.create_character("Layla", fictional_age=27)
+            service.create_persona("Omar", fictional_age=31)
+            companions = {row.name for row in service.character_rows()}
+            personas = {row.name for row in service.persona_rows()}
+            # Neither list leaks into the other.
+            return companions == {"Layla"} and personas == {"Omar"}
+
+    if kind == "avatar-round-trip":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            bundle = service.create_character("Layla", fictional_age=27)
+            # Generate one from the character's own profile.
+            generated = service.generate_avatar(bundle.id)
+            if not generated.ok or service.avatar_path(bundle.id) is None:
+                return False
+            # Upload a real file the user chose.
+            picture = Path(folder) / "chosen.png"
+            picture.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+            uploaded = service.set_avatar_from_file(bundle.id, picture)
+            if not uploaded.ok or service.avatar_path(bundle.id) is None:
+                return False
+            # Clearing removes it.
+            service.clear_avatar(bundle.id)
+            return service.avatar_path(bundle.id) is None
+
+    if kind == "negative-avatar-isolated":
+        from gui.romance import RomanceStudioService
+
+        with tempfile.TemporaryDirectory() as folder:
+            service = RomanceStudioService(root=Path(folder), generator=_fixed_generator("Hi."))
+            first = service.create_character("Layla", fictional_age=27)
+            second = service.create_character("Noor", fictional_age=30)
+            service.generate_avatar(first.id)
+            # The second has no picture, and its folder is a different one.
+            if service.avatar_path(second.id) is not None:
+                return False
+            manager = service.avatar_manager()
+            return manager.folder(first.id) != manager.folder(second.id)
 
     return False
 
