@@ -548,3 +548,167 @@ def test_a_reply_that_hit_the_output_cap_is_recorded_not_discarded(tmp_path: Pat
     assert all(piece.ok for piece in pieces)
     messages = " ".join(event.message for event in manager.log.tail(limit=5))
     assert "output limit" in messages
+
+
+# -- the in-process trained runtime streams too -----------------------------
+
+
+def test_the_trained_generator_streams_exactly_what_it_generates():
+    """The in-process generator can be watched, and streaming changes nothing.
+
+    The companion's own trained checkpoint is the one model a clean install really
+    has, and its runtime used to report ``streaming=False`` -- so a reply arrived
+    whole, at the end. ``LocalGenerator.generate_stream`` yields the same
+    continuation as ``generate``, piece by piece, so a reader watches the answer
+    grow without the text changing.
+    """
+    from ml.llm.generator import LocalGenerator
+    from ml.llm.transformer import TransformerConfig, TransformerLM
+
+    config = TransformerConfig(vocab_size=258, block_size=32, n_layer=1, n_head=2, n_embd=16)
+    model = TransformerLM(config)
+    generator = LocalGenerator(model)
+    prompt = "Porosity is"
+    full = generator.generate(prompt, max_new_tokens=12, temperature=0.0)[len(prompt):]
+    pieces = list(generator.generate_stream(prompt, max_new_tokens=12, temperature=0.0))
+    # The concatenation is *exactly* the one-shot reply, and it arrives in pieces.
+    assert "".join(pieces) == full
+    assert len(pieces) > 1
+
+
+def test_the_trained_generator_streams_a_seeded_run_identically():
+    """A seeded stream and a seeded one-shot draw the same sequence."""
+    from ml.llm.generator import LocalGenerator
+    from ml.llm.transformer import TransformerConfig, TransformerLM
+
+    config = TransformerConfig(vocab_size=258, block_size=32, n_layer=1, n_head=2, n_embd=16)
+    generator = LocalGenerator(TransformerLM(config))
+    prompt = "The reservoir"
+    full = generator.generate(prompt, max_new_tokens=10, temperature=0.9, seed=11)[len(prompt):]
+    pieces = "".join(
+        generator.generate_stream(prompt, max_new_tokens=10, temperature=0.9, seed=11)
+    )
+    assert pieces == full
+
+
+def test_the_streamed_pieces_never_split_a_multibyte_character(monkeypatch):
+    """No piece is a broken glyph, even when a character spans two byte tokens.
+
+    The vocabulary is bytes, so an Arabic letter is two tokens; decoding each
+    token on its own would turn every half into ``�``. The stream decodes through
+    an incremental UTF-8 decoder, so a whole character is held until both its
+    bytes have arrived and every yielded piece is whole. The sampler is pinned to
+    a known byte sequence so the property is tested on its own, not on whatever an
+    untrained model happens to emit.
+    """
+    from ml.llm.generator import LocalGenerator
+    from ml.llm.tokenizer import BOS_ID, ByteTokenizer
+    from ml.llm.transformer import TransformerConfig, TransformerLM
+
+    generator = LocalGenerator(TransformerLM(
+        TransformerConfig(vocab_size=258, block_size=64, n_layer=1, n_head=2, n_embd=16)
+    ))
+    word = "مس"  # two Arabic letters, four bytes, i.e. four byte tokens
+    sequence = iter([*list(word.encode("utf-8")), BOS_ID])
+
+    import ml.llm.generator as generator_module
+
+    monkeypatch.setattr(generator_module, "sample", lambda *a, **k: next(sequence))
+    pieces = list(generator.generate_stream("x", max_new_tokens=8, temperature=0.0))
+
+    assert "".join(pieces) == word
+    # No replacement character is ever emitted, and no piece holds half a glyph:
+    # the first letter only appears once both of its bytes have arrived.
+    assert all("\ufffd" not in piece for piece in pieces)
+    assert pieces[0] == word[:1]
+    # The tokenizer round-trips the Arabic word itself (sanity on the harness).
+    assert ByteTokenizer().decode(ByteTokenizer().encode(word)) == word
+
+
+def test_the_trained_adapter_reports_streaming_and_has_a_stream_seam():
+    from core.model_runtime import InProcessTrainedAdapter
+
+    adapter = InProcessTrainedAdapter(loader=lambda path: object())
+    assert adapter.capabilities().streaming is True
+    assert hasattr(adapter, "stream")
+
+
+def test_the_trained_adapter_streams_through_the_manager(tmp_path: Path, monkeypatch):
+    """The manager streams a trained checkpoint instead of returning it whole."""
+    from core.model_runtime import InProcessTrainedAdapter
+
+    class _Model:
+        pass
+
+    class _Generator:
+        def __init__(self, model):
+            self._model = model
+
+        def generate_stream(self, prompt, *, max_new_tokens, temperature):
+            yield "one "
+            yield "two"
+
+    adapter = InProcessTrainedAdapter(loader=lambda path: _Model())
+    # Drive the adapter directly: load is bypassed by injecting the loaded model.
+    adapter._model = _Model()
+    import ml.llm.generator as generator_module
+
+    monkeypatch.setattr(generator_module, "LocalGenerator", _Generator)
+    pieces = list(adapter.stream("hi"))
+    assert pieces == ["one ", "two"]
+
+
+def test_the_ollama_client_exposes_a_stream_seam():
+    from core.coder_model import OllamaCoderClient
+
+    assert hasattr(OllamaCoderClient, "chat_stream")
+
+
+def test_the_ollama_adapter_reports_streaming_and_has_a_stream_seam():
+    from core.model_runtime import OllamaAdapter
+
+    adapter = OllamaAdapter(client=object())
+    assert adapter.capabilities().streaming is True
+    assert hasattr(adapter, "stream")
+
+
+def test_the_ollama_adapter_streams_through_a_client_that_can():
+    """A client that streams is used; the pieces are passed straight through."""
+    from core.model_runtime import OllamaAdapter
+
+    class _Client:
+        def chat(self, messages, *, temperature=0.2):  # pragma: no cover
+            raise AssertionError("a streaming client must stream")
+
+        def chat_stream(self, messages, *, temperature=0.2):
+            yield "a "
+            yield "b"
+
+    adapter = OllamaAdapter(client=_Client())
+    assert list(adapter.stream("hi")) == ["a ", "b"]
+
+
+def test_the_ollama_adapter_falls_back_when_its_client_cannot_stream():
+    """A client with no streaming method is called once, never refused."""
+    from core.model_runtime import OllamaAdapter
+
+    class _Client:
+        def chat(self, messages, *, temperature=0.2):
+            return "the whole reply"
+
+    adapter = OllamaAdapter(client=_Client())
+    assert list(adapter.stream("hi")) == ["the whole reply"]
+
+
+def test_the_shipped_answer_limit_is_comfortably_larger_than_the_old_cap():
+    # The reader asked for more words: the shipped default is well above the old
+    # 512-token cap and above the earlier 1024, so a long answer is not cut off.
+    assert float(_default_setting(SETTING_MAX_TOKENS)) >= 2048
+
+
+def test_the_bubble_cap_allows_a_long_companion_answer():
+    # The reader's second complaint was a reply drawn only up to the old cap, so a
+    # complete answer looked truncated. The cap must be far above a long reply.
+    from gui.romance_dialog import _MAX_BUBBLE_LINES
+
+    assert _MAX_BUBBLE_LINES >= 1000

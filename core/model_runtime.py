@@ -672,7 +672,7 @@ class OllamaAdapter:
             # Decided by Ollama and its own configuration, not by this project, so
             # the honest answer is "unknown" rather than a guess either way.
             gpu_offload=None,
-            streaming=False,
+            streaming=True,
             vision=False,
             resident=True,
         )
@@ -755,6 +755,33 @@ class OllamaAdapter:
             seconds=time.monotonic() - started,
         )
 
+    def stream(self, prompt: str, *, settings: Any = None) -> Iterator[str]:
+        """Yield Ollama's reply piece by piece, so a caller shows it live.
+
+        The same one request as :meth:`infer`, but through the client's own
+        streaming API, so a reader watches the character answer instead of waiting
+        for the last token. A client that cannot stream is called once and its
+        whole reply is yielded as one piece -- the honest fallback, never a
+        refusal. A failure raises :class:`RuntimeUnavailable`, before the first
+        piece or during the stream.
+        """
+        text = (prompt or "").strip()
+        if not text:
+            raise RuntimeUnavailable("A streamed reply needs a prompt.")
+        streamer = getattr(self._client, "chat_stream", None)
+        if not callable(streamer):
+            yield str(
+                self._client.chat([CoderMessage(role="user", content=text)])
+            )
+            return
+        temperature = float(getattr(settings, "temperature", 0.2) or 0.2)
+        try:
+            yield from streamer(
+                [CoderMessage(role="user", content=text)], temperature=temperature
+            )
+        except CoderUnavailable as error:
+            raise RuntimeUnavailable(str(error)) from error
+
 
 # ------------------------------------------------------- in-project trained
 
@@ -789,7 +816,7 @@ class InProcessTrainedAdapter:
             can_validate=True,
             can_infer=True,
             gpu_offload=False,  # the numpy transformer is CPU only, by design
-            streaming=False,
+            streaming=True,
             vision=False,
             resident=True,
         )
@@ -921,6 +948,33 @@ class InProcessTrainedAdapter:
             ok=True, runtime=self.name, text=str(full)[len(prompt):],
             seconds=time.monotonic() - started,
         )
+
+    def stream(self, prompt: str, *, settings: Any = None) -> Iterator[str]:
+        """Yield the checkpoint's reply piece by piece, so a caller shows it live.
+
+        The same one generation as :meth:`infer` -- the project's own numpy
+        transformer, never a second runtime -- but streamed through
+        :meth:`~ml.llm.generator.LocalGenerator.generate_stream`, so a reader
+        watches the character answer instead of waiting for the last token. A
+        failure (no checkpoint loaded, a runtime that raised) is raised as
+        :class:`RuntimeUnavailable`, before the first piece or during the stream,
+        so a caller never mistakes a partial reply for a complete one.
+        """
+        if self._model is None:
+            raise RuntimeUnavailable("No checkpoint is loaded. Load one first.")
+        try:
+            from ml.llm.generator import LocalGenerator
+
+            generator = LocalGenerator(self._model)
+            max_tokens = int(getattr(settings, "max_tokens", 0) or 32)
+            temperature = float(getattr(settings, "temperature", 0.0) or 0.0)
+            yield from generator.generate_stream(
+                prompt, max_new_tokens=max_tokens, temperature=temperature
+            )
+        except RuntimeUnavailable:
+            raise
+        except Exception as error:
+            raise RuntimeUnavailable(f"{type(error).__name__}: {error}") from error
 
 
 # ------------------------------------------------------------------ registry

@@ -327,6 +327,21 @@ def _close_window(root, dialog) -> None:
         gc.collect()
 
 
+def _all_buttons(widget) -> list:
+    """Every descendant ``tk.Button``/``Menubutton`` of a widget, recursively."""
+    import tkinter as tk
+
+    found: list = []
+    stack = [widget]
+    while stack:
+        current = stack.pop()
+        for child in current.winfo_children():
+            if isinstance(child, (tk.Button, tk.Menubutton)):
+                found.append(child)
+            stack.append(child)
+    return found
+
+
 @pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_the_body_window_shows_a_figure_with_every_dial(tmp_path: Path) -> None:
     import tkinter as tk
@@ -389,6 +404,70 @@ def test_the_body_window_applies_templates_views_and_stores_the_picture(tmp_path
         # The render becomes the character's picture through the avatar manager.
         dialog._use_as_avatar()
         assert _wait_for(root, lambda: service.avatar_path(character.id) is not None)
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_every_body_window_button_is_really_placed(tmp_path: Path) -> None:
+    """Every button in the body window is packed, so none is invisible.
+
+    The reported failure was "the Body & shape feature does not work -- no window
+    opens at all": the window's own buttons (and the managers' entry buttons) were
+    created but never packed, so they had no geometry and a click could never
+    reach them. This walks every descendant button and asserts each one has a
+    manager and a non-empty geometry.
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_body import BodyStudioDialog
+
+    service = _service(tmp_path)
+    character = service.create_character(name="Amina", role=ROLE_COMPANION, gender="woman")
+    root = tk.Tk()
+    root.withdraw()
+    dialog = None
+    try:
+        dialog = BodyStudioDialog(
+            root, service, character.id, role=ROLE_COMPANION,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        buttons = _all_buttons(dialog.window)
+        assert buttons, "the body window must have controls"
+        unplaced = [b for b in buttons if not b.winfo_manager()]
+        assert not unplaced, f"unplaced body-window buttons: {len(unplaced)}"
+        # The action row (Render / Use as picture / Close) is packed too, so it is
+        # not squeezed out by the expanding preview.
+        action_row = dialog._action_row
+        assert action_row.winfo_manager(), "the action row must be packed"
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_every_manager_button_is_really_placed(tmp_path: Path) -> None:
+    """The managers' buttons are packed, so the Body & shape entry is clickable."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_managers import CharacterManagerDialog
+
+    service = _service(tmp_path)
+    root = tk.Tk()
+    root.withdraw()
+    dialog = None
+    try:
+        dialog = CharacterManagerDialog(
+            root, service, role=ROLE_COMPANION,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        buttons = _all_buttons(dialog.window)
+        assert buttons
+        unplaced = [b for b in buttons if not b.winfo_manager()]
+        assert not unplaced, f"unplaced manager buttons: {len(unplaced)}"
     finally:
         _close_window(root, dialog)
 

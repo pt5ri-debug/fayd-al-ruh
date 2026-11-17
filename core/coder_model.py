@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -215,6 +215,73 @@ class OllamaCoderClient:
         if not content:
             raise CoderUnavailable("The coding model returned an empty reply.")
         return content
+
+    def chat_stream(
+        self, messages: Sequence[CoderMessage], *, temperature: float = 0.2
+    ) -> Iterator[str]:
+        """Yield one reply's content deltas, so a caller can show it live.
+
+        Ollama's own streaming API: the same request as :meth:`chat` with
+        ``"stream": true``, which answers with newline-delimited JSON objects,
+        each carrying a piece of the reply. A transport problem raises
+        :class:`CoderUnavailable`, and an empty reply is named as such, so a
+        caller never mistakes a partial reply for a complete one. The
+        concatenation of every yielded piece is what :meth:`chat` returns.
+        """
+        if not messages:
+            raise ValueError("At least one message is required.")
+        options: dict[str, Any] = {"temperature": temperature}
+        if self.max_tokens is not None:
+            options["num_predict"] = self.max_tokens
+        if self.num_ctx is not None:
+            options["num_ctx"] = self.num_ctx
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [message.as_dict() for message in messages],
+            "stream": True,
+            "options": options,
+        }
+        if self.think is not None:
+            payload["think"] = self.think
+        if self.keep_alive is not None:
+            payload["keep_alive"] = self.keep_alive
+        data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base_url}/api/chat",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        produced = False
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                for raw in response:
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(chunk, dict):
+                        continue
+                    if chunk.get("error"):
+                        raise CoderUnavailable(f"Ollama reported: {chunk['error']}")
+                    piece = str((chunk.get("message") or {}).get("content", ""))
+                    if piece:
+                        produced = True
+                        yield piece
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace") if error.fp else str(error)
+            raise CoderUnavailable(
+                f"Ollama returned HTTP {error.code} for {request.full_url}: {detail[:300]}"
+            ) from error
+        except (urllib.error.URLError, OSError) as error:
+            raise CoderUnavailable(
+                f"Could not reach Ollama at {self.base_url}: {error}"
+            ) from error
+        if not produced:
+            raise CoderUnavailable("The coding model returned an empty reply.")
 
 
 def _model_present(model: str, models: Sequence[str]) -> bool:

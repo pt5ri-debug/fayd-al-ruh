@@ -189,7 +189,7 @@ class BodyStudioDialog(ThemedDialog):
         for preset_key, title in self.service.body_presets():
             self._button(
                 templates, title, _binder(self._apply_preset, preset_key),
-            )
+            ).pack(side="top", fill="x", pady=1)
 
         build_section = column.add("build", "Body type", icon="⚧", open=True)
         tk.Label(
@@ -313,19 +313,13 @@ class BodyStudioDialog(ThemedDialog):
         for view_key, label in _VIEW_BUTTONS:
             self._button(views, label, _binder(self._set_view, view_key))
 
-        stage = tk.Frame(parent, bg=theme.surface_raised)
-        stage.pack(fill="both", expand=True, padx=16, pady=(4, 8))
-        self._canvas = tk.Label(
-            stage,
-            text="Rendering the body…",
-            bg=theme.surface_raised,
-            fg=theme.text_dim,
-            font=self._type.font("sm"),
-        )
-        self._canvas.pack(fill="both", expand=True)
-
+        # The action row and the honesty note are packed **before** the expanding
+        # preview, anchored to the bottom: a widget packed after a ``fill="both",
+        # expand=True`` sibling is left with no space and is never mapped, which is
+        # how Render / Use as the picture / Close had become unreachable.
         actions = tk.Frame(parent, bg=theme.base)
-        actions.pack(fill="x", padx=16, pady=(0, 8))
+        actions.pack(side="bottom", fill="x", padx=16, pady=(0, 8))
+        self._action_row = actions
         self._button(actions, "Render", self._render_now, variant="primary")
         self._button(actions, "Use as the picture", self._use_as_avatar)
         self._button(actions, "Reset the shape", self._reset_shape)
@@ -344,14 +338,40 @@ class BodyStudioDialog(ThemedDialog):
             justify="left",
             wraplength=680,
         )
-        note.pack(fill="x", padx=16, pady=(0, 8))
+        note.pack(side="bottom", fill="x", padx=16, pady=(0, 8))
+
+        stage = tk.Frame(parent, bg=theme.surface_raised)
+        stage.pack(fill="both", expand=True, padx=16, pady=(4, 8))
+        self._canvas = tk.Label(
+            stage,
+            text="Rendering the body…",
+            bg=theme.surface_raised,
+            fg=theme.text_dim,
+            font=self._type.font("sm"),
+        )
+        self._canvas.pack(fill="both", expand=True)
 
     # -- control helpers --------------------------------------------------
 
     def _button(self, parent: tk.Misc, text: str, command: Callable[[], None], *, variant: str = "secondary") -> tk.Button:
+        """A themed button, **placed** in its row.
+
+        The control is packed here so a caller that does not chain its own
+        ``.pack(...)`` still shows it: an unplaced Tk widget has no geometry
+        manager, so it is never drawn and can never be clicked -- which is how the
+        body window's Render / Use as the picture / templates / views controls all
+        ended up invisible. A caller that packs it again only re-applies the
+        geometry (``pack`` is idempotent).
+        """
         from gui.components import button
 
-        return button(parent, text=text, command=command, theme=self.theme, typography=self._type, variant=variant)
+        widget = button(
+            parent, text=text, command=command, theme=self.theme,
+            typography=self._type, variant=variant,
+        )
+        if not widget.winfo_manager():
+            widget.pack(side="left", padx=(0, 6), pady=1)
+        return widget
 
     def _sync_controls(self) -> None:
         """Push the current parameters onto every control (a read of the dials)."""
