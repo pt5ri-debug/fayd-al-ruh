@@ -336,17 +336,24 @@ class Mesh:
     quad or n-gon is triangulated by the renderer as a fan. ``normals`` are
     optional -- when absent :meth:`vertex_normals` computes them from the faces
     (area-weighted), so a mesh loaded from a file with no normals still shades
-    correctly.
+    correctly. ``vertex_colors`` are optional per-vertex RGB triples: when present
+    the shaded colour is interpolated from them instead of the material's flat base
+    colour, which is what lets one skinned mesh carry a skin tone *and* the lip,
+    eye, nail, and hair colours (a separate object per colour would not follow a
+    pose, because only the body is bound to the skeleton).
     """
 
     name: str
     vertices: tuple[Vec3, ...]
     faces: tuple[tuple[int, ...], ...]
     normals: tuple[Vec3, ...] = ()
+    vertex_colors: tuple[tuple[float, float, float], ...] = ()
 
     def __post_init__(self) -> None:
         if self.normals and len(self.normals) != len(self.vertices):
             raise ValueError("A mesh's normals must match its vertex count.")
+        if self.vertex_colors and len(self.vertex_colors) != len(self.vertices):
+            raise ValueError("A mesh's vertex colours must match its vertex count.")
         count = len(self.vertices)
         for face in self.faces:
             if len(face) < 3:
@@ -354,6 +361,11 @@ class Mesh:
             for index in face:
                 if not -count <= index < count:
                     raise ValueError(f"Face {face!r} indexes a vertex outside the mesh.")
+
+    @property
+    def has_vertex_colors(self) -> bool:
+        """Whether this mesh carries per-vertex colours (used instead of the base)."""
+        return bool(self.vertex_colors)
 
     @property
     def vertex_count(self) -> int:
@@ -408,7 +420,9 @@ class Mesh:
         """A copy carrying computed vertex normals (a no-op when they exist)."""
         if self.normals:
             return self
-        return Mesh(self.name, self.vertices, self.faces, self.vertex_normals())
+        return Mesh(
+            self.name, self.vertices, self.faces, self.vertex_normals(), self.vertex_colors
+        )
 
     def transformed(self, matrix: Mat4, *, name: str | None = None) -> Mesh:
         """A copy with every vertex moved by ``matrix`` (normals re-derived)."""
@@ -416,6 +430,8 @@ class Mesh:
             name or self.name,
             tuple(matrix.transform_point(vertex) for vertex in self.vertices),
             self.faces,
+            (),
+            self.vertex_colors,
         )
 
     def merge(self, other: Mesh, *, name: str | None = None) -> Mesh:
@@ -424,7 +440,18 @@ class Mesh:
         faces = tuple(self.faces) + tuple(
             tuple(index + offset for index in face) for face in other.faces
         )
-        return Mesh(name or self.name, tuple(self.vertices) + tuple(other.vertices), faces)
+        colors = (
+            self.vertex_colors + other.vertex_colors
+            if self.vertex_colors and other.vertex_colors
+            else ()
+        )
+        return Mesh(
+            name or self.name,
+            tuple(self.vertices) + tuple(other.vertices),
+            faces,
+            (),
+            colors,
+        )
 
 
 # --------------------------------------------------------------------------- skeleton
@@ -665,19 +692,27 @@ def skin_normals(
 
 @dataclass(frozen=True)
 class Material:
-    """A simple Blinn-Phong surface: base colour, specular tint, and shininess."""
+    """A simple Blinn-Phong surface: base colour, specular tint, and shininess.
+
+    ``wrap`` adds a soft diffuse wrap (a cheap stand-in for subsurface scattering),
+    which keeps skin lit just past the geometric terminator instead of ending in a
+    hard dark band.
+    """
 
     name: str = "default"
     base_color: tuple[float, float, float] = (0.82, 0.66, 0.56)
     specular: float = 0.25
     shininess: float = 24.0
     opacity: float = 1.0
+    wrap: float = 0.0
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.opacity <= 1.0:
             raise ValueError("Material opacity must be in [0, 1].")
         if self.shininess <= 0.0:
             raise ValueError("Material shininess must be positive.")
+        if not 0.0 <= self.wrap <= 1.0:
+            raise ValueError("Material wrap must be in [0, 1].")
 
 
 @dataclass(frozen=True)

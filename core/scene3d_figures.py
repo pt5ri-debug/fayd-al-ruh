@@ -28,7 +28,9 @@ parametric humanoid, and every figure it makes says so.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from itertools import pairwise
 
 from core.scene3d import (
     Bone,
@@ -41,9 +43,11 @@ from core.scene3d import (
     make_default_scene,
 )
 
-#: Segments around a limb's circumference. Eight is enough for a smooth silhouette
-#: at the render sizes this studio uses, and keeps the mesh small and fast.
-RADIAL_SEGMENTS = 8
+#: Segments around a limb's circumference. Sixteen reads as a smooth silhouette at
+#: the render sizes this studio uses while keeping the mesh small -- the rasteriser
+#: is fill-bound, not triangle-bound, so the extra detail is nearly free and the
+#: low-poly "wooden" look of eight is gone.
+RADIAL_SEGMENTS = 16
 
 #: The build families a figure can belong to.
 BUILD_FEMININE = "feminine"
@@ -106,6 +110,20 @@ class FigureParameters:
     ear_size: float = 1.0
     hair: float = 1.0
     hair_color: tuple[float, float, float] = (0.20, 0.14, 0.10)
+    # -- per-part shape and colour --------------------------------------
+    #: The chest's areola size (a dial), and the colour of the lips, the irises,
+    #: the areolae, the fingernails/toenails, and the genitalia. Each is a real
+    #: per-vertex colour on the one skinned mesh, so it follows a pose.
+    areola: float = 1.0
+    lip_color: tuple[float, float, float] = (0.62, 0.30, 0.30)
+    eye_color: tuple[float, float, float] = (0.22, 0.34, 0.42)
+    nipple_color: tuple[float, float, float] = (0.60, 0.34, 0.32)
+    nail_color: tuple[float, float, float] = (0.90, 0.82, 0.80)
+    genitalia: float = 1.0
+    genital_size: float = 1.0
+    genital_color: tuple[float, float, float] = (0.60, 0.40, 0.38)
+    #: The figure's pose, kept with the body so a saved body remembers how it stood.
+    pose: str = "rest"
 
     def __post_init__(self) -> None:
         if not 0.8 <= self.height <= 2.6:
@@ -137,10 +155,14 @@ class FigureParameters:
             "eye_spacing",
             "lips",
             "ear_size",
+            "areola",
+            "genital_size",
         ):
             value = getattr(self, field_name)
             if value <= 0.0:
                 raise ValueError(f"Figure {field_name} must be positive.")
+        if not 0.0 <= self.genitalia <= 1.0:
+            raise ValueError("The genitalia dial must be in [0, 1].")
 
     # -- convenience -----------------------------------------------------
 
@@ -153,100 +175,144 @@ class FigureParameters:
         return f"{self.build} build, {self.proportion} proportions, {self.height:.2f} m"
 
 
-def _ring(center: Vec3, radius_x: float, radius_z: float, segments: int) -> list[Vec3]:
-    """A horizontal ellipse of points around ``center``, in the XZ plane.
+class _Body:
+    """A growing mesh that carries a **per-vertex colour** as it is built.
 
-    Points are generated counter-clockwise seen from above, which is the winding
-    the rasteriser's backface culling treats as the *outside* of a lofted tube.
+    Every primitive appends vertices together with the colour they should be shaded
+    with, so one skinned mesh can hold the skin tone *and* the lips, the irises, the
+    areolae, the nails, and the genitalia -- a separate object per colour would not
+    follow a pose, because only the body mesh is bound to the skeleton. The colour is
+    a plain RGB triple the rasteriser interpolates across each triangle, which is
+    what turns a flat "wooden" figure into one with real tonal detail.
     """
-    points = []
-    for index in range(segments):
-        angle = 2.0 * math.pi * index / segments
-        points.append(
+
+    def __init__(self, default_color: tuple[float, float, float]) -> None:
+        self.vertices: list[Vec3] = []
+        self.faces: list[tuple[int, ...]] = []
+        self.colors: list[tuple[float, float, float]] = []
+        self.default_color = default_color
+
+    # -- primitives -------------------------------------------------------
+
+    def _add(self, points: Sequence[Vec3], color: tuple[float, float, float]) -> list[int]:
+        indices: list[int] = []
+        for point in points:
+            indices.append(len(self.vertices))
+            self.vertices.append(point)
+            self.colors.append(color)
+        return indices
+
+    def ring(
+        self,
+        center: Vec3,
+        radius_x: float,
+        radius_z: float,
+        color: tuple[float, float, float],
+        *,
+        segments: int = RADIAL_SEGMENTS,
+    ) -> list[int]:
+        """An ellipse of points in the XZ plane; returns their vertex indices."""
+        points = [
             Vec3(
-                center.x + radius_x * math.cos(angle),
+                center.x + radius_x * math.cos(2.0 * math.pi * index / segments),
                 center.y,
-                center.z + radius_z * math.sin(angle),
+                center.z + radius_z * math.sin(2.0 * math.pi * index / segments),
             )
-        )
-    return points
-
-
-def _bridge_rings(rings: list[list[Vec3]], vertices: list[Vec3], faces: list[tuple[int, ...]]) -> None:
-    """Stitch consecutive rings into a closed tube of quads (bottom ring first)."""
-    offsets = []
-    for ring in rings:
-        offsets.append(len(vertices))
-        vertices.extend(ring)
-    segments = len(rings[0])
-    for ring_index in range(len(rings) - 1):
-        lower = offsets[ring_index]
-        upper = offsets[ring_index + 1]
-        for index in range(segments):
-            nxt = (index + 1) % segments
-            faces.append((lower + index, lower + nxt, upper + nxt, upper + index))
-
-
-def _cap_top(ring: list[Vec3], center: Vec3, vertices: list[Vec3], faces: list[tuple[int, ...]]) -> None:
-    """Close the *top* of a tube with a fan to ``center``."""
-    base = len(vertices)
-    vertices.append(center)
-    count = len(ring)
-    for index in range(count):
-        nxt = (index + 1) % count
-        faces.append((base, base + 1 + nxt, base + 1 + index))
-
-
-def _box(center: Vec3, size: Vec3, vertices: list[Vec3], faces: list[tuple[int, ...]]) -> None:
-    """Add an axis-aligned box (a hand's palm, a foot, and a hair mass)."""
-    half = Vec3(size.x * 0.5, size.y * 0.5, size.z * 0.5)
-    base = len(vertices)
-    for sx in (-1.0, 1.0):
-        for sy in (-1.0, 1.0):
-            for sz in (-1.0, 1.0):
-                vertices.append(
-                    Vec3(center.x + sx * half.x, center.y + sy * half.y, center.z + sz * half.z)
-                )
-
-    def corner(sx: int, sy: int, sz: int) -> int:
-        return base + sx * 4 + sy * 2 + sz
-
-    faces.extend(
-        [
-            (corner(0, 0, 0), corner(0, 0, 1), corner(0, 1, 1), corner(0, 1, 0)),
-            (corner(1, 0, 0), corner(1, 1, 0), corner(1, 1, 1), corner(1, 0, 1)),
-            (corner(0, 0, 0), corner(1, 0, 0), corner(1, 0, 1), corner(0, 0, 1)),
-            (corner(0, 1, 0), corner(0, 1, 1), corner(1, 1, 1), corner(1, 1, 0)),
-            (corner(0, 0, 0), corner(0, 1, 0), corner(1, 1, 0), corner(1, 0, 0)),
-            (corner(0, 0, 1), corner(1, 0, 1), corner(1, 1, 1), corner(0, 1, 1)),
+            for index in range(segments)
         ]
-    )
+        return self._add(points, color)
 
+    def loft(self, rings: Sequence[Sequence[int]]) -> None:
+        """Stitch consecutive rings (each already added) into a tube of quads."""
+        segments = len(rings[0])
+        for lower, upper in pairwise(rings):
+            for index in range(segments):
+                nxt = (index + 1) % segments
+                self.faces.append((lower[index], lower[nxt], upper[nxt], upper[index]))
 
-def _sphere(center: Vec3, radius: float, vertices: list[Vec3], faces: list[tuple[int, ...]]) -> None:
-    """A low-poly sphere, used for a face feature (bottom ring first, so it is solid)."""
-    if radius <= 0.0:
-        return
-    latitude = 4
-    rings: list[list[Vec3]] = []
-    for step in range(latitude, -1, -1):
-        phi = math.pi * step / latitude
-        ring_radius = radius * math.sin(phi)
-        y = center.y + radius * math.cos(phi)
-        rings.append(
+    def cap(self, ring: Sequence[int], center: Vec3, color: tuple[float, float, float]) -> None:
+        """Close a ring with a fan to ``center``."""
+        apex = self._add([center], color)[0]
+        count = len(ring)
+        for index in range(count):
+            nxt = (index + 1) % count
+            self.faces.append((apex, ring[nxt], ring[index]))
+
+    def box(self, center: Vec3, size: Vec3, color: tuple[float, float, float]) -> None:
+        """An axis-aligned box (a palm, a foot)."""
+        half = Vec3(size.x * 0.5, size.y * 0.5, size.z * 0.5)
+        corners = [
+            Vec3(center.x + sx * half.x, center.y + sy * half.y, center.z + sz * half.z)
+            for sx in (-1.0, 1.0)
+            for sy in (-1.0, 1.0)
+            for sz in (-1.0, 1.0)
+        ]
+        base = self._add(corners, color)
+
+        def corner(sx: int, sy: int, sz: int) -> int:
+            return base[sx * 4 + sy * 2 + sz]
+
+        self.faces.extend(
             [
-                Vec3(
-                    center.x + ring_radius * math.cos(2.0 * math.pi * index / RADIAL_SEGMENTS),
-                    y,
-                    center.z + ring_radius * math.sin(2.0 * math.pi * index / RADIAL_SEGMENTS),
-                )
-                for index in range(RADIAL_SEGMENTS)
+                (corner(0, 0, 0), corner(0, 0, 1), corner(0, 1, 1), corner(0, 1, 0)),
+                (corner(1, 0, 0), corner(1, 1, 0), corner(1, 1, 1), corner(1, 0, 1)),
+                (corner(0, 0, 0), corner(1, 0, 0), corner(1, 0, 1), corner(0, 0, 1)),
+                (corner(0, 1, 0), corner(0, 1, 1), corner(1, 1, 1), corner(1, 1, 0)),
+                (corner(0, 0, 0), corner(0, 1, 0), corner(1, 1, 0), corner(1, 0, 0)),
+                (corner(0, 0, 1), corner(1, 0, 1), corner(1, 1, 1), corner(0, 1, 1)),
             ]
         )
-    _bridge_rings(rings, vertices, faces)
+
+    def ellipsoid(
+        self,
+        center: Vec3,
+        radii: Vec3,
+        color: tuple[float, float, float],
+        *,
+        segments: int = RADIAL_SEGMENTS,
+        latitude: int = 6,
+    ) -> None:
+        """A smooth ellipsoid (a nose, an eye, a breast)."""
+        if min(radii.x, radii.y, radii.z) <= 0.0:
+            return
+        rings: list[list[int]] = []
+        for step in range(latitude, -1, -1):
+            phi = math.pi * step / latitude
+            ring_radius = math.sin(phi)
+            y = center.y + radii.y * math.cos(phi)
+            points = [
+                Vec3(
+                    center.x + radii.x * ring_radius * math.cos(2.0 * math.pi * i / segments),
+                    y,
+                    center.z + radii.z * ring_radius * math.sin(2.0 * math.pi * i / segments),
+                )
+                for i in range(segments)
+            ]
+            rings.append(self._add(points, color))
+        self.loft(rings)
+
+    def tube(
+        self,
+        centers: Sequence[Vec3],
+        radii: Sequence[tuple[float, float]],
+        color: tuple[float, float, float],
+        *,
+        segments: int = RADIAL_SEGMENTS,
+    ) -> None:
+        """A stack of rings along a path, one ring per ``(radius_x, radius_z)``."""
+        rings = [
+            self.ring(center, rx, rz, color, segments=segments)
+            for center, (rx, rz) in zip(centers, radii, strict=True)
+        ]
+        self.loft(rings)
+
+    def to_mesh(self, name: str) -> Mesh:
+        return Mesh(name, tuple(self.vertices), tuple(self.faces), (), tuple(self.colors))
 
 
-def _build_torso(params: FigureParameters, vertices: list[Vec3], faces: list[tuple[int, ...]]) -> None:
+def _build_torso(
+    body: _Body, params: FigureParameters, skin: tuple[float, float, float]
+) -> None:
     """A torso as stacked elliptical rings from hips to shoulders.
 
     The rings carry the build and the shape dials: the bust widens the chest and
@@ -263,49 +329,72 @@ def _build_torso(params: FigureParameters, vertices: list[Vec3], faces: list[tup
     belly_z = params.chest_depth * (0.45 + 0.35 * params.belly)
 
     rings = [
-        _ring(Vec3(0, height * 0.50, 0.0), hips * 0.5, params.chest_depth * 0.60, RADIAL_SEGMENTS),
-        _ring(
+        body.ring(Vec3(0, height * 0.50, 0.0), hips * 0.5, params.chest_depth * 0.60, skin),
+        body.ring(
             Vec3(0, height * 0.60, belly_z * 0.25),
             waist_r * 0.5,
             params.chest_depth * 0.42 + belly_z * 0.4,
-            RADIAL_SEGMENTS,
+            skin,
         ),
-        _ring(Vec3(0, height * 0.70, chest_z * 0.22), chest_r, chest_z, RADIAL_SEGMENTS),
-        _ring(
+        body.ring(Vec3(0, height * 0.70, chest_z * 0.22), chest_r, chest_z, skin),
+        body.ring(
             Vec3(0, height * 0.81, 0.0),
             params.shoulder_width * 0.5 * scale,
             params.chest_depth * 0.50,
-            RADIAL_SEGMENTS,
+            skin,
         ),
     ]
-    _bridge_rings(rings, vertices, faces)
+    body.loft(rings)
+    _build_chest(body, params, skin)
 
 
-def _build_neck(params: FigureParameters, vertices: list[Vec3], faces: list[tuple[int, ...]]) -> None:
+def _build_chest(
+    body: _Body, params: FigureParameters, skin: tuple[float, float, float]
+) -> None:
+    """Breasts (with areolae) when the bust dial is raised, else a flat chest."""
+    if params.bust <= 0.02:
+        return
+    height = params.height
+    radius = 0.030 + 0.075 * params.bust
+    forward = params.chest_depth * 0.55 + 0.05 * params.bust
+    for side in (-1.0, 1.0):
+        center = Vec3(side * params.shoulder_width * 0.20, height * 0.695, forward)
+        body.ellipsoid(center, Vec3(radius * 0.85, radius * 0.80, radius), skin)
+        body.ellipsoid(
+            Vec3(center.x, center.y + radius * 0.10, center.z + radius * 0.72),
+            Vec3(radius * 0.34 * params.areola, radius * 0.34 * params.areola, radius * 0.16),
+            params.nipple_color,
+        )
+
+
+def _build_neck(
+    body: _Body, params: FigureParameters, skin: tuple[float, float, float]
+) -> None:
     """A short neck between the shoulders and the jaw."""
     height = params.height
     radius = 0.052 * params.neck_thickness
-    rings = [
-        _ring(Vec3(0, height * 0.815, 0.0), radius * 1.25, radius * 1.15, RADIAL_SEGMENTS),
-        _ring(Vec3(0, height * 0.855, 0.0), radius, radius * 0.95, RADIAL_SEGMENTS),
-    ]
-    _bridge_rings(rings, vertices, faces)
+    body.tube(
+        [Vec3(0, height * 0.815, 0.0), Vec3(0, height * 0.855, 0.0)],
+        [(radius * 1.25, radius * 1.15), (radius, radius * 0.95)],
+        skin,
+    )
 
 
 def _build_limb(
+    body: _Body,
     params: FigureParameters,
-    vertices: list[Vec3],
-    faces: list[tuple[int, ...]],
+    skin: tuple[float, float, float],
     *,
     top: Vec3,
-    joints: list[tuple[float, float]],
+    joints: Sequence[tuple[float, float]],
+    end_radius: float,
 ) -> None:
     """A limb as rings around ``top`` descending along ``-Y``.
 
     ``joints`` is a list of ``(length, radius)`` pairs, one per bone segment, so
-    the limb tapers and bends the way the skeleton does. Rings are emitted
-    **bottom-first** so the loft's winding faces outwards, which is what the
-    rasteriser's backface culling expects.
+    the limb tapers the way the skeleton bends. Rings are emitted **bottom-first**
+    so the loft's winding faces outwards, which is what the rasteriser's backface
+    culling expects.
     """
     positions: list[Vec3] = []
     position = top
@@ -313,17 +402,19 @@ def _build_limb(
         positions.append(position)
         position = Vec3(position.x, position.y - length, position.z)
     positions.append(position)
-
     radii = [radius for _length, radius in joints]
-    radii.append(radii[-1] * 0.7)
-    rings = [
-        _ring(point, radius, radius, RADIAL_SEGMENTS)
-        for point, radius in reversed(list(zip(positions, radii, strict=True)))
-    ]
-    _bridge_rings(rings, vertices, faces)
+    radii.append(end_radius)
+    body.tube(
+        list(reversed(positions)),
+        [(radius, radius) for radius in reversed(radii)],
+        skin,
+        segments=RADIAL_SEGMENTS,
+    )
 
 
-def _build_head(params: FigureParameters, vertices: list[Vec3], faces: list[tuple[int, ...]]) -> None:
+def _build_head(
+    body: _Body, params: FigureParameters, skin: tuple[float, float, float]
+) -> None:
     """A head as stacked rings from the jaw to the crown, shaped by the face dials."""
     base_y = params.height * 0.845
     length = 0.235 * params.head_scale * params.face_length
@@ -333,28 +424,29 @@ def _build_head(params: FigureParameters, vertices: list[Vec3], faces: list[tupl
     chin = 1.0 - 0.35 * params.chin_shape
 
     rings = [
-        _ring(Vec3(0, base_y, 0.0), jaw * 0.62 * chin, depth * 0.60, RADIAL_SEGMENTS),
-        _ring(Vec3(0, base_y + length * 0.16, 0.006), jaw * 0.95, depth * 0.95, RADIAL_SEGMENTS),
-        _ring(
+        body.ring(Vec3(0, base_y, 0.0), jaw * 0.62 * chin, depth * 0.60, skin),
+        body.ring(Vec3(0, base_y + length * 0.16, 0.006), jaw * 0.95, depth * 0.95, skin),
+        body.ring(
             Vec3(0, base_y + length * 0.42, 0.010),
             width * (1.0 + 0.10 * params.cheek),
             depth * 1.02,
-            RADIAL_SEGMENTS,
+            skin,
         ),
-        _ring(Vec3(0, base_y + length * 0.68, 0.004), width * 0.98, depth * 0.98, RADIAL_SEGMENTS),
-        _ring(Vec3(0, base_y + length * 0.88, 0.0), width * 0.72, depth * 0.72, RADIAL_SEGMENTS),
+        body.ring(Vec3(0, base_y + length * 0.68, 0.004), width * 0.98, depth * 0.98, skin),
+        body.ring(Vec3(0, base_y + length * 0.88, 0.0), width * 0.72, depth * 0.72, skin),
     ]
-    _bridge_rings(rings, vertices, faces)
-    _cap_top(rings[-1], Vec3(0, base_y + length, 0.0), vertices, faces)
+    body.loft(rings)
+    body.cap(rings[-1], Vec3(0, base_y + length, 0.0), skin)
 
 
-def _build_face(params: FigureParameters, vertices: list[Vec3], faces: list[tuple[int, ...]]) -> None:
-    """The face features: eyes, a nose, lips, and ears.
+def _build_face(
+    body: _Body, params: FigureParameters, skin: tuple[float, float, float]
+) -> None:
+    """The face features: eyes, a nose, lips, ears, and eyebrows.
 
-    Deliberately simple -- low-poly spheres in the head's front half -- so a figure
-    reads as a *person* at the studio's render sizes rather than a featureless
-    mannequin, while staying cheap to build and honest about being a stylised
-    likeness.
+    Low-poly ellipsoids in the head's front half, each carrying its own colour --
+    so the irises, the lips, and the brows read as real features rather than the
+    same flat tone as the face.
     """
     base_y = params.height * 0.845
     length = 0.235 * params.head_scale * params.face_length
@@ -366,93 +458,208 @@ def _build_face(params: FigureParameters, vertices: list[Vec3], faces: list[tupl
     eye_x = width * 0.40 * params.eye_spacing
     eye_r = 0.013 * params.head_scale * params.eye_size
     for side in (-1.0, 1.0):
-        _sphere(Vec3(side * eye_x, eye_y, front * 0.72), eye_r, vertices, faces)
+        # The white of the eye, then the iris just in front of it.
+        body.ellipsoid(Vec3(side * eye_x, eye_y, front * 0.70), Vec3(eye_r, eye_r * 0.9, eye_r), (0.94, 0.94, 0.95))
+        body.ellipsoid(
+            Vec3(side * eye_x, eye_y, front * 0.70 + eye_r * 0.72),
+            Vec3(eye_r * 0.55, eye_r * 0.55, eye_r * 0.30),
+            params.eye_color,
+        )
 
-    _sphere(
-        Vec3(0.0, base_y + length * 0.47, front * 0.92),
-        0.011 * params.head_scale * params.nose_size,
-        vertices,
-        faces,
+    body.ellipsoid(
+        Vec3(0.0, base_y + length * 0.47, front * 0.90),
+        Vec3(
+            0.011 * params.head_scale * params.nose_size,
+            0.014 * params.head_scale * params.nose_size,
+            0.013 * params.head_scale * params.nose_size,
+        ),
+        skin,
     )
-    _sphere(
-        Vec3(0.0, base_y + length * 0.36, front * 0.80),
-        0.012 * params.head_scale * params.lips,
-        vertices,
-        faces,
+    body.ellipsoid(
+        Vec3(0.0, base_y + length * 0.35, front * 0.78),
+        Vec3(0.017 * params.head_scale * params.lips, 0.008 * params.head_scale * params.lips, 0.010),
+        params.lip_color,
     )
     ear_r = 0.020 * params.head_scale * params.ear_size
     for side in (-1.0, 1.0):
-        _sphere(Vec3(side * width * 0.98, base_y + length * 0.55, 0.0), ear_r, vertices, faces)
+        body.ellipsoid(
+            Vec3(side * width * 0.98, base_y + length * 0.55, 0.0),
+            Vec3(ear_r * 0.45, ear_r, ear_r * 0.85),
+            skin,
+        )
+    _build_brow(body, params, skin)
 
 
-def _build_brow(params: FigureParameters, vertices: list[Vec3], faces: list[tuple[int, ...]]) -> None:
-    """A brow ridge across the eyes, present only when the dial is raised."""
-    if params.brow_ridge <= 0.0:
-        return
+def _build_brow(
+    body: _Body, params: FigureParameters, skin: tuple[float, float, float]
+) -> None:
+    """Eyebrows across the eyes: always present, raised by the brow-ridge dial."""
     base_y = params.height * 0.845
     length = 0.235 * params.head_scale * params.face_length
     width = 0.088 * params.head_scale * params.face_width
     depth = 0.100 * params.head_scale * params.face_length
-    _box(
-        Vec3(0.0, base_y + length * 0.66, depth * 0.58),
-        Vec3(width * 1.5, 0.012 * params.head_scale * (1.0 + params.brow_ridge), 0.02),
-        vertices,
-        faces,
-    )
+    thickness = 0.004 * params.head_scale * (0.6 + 0.8 * params.brow_ridge)
+    for side in (-1.0, 1.0):
+        body.ellipsoid(
+            Vec3(side * width * 0.40 * params.eye_spacing, base_y + length * 0.685, depth * 0.60),
+            Vec3(width * 0.42, thickness, 0.010),
+            params.hair_color,
+            latitude=3,
+        )
 
 
-def _build_hair(params: FigureParameters, vertices: list[Vec3], faces: list[tuple[int, ...]]) -> None:
-    """A hair mass over the crown and down the back, when the hair dial is up."""
+def _build_hair_mass(
+    params: FigureParameters, color: tuple[float, float, float]
+) -> tuple[list[Vec3], list[tuple[int, ...]]]:
+    """The hair as a smooth dome over the crown and down the back of the head."""
+    body = _Body(color)
     if params.hair <= 0.0:
-        return
+        return [], []
     base_y = params.height * 0.845
     length = 0.235 * params.head_scale * params.face_length
     width = 0.088 * params.head_scale * params.face_width
     depth = 0.100 * params.head_scale * params.face_length
     crown = base_y + length * 0.86
-    height = (0.05 + 0.10 * params.hair) * params.head_scale
-    _box(
-        Vec3(0.0, crown + height * 0.30, -depth * 0.28),
-        Vec3(width * 2.0, height, depth * (1.2 + 0.8 * params.hair)),
-        vertices,
-        faces,
+    scale = 1.06 + 0.14 * params.hair
+    # A larger ellipsoid than the skull, cut back at the face so the face is clear.
+    body.ellipsoid(
+        Vec3(0.0, crown - length * 0.10, -depth * 0.18),
+        Vec3(width * 1.12 * scale, length * 0.62 * scale, depth * 1.15 * scale),
+        color,
+        latitude=6,
     )
+    # A fall down the back, when the volume dial is up.
+    if params.hair >= 0.35:
+        fall = (0.10 + 0.22 * params.hair) * params.head_scale
+        body.ellipsoid(
+            Vec3(0.0, crown - length * 0.55 - fall * 0.5, -depth * 0.95),
+            Vec3(width * 1.05 * scale, fall * 0.7, depth * 0.55),
+            color,
+            latitude=5,
+        )
+    return body.vertices, body.faces
 
 
 def build_hair_object(params: FigureParameters, parent_name: str) -> SceneObject | None:
     """The hair as its own object (its own material), or ``None`` when there is none.
 
-    It is a *separate* object on purpose: the renderer takes one material per
-    object, so a hair colour can only be real if the hair is not part of the body
-    mesh. A studio adds it beside the figure; :func:`build_figure_scene` does.
+    It is a *separate* object on purpose: the hair is not skinned to the body, so it
+    keeps its own material and a hair colour is real rather than the skin colour.
     """
-    vertices: list[Vec3] = []
-    faces: list[tuple[int, ...]] = []
-    _build_hair(params, vertices, faces)
+    vertices, faces = _build_hair_mass(params, params.hair_color)
     if not faces:
         return None
     mesh = Mesh(f"{parent_name} hair", tuple(vertices), tuple(faces))
     material = Material(
-        name=f"{parent_name} hair", base_color=params.hair_color, specular=0.35, shininess=48.0
+        name=f"{parent_name} hair", base_color=params.hair_color, specular=0.4, shininess=56.0
     )
     return SceneObject(f"{parent_name} hair", mesh, material)
 
 
+def _build_hand(
+    body: _Body,
+    params: FigureParameters,
+    skin: tuple[float, float, float],
+    *,
+    center: Vec3,
+    radius: float,
+) -> None:
+    """A palm with four fingers and a thumb, each tipped with a nail colour."""
+    body.ellipsoid(center, Vec3(radius * 0.75, radius * 1.05, radius * 0.40), skin)
+    finger_len = radius * 0.95
+    finger_r = radius * 0.16
+    for index in range(4):
+        offset = (index - 1.5) * radius * 0.40
+        tip = Vec3(center.x + offset, center.y - radius * 1.05 - finger_len * 0.5, center.z)
+        body.ellipsoid(tip, Vec3(finger_r, finger_len * 0.55, finger_r), skin, latitude=4)
+        body.ellipsoid(
+            Vec3(tip.x, tip.y - finger_len * 0.55, tip.z),
+            Vec3(finger_r * 0.9, finger_r * 0.5, finger_r * 0.9),
+            params.nail_color,
+            latitude=3,
+        )
+    thumb = Vec3(center.x - radius * 0.9, center.y - radius * 0.15, center.z + radius * 0.1)
+    body.ellipsoid(thumb, Vec3(finger_r * 1.1, finger_len * 0.5, finger_r * 1.1), skin, latitude=4)
+
+
+def _build_foot(
+    body: _Body,
+    params: FigureParameters,
+    skin: tuple[float, float, float],
+    *,
+    center: Vec3,
+    size: Vec3,
+) -> None:
+    """A foot as a tapered block, with a nail colour on the toes."""
+    body.box(center, size, skin)
+    toe_r = size.x * 0.20
+    for index in range(4):
+        offset = (index - 1.5) * size.x * 0.28
+        body.ellipsoid(
+            Vec3(center.x + offset, center.y, center.z + size.z * 0.5 + toe_r * 0.4),
+            Vec3(toe_r, toe_r * 0.7, toe_r),
+            skin,
+            latitude=3,
+        )
+
+
+def _build_genitalia(
+    body: _Body, params: FigureParameters
+) -> None:
+    """The genital region, drawn from the build and shaped by its own dials.
+
+    Kept simple and honest -- a smooth shape whose *size* and *colour* are the
+    user's own dials -- so the body reads as anatomically complete without the
+    geometry pretending to be a photograph.
+    """
+    if params.genitalia <= 0.0:
+        return
+    height = params.height
+    scale = params.genitalia * params.genital_size
+    color = params.genital_color
+    center_y = height * 0.495
+    forward = params.chest_depth * 0.34
+    if params.build == BUILD_FEMININE:
+        body.ellipsoid(Vec3(0.0, center_y, forward * 0.6), Vec3(0.026 * scale, 0.012 * scale, 0.030 * scale), color, latitude=4)
+        body.ellipsoid(Vec3(0.0, center_y - 0.012 * scale, forward * 0.5), Vec3(0.010 * scale, 0.012 * scale, 0.014 * scale), color, latitude=4)
+    else:
+        shaft_len = 0.045 * scale
+        body.ellipsoid(
+            Vec3(0.0, center_y - shaft_len * 0.4, forward * 0.7),
+            Vec3(0.012 * scale, shaft_len * 0.6, 0.012 * scale),
+            color,
+            latitude=4,
+        )
+        body.ellipsoid(
+            Vec3(0.0, center_y - shaft_len * 0.9, forward * 0.8),
+            Vec3(0.016 * scale, 0.016 * scale, 0.016 * scale),
+            color,
+            latitude=4,
+        )
+        for side in (-1.0, 1.0):
+            body.ellipsoid(
+                Vec3(side * 0.014 * scale, center_y + 0.004, forward * 0.5),
+                Vec3(0.012 * scale, 0.014 * scale, 0.012 * scale),
+                color,
+                latitude=4,
+            )
+
+
 def build_figure_mesh(params: FigureParameters) -> Mesh:
-    """Generate the humanoid mesh: torso, neck, head, arms, hands, legs, feet.
+    """Generate the humanoid mesh: torso, neck, head, arms, hands, legs, feet, face.
 
     The figure stands on ``y = 0``, centred on the origin, facing ``+Z``. It is a
-    single mesh with the given name, so it skins as one body. The hair is a
-    separate object (:func:`build_hair_object`).
+    single skinned mesh carrying per-vertex colours for the skin, the lips, the
+    irises, the areolae, the nails, and the genitalia. The hair is a separate object
+    (:func:`build_hair_object`).
     """
-    vertices: list[Vec3] = []
-    faces: list[tuple[int, ...]] = []
+    skin = params.skin
+    body = _Body(skin)
 
-    _build_torso(params, vertices, faces)
-    _build_neck(params, vertices, faces)
-    _build_head(params, vertices, faces)
-    _build_brow(params, vertices, faces)
-    _build_face(params, vertices, faces)
+    _build_torso(body, params, skin)
+    _build_neck(body, params, skin)
+    _build_head(body, params, skin)
+    _build_face(body, params, skin)
 
     thickness = params.limb_thickness
     shoulder_y = params.height * 0.80
@@ -467,29 +674,43 @@ def build_figure_mesh(params: FigureParameters) -> Mesh:
         arm_length = params.height * 0.155
         fore_length = params.height * 0.150
         _build_limb(
+            body,
             params,
-            vertices,
-            faces,
+            skin,
             top=Vec3(shoulder_x, shoulder_y, 0),
             joints=[(arm_length, arm_radius), (fore_length, arm_radius * 0.85)],
+            end_radius=arm_radius * 0.62,
         )
-        hand_center = Vec3(shoulder_x, shoulder_y - arm_length - fore_length - hand_r, 0.0)
-        _box(hand_center, Vec3(hand_r * 1.4, hand_r * 1.9, hand_r * 0.7), vertices, faces)
+        _build_hand(
+            body,
+            params,
+            skin,
+            center=Vec3(shoulder_x, shoulder_y - arm_length - fore_length - hand_r, 0.0),
+            radius=hand_r,
+        )
 
         hip_x = side * params.hip_width * 0.28
         thigh_length = params.height * 0.24
         shin_length = params.height * 0.235
         _build_limb(
+            body,
             params,
-            vertices,
-            faces,
+            skin,
             top=Vec3(hip_x, hip_y, 0),
             joints=[(thigh_length, leg_radius), (shin_length, leg_radius * 0.85)],
+            end_radius=leg_radius * 0.62,
         )
-        foot_center = Vec3(hip_x, hip_y - thigh_length - shin_length - 0.02, foot_l * 0.28)
-        _box(foot_center, Vec3(leg_radius * 1.5, 0.045, foot_l), vertices, faces)
+        _build_foot(
+            body,
+            params,
+            skin,
+            center=Vec3(hip_x, hip_y - thigh_length - shin_length - 0.02, foot_l * 0.28),
+            size=Vec3(leg_radius * 1.5, 0.045, foot_l),
+        )
 
-    return Mesh(f"{params.name} body", tuple(vertices), tuple(faces))
+    _build_genitalia(body, params)
+    return body.to_mesh(f"{params.name} body")
+
 
 
 def build_figure_skeleton(params: FigureParameters) -> Skeleton:
@@ -592,10 +813,16 @@ def build_figure(
     mesh = build_figure_mesh(settings)
     skeleton = build_figure_skeleton(settings)
     skin = material or Material(
-        name=f"{object_name} skin", base_color=settings.skin, specular=0.18, shininess=16.0
+        name=f"{object_name} skin",
+        base_color=settings.skin,
+        specular=0.18,
+        shininess=16.0,
+        wrap=0.35,
     )
     obj = SceneObject(object_name, mesh, skin, skeleton=skeleton)
     obj.bind()
+    if settings.pose and settings.pose != "rest":
+        obj.pose = pose_rotations(settings.pose)
     return obj
 
 
@@ -689,6 +916,113 @@ def figure_preset_names() -> tuple[str, ...]:
     return tuple(FIGURE_PRESETS)
 
 
+#: Ready-made poses a figure can be put into, as named bone rotations (degrees).
+#: They live here, beside the rig, so the Scene Studio and the body studio share one
+#: set and cannot drift apart. Each entry is ``bone -> (x, y, z)`` euler degrees.
+POSE_PRESETS: dict[str, dict[str, Vec3]] = {
+    "rest": {},
+    "contrapposto": {
+        "hips": Vec3(0.0, 0.0, 6.0),
+        "spine": Vec3(0.0, 0.0, -3.0),
+        "thigh.L": Vec3(-4.0, 0.0, 4.0),
+        "shin.L": Vec3(6.0, 0.0, 0.0),
+        "thigh.R": Vec3(2.0, 0.0, -2.0),
+    },
+    "wave": {
+        "shoulder.L": Vec3(0.0, 0.0, -20.0),
+        "upper_arm.L": Vec3(0.0, 0.0, -125.0),
+        "forearm.L": Vec3(0.0, 0.0, -35.0),
+    },
+    "walk": {
+        "thigh.L": Vec3(-28.0, 0.0, 0.0),
+        "shin.L": Vec3(22.0, 0.0, 0.0),
+        "thigh.R": Vec3(24.0, 0.0, 0.0),
+        "shin.R": Vec3(8.0, 0.0, 0.0),
+        "upper_arm.L": Vec3(22.0, 0.0, 0.0),
+        "upper_arm.R": Vec3(-22.0, 0.0, 0.0),
+    },
+    "run": {
+        "hips": Vec3(6.0, 0.0, 0.0),
+        "thigh.L": Vec3(-48.0, 0.0, 0.0),
+        "shin.L": Vec3(58.0, 0.0, 0.0),
+        "thigh.R": Vec3(34.0, 0.0, 0.0),
+        "shin.R": Vec3(22.0, 0.0, 0.0),
+        "upper_arm.L": Vec3(48.0, 0.0, 0.0),
+        "forearm.L": Vec3(-70.0, 0.0, 0.0),
+        "upper_arm.R": Vec3(-48.0, 0.0, 0.0),
+        "forearm.R": Vec3(-70.0, 0.0, 0.0),
+    },
+    "sit": {
+        "thigh.L": Vec3(-85.0, 0.0, 0.0),
+        "shin.L": Vec3(85.0, 0.0, 0.0),
+        "thigh.R": Vec3(-85.0, 0.0, 0.0),
+        "shin.R": Vec3(85.0, 0.0, 0.0),
+    },
+    "sit_ground": {
+        "hips": Vec3(0.0, 0.0, 0.0),
+        "thigh.L": Vec3(-92.0, 12.0, 0.0),
+        "shin.L": Vec3(60.0, 0.0, 0.0),
+        "thigh.R": Vec3(-92.0, -12.0, 0.0),
+        "shin.R": Vec3(60.0, 0.0, 0.0),
+        "spine": Vec3(-6.0, 0.0, 0.0),
+    },
+    "tpose": {
+        "shoulder.L": Vec3(0.0, 0.0, -90.0),
+        "shoulder.R": Vec3(0.0, 0.0, 90.0),
+        "upper_arm.L": Vec3(0.0, 0.0, -90.0),
+        "upper_arm.R": Vec3(0.0, 0.0, 90.0),
+    },
+    "reach": {
+        "shoulder.L": Vec3(0.0, 0.0, -40.0),
+        "upper_arm.L": Vec3(-60.0, 0.0, -100.0),
+        "forearm.L": Vec3(-25.0, 0.0, 0.0),
+        "chest": Vec3(-8.0, 0.0, 0.0),
+    },
+    "arms_crossed": {
+        "shoulder.L": Vec3(0.0, 0.0, -20.0),
+        "upper_arm.L": Vec3(-70.0, 30.0, -35.0),
+        "forearm.L": Vec3(0.0, 0.0, -95.0),
+        "shoulder.R": Vec3(0.0, 0.0, 20.0),
+        "upper_arm.R": Vec3(-70.0, -30.0, 35.0),
+        "forearm.R": Vec3(0.0, 0.0, 95.0),
+    },
+    "hands_hips": {
+        "upper_arm.L": Vec3(0.0, 0.0, -45.0),
+        "forearm.L": Vec3(-80.0, 0.0, -45.0),
+        "upper_arm.R": Vec3(0.0, 0.0, 45.0),
+        "forearm.R": Vec3(-80.0, 0.0, 45.0),
+    },
+    "squat": {
+        "hips": Vec3(20.0, 0.0, 0.0),
+        "thigh.L": Vec3(-70.0, 8.0, 0.0),
+        "shin.L": Vec3(80.0, 0.0, 0.0),
+        "foot.L": Vec3(-10.0, 0.0, 0.0),
+        "thigh.R": Vec3(-70.0, -8.0, 0.0),
+        "shin.R": Vec3(80.0, 0.0, 0.0),
+        "foot.R": Vec3(-10.0, 0.0, 0.0),
+        "upper_arm.L": Vec3(-40.0, 0.0, -20.0),
+        "upper_arm.R": Vec3(-40.0, 0.0, 20.0),
+    },
+    "lying": {
+        "hips": Vec3(-90.0, 0.0, 0.0),
+        "thigh.L": Vec3(6.0, 0.0, 0.0),
+        "thigh.R": Vec3(6.0, 0.0, 0.0),
+        "upper_arm.L": Vec3(0.0, 0.0, -20.0),
+        "upper_arm.R": Vec3(0.0, 0.0, 20.0),
+    },
+}
+
+
+def pose_preset_names() -> tuple[str, ...]:
+    return tuple(POSE_PRESETS)
+
+
+def pose_rotations(preset: str) -> dict[str, Vec3]:
+    """The bone rotations of a named pose, or an empty pose for ``rest``/unknown."""
+    return dict(POSE_PRESETS.get(preset, {}))
+
+
+
 def build_figure_from_preset(key: str = "adult", *, name: str | None = None) -> SceneObject:
     """Build one of the named presets (``adult`` is the default)."""
     try:
@@ -733,6 +1067,7 @@ __all__ = [
     "BUILD_MASCULINE",
     "BUILD_NEUTRAL",
     "FIGURE_PRESETS",
+    "POSE_PRESETS",
     "RADIAL_SEGMENTS",
     "FigureParameters",
     "build_figure",
@@ -743,4 +1078,6 @@ __all__ = [
     "build_hair_object",
     "figure_preset_names",
     "morph_figure",
+    "pose_preset_names",
+    "pose_rotations",
 ]

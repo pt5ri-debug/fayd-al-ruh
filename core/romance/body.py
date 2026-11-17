@@ -41,8 +41,13 @@ from core.scene3d_figures import (
     FigureParameters,
     build_figure,
     build_hair_object,
+    pose_preset_names,
 )
 from core.scene3d_render import render_scene
+
+#: The ready-made poses the body studio offers, taken from the figure rig so the
+#: body studio and the Scene Studio share one set.
+POSE_PRESET_KEYS: tuple[str, ...] = pose_preset_names()
 
 #: What this engine is, said plainly, so a surface can show it.
 HONESTY_LINE = (
@@ -69,8 +74,10 @@ DIAL_GROUPS: tuple[tuple[str, str, str], ...] = (
     ("torso", "Torso and shape", "الجذع والقوام"),
     ("limbs", "Arms and legs", "الذراعان والساقان"),
     ("head", "Head and face", "الرأس والوجه"),
+    ("intimate", "Intimate detail", "التفاصيل الحميمة"),
     ("hair", "Hair", "الشعر"),
     ("colour", "Skin and hair colour", "لون البشرة والشعر"),
+    ("pose", "Pose", "الوضعية"),
 )
 
 _GROUP_TITLES: dict[str, str] = {key: en for key, en, _ar in DIAL_GROUPS}
@@ -171,9 +178,27 @@ DIALS: tuple[DialSpec, ...] = (
     DialSpec("lips", "Lips", "الشفتان", "head", minimum=0.50, maximum=1.80, step=0.01),
     DialSpec("cheek", "Cheeks", "الوجنتان", "head"),
     DialSpec("ear_size", "Ears", "الأذنان", "head", minimum=0.50, maximum=1.80, step=0.01),
+    DialSpec(
+        "genitalia", "Intimate detail", "التفاصيل الحميمة", "intimate",
+        hint="Shows the genital region (adults only); 0 hides it",
+    ),
+    DialSpec(
+        "genital_size", "Intimate size", "حجم التفاصيل الحميمة", "intimate",
+        minimum=0.40, maximum=1.80, step=0.01,
+    ),
+    DialSpec("areola", "Areola size", "حجم الهالة", "intimate", minimum=0.40, maximum=2.00, step=0.01),
     DialSpec("hair", "Hair volume", "كثافة الشعر", "hair"),
     DialSpec("skin", "Skin colour", "لون البشرة", "colour", kind="colour"),
     DialSpec("hair_color", "Hair colour", "لون الشعر", "colour", kind="colour"),
+    DialSpec("lip_color", "Lip colour", "لون الشفتين", "colour", kind="colour"),
+    DialSpec("eye_color", "Eye colour", "لون العين", "colour", kind="colour"),
+    DialSpec("nipple_color", "Areola colour", "لون الهالة", "colour", kind="colour"),
+    DialSpec("nail_color", "Nail colour", "لون الأظافر", "colour", kind="colour"),
+    DialSpec("genital_color", "Intimate colour", "لون التفاصيل الحميمة", "colour", kind="colour"),
+    DialSpec(
+        "pose", "Pose", "الوضعية", "pose",
+        kind="choice", choices=POSE_PRESET_KEYS, hint="A ready-made body position",
+    ),
 )
 
 _DIAL_BY_KEY: dict[str, DialSpec] = {dial.key: dial for dial in DIALS}
@@ -320,6 +345,112 @@ def reset_to_preset(params: FigureParameters, key: str) -> FigureParameters:
     return preset.with_changes(name=params.name)
 
 
+#: Human-readable titles for the ready-made poses.
+POSE_TITLES: dict[str, str] = {
+    "rest": "Rest (standing)",
+    "contrapposto": "Contrapposto",
+    "wave": "Wave",
+    "walk": "Walk",
+    "run": "Run",
+    "sit": "Sit (chair)",
+    "sit_ground": "Sit (ground)",
+    "tpose": "T-pose",
+    "reach": "Reach up",
+    "arms_crossed": "Arms crossed",
+    "hands_hips": "Hands on hips",
+    "squat": "Squat",
+    "lying": "Lying down",
+}
+
+
+def pose_keys() -> tuple[str, ...]:
+    """The pose presets the studio offers."""
+    return POSE_PRESET_KEYS
+
+
+def pose_titles(language: str = "en") -> tuple[tuple[str, str], ...]:
+    """``(key, readable title)`` for each pose, in either language."""
+    titles = {
+        "ar": {
+            "rest": "وقوف",
+            "contrapposto": "وقفة مائلة",
+            "wave": "تلويح",
+            "walk": "مشي",
+            "run": "جري",
+            "sit": "جلوس (كرسي)",
+            "sit_ground": "جلوس (أرض)",
+            "tpose": "وضع T",
+            "reach": "مدّ اليد",
+            "arms_crossed": "ذراعان متقاطعتان",
+            "hands_hips": "اليدان على الخصر",
+            "squat": "قرفصاء",
+            "lying": "استلقاء",
+        }
+    }.get(language, {})
+    return tuple((key, titles.get(key) or POSE_TITLES.get(key, key)) for key in POSE_PRESET_KEYS)
+
+
+def set_pose(params: FigureParameters, key: str) -> FigureParameters:
+    """A copy of ``params`` in the named pose (an unknown pose is refused)."""
+    if key not in POSE_PRESET_KEYS:
+        raise KeyError(f"Unknown pose {key!r}; choose from {', '.join(POSE_PRESET_KEYS)}.")
+    return params.with_changes(pose=key)
+
+
+#: Cues that map a plain-language instruction onto a ready-made pose. The keys are
+#: the words a user would type; the values are the pose they mean. Both languages
+#: are covered, so "اجلس" and "sit" reach the same pose.
+_POSE_CUES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("wave", "waving", "تلويح", "لوّح", "تحية"), "wave"),
+    (("walk", "walking", "مشي", "يمشي", "امش"), "walk"),
+    (("run", "running", "jog", "جري", "يجري"), "run"),
+    (("sit on the floor", "sit on the ground", "cross-legged", "أرض", "الأرض"), "sit_ground"),
+    (("sit", "sitting", "chair", "اجلس", "جلوس", "كرسي"), "sit"),
+    (("t-pose", "tpose", "t pose", "arms out", "وضع t"), "tpose"),
+    (("reach", "reaching", "raise", "رفع", "مدّ", "يمد"), "reach"),
+    (("arms crossed", "cross your arms", "ذراعان متقاطعتان", "تقاطع"), "arms_crossed"),
+    (("hands on hips", "akimbo", "اليدان على الخصر", "الخصر"), "hands_hips"),
+    (("squat", "crouch", "kneel", "قرفصاء", "اقرفص"), "squat"),
+    (("lying", "lie down", "lay down", "استلقاء", "استلق"), "lying"),
+    (("contrapposto", "posing", "model", "وقفة", "موديل"), "contrapposto"),
+    (("stand", "standing", "rest", "قف", "وقوف"), "rest"),
+)
+
+
+def pose_from_instruction(text: str) -> str | None:
+    """The pose a plain-language instruction asks for, or ``None`` if none matches.
+
+    A small, deterministic keyword matcher -- not a model -- so the studio can turn
+    a typed or spoken "sit down" into the sitting pose without guessing: an
+    instruction that names no pose returns ``None`` and changes nothing.
+    """
+    lowered = (text or "").strip().casefold()
+    if not lowered:
+        return None
+    for cues, key in _POSE_CUES:
+        if any(cue in lowered for cue in cues):
+            return key
+    return None
+
+
+def apply_pose_instruction(
+    params: FigureParameters, text: str
+) -> tuple[FigureParameters, str]:
+    """Set the pose a plain-language instruction asks for.
+
+    Returns ``(params, message)``: the new parameters and a readable note. When the
+    instruction names no pose the parameters are returned unchanged and the message
+    says so, so the studio can show an honest answer rather than pretend.
+    """
+    key = pose_from_instruction(text)
+    if key is None:
+        return params, (
+            "No pose matched that instruction. Try a word like sit, wave, walk, run, "
+            "reach, squat, arms crossed, hands on hips, or lying."
+        )
+    return params.with_changes(pose=key), f"Pose set to {POSE_TITLES.get(key, key)}."
+
+
 def changed_keys(params: FigureParameters) -> tuple[str, ...]:
     """The dials that differ from the neutral default (so the window can mark them)."""
     base = FIGURE_PRESETS["adult"]
@@ -410,6 +541,8 @@ __all__ = [
     "DIALS",
     "DIAL_GROUPS",
     "HONESTY_LINE",
+    "POSE_PRESET_KEYS",
+    "POSE_TITLES",
     "PREVIEW_HEIGHT",
     "PREVIEW_WIDTH",
     "VIEWS",
@@ -417,6 +550,7 @@ __all__ = [
     "VIEW_FULL",
     "VIEW_TITLES",
     "DialSpec",
+    "apply_pose_instruction",
     "as_colour",
     "body_preset_keys",
     "body_preset_titles",
@@ -428,6 +562,9 @@ __all__ = [
     "dial_keys",
     "dials_in_group",
     "group_titles",
+    "pose_from_instruction",
+    "pose_keys",
+    "pose_titles",
     "preset_parameters",
     "preview_scene",
     "render_avatar",
@@ -435,5 +572,6 @@ __all__ = [
     "reset_to_preset",
     "set_dial",
     "set_dials",
+    "set_pose",
     "values_of",
 ]

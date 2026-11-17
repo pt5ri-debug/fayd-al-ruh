@@ -153,6 +153,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Set a measurement (repeatable), e.g. --set height=1.9 --set bust=0.6.",
     )
     body.add_argument("--preset", default="", help="Start from a ready-made body.")
+    body.add_argument("--poses", action="store_true", help="List the ready-made poses.")
+    body.add_argument("--pose", default="", help="Set a ready-made pose by key.")
+    body.add_argument(
+        "--pose-text", default="", metavar="INSTRUCTION",
+        help="Set the pose from a plain-language instruction, e.g. \"sit down\".",
+    )
     body.add_argument(
         "--view", default="full", choices=("full", "face"), help="Which framing to render."
     )
@@ -575,8 +581,21 @@ def run_body(args: argparse.Namespace) -> int:
         rows = [{"key": key, "title": title} for key, title in service.body_presets()]
         _emit(args, rows, "\n".join(f"{row['key']:12s} {row['title']}" for row in rows))
         return EXIT_OK
+    if args.poses:
+        rows = [{"key": key, "title": title} for key, title in service.body_poses()]
+        _emit(args, rows, "\n".join(f"{row['key']:14s} {row['title']}" for row in rows))
+        return EXIT_OK
 
     params = service.body_parameters(args.character_id, preset=args.preset)
+    if args.pose:
+        try:
+            params = service.set_body_pose(params, args.pose)
+        except KeyError as error:
+            print(f"romance: {error}", file=sys.stderr)
+            return EXIT_USAGE
+    if args.pose_text:
+        params, note = service.apply_body_pose_instruction(params, args.pose_text)
+        print(note, file=sys.stderr)
     changes: dict[str, Any] = {}
     for item in args.set:
         key, _, value = item.partition("=")

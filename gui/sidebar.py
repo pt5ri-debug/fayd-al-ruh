@@ -29,6 +29,15 @@ from gui.typography import Typography
 _CHEVRON_OPEN = "▾"
 _CHEVRON_CLOSED = "▸"
 
+#: The three wheel event spellings Tk uses across platforms (``<MouseWheel>`` on
+#: Windows/macOS, ``<Button-4|5>`` on X11), bound together everywhere so one
+#: gesture scrolls the same way on every desktop.
+_WHEEL_SEQUENCES = ("<MouseWheel>", "<Button-4>", "<Button-5>")
+
+#: Widget classes that scroll their **own** content, so the column's wheel must not
+#: hijack them: the wheel over a long list should scroll the list, not the column.
+_SELF_SCROLLING = frozenset({"Listbox", "Text"})
+
 
 class SidebarSection:
     """One collapsible group: a clickable header over a body frame.
@@ -220,14 +229,15 @@ class SidebarColumn:
 
         self.body = tk.Frame(self.canvas, bg=_token(theme, "surface"))
         self._window = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
-        self.body.bind(
-            "<Configure>", lambda _e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
+        self.body.bind("<Configure>", self._on_body_configure)
         self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self._window, width=e.width))
-        for widget in (self.canvas, self.body):
-            widget.bind("<MouseWheel>", self._on_wheel)
-            widget.bind("<Button-4>", self._on_wheel)
-            widget.bind("<Button-5>", self._on_wheel)
+        # A ``<MouseWheel>``/``<Button-4|5>`` event goes to the widget under the
+        # pointer, so binding the canvas and the body alone left the wheel dead over
+        # the actual controls. Every widget a section builds is bound (recursively,
+        # and re-scanned whenever the body changes size, which is how a control added
+        # after ``add`` returns is caught too).
+        self._wheel_bound: set[str] = set()
+        self._bind_wheel_recursive(self.canvas)
 
     def add(
         self,
@@ -249,7 +259,36 @@ class SidebarColumn:
             on_toggle=self._on_toggle if self._scope else None,
         )
         self.sections[key] = section
+        self._bind_wheel_recursive(section.frame)
         return section.body
+
+    def _bind_wheel_recursive(self, widget: tk.Misc) -> None:
+        """Bind the wheel to ``widget`` and every descendant that needs it.
+
+        A ``<MouseWheel>``/``<Button-4|5>`` event goes to the widget under the
+        pointer, so binding the canvas and the body alone left the wheel dead over
+        the actual controls (a list, a button): the column could only be scrolled by
+        hovering an empty patch. A widget that scrolls **its own** content (a
+        ``Listbox`` or a ``Text``) is left alone, so a long list is still scrolled by
+        the wheel over it rather than scrolling the column behind it.
+        """
+        key = str(widget)
+        if key not in self._wheel_bound:
+            self._wheel_bound.add(key)
+            if widget.winfo_class() not in _SELF_SCROLLING:
+                for sequence in _WHEEL_SEQUENCES:
+                    widget.bind(sequence, self._on_wheel, add="+")
+        for child in widget.winfo_children():
+            self._bind_wheel_recursive(child)
+
+    def _on_body_configure(self, _event: tk.Event) -> None:
+        """Grow the scroll region to the whole stacked body and catch new widgets.
+
+        The re-scan is what binds a control a section adds *after* :meth:`add`
+        returned, so the wheel works over the newest row too.
+        """
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self._bind_wheel_recursive(self.body)
 
     def set_open(self, key: str, open: bool = True) -> None:
         """Open (or close) a section programmatically, without persisting it."""
@@ -262,13 +301,21 @@ class SidebarColumn:
         if self._scope:
             save_section_states(self._scope, self._states, self._state_root)
 
-    def _on_wheel(self, event: tk.Event) -> None:
+    def _on_wheel(self, event: tk.Event) -> str:
+        """Scroll the column one unit per notch, in the direction of the wheel.
+
+        Returning ``"break"`` stops the event from bubbling to an ancestor with its
+        own scroll region, so a wheel over the column scrolls the column and nothing
+        else (and the wheel over a *child* control scrolls it too, because the
+        binding is installed on every descendant).
+        """
         delta = -1 if getattr(event, "delta", 0) > 0 else 1
         if getattr(event, "num", None) == 4:
             delta = -1
         elif getattr(event, "num", None) == 5:
             delta = 1
         self.canvas.yview_scroll(delta, "units")
+        return "break"
 
 
 #: The namespace the per-dialog section states are stored under (beside the main
