@@ -76,7 +76,9 @@ SETTING_LABELS: tuple[tuple[str, str, str], ...] = (
 #: The Studio setting keys that hold a numeric value, with their safe bounds.
 _NUMERIC_SETTINGS: dict[str, tuple[float, float, float]] = {
     SETTING_CONTEXT_LENGTH: (512.0, 32768.0, 4096.0),
-    SETTING_MAX_TOKENS: (32.0, 4096.0, 1024.0),
+    #: The answer limit is generous by default: a companion's reply is read, not
+    #: summarised, so a short cap is what made a long answer arrive cut off.
+    SETTING_MAX_TOKENS: (32.0, 4096.0, 2048.0),
     SETTING_TEMPERATURE: (0.0, 2.0, 0.8),
     SETTING_MEMORY_LIMIT: (0.0, 20.0, 6.0),
 }

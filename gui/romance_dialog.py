@@ -62,8 +62,9 @@ DISCLOSURE = (
 _COLUMN_MAX = 860
 #: How tall a message may grow before it scrolls inside itself. Raised well above
 #: the old 40 lines because a companion answers in paragraphs: a longer reply was
-#: drawn only up to the cap, so a complete answer looked truncated.
-_MAX_BUBBLE_LINES = 400
+#: drawn only up to the cap, so a complete answer looked truncated. The cap is a
+#: safety valve against a runaway generation, not a reading limit.
+_MAX_BUBBLE_LINES = 1000
 
 #: The characters that end a sentence, in either language, so a live reply can be
 #: written one *finished sentence* at a time instead of a word at a time.
@@ -662,12 +663,24 @@ class RomanceStudioDialog(ThemedDialog):
         self, parent: tk.Misc, text: str, command: Any, *, anchor: str = "w",
         small: bool = True, variant: str = "secondary",
     ) -> tk.Button:
+        """A themed sidebar button, **placed** in its row.
+
+        The button is packed here so a caller that does not chain its own
+        ``.pack(...)`` still shows the control: an unplaced Tk widget has no
+        geometry manager, so it is never drawn and can never be clicked -- which is
+        how most of this window's sidebar (New…, Add the chosen, and every other
+        control that was not explicitly packed) ended up invisible. A caller that
+        packs it again only re-applies the geometry (``pack`` is idempotent).
+        """
         from gui.components import button
 
-        return button(
+        widget = button(
             parent, text, command, theme=self.theme, typography=self._type,
             variant=variant, small=small, anchor=anchor,  # type: ignore[arg-type]
         )
+        if not widget.winfo_manager():
+            widget.pack(side="left", padx=(0, 6))
+        return widget
 
     def _listbox(self, parent: tk.Misc, *, height: int, on_select: Callable[[int], None]) -> tk.Listbox:
         theme = self.theme

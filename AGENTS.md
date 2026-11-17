@@ -1415,6 +1415,39 @@ Arabic is kept as secondary aliases where useful.
   refusals, the templates, the gender rule, the real PNG render, the service, the
   picture bridge, the CLI, and the three real Tk windows (including both managers
   opening the builder).
+  **The Body & shape studio really opens, and the answer is larger and streamed
+  (Phase 16).** Two reported failures. (1) *"The Body & shape feature does not
+  work -- no window opens at all"*: the window and both managers built their
+  controls but **never placed** most of them, so an unplaced Tk widget had no
+  geometry manager, was never drawn, and could never be clicked -- the *Body &
+  shape* entry and the window's own Render / Use as the picture / template / view
+  buttons were all invisible. Each dialog's `_button` helper now **packs the
+  widget it returns** (`gui/romance_body.py`, `gui/romance_dialog.py`,
+  `gui/romance_managers.py`); a caller that re-packs it only re-applies the
+  geometry (`pack` is idempotent, and an explicit `side` overrides the default), so
+  both call styles work and no control can be silently unplaced again. The body
+  window's action row and honesty note are also packed **before** the expanding
+  preview, anchored to the bottom (`side="bottom"`), because a widget packed after
+  a `fill="both", expand=True` sibling is left with no space. (2) *the answer
+  arrives cut off and all at once*: the in-process trained checkpoint -- the only
+  model a clean install really has -- reported `streaming=False`, so the manager
+  yielded the whole reply at the end, and the Studio's default answer limit was
+  1024 tokens. `ml/llm/generator.py` gained `generate_stream(prompt, ...)` (the
+  same seeded sampling loop, yielding each decoded piece; it decodes through an
+  **incremental UTF-8 decoder** so a multi-byte Arabic character split across two
+  byte tokens is never shown as `�`, and the concatenation is byte-identical to
+  `generate`), `core/model_runtime.py` wired it into `InProcessTrainedAdapter`
+  (`streaming=True`, a `stream()` seam) and added the same for `OllamaAdapter`
+  (through a new `OllamaCoderClient.chat_stream`), and the Studio raised its
+  stored answer limit to **2048** and its bubble cap (`_MAX_BUBBLE_LINES`) to
+  **1000**. The window already streamed *sentence by sentence* through
+  `_stream_reply`, so the runtime fix is what makes a live answer visible; the
+  hidden reasoning trace stays off by default (it was the other half of a short
+  reply). `tests/test_romance_streaming.py` pins the generator's stream/one-shot
+  equivalence (seeded and greedy), the multi-byte safety, both adapters' streaming
+  seams, the raised limits, and the CLI; `tests/test_romance_body_studio.py` gained
+  two placement tests (`test_every_body_window_button_is_really_placed`,
+  `test_every_manager_button_is_really_placed`).
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
   theme=, typography=, on_close=)` builds one frame of three buttons into the

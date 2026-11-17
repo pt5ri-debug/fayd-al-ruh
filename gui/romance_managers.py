@@ -568,12 +568,24 @@ class CharacterManagerDialog(ThemedDialog):
     # -- small widgets ----------------------------------------------------
 
     def _button(self, parent: tk.Misc, text: str, command: Any, *, variant: str = "secondary") -> tk.Button:
+        """A themed sidebar button, **placed** in its row.
+
+        The button is packed here so a caller that does not chain its own
+        ``.pack(...)`` still shows the control: an unplaced Tk widget has no
+        geometry manager, so it is never drawn and can never be clicked -- which
+        is exactly how the whole manager sidebar (New…, Add the chosen, the body
+        builder…) ended up invisible. A caller that packs it again only re-applies
+        the geometry (``pack`` is idempotent), so both call styles work.
+        """
         from gui.components import button
 
-        return button(
+        widget = button(
             parent, text, command, theme=self.theme, typography=self._type,
             variant=variant, small=True,
         )
+        if not widget.winfo_manager():
+            widget.pack(side="left", padx=(0, 6))
+        return widget
 
     def _listbox(
         self, parent: tk.Misc, *, height: int, on_select: Callable[[int], None],
