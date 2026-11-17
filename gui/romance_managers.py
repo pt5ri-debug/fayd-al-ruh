@@ -234,6 +234,24 @@ class CharacterManagerDialog(ThemedDialog):
         self._button(lib_row, "Add the chosen", self._add_library, variant="primary")
         self._button(lib_row, "Add the whole group", self._add_library_group)
 
+        body = column.add("body", "Body & shape", icon="🧍", open=True)
+        tk.Label(
+            body,
+            text=(
+                "Build the character's whole body — pick a template, then shape every "
+                "measurement, and use the render as the picture."
+            ),
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=280,
+        ).pack(fill="x", pady=(0, 4))
+        self._button(
+            body, "Open the body builder…", self._open_body_studio, variant="primary",
+        )
+
     # -- the profile panel (right) ----------------------------------------
 
     def _build_profile(self, parent: tk.Frame) -> None:
@@ -963,6 +981,37 @@ class CharacterManagerDialog(ThemedDialog):
         self._refresh_list()
         if character_id:
             self._select(character_id)
+        self._notify(character_id)
+
+    def _open_body_studio(self) -> None:
+        """Open the body builder for the selected character (one window per manager)."""
+        character_id = self._selected_id()
+        if not character_id:
+            self._set_status(f"Select a {self._plural()} first.")
+            return
+        from gui.romance_body import BodyStudioDialog
+
+        existing = getattr(self, "_body_studio", None)
+        if existing is not None and not getattr(existing, "_closed", True):
+            try:
+                existing.window.lift()
+                return
+            except Exception:
+                pass
+        dialog = BodyStudioDialog(
+            self.window, self.service, character_id, role=self.role,
+            theme=self.theme, font=self.font, mono=self.mono,
+            overrides=self._overrides, list_overrides=self._list_overrides,
+            on_changed=self._on_body_changed,
+        )
+        self._body_studio = dialog
+        self._children = getattr(self, "_children", [])
+        self._children.append(dialog)
+
+    def _on_body_changed(self, character_id: str) -> None:
+        """A body render was stored as the picture: refresh this window's view."""
+        self._refresh_avatar()
+        self._refresh_list()
         self._notify(character_id)
 
     def _edit_in_editor(self) -> None:

@@ -196,6 +196,40 @@ class CharacterAvatarManager:
             description=f"Avatar set from {src.name}.",
         )
 
+    # -- store raw bytes --------------------------------------------------
+
+    def set_from_bytes(
+        self, character_id: str, data: bytes, *, suffix: str = ".png", source: str = "generated"
+    ) -> AvatarResult:
+        """Store a picture the caller already rendered (the body studio's path).
+
+        The bytes are written exactly as given -- the body studio hands over a PNG
+        the project's own rasteriser produced -- so a rendered body lands in the
+        character's folder the same way an uploaded file does, and the record points
+        at it the same way. A blank payload, or a suffix that is not an image, is
+        refused rather than stored.
+        """
+        self._character(character_id)
+        if not data:
+            raise AvatarError("no picture data was produced")
+        clean = suffix if suffix.startswith(".") else f".{suffix}"
+        if not is_image_name(f"avatar{clean}"):
+            raise AvatarError(
+                f"{clean!r} is not an image suffix; choose one of "
+                f"{', '.join(AVATAR_SUFFIXES)}"
+            )
+        folder = self.folder(character_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"avatar{clean.lower()}"
+        target.write_bytes(data)
+        self._store(character_id, target)
+        return AvatarResult(
+            character_id=character_id,
+            path=target,
+            source=source,
+            description=f"Picture stored from the {source.replace(':', ' ')} ({len(data)} bytes).",
+        )
+
     # -- generate ---------------------------------------------------------
 
     def generate(

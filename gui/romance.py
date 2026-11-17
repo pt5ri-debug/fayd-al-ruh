@@ -591,6 +591,107 @@ class RomanceStudioService:
         }
         return tuple((key, labels.get(key, key)) for key in AVATAR_BACKENDS)
 
+    # -- the body studio --------------------------------------------------
+
+    def body_parameters(self, character_id: str, *, preset: str = "") -> Any:
+        """The body dials a character starts from (its own gender picks the build).
+
+        A blank or unknown character id is **not** an error here: the studio may be
+        opened before a character exists, and the honest answer is the neutral
+        starting body rather than a crash.
+        """
+        from core.romance.body import default_parameters
+
+        try:
+            character = self.character(character_id) if character_id else None
+        except Exception:
+            character = None
+        return default_parameters(character, preset=preset)
+
+    def body_dial_groups(self, *, language: str = "en") -> tuple[tuple[str, str, tuple[Any, ...]], ...]:
+        """``(group key, title, dials)`` for every dial group, in window order."""
+        from core.romance.body import dials_in_group, group_titles
+
+        return tuple(
+            (key, title, dials_in_group(key)) for key, title in group_titles(language)
+        )
+
+    def body_presets(self, *, language: str = "en") -> tuple[tuple[str, str], ...]:
+        """``(key, title)`` for each ready-made body the user can start from."""
+        from core.romance.body import body_preset_titles
+
+        return body_preset_titles(language)
+
+    def body_builds(self) -> tuple[tuple[str, str], ...]:
+        """``(key, title)`` for each build family (feminine / masculine / neutral)."""
+        from core.romance.body import BUILD_CHOICES, BUILD_TITLES
+
+        return tuple((key, BUILD_TITLES.get(key, key)) for key in BUILD_CHOICES)
+
+    def set_body_dial(self, params: Any, key: str, value: Any) -> Any:
+        """A copy of ``params`` with one dial set (clamped); unknown keys raise."""
+        from core.romance.body import set_dial
+
+        return set_dial(params, key, value)
+
+    def set_body_dials(self, params: Any, changes: dict[str, Any]) -> Any:
+        """A copy of ``params`` with several dials set at once."""
+        from core.romance.body import set_dials
+
+        return set_dials(params, changes)
+
+    def apply_body_preset(self, params: Any, key: str) -> Any:
+        """Return ``params`` to a named preset's measurements (its name kept)."""
+        from core.romance.body import reset_to_preset
+
+        return reset_to_preset(params, key)
+
+    def body_summary(self, params: Any) -> str:
+        """A short, readable description of the body the dials describe."""
+        from core.romance.body import body_summary
+
+        return body_summary(params)
+
+    def body_values(self, params: Any) -> dict[str, Any]:
+        """Every dial's current value on ``params`` (the headless view of the dials)."""
+        from core.romance.body import values_of
+
+        return values_of(params)
+
+    def render_body(
+        self,
+        params: Any,
+        *,
+        view: str = "full",
+        width: int | None = None,
+        height: int | None = None,
+    ) -> bytes:
+        """Render the body and return the PNG bytes (the window shows them)."""
+        from core.romance.body import (
+            PREVIEW_HEIGHT,
+            PREVIEW_WIDTH,
+            render_preview,
+        )
+
+        return render_preview(
+            params,
+            view=view,
+            width=int(width or PREVIEW_WIDTH),
+            height=int(height or PREVIEW_HEIGHT),
+        )
+
+    def use_body_as_avatar(self, character_id: str, params: Any) -> Any:
+        """Render a square portrait of the body and store it as the character's picture.
+
+        This is the bridge between the body studio and the Studio's existing avatar:
+        the picture is written through the *same* avatar manager an upload uses, so
+        the character's card, its window, and its profile all show it at once.
+        """
+        from core.romance.body import AVATAR_HEIGHT, AVATAR_WIDTH, render_avatar
+
+        data = render_avatar(params, width=AVATAR_WIDTH, height=AVATAR_HEIGHT)
+        return self.avatar_manager().set_from_bytes(character_id, data, source="body studio")
+
     # -- characters -------------------------------------------------------
 
     def character_rows(
