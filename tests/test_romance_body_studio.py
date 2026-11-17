@@ -315,13 +315,22 @@ def _display_available() -> bool:
     return True
 
 
-def _wait_for(root, predicate, *, rounds: int = 600) -> bool:
-    """Drain the UI event loop until ``predicate()`` is true (a worker-thread result)."""
-    for _ in range(rounds):
+def _wait_for(root, predicate, *, timeout: float = 60.0) -> bool:
+    """Drain the UI event loop until ``predicate()`` is true (a worker-thread result).
+
+    Bounded by a wall-clock *timeout* rather than a fixed number of ``update``
+    rounds: a busy CI runner can spend seconds inside one round (a full-body render
+    is CPU-bound), so a round count is not a reliable deadline there.
+    """
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
         root.update()
         if predicate():
             return True
-    return False
+        _time.sleep(0.01)
+    return predicate()
 
 
 def _close_window(root, dialog) -> None:

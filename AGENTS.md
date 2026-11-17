@@ -7964,5 +7964,12 @@ regression monitor each can refuse a change.
   ten (the camera presets, a render from another angle differing, zoom,
   the engine's orbit placement and clamping, the subdivision/smoothing dials, the
   window's camera controls and drag, the two `_open_body_studio` fix cases, and
-  the CLI camera flags). Gates: ruff clean, mypy 1200 files OK, evaluation PASS
-  (`overall` 0.9918 unchanged).
+  the CLI camera flags). A slower CI runner exposed one more cost: binding a
+  finer mesh is `O(vertices x bones)` and dominated the first render, so
+  `compute_skin_weights` now flattens each bone's segment to plain floats once and
+  ranks by **squared** distance (one `sqrt` for the few bones chosen) -- the
+  binding is numerically identical (max weight delta 1e-19) and a full-body render
+  fell from ~1.8 s to ~1.0 s; the window tests' `_wait_for` is now bounded by a
+  wall-clock timeout rather than a fixed number of `update` rounds, which a busy
+  runner can spend seconds inside. Gates: ruff clean, mypy 1200 files OK,
+  evaluation PASS (`overall` 0.9918 unchanged).

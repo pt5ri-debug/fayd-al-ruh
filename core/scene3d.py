@@ -809,15 +809,47 @@ def compute_skin_weights(
     order = skeleton.names()
     if not order:
         return tuple(() for _ in mesh.vertices)
+    # Binding is O(vertices x bones) and is the hot path of a full-body render, so
+    # each bone's segment is flattened to plain floats once: the per-vertex loop
+    # then makes no ``Vec3`` allocations, and distances are compared *squared*
+    # (monotonic, so the ranking is identical) with a single ``sqrt`` for the few
+    # bones actually chosen.
+    bones: list[tuple[float, float, float, float, float, float, float]] = []
+    for name in order:
+        start, end = segments[name]
+        dx = end.x - start.x
+        dy = end.y - start.y
+        dz = end.z - start.z
+        bones.append(
+            (start.x, start.y, start.z, dx, dy, dz, dx * dx + dy * dy + dz * dz)
+        )
+    keep = max(1, min(max_influences, len(order)))
     bindings: list[tuple[tuple[int, float], ...]] = []
     for vertex in mesh.vertices:
-        distances = [
-            _distance_to_segment(vertex, segments[name][0], segments[name][1])
-            for name in order
-        ]
+        vx, vy, vz = vertex.x, vertex.y, vertex.z
+        distances: list[float] = []
+        for sx, sy, sz, dx, dy, dz, length_sq in bones:
+            px = vx - sx
+            py = vy - sy
+            pz = vz - sz
+            if length_sq < 1e-12:
+                distances.append(px * px + py * py + pz * pz)
+                continue
+            t = (px * dx + py * dy + pz * dz) / length_sq
+            if t < 0.0:
+                t = 0.0
+            elif t > 1.0:
+                t = 1.0
+            cx = px - dx * t
+            cy = py - dy * t
+            cz = pz - dz * t
+            distances.append(cx * cx + cy * cy + cz * cz)
         ranked = sorted(range(len(order)), key=lambda index: distances[index])
-        chosen = ranked[: max(1, min(max_influences, len(order)))]
-        raw = [(index, 1.0 / ((distances[index] + 1e-4) ** falloff)) for index in chosen]
+        chosen = ranked[:keep]
+        raw = [
+            (index, 1.0 / ((math.sqrt(distances[index]) + 1e-4) ** falloff))
+            for index in chosen
+        ]
         total = sum(weight for _, weight in raw)
         if total <= 0.0:
             bindings.append(((chosen[0], 1.0),))
