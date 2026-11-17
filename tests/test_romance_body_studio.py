@@ -29,6 +29,7 @@ from core.romance.body import (
     HONESTY_LINE,
     VIEW_FACE,
     VIEW_FULL,
+    apply_pose_instruction,
     body_preset_keys,
     body_preset_titles,
     body_summary,
@@ -39,12 +40,16 @@ from core.romance.body import (
     dial_keys,
     dials_in_group,
     group_titles,
+    pose_from_instruction,
+    pose_keys,
+    pose_titles,
     preset_parameters,
     render_avatar,
     render_preview,
     reset_to_preset,
     set_dial,
     set_dials,
+    set_pose,
 )
 from core.romance.model import ROLE_COMPANION, ROLE_USER
 from gui.romance import RomanceStudioService
@@ -473,6 +478,42 @@ def test_every_manager_button_is_really_placed(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_body_window_offers_poses_and_applies_an_instruction(tmp_path: Path) -> None:
+    """The window lists the poses, applies one on a click, and reads an instruction."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_body import BodyStudioDialog
+
+    service = _service(tmp_path)
+    character = service.create_character(name="Amina", role=ROLE_COMPANION, gender="woman")
+    root = tk.Tk()
+    root.withdraw()
+    dialog = None
+    try:
+        dialog = BodyStudioDialog(
+            root, service, character.id, role=ROLE_COMPANION,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        # A button per pose is drawn in the Pose section.
+        pose_titles_set = {title for _key, title in service.body_poses()}
+        labels = {b.cget("text") for b in _all_buttons(dialog.window)}
+        assert pose_titles_set <= labels
+        # A click sets the pose.
+        dialog._set_pose("wave")
+        root.update()
+        assert dialog._params.pose == "wave"
+        # A typed instruction sets the pose too.
+        dialog._pose_var.set("please sit down")
+        dialog._apply_pose_text()
+        root.update()
+        assert dialog._params.pose == "sit"
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_both_managers_open_the_body_builder_for_the_selected_character(tmp_path: Path) -> None:
     import tkinter as tk
 
@@ -563,3 +604,149 @@ def test_the_cli_stores_the_body_as_the_characters_picture(tmp_path: Path, capsy
     )
     assert code == 0
     assert service.avatar_path(character.id) is not None
+
+
+# -- per-part colour and intimate detail ----------------------------------
+
+
+def test_the_colour_dials_cover_every_part() -> None:
+    for key in ("skin", "hair_color", "lip_color", "eye_color", "nipple_color", "nail_color",
+                "genital_color"):
+        dial = dial_for(key)
+        assert dial is not None and dial.kind == "colour", key
+
+
+def test_the_intimate_dials_exist_and_are_bounded() -> None:
+    for key in ("genitalia", "genital_size", "areola"):
+        dial = dial_for(key)
+        assert dial is not None, key
+    params = default_parameters()
+    assert set_dial(params, "genitalia", 5.0).genitalia == 1.0
+    assert set_dial(params, "genitalia", -3.0).genitalia == 0.0
+    assert set_dial(params, "genital_size", 0.01).genital_size >= 0.4
+
+
+def test_the_intimate_group_holds_its_dials() -> None:
+    keys = {dial.key for dial in dials_in_group("intimate")}
+    assert {"genitalia", "genital_size", "areola"} <= keys
+
+
+def test_hiding_the_intimate_dial_changes_the_mesh() -> None:
+    from core.scene3d_figures import build_figure_mesh
+
+    shown = build_figure_mesh(set_dial(default_parameters(), "genitalia", 1.0))
+    hidden = build_figure_mesh(set_dial(default_parameters(), "genitalia", 0.0))
+    assert hidden.vertex_count < shown.vertex_count
+
+
+def test_the_mesh_carries_per_vertex_colours() -> None:
+    from core.scene3d_figures import build_figure_mesh
+
+    mesh = build_figure_mesh(default_parameters())
+    assert mesh.has_vertex_colors
+    assert len(mesh.vertex_colors) == mesh.vertex_count
+    # More than one distinct colour means the lips/eyes/nails are really shaded apart.
+    assert len(set(mesh.vertex_colors)) > 3
+
+
+# -- poses ----------------------------------------------------------------
+
+
+def test_pose_presets_are_offered_and_named_bilingually() -> None:
+    keys = pose_keys()
+    assert "rest" in keys and "sit" in keys and "wave" in keys
+    english = dict(pose_titles("en"))
+    arabic = dict(pose_titles("ar"))
+    assert set(english) == set(arabic) == set(keys)
+    for key in keys:
+        assert english[key].strip() and arabic[key].strip()
+
+
+def test_set_pose_changes_the_parameters_and_refuses_an_unknown_pose() -> None:
+    params = default_parameters()
+    assert set_pose(params, "sit").pose == "sit"
+    with pytest.raises(KeyError):
+        set_pose(params, "backflip")
+
+
+def test_a_pose_really_moves_the_mesh() -> None:
+    from core.scene3d_figures import build_figure
+
+    rest = build_figure(default_parameters())
+    sitting = build_figure(set_pose(default_parameters(), "sit"))
+    rest_bounds = _bounds(rest.deformed_vertices())
+    sit_bounds = _bounds(sitting.deformed_vertices())
+    # Sitting lowers the lowest point (the hips drop) -- the pose is applied.
+    assert sit_bounds[1] > rest_bounds[1] + 0.1
+
+
+def test_pose_from_instruction_reads_english_and_arabic() -> None:
+    assert pose_from_instruction("please sit down") == "sit"
+    assert pose_from_instruction("wave at the camera") == "wave"
+    assert pose_from_instruction("اجلس على الكرسي") == "sit"
+    assert pose_from_instruction("just stand there") == "rest"
+
+
+def test_pose_from_instruction_is_honest_when_nothing_matches() -> None:
+    assert pose_from_instruction("make it look nice") is None
+    assert pose_from_instruction("") is None
+    params = default_parameters()
+    unchanged, message = apply_pose_instruction(params, "do something artistic")
+    assert unchanged is params
+    assert "No pose matched" in message
+
+
+def test_apply_pose_instruction_sets_the_pose() -> None:
+    params = default_parameters()
+    updated, message = apply_pose_instruction(params, "lying down")
+    assert updated.pose == "lying"
+    assert "Lying" in message
+
+
+def _bounds(vertices: object) -> tuple[float, float, float, float, float, float]:
+    points = list(vertices)  # type: ignore[call-overload]
+    xs = [v.x for v in points]
+    ys = [v.y for v in points]
+    zs = [v.z for v in points]
+    return (min(xs), min(ys), min(zs), max(xs), max(ys), max(zs))
+
+
+# -- the service pose API -------------------------------------------------
+
+
+def test_the_service_lists_poses_and_applies_them(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    titles = dict(service.body_poses())
+    assert "sit" in titles and titles["sit"].strip()
+    params = service.body_parameters("")
+    posed = service.set_body_pose(params, "wave")
+    assert posed.pose == "wave"
+    with pytest.raises(KeyError):
+        service.set_body_pose(params, "moonwalk")
+
+
+def test_the_service_applies_a_pose_instruction(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    params = service.body_parameters("")
+    updated, note = service.apply_body_pose_instruction(params, "arms crossed")
+    assert updated.pose == "arms_crossed"
+    assert "Arms crossed" in note
+
+
+def test_the_cli_lists_and_sets_poses(tmp_path: Path, capsys) -> None:
+    root = str(tmp_path)
+    code, out = _cli(["--data-root", root, "body", "--poses"], capsys)
+    assert code == 0 and "Sit (chair)" in out
+    code, out = _cli(["--data-root", root, "body", "--pose", "squat", "--summary"], capsys)
+    assert code == 0
+    code, _out = _cli(["--data-root", root, "body", "--pose", "backflip"], capsys)
+    assert code == 2
+
+
+def test_the_cli_accepts_a_pose_instruction(tmp_path: Path, capsys) -> None:
+    code, _out = _cli(
+        ["--data-root", str(tmp_path), "body", "--pose-text", "please wave", "--summary"],
+        capsys,
+    )
+    assert code == 0
+

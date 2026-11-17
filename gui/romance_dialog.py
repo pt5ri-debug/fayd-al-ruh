@@ -575,6 +575,10 @@ class RomanceStudioDialog(ThemedDialog):
         theme = self.theme
         panel = tk.Frame(parent, bg=theme.surface)
         panel.grid(row=0, column=2, sticky="nsew")
+        # Give the column the whole cell, or it collapses to its natural height and
+        # the lower sections are clipped off the bottom of the panel.
+        panel.rowconfigure(0, weight=1)
+        panel.columnconfigure(0, weight=1)
         self._right_panel = panel
         self._right_column = SidebarColumn(
             panel, theme=self.theme, typography=self._type, scope="romance_info", width=310,

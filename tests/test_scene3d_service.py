@@ -122,8 +122,13 @@ def test_set_visible_rejects_an_unknown_name(service: SceneStudioService):
 # ---------------------------------------------------------------------------
 
 
-def test_pose_presets_are_the_documented_six():
-    assert pose_preset_names() == ("rest", "wave", "walk", "sit", "tpose", "reach")
+def test_pose_presets_include_the_documented_ones():
+    names = pose_preset_names()
+    # The original six stay available; the studio now ships a fuller pose library.
+    for documented in ("rest", "wave", "walk", "sit", "tpose", "reach"):
+        assert documented in names
+    assert names[0] == "rest"
+    assert len(names) >= 6
 
 
 def test_pose_bone_moves_the_mesh(service: SceneStudioService):

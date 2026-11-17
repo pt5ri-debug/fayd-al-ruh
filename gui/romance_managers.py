@@ -146,6 +146,11 @@ class CharacterManagerDialog(ThemedDialog):
 
         sidebar_parent = tk.Frame(body, bg=self.theme.surface)
         sidebar_parent.grid(row=0, column=0, sticky="nsew")
+        # The wrapper must give its single child the whole cell, or the column
+        # collapses to its natural height and its lower controls (the *Open the
+        # body builder…* button among them) are clipped off the bottom.
+        sidebar_parent.rowconfigure(0, weight=1)
+        sidebar_parent.columnconfigure(0, weight=1)
         self._column = SidebarColumn(
             sidebar_parent, theme=self.theme, typography=self._type,
             scope=f"romance-{self._plural()}-manager", width=320,

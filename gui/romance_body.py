@@ -141,6 +141,10 @@ class BodyStudioDialog(ThemedDialog):
 
         sidebar_parent = tk.Frame(body, bg=self.theme.surface)
         sidebar_parent.grid(row=0, column=0, sticky="nsew")
+        # Give the column the whole cell: without the weight it keeps only its
+        # natural height and its lower sections are clipped off the window.
+        sidebar_parent.rowconfigure(0, weight=1)
+        sidebar_parent.columnconfigure(0, weight=1)
         self._column = SidebarColumn(
             sidebar_parent,
             theme=self.theme,
@@ -209,8 +213,51 @@ class BodyStudioDialog(ThemedDialog):
 
         for group_key, title, dials in self.service.body_dial_groups():
             section = column.add(group_key, title, icon="🎚", open=(group_key == "proportions"))
+            if group_key == "pose":
+                self._build_pose_section(section)
+                continue
             for dial in dials:
                 self._build_dial(section, dial)
+
+    def _build_pose_section(self, parent: tk.Frame) -> None:
+        """The ready-made poses plus a plain-language instruction box."""
+        theme = self.theme
+        tk.Label(
+            parent,
+            text="Choose a ready-made position, or describe one in words.",
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=340,
+        ).pack(fill="x", pady=(0, 4))
+        grid = tk.Frame(parent, bg=theme.surface)
+        grid.pack(fill="x")
+        for pose_key, title in self.service.body_poses():
+            self._button(grid, title, _binder(self._set_pose, pose_key)).pack(
+                side="top", fill="x", pady=1
+            )
+
+        field = tk.Frame(parent, bg=theme.surface)
+        field.pack(fill="x", pady=(6, 0))
+        self._pose_var = tk.StringVar(value="")
+        entry = tk.Entry(
+            field,
+            textvariable=self._pose_var,
+            relief="flat",
+            borderwidth=1,
+            highlightthickness=0,
+            bg=theme.surface_raised,
+            fg=theme.foreground,
+            insertbackground=theme.foreground,
+            font=self._type.font("2xs"),
+        )
+        entry.pack(fill="x", ipady=3)
+        entry.bind("<Return>", lambda _event: self._apply_pose_text())
+        self._button(field, "Apply the described pose", self._apply_pose_text, variant="primary").pack(
+            fill="x", pady=(4, 0)
+        )
 
     def _build_dial(self, parent: tk.Frame, dial: Any) -> None:
         theme = self.theme
@@ -462,6 +509,24 @@ class BodyStudioDialog(ThemedDialog):
         except KeyError:
             return
         self._sync_controls()
+        self._render_now()
+
+    def _set_pose(self, key: str) -> None:
+        try:
+            self._params = self.service.set_body_pose(self._params, key)
+        except KeyError as error:
+            self._set_status(str(error))
+            return
+        self._set_status(f"Pose set to {key}.")
+        self._render_now()
+
+    def _apply_pose_text(self) -> None:
+        try:
+            text = self._pose_var.get()
+        except tk.TclError:
+            return
+        self._params, message = self.service.apply_body_pose_instruction(self._params, text)
+        self._set_status(message)
         self._render_now()
 
     def _apply_preset(self, key: str) -> None:

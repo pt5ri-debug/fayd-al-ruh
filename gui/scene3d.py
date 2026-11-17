@@ -40,11 +40,13 @@ from core.scene3d import (
 )
 from core.scene3d_figures import (
     FIGURE_PRESETS,
+    POSE_PRESETS,
     FigureParameters,
     build_figure,
     build_figure_from_preset,
     figure_preset_names,
     morph_figure,
+    pose_preset_names,
 )
 from core.scene3d_io import (
     LoadReport,
@@ -766,48 +768,9 @@ class SceneStudioService:
         return None
 
 
-#: Ready-made poses, keyed by name, so a figure can be posed with one call. They
-#: are deliberately small rotations of the named bones, and they compose with any
-#: further posing the user does.
-POSE_PRESETS: dict[str, dict[str, Vec3]] = {
-    "rest": {},
-    "wave": {
-        "shoulder.L": Vec3(0.0, 0.0, -20.0),
-        "upper_arm.L": Vec3(0.0, 0.0, -125.0),
-        "forearm.L": Vec3(0.0, 0.0, -35.0),
-    },
-    "walk": {
-        "thigh.L": Vec3(-28.0, 0.0, 0.0),
-        "shin.L": Vec3(22.0, 0.0, 0.0),
-        "thigh.R": Vec3(24.0, 0.0, 0.0),
-        "shin.R": Vec3(8.0, 0.0, 0.0),
-        "upper_arm.L": Vec3(22.0, 0.0, 0.0),
-        "upper_arm.R": Vec3(-22.0, 0.0, 0.0),
-    },
-    "sit": {
-        "thigh.L": Vec3(-85.0, 0.0, 0.0),
-        "shin.L": Vec3(85.0, 0.0, 0.0),
-        "thigh.R": Vec3(-85.0, 0.0, 0.0),
-        "shin.R": Vec3(85.0, 0.0, 0.0),
-        "hips": Vec3(0.0, 0.0, 0.0),
-    },
-    "tpose": {
-        "shoulder.L": Vec3(0.0, 0.0, -90.0),
-        "shoulder.R": Vec3(0.0, 0.0, 90.0),
-        "upper_arm.L": Vec3(0.0, 0.0, -90.0),
-        "upper_arm.R": Vec3(0.0, 0.0, 90.0),
-    },
-    "reach": {
-        "shoulder.L": Vec3(0.0, 0.0, -40.0),
-        "upper_arm.L": Vec3(-60.0, 0.0, -100.0),
-        "forearm.L": Vec3(-25.0, 0.0, 0.0),
-        "chest": Vec3(-8.0, 0.0, 0.0),
-    },
-}
-
-
-def pose_preset_names() -> tuple[str, ...]:
-    return tuple(POSE_PRESETS)
+#: The ready-made poses now live in :mod:`core.scene3d_figures` beside the rig, so
+#: the Scene Studio and the body studio share one set and cannot drift apart.
+#: ``POSE_PRESETS`` and ``pose_preset_names`` are re-exported there.
 
 
 # --------------------------------------------------------------------------- commands

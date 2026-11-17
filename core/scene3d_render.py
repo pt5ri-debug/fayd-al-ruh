@@ -24,7 +24,7 @@ rather than clipped, which is stated plainly in the module's contract.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from core.imagegen import encode_png
@@ -155,23 +155,32 @@ def shade_point(
     lights: Iterable[Light],
     *,
     ambient: float = AMBIENT,
+    base_color: tuple[float, float, float] | None = None,
 ) -> RGB:
     """Blinn-Phong shading for one surface point, returning an 8-bit colour.
 
     ``view_direction`` points from the surface towards the eye. The ambient term
     keeps an unlit surface visible; each light adds a diffuse and a specular term.
+    ``base_color`` overrides the material's own base colour, which is how a
+    per-vertex colour (skin, lips, an eye) is shaded rather than painted flat.
     """
+    albedo = base_color if base_color is not None else material.base_color
     facing = normal.normalized()
     if facing.dot(view_direction) < 0.0:
         # The normal points away from the camera (a thin/open surface); flip it so
         # the surface is still lit rather than rendered black.
         facing = -facing
-    red = material.base_color[0] * ambient
-    green = material.base_color[1] * ambient
-    blue = material.base_color[2] * ambient
+    # A soft wrap term gives skin a little light past the geometric terminator
+    # instead of a hard band -- the cheap stand-in for subsurface scattering.
+    red = albedo[0] * ambient
+    green = albedo[1] * ambient
+    blue = albedo[2] * ambient
     for light in lights:
         to_light = light.direction_to_light(position)
-        diffuse = max(0.0, facing.dot(to_light))
+        lambert = facing.dot(to_light)
+        diffuse = max(0.0, lambert)
+        if material.wrap > 0.0:
+            diffuse = max(0.0, (lambert + material.wrap) / (1.0 + material.wrap))
         if diffuse <= 0.0:
             continue
         half = (to_light + view_direction).normalized()
@@ -179,9 +188,107 @@ def shade_point(
         if material.specular > 0.0:
             specular = material.specular * max(0.0, facing.dot(half)) ** material.shininess
         scale = light.intensity * diffuse
-        red += material.base_color[0] * light.color[0] * scale + light.color[0] * specular
-        green += material.base_color[1] * light.color[1] * scale + light.color[1] * specular
-        blue += material.base_color[2] * light.color[2] * scale + light.color[2] * specular
+        red += albedo[0] * light.color[0] * scale + light.color[0] * specular
+        green += albedo[1] * light.color[1] * scale + light.color[1] * specular
+        blue += albedo[2] * light.color[2] * scale + light.color[2] * specular
+    return (_clamp_channel(red), _clamp_channel(green), _clamp_channel(blue))
+
+
+def _light_scalars(light: Light) -> tuple[float, float, float, float, float, float, float, bool, float, float, float]:
+    """Flatten one light to scalars, so the pixel loop never builds a ``Vec3``."""
+    direction = (-light.direction).normalized()
+    is_point = light.kind == "point"
+    return (
+        direction.x,
+        direction.y,
+        direction.z,
+        light.color[0],
+        light.color[1],
+        light.color[2],
+        light.intensity,
+        is_point,
+        light.position.x,
+        light.position.y,
+        light.position.z,
+    )
+
+
+def _shade_scalars(
+    wx: float,
+    wy: float,
+    wz: float,
+    nx: float,
+    ny: float,
+    nz: float,
+    eye: Vec3,
+    material: Material,
+    light_data: Sequence[
+        tuple[float, float, float, float, float, float, float, bool, float, float, float]
+    ],
+    albedo: tuple[float, float, float],
+) -> RGB:
+    """The scalar twin of :func:`shade_point`, for the per-pixel hot path.
+
+    It takes the already-interpolated world point and normal as plain floats and the
+    lights pre-flattened (:func:`_light_scalars`), so the rasteriser never builds a
+    ``Vec3`` per pixel; the maths is exactly the same as :func:`shade_point`.
+    """
+    length = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if length > 1e-9:
+        nx, ny, nz = nx / length, ny / length, nz / length
+    vx = eye.x - wx
+    vy = eye.y - wy
+    vz = eye.z - wz
+    view_len = math.sqrt(vx * vx + vy * vy + vz * vz)
+    if view_len > 1e-9:
+        vx, vy, vz = vx / view_len, vy / view_len, vz / view_len
+    if nx * vx + ny * vy + nz * vz < 0.0:
+        nx, ny, nz = -nx, -ny, -nz
+
+    red = albedo[0] * AMBIENT
+    green = albedo[1] * AMBIENT
+    blue = albedo[2] * AMBIENT
+    wrap = material.wrap
+    specular_strength = material.specular
+    shininess = material.shininess
+    for (
+        dx,
+        dy,
+        dz,
+        lr,
+        lg,
+        lb,
+        intensity,
+        is_point,
+        px,
+        py,
+        pz,
+    ) in light_data:
+        if is_point:
+            ox, oy, oz = px - wx, py - wy, pz - wz
+            o_len = math.sqrt(ox * ox + oy * oy + oz * oz)
+            if o_len > 1e-9:
+                dx, dy, dz = ox / o_len, oy / o_len, oz / o_len
+        lambert = nx * dx + ny * dy + nz * dz
+        diffuse = max(0.0, lambert)
+        if wrap > 0.0:
+            diffuse = max(0.0, (lambert + wrap) / (1.0 + wrap))
+        if diffuse <= 0.0:
+            continue
+        specular = 0.0
+        if specular_strength > 0.0:
+            hx = dx + vx
+            hy = dy + vy
+            hz = dz + vz
+            h_len = math.sqrt(hx * hx + hy * hy + hz * hz)
+            if h_len > 1e-9:
+                dot = (nx * hx + ny * hy + nz * hz) / h_len
+                if dot > 0.0:
+                    specular = specular_strength * dot**shininess
+        scale = intensity * diffuse
+        red += albedo[0] * lr * scale + lr * specular
+        green += albedo[1] * lg * scale + lg * specular
+        blue += albedo[2] * lb * scale + lb * specular
     return (_clamp_channel(red), _clamp_channel(green), _clamp_channel(blue))
 
 
@@ -195,6 +302,7 @@ class _Projected:
     world: Vec3
     normal: Vec3
     behind: bool
+    color: tuple[float, float, float] | None = None
 
 
 class SoftwareRenderer:
@@ -225,12 +333,13 @@ class SoftwareRenderer:
         projection: Mat4,
         width: int,
         height: int,
+        color: tuple[float, float, float] | None = None,
     ) -> _Projected:
         view_position = view.transform_point(world)
         clip_x, clip_y, clip_z, clip_w = projection.transform_vec4(view_position)
         behind = clip_w <= 1e-6
         if behind:
-            return _Projected(0.0, 0.0, math.inf, world, normal, True)
+            return _Projected(0.0, 0.0, math.inf, world, normal, True, color)
         inv_w = 1.0 / clip_w
         ndc_x = clip_x * inv_w
         ndc_y = clip_y * inv_w
@@ -240,7 +349,7 @@ class SoftwareRenderer:
         # monotonic depth: smaller is nearer. ``clip_z`` is kept only for
         # completeness of the projection call.
         del clip_z
-        return _Projected(screen_x, screen_y, clip_w, world, normal, False)
+        return _Projected(screen_x, screen_y, clip_w, world, normal, False, color)
 
     # -- rasterisation ----------------------------------------------------
 
@@ -276,6 +385,7 @@ class SoftwareRenderer:
         inv_wa = 1.0 / a.depth
         inv_wb = 1.0 / b.depth
         inv_wc = 1.0 / c.depth
+        light_data = [_light_scalars(light) for light in lights] if self.shaded else []
         drew = False
         for y in range(min_y, max_y + 1):
             for x in range(min_x, max_x + 1):
@@ -292,15 +402,26 @@ class SoftwareRenderer:
                     continue
                 buffer.depth[index] = depth
                 if self.shaded:
-                    world = _interpolate(a.world, b.world, c.world, w0, w1, w2)
-                    normal = _interpolate(a.normal, b.normal, c.normal, w0, w1, w2)
-                    color = shade_point(
-                        world,
-                        normal,
-                        (eye - world).normalized(),
-                        material,
-                        lights,
+                    # Interpolate the world point and normal with plain floats and
+                    # shade in scalars: a ``Vec3`` per pixel is the render's hot
+                    # path, and avoiding the allocations keeps a full-body render
+                    # near a second even though the rasteriser is fill-bound.
+                    albedo = (
+                        (
+                            a.color[0] * w0 + b.color[0] * w1 + c.color[0] * w2,
+                            a.color[1] * w0 + b.color[1] * w1 + c.color[1] * w2,
+                            a.color[2] * w0 + b.color[2] * w1 + c.color[2] * w2,
+                        )
+                        if a.color is not None and b.color is not None and c.color is not None
+                        else material.base_color
                     )
+                    wx = a.world.x * w0 + b.world.x * w1 + c.world.x * w2
+                    wy = a.world.y * w0 + b.world.y * w1 + c.world.y * w2
+                    wz = a.world.z * w0 + b.world.z * w1 + c.world.z * w2
+                    nx = a.normal.x * w0 + b.normal.x * w1 + c.normal.x * w2
+                    ny = a.normal.y * w0 + b.normal.y * w1 + c.normal.y * w2
+                    nz = a.normal.z * w0 + b.normal.z * w1 + c.normal.z * w2
+                    color = _shade_scalars(wx, wy, wz, nx, ny, nz, eye, material, light_data, albedo)
                 else:
                     color = _clamp_rgb(material.base_color)
                 buffer.set_pixel(x, y, color)
@@ -379,8 +500,17 @@ class SoftwareRenderer:
         """Project and rasterise one object; returns how many triangles were drawn."""
         vertices = obj.world_vertices()
         normals = obj.world_normals()
+        colors = obj.mesh.vertex_colors or None
         projected = [
-            self._project(vertex, normals[index], view, projection, buffer.width, buffer.height)
+            self._project(
+                vertex,
+                normals[index],
+                view,
+                projection,
+                buffer.width,
+                buffer.height,
+                colors[index] if colors is not None else None,
+            )
             for index, vertex in enumerate(vertices)
         ]
         material = obj.material
@@ -399,6 +529,22 @@ def _interpolate(a: Vec3, b: Vec3, c: Vec3, w0: float, w1: float, w2: float) -> 
         a.x * w0 + b.x * w1 + c.x * w2,
         a.y * w0 + b.y * w1 + c.y * w2,
         a.z * w0 + b.z * w1 + c.z * w2,
+    )
+
+
+def _interpolate_color(
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+    c: tuple[float, float, float],
+    w0: float,
+    w1: float,
+    w2: float,
+) -> tuple[float, float, float]:
+    """Barycentric interpolation of three per-vertex RGB colours."""
+    return (
+        a[0] * w0 + b[0] * w1 + c[0] * w2,
+        a[1] * w0 + b[1] * w1 + c[1] * w2,
+        a[2] * w0 + b[2] * w1 + c[2] * w2,
     )
 
 

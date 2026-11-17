@@ -660,6 +660,24 @@ class RomanceStudioService:
 
         return values_of(params)
 
+    def body_poses(self, *, language: str = "en") -> tuple[tuple[str, str], ...]:
+        """``(key, title)`` for each ready-made pose the studio offers."""
+        from core.romance.body import pose_titles
+
+        return pose_titles(language)
+
+    def set_body_pose(self, params: Any, key: str) -> Any:
+        """A copy of ``params`` in the named pose (an unknown pose raises)."""
+        from core.romance.body import set_pose
+
+        return set_pose(params, key)
+
+    def apply_body_pose_instruction(self, params: Any, text: str) -> tuple[Any, str]:
+        """Set the pose a plain-language instruction asks for; returns (params, note)."""
+        from core.romance.body import apply_pose_instruction
+
+        return apply_pose_instruction(params, text)
+
     def render_body(
         self,
         params: Any,
