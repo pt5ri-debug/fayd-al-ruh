@@ -685,8 +685,15 @@ class RomanceStudioService:
         view: str = "full",
         width: int | None = None,
         height: int | None = None,
+        azimuth: float = 0.0,
+        elevation: float = 0.0,
+        zoom: float = 1.0,
     ) -> bytes:
-        """Render the body and return the PNG bytes (the window shows them)."""
+        """Render the body and return the PNG bytes (the window shows them).
+
+        ``azimuth``/``elevation``/``zoom`` orbit the camera around the figure, so
+        the window's camera tool can show the same body from any direction.
+        """
         from core.romance.body import (
             PREVIEW_HEIGHT,
             PREVIEW_WIDTH,
@@ -698,7 +705,22 @@ class RomanceStudioService:
             view=view,
             width=int(width or PREVIEW_WIDTH),
             height=int(height or PREVIEW_HEIGHT),
+            azimuth=float(azimuth),
+            elevation=float(elevation),
+            zoom=float(zoom),
         )
+
+    def body_camera_presets(self) -> tuple[tuple[str, str], ...]:
+        """``(key, title)`` for each ready-made camera angle."""
+        from core.romance.body import camera_preset_titles
+
+        return camera_preset_titles()
+
+    def body_camera_preset(self, key: str) -> tuple[float, float]:
+        """The ``(azimuth, elevation)`` a named camera angle asks for."""
+        from core.romance.body import camera_preset
+
+        return camera_preset(key)
 
     def use_body_as_avatar(self, character_id: str, params: Any) -> Any:
         """Render a square portrait of the body and store it as the character's picture.

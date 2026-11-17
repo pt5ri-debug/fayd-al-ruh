@@ -732,3 +732,135 @@ def test_scene_object_round_trip_keeps_the_transform():
     )
     restored = scene_from_dict(scene_to_dict(scene))
     assert restored.objects[0].transform.translation == vec3(2, 1, 0)
+
+
+# ---------------------------------------------------------------------------
+# mesh welding, subdivision and smoothing
+# ---------------------------------------------------------------------------
+
+
+def test_weld_merges_coincident_vertices_and_keeps_the_faces():
+    mesh = Mesh(
+        "two triangles meeting",
+        (vec3(0, 0, 0), vec3(1, 0, 0), vec3(0, 1, 0), vec3(1, 0, 0), vec3(1, 1, 0), vec3(0, 1, 0)),
+        ((0, 1, 2), (3, 4, 5)),
+    )
+    welded = mesh.weld()
+    assert welded.vertex_count == 4
+    assert welded.face_count == 2
+
+
+def test_weld_drops_a_face_that_collapses_to_a_line():
+    mesh = Mesh("degenerate", (vec3(0, 0, 0), vec3(0, 0, 0), vec3(0, 0, 0)), ((0, 1, 2),))
+    welded = mesh.weld()
+    assert welded.vertex_count == 1
+    assert welded.face_count == 0
+
+
+def test_weld_keeps_the_first_colour_of_a_coincident_group():
+    mesh = Mesh(
+        "coloured",
+        (vec3(0, 0, 0), vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 0)),
+        ((0, 1, 2), (3, 1, 2)),
+        (),
+        ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (0.5, 0.5, 0.5)),
+    )
+    welded = mesh.weld()
+    assert welded.vertex_count == 3
+    assert welded.vertex_colors[0] == (1.0, 0.0, 0.0)
+
+
+def test_subdivision_increases_the_vertex_and_face_counts():
+    mesh = build_primitive("cube")
+    finer = mesh.subdivide(1)
+    assert finer.vertex_count > mesh.vertex_count
+    assert finer.face_count > mesh.face_count
+    # Every new face is a quad, so it fans into two triangles.
+    assert all(len(face) == 4 for face in finer.faces)
+
+
+def test_subdivision_of_two_levels_is_finer_than_one():
+    mesh = build_primitive("cube")
+    assert mesh.subdivide(2).face_count > mesh.subdivide(1).face_count
+
+
+def test_subdivision_with_no_levels_returns_the_same_mesh():
+    mesh = build_primitive("cube")
+    assert mesh.subdivide(0) is mesh
+
+
+def test_subdivision_keeps_the_mesh_inside_its_original_bounds():
+    mesh = build_primitive("cube")
+    low, high = mesh.bounds()
+    fine_low, fine_high = mesh.subdivide(2).bounds()
+    # Catmull-Clark shrinks a convex solid toward its limit surface; it must not
+    # grow it, and it must stay centred.
+    assert fine_low.x >= low.x - 1e-9 and fine_high.x <= high.x + 1e-9
+    assert fine_low.y >= low.y - 1e-9 and fine_high.y <= high.y + 1e-9
+
+
+def test_subdivision_interpolates_the_per_vertex_colours():
+    mesh = Mesh(
+        "coloured quad",
+        (vec3(-1, -1, 0), vec3(1, -1, 0), vec3(1, 1, 0), vec3(-1, 1, 0)),
+        ((0, 1, 2, 3),),
+        (),
+        ((1.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0, 1.0)),
+    )
+    finer = mesh.subdivide(1)
+    assert finer.has_vertex_colors
+    # Colours are interpolated, never invented: every output colour is a convex
+    # combination of the two inputs (so each channel stays within [0, 1] and the
+    # red channel never rises above the reddest input).
+    for red, green, blue in finer.vertex_colors:
+        assert 0.0 <= red <= 1.0 and 0.0 <= green <= 1.0 and 0.0 <= blue <= 1.0
+        assert green == pytest.approx(0.0)
+    assert max(colour[0] for colour in finer.vertex_colors) <= 1.0
+    assert min(colour[2] for colour in finer.vertex_colors) >= 0.0
+
+
+def test_smoothing_moves_a_vertex_toward_its_neighbours():
+    mesh = Mesh(
+        "spike",
+        (vec3(0, 0, 0), vec3(1, 0, 0), vec3(1, 1, 0), vec3(0, 1, 0), vec3(0.5, 0.5, 3.0)),
+        ((0, 1, 2, 3), (0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4)),
+    )
+    smoothed = mesh.smoothed(iterations=1, factor=1.0)
+    assert abs(smoothed.vertices[4].z) < 3.0
+    assert smoothed.face_count == mesh.face_count
+
+
+def test_smoothing_with_no_iterations_returns_the_same_mesh():
+    mesh = build_primitive("cube")
+    assert mesh.smoothed(iterations=0) is mesh
+
+
+def test_figure_subdivision_is_a_real_dial():
+    coarse = FigureParameters(subdivisions=0)
+    fine = FigureParameters(subdivisions=1)
+    assert build_figure_mesh(coarse).face_count < build_figure_mesh(fine).face_count
+
+
+def test_figure_parameters_refuse_an_impossible_subdivision_count():
+    with pytest.raises(ValueError):
+        FigureParameters(subdivisions=5)
+    with pytest.raises(ValueError):
+        FigureParameters(smoothing=9)
+
+
+def test_a_subdivided_figure_is_still_bound_and_poseable():
+    figure = build_figure(FigureParameters(subdivisions=1))
+    assert figure.is_figure()
+    rest = figure.deformed_vertices()
+    figure.set_pose("forearm.L", vec3(0, 0, -90))
+    posed = figure.deformed_vertices()
+    assert rest != posed
+
+
+def test_skinning_is_cached_until_the_pose_changes():
+    figure = build_figure()
+    first = figure.deformed_vertices()
+    # A second read with the same pose returns the identical tuple (the cache).
+    assert figure.deformed_vertices() is first
+    figure.set_pose("forearm.L", vec3(0, 0, -45))
+    assert figure.deformed_vertices() is not first

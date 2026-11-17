@@ -122,6 +122,15 @@ class FigureParameters:
     genitalia: float = 1.0
     genital_size: float = 1.0
     genital_color: tuple[float, float, float] = (0.60, 0.40, 0.38)
+    #: How many Catmull-Clark subdivision passes smooth the mesh (0 = the raw
+    #: primitives, 1 = the default fine, round skin, 2 = very fine). The mesh is
+    #: welded first so the pass smooths *across* the seams between primitives
+    #: rather than leaving a crease, which is what turns a faceted figure into a
+    #: smooth, human-looking one.
+    subdivisions: int = 1
+    #: Laplacian smoothing passes applied after subdivision (a cheap relax that
+    #: removes the last facets a single pass can leave).
+    smoothing: int = 1
     #: The figure's pose, kept with the body so a saved body remembers how it stood.
     pose: str = "rest"
 
@@ -163,6 +172,10 @@ class FigureParameters:
                 raise ValueError(f"Figure {field_name} must be positive.")
         if not 0.0 <= self.genitalia <= 1.0:
             raise ValueError("The genitalia dial must be in [0, 1].")
+        if not 0 <= self.subdivisions <= 2:
+            raise ValueError("Subdivisions must be 0, 1, or 2.")
+        if not 0 <= self.smoothing <= 4:
+            raise ValueError("Smoothing passes must be between 0 and 4.")
 
     # -- convenience -----------------------------------------------------
 
@@ -709,7 +722,14 @@ def build_figure_mesh(params: FigureParameters) -> Mesh:
         )
 
     _build_genitalia(body, params)
-    return body.to_mesh(f"{params.name} body")
+    mesh = body.to_mesh(f"{params.name} body")
+    if params.subdivisions > 0:
+        # Weld first so the pass smooths across the seams between primitives
+        # (a shoulder ring touching an arm ring), then subdivide, then relax.
+        mesh = mesh.weld(tolerance=1e-5).subdivide(params.subdivisions)
+        if params.smoothing > 0:
+            mesh = mesh.smoothed(iterations=params.smoothing, factor=0.35)
+    return mesh
 
 
 

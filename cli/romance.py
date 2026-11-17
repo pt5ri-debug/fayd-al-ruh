@@ -162,6 +162,13 @@ def _build_parser() -> argparse.ArgumentParser:
     body.add_argument(
         "--view", default="full", choices=("full", "face"), help="Which framing to render."
     )
+    body.add_argument("--azimuth", type=float, default=0.0, help="Camera turn in degrees.")
+    body.add_argument("--elevation", type=float, default=0.0, help="Camera height in degrees.")
+    body.add_argument("--zoom", type=float, default=1.0, help="Camera distance multiplier.")
+    body.add_argument(
+        "--camera", default="", help="A ready-made camera angle (front, back, left, ...)."
+    )
+    body.add_argument("--cameras", action="store_true", help="List the ready-made camera angles.")
     body.add_argument("--render", default="", help="Write the render to this PNG file.")
     body.add_argument(
         "--use-as-picture", action="store_true",
@@ -585,6 +592,24 @@ def run_body(args: argparse.Namespace) -> int:
         rows = [{"key": key, "title": title} for key, title in service.body_poses()]
         _emit(args, rows, "\n".join(f"{row['key']:14s} {row['title']}" for row in rows))
         return EXIT_OK
+    if args.cameras:
+        rows = [
+            {"key": key, "title": title, "azimuth": azimuth, "elevation": elevation}
+            for key, title, azimuth, elevation in (
+                (key, title, *service.body_camera_preset(key))
+                for key, title in service.body_camera_presets()
+            )
+        ]
+        _emit(
+            args,
+            rows,
+            "\n".join(
+                f"{row['key']:14s} {row['title']:14s} "
+                f"azimuth {row['azimuth']:.0f}°, height {row['elevation']:.0f}°"
+                for row in rows
+            ),
+        )
+        return EXIT_OK
 
     params = service.body_parameters(args.character_id, preset=args.preset)
     if args.pose:
@@ -622,10 +647,31 @@ def run_body(args: argparse.Namespace) -> int:
     if args.render:
         from pathlib import Path
 
+        azimuth = float(args.azimuth)
+        elevation = float(args.elevation)
+        if args.camera:
+            try:
+                azimuth, elevation = service.body_camera_preset(args.camera)
+            except KeyError as error:
+                print(f"romance: {error}", file=sys.stderr)
+                return EXIT_USAGE
         target = Path(args.render)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(service.render_body(params, view=args.view))
+        target.write_bytes(
+            service.render_body(
+                params,
+                view=args.view,
+                azimuth=azimuth,
+                elevation=elevation,
+                zoom=float(args.zoom),
+            )
+        )
         payload["render"] = str(target)
+        payload["camera"] = {
+            "azimuth": azimuth,
+            "elevation": elevation,
+            "zoom": float(args.zoom),
+        }
     if args.use_as_picture:
         if not args.character_id:
             print("romance: --use-as-picture needs a character id", file=sys.stderr)
