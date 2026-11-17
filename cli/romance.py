@@ -143,6 +143,25 @@ def _build_parser() -> argparse.ArgumentParser:
     avatar.add_argument("--prompt", default="")
     avatar.add_argument("--clear", action="store_true", help="Remove the picture.")
 
+    body = _sub(sub, "body", help="Build a character's body (shape, size, templates).")
+    body.add_argument("character_id", nargs="?", default="")
+    body.add_argument("--dials", action="store_true", help="List every editable measurement.")
+    body.add_argument("--presets", action="store_true", help="List the ready-made bodies.")
+    body.add_argument("--summary", action="store_true", help="Describe the current body.")
+    body.add_argument(
+        "--set", action="append", default=[], metavar="KEY=VALUE",
+        help="Set a measurement (repeatable), e.g. --set height=1.9 --set bust=0.6.",
+    )
+    body.add_argument("--preset", default="", help="Start from a ready-made body.")
+    body.add_argument(
+        "--view", default="full", choices=("full", "face"), help="Which framing to render."
+    )
+    body.add_argument("--render", default="", help="Write the render to this PNG file.")
+    body.add_argument(
+        "--use-as-picture", action="store_true",
+        help="Store the render as the character's picture.",
+    )
+
     characters = _sub(sub, "characters", help="The character library.")
     characters.add_argument("--archived", action="store_true", help="Include archived.")
     characters.add_argument("--search", default="", help="Filter by name or tag.")
@@ -519,6 +538,91 @@ def run_avatar(args: argparse.Namespace) -> int:
         result.describe(),
     )
     return EXIT_OK
+
+
+def run_body(args: argparse.Namespace) -> int:
+    """Build a character's body: list the dials, set measurements, render, store."""
+    service = _service(args)
+    if args.dials:
+        rows = [
+            {
+                "key": dial.key,
+                "label": dial.label,
+                "group": dial.group,
+                "kind": dial.kind,
+                "minimum": dial.minimum,
+                "maximum": dial.maximum,
+                "choices": list(dial.choices),
+            }
+            for _key, _title, dials in service.body_dial_groups()
+            for dial in dials
+        ]
+        _emit(
+            args,
+            rows,
+            "\n".join(
+                f"{row['group']:12s} {row['key']:18s} {row['label']} "
+                + (
+                    "(" + " / ".join(row["choices"]) + ")"
+                    if row["kind"] == "choice"
+                    else f"({row['minimum']}..{row['maximum']})"
+                )
+                for row in rows
+            ),
+        )
+        return EXIT_OK
+    if args.presets:
+        rows = [{"key": key, "title": title} for key, title in service.body_presets()]
+        _emit(args, rows, "\n".join(f"{row['key']:12s} {row['title']}" for row in rows))
+        return EXIT_OK
+
+    params = service.body_parameters(args.character_id, preset=args.preset)
+    changes: dict[str, Any] = {}
+    for item in args.set:
+        key, _, value = item.partition("=")
+        if not key or not value:
+            print(f"romance: --set wants KEY=VALUE, got {item!r}", file=sys.stderr)
+            return EXIT_USAGE
+        changes[key.strip()] = _coerce(value.strip())
+    try:
+        params = service.set_body_dials(params, changes)
+    except (KeyError, ValueError) as error:
+        print(f"romance: {error}", file=sys.stderr)
+        return EXIT_USAGE
+
+    payload: dict[str, Any] = {
+        "character_id": args.character_id,
+        "build": params.build,
+        "summary": service.body_summary(params),
+        "dials": service.body_values(params),
+    }
+    if args.summary:
+        _emit(args, payload, payload["summary"])
+        return EXIT_OK
+
+    if args.render:
+        from pathlib import Path
+
+        target = Path(args.render)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(service.render_body(params, view=args.view))
+        payload["render"] = str(target)
+    if args.use_as_picture:
+        if not args.character_id:
+            print("romance: --use-as-picture needs a character id", file=sys.stderr)
+            return EXIT_USAGE
+        result = service.use_body_as_avatar(args.character_id, params)
+        payload["picture"] = str(result.path)
+    _emit(args, payload, payload["summary"])
+    return EXIT_OK
+
+
+def _coerce(text: str) -> Any:
+    """Read a ``--set`` value as a number when it looks like one, else as text."""
+    try:
+        return float(text)
+    except ValueError:
+        return text
 
 
 def run_show(args: argparse.Namespace) -> int:
@@ -1099,6 +1203,7 @@ _HANDLERS = {
     "new-persona": run_new_persona,
     "use-persona": run_use_persona,
     "avatar": run_avatar,
+    "body": run_body,
     "characters": run_characters,
     "new": run_new,
     "show": run_show,

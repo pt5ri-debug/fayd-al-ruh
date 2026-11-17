@@ -1370,6 +1370,51 @@ Arabic is kept as secondary aliases where useful.
   The CLI gained `persona-categories`/`persona-library`/`add-persona-library`/
   `seed-persona-library`. `tests/test_romance_persona_manager.py` (17 tests) pins
   the persona data, the service, the CLI, and the two real Tk windows.
+
+  **The Body & shape studio (Phase 15)** gives both managers the body builder the
+  user asked for: an entry inside **My Persona Manager** and the **Character
+  Manager** opens one window showing the selected character's body **centred** --
+  a woman's figure for a woman and a man's for a man, following the character's
+  own recorded `gender` -- with **every** measurement editable, ready-made body
+  templates to start from, and the render usable as the character's own picture.
+  It is a thin layer over the project's **existing** 3D engine, never a second
+  figure builder: `core/scene3d_figures.py` was **extended** with a full
+  body-shape parameter set (`build`, `proportion`, bust/waist/hip/belly/muscle,
+  shoulder slope, neck/arm/leg thickness, hand/foot size, head and face features,
+  and hair colour -- every new field defaulting to the original geometry, so an
+  existing caller and a saved scene are unaffected) and a real **face** (eyes, a
+  nose, lips, ears, an optional brow) plus the hair as its own object
+  (`build_hair_object`) so a hair colour is real rather than the skin colour; the
+  lofts were wound bottom-ring-first so the rasteriser's backface culling draws
+  them correctly. `core/romance/body.py` (new) is the **engine**: the 33-dial
+  catalogue (`DIALS`/`DialSpec`, grouped into six bilingual sections), the seven
+  ready-made bodies (`BODY_PRESETS`), the gender→build rule (`build_for_gender`,
+  which **never guesses** -- a blank or non-binary gender is the *neutral* build),
+  the clamping/refusals (`set_dial` refuses an unknown key and a choice dial
+  refuses an off-list value), and the render (`render_preview` full-body or face,
+  `render_avatar` a 512² portrait) through the project's own CPU rasteriser.
+  `core/romance/avatar.py` gained `set_from_bytes` (store a picture the caller
+  already rendered, refusing a blank payload or a non-image suffix), and
+  `RomanceStudioService` gained `body_parameters`/`body_dial_groups`/
+  `body_presets`/`body_builds`/`set_body_dial(s)`/`apply_body_preset`/
+  `body_summary`/`body_values`/`render_body`/`use_body_as_avatar` -- the last one
+  storing a rendered portrait through the *same* avatar manager an upload uses, so
+  the picture appears on the card, the window, and the profile at once.
+  `gui/romance_body.py` (new) is the **window**: built the way every other window
+  is built (the shared `Theme`/`DialogHeader`/`button`/`SidebarColumn`/
+  `ThemedDialog`), a left column of collapsible sections (templates, body type,
+  and one section per dial group) and a centred stage showing the live render
+  (a `tk.PhotoImage` of the real PNG), with *Render*, *Use as the picture*,
+  *Reset the shape*, and the honest "stylised figure" note. A dial change
+  **debounces** into one render, and every render runs on a worker thread whose
+  result the UI thread drains. `CharacterManagerDialog` gained the **Body & shape**
+  sidebar section and `_open_body_studio` (one window per manager, raised on a
+  second click), and the headless twin is `python -m cli romance body
+  [--dials|--presets|--set KEY=VALUE|--render F|--use-as-picture]`.
+  `tests/test_romance_body_studio.py` (30 tests) pins the dial catalogue and its
+  refusals, the templates, the gender rule, the real PNG render, the service, the
+  picture bridge, the CLI, and the three real Tk windows (including both managers
+  opening the builder).
 - `gui/window_controls.py` — the shared **minimize / maximize / close** controls
   every window's title bar installs. `install_window_controls(window, header,
   theme=, typography=, on_close=)` builds one frame of three buttons into the
