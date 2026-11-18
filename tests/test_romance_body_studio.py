@@ -174,9 +174,14 @@ def test_default_parameters_follow_the_characters_own_gender() -> None:
             self.name = name
             self.gender = gender
 
+    # The studio now opens on one of the four ready-made figures, chosen from the
+    # character's own gender: a woman shows the woman's body, a man the man's.
     assert default_parameters(_Record("Amina", "woman")).build == "feminine"
     assert default_parameters(_Record("Karim", "man")).build == "masculine"
-    assert default_parameters(_Record("Nour", "")).build == "neutral"
+    # An unrecorded (or non-binary) gender falls back to the documented default --
+    # the woman's figure -- rather than a made-up choice.
+    assert default_parameters(_Record("Nour", "")).build == "feminine"
+    assert default_parameters(_Record("Nour", "non-binary")).build == "feminine"
     assert default_parameters(_Record("Amina", "woman")).name == "Amina"
     # The bundle the Studio returns is accepted too.
     class _Bundle:

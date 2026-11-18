@@ -405,6 +405,20 @@ def character_config_dir() -> Path:
     return config_dir() / "characters"
 
 
+def romance_figures_dir() -> Path:
+    """Where the Body & shape studio keeps **imported** human models.
+
+    One sub-folder per figure slot (``woman`` / ``girl`` / ``man`` / ``boy``) holds
+    a ready-made human model the user imported -- a DAZ 3D export, a MakeHuman OBJ,
+    or any OBJ/STL/PLY mesh -- together with a small ``figure.json`` naming the file
+    and where it came from. It is git-ignored like the rest of the Studio's data, so
+    a large mesh never dirties the working tree, and ``FAYD_DATA_DIR`` moves it with
+    the rest of the data. A slot with nothing imported is simply absent, and the
+    studio shows that slot's own built-in figure instead.
+    """
+    return romance_dir() / "figures"
+
+
 def _asset_roots() -> tuple[Path, ...]:
     """Every place a bundled read-only asset may live, most specific first.
 
