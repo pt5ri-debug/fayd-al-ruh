@@ -595,14 +595,18 @@ def _orbit(scene: Scene, *, azimuth: float, elevation: float, zoom: float) -> No
 
 def _frame_head(scene: Scene, params: FigureParameters) -> None:
     """Aim the camera at the head, close enough that the face fills the frame."""
-    head_y = params.height * 0.845
-    length = 0.235 * params.head_scale * params.face_length
-    target = Vec3(0.0, head_y + length * 0.5, 0.0)
-    distance = max(0.35, 1.35 * params.head_scale * params.face_length)
+    scale = params.height / 1.75
+    # The head sits at the top of the body: its centre is about 0.94 of the height,
+    # which is where the sculptor places it (neck at 0.88, skull above it).
+    head_y = params.height * 0.94
+    head_length = 0.235 * params.head_scale * params.face_length * scale
+    target = Vec3(0.0, head_y, 0.0)
+    # Pull back just enough that the head (with its hair) fills the frame.
+    distance = max(0.30, 3.4 * head_length)
     scene.camera = Camera(
         position=Vec3(0.0, target.y, distance),
         target=target,
-        fov_degrees=32.0,
+        fov_degrees=30.0,
         near=0.05,
         far=50.0,
     )
