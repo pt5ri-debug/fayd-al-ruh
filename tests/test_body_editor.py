@@ -124,6 +124,21 @@ def test_region_vertices_selects_the_points_inside_the_box() -> None:
         assert head.contains((vertex.x, vertex.y, vertex.z))
 
 
+def test_a_regions_centre_sits_on_the_body_not_in_the_boxes_half_space() -> None:
+    # A lateral box (an arm, a leg) reaches the whole half-space, so the box's own
+    # geometric centre is far off the body -- adding a part there would float in
+    # mid-air. Each region carries a real ``centre`` on the part instead.
+    regions = {region.key: region for region in body_regions(1.75)}
+    assert regions["arm_left"].centre[0] > 0.0
+    assert regions["arm_left"].centre[0] < 0.35  # a real arm, not the box edge
+    assert regions["arm_right"].centre[0] == -regions["arm_left"].centre[0]
+    assert regions["head"].centre[1] > 1.5  # the head is high on the body
+    assert regions["foot_left"].centre[1] < 0.1  # the foot is on the ground
+    # The centre is inside the region's own box, so it is genuinely on the part.
+    for region in regions.values():
+        assert region.contains(region.centre)
+
+
 # -- the readers ----------------------------------------------------------
 
 

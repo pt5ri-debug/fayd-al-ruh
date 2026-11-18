@@ -813,11 +813,7 @@ def _region_centre(service: Any, params: Any, region_key: str) -> tuple[float, f
     """The centre of a named region, so a new part lands where that part is."""
     for region in service.body_model_region_objects(params):
         if region.key == region_key:
-            return (
-                (region.lo[0] + region.hi[0]) * 0.5,
-                (region.lo[1] + region.hi[1]) * 0.5,
-                (region.lo[2] + region.hi[2]) * 0.5,
-            )
+            return tuple(region.centre)  # type: ignore[return-value]
     return (0.0, float(params.height) * 0.5, 0.0)
 
 

@@ -102,6 +102,7 @@ class BodyStudioDialog(ThemedDialog):
         self._photo: Any = None
         self._preview_png: bytes = b""
         self._busy = False
+        self._jobs = 0
         self._render_dirty = False
         self._results: queue.Queue[Any] = queue.Queue()
         self._pump_ticket: str | None = None
@@ -742,11 +743,7 @@ class BodyStudioDialog(ThemedDialog):
         """The centre of a named region, so a new part is added where it belongs."""
         for region in self.service.body_model_region_objects(self._params):
             if region.key == region_key:
-                return (
-                    (region.lo[0] + region.hi[0]) * 0.5,
-                    (region.lo[1] + region.hi[1]) * 0.5,
-                    (region.lo[2] + region.hi[2]) * 0.5,
-                )
+                return tuple(region.centre)  # type: ignore[return-value]
         return (0.0, self._params.height * 0.5, 0.0)
 
     def _build_pose_section(self, parent: tk.Frame) -> None:
@@ -1197,6 +1194,7 @@ class BodyStudioDialog(ThemedDialog):
         finish: Callable[[Any, Exception | None], None],
     ) -> None:
         self._busy = True
+        self._jobs += 1
         self._set_status(message)
         try:
             self._spinner.pack(side="right", padx=8)
@@ -1211,25 +1209,37 @@ class BodyStudioDialog(ThemedDialog):
                 self._results.put((finish, None, error))
 
         threading.Thread(target=run, daemon=True).start()
-        self._pump_ticket = self.window.after(60, self._pump_results)
+        if self._pump_ticket is None:
+            self._pump_ticket = self.window.after(60, self._pump_results)
 
     def _pump_results(self) -> None:
         self._pump_ticket = None
-        try:
-            finish, result, error = self._results.get_nowait()
-        except queue.Empty:
-            if self._busy and not self._closed:
+        drained = 0
+        while True:
+            try:
+                finish, result, error = self._results.get_nowait()
+            except queue.Empty:
+                break
+            # A render and a part edit can be queued together; every finished job is
+            # applied, in the order it finished, so none is stranded by another.
+            finish(result, error)
+            self._jobs = max(0, self._jobs - 1)
+            drained += 1
+        if drained:
+            if self._render_dirty and not self._closed:
+                self._schedule_render()
+        # Keep polling while a job is still in flight (a burst of renders), so the
+        # next result is drained as soon as it arrives rather than being left queued.
+        if self._jobs > 0 and not self._closed:
+            if self._pump_ticket is None:
                 self._pump_ticket = self.window.after(60, self._pump_results)
-            return
-        self._busy = False
-        try:
-            self._spinner.stop()
-            self._spinner.pack_forget()
-        except tk.TclError:
-            pass
-        finish(result, error)
-        if self._render_dirty and not self._closed:
-            self._schedule_render()
+        else:
+            self._busy = False
+            try:
+                self._spinner.stop()
+                self._spinner.pack_forget()
+            except tk.TclError:
+                pass
 
     # -- status and close -------------------------------------------------
 

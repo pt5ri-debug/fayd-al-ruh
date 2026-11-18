@@ -105,6 +105,11 @@ class BodyRegion:
     label_ar: str
     lo: tuple[float, float, float]
     hi: tuple[float, float, float]
+    #: The point a new part is added at, or a region edit turns about. It is *not*
+    #: the box centre: a lateral region's box runs far past the body (the arm box
+    #: reaches the whole half-space), so the geometric centre would sit in mid-air.
+    #: This is a real point on the part, taken from the figure's own landmarks.
+    centre: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
     def contains(self, point: tuple[float, float, float]) -> bool:
         return (
@@ -162,6 +167,11 @@ def body_regions(height: float, *, shoulder_width: float = 0.42) -> tuple[BodyRe
     big = height * 2.0  # a box that covers everything along an axis
     head_lo = mark["head_base"] - height * 0.02
     head_hi = height * 1.06
+    # The arm/leg axes: where the limb really is, so a region's ``centre`` is on the
+    # limb and not in the empty half-space the box reaches into.
+    arm_x = half_shoulder * 0.85
+    leg_x = half_hip * 0.55
+    head_mid = (head_lo + head_hi) * 0.5
 
     boxes: dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]] = {
         "head": ((-half_shoulder, head_lo, -big), (half_shoulder, head_hi, big)),
@@ -211,8 +221,22 @@ def body_regions(height: float, *, shoulder_width: float = 0.42) -> tuple[BodyRe
         ),
     }
     titles = {key: (en, ar) for key, en, ar in REGION_TITLES}
+    centres: dict[str, tuple[float, float, float]] = {
+        "head": (0.0, head_mid, 0.0),
+        "neck": (0.0, (mark["shoulder_y"] + mark["head_base"]) * 0.5, 0.0),
+        "torso": (0.0, (mark["chest_y"] + mark["shoulder_y"]) * 0.5, 0.0),
+        "pelvis": (0.0, (mark["hip_y"] + mark["chest_y"]) * 0.5, 0.0),
+        "arm_left": (arm_x, (mark["hip_y"] + mark["shoulder_y"]) * 0.5, 0.0),
+        "arm_right": (-arm_x, (mark["hip_y"] + mark["shoulder_y"]) * 0.5, 0.0),
+        "hand_left": (arm_x, mark["hip_y"] * 0.5, 0.0),
+        "hand_right": (-arm_x, mark["hip_y"] * 0.5, 0.0),
+        "leg_left": (leg_x, mark["hip_y"] * 0.5, 0.0),
+        "leg_right": (-leg_x, mark["hip_y"] * 0.5, 0.0),
+        "foot_left": (leg_x, height * 0.01, 0.0),
+        "foot_right": (-leg_x, height * 0.01, 0.0),
+    }
     return tuple(
-        BodyRegion(key, titles[key][0], titles[key][1], lo, hi)
+        BodyRegion(key, titles[key][0], titles[key][1], lo, hi, centres.get(key, (0.0, 0.0, 0.0)))
         for key, (lo, hi) in boxes.items()
     )
 
@@ -504,7 +528,7 @@ def _region_pivot(points: np.ndarray, region: BodyRegion) -> np.ndarray:
     lo = np.asarray(region.lo, dtype=float)
     hi = np.asarray(region.hi, dtype=float)
     mask = np.all((points >= lo) & (points <= hi), axis=1)
-    chosen = points[mask] if bool(mask.any()) else (lo + hi) * 0.5
+    chosen = points[mask] if bool(mask.any()) else np.asarray(region.centre, dtype=float)
     return chosen.mean(axis=0)
 
 

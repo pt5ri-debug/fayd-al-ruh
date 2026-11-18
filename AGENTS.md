@@ -8063,3 +8063,29 @@ regression monitor each can refuse a change.
   Gates: ruff clean, mypy 1204 files OK, `tests/test_body_editor.py` +
   `tests/test_romance_body_studio.py` + the scene3d suite pass (window tests under
   `xvfb-run` in CI).
+
+- Phase 71 — **the body studio's two real defects CI caught** (a follow-up to
+  Phase 70). The full suite under `xvfb-run` failed on
+  `test_the_body_window_imports_and_edits_a_model`, and the failure exposed two
+  genuine bugs, both fixed. **(1) A region's box centre is not on the body.** The
+  named regions are cut from boxes whose *lateral* edge is a deliberate sentinel
+  (`big = 2 x height`, so a region covers the whole half-space), so the box's
+  geometric centre for a limb sat at x ~ 1.8 m -- far off the body. The window's
+  *add a part* and the CLI's `--add-shape` both placed a new part at that point, so
+  the part was added in mid-air and the edit appeared to do nothing. `BodyRegion`
+  now carries a real `centre` (`core/body_editor.py`), computed from the figure's
+  own landmarks (`arm_x`/`leg_x`/`head_mid`), always inside the region's box, and
+  `_region_pivot`'s fallback and both `_region_centre` helpers use it, so a part is
+  added where the part really is. **(2) A second finished job was stranded.**
+  `gui/romance_body.py`'s result pump drained **one** queued result per firing, so
+  when a render and a part edit were in flight together the second result was left
+  queued and its callback never ran (the test saw the mesh unchanged). The pump now
+  drains every queued result in order, tracks the in-flight job count
+  (`self._jobs`) so it keeps polling until every job is applied, and stops the
+  spinner only when the last one is done. `tests/test_body_editor.py` gained
+  `test_a_regions_centre_sits_on_the_body_not_in_the_boxes_half_space`, which pins
+  the centre on the part (and inside its own box) for every region; the window test
+  that failed in CI passes under `xvfb-run`. Gates: ruff clean, mypy 1204 files OK,
+  `tests/test_body_editor.py` (36) + `tests/test_romance_body_studio.py` (59) +
+  the romance window suites pass under `xvfb-run`.
+
