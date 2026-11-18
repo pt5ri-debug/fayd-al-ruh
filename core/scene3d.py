@@ -773,16 +773,6 @@ class Skeleton:
         return result
 
 
-def _distance_to_segment(point: Vec3, start: Vec3, end: Vec3) -> float:
-    """The shortest distance from ``point`` to the segment ``start``--``end``."""
-    span = end - start
-    length_sq = span.dot(span)
-    if length_sq < 1e-12:
-        return (point - start).length()
-    t = max(0.0, min(1.0, (point - start).dot(span) / length_sq))
-    return (point - (start + span * t)).length()
-
-
 #: How many bones may influence one vertex. Two is the classic "smooth joint"
 #: compromise: a knee blends between thigh and shin, while a distant limb never
 #: drags a vertex with it.
