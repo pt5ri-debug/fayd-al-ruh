@@ -8006,3 +8006,60 @@ regression monitor each can refuse a change.
   the smooth union, per-vertex colours, the detail dials, and the render). Gates:
   ruff clean, mypy clean, evaluation PASS (`overall` 0.9918 unchanged),
   `tests/test_scene3d*.py` + the romance suite pass (357 tests under `xvfb-run`).
+
+- Phase 70 — **the body reads as a real person, and a ready-made human model can
+  be imported and edited**. Two reports from the Body & shape window: the figure
+  still looked like "separate pieces far apart" rather than a body, and there was
+  no way to open a model the project did not build. Both are closed, additively.
+  **(1) Real proportions, and one skin.** `core/scene3d_figures.py`'s `_body_parts`
+  was rebuilt on the proportions a figure is judged by, every length a **fraction
+  of the total height** (so a tall figure is the same shape, only bigger): the
+  shoulder line at `0.82H`, the hip line at `0.48H`, the waist at `0.60H`, a head
+  about `0.125H` tall and `0.72` as wide as it is tall (the classic ratio), and
+  natural arm (`0.170H` + `0.145H`) and leg (`0.235H` + `0.205H`) lengths. The
+  chest is made **narrower than the shoulder line** and the arms and legs are kept
+  **clear of the torso**, so the armpit and the inner thigh stay open the way they
+  do on a real body -- the reason the earlier figure fused into a blob. The
+  shoulders and the hips are wide, flattened masses, so the shoulder line and the
+  pelvis read. Face features are now placed **on the head ellipsoid's own front
+  surface** (`_surface_z`, computed from the head's centre and depth) rather than
+  at a guessed `face_front` constant, so the eyes, the nose, and the lips stand
+  proud of the skin instead of being buried. Because every part is still a smooth
+  field fused by `core.scene3d_sculpt`, the result is **exactly one connected
+  shell** for every shipped preset (adult / athletic / slim / child / feminine /
+  masculine / curvy), which is what makes a viewer see a person and not a pile of
+  shapes. **(2) A mesh importer and editor.** `core/body_editor.py` (new) reads a
+  ready-made human model -- **OBJ** (through the project's own reader), **STL**
+  (ASCII *and* binary, triangles read from the 50-byte binary record), and **PLY**
+  (ASCII *and* binary little-endian) -- with a bounded size (`MAX_FILE_BYTES`,
+  `MAX_VERTICES`, `MAX_FACES`) and an honest refusal for a missing file, an
+  unreadable suffix, or a file with no faces. `normalize_mesh` puts any model in
+  the project's own space (metres, feet on the ground, centred on the origin), so
+  a DAZ/MakeHuman export in centimetres and an arbitrary origin behaves like the
+  parametric figure. Editing is by **named region** (`body_regions`, derived from
+  the shared skeleton so "head" means the same box on any body): `resize_region`,
+  `move_region`, and `rotate_region` change only the vertices inside the box, with
+  a **smooth falloff** (`_region_weights`/`_apply_matrix`) so a joint bends instead
+  of tearing, and a non-positive resize factor is refused. A missing part is added
+  by `add_part` from a **sphere, ellipsoid, capsule, box, or a supplied mesh**,
+  fused into the skin by the same smooth-union sculptor, so the new part is one
+  with the body rather than a lump beside it. **(3) The wiring.** `core/romance/body.py`
+  gained the mesh-studio layer (`figure_mesh`, `load_model_mesh`, `render_preview`
+  with a `body_mesh`, `edit_model_region`, `add_model_part`, `model_regions`,
+  `model_region_titles`); `gui/romance.py`'s `RomanceStudioService` exposes it
+  (`load_body_model`, `body_model_from_figure`, `edit_body_model_region`,
+  `add_body_model_part`, `save_body_model`, `body_model_summary`), and its
+  `render_body` gained a `mesh` parameter so the preview shows the edited model;
+  `gui/romance_body.py`'s window gained a **Model (import & edit)** sidebar section
+  (open a model, turn the built figure into an editable model, a region menu, edit
+  sliders, add-a-part, save, and back to the figure); and the CLI gained
+  `python -m cli romance body --model FILE | --model-from-figure | --regions |
+  --part-shapes | --edit-part KEY [--scale/--move/--rotate-part] | --add-shape
+  SHAPE [--at/--part-size] | --save-model FILE`, driving the same engine.
+  `tests/test_body_editor.py` (new, 35 tests) pins the readers and their refusals,
+  the region model, the smooth edits, the fused part-adding, the normalisation,
+  the service bridge, and the CLI; `tests/test_romance_body_studio.py` gained a
+  window test that imports, edits, adds a part, and returns to the figure.
+  Gates: ruff clean, mypy 1204 files OK, `tests/test_body_editor.py` +
+  `tests/test_romance_body_studio.py` + the scene3d suite pass (window tests under
+  `xvfb-run` in CI).
