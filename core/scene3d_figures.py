@@ -413,12 +413,14 @@ def _body_parts(params: FigureParameters) -> list[_Blob]:
         _add_hand(parts, params, skin, wrist, arm_radius, side, s)
 
     # -- legs: the feet sit on the ground and the legs stay clear of each other --
-    thigh_len = 0.235 * H
-    shin_len = 0.205 * H
+    # Hip joint at the hip line, knee and ankle a natural distance below it, so the
+    # ankle lands about 0.04 of the height above the ground and the feet rest on it.
+    thigh_len = 0.240 * H
+    shin_len = 0.200 * H
     leg_radius = 0.040 * H * limb * params.leg_thickness
     for side in (-1.0, 1.0):
         hip_x = side * hips * 0.5 * 0.62
-        hip_top = Vec3(hip_x, hip_y - 0.015 * H, 0.0)
+        hip_top = Vec3(hip_x, hip_y, 0.0)
         knee = Vec3(hip_x, hip_top.y - thigh_len, 0.006 * s)
         ankle = Vec3(hip_x, knee.y - shin_len, 0.0)
         parts.append(capsule(hip_top, knee, leg_radius * 1.10, leg_radius * 0.56, skin, blend=0.055))
@@ -480,30 +482,33 @@ def _add_foot(
 
     The foot lies flat on the ground (``y = 0``): its sole is a flattened capsule
     from the heel to the ball, the toes fan out in front, and the ankle rises into
-    the shin, so the leg really stands on the ground.
+    the shin, so the leg really stands on the ground. Its length is a natural
+    fraction of the height (about ``0.15``), so it reads as a foot rather than a stub.
     """
     size = params.foot_size * s
     width = leg_radius * 0.95 * size
-    length = 0.085 * s * size
-    ground = 0.012 * s
+    length = 0.105 * params.height * size
+    sole_r = width * 0.58
     parts.append(
         capsule((ankle.x, ankle.y, ankle.z),
                 (ankle.x, ankle.y - 0.020 * s, ankle.z + 0.012 * s),
                 leg_radius * 0.46, width * 0.52, skin, blend=0.025)
     )
-    # The sole is a flattened capsule from the heel to the ball; the ball is wide
+    # The sole is a flattened capsule from the heel to the ball, raised by its own
+    # radius so its underside rests on the ground (``y = 0``); the ball is wide
     # enough that every toe overlaps it, so the toes fuse into the foot rather than
     # detaching as separate specks.
-    heel = Vec3(ankle.x, ground, -length * 0.30)
-    ball = Vec3(ankle.x, ground, length * 0.62)
-    parts.append(capsule(heel, ball, width * 0.46, width * 0.60, skin, blend=0.030))
+    heel = Vec3(ankle.x, sole_r, -length * 0.34)
+    ball = Vec3(ankle.x, sole_r, length * 0.58)
+    parts.append(capsule(heel, ball, sole_r * 0.86, sole_r, skin, blend=0.030))
     for index in range(5):
         offset = (index - 2.0) * width * 0.44
         toe_r = width * (0.30 if index == 0 else 0.24)
-        # Each toe starts *inside* the ball and runs forward, so its base is buried
-        # in the sole and the two are always one surface.
-        base = Vec3(ankle.x + offset * 0.75, ground, ball.z - length * 0.20)
-        tip = Vec3(ankle.x + offset, ground, ball.z + length * 0.16)
+        # Each toe starts *inside* the ball and runs forward, resting on the ground
+        # (raised by its own radius), so its base is buried in the sole and the two
+        # are always one surface.
+        base = Vec3(ankle.x + offset * 0.75, toe_r, ball.z - length * 0.20)
+        tip = Vec3(ankle.x + offset, toe_r, ball.z + length * 0.22)
         parts.append(capsule(base, tip, toe_r * 1.05, toe_r, skin, blend=0.020))
         # The nail sits *on* the toe (its centre inside the toe's surface) so the
         # smooth union fuses it; a nail floating past the tip would detach.
