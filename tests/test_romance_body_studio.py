@@ -951,3 +951,56 @@ def test_the_cli_lists_and_uses_camera_angles(tmp_path: Path, capsys) -> None:
         ["--data-root", root, "body", "--camera", "moonwalk", "--render", "x.png"], capsys
     )
     assert code == 2
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_body_window_imports_and_edits_a_model(tmp_path: Path) -> None:
+    """The window shows an imported/edited model and edits a part of it.
+
+    The user asked to open a ready-made model, see it, and edit any part. This
+    drives the window's model section: turn the built body into a model, apply a
+    part edit, add a part, and confirm the preview follows the model (not the
+    parametric figure).
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_body import BodyStudioDialog
+
+    service = _service(tmp_path)
+    character = service.create_character(name="Amina", role=ROLE_COMPANION, gender="woman")
+    root = tk.Tk()
+    root.withdraw()
+    dialog = None
+    try:
+        dialog = BodyStudioDialog(
+            root, service, character.id, role=ROLE_COMPANION,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        assert _wait_for(root, lambda: dialog._photo is not None)
+        # The model section exists with its menus populated.
+        assert dict(service.body_model_region_titles())["head"] == "Head"
+        assert dialog._region_var.get()
+        assert dialog._part_var.get()
+        # Turn the built body into an editable model.
+        dialog._use_figure_as_model()
+        assert _wait_for(root, lambda: dialog._mesh is not None)
+        first = dialog._mesh
+        # Edit the left arm and add a sphere part.
+        dialog._set_region("arm_left")
+        dialog._edit_vars["scale_x"].set(1.3)
+        dialog._apply_part_edit()
+        assert _wait_for(root, lambda: dialog._mesh is not first)
+        edited = dialog._mesh
+        assert edited.face_count == first.face_count
+        dialog._add_part()
+        assert _wait_for(root, lambda: dialog._mesh is not edited)
+        assert dialog._mesh.vertex_count > 0
+        # The preview follows the edited model.
+        assert dialog._preview_png.startswith(b"\x89PNG")
+        # Back to the built figure clears the model.
+        dialog._clear_model()
+        root.update()
+        assert dialog._mesh is None
+    finally:
+        _close_window(root, dialog)

@@ -169,6 +169,52 @@ def _build_parser() -> argparse.ArgumentParser:
         "--camera", default="", help="A ready-made camera angle (front, back, left, ...)."
     )
     body.add_argument("--cameras", action="store_true", help="List the ready-made camera angles.")
+    body.add_argument(
+        "--model", default="",
+        help="Show and edit a ready-made human model (OBJ, STL, PLY) instead of the built body.",
+    )
+    body.add_argument(
+        "--model-from-figure", action="store_true",
+        help="Turn the built body into an editable model (the starting point for edits).",
+    )
+    body.add_argument(
+        "--regions", action="store_true", help="List the editable parts of a body model."
+    )
+    body.add_argument(
+        "--part-shapes", action="store_true", help="List the shapes a missing part can be added from."
+    )
+    body.add_argument(
+        "--edit-part", default="", metavar="REGION",
+        help="Edit one region of the model (with --scale/--move/--rotate-part).",
+    )
+    body.add_argument(
+        "--scale", default="", metavar="SX,SY,SZ",
+        help="Scale a region (a size multiplier per axis), e.g. 1.2,1.0,1.2.",
+    )
+    body.add_argument(
+        "--move", default="", metavar="DX,DY,DZ",
+        help="Move a region by these metres, e.g. 0,0.02,0.",
+    )
+    body.add_argument(
+        "--rotate-part", default="", metavar="RX,RY,RZ",
+        help="Rotate a region by these degrees, e.g. 0,20,0.",
+    )
+    body.add_argument(
+        "--add-shape", default="", metavar="SHAPE",
+        help="Add a missing part (sphere, ellipsoid, capsule, box) at --at.",
+    )
+    body.add_argument(
+        "--at", default="", metavar="X,Y,Z",
+        help="Where to place an added part (or default to the --edit-part's centre).",
+    )
+    body.add_argument(
+        "--part-size", type=float, default=0.09,
+        help="The size of an added part in metres (its radius / half-extent).",
+    )
+    body.add_argument(
+        "--save-model", default="", metavar="FILE",
+        help="Write the edited model to this file (OBJ), to keep or re-open later.",
+    )
     body.add_argument("--render", default="", help="Write the render to this PNG file.")
     body.add_argument(
         "--use-as-picture", action="store_true",
@@ -610,6 +656,14 @@ def run_body(args: argparse.Namespace) -> int:
             ),
         )
         return EXIT_OK
+    if args.regions:
+        rows = [{"key": key, "title": title} for key, title in service.body_model_region_titles()]
+        _emit(args, rows, "\n".join(f"{row['key']:14s} {row['title']}" for row in rows))
+        return EXIT_OK
+    if args.part_shapes:
+        rows = [{"key": key, "title": title} for key, title in service.body_model_part_shapes()]
+        _emit(args, rows, "\n".join(f"{row['key']:14s} {row['title']}" for row in rows))
+        return EXIT_OK
 
     params = service.body_parameters(args.character_id, preset=args.preset)
     if args.pose:
@@ -640,6 +694,57 @@ def run_body(args: argparse.Namespace) -> int:
         "summary": service.body_summary(params),
         "dials": service.body_values(params),
     }
+
+    # -- an imported or edited model (the body is a mesh, not only the dials) --
+    mesh: Any = None
+    if args.model:
+        try:
+            mesh = service.load_body_model(args.model)
+        except Exception as error:  # a bad file is reported, never a crash
+            print(f"romance: {error}", file=sys.stderr)
+            return EXIT_USAGE
+        payload["model"] = {"source": args.model, "summary": service.body_model_summary(mesh)}
+    elif args.model_from_figure:
+        mesh = service.body_model_from_figure(params)
+        payload["model"] = {"source": "figure", "summary": service.body_model_summary(mesh)}
+    if mesh is not None and args.edit_part and (args.scale or args.move or args.rotate_part):
+        scale = _vector(args.scale, "scale") if args.scale else None
+        move = _vector(args.move, "move") if args.move else None
+        rotate = _vector(args.rotate_part, "rotate") if args.rotate_part else None
+        if (args.scale and scale is None) or (args.move and move is None) or (
+            args.rotate_part and rotate is None
+        ):
+            return EXIT_USAGE
+        try:
+            mesh = service.edit_body_model_region(
+                mesh, params, args.edit_part, scale=scale, move=move, rotate=rotate
+            )
+        except Exception as error:
+            print(f"romance: {error}", file=sys.stderr)
+            return EXIT_USAGE
+        payload["edited"] = args.edit_part
+        payload["model"]["summary"] = service.body_model_summary(mesh)
+    if mesh is not None and args.add_shape:
+        centre = _vector(args.at, "at")
+        if centre is None:
+            centre = _region_centre(service, params, args.edit_part)
+        try:
+            mesh = service.add_body_model_part(
+                mesh, shape=args.add_shape, centre=centre, size=float(args.part_size)
+            )
+        except Exception as error:
+            print(f"romance: {error}", file=sys.stderr)
+            return EXIT_USAGE
+        payload["added"] = {"shape": args.add_shape, "centre": list(centre)}
+        payload["model"]["summary"] = service.body_model_summary(mesh)
+    if mesh is not None and args.save_model:
+        try:
+            saved = service.export_body_model(mesh, args.save_model)
+        except Exception as error:
+            print(f"romance: {error}", file=sys.stderr)
+            return EXIT_USAGE
+        payload["saved_model"] = str(saved)
+
     if args.summary:
         _emit(args, payload, payload["summary"])
         return EXIT_OK
@@ -664,6 +769,7 @@ def run_body(args: argparse.Namespace) -> int:
                 azimuth=azimuth,
                 elevation=elevation,
                 zoom=float(args.zoom),
+                mesh=mesh,
             )
         )
         payload["render"] = str(target)
@@ -676,10 +782,43 @@ def run_body(args: argparse.Namespace) -> int:
         if not args.character_id:
             print("romance: --use-as-picture needs a character id", file=sys.stderr)
             return EXIT_USAGE
+        if mesh is not None:
+            print(
+                "romance: --use-as-picture stores the built figure's portrait; "
+                "use --save-model to keep an edited model, then --model to re-open it.",
+                file=sys.stderr,
+            )
         result = service.use_body_as_avatar(args.character_id, params)
         payload["picture"] = str(result.path)
     _emit(args, payload, payload["summary"])
     return EXIT_OK
+
+
+def _vector(text: str, name: str) -> tuple[float, float, float] | None:
+    """Read a ``X,Y,Z`` triple; a blank string is the identity (zeros), else refuse."""
+    if not text:
+        return (0.0, 0.0, 0.0)
+    parts = [item.strip() for item in text.replace(" ", "").split(",")]
+    if len(parts) != 3:
+        print(f"romance: --{name} wants X,Y,Z, got {text!r}", file=sys.stderr)
+        return None
+    try:
+        return (float(parts[0]), float(parts[1]), float(parts[2]))
+    except ValueError:
+        print(f"romance: --{name} wants numbers, got {text!r}", file=sys.stderr)
+        return None
+
+
+def _region_centre(service: Any, params: Any, region_key: str) -> tuple[float, float, float]:
+    """The centre of a named region, so a new part lands where that part is."""
+    for region in service.body_model_region_objects(params):
+        if region.key == region_key:
+            return (
+                (region.lo[0] + region.hi[0]) * 0.5,
+                (region.lo[1] + region.hi[1]) * 0.5,
+                (region.lo[2] + region.hi[2]) * 0.5,
+            )
+    return (0.0, float(params.height) * 0.5, 0.0)
 
 
 def _coerce(text: str) -> Any:

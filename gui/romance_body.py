@@ -86,6 +86,11 @@ class BodyStudioDialog(ThemedDialog):
         self._camera_azimuth = 0.0
         self._camera_elevation = 0.0
         self._camera_zoom = 1.0
+        self._mesh: Any = None
+        self._edit_vars: dict[str, tk.DoubleVar] = {}
+        self._edit_labels: dict[str, tk.Label] = {}
+        self._edit_defaults: dict[str, float] = {}
+        self._edit_scales: list[tk.Scale] = []
         self._drag_origin: tuple[int, int] | None = None
         self._drag_angles: tuple[float, float] | None = None
         self._dial_vars: dict[str, tk.DoubleVar] = {}
@@ -184,6 +189,9 @@ class BodyStudioDialog(ThemedDialog):
 
     def _build_sidebar(self, column: SidebarColumn) -> None:
         theme = self.theme
+
+        model = column.add("model", "Model (import & edit)", icon="🗿", open=True)
+        self._build_model_section(model)
 
         camera = column.add("camera", "Camera (orbit)", icon="🎥", open=True)
         self._build_camera_section(camera)
@@ -401,6 +409,345 @@ class BodyStudioDialog(ThemedDialog):
             self._canvas.configure(cursor="")
         except tk.TclError:
             pass
+
+    # -- the imported / edited model --------------------------------------
+
+    def _build_model_section(self, parent: tk.Frame) -> None:
+        """Import a ready-made human model, show it, and edit it part by part.
+
+        The user asked for exactly this: open a mesh the project did not build,
+        see it in the window, change the size or shape of any part, and add a
+        missing part. The engine is :mod:`core.body_editor` (through the
+        service); the window only collects the choice and shows the result.
+        """
+        theme = self.theme
+        tk.Label(
+            parent,
+            text=(
+                "Open a ready-made model (OBJ, STL, or PLY) to see and edit it here, "
+                "or turn the built body into an editable model. Then pick a part and "
+                "resize, move, or rotate it — or add a missing part."
+            ),
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=340,
+        ).pack(fill="x", pady=(0, 4))
+
+        self._model_label = tk.Label(
+            parent,
+            text="Showing the built figure.",
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=340,
+        )
+        self._model_label.pack(fill="x", pady=(0, 4))
+
+        self._button(parent, "Import a model…", self._import_model).pack(fill="x", pady=1)
+        self._button(parent, "Use the built body as the model", self._use_figure_as_model).pack(
+            fill="x", pady=1
+        )
+        self._button(parent, "Back to the built figure", self._clear_model).pack(fill="x", pady=1)
+
+        tk.Label(
+            parent,
+            text="Part to edit",
+            bg=theme.surface,
+            fg=theme.foreground,
+            font=self._type.font("2xs", weight="bold"),
+            anchor="w",
+        ).pack(fill="x", pady=(6, 0))
+        self._region_var = tk.StringVar(value="")
+        self._region_menu = tk.OptionMenu(parent, self._region_var, "")
+        self._region_menu.configure(
+            bg=theme.surface_raised,
+            fg=theme.foreground,
+            activebackground=theme.primary,
+            activeforeground=theme.base,
+            highlightthickness=0,
+            borderwidth=0,
+            anchor="w",
+            font=self._type.font("2xs"),
+        )
+        self._region_menu["menu"].configure(bg=theme.surface_raised, fg=theme.foreground)
+        self._region_menu.pack(fill="x", pady=(1, 4))
+        self._fill_region_menu()
+
+        for key, label, low, high, step in (
+            ("scale_x", "Part width", 0.5, 2.0, 0.05),
+            ("scale_y", "Part height", 0.5, 2.0, 0.05),
+            ("scale_z", "Part depth", 0.5, 2.0, 0.05),
+            ("move_x", "Move left / right", -0.3, 0.3, 0.005),
+            ("move_y", "Move up / down", -0.3, 0.3, 0.005),
+            ("move_z", "Move forward / back", -0.3, 0.3, 0.005),
+            ("rotate_y", "Rotate the part", -90.0, 90.0, 1.0),
+        ):
+            holder = tk.Frame(parent, bg=theme.surface)
+            holder.pack(fill="x", pady=(4, 0))
+            head = tk.Frame(holder, bg=theme.surface)
+            head.pack(fill="x")
+            tk.Label(
+                head, text=label, bg=theme.surface, fg=theme.foreground,
+                font=self._type.font("2xs", weight="bold"), anchor="w",
+            ).pack(side="left")
+            value_label = tk.Label(
+                head, text="", bg=theme.surface, fg=theme.text_dim,
+                font=self._type.font("2xs"), anchor="e",
+            )
+            value_label.pack(side="right")
+            self._edit_labels[key] = value_label
+            variable = tk.DoubleVar(value=1.0 if key.startswith("scale") else 0.0)
+            self._edit_vars[key] = variable
+            self._edit_defaults[key] = variable.get()
+            scale = tk.Scale(
+                holder, from_=low, to=high, resolution=step, orient="horizontal",
+                variable=variable, showvalue=False, highlightthickness=0, borderwidth=0,
+                troughcolor=theme.surface_raised, bg=theme.surface,
+                activebackground=theme.primary, length=320,
+            )
+            scale.pack(fill="x", pady=(1, 0))
+            self._edit_scales.append(scale)
+            variable.trace_add("write", _camera_trace(self._on_edit_slider, key, variable))
+        self._sync_edit_labels()
+
+        self._button(parent, "Apply to the chosen part", self._apply_part_edit, variant="primary").pack(
+            fill="x", pady=(6, 0)
+        )
+        self._button(parent, "Reset the sliders", self._reset_edit_sliders).pack(fill="x", pady=1)
+
+        tk.Label(
+            parent,
+            text="Add a missing part",
+            bg=theme.surface,
+            fg=theme.foreground,
+            font=self._type.font("2xs", weight="bold"),
+            anchor="w",
+        ).pack(fill="x", pady=(8, 0))
+        self._part_var = tk.StringVar(value="")
+        self._part_menu = tk.OptionMenu(parent, self._part_var, "")
+        self._part_menu.configure(
+            bg=theme.surface_raised,
+            fg=theme.foreground,
+            activebackground=theme.primary,
+            activeforeground=theme.base,
+            highlightthickness=0,
+            borderwidth=0,
+            anchor="w",
+            font=self._type.font("2xs"),
+        )
+        self._part_menu["menu"].configure(bg=theme.surface_raised, fg=theme.foreground)
+        self._part_menu.pack(fill="x", pady=(1, 2))
+        self._fill_part_menu()
+        tk.Label(
+            parent,
+            text=(
+                "Place it where the chosen part is and it fuses into the body as one "
+                "skin. Widen 'Add size' for a larger piece."
+            ),
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=340,
+        ).pack(fill="x", pady=(0, 2))
+        add_row = tk.Frame(parent, bg=theme.surface)
+        add_row.pack(fill="x")
+        tk.Label(
+            add_row, text="Add size", bg=theme.surface, fg=theme.foreground,
+            font=self._type.font("2xs"), anchor="w",
+        ).pack(side="left")
+        self._add_size_var = tk.DoubleVar(value=1.0)
+        tk.Scale(
+            add_row, from_=0.3, to=3.0, resolution=0.05, orient="horizontal",
+            variable=self._add_size_var, showvalue=False, highlightthickness=0, borderwidth=0,
+            troughcolor=theme.surface_raised, bg=theme.surface,
+            activebackground=theme.primary, length=240,
+        ).pack(side="right", fill="x", expand=True)
+        self._button(parent, "Add the part to the body", self._add_part, variant="primary").pack(
+            fill="x", pady=(4, 0)
+        )
+
+    def _fill_region_menu(self) -> None:
+        menu = self._region_menu["menu"]
+        menu.delete(0, "end")
+        options = self.service.body_model_region_titles()
+        if not options:
+            return
+        if not self._region_var.get():
+            self._region_var.set(options[0][0])
+        for key, title in options:
+            menu.add_command(label=title, command=_binder(self._set_region, key))
+
+    def _fill_part_menu(self) -> None:
+        menu = self._part_menu["menu"]
+        menu.delete(0, "end")
+        options = self.service.body_model_part_shapes()
+        if not options:
+            return
+        if not self._part_var.get():
+            self._part_var.set(options[0][0])
+        for key, title in options:
+            menu.add_command(label=title, command=_binder(self._set_part_shape, key))
+
+    def _set_region(self, key: str) -> None:
+        self._region_var.set(key)
+        self._reset_edit_sliders()
+
+    def _set_part_shape(self, key: str) -> None:
+        self._part_var.set(key)
+
+    def _on_edit_slider(self, key: str, _variable: tk.DoubleVar) -> None:
+        self._sync_edit_labels()
+
+    def _sync_edit_labels(self) -> None:
+        for key, label in getattr(self, "_edit_labels", {}).items():
+            variable = self._edit_vars.get(key)
+            if variable is None:
+                continue
+            try:
+                value = float(variable.get())
+            except (tk.TclError, ValueError):
+                continue
+            text = f"{value:.2f}" if key.startswith("scale") else f"{value:+.2f}"
+            try:
+                label.configure(text=text)
+            except tk.TclError:
+                pass
+
+    def _reset_edit_sliders(self) -> None:
+        for key, variable in self._edit_vars.items():
+            try:
+                variable.set(self._edit_defaults.get(key, 0.0))
+            except tk.TclError:
+                pass
+        self._sync_edit_labels()
+
+    def _import_model(self) -> None:
+        from tkinter import filedialog
+
+        path = filedialog.askopenfilename(
+            parent=self.window,
+            title="Open a human model",
+            filetypes=[
+                ("Human models", "*.obj *.stl *.ply"),
+                ("Wavefront OBJ", "*.obj"),
+                ("STL", "*.stl"),
+                ("PLY", "*.ply"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        self._busy_model("Reading the model…", lambda: self.service.load_body_model(path))
+
+    def _use_figure_as_model(self) -> None:
+        self._busy_model(
+            "Turning the built body into a model…",
+            lambda: self.service.body_model_from_figure(self._params),
+        )
+
+    def _busy_model(self, message: str, job: Callable[[], Any]) -> None:
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._set_status(f"Could not load the model: {error}")
+                return
+            self._mesh = result
+            self._model_label.configure(text=self.service.body_model_summary(result))
+            self._set_status("Model ready — pick a part to edit, or add a part.")
+            self._render_now()
+
+        self._run_background(message, job, finish)
+
+    def _clear_model(self) -> None:
+        self._mesh = None
+        self._model_label.configure(text="Showing the built figure.")
+        self._set_status("Back to the built figure.")
+        self._render_now()
+
+    def _apply_part_edit(self) -> None:
+        if self._mesh is None:
+            self._set_status("Import a model or turn the built body into one first.")
+            return
+        region_key = self._region_var.get()
+        if not region_key:
+            self._set_status("Pick the part to edit.")
+            return
+        scale: tuple[float, float, float] = (
+            float(self._edit_vars["scale_x"].get()),
+            float(self._edit_vars["scale_y"].get()),
+            float(self._edit_vars["scale_z"].get()),
+        )
+        move: tuple[float, float, float] = (
+            float(self._edit_vars["move_x"].get()),
+            float(self._edit_vars["move_y"].get()),
+            float(self._edit_vars["move_z"].get()),
+        )
+        rotate: tuple[float, float, float] = (0.0, float(self._edit_vars["rotate_y"].get()), 0.0)
+        mesh = self._mesh
+        params = self._params
+
+        def job() -> Any:
+            return self.service.edit_body_model_region(
+                mesh, params, region_key, scale=scale, move=move, rotate=rotate
+            )
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._set_status(f"Could not edit the part: {error}")
+                return
+            self._mesh = result
+            self._model_label.configure(text=self.service.body_model_summary(result))
+            self._set_status(f"Applied the edit to {region_key}.")
+            self._reset_edit_sliders()
+            self._render_now()
+
+        self._run_background("Editing the part…", job, finish)
+
+    def _add_part(self) -> None:
+        if self._mesh is None:
+            self._set_status("Import a model or turn the built body into one first.")
+            return
+        shape = self._part_var.get()
+        if not shape:
+            self._set_status("Pick the shape to add.")
+            return
+        centre = self._region_centre(self._region_var.get())
+        try:
+            size = 0.09 * float(self._add_size_var.get())
+        except (tk.TclError, ValueError):
+            size = 0.09
+        mesh = self._mesh
+
+        def job() -> Any:
+            return self.service.add_body_model_part(mesh, shape=shape, centre=centre, size=size)
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._set_status(f"Could not add the part: {error}")
+                return
+            self._mesh = result
+            self._model_label.configure(text=self.service.body_model_summary(result))
+            self._set_status(f"Added a {shape} part.")
+            self._render_now()
+
+        self._run_background("Adding the part…", job, finish)
+
+    def _region_centre(self, region_key: str) -> tuple[float, float, float]:
+        """The centre of a named region, so a new part is added where it belongs."""
+        for region in self.service.body_model_region_objects(self._params):
+            if region.key == region_key:
+                return (
+                    (region.lo[0] + region.hi[0]) * 0.5,
+                    (region.lo[1] + region.hi[1]) * 0.5,
+                    (region.lo[2] + region.hi[2]) * 0.5,
+                )
+        return (0.0, self._params.height * 0.5, 0.0)
 
     def _build_pose_section(self, parent: tk.Frame) -> None:
         theme = self.theme
@@ -776,6 +1123,8 @@ class BodyStudioDialog(ThemedDialog):
         elevation = self._camera_elevation
         zoom = self._camera_zoom
 
+        mesh = self._mesh
+
         def job() -> bytes:
             return self.service.render_body(
                 params,
@@ -785,6 +1134,7 @@ class BodyStudioDialog(ThemedDialog):
                 azimuth=azimuth,
                 elevation=elevation,
                 zoom=zoom,
+                mesh=mesh,
             )
 
         self._run_background("Rendering the body…", job, self._on_rendered)
@@ -909,6 +1259,15 @@ class BodyStudioDialog(ThemedDialog):
         finally:
             if self._on_close is not None:
                 self._on_close()
+
+
+def _edit_trace(action: Callable[[str, tk.DoubleVar], None], key: str) -> Callable[..., None]:
+    """A trace callback for a model-edit slider (passes the key, ignores the rest)."""
+    def handler(_name: str, _index: str, _op: str) -> None:
+        variable = None
+        action(key, variable)  # type: ignore[arg-type]
+
+    return handler
 
 
 def _binder(action: Callable[[str], None], key: str) -> Callable[[], None]:

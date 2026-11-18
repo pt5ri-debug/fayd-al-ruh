@@ -32,7 +32,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from core.scene3d import Camera, Scene, Vec3, make_default_scene
+from core.scene3d import Camera, Material, Scene, SceneObject, Vec3, make_default_scene
 from core.scene3d_figures import (
     BUILD_FEMININE,
     BUILD_MASCULINE,
@@ -88,6 +88,9 @@ CAMERA_DEFAULT_ZOOM = 1.0
 #: The zoom range the camera tool allows (a distance multiplier).
 CAMERA_MIN_ZOOM = 0.35
 CAMERA_MAX_ZOOM = 3.0
+
+#: The fallback skin a mesh that carries no per-vertex colours is drawn with.
+SKIN_COLOUR: tuple[float, float, float] = (0.82, 0.66, 0.56)
 
 
 def camera_preset_titles() -> tuple[tuple[str, str], ...]:
@@ -534,6 +537,7 @@ def preview_scene(
     azimuth: float = 0.0,
     elevation: float = 0.0,
     zoom: float = 1.0,
+    body_mesh: Any = None,
 ) -> Scene:
     """A scene holding the figure (and its hair), framed for the requested view.
 
@@ -541,13 +545,27 @@ def preview_scene(
     the horizon), and ``zoom`` (a distance multiplier) place the camera on an
     orbit around the figure's own framing target, so the same body can be viewed
     from any direction without rebuilding it.
+
+    When ``body_mesh`` is given, that mesh *is* the body -- an imported or edited
+    figure the studio is working on -- so the window can show a model the dials did
+    not build. The hair is only added for the parametric figure, because an
+    imported model already carries its own.
     """
-    figure = build_figure(params, name=name)
     scene = make_default_scene(f"{name} body")
-    scene.add_object(figure)
-    hair = build_hair_object(params, name)
-    if hair is not None:
-        scene.add_object(hair)
+    if body_mesh is not None:
+        scene.add_object(
+            SceneObject(
+                name=f"{name} body",
+                mesh=body_mesh,
+                material=Material("body", SKIN_COLOUR),
+            )
+        )
+    else:
+        figure = build_figure(params, name=name)
+        scene.add_object(figure)
+        hair = build_hair_object(params, name)
+        if hair is not None:
+            scene.add_object(hair)
     scene.background = (0.13, 0.15, 0.19)
     if view == VIEW_FACE:
         _frame_head(scene, params)
@@ -595,14 +613,13 @@ def _orbit(scene: Scene, *, azimuth: float, elevation: float, zoom: float) -> No
 
 def _frame_head(scene: Scene, params: FigureParameters) -> None:
     """Aim the camera at the head, close enough that the face fills the frame."""
-    scale = params.height / 1.75
-    # The head sits at the top of the body: its centre is about 0.94 of the height,
-    # which is where the sculptor places it (neck at 0.88, skull above it).
-    head_y = params.height * 0.94
-    head_length = 0.235 * params.head_scale * params.face_length * scale
+    # The head is a *fraction of the total height*: its base sits at 0.875 of the
+    # height and it is about 0.125 tall, so its centre is at 0.9375 of the height.
+    head_y = params.height * 0.9375
+    head_length = 0.125 * params.height * params.head_scale * params.face_length
     target = Vec3(0.0, head_y, 0.0)
     # Pull back just enough that the head (with its hair) fills the frame.
-    distance = max(0.30, 3.4 * head_length)
+    distance = max(0.22, 3.2 * head_length)
     scene.camera = Camera(
         position=Vec3(0.0, target.y, distance),
         target=target,
@@ -621,28 +638,145 @@ def render_preview(
     azimuth: float = 0.0,
     elevation: float = 0.0,
     zoom: float = 1.0,
+    body_mesh: Any = None,
 ) -> bytes:
     """Render the body and return the PNG bytes (the window shows them directly).
 
     ``azimuth``/``elevation``/``zoom`` orbit the camera around the figure, so the
-    window's camera tool can show the same body from any direction.
+    window's camera tool can show the same body from any direction. ``body_mesh``
+    renders an imported or edited mesh instead of the parametric figure.
     """
     if view not in VIEWS:
         view = VIEW_FULL
     scene = preview_scene(
-        params, view=view, azimuth=azimuth, elevation=elevation, zoom=zoom
+        params,
+        view=view,
+        azimuth=azimuth,
+        elevation=elevation,
+        zoom=zoom,
+        body_mesh=body_mesh,
     )
     buffer, _stats = render_scene(scene, width=int(width), height=int(height))
     return buffer.to_png()
 
 
 def render_avatar(
-    params: FigureParameters, *, width: int = AVATAR_WIDTH, height: int = AVATAR_HEIGHT
+    params: FigureParameters,
+    *,
+    width: int = AVATAR_WIDTH,
+    height: int = AVATAR_HEIGHT,
+    body_mesh: Any = None,
 ) -> bytes:
     """Render a square **portrait** of the body, for use as a character's picture."""
-    scene = preview_scene(params, view=VIEW_FULL)
+    scene = preview_scene(params, view=VIEW_FULL, body_mesh=body_mesh)
     buffer, _stats = render_scene(scene, width=int(width), height=int(height))
     return buffer.to_png()
+
+
+# -- an imported or edited mesh (the body is a model, not only the dials) --
+
+
+def load_model_mesh(path: str) -> Any:
+    """Read a ready-made human model (OBJ, STL, or PLY) into a normalised mesh.
+
+    The mesh is put in the project's own space (metres, feet on the ground, centred
+    on the origin) so the region boxes, the camera framing, and the renderer all
+    mean the same thing as they do for the parametric figure. A file this build
+    cannot read is refused by :class:`core.body_editor.BodyMeshError` with the real
+    reason.
+    """
+    from core.body_editor import load_body_mesh, normalize_mesh
+
+    return normalize_mesh(load_body_mesh(path))
+
+
+def figure_mesh(params: FigureParameters) -> Any:
+    """The parametric figure's own mesh, in the studio's normalised body space."""
+    from core.body_editor import normalize_mesh
+    from core.scene3d_figures import build_figure_mesh
+
+    return normalize_mesh(build_figure_mesh(params), height=params.height)
+
+
+def model_regions(params: FigureParameters) -> tuple[Any, ...]:
+    """The editable regions of a body of this figure's height (from its own rig)."""
+    from core.body_editor import body_regions
+
+    return body_regions(params.height, shoulder_width=params.shoulder_width)
+
+
+def model_region_titles(language: str = "en") -> tuple[tuple[str, str], ...]:
+    """``(key, readable title)`` for each editable body region, in either language."""
+    from core.body_editor import region_titles
+
+    return region_titles(language)
+
+
+def add_part_titles(language: str = "en") -> tuple[tuple[str, str], ...]:
+    """``(key, readable title)`` for each shape a missing part can be built from."""
+    from core.body_editor import add_shape_titles
+
+    return add_shape_titles(language)
+
+
+def model_summary(mesh: Any, *, source: str = "") -> Any:
+    """A :class:`core.body_editor.MeshSummary` of a body mesh (its real figures)."""
+    from core.body_editor import summarize_mesh
+
+    return summarize_mesh(mesh, source=source)
+
+
+def edit_model_region(
+    mesh: Any,
+    region_key: str,
+    *,
+    params: FigureParameters,
+    scale: tuple[float, float, float] | None = None,
+    move: tuple[float, float, float] | None = None,
+    rotate: tuple[float, float, float] | None = None,
+    falloff: float | None = None,
+) -> Any:
+    """Resize, move, and/or rotate one region of ``mesh`` (a smooth-space edit).
+
+    The region is resolved from the figure's own rig (so ``"arm_left"`` is the left
+    arm on any mesh), and each edit blends out over ``falloff`` so the joint stays
+    smooth. An unknown region is refused.
+    """
+    from core.body_editor import (
+        DEFAULT_FALLOFF,
+        BodyMeshError,
+        find_region,
+        move_region,
+        resize_region,
+        rotate_region,
+    )
+
+    region = find_region(region_key, model_regions(params))
+    if region is None:
+        raise BodyMeshError(f"Unknown body region {region_key!r}.")
+    blend = DEFAULT_FALLOFF if falloff is None else float(falloff)
+    result = mesh
+    if scale is not None:
+        result = resize_region(result, region, scale, falloff=blend)
+    if move is not None:
+        result = move_region(result, region, move, falloff=blend)
+    if rotate is not None:
+        result = rotate_region(result, region, rotate, falloff=blend)
+    return result
+
+
+def add_model_part(
+    mesh: Any,
+    *,
+    shape: str,
+    centre: tuple[float, float, float],
+    size: tuple[float, float, float] | float,
+    part_mesh: Any = None,
+) -> Any:
+    """Fuse a new part (a shape or a sub-mesh) into ``mesh`` as one connected skin."""
+    from core.body_editor import add_part
+
+    return add_part(mesh, shape=shape, centre=centre, size=size, part_mesh=part_mesh)
 
 
 def body_summary(params: FigureParameters) -> str:
@@ -679,11 +813,14 @@ __all__ = [
     "POSE_TITLES",
     "PREVIEW_HEIGHT",
     "PREVIEW_WIDTH",
+    "SKIN_COLOUR",
     "VIEWS",
     "VIEW_FACE",
     "VIEW_FULL",
     "VIEW_TITLES",
     "DialSpec",
+    "add_model_part",
+    "add_part_titles",
     "apply_pose_instruction",
     "as_colour",
     "body_preset_keys",
@@ -698,7 +835,13 @@ __all__ = [
     "dial_for",
     "dial_keys",
     "dials_in_group",
+    "edit_model_region",
+    "figure_mesh",
     "group_titles",
+    "load_model_mesh",
+    "model_region_titles",
+    "model_regions",
+    "model_summary",
     "pose_from_instruction",
     "pose_keys",
     "pose_titles",

@@ -30,6 +30,7 @@ humanoid, and every figure it makes says so.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 
 from core.scene3d import (
@@ -217,176 +218,211 @@ def _proportion_scale(params: FigureParameters) -> dict[str, float]:
 def _body_parts(params: FigureParameters) -> list[_Blob]:
     """Every volumetric part of the body, ready to be fused into one skin.
 
-    The list is the body, read top to bottom: hips, belly, chest, shoulders, neck,
-    head, jaw, ears, nose, lips, eyes, brows, arms, hands, fingers, legs, feet, and
-    toes, plus the areolae and the genital region when those dials are raised. Each
-    part is a smooth field, and the sculptor's smooth union is what makes the parts
-    one body rather than a pile of shapes.
+    The list is the body, read top to bottom -- pelvis, waist, chest, shoulders,
+    neck, head, face, ears, arms, hands, legs, feet, and the coloured details --
+    each a smooth field. The sculptor's smooth union fuses them into one body
+    rather than a pile of shapes, so a viewer sees a single skin with no gap and
+    no seam.
+
+    The proportions are the ones a figure is judged by, and every length here is a
+    **fraction of the total height** (so a tall figure is the same shape, only
+    bigger): a head-to-height ratio of about eight, the shoulder line at 0.82 of
+    the height, the hip line at 0.48, and arms and legs of natural length. The
+    shoulders and the hips are wide, flattened masses and the arms and legs are
+    kept **clear of the torso**, so the armpit and the inner thigh stay open the
+    way they do on a real body. That is what makes the result read as a person
+    rather than a blob.
     """
     skin = params.skin
-    s = params.height / 1.75
+    H = params.height
+    s = H / 1.75  # scales the metre dials (shoulder width, etc.) to this height
     style = _proportion_scale(params)
     limb = params.limb_thickness * style["limb"]
 
-    shoulder = params.shoulder_width * style["shoulder"]
-    hips = params.hip_width * style["hip"] * (1.0 + 0.35 * params.hip_shape)
-    waist = params.waist * style["waist"] * (1.0 - 0.28 * params.waist_shape)
-    chest_depth = params.chest_depth * (0.9 + 0.25 * params.muscle)
+    shoulder = params.shoulder_width * style["shoulder"] * s
+    hips = params.hip_width * style["hip"] * (1.0 + 0.35 * params.hip_shape) * s
+    waist = params.waist * style["waist"] * (1.0 - 0.28 * params.waist_shape) * s
+    chest_depth = params.chest_depth * (0.9 + 0.25 * params.muscle) * s
     belly = params.belly
 
     parts: list[_Blob] = []
 
-    # -- torso: a chain of blended capsules from hips up to the shoulders ----
-    hip_y = 0.98 * s
-    waist_y = 1.13 * s
-    chest_y = 1.34 * s
-    shoulder_y = 1.44 * s
+    # -- torso: a chain of blended masses from the pelvis up to the shoulders ---
+    hip_y = 0.480 * H
+    waist_y = 0.600 * H
+    chest_y = 0.720 * H
+    shoulder_y = 0.820 * H
+    pelvis_half = hips * 0.5
+    waist_half = waist * 0.5
+    # The chest is *narrower* than the shoulder line, so the arms hang clear of it
+    # and the armpit stays open rather than fusing into the torso.
+    chest_half = shoulder * 0.5 * 0.72
+
     parts.append(
-        capsule((0.0, hip_y, 0.0), (0.0, waist_y, 0.0), hips * 0.5, waist * 0.5, skin, blend=0.10)
+        capsule((0.0, hip_y, 0.0), (0.0, waist_y, 0.0),
+                pelvis_half * 0.95, waist_half, skin, blend=0.05)
     )
     parts.append(
-        capsule((0.0, waist_y, belly * 0.03 * s), (0.0, chest_y, 0.006 * s),
-                waist * 0.5, shoulder * 0.5 * 0.92, skin, blend=0.10)
+        capsule((0.0, waist_y, belly * 0.015 * H), (0.0, chest_y, 0.004 * s),
+                waist_half, chest_half, skin, blend=0.05)
     )
     parts.append(
-        capsule((0.0, chest_y, 0.006 * s), (0.0, shoulder_y, 0.0),
-                shoulder * 0.5 * 0.92, shoulder * 0.5 * 0.86, skin, blend=0.10)
+        capsule((0.0, chest_y, 0.004 * s), (0.0, shoulder_y, 0.0),
+                chest_half, chest_half * 1.05, skin, blend=0.05)
     )
+    # The chest is only a little deeper than it is wide, so the body is not a tube.
     parts.append(
-        ellipsoid((0.0, chest_y - 0.02 * s, chest_depth * 0.30),
-                  (shoulder * 0.46, 0.10 * s, chest_depth * 0.62), skin, blend=0.09)
+        ellipsoid((0.0, chest_y - 0.005 * H, chest_depth * 0.14),
+                  (chest_half * 1.02, 0.032 * H, chest_depth * 0.40), skin, blend=0.05)
     )
     if belly > 0.02:
         parts.append(
-            ellipsoid((0.0, waist_y - 0.01 * s, chest_depth * 0.20),
-                      (waist * 0.52, 0.075 * s, chest_depth * (0.5 + 0.35 * belly)),
-                      skin, blend=0.09)
+            ellipsoid((0.0, waist_y - 0.005 * H, chest_depth * 0.10),
+                      (waist_half * 1.02, 0.030 * H, chest_depth * (0.36 + 0.30 * belly)),
+                      skin, blend=0.05)
         )
+    # Hip masses: two flattened, wide masses on the sides of the pelvis.
     for side in (-1.0, 1.0):
         parts.append(
-            ellipsoid((side * hips * 0.22, hip_y + 0.02 * s, -chest_depth * 0.42),
-                      (hips * 0.26, 0.075 * s, chest_depth * 0.5), skin, blend=0.08)
+            ellipsoid((side * pelvis_half * 0.55, hip_y + 0.010 * H, -chest_depth * 0.04),
+                      (pelvis_half * 0.42, 0.032 * H, chest_depth * 0.40), skin, blend=0.05)
         )
 
-    # -- shoulders -------------------------------------------------------
-    shoulder_x = shoulder * 0.5 * 0.98
+    # -- shoulders: a wide flattened mass each side, so the shoulder line reads --
+    shoulder_x = shoulder * 0.5
     for side in (-1.0, 1.0):
-        drop = params.shoulder_slope * 0.03 * s
+        drop = params.shoulder_slope * 0.02 * H
         parts.append(
-            ellipsoid((side * shoulder_x * 0.72, shoulder_y - drop, 0.0),
-                      (shoulder * 0.16, shoulder * 0.15, chest_depth * 0.52), skin, blend=0.08)
+            ellipsoid((side * shoulder_x * 0.80, shoulder_y - drop, 0.0),
+                      (shoulder * 0.22, 0.040 * H, chest_depth * 0.40), skin, blend=0.05)
         )
 
     # -- bust ------------------------------------------------------------
     if params.bust > 0.02:
-        radius = (0.028 + 0.050 * params.bust) * s
-        forward = chest_depth * 0.42 + 0.05 * params.bust
+        radius = (0.012 + 0.024 * params.bust) * H
+        forward = chest_depth * 0.32 + 0.02 * params.bust
         for side in (-1.0, 1.0):
-            centre = (side * shoulder * 0.19, chest_y - 0.03 * s, forward)
+            centre = (side * shoulder * 0.150, chest_y - 0.015 * H, forward)
             parts.append(
-                ellipsoid(centre, (radius * 0.98, radius * 0.9, radius * 1.05), skin, blend=0.05)
+                ellipsoid(centre, (radius * 1.05, radius * 0.92, radius * 0.95), skin, blend=0.03)
             )
             parts.append(
-                ellipsoid((centre[0], centre[1] + radius * 0.08, centre[2] + radius * 0.85),
-                          (radius * 0.32 * params.areola, radius * 0.32 * params.areola,
-                           radius * 0.18),
-                          params.nipple_color, blend=0.015)
+                ellipsoid((centre[0], centre[1] + radius * 0.05, centre[2] + radius * 0.80),
+                          (radius * 0.30 * params.areola, radius * 0.30 * params.areola,
+                           radius * 0.16),
+                          params.nipple_color, blend=0.010)
             )
 
     # -- neck and head ---------------------------------------------------
-    neck_radius = 0.050 * params.neck_thickness * s
-    neck_y = shoulder_y + 0.04 * s
-    head_base = neck_y + 0.05 * s
+    neck_radius = 0.034 * H * params.neck_thickness
+    neck_y = shoulder_y + 0.025 * H
+    head_base = 0.875 * H
     parts.append(
-        capsule((0.0, shoulder_y + 0.005 * s, 0.0), (0.0, neck_y, -0.004 * s),
-                neck_radius * 1.25, neck_radius, skin, blend=0.06)
+        capsule((0.0, shoulder_y + 0.005 * H, -0.004 * s), (0.0, neck_y, -0.008 * s),
+                neck_radius * 1.15, neck_radius, skin, blend=0.04)
     )
-    head_length = 0.235 * params.head_scale * params.face_length * s
-    head_width = 0.088 * params.head_scale * params.face_width * s
-    head_depth = 0.100 * params.head_scale * params.face_length * s
+    # A head is about 0.125 of the total height tall and about 0.72 as wide as it
+    # is tall: the classic proportions, so the head reads as a head.
+    head_length = 0.125 * H * params.head_scale * params.face_length
+    head_width = head_length * 0.36 * params.face_width
+    head_depth = head_length * 0.42 * params.face_length
     head_centre = head_base + head_length * 0.5
     parts.append(
-        ellipsoid((0.0, head_centre, 0.004 * s),
-                  (head_width, head_length * 0.5, head_depth), skin, blend=0.045)
+        ellipsoid((0.0, head_centre, 0.006 * s),
+                  (head_width, head_length * 0.50, head_depth), skin, blend=0.030)
     )
     jaw_width = head_width * params.jaw_width
-    chin_drop = (1.0 - 0.30 * params.chin_shape) * head_length * 0.16
+    chin_drop = (1.0 - 0.30 * params.chin_shape) * head_length * 0.12
     parts.append(
-        ellipsoid((0.0, head_base + head_length * 0.16 - chin_drop, 0.020 * s),
-                  (jaw_width * 0.86, head_length * 0.20, head_depth * 0.82), skin, blend=0.04)
+        ellipsoid((0.0, head_base + head_length * 0.17 - chin_drop, 0.012 * s),
+                  (jaw_width * 0.82, head_length * 0.18, head_depth * 0.78), skin, blend=0.025)
     )
     if params.cheek > 0.0:
         for side in (-1.0, 1.0):
             parts.append(
-                ellipsoid((side * head_width * 0.6, head_base + head_length * 0.42, 0.045 * s),
-                          (head_width * 0.28 * params.cheek, head_length * 0.16,
-                           head_depth * 0.42 * params.cheek),
-                          skin, blend=0.02)
+                ellipsoid((side * head_width * 0.58, head_base + head_length * 0.44, 0.026 * s),
+                          (head_width * 0.24 * params.cheek, head_length * 0.13,
+                           head_depth * 0.36 * params.cheek),
+                          skin, blend=0.018)
             )
 
     # -- ears ------------------------------------------------------------
-    ear = 0.020 * params.head_scale * params.ear_size * s
+    ear = 0.012 * H * params.head_scale * params.ear_size
     for side in (-1.0, 1.0):
         parts.append(
-            ellipsoid((side * head_width * 1.0, head_base + head_length * 0.52, -0.004 * s),
-                      (ear * 0.42, ear, ear * 0.8), skin, blend=0.02)
+            ellipsoid((side * head_width * 0.98, head_base + head_length * 0.52, -0.006 * s),
+                      (ear * 0.34, ear * 0.78, ear * 0.62), skin, blend=0.018)
         )
 
     # -- face ------------------------------------------------------------
-    face_front = head_depth * 0.72
+    # The face features sit **on the head's own front surface**, computed from the
+    # head ellipsoid rather than guessed, so the eyes, the nose, and the lips really
+    # stand proud of the skin instead of being buried inside it.
+    head_z = 0.006 * s
+
+    def _surface_z(y: float) -> float:
+        dy = (y - head_centre) / (head_length * 0.50)
+        return head_z + head_depth * math.sqrt(max(0.0, 1.0 - dy * dy))
+
     eye_y = head_base + head_length * 0.58
-    eye_x = head_width * 0.40 * params.eye_spacing
-    eye_r = 0.013 * params.head_scale * params.eye_size * s
+    eye_x = head_width * 0.36 * params.eye_spacing
+    eye_r = 0.006 * H * params.head_scale * params.eye_size
+    eye_z = _surface_z(eye_y)
     for side in (-1.0, 1.0):
         parts.append(
-            ellipsoid((side * eye_x, eye_y, face_front * 0.86),
-                      (eye_r, eye_r * 0.92, eye_r * 0.7), (0.94, 0.94, 0.95), blend=0.008)
+            ellipsoid((side * eye_x, eye_y, eye_z - eye_r * 0.35),
+                      (eye_r, eye_r * 0.92, eye_r * 0.75), (0.94, 0.94, 0.95), blend=0.006)
         )
         parts.append(
-            ellipsoid((side * eye_x, eye_y, face_front * 0.86 + eye_r * 0.62),
-                      (eye_r * 0.52, eye_r * 0.52, eye_r * 0.34), params.eye_color, blend=0.006)
+            ellipsoid((side * eye_x, eye_y, eye_z + eye_r * 0.12),
+                      (eye_r * 0.55, eye_r * 0.55, eye_r * 0.45), params.eye_color, blend=0.005)
         )
-        thickness = 0.004 * params.head_scale * (0.6 + 0.8 * params.brow_ridge) * s
+        thickness = 0.002 * H * (0.5 + 0.7 * params.brow_ridge)
+        brow_y = eye_y + eye_r * 2.2
         parts.append(
-            ellipsoid((side * eye_x, eye_y + eye_r * 2.0, face_front * 0.82),
-                      (head_width * 0.42, thickness, head_depth * 0.10),
+            ellipsoid((side * eye_x, brow_y, _surface_z(brow_y) - thickness * 0.2),
+                      (head_width * 0.38, thickness, head_depth * 0.12),
                       params.hair_color, blend=0.006)
         )
-    nose = 0.011 * params.head_scale * params.nose_size * s
+    nose_y = head_base + head_length * 0.44
+    nose = 0.006 * H * params.head_scale * params.nose_size
     parts.append(
-        ellipsoid((0.0, head_base + head_length * 0.46, face_front * 1.02),
-                  (nose, nose * 1.35, nose * 1.25), skin, blend=0.012)
+        ellipsoid((0.0, nose_y, _surface_z(nose_y) + nose * 0.25),
+                  (nose, nose * 1.5, nose * 1.25), skin, blend=0.010)
     )
+    lips_y = head_base + head_length * 0.30
     parts.append(
-        ellipsoid((0.0, head_base + head_length * 0.34, face_front * 0.96),
-                  (0.017 * params.head_scale * params.lips * s,
-                   0.008 * params.head_scale * params.lips * s, head_depth * 0.10),
-                  params.lip_color, blend=0.010)
+        ellipsoid((0.0, lips_y, _surface_z(lips_y) - 0.002 * H),
+                  (0.010 * H * params.head_scale * params.lips,
+                   0.0045 * H * params.head_scale * params.lips,
+                   head_depth * 0.12),
+                  params.lip_color, blend=0.008)
     )
 
-    # -- arms ------------------------------------------------------------
-    upper_arm_len = 0.275 * s
-    fore_arm_len = 0.250 * s
-    arm_radius = 0.045 * limb * params.arm_thickness * s
+    # -- arms: kept clear of the torso so the armpit stays open --------------
+    upper_arm_len = 0.170 * H
+    fore_arm_len = 0.145 * H
+    arm_radius = 0.026 * H * limb * params.arm_thickness
+    arm_centre = shoulder * 0.5 * 0.96
     for side in (-1.0, 1.0):
-        top = Vec3(side * shoulder_x, shoulder_y - 0.02 * s, 0.0)
+        top = Vec3(side * arm_centre, shoulder_y - 0.010 * H, 0.0)
         elbow = Vec3(top.x, top.y - upper_arm_len, 0.006 * s)
         wrist = Vec3(top.x, elbow.y - fore_arm_len, 0.012 * s)
-        parts.append(capsule(top, elbow, arm_radius * 1.15, arm_radius * 0.86, skin, blend=0.06))
-        parts.append(capsule(elbow, wrist, arm_radius * 0.86, arm_radius * 0.62, skin, blend=0.05))
+        parts.append(capsule(top, elbow, arm_radius * 1.10, arm_radius * 0.78, skin, blend=0.04))
+        parts.append(capsule(elbow, wrist, arm_radius * 0.78, arm_radius * 0.58, skin, blend=0.035))
         _add_hand(parts, params, skin, wrist, arm_radius, side, s)
 
-    # -- legs ------------------------------------------------------------
-    thigh_len = 0.42 * s
-    shin_len = 0.40 * s
-    leg_radius = 0.075 * limb * params.leg_thickness * s
+    # -- legs: the feet sit on the ground and the legs stay clear of each other --
+    thigh_len = 0.235 * H
+    shin_len = 0.205 * H
+    leg_radius = 0.040 * H * limb * params.leg_thickness
     for side in (-1.0, 1.0):
-        hip_x = side * hips * 0.26
-        hip_top = Vec3(hip_x, hip_y - 0.02 * s, 0.0)
+        hip_x = side * hips * 0.5 * 0.62
+        hip_top = Vec3(hip_x, hip_y - 0.015 * H, 0.0)
         knee = Vec3(hip_x, hip_top.y - thigh_len, 0.006 * s)
         ankle = Vec3(hip_x, knee.y - shin_len, 0.0)
-        parts.append(capsule(hip_top, knee, leg_radius * 1.12, leg_radius * 0.62, skin, blend=0.08))
-        parts.append(capsule(knee, ankle, leg_radius * 0.62, leg_radius * 0.44, skin, blend=0.05))
+        parts.append(capsule(hip_top, knee, leg_radius * 1.10, leg_radius * 0.56, skin, blend=0.055))
+        parts.append(capsule(knee, ankle, leg_radius * 0.56, leg_radius * 0.38, skin, blend=0.035))
         _add_foot(parts, params, skin, ankle, leg_radius, side, s)
 
     _add_genitalia(parts, params, skin, hip_y, hips, s)
@@ -404,31 +440,31 @@ def _add_hand(
 ) -> None:
     """A palm, four fingers, and a thumb, each tipped with a nail."""
     size = params.hand_size * s
-    hand_r = arm_radius * 0.90 * size
-    palm = Vec3(wrist.x, wrist.y - hand_r * 1.05, wrist.z + 0.004 * s)
+    hand_r = arm_radius * 0.85 * size
+    palm = Vec3(wrist.x, wrist.y - hand_r * 1.15, wrist.z + 0.004 * s)
     parts.append(
-        ellipsoid((palm.x, palm.y, palm.z), (hand_r * 0.78, hand_r * 1.05, hand_r * 0.42),
-                  skin, blend=0.02)
+        ellipsoid((palm.x, palm.y, palm.z), (hand_r * 0.85, hand_r * 1.05, hand_r * 0.40),
+                  skin, blend=0.018)
     )
     finger_len = hand_r * 1.0
-    finger_r = hand_r * 0.16
+    finger_r = hand_r * 0.17
     for index in range(4):
-        offset = (index - 1.5) * hand_r * 0.42
+        offset = (index - 1.5) * hand_r * 0.44
         base = Vec3(palm.x + offset, palm.y - hand_r * 0.95, palm.z)
         tip = Vec3(base.x, base.y - finger_len, base.z)
-        parts.append(capsule(base, tip, finger_r, finger_r * 0.9, skin, blend=0.008))
+        parts.append(capsule(base, tip, finger_r, finger_r * 0.9, skin, blend=0.006))
         # The nail is a flattened disc *on* the fingertip, its centre well inside
         # the finger's rounded end so the smooth union always fuses the two.
         parts.append(
             ellipsoid((tip.x, tip.y - finger_r * 0.15, tip.z + finger_r * 0.5),
                       (finger_r * 0.9, finger_r * 0.6, finger_r * 0.9),
-                      params.nail_color, blend=0.012)
+                      params.nail_color, blend=0.009)
         )
     thumb_base = Vec3(palm.x - side * hand_r * 0.85, palm.y + hand_r * 0.1,
                       palm.z + hand_r * 0.2)
     thumb_tip = Vec3(palm.x - side * hand_r * 1.25, palm.y - hand_r * 0.5,
                      palm.z + hand_r * 0.35)
-    parts.append(capsule(thumb_base, thumb_tip, finger_r * 1.1, finger_r * 0.95, skin, blend=0.008))
+    parts.append(capsule(thumb_base, thumb_tip, finger_r * 1.1, finger_r * 0.95, skin, blend=0.006))
 
 
 def _add_foot(
@@ -440,29 +476,40 @@ def _add_foot(
     side: float,
     s: float,
 ) -> None:
-    """An ankle, a foot, and five toes, each tipped with a nail."""
+    """An ankle, a foot, and five toes, each tipped with a nail.
+
+    The foot lies flat on the ground (``y = 0``): its sole is a flattened capsule
+    from the heel to the ball, the toes fan out in front, and the ankle rises into
+    the shin, so the leg really stands on the ground.
+    """
     size = params.foot_size * s
-    width = leg_radius * 0.9 * size
-    length = 0.22 * size
+    width = leg_radius * 0.95 * size
+    length = 0.085 * s * size
+    ground = 0.012 * s
     parts.append(
         capsule((ankle.x, ankle.y, ankle.z),
-                (ankle.x, ankle.y - 0.03 * s, ankle.z + 0.02 * s),
-                leg_radius * 0.5, width * 0.55, skin, blend=0.03)
+                (ankle.x, ankle.y - 0.020 * s, ankle.z + 0.012 * s),
+                leg_radius * 0.46, width * 0.52, skin, blend=0.025)
     )
-    heel = Vec3(ankle.x, ankle.y - 0.05 * s, -length * 0.18)
-    toe = Vec3(ankle.x, ankle.y - 0.05 * s, length * 0.62)
-    parts.append(capsule(heel, toe, width * 0.55, width * 0.5, skin, blend=0.03))
+    # The sole is a flattened capsule from the heel to the ball; the ball is wide
+    # enough that every toe overlaps it, so the toes fuse into the foot rather than
+    # detaching as separate specks.
+    heel = Vec3(ankle.x, ground, -length * 0.30)
+    ball = Vec3(ankle.x, ground, length * 0.62)
+    parts.append(capsule(heel, ball, width * 0.46, width * 0.60, skin, blend=0.030))
     for index in range(5):
-        offset = (index - 2.0) * width * 0.55
-        toe_r = width * (0.32 if index == 0 else 0.24)
-        tip = Vec3(ankle.x + offset, ankle.y - 0.05 * s, toe.z + length * 0.14)
-        parts.append(ellipsoid((tip.x, tip.y, tip.z), (toe_r, toe_r * 0.85, toe_r * 1.1),
-                               skin, blend=0.006))
+        offset = (index - 2.0) * width * 0.44
+        toe_r = width * (0.30 if index == 0 else 0.24)
+        # Each toe starts *inside* the ball and runs forward, so its base is buried
+        # in the sole and the two are always one surface.
+        base = Vec3(ankle.x + offset * 0.75, ground, ball.z - length * 0.20)
+        tip = Vec3(ankle.x + offset, ground, ball.z + length * 0.16)
+        parts.append(capsule(base, tip, toe_r * 1.05, toe_r, skin, blend=0.020))
         # The nail sits *on* the toe (its centre inside the toe's surface) so the
         # smooth union fuses it; a nail floating past the tip would detach.
         parts.append(
-            ellipsoid((tip.x, tip.y + toe_r * 0.1, tip.z + toe_r * 0.5),
-                      (toe_r * 0.8, toe_r * 0.6, toe_r * 0.8), params.nail_color, blend=0.012)
+            ellipsoid((tip.x, tip.y + toe_r * 0.5, tip.z + toe_r * 0.35),
+                      (toe_r * 0.8, toe_r * 0.6, toe_r * 0.8), params.nail_color, blend=0.009)
         )
 
 
@@ -478,40 +525,40 @@ def _add_genitalia(
 
     Kept simple and honest -- a smooth shape whose *size* and *colour* are the
     user's own dials -- so the body reads as anatomically complete without the
-    geometry pretending to be a photograph. It sits on the **front surface of the
-    pelvis** (so it really protrudes and the dial changes the silhouette) and is
-    fused into the body like every other part, so it is not a separate piece.
+    geometry pretending to be a photograph. It sits on the **pelvis's own front
+    surface** (the pelvis is a capsule of radius ``hips/2``), so it really protrudes
+    and the dial changes the silhouette, and it is fused into the body like every
+    other part, so it is not a separate piece.
     """
     if params.genitalia <= 0.0:
         return
     scale = params.genitalia * params.genital_size * s
     colour = params.genital_color
-    # The pubic region sits a little below the hip line, on the pelvis's front face.
-    centre_y = hip_y - 0.06 * s
+    centre_y = hip_y - 0.020 * s
     front = hips * 0.5 * 0.92
     if params.build == BUILD_FEMININE:
         parts.append(
             ellipsoid((0.0, centre_y, front),
-                      (0.030 * scale, 0.020 * scale, 0.024 * scale), colour, blend=0.03)
+                      (0.022 * scale, 0.016 * scale, 0.020 * scale), colour, blend=0.02)
         )
         parts.append(
-            ellipsoid((0.0, centre_y - 0.010 * scale, front * 1.02),
-                      (0.012 * scale, 0.014 * scale, 0.016 * scale), colour, blend=0.02)
+            ellipsoid((0.0, centre_y - 0.008 * scale, front * 1.01),
+                      (0.010 * scale, 0.011 * scale, 0.014 * scale), colour, blend=0.015)
         )
     else:
-        shaft = 0.050 * scale
+        shaft = 0.034 * scale
         parts.append(
-            ellipsoid((0.0, centre_y - shaft * 0.5, front * 1.02),
-                      (0.014 * scale, shaft * 0.6, 0.014 * scale), colour, blend=0.025)
+            ellipsoid((0.0, centre_y - shaft * 0.5, front * 1.01),
+                      (0.011 * scale, shaft * 0.6, 0.012 * scale), colour, blend=0.02)
         )
         parts.append(
-            ellipsoid((0.0, centre_y - shaft * 1.05, front * 1.05),
-                      (0.018 * scale, 0.018 * scale, 0.018 * scale), colour, blend=0.02)
+            ellipsoid((0.0, centre_y - shaft * 1.05, front * 1.02),
+                      (0.014 * scale, 0.014 * scale, 0.014 * scale), colour, blend=0.015)
         )
         for side in (-1.0, 1.0):
             parts.append(
-                ellipsoid((side * 0.017 * scale, centre_y - 0.006 * s, front * 0.98),
-                          (0.014 * scale, 0.016 * scale, 0.014 * scale), colour, blend=0.02)
+                ellipsoid((side * 0.014 * scale, centre_y - 0.005 * s, front * 0.98),
+                          (0.012 * scale, 0.013 * scale, 0.012 * scale), colour, blend=0.015)
             )
 
 
