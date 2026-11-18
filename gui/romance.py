@@ -756,12 +756,6 @@ class RomanceStudioService:
 
         return figure_mesh(params)
 
-    def body_model_regions(self, params: Any) -> tuple[tuple[str, str], ...]:
-        """``(key, title)`` for every editable region of a body of this height."""
-        from core.romance.body import model_region_titles
-
-        return model_region_titles()
-
     def body_model_region_objects(self, params: Any) -> tuple[Any, ...]:
         """The editable :class:`core.body_editor.BodyRegion` objects (with their boxes)."""
         from core.romance.body import model_regions
