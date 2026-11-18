@@ -1000,11 +1000,47 @@ class CharacterManagerDialog(ThemedDialog):
             self._select(character_id)
         self._notify(character_id)
 
+    def _ensure_selection(self) -> str:
+        """The character to act on, choosing or creating one rather than refusing.
+
+        The manager opens with nothing selected, so a body-builder button pressed
+        before a row was clicked used to do nothing at all -- which is exactly the
+        "the window does not open" report. The honest behaviour is to act on the
+        first character of this role, and, when the role has none yet, to create a
+        starter one so the builder still opens on a real body.
+        """
+        if self._selected:
+            return self._selected
+        if self._ids:
+            self._select(self._ids[0])
+            return self._selected
+        return self._create_starter()
+
+    def _create_starter(self) -> str:
+        """Create a minimal character of this role so a body can be built."""
+        is_persona = self.role == "user"
+        try:
+            character = self.service.create_character(
+                "My persona" if is_persona else "New companion",
+                role=self.role,
+                gender="" if is_persona else "woman",
+            )
+        except Exception as error:
+            self._set_status(f"Could not start a {self._plural()}: {error}")
+            return ""
+        self._selected = character.id
+        self._refresh_list()
+        self._select(character.id)
+        self._notify(character.id)
+        self._set_status(
+            f"Started a new {self._plural()} so the body builder has a body to shape."
+        )
+        return character.id
+
     def _open_body_studio(self) -> None:
         """Open the body builder for the selected character (one window per manager)."""
-        character_id = self._selected_id()
+        character_id = self._ensure_selection()
         if not character_id:
-            self._set_status(f"Select a {self._plural()} first.")
             return
         from gui.romance_body import BodyStudioDialog
 

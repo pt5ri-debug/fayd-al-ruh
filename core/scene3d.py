@@ -453,6 +453,223 @@ class Mesh:
             colors,
         )
 
+    def weld(self, *, tolerance: float = 1e-6) -> Mesh:
+        """A copy with coincident vertices merged and degenerate faces dropped.
+
+        The primitives in :mod:`core.scene3d_figures` are built separately, so a
+        shoulder ring and an arm ring that touch end up as two vertices at the same
+        point. Merging them first is what lets :meth:`subdivide` smooth *across* a
+        seam rather than leaving a crease, and it shrinks the mesh. Vertices are
+        bucketed by a rounded coordinate so the lookup is linear, and the first
+        vertex of a coincident group keeps its colour.
+        """
+        if not self.vertices:
+            return self
+        buckets: dict[tuple[int, int, int], int] = {}
+        remap: list[int] = []
+        points: list[Vec3] = []
+        colors: list[tuple[float, float, float]] = []
+        has_colors = bool(self.vertex_colors)
+        scale = 1.0 / max(tolerance, 1e-9)
+        for index, vertex in enumerate(self.vertices):
+            key = (
+                round(vertex.x * scale),
+                round(vertex.y * scale),
+                round(vertex.z * scale),
+            )
+            existing = buckets.get(key)
+            if existing is None:
+                buckets[key] = len(points)
+                remap.append(len(points))
+                points.append(vertex)
+                if has_colors:
+                    colors.append(self.vertex_colors[index])
+            else:
+                remap.append(existing)
+        faces: list[tuple[int, ...]] = []
+        for face in self.faces:
+            deduped: list[int] = []
+            for index in face:
+                mapped = remap[index]
+                if not deduped or deduped[-1] != mapped:
+                    deduped.append(mapped)
+            if len(deduped) > 3 and deduped[0] == deduped[-1]:
+                deduped = deduped[:-1]
+            if len(deduped) >= 3:
+                faces.append(tuple(deduped))
+        return Mesh(
+            self.name,
+            tuple(points),
+            tuple(faces),
+            (),
+            tuple(colors) if has_colors else (),
+        )
+
+    def subdivide(self, levels: int = 1) -> Mesh:
+        """Smooth the mesh with ``levels`` passes of Catmull-Clark subdivision.
+
+        Each pass replaces every face with a quad per corner: a face point at the
+        centroid, an edge point per edge, and a repositioned original vertex
+        (``(F + 2R + (n-3)P) / n``). The surface **converges to a smooth limit
+        surface**, which is the honest way a low-poly primitives mesh becomes a
+        fine, round, human-looking skin instead of a faceted "wooden doll" -- the
+        same idea a professional figure tool applies. Per-vertex colours are
+        interpolated (a face point averages its face's colours, an edge point its
+        two endpoints'), so the skin tone, lips, irises, nails, and genitalia stay
+        correct on the finer mesh. A non-positive ``levels`` returns ``self``.
+        """
+        mesh = self
+        for _ in range(max(0, levels)):
+            mesh = mesh._subdivide_once()
+        return mesh
+
+    def _subdivide_once(self) -> Mesh:
+        """One Catmull-Clark pass (see :meth:`subdivide`)."""
+        if not self.faces:
+            return self
+        has_colors = bool(self.vertex_colors)
+        face_points: list[Vec3] = []
+        face_colors: list[tuple[float, float, float]] = []
+        for face in self.faces:
+            count = len(face)
+            total = Vec3()
+            red = green = blue = 0.0
+            for index in face:
+                total = total + self.vertices[index]
+                if has_colors:
+                    colour = self.vertex_colors[index]
+                    red += colour[0]
+                    green += colour[1]
+                    blue += colour[2]
+            face_points.append(total / count)
+            if has_colors:
+                face_colors.append((red / count, green / count, blue / count))
+
+        edge_faces: dict[tuple[int, int], list[int]] = {}
+        edge_order: list[tuple[int, int]] = []
+        for face_index, face in enumerate(self.faces):
+            count = len(face)
+            for position in range(count):
+                a = face[position]
+                b = face[(position + 1) % count]
+                key = (a, b) if a < b else (b, a)
+                if key not in edge_faces:
+                    edge_faces[key] = []
+                    edge_order.append(key)
+                edge_faces[key].append(face_index)
+
+        edge_index = {key: position for position, key in enumerate(edge_order)}
+
+        vertex_faces: list[list[int]] = [[] for _ in self.vertices]
+        vertex_edges: list[list[tuple[int, int]]] = [[] for _ in self.vertices]
+        for face_index, face in enumerate(self.faces):
+            for index in face:
+                vertex_faces[index].append(face_index)
+        for key in edge_order:
+            vertex_edges[key[0]].append(key)
+            vertex_edges[key[1]].append(key)
+
+        new_vertices: list[Vec3] = []
+        new_colors: list[tuple[float, float, float]] = []
+        for index, vertex in enumerate(self.vertices):
+            faces_here = vertex_faces[index]
+            edges_here = vertex_edges[index]
+            n = len(faces_here)
+            if n < 2 or len(edges_here) < 2:
+                new_vertices.append(vertex)
+            else:
+                face_average = Vec3()
+                for face_index in faces_here:
+                    face_average = face_average + face_points[face_index]
+                face_average = face_average / n
+                edge_average = Vec3()
+                for a, b in edges_here:
+                    edge_average = edge_average + (self.vertices[a] + self.vertices[b]) * 0.5
+                edge_average = edge_average / len(edges_here)
+                new_vertices.append((face_average + edge_average * 2.0 + vertex * (n - 3)) / n)
+            if has_colors:
+                new_colors.append(self.vertex_colors[index])
+
+        face_base = len(new_vertices)
+        new_vertices.extend(face_points)
+        if has_colors:
+            new_colors.extend(face_colors)
+
+        edge_base = len(new_vertices)
+        for key in edge_order:
+            a, b = key
+            adjacent = edge_faces[key]
+            total = self.vertices[a] + self.vertices[b]
+            for face_index in adjacent:
+                total = total + face_points[face_index]
+            new_vertices.append(total / (2 + len(adjacent)))
+            if has_colors:
+                ca = self.vertex_colors[a]
+                cb = self.vertex_colors[b]
+                new_colors.append(
+                    ((ca[0] + cb[0]) * 0.5, (ca[1] + cb[1]) * 0.5, (ca[2] + cb[2]) * 0.5)
+                )
+
+        new_faces: list[tuple[int, ...]] = []
+        for face_index, face in enumerate(self.faces):
+            count = len(face)
+            for position in range(count):
+                current = face[position]
+                nxt = face[(position + 1) % count]
+                prev = face[(position - 1) % count]
+                key_next = (current, nxt) if current < nxt else (nxt, current)
+                key_prev = (prev, current) if prev < current else (current, prev)
+                new_faces.append(
+                    (
+                        current,
+                        edge_base + edge_index[key_next],
+                        face_base + face_index,
+                        edge_base + edge_index[key_prev],
+                    )
+                )
+        return Mesh(
+            self.name,
+            tuple(new_vertices),
+            tuple(new_faces),
+            (),
+            tuple(new_colors) if has_colors else (),
+        )
+
+    def smoothed(self, *, iterations: int = 1, factor: float = 0.5) -> Mesh:
+        """Laplacian smoothing: move each vertex toward its neighbours' average.
+
+        A cheap, deterministic relaxation applied *after* subdivision, which removes
+        the last facets a subdivision pass can leave. A vertex with fewer than two
+        neighbours is left in place, so an open silhouette is not shrunk, and
+        ``factor`` is clamped to ``[0, 1]``. Colours are carried through unchanged
+        (the topology is untouched).
+        """
+        amount = min(1.0, max(0.0, factor))
+        if iterations <= 0 or amount <= 0.0:
+            return self
+        neighbours: list[set[int]] = [set() for _ in self.vertices]
+        for face in self.faces:
+            count = len(face)
+            for position in range(count):
+                a = face[position]
+                b = face[(position + 1) % count]
+                neighbours[a].add(b)
+                neighbours[b].add(a)
+        points = list(self.vertices)
+        for _ in range(iterations):
+            updated = list(points)
+            for index, vertex in enumerate(points):
+                near = neighbours[index]
+                if len(near) < 2:
+                    continue
+                total = Vec3()
+                for other in near:
+                    total = total + points[other]
+                average = total / len(near)
+                updated[index] = vertex * (1.0 - amount) + average * amount
+            points = updated
+        return Mesh(self.name, tuple(points), self.faces, (), self.vertex_colors)
+
 
 # --------------------------------------------------------------------------- skeleton
 
@@ -556,16 +773,6 @@ class Skeleton:
         return result
 
 
-def _distance_to_segment(point: Vec3, start: Vec3, end: Vec3) -> float:
-    """The shortest distance from ``point`` to the segment ``start``--``end``."""
-    span = end - start
-    length_sq = span.dot(span)
-    if length_sq < 1e-12:
-        return (point - start).length()
-    t = max(0.0, min(1.0, (point - start).dot(span) / length_sq))
-    return (point - (start + span * t)).length()
-
-
 #: How many bones may influence one vertex. Two is the classic "smooth joint"
 #: compromise: a knee blends between thigh and shin, while a distant limb never
 #: drags a vertex with it.
@@ -592,15 +799,47 @@ def compute_skin_weights(
     order = skeleton.names()
     if not order:
         return tuple(() for _ in mesh.vertices)
+    # Binding is O(vertices x bones) and is the hot path of a full-body render, so
+    # each bone's segment is flattened to plain floats once: the per-vertex loop
+    # then makes no ``Vec3`` allocations, and distances are compared *squared*
+    # (monotonic, so the ranking is identical) with a single ``sqrt`` for the few
+    # bones actually chosen.
+    bones: list[tuple[float, float, float, float, float, float, float]] = []
+    for name in order:
+        start, end = segments[name]
+        dx = end.x - start.x
+        dy = end.y - start.y
+        dz = end.z - start.z
+        bones.append(
+            (start.x, start.y, start.z, dx, dy, dz, dx * dx + dy * dy + dz * dz)
+        )
+    keep = max(1, min(max_influences, len(order)))
     bindings: list[tuple[tuple[int, float], ...]] = []
     for vertex in mesh.vertices:
-        distances = [
-            _distance_to_segment(vertex, segments[name][0], segments[name][1])
-            for name in order
-        ]
+        vx, vy, vz = vertex.x, vertex.y, vertex.z
+        distances: list[float] = []
+        for sx, sy, sz, dx, dy, dz, length_sq in bones:
+            px = vx - sx
+            py = vy - sy
+            pz = vz - sz
+            if length_sq < 1e-12:
+                distances.append(px * px + py * py + pz * pz)
+                continue
+            t = (px * dx + py * dy + pz * dz) / length_sq
+            if t < 0.0:
+                t = 0.0
+            elif t > 1.0:
+                t = 1.0
+            cx = px - dx * t
+            cy = py - dy * t
+            cz = pz - dz * t
+            distances.append(cx * cx + cy * cy + cz * cz)
         ranked = sorted(range(len(order)), key=lambda index: distances[index])
-        chosen = ranked[: max(1, min(max_influences, len(order)))]
-        raw = [(index, 1.0 / ((distances[index] + 1e-4) ** falloff)) for index in chosen]
+        chosen = ranked[:keep]
+        raw = [
+            (index, 1.0 / ((math.sqrt(distances[index]) + 1e-4) ** falloff))
+            for index in chosen
+        ]
         total = sum(weight for _, weight in raw)
         if total <= 0.0:
             bindings.append(((chosen[0], 1.0),))
@@ -790,6 +1029,23 @@ class SceneObject:
     pose: dict[str, Vec3] = field(default_factory=dict)
     bindings: tuple[tuple[tuple[int, float], ...], ...] = ()
     visible: bool = True
+    #: Skinning the whole mesh is the expensive part of a render, and an *orbit*
+    #: render changes only the camera, so the deformed vertices/normals are cached
+    #: against the pose that produced them. A pose change invalidates the cache
+    #: automatically (the signature differs), and the cache is never serialised.
+    _deformed_cache: tuple[
+        tuple[tuple[str, tuple[float, float, float]], ...],
+        tuple[Vec3, ...],
+        tuple[Vec3, ...],
+    ] | None = field(default=None, repr=False, compare=False)
+
+    def _pose_signature(self) -> tuple[tuple[str, tuple[float, float, float]], ...]:
+        return tuple(
+            sorted(
+                (name, (rotation.x, rotation.y, rotation.z))
+                for name, rotation in self.pose.items()
+            )
+        )
 
     def is_figure(self) -> bool:
         return self.skeleton is not None and bool(self.bindings)
@@ -802,34 +1058,40 @@ class SceneObject:
         self.bindings = compute_skin_weights(
             self.mesh, self.skeleton, max_influences=max_influences
         )
+        self._deformed_cache = None
         return self
+
+    def _deform(self) -> tuple[tuple[Vec3, ...], tuple[Vec3, ...]]:
+        """The skinned vertices and normals for the current pose (cached)."""
+        signature = self._pose_signature()
+        cached = self._deformed_cache
+        if cached is not None and cached[0] == signature:
+            return cached[1], cached[2]
+        assert self.skeleton is not None
+        posed = self.skeleton.with_pose(self.pose)
+        bind_matrices = self.skeleton.world_matrices()
+        pose_matrices = posed.world_matrices()
+        names = self.skeleton.names()
+        vertices = skin_mesh(
+            self.mesh, bind_matrices, pose_matrices, self.bindings, names
+        )
+        normals = skin_normals(
+            self.mesh.vertex_normals(), bind_matrices, pose_matrices, self.bindings, names
+        )
+        self._deformed_cache = (signature, vertices, normals)
+        return vertices, normals
 
     def deformed_vertices(self) -> tuple[Vec3, ...]:
         """The mesh's vertices after skinning the current pose (no object transform)."""
-        if not self.is_figure() or self.skeleton is None:
+        if not self.is_figure():
             return tuple(self.mesh.vertices)
-        posed = self.skeleton.with_pose(self.pose)
-        return skin_mesh(
-            self.mesh,
-            self.skeleton.world_matrices(),
-            posed.world_matrices(),
-            self.bindings,
-            self.skeleton.names(),
-        )
+        return self._deform()[0]
 
     def deformed_normals(self) -> tuple[Vec3, ...]:
         """The mesh's vertex normals after skinning (shading follows the pose)."""
-        normals = self.mesh.vertex_normals()
-        if not self.is_figure() or self.skeleton is None:
-            return normals
-        posed = self.skeleton.with_pose(self.pose)
-        return skin_normals(
-            normals,
-            self.skeleton.world_matrices(),
-            posed.world_matrices(),
-            self.bindings,
-            self.skeleton.names(),
-        )
+        if not self.is_figure():
+            return self.mesh.vertex_normals()
+        return self._deform()[1]
 
     def world_vertices(self) -> tuple[Vec3, ...]:
         """The posed vertices with the object's own transform applied."""

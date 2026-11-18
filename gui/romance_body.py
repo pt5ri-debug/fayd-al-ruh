@@ -83,6 +83,11 @@ class BodyStudioDialog(ThemedDialog):
 
         self._params = service.body_parameters(character_id)
         self._view = "full"
+        self._camera_azimuth = 0.0
+        self._camera_elevation = 0.0
+        self._camera_zoom = 1.0
+        self._drag_origin: tuple[int, int] | None = None
+        self._drag_angles: tuple[float, float] | None = None
         self._dial_vars: dict[str, tk.DoubleVar] = {}
         self._dial_labels: dict[str, tk.Label] = {}
         self._colour_vars: dict[str, tk.StringVar] = {}
@@ -92,6 +97,7 @@ class BodyStudioDialog(ThemedDialog):
         self._photo: Any = None
         self._preview_png: bytes = b""
         self._busy = False
+        self._render_dirty = False
         self._results: queue.Queue[Any] = queue.Queue()
         self._pump_ticket: str | None = None
         self._children: list[Any] = []
@@ -179,6 +185,9 @@ class BodyStudioDialog(ThemedDialog):
     def _build_sidebar(self, column: SidebarColumn) -> None:
         theme = self.theme
 
+        camera = column.add("camera", "Camera (orbit)", icon="🎥", open=True)
+        self._build_camera_section(camera)
+
         templates = column.add("templates", "Templates", icon="🧍", open=True)
         tk.Label(
             templates,
@@ -219,8 +228,181 @@ class BodyStudioDialog(ThemedDialog):
             for dial in dials:
                 self._build_dial(section, dial)
 
+    def _build_camera_section(self, parent: tk.Frame) -> None:
+        """The camera tool: one-click angles, free orbit sliders, and drag-to-look.
+
+        The user asked for a tool that moves the viewpoint around the figure in
+        every direction, so this section offers both: named angles for the common
+        views, and azimuth/elevation/zoom sliders for any other. The preview
+        itself also accepts a click-and-drag, so the camera can be turned the way
+        a 3D program turns it.
+        """
+        theme = self.theme
+        tk.Label(
+            parent,
+            text=(
+                "Turn the viewpoint around the body. Pick an angle, drag the sliders, "
+                "or click and drag directly on the picture."
+            ),
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=340,
+        ).pack(fill="x", pady=(0, 4))
+
+        grid = tk.Frame(parent, bg=theme.surface)
+        grid.pack(fill="x")
+        for preset_key, title in self.service.body_camera_presets():
+            self._button(grid, title, _binder(self._apply_camera_preset, preset_key)).pack(
+                side="top", fill="x", pady=1
+            )
+
+        self._camera_azimuth_var = tk.DoubleVar(value=self._camera_azimuth)
+        self._camera_elevation_var = tk.DoubleVar(value=self._camera_elevation)
+        self._camera_zoom_var = tk.DoubleVar(value=self._camera_zoom)
+        self._camera_labels: dict[str, tk.Label] = {}
+        self._camera_scales: list[tk.Scale] = []
+        for key, label, variable, low, high, step in (
+            ("azimuth", "Turn (left / right)", self._camera_azimuth_var, -180.0, 180.0, 1.0),
+            ("elevation", "Height (up / down)", self._camera_elevation_var, -85.0, 85.0, 1.0),
+            ("zoom", "Zoom (near / far)", self._camera_zoom_var, 0.35, 3.0, 0.01),
+        ):
+            holder = tk.Frame(parent, bg=theme.surface)
+            holder.pack(fill="x", pady=(4, 0))
+            head = tk.Frame(holder, bg=theme.surface)
+            head.pack(fill="x")
+            tk.Label(
+                head, text=label, bg=theme.surface, fg=theme.foreground,
+                font=self._type.font("2xs", weight="bold"), anchor="w",
+            ).pack(side="left")
+            value_label = tk.Label(
+                head, text="", bg=theme.surface, fg=theme.text_dim,
+                font=self._type.font("2xs"), anchor="e",
+            )
+            value_label.pack(side="right")
+            self._camera_labels[key] = value_label
+            scale = tk.Scale(
+                holder, from_=low, to=high, resolution=step, orient="horizontal",
+                variable=variable, showvalue=False, highlightthickness=0, borderwidth=0,
+                troughcolor=theme.surface_raised, bg=theme.surface,
+                activebackground=theme.primary, length=320,
+            )
+            scale.pack(fill="x", pady=(1, 0))
+            self._camera_scales.append(scale)
+            variable.trace_add("write", _camera_trace(self._on_camera, key, variable))
+
+        self._button(
+            parent, "Reset the camera", self._reset_camera, variant="primary"
+        ).pack(fill="x", pady=(6, 0))
+        self._sync_camera_labels()
+
+    def _on_camera(self, key: str, variable: tk.DoubleVar) -> None:
+        if self._syncing:
+            return
+        try:
+            value = float(variable.get())
+        except (tk.TclError, ValueError):
+            return
+        if key == "azimuth":
+            self._camera_azimuth = value
+        elif key == "elevation":
+            self._camera_elevation = value
+        else:
+            self._camera_zoom = value
+        self._sync_camera_labels()
+        self._schedule_render()
+
+    def _sync_camera_labels(self) -> None:
+        labels = getattr(self, "_camera_labels", {})
+        values = {
+            "azimuth": f"{self._camera_azimuth:.0f}°",
+            "elevation": f"{self._camera_elevation:.0f}°",
+            "zoom": f"{self._camera_zoom:.2f}×",
+        }
+        for key, text in values.items():
+            label = labels.get(key)
+            if label is not None:
+                try:
+                    label.configure(text=text)
+                except tk.TclError:
+                    pass
+
+    def _set_camera(
+        self, *, azimuth: float | None = None, elevation: float | None = None, zoom: float | None = None
+    ) -> None:
+        """Move the camera and push the new values onto the sliders, then render."""
+        if azimuth is not None:
+            self._camera_azimuth = max(-180.0, min(180.0, azimuth))
+        if elevation is not None:
+            self._camera_elevation = max(-85.0, min(85.0, elevation))
+        if zoom is not None:
+            self._camera_zoom = max(0.35, min(3.0, zoom))
+        self._syncing = True
+        try:
+            self._camera_azimuth_var.set(round(self._camera_azimuth, 2))
+            self._camera_elevation_var.set(round(self._camera_elevation, 2))
+            self._camera_zoom_var.set(round(self._camera_zoom, 2))
+        except (tk.TclError, AttributeError):
+            pass
+        finally:
+            self._syncing = False
+        self._sync_camera_labels()
+        self._render_now()
+
+    def _apply_camera_preset(self, key: str) -> None:
+        try:
+            azimuth, elevation = self.service.body_camera_preset(key)
+        except KeyError as error:
+            self._set_status(str(error))
+            return
+        self._set_camera(azimuth=azimuth, elevation=elevation)
+        self._set_status(f"Camera set to {key}.")
+
+    def _reset_camera(self) -> None:
+        self._set_camera(azimuth=0.0, elevation=0.0, zoom=1.0)
+        self._set_status("Camera reset to the front view.")
+
+    # -- drag to orbit ----------------------------------------------------
+
+    def _on_preview_press(self, event: Any) -> None:
+        self._drag_origin = (event.x, event.y)
+        self._drag_angles = (self._camera_azimuth, self._camera_elevation)
+        try:
+            self._canvas.configure(cursor="fleur")
+        except tk.TclError:
+            pass
+
+    def _on_preview_drag(self, event: Any) -> None:
+        if self._drag_origin is None or self._drag_angles is None:
+            return
+        start_x, start_y = self._drag_origin
+        base_azimuth, base_elevation = self._drag_angles
+        self._camera_azimuth = max(-180.0, min(180.0, base_azimuth + (event.x - start_x) * 0.6))
+        self._camera_elevation = max(
+            -85.0, min(85.0, base_elevation - (event.y - start_y) * 0.6)
+        )
+        self._syncing = True
+        try:
+            self._camera_azimuth_var.set(round(self._camera_azimuth, 2))
+            self._camera_elevation_var.set(round(self._camera_elevation, 2))
+        except (tk.TclError, AttributeError):
+            pass
+        finally:
+            self._syncing = False
+        self._sync_camera_labels()
+        self._schedule_render()
+
+    def _on_preview_release(self, _event: Any) -> None:
+        self._drag_origin = None
+        self._drag_angles = None
+        try:
+            self._canvas.configure(cursor="")
+        except tk.TclError:
+            pass
+
     def _build_pose_section(self, parent: tk.Frame) -> None:
-        """The ready-made poses plus a plain-language instruction box."""
         theme = self.theme
         tk.Label(
             parent,
@@ -375,8 +557,9 @@ class BodyStudioDialog(ThemedDialog):
         note = tk.Label(
             parent,
             text=(
-                "A stylised, parametric figure drawn locally by the project's own CPU "
-                "rasteriser — not a licensed likeness or a photograph."
+                "A parametric figure drawn locally by the project's own CPU rasteriser: "
+                "a subdivided, smooth-shaded mesh with per-part colour — not a licensed "
+                "likeness, a photograph, or a commercial render."
             ),
             bg=theme.base,
             fg=theme.text_dim,
@@ -397,6 +580,11 @@ class BodyStudioDialog(ThemedDialog):
             font=self._type.font("sm"),
         )
         self._canvas.pack(fill="both", expand=True)
+        # Click-and-drag on the picture turns the camera, so the viewpoint can be
+        # moved the way a 3D program moves it.
+        self._canvas.bind("<ButtonPress-1>", self._on_preview_press)
+        self._canvas.bind("<B1-Motion>", self._on_preview_drag)
+        self._canvas.bind("<ButtonRelease-1>", self._on_preview_release)
 
     # -- control helpers --------------------------------------------------
 
@@ -572,14 +760,32 @@ class BodyStudioDialog(ThemedDialog):
 
     def _render_now(self) -> None:
         self._cancel_pending_render()
-        if self._closed or self._busy:
+        if self._closed:
             return
+        if self._busy:
+            # A render is already running (a fast drag emits many requests). Mark
+            # the state dirty so the *latest* camera/pose is rendered as soon as
+            # the current one finishes, instead of the last change being dropped.
+            self._render_dirty = True
+            return
+        self._render_dirty = False
         params = self._params
         view = self._view
         width, height = _PREVIEW_WIDTH, _PREVIEW_HEIGHT
+        azimuth = self._camera_azimuth
+        elevation = self._camera_elevation
+        zoom = self._camera_zoom
 
         def job() -> bytes:
-            return self.service.render_body(params, view=view, width=width, height=height)
+            return self.service.render_body(
+                params,
+                view=view,
+                width=width,
+                height=height,
+                azimuth=azimuth,
+                elevation=elevation,
+                zoom=zoom,
+            )
 
         self._run_background("Rendering the body…", job, self._on_rendered)
 
@@ -672,6 +878,8 @@ class BodyStudioDialog(ThemedDialog):
         except tk.TclError:
             pass
         finish(result, error)
+        if self._render_dirty and not self._closed:
+            self._schedule_render()
 
     # -- status and close -------------------------------------------------
 
@@ -732,6 +940,17 @@ def _colour_trace(
     handler: Callable[[str, tk.StringVar], None], key: str, var: tk.StringVar
 ) -> Callable[..., None]:
     """A ``trace_add`` callback for a colour field (the value is read from the var)."""
+
+    def callback(*_args: object) -> None:
+        handler(key, var)
+
+    return callback
+
+
+def _camera_trace(
+    handler: Callable[[str, tk.DoubleVar], None], key: str, var: tk.DoubleVar
+) -> Callable[..., None]:
+    """A ``trace_add`` callback for a camera slider (the value is read from the var)."""
 
     def callback(*_args: object) -> None:
         handler(key, var)

@@ -315,13 +315,22 @@ def _display_available() -> bool:
     return True
 
 
-def _wait_for(root, predicate, *, rounds: int = 600) -> bool:
-    """Drain the UI event loop until ``predicate()`` is true (a worker-thread result)."""
-    for _ in range(rounds):
+def _wait_for(root, predicate, *, timeout: float = 60.0) -> bool:
+    """Drain the UI event loop until ``predicate()`` is true (a worker-thread result).
+
+    Bounded by a wall-clock *timeout* rather than a fixed number of ``update``
+    rounds: a busy CI runner can spend seconds inside one round (a full-body render
+    is CPU-bound), so a round count is not a reliable deadline there.
+    """
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
         root.update()
         if predicate():
             return True
-    return False
+        _time.sleep(0.01)
+    return predicate()
 
 
 def _close_window(root, dialog) -> None:
@@ -750,3 +759,195 @@ def test_the_cli_accepts_a_pose_instruction(tmp_path: Path, capsys) -> None:
     )
     assert code == 0
 
+
+
+# -- the camera (orbit) tool ----------------------------------------------
+
+
+def test_the_service_exposes_the_camera_presets(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    titles = dict(service.body_camera_presets())
+    assert "front" in titles and "back" in titles and "left" in titles
+    assert service.body_camera_preset("left") == (-90.0, 0.0)
+    with pytest.raises(KeyError):
+        service.body_camera_preset("over-the-rainbow")
+
+
+def test_rendering_from_another_angle_changes_the_picture(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    params = service.body_parameters("")
+    front = service.render_body(params, width=200, height=280)
+    back = service.render_body(params, azimuth=180.0, width=200, height=280)
+    side = service.render_body(params, azimuth=90.0, width=200, height=280)
+    assert front and back and side
+    assert front != back
+    assert front != side
+
+
+def test_zooming_changes_the_picture(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    params = service.body_parameters("")
+    near = service.render_body(params, zoom=0.5, width=200, height=280)
+    far = service.render_body(params, zoom=2.0, width=200, height=280)
+    assert near != far
+
+
+def test_the_body_engine_places_the_camera_on_an_orbit() -> None:
+    from core.romance.body import CAMERA_MAX_ZOOM, CAMERA_MIN_ZOOM, clamp_zoom, preview_scene
+
+    params = default_parameters()
+    front = preview_scene(params).camera.position
+    back = preview_scene(params, azimuth=180.0).camera.position
+    # A half-turn puts the camera on the other side of the figure.
+    assert front.z > 0 > back.z
+    # The elevation is clamped short of the poles so the up vector never flips.
+    high = preview_scene(params, elevation=200.0).camera.position
+    assert high.y > 0
+    # A zoom really changes the distance.
+    near = preview_scene(params, zoom=0.5).camera.position
+    far = preview_scene(params, zoom=2.0).camera.position
+    assert (near - preview_scene(params).camera.target).length() < (
+        far - preview_scene(params).camera.target
+    ).length()
+    assert clamp_zoom(0.0) == CAMERA_MIN_ZOOM
+    assert clamp_zoom(99.0) == CAMERA_MAX_ZOOM
+
+
+def test_the_subdivision_and_smoothing_dials_are_real(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    params = service.body_parameters("")
+    finer = service.set_body_dial(params, "subdivisions", 2)
+    assert finer.subdivisions == 2
+    relaxed = service.set_body_dial(params, "smoothing", 0)
+    assert relaxed.smoothing == 0
+    # A numeric dial is clamped to its range, never stored out of it.
+    assert service.set_body_dial(params, "subdivisions", 9).subdivisions == 2
+    assert service.set_body_dial(params, "smoothing", -4).smoothing == 0
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_body_window_has_a_camera_tool(tmp_path: Path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_body import BodyStudioDialog
+
+    service = _service(tmp_path)
+    character = service.create_character(name="Amina", role=ROLE_COMPANION, gender="woman")
+    root = tk.Tk()
+    root.withdraw()
+    dialog = None
+    try:
+        dialog = BodyStudioDialog(
+            root, service, character.id, theme=DARK_THEME,
+            font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        assert _wait_for(root, lambda: bool(dialog._preview_png))
+        # Every angle preset is a real, clickable button.
+        labels = {b.cget("text") for b in _all_buttons(dialog.window)}
+        for _key, title in service.body_camera_presets():
+            assert title in labels
+        assert "Reset the camera" in labels
+        # The three orbit sliders are wired to the camera state.
+        assert len(dialog._camera_scales) == 3
+        dialog._apply_camera_preset("back")
+        assert _wait_for(root, lambda: dialog._camera_azimuth == 180.0)
+        assert dialog._camera_elevation == 0.0
+        # A drag on the picture turns the camera (the 3D-program gesture).
+        class _Event:
+            def __init__(self, x: int, y: int) -> None:
+                self.x = x
+                self.y = y
+
+        dialog._on_preview_press(_Event(100, 40))
+        dialog._on_preview_drag(_Event(40, 10))
+        dialog._on_preview_release(_Event(40, 10))
+        assert dialog._camera_azimuth == pytest.approx(180.0 - 36.0)
+        assert dialog._camera_elevation > 0.0
+        dialog._reset_camera()
+        assert dialog._camera_azimuth == 0.0 and dialog._camera_zoom == 1.0
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_body_builder_opens_even_with_nothing_selected(tmp_path: Path) -> None:
+    """The reported bug: the button did nothing until a row was clicked."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_managers import CharacterManagerDialog
+
+    service = _service(tmp_path)
+    root = tk.Tk()
+    root.withdraw()
+    dialog = None
+    try:
+        dialog = CharacterManagerDialog(
+            root, service, role=ROLE_COMPANION,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        assert dialog._selected_id() == ""
+        dialog._open_body_studio()
+        root.update()
+        studio = getattr(dialog, "_body_studio", None)
+        assert studio is not None, "the body builder did not open with no selection"
+        assert not getattr(studio, "_closed", True)
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_body_builder_opens_on_an_existing_character(tmp_path: Path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_managers import CharacterManagerDialog
+
+    service = _service(tmp_path)
+    character = service.create_character(name="Amina", role=ROLE_COMPANION, gender="woman")
+    root = tk.Tk()
+    root.withdraw()
+    dialog = None
+    try:
+        dialog = CharacterManagerDialog(
+            root, service, role=ROLE_COMPANION,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        dialog._open_body_studio()
+        root.update()
+        studio = getattr(dialog, "_body_studio", None)
+        assert studio is not None
+        assert studio.character_id == character.id
+    finally:
+        _close_window(root, dialog)
+
+
+def test_the_cli_lists_and_uses_camera_angles(tmp_path: Path, capsys) -> None:
+    root = str(tmp_path)
+    code, out = _cli(["--data-root", root, "body", "--cameras"], capsys)
+    assert code == 0 and "Left side" in out and "azimuth -90°" in out
+
+    target = tmp_path / "left.png"
+    code, _out = _cli(
+        ["--data-root", root, "body", "--camera", "left", "--render", str(target)], capsys
+    )
+    assert code == 0 and target.read_bytes()
+
+    code, out = _cli(
+        [
+            "--data-root", root, "body", "--azimuth", "90", "--elevation", "20",
+            "--zoom", "0.6", "--render", str(tmp_path / "az.png"), "--json",
+        ],
+        capsys,
+    )
+    assert code == 0
+    assert '"azimuth": 90.0' in out and '"zoom": 0.6' in out
+
+    code, _out = _cli(
+        ["--data-root", root, "body", "--camera", "moonwalk", "--render", "x.png"], capsys
+    )
+    assert code == 2

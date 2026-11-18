@@ -28,6 +28,7 @@ for (the hair, when the hair dial is at zero) is simply not drawn.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -68,6 +69,52 @@ VIEW_FACE = "face"
 VIEWS: tuple[str, ...] = (VIEW_FULL, VIEW_FACE)
 VIEW_TITLES: dict[str, str] = {VIEW_FULL: "Full body", VIEW_FACE: "Face and head"}
 
+#: Ready-made camera angles, as ``(key, title, azimuth, elevation)`` degrees. The
+#: camera tool offers these as one-click viewpoints beside the free orbit sliders.
+CAMERA_PRESETS: tuple[tuple[str, str, float, float], ...] = (
+    ("front", "Front", 0.0, 0.0),
+    ("back", "Back", 180.0, 0.0),
+    ("left", "Left side", -90.0, 0.0),
+    ("right", "Right side", 90.0, 0.0),
+    ("three_quarter", "Three-quarter", 35.0, 8.0),
+    ("top", "From above", 0.0, 70.0),
+    ("low", "From below", 0.0, -35.0),
+)
+
+#: The neutral camera an orbit starts from.
+CAMERA_DEFAULT_AZIMUTH = 0.0
+CAMERA_DEFAULT_ELEVATION = 0.0
+CAMERA_DEFAULT_ZOOM = 1.0
+#: The zoom range the camera tool allows (a distance multiplier).
+CAMERA_MIN_ZOOM = 0.35
+CAMERA_MAX_ZOOM = 3.0
+
+
+def camera_preset_titles() -> tuple[tuple[str, str], ...]:
+    """``(key, title)`` for each ready-made camera angle."""
+    return tuple((key, title) for key, title, _azimuth, _elevation in CAMERA_PRESETS)
+
+
+def camera_preset(key: str) -> tuple[float, float]:
+    """The ``(azimuth, elevation)`` a named camera angle asks for.
+
+    An unknown key is refused with a ``KeyError`` rather than silently returning
+    the front view, so a typo in a window or a CLI call is reported.
+    """
+    for preset_key, _title, azimuth, elevation in CAMERA_PRESETS:
+        if preset_key == key:
+            return azimuth, elevation
+    raise KeyError(f"Unknown camera preset {key!r}.")
+
+
+def clamp_zoom(value: float) -> float:
+    """Bring a zoom multiplier inside the camera tool's own range."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return CAMERA_DEFAULT_ZOOM
+    return min(CAMERA_MAX_ZOOM, max(CAMERA_MIN_ZOOM, number))
+
 #: The dial groups, in the order the window shows them.
 DIAL_GROUPS: tuple[tuple[str, str, str], ...] = (
     ("proportions", "Proportions", "القياسات"),
@@ -75,6 +122,7 @@ DIAL_GROUPS: tuple[tuple[str, str, str], ...] = (
     ("limbs", "Arms and legs", "الذراعان والساقان"),
     ("head", "Head and face", "الرأس والوجه"),
     ("intimate", "Intimate detail", "التفاصيل الحميمة"),
+    ("detail", "Mesh and detail", "الشبكة والتفاصيل"),
     ("hair", "Hair", "الشعر"),
     ("colour", "Skin and hair colour", "لون البشرة والشعر"),
     ("pose", "Pose", "الوضعية"),
@@ -187,6 +235,17 @@ DIALS: tuple[DialSpec, ...] = (
         minimum=0.40, maximum=1.80, step=0.01,
     ),
     DialSpec("areola", "Areola size", "حجم الهالة", "intimate", minimum=0.40, maximum=2.00, step=0.01),
+    DialSpec(
+        "subdivisions", "Mesh detail (smoothness)", "دقة الشبكة (النعومة)", "detail",
+        kind="int", minimum=0, maximum=2, step=1,
+        hint="How finely the skin mesh is subdivided: 0 is the raw mesh, 1 is the "
+             "smooth default, 2 is very fine",
+    ),
+    DialSpec(
+        "smoothing", "Surface smoothing", "نعومة السطح", "detail",
+        kind="int", minimum=0, maximum=4, step=1,
+        hint="Relaxation passes that remove the last facets after subdivision",
+    ),
     DialSpec("hair", "Hair volume", "كثافة الشعر", "hair"),
     DialSpec("skin", "Skin colour", "لون البشرة", "colour", kind="colour"),
     DialSpec("hair_color", "Hair colour", "لون الشعر", "colour", kind="colour"),
@@ -326,7 +385,12 @@ def set_dial(params: FigureParameters, key: str, value: Any) -> FigureParameters
     dial = _DIAL_BY_KEY.get(key)
     if dial is None:
         raise KeyError(f"Unknown body dial {key!r}.")
-    return params.with_changes(**{key: dial.clamp(value)})
+    value = dial.clamp(value)
+    if isinstance(value, str):
+        current = getattr(params, key, None)
+        if isinstance(current, int) and not isinstance(current, bool):
+            value = int(value)
+    return params.with_changes(**{key: value})
 
 
 def set_dials(params: FigureParameters, changes: dict[str, Any]) -> FigureParameters:
@@ -462,8 +526,22 @@ def changed_keys(params: FigureParameters) -> tuple[str, ...]:
 # -- rendering ------------------------------------------------------------
 
 
-def preview_scene(params: FigureParameters, *, view: str = VIEW_FULL, name: str = "Body") -> Scene:
-    """A scene holding the figure (and its hair), framed for the requested view."""
+def preview_scene(
+    params: FigureParameters,
+    *,
+    view: str = VIEW_FULL,
+    name: str = "Body",
+    azimuth: float = 0.0,
+    elevation: float = 0.0,
+    zoom: float = 1.0,
+) -> Scene:
+    """A scene holding the figure (and its hair), framed for the requested view.
+
+    ``azimuth`` (degrees around the vertical axis), ``elevation`` (degrees above
+    the horizon), and ``zoom`` (a distance multiplier) place the camera on an
+    orbit around the figure's own framing target, so the same body can be viewed
+    from any direction without rebuilding it.
+    """
     figure = build_figure(params, name=name)
     scene = make_default_scene(f"{name} body")
     scene.add_object(figure)
@@ -474,8 +552,45 @@ def preview_scene(params: FigureParameters, *, view: str = VIEW_FULL, name: str 
     if view == VIEW_FACE:
         _frame_head(scene, params)
     else:
-        scene.frame_camera(margin=1.5)
+        # A tight margin so the figure fills the frame and the finer mesh is
+        # actually visible, rather than a small figure floating in a large scene.
+        scene.frame_camera(margin=1.12)
+    if azimuth or elevation or zoom != 1.0:
+        _orbit(scene, azimuth=azimuth, elevation=elevation, zoom=zoom)
     return scene
+
+
+def _orbit(scene: Scene, *, azimuth: float, elevation: float, zoom: float) -> None:
+    """Place the camera on an orbit around its current target.
+
+    The azimuth rotates about the world vertical axis; the elevation lifts the
+    camera above (positive) or below (negative) the horizon, clamped short of the
+    poles so the up vector never flips; the zoom scales the distance. Only the
+    camera moves, so the figure and its pose are untouched.
+    """
+    camera = scene.camera
+    offset = camera.position - camera.target
+    radius = offset.length()
+    if radius <= 1e-6:
+        return
+    elevation = max(-89.0, min(89.0, elevation))
+    polar = math.radians(90.0 - elevation)
+    azimuth = math.radians(azimuth)
+    distance = max(0.05, radius * max(0.05, zoom))
+    horizontal = math.sin(polar)
+    position = camera.target + Vec3(
+        distance * horizontal * math.sin(azimuth),
+        distance * math.cos(polar),
+        distance * horizontal * math.cos(azimuth),
+    )
+    scene.camera = Camera(
+        position=position,
+        target=camera.target,
+        up=camera.up,
+        fov_degrees=camera.fov_degrees,
+        near=camera.near,
+        far=camera.far,
+    )
 
 
 def _frame_head(scene: Scene, params: FigureParameters) -> None:
@@ -499,11 +614,20 @@ def render_preview(
     view: str = VIEW_FULL,
     width: int = PREVIEW_WIDTH,
     height: int = PREVIEW_HEIGHT,
+    azimuth: float = 0.0,
+    elevation: float = 0.0,
+    zoom: float = 1.0,
 ) -> bytes:
-    """Render the body and return the PNG bytes (the window shows them directly)."""
+    """Render the body and return the PNG bytes (the window shows them directly).
+
+    ``azimuth``/``elevation``/``zoom`` orbit the camera around the figure, so the
+    window's camera tool can show the same body from any direction.
+    """
     if view not in VIEWS:
         view = VIEW_FULL
-    scene = preview_scene(params, view=view)
+    scene = preview_scene(
+        params, view=view, azimuth=azimuth, elevation=elevation, zoom=zoom
+    )
     buffer, _stats = render_scene(scene, width=int(width), height=int(height))
     return buffer.to_png()
 
@@ -538,6 +662,12 @@ __all__ = [
     "BODY_PRESETS",
     "BUILD_CHOICES",
     "BUILD_TITLES",
+    "CAMERA_DEFAULT_AZIMUTH",
+    "CAMERA_DEFAULT_ELEVATION",
+    "CAMERA_DEFAULT_ZOOM",
+    "CAMERA_MAX_ZOOM",
+    "CAMERA_MIN_ZOOM",
+    "CAMERA_PRESETS",
     "DIALS",
     "DIAL_GROUPS",
     "HONESTY_LINE",
@@ -556,7 +686,10 @@ __all__ = [
     "body_preset_titles",
     "body_summary",
     "build_for_gender",
+    "camera_preset",
+    "camera_preset_titles",
     "changed_keys",
+    "clamp_zoom",
     "default_parameters",
     "dial_for",
     "dial_keys",

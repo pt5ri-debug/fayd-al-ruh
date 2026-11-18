@@ -7908,3 +7908,68 @@ regression monitor each can refuse a change.
   default. Docs: `docs/romance_companion/MODEL_INTEGRATION.md` gained a *Streaming
   turns* section. Gates: pytest 8364 passed / 16 skipped, ruff clean, mypy 1193
   files OK, evaluation PASS (`overall` 0.9918 unchanged).
+
+- Phase 68 — **the Body & shape studio really opens, its figure is a smooth human
+  mesh rather than a faceted doll, and it carries an orbit camera** (a follow-up
+  to the Phase-15/16 body builder, reported from **My Persona Manager**). Four
+  fixes, all additive. **(1) The reported bug: the button did nothing.** Pressing
+  *Open the body builder…* before a row was clicked called
+  `CharacterManagerDialog._open_body_studio`, which read `_selected_id()` -- empty
+  on a fresh window -- printed "Select a companion first." and **returned without
+  opening anything**, so the window looked broken. It now resolves a character
+  through the new `_ensure_selection()`: the current selection, else the **first**
+  character of this role, else (when the role has none yet) a **starter**
+  character created through `_create_starter()`, so the builder always opens on a
+  real body. **(2) The figure is a fine, smooth skin.** The mesh was a low-poly
+  primitives assembly, so it read as a "wooden doll". `core.scene3d.Mesh` gained
+  `weld(tolerance=)` (merges coincident vertices -- the seams between primitives
+  -- keeping the first colour of each group and dropping a face that collapses),
+  `subdivide(levels)` (Catmull-Clark: a face point, an edge point, and a
+  repositioned vertex per face, so the surface converges to a smooth **limit
+  surface**, with per-vertex colours interpolated so the skin tone, lips, irises,
+  nails, and intimate colours stay correct on the finer mesh), and
+  `smoothed(iterations, factor)` (a bounded Laplacian relax that removes the last
+  facets a single pass can leave). `FigureParameters` gained a validated
+  `subdivisions` (0-2) and `smoothing` (0-4) dial, and `build_figure_mesh` welds
+  **then** subdivides **then** relaxes -- welding first is what lets the pass
+  smooth *across* a seam instead of leaving a crease. The default is level 1
+  (3,777 -> 10,953 vertices, 21,312 triangles), so a fresh body is smooth out of
+  the box; both dials are editable in the window (a *Mesh and detail* group) and
+  on the CLI (`--set subdivisions=2`). `SceneObject.deformed_vertices()` gained a
+  per-pose **cache** (keyed on the pose signature), so a re-read with an unchanged
+  pose reuses the skinned geometry instead of re-running `compute_skin_weights`
+  every frame -- which is what makes the orbit below cheap. **(3) An orbit
+  camera.** `core.romance.body` gained `CAMERA_PRESETS` (front, back, left, right,
+  three-quarter, above, below) with `camera_preset`/`camera_preset_titles`/
+  `clamp_zoom`, and `preview_scene`/`render_preview` gained `azimuth`/`elevation`/
+  `zoom` (the camera orbits its own framing target; the elevation is clamped short
+  of the poles so the up vector never flips; only the camera moves, so the figure
+  and its pose are untouched). `RomanceStudioService` forwards them through
+  `render_body(..., azimuth=, elevation=, zoom=)` and exposes
+  `body_camera_presets`/`body_camera_preset`. The full-body framing margin
+  tightened from 1.5 to 1.12, so the finer mesh actually fills the frame.
+  **(4) The window's camera tool.** `gui/romance_body.py` gained a **Camera
+  (orbit)** sidebar section: one button per ready-made angle, three labelled
+  sliders (turn / height / zoom) that drive the camera live, a *Reset the camera*,
+  and **click-and-drag on the picture** to orbit it the way a 3D program does
+  (the drag only updates the sliders and schedules a render). A drag that lands
+  while a render is in flight no longer drops the last change: `_render_now` marks
+  the state dirty and the finished render schedules the newest one, so the picture
+  always settles on the current camera. The CLI gained `--camera KEY`,
+  `--cameras`, `--azimuth`, `--elevation`, and `--zoom` (with the camera echoed in
+  `--json`). Tests: `tests/test_scene3d.py` gained twelve (weld, the degenerate
+  face, colour preservation, subdivision counts and bounds, colour interpolation,
+  smoothing, the two dials' validation, a subdivided figure that is still bound
+  and poseable, and the skin cache); `tests/test_romance_body_studio.py` gained
+  ten (the camera presets, a render from another angle differing, zoom,
+  the engine's orbit placement and clamping, the subdivision/smoothing dials, the
+  window's camera controls and drag, the two `_open_body_studio` fix cases, and
+  the CLI camera flags). A slower CI runner exposed one more cost: binding a
+  finer mesh is `O(vertices x bones)` and dominated the first render, so
+  `compute_skin_weights` now flattens each bone's segment to plain floats once and
+  ranks by **squared** distance (one `sqrt` for the few bones chosen) -- the
+  binding is numerically identical (max weight delta 1e-19) and a full-body render
+  fell from ~1.8 s to ~1.0 s; the window tests' `_wait_for` is now bounded by a
+  wall-clock timeout rather than a fixed number of `update` rounds, which a busy
+  runner can spend seconds inside. Gates: ruff clean, mypy 1200 files OK,
+  evaluation PASS (`overall` 0.9918 unchanged).
