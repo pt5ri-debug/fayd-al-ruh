@@ -688,11 +688,13 @@ class RomanceStudioService:
         azimuth: float = 0.0,
         elevation: float = 0.0,
         zoom: float = 1.0,
+        mesh: Any = None,
     ) -> bytes:
         """Render the body and return the PNG bytes (the window shows them).
 
         ``azimuth``/``elevation``/``zoom`` orbit the camera around the figure, so
-        the window's camera tool can show the same body from any direction.
+        the window's camera tool can show the same body from any direction. When
+        ``mesh`` is given (an imported or edited model) it *is* the body shown.
         """
         from core.romance.body import (
             PREVIEW_HEIGHT,
@@ -708,7 +710,110 @@ class RomanceStudioService:
             azimuth=float(azimuth),
             elevation=float(elevation),
             zoom=float(zoom),
+            body_mesh=mesh,
         )
+
+    # -- an imported or edited model (the body is a mesh, not only the dials) --
+
+    def load_body_model(self, path: str) -> Any:
+        """Read a ready-made human model (OBJ, STL, PLY) into a normalised mesh."""
+        from core.romance.body import load_model_mesh
+
+        return load_model_mesh(path)
+
+    def body_model_dir(self) -> Any:
+        """The folder a headless model edit is kept in (so the CLI can round-trip).
+
+        Resolved under the Studio's own data root, so an imported or edited model
+        lives beside the character's own files and never dirties the working tree.
+        """
+        return self.storage.root / "body_models"
+
+    def save_body_model(self, name: str, mesh: Any) -> str:
+        """Write a mesh to the body-model folder and return the path (the CLI bridge)."""
+        from core.scene3d_io import MESH_SUFFIXES
+
+        directory = self.body_model_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        suffix = next((item for item in MESH_SUFFIXES), ".obj")
+        target = directory / f"{name}{suffix}"
+        self.export_body_model(mesh, str(target))
+        return str(target)
+
+    def export_body_model(self, mesh: Any, path: str) -> str:
+        """Write a body mesh to ``path`` as a Wavefront OBJ (and its MTL)."""
+        from core.scene3d import Material, Scene, SceneObject
+        from core.scene3d_io import save_obj
+
+        scene = Scene(name="Body")
+        scene.add_object(SceneObject(name="body", mesh=mesh, material=Material("body", (0.82, 0.66, 0.56))))
+        save_obj(scene, path)
+        return path
+
+    def body_model_from_figure(self, params: Any) -> Any:
+        """The parametric figure as an editable mesh (the starting point for edits)."""
+        from core.romance.body import figure_mesh
+
+        return figure_mesh(params)
+
+    def body_model_region_objects(self, params: Any) -> tuple[Any, ...]:
+        """The editable :class:`core.body_editor.BodyRegion` objects (with their boxes)."""
+        from core.romance.body import model_regions
+
+        return model_regions(params)
+
+    def body_model_region_titles(self, *, language: str = "en") -> tuple[tuple[str, str], ...]:
+        """``(key, title)`` for every editable region, in either language."""
+        from core.romance.body import model_region_titles
+
+        return model_region_titles(language)
+
+    def body_model_part_shapes(self, *, language: str = "en") -> tuple[tuple[str, str], ...]:
+        """``(key, title)`` for each shape a missing part can be built from."""
+        from core.romance.body import add_part_titles
+
+        return add_part_titles(language)
+
+    def body_model_summary(self, mesh: Any, *, source: str = "") -> str:
+        """A readable description of a body mesh (its real vertex/face counts)."""
+        from core.romance.body import model_summary
+
+        return model_summary(mesh, source=source).describe()
+
+    def edit_body_model_region(
+        self,
+        mesh: Any,
+        params: Any,
+        region_key: str,
+        *,
+        scale: tuple[float, float, float] | None = None,
+        move: tuple[float, float, float] | None = None,
+        rotate: tuple[float, float, float] | None = None,
+    ) -> Any:
+        """Resize/move/rotate one region of a body mesh (a smooth-space edit)."""
+        from core.romance.body import edit_model_region
+
+        return edit_model_region(
+            mesh,
+            region_key,
+            params=params,
+            scale=scale,
+            move=move,
+            rotate=rotate,
+        )
+
+    def add_body_model_part(
+        self,
+        mesh: Any,
+        *,
+        shape: str,
+        centre: tuple[float, float, float],
+        size: tuple[float, float, float] | float,
+    ) -> Any:
+        """Fuse a new part (a shape) into a body mesh as one connected skin."""
+        from core.romance.body import add_model_part
+
+        return add_model_part(mesh, shape=shape, centre=centre, size=size)
 
     def body_camera_presets(self) -> tuple[tuple[str, str], ...]:
         """``(key, title)`` for each ready-made camera angle."""
