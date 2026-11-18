@@ -780,6 +780,83 @@ class RomanceStudioService:
 
         return model_summary(mesh, source=source).describe()
 
+    # -- the four ready-made figures (the studio's default) ---------------
+
+    def figure_library(self) -> Any:
+        """The Studio's figure library (the four slots and their imported models)."""
+        from core.romance.figures import FigureLibrary
+
+        return FigureLibrary(self.storage.root / "figures")
+
+    def figure_slots(self, *, language: str = "en") -> tuple[tuple[str, str, bool], ...]:
+        """``(slot, title, imported?)`` for each of the four figures, in order."""
+        return self.figure_library().slots()
+
+    def figure_slot_titles(self, *, language: str = "en") -> tuple[tuple[str, str], ...]:
+        """``(slot, title)`` for each of the four figures, in order."""
+        from core.romance.figures import slot_titles
+
+        return slot_titles(language)
+
+    def character_figure_slot(self, character_id: str) -> str:
+        """The figure slot a character opens on (from its own gender and age)."""
+        from core.romance.figures import slot_for_character
+
+        try:
+            character = self.character(character_id) if character_id else None
+        except Exception:
+            character = None
+        return slot_for_character(character)
+
+    def figure_slot_parameters(self, slot: str) -> Any:
+        """The built-in body parameters for a figure slot."""
+        from core.romance.figures import slot_parameters
+
+        return slot_parameters(slot)
+
+    def figure_slot_summary(self, slot: str) -> str:
+        """A one-line, honest description of what a slot is showing."""
+        return self.figure_library().summary(slot)
+
+    def figure_slot_has_import(self, slot: str) -> bool:
+        return self.figure_library().has_imported(slot)
+
+    def import_figure_model(
+        self, slot: str, source: str, *, origin: str = "", note: str = ""
+    ) -> Any:
+        """Import a ready-made human model (OBJ/STL/PLY) into one of the four slots."""
+        return self.figure_library().import_model(slot, source, origin=origin, note=note)
+
+    def clear_figure_slot(self, slot: str) -> bool:
+        """Forget the model imported into a slot (it falls back to the built-in)."""
+        return self.figure_library().clear(slot)
+
+    def render_figure_slot(
+        self,
+        slot: str,
+        *,
+        view: str = "full",
+        width: int | None = None,
+        height: int | None = None,
+        azimuth: float = 0.0,
+        elevation: float = 0.0,
+        zoom: float = 1.0,
+    ) -> bytes:
+        """Render one of the four figures (its imported model, else the built-in)."""
+        return self.figure_library().render(
+            slot,
+            view=view,
+            width=width,
+            height=height,
+            azimuth=azimuth,
+            elevation=elevation,
+            zoom=zoom,
+        )
+
+    def figure_slot_mesh(self, slot: str) -> Any:
+        """The editable mesh a slot shows (its imported model, else the built-in)."""
+        return self.figure_library().mesh(slot)
+
     def edit_body_model_region(
         self,
         mesh: Any,

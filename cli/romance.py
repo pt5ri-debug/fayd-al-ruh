@@ -149,6 +149,26 @@ def _build_parser() -> argparse.ArgumentParser:
     body.add_argument("--presets", action="store_true", help="List the ready-made bodies.")
     body.add_argument("--summary", action="store_true", help="Describe the current body.")
     body.add_argument(
+        "--figures", action="store_true",
+        help="List the four ready-made figures (woman, girl, man, boy) and the slot in force.",
+    )
+    body.add_argument(
+        "--figure", default="", metavar="SLOT",
+        help="Use one of the four figures (woman, girl, man, boy) as the body to show/edit.",
+    )
+    body.add_argument(
+        "--import-figure", default="", metavar="FILE",
+        help="Import a ready-made model (OBJ/STL/PLY) into the --figure slot.",
+    )
+    body.add_argument(
+        "--figure-source", default="", metavar="ORIGIN",
+        help="Where an imported figure came from (a URL or product name), for the record.",
+    )
+    body.add_argument(
+        "--clear-figure", action="store_true",
+        help="Forget the model imported into the --figure slot (back to the built-in).",
+    )
+    body.add_argument(
         "--set", action="append", default=[], metavar="KEY=VALUE",
         help="Set a measurement (repeatable), e.g. --set height=1.9 --set bust=0.6.",
     )
@@ -665,7 +685,72 @@ def run_body(args: argparse.Namespace) -> int:
         _emit(args, rows, "\n".join(f"{row['key']:14s} {row['title']}" for row in rows))
         return EXIT_OK
 
+    # -- the four ready-made figures (the studio's default) ----------------
+    if args.figures:
+        rows = [
+            {
+                "slot": slot,
+                "title": title,
+                "imported": imported,
+                "summary": service.figure_slot_summary(slot),
+            }
+            for slot, title, imported in service.figure_slots()
+        ]
+        active = args.figure or (
+            service.character_figure_slot(args.character_id) if args.character_id else ""
+        )
+        text = "\n".join(
+            ("* " if row["slot"] == active else "  ")
+            + f"{row['slot']:8s} {row['title']:8s} {row['summary']}"
+            for row in rows
+        )
+        _emit(args, rows, text)
+        return EXIT_OK
+
+    figure_slot = args.figure or (
+        service.character_figure_slot(args.character_id) if args.character_id else ""
+    )
+    if args.import_figure:
+        if not figure_slot:
+            print(
+                "romance: --import-figure needs a --figure slot or a character id",
+                file=sys.stderr,
+            )
+            return EXIT_USAGE
+        try:
+            entry = service.import_figure_model(
+                figure_slot, args.import_figure, origin=args.figure_source
+            )
+        except Exception as error:
+            print(f"romance: {error}", file=sys.stderr)
+            return EXIT_USAGE
+        _emit(
+            args,
+            {"slot": figure_slot, "filename": entry.filename, "source": entry.source},
+            f"Imported into the {figure_slot} figure: {entry.filename}",
+        )
+        return EXIT_OK
+    if args.clear_figure:
+        if not figure_slot:
+            print(
+                "romance: --clear-figure needs a --figure slot or a character id",
+                file=sys.stderr,
+            )
+            return EXIT_USAGE
+        removed = service.clear_figure_slot(figure_slot)
+        message = (
+            f"Removed the imported model from the {figure_slot} figure."
+            if removed
+            else f"The {figure_slot} figure had no imported model."
+        )
+        _emit(args, {"slot": figure_slot, "removed": removed}, message)
+        return EXIT_OK
+
     params = service.body_parameters(args.character_id, preset=args.preset)
+    if figure_slot and not args.preset:
+        params = service.figure_slot_parameters(figure_slot).with_changes(
+            name=params.name or service.figure_slot_parameters(figure_slot).name
+        )
     if args.pose:
         try:
             params = service.set_body_pose(params, args.pose)
@@ -705,8 +790,15 @@ def run_body(args: argparse.Namespace) -> int:
             return EXIT_USAGE
         payload["model"] = {"source": args.model, "summary": service.body_model_summary(mesh)}
     elif args.model_from_figure:
-        mesh = service.body_model_from_figure(params)
-        payload["model"] = {"source": "figure", "summary": service.body_model_summary(mesh)}
+        mesh = (
+            service.figure_slot_mesh(figure_slot)
+            if figure_slot
+            else service.body_model_from_figure(params)
+        )
+        payload["model"] = {
+            "source": figure_slot or "figure",
+            "summary": service.body_model_summary(mesh),
+        }
     if mesh is not None and args.edit_part and (args.scale or args.move or args.rotate_part):
         scale = _vector(args.scale, "scale") if args.scale else None
         move = _vector(args.move, "move") if args.move else None

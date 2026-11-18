@@ -297,6 +297,10 @@ def group_titles(language: str = "en") -> tuple[tuple[str, str], ...]:
 #: The ready-made bodies a user can start from and then edit. Each is a full set of
 #: dials, so applying one really changes the body.
 BODY_PRESETS: tuple[tuple[str, str, str, FigureParameters], ...] = (
+    ("woman", "Woman", "امرأة", FIGURE_PRESETS["woman"]),
+    ("girl", "Girl", "بنت", FIGURE_PRESETS["girl"]),
+    ("man", "Man", "رجل", FIGURE_PRESETS["man"]),
+    ("boy", "Boy", "ولد", FIGURE_PRESETS["boy"]),
     ("average", "Average adult", "بالغ معتاد", FIGURE_PRESETS["adult"]),
     ("athletic", "Athletic", "رياضي", FIGURE_PRESETS["athletic"]),
     ("slim", "Slim", "نحيف", FIGURE_PRESETS["slim"]),
@@ -360,14 +364,19 @@ def build_for_gender(gender: str) -> str:
 def default_parameters(character: Any = None, *, preset: str = "") -> FigureParameters:
     """The parameters a character's body starts from.
 
-    A named preset wins; otherwise the character's own recorded **gender** picks the
-    build family and everything else is the neutral default, so opening the studio
-    for a woman shows a woman's shape and for a man a man's -- without inventing a
-    measurement the character never recorded.
+    With no explicit ``preset`` the studio opens on one of the **four ready-made
+    figures** -- a woman, a girl, a man, or a boy -- chosen from the character's own
+    recorded **gender and age** (see :mod:`core.romance.figures`), so opening the
+    studio for a woman shows a woman's body and for a boy a boy's, rather than a
+    single generic figure a user had reshaped. A named ``preset`` still wins, so the
+    Templates section can put any figure or template on the body.
     """
-    base = preset_parameters(preset) if preset else None
-    if base is None:
-        base = FIGURE_PRESETS["adult"]
+    if not preset:
+        from core.romance.figures import slot_parameters_for_character
+
+        _slot, params = slot_parameters_for_character(character)
+        return params
+    base = preset_parameters(preset) or FIGURE_PRESETS["adult"]
     gender = str(_character_field(character, "gender") or "")
     build = build_for_gender(gender) if gender else base.build
     name = str(_character_field(character, "name") or "") or base.name

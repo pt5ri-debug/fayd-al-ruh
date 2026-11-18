@@ -8089,3 +8089,50 @@ regression monitor each can refuse a change.
   `tests/test_body_editor.py` (36) + `tests/test_romance_body_studio.py` (59) +
   the romance window suites pass under `xvfb-run`.
 
+
+- Phase 72 — **four ready-made bodies the Body & shape studio opens on, and
+  ready-made models it can import**. The studio used to open on a single generic
+  figure a user had reshaped many times, so there was no clear, complete body to
+  start from -- the reported complaint. It now opens on one of **four** complete
+  human bodies -- a **woman**, a **girl**, a **man**, and a **boy** -- chosen from
+  the character being edited, and a user who has a **ready-made model** (a DAZ 3D
+  export, a MakeHuman OBJ, or any OBJ/STL/PLY mesh) imports it into one of the four
+  slots and edits it there. `core/scene3d_figures.py` gained the four
+  `FIGURE_PRESETS` (`woman`, `girl`, `man`, `boy`), each a *real* body at that age
+  and sex -- a woman's feminine curvy build, a man's masculine athletic one, and
+  the two children shorter with a bigger head and no adult bust -- and every one
+  fuses into a **single connected skin** (pinned by a connectivity test), which is
+  what makes it read as a person rather than a pile of parts. `core/romance/figures.py`
+  (new) is the figure library: the four slots (`FIGURE_SLOTS`, bilingual
+  `SLOT_TITLES`), the **character -> slot** rule (`slot_for_character`, from the
+  character's own recorded `gender` and `fictional_age` -- a woman shows the
+  woman's body, a boy the boy's, a character under `ADULT_AGE` the younger figure
+  of its sex so a minor is never drawn with an adult body, and an unrecorded or
+  non-binary gender the documented default rather than a made-up choice), and
+  `FigureLibrary`, which **imports** a ready-made model into a slot (reading it
+  first, so a format this build cannot parse is refused with the real reason and
+  nothing is stored; storing it under the git-ignored
+  `core.paths.romance_figures_dir()`, `data/romance/figures/<slot>`, never the
+  repository) and **renders** it (the imported model normalised into the studio's
+  own space, the built-in figure when a slot holds nothing -- so the window is
+  never empty). `core/romance/body.default_parameters` now opens on one of the
+  four figures (a named preset still wins, so the Templates section can put any
+  body on), and the four join `BODY_PRESETS` as templates. `RomanceStudioService`
+  gained `figure_slots`/`figure_slot_titles`/`character_figure_slot`/
+  `figure_slot_parameters`/`figure_slot_summary`/`figure_slot_has_import`/
+  `import_figure_model`/`clear_figure_slot`/`render_figure_slot`/`figure_slot_mesh`;
+  the Body & shape window gained a **Figure library** sidebar section (four
+  buttons, one marked active, *Import a model into this figure…*, *Edit this figure
+  (resize, add parts)*, *Remove the imported model*) that **opens on the
+  character's own figure** and loads an imported model as the editable mesh; and
+  the CLI gained `body --figures`/`--figure SLOT`/`--import-figure FILE
+  [--figure-source ORIGIN]`/`--clear-figure` (with `--model-from-figure` now
+  honouring `--figure`). Nothing here downloads anything or opens a network
+  connection: a DAZ or MakeHuman model is the user's own file, and the program only
+  reads it. `tests/test_romance_figures.py` (new, 30 tests) pins the four slots,
+  the built-in parameters and the single connected shell, the character -> slot
+  rule (including the minor and the unrecorded-gender controls), importing (store,
+  refuse a bad file, refuse an unknown slot, refuse a missing file, clear, a file
+  that went missing, a corrupt record), the mesh/render a slot shows, the service,
+  the CLI, and the two real Tk windows. Gates: ruff clean, mypy 1205 files OK,
+  evaluation PASS (`overall` 0.9918 unchanged).

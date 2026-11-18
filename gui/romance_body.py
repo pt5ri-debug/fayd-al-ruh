@@ -82,6 +82,7 @@ class BodyStudioDialog(ThemedDialog):
         self._closed = False
 
         self._params = service.body_parameters(character_id)
+        self._figure_slot = service.character_figure_slot(character_id)
         self._view = "full"
         self._camera_azimuth = 0.0
         self._camera_elevation = 0.0
@@ -184,12 +185,20 @@ class BodyStudioDialog(ThemedDialog):
 
     def _after_build(self) -> None:
         self._sync_controls()
-        self._render_now()
+        if self.service.figure_slot_has_import(self._figure_slot):
+            # The figure in force has an imported model: load it so the window shows
+            # (and can edit) the imported body rather than the built-in one.
+            self._edit_figure_slot()
+        else:
+            self._render_now()
 
     # -- sidebar ----------------------------------------------------------
 
     def _build_sidebar(self, column: SidebarColumn) -> None:
         theme = self.theme
+
+        figures = column.add("figures", "Figure library", icon="🧑‍🤝‍🧑", open=True)
+        self._build_figures_section(figures)
 
         model = column.add("model", "Model (import & edit)", icon="🗿", open=True)
         self._build_model_section(model)
@@ -412,6 +421,61 @@ class BodyStudioDialog(ThemedDialog):
             pass
 
     # -- the imported / edited model --------------------------------------
+
+    def _build_figures_section(self, parent: tk.Frame) -> None:
+        """The four ready-made figures: woman, girl, man, boy.
+
+        The studio opens on one of these four -- chosen from the character's own
+        gender and age -- instead of a single generic figure, so there is always a
+        clear, complete body to start from. A user who has a ready-made model (a DAZ
+        3D export, a MakeHuman OBJ, or any OBJ/STL/PLY mesh) imports it into one of
+        the four slots, and that slot then shows the imported model.
+        """
+        theme = self.theme
+        tk.Label(
+            parent,
+            text=(
+                "Start from one of four complete bodies — a woman, a girl, a man, or "
+                "a boy. The one matching the character is chosen for you. You can "
+                "also import a ready-made model (OBJ/STL/PLY) into any of the four."
+            ),
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=340,
+        ).pack(fill="x", pady=(0, 4))
+
+        self._figure_label = tk.Label(
+            parent,
+            text="",
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=340,
+        )
+        self._figure_label.pack(fill="x", pady=(0, 4))
+
+        row = tk.Frame(parent, bg=theme.surface)
+        row.pack(fill="x")
+        self._figure_buttons: dict[str, tk.Button] = {}
+        for slot, title, _imported in self.service.figure_slots():
+            button = self._button(row, title, _binder(self._show_figure_slot, slot))
+            self._figure_buttons[slot] = button
+
+        self._button(parent, "Import a model into this figure…", self._import_figure_model).pack(
+            fill="x", pady=(4, 1)
+        )
+        self._button(parent, "Edit this figure (resize, add parts)", self._edit_figure_slot).pack(
+            fill="x", pady=1
+        )
+        self._button(parent, "Remove the imported model", self._clear_figure_slot).pack(
+            fill="x", pady=1
+        )
+        self._refresh_figure_controls()
 
     def _build_model_section(self, parent: tk.Frame) -> None:
         """Import a ready-made human model, show it, and edit it part by part.
@@ -670,6 +734,100 @@ class BodyStudioDialog(ThemedDialog):
         self._model_label.configure(text="Showing the built figure.")
         self._set_status("Back to the built figure.")
         self._render_now()
+
+    # -- the four ready-made figures --------------------------------------
+
+    def _refresh_figure_controls(self) -> None:
+        """Show which of the four figures is in force and whether it was imported."""
+        if not hasattr(self, "_figure_label"):
+            return
+        title = dict(self.service.figure_slot_titles()).get(self._figure_slot, self._figure_slot)
+        self._figure_label.configure(text=f"Showing: {title}.")
+        for slot, button in getattr(self, "_figure_buttons", {}).items():
+            active = slot == self._figure_slot
+            try:
+                button.configure(
+                    bg=self.theme.primary if active else self.theme.surface_raised,
+                    fg=self.theme.primary_foreground if active else self.theme.foreground,
+                )
+            except tk.TclError:
+                pass
+
+    def _show_figure_slot(self, slot: str) -> None:
+        """Switch the studio to one of the four ready-made figures.
+
+        The slot's own built-in measurements become the body (so its dials read
+        right), and its **imported** model -- if it has one -- becomes the editable
+        mesh, so a figure a user imported shows the imported model immediately.
+        """
+        self._figure_slot = slot
+        base = self.service.figure_slot_parameters(slot)
+        self._params = base.with_changes(name=self._character_name() or base.name)
+        self._mesh = None
+        self._refresh_figure_controls()
+        self._sync_controls()
+        self._set_status(self.service.figure_slot_summary(slot))
+        if self.service.figure_slot_has_import(slot):
+            self._edit_figure_slot()
+        else:
+            self._model_label.configure(text="Showing the built figure.")
+            self._render_now()
+
+    def _import_figure_model(self) -> None:
+        """Import a ready-made model (OBJ/STL/PLY) into the figure in force."""
+        from tkinter import filedialog
+
+        path = filedialog.askopenfilename(
+            parent=self.window,
+            title="Import a ready-made human model into this figure",
+            filetypes=[
+                ("Human models", "*.obj *.stl *.ply"),
+                ("Wavefront OBJ", "*.obj"),
+                ("STL", "*.stl"),
+                ("PLY", "*.ply"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        slot = self._figure_slot
+
+        def job() -> Any:
+            return self.service.import_figure_model(slot, path)
+
+        def finish(result: Any, error: Exception | None) -> None:
+            if error is not None:
+                self._set_status(f"Could not import the model: {error}")
+                return
+            self._refresh_figure_controls()
+            self._set_status(
+                f"Imported into the {slot} figure: {getattr(result, 'filename', '')}."
+            )
+            # Load the imported model as the editable mesh, so the user can reshape
+            # it at once (and the preview shows the imported figure, not the built one).
+            self._edit_figure_slot()
+
+        self._run_background("Importing the model…", job, finish)
+
+    def _clear_figure_slot(self) -> None:
+        """Forget this figure's imported model (it falls back to the built-in)."""
+        slot = self._figure_slot
+        removed = self.service.clear_figure_slot(slot)
+        self._refresh_figure_controls()
+        self._set_status(
+            f"Removed the imported model from the {slot} figure."
+            if removed
+            else f"The {slot} figure had no imported model."
+        )
+        self._render_now()
+
+    def _edit_figure_slot(self) -> None:
+        """Load this figure as an editable model, so its parts can be reshaped."""
+        slot = self._figure_slot
+        self._busy_model(
+            "Loading the figure as a model…",
+            lambda: self.service.figure_slot_mesh(slot),
+        )
 
     def _apply_part_edit(self) -> None:
         if self._mesh is None:
