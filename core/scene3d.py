@@ -505,6 +505,51 @@ class Mesh:
             tuple(colors) if has_colors else (),
         )
 
+    def largest_shell(self) -> Mesh:
+        """A copy keeping only the **largest connected piece** of the mesh.
+
+        A sculpted body is one fused surface, but a very small feature (a nail on a
+        fingertip) can fall below the sampling grid and be polygonized as a few
+        stray triangles detached from the body. Those specks read as debris, so the
+        figure keeps the single connected shell that is the body and drops the rest.
+        Connectivity is by shared vertices, found with a union-find over the faces.
+        """
+        if not self.faces:
+            return self
+        parent = list(range(len(self.vertices)))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        for face in self.faces:
+            root = find(face[0])
+            for index in face[1:]:
+                other = find(index)
+                if root != other:
+                    parent[root] = other
+                    root = find(root)
+        sizes: dict[int, int] = {}
+        for index in range(len(self.vertices)):
+            root = find(index)
+            sizes[root] = sizes.get(root, 0) + 1
+        if len(sizes) <= 1:
+            return self
+        keep_root = max(sizes, key=lambda root: sizes[root])
+        keep_faces = tuple(face for face in self.faces if find(face[0]) == keep_root)
+        used = sorted({index for face in keep_faces for index in face})
+        remap = {old: new for new, old in enumerate(used)}
+        vertices = tuple(self.vertices[index] for index in used)
+        colors = (
+            tuple(self.vertex_colors[index] for index in used)
+            if self.vertex_colors
+            else ()
+        )
+        faces = tuple(tuple(remap[index] for index in face) for face in keep_faces)
+        return Mesh(self.name, vertices, faces, (), colors)
+
     def subdivide(self, levels: int = 1) -> Mesh:
         """Smooth the mesh with ``levels`` passes of Catmull-Clark subdivision.
 

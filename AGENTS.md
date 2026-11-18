@@ -7973,3 +7973,36 @@ regression monitor each can refuse a change.
   wall-clock timeout rather than a fixed number of `update` rounds, which a busy
   runner can spend seconds inside. Gates: ruff clean, mypy 1200 files OK,
   evaluation PASS (`overall` 0.9918 unchanged).
+
+- Phase 69 — **the body is one fused, smooth skin, not a pile of pieces**. The
+  reported defect: a viewer of an avatar saw "separate pieces far apart", not a
+  human body. The figure had been assembled from separate primitives (a torso
+  cylinder, two arm tubes, two leg tubes, a head, a neck, hands, feet) and stitched
+  afterwards with subdivision, so it read as a **doll** with visible gaps where a
+  shoulder ring only *touched* an arm ring. `core/scene3d_sculpt.py` (new) is the
+  fix: a small **implicit-surface (SDF) sculptor**. Every part is a smooth field
+  (an ellipsoid, a tapered capsule, a rounded box) and the parts are combined with
+  a **polynomial smooth-minimum** (`_smooth_min`/`_smooth_max`, so a part can also
+  be *carved* out), which **fuses** them where they meet -- the shoulder blends into
+  the arm, the neck into the chest, the thigh into the hip, with no seam and no gap.
+  The field's zero level set is polygonized **once** by **surface nets**
+  (`_surface_nets`) into a single closed mesh, evaluated only inside each
+  primitive's own bounding box so a full body builds in well under a second. The
+  fused surface carries a **per-vertex colour** from the nearest part
+  (`_vertex_colours`, vectorized), so one skin still shows the lips, irises, nails,
+  areolae, and the genital region. `core/scene3d_figures.py`'s `_body_parts` now
+  emits the body as *blobs* top-to-bottom (torso chain, shoulders, bust, neck,
+  head, jaw, cheeks, ears, nose, lips, eyes, brows, arms, hands, fingers, legs,
+  feet, toes, plus the areolae and genitalia) rather than as stitched rings, and
+  `build_figure_mesh` calls the sculptor. A **`subdivisions` dial** (0/1/2) maps to
+  the grid spacing (`_DETAIL_SPACING`), `DEFAULT_CELL` is `0.010`, and
+  `Mesh.largest_shell()` (new in `core/scene3d.py`, a union-find over the faces)
+  keeps only the one connected piece so a sub-grid speck (a nail) cannot leave
+  debris. Every shipped preset is now **exactly one shell** (verified adult /
+  athletic / slim / child / feminine / masculine / curvy). `core/romance/body.py`'s
+  `_frame_head` was retargeted to where the sculptor places the head (about 0.94 of
+  the height) so the face render fills the frame. `tests/test_scene3d.py` and
+  `tests/test_romance_body_studio.py` pin the fused body (a single connected shell,
+  the smooth union, per-vertex colours, the detail dials, and the render). Gates:
+  ruff clean, mypy clean, evaluation PASS (`overall` 0.9918 unchanged),
+  `tests/test_scene3d*.py` + the romance suite pass (357 tests under `xvfb-run`).
