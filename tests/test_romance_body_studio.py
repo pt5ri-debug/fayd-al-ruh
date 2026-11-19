@@ -813,7 +813,17 @@ def test_hiding_the_intimate_dial_changes_the_mesh() -> None:
 
     shown = build_figure_mesh(set_dial(default_parameters(), "genitalia", 1.0))
     hidden = build_figure_mesh(set_dial(default_parameters(), "genitalia", 0.0))
-    assert hidden.vertex_count < shown.vertex_count
+    # The body is one fixed-topology human mesh, so hiding the detail is a real
+    # deformation of the genital region rather than a vertex being deleted: the
+    # two meshes differ, and the hidden one is smaller there.
+    assert shown.vertices != hidden.vertices
+    assert shown.vertex_count == hidden.vertex_count
+    moved = sum(
+        1
+        for before, after in zip(shown.vertices, hidden.vertices, strict=True)
+        if (before - after).length() > 1e-6
+    )
+    assert moved > 0, "the genitalia dial did not move a single vertex"
 
 
 def test_the_mesh_carries_per_vertex_colours() -> None:

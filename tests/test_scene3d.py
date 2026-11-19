@@ -304,7 +304,10 @@ def test_figure_presets_are_named_and_deterministic():
 def test_figure_mesh_and_skeleton_agree_on_the_bone_count():
     figure = build_figure()
     assert figure.skeleton is not None
-    assert len(figure.skeleton.bones) == 19
+    # The rig is the humanoid skeleton the anatomy calls for: five spine bones
+    # (hips, spine, chest, neck, head) and, per side, a shoulder, an upper arm, a
+    # forearm, a hand, a thigh, a shin, a foot and a toe -- 5 + 8 * 2 = 21.
+    assert len(figure.skeleton.bones) == 21
     assert figure.is_figure()
 
 

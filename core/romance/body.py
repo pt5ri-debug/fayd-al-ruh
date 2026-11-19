@@ -606,9 +606,10 @@ def preview_scene(
     if view == VIEW_FACE:
         _frame_head(scene, params)
     else:
-        # A tight margin so the figure fills the frame and the finer mesh is
-        # actually visible, rather than a small figure floating in a large scene.
-        scene.frame_camera(margin=1.12)
+        # A close margin so the figure fills the frame and the finer mesh is
+        # visible, but with enough room that the head and the feet are both
+        # inside it -- a cropped foot reads as a broken body.
+        scene.frame_camera(margin=1.30)
     if azimuth or elevation or zoom != 1.0:
         _orbit(scene, azimuth=azimuth, elevation=elevation, zoom=zoom)
     return scene

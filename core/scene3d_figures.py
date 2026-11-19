@@ -33,6 +33,16 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
+from core.human_body import (
+    build_body as build_human_body,
+)
+from core.human_body import (
+    build_skeleton as build_human_skeleton,
+)
+from core.human_body import (
+    dials_from_parameters,
+)
+from core.human_pack import pack_available as human_pack_available
 from core.scene3d import (
     Bone,
     Material,
@@ -145,10 +155,12 @@ class FigureParameters:
     genitalia: float = 1.0
     genital_size: float = 1.0
     genital_color: tuple[float, float, float] = (0.60, 0.40, 0.38)
-    #: How finely the sculptor samples the body's surface: 0 is coarse (a fast,
-    #: faceted body), 1 is the smooth default, 2 is very fine. Internally each
-    #: level is a grid spacing in metres -- smaller is smoother and heavier.
-    subdivisions: int = 1
+    #: Extra Catmull-Clark smoothing passes over the body: 0 is the base human
+    #: mesh exactly as the modeller authored it (already 27k triangles, and the
+    #: default), 1 doubles the density, 2 quadruples it. It is a real detail dial
+    #: for a close-up; a whole-figure preview is drawn at 0 because the authored
+    #: mesh is already smooth.
+    subdivisions: int = 0
     #: Extra Laplacian relaxation passes applied after the surface is polygonized
     #: (a cheap polish that removes the last facets). ``0`` is the raw sculpt.
     smoothing: int = 0
@@ -610,15 +622,39 @@ def _add_genitalia(
 
 
 def build_figure_mesh(params: FigureParameters) -> Mesh:
-    """Sculpt the body into one connected, closed, skinned mesh.
+    """The body: a real, artist-authored human mesh morphed by this figure's dials.
 
-    The figure stands on ``y = 0``, centred on the origin, facing ``+Z``. It is a
-    **single** mesh -- the torso, neck, head, face, arms, hands, legs, feet, and the
-    coloured details are one fused skin, so there are no separate pieces and no gaps
-    between them. It carries per-vertex colours for the skin, the lips, the irises,
-    the areolae, the nails, and the genitalia. The hair is a separate object
-    (:func:`build_hair_object`).
+    The geometry is MakeHuman's **CC0** base mesh -- 13,660 vertices with modelled
+    hands, feet, a face, eyes and teeth -- and every dial applies a real,
+    artist-authored morph target (``incr``/``decr``), so a slider moves vertices
+    the way a modeller intended. The figure stands on ``y = 0``, centred on the
+    origin, facing ``+Z``, and is one skinned skin carrying the skin, lip, iris
+    and tooth colours. The hair is a separate object (:func:`build_hair_object`).
+
+    A build without the pack (a partial install) falls back to the sculpted body,
+    so the studio still works and says so rather than failing.
     """
+    if human_pack_available():
+        body = build_human_body(
+            dials_from_parameters(params),
+            height=params.height,
+            name=params.name,
+        )
+        mesh = body.mesh
+        # The subdivision dial still means something: the base body is already a
+        # fine mesh, and a caller that asks for more detail gets it.
+        # The base body is already a fine, smooth mesh, so the detail dial only
+        # adds density when a caller asks for it (a close-up render).
+        if params.subdivisions > 0:
+            mesh = mesh.subdivide(params.subdivisions)
+        if params.smoothing > 0:
+            mesh = mesh.smoothed(iterations=params.smoothing, factor=0.30)
+        return mesh
+    return _sculpted_figure_mesh(params)
+
+
+def _sculpted_figure_mesh(params: FigureParameters) -> Mesh:
+    """The original sculpted body, kept as the fallback when the pack is absent."""
     parts = _body_parts(params)
     cell = _DETAIL_SPACING.get(params.subdivisions, DEFAULT_CELL)
     mesh = sculpt(parts, cell=cell, name=f"{params.name} body")
@@ -631,13 +667,27 @@ def build_figure_mesh(params: FigureParameters) -> Mesh:
 
 
 def build_figure_skeleton(params: FigureParameters) -> Skeleton:
-    """The bone hierarchy that matches :func:`build_figure_mesh`.
+    """The humanoid rig, placed on the body's own joint markers.
 
     Bones are named for what they are (``hips``, ``spine``, ``chest``, ``neck``,
     ``head``, ``upper_arm.L``, ``thigh.R``, ...) and ordered parents-first, so
-    forward kinematics is a single pass. Each bone's ``offset`` is expressed in
-    its parent's local frame and its ``length`` matches the mesh segment it drives.
+    forward kinematics is a single pass. When the human pack is present each bone
+    is placed from MakeHuman's own joint markers, so it sits where the anatomy
+    puts it and moves with the body; without the pack the bones are derived from
+    the same measurement dials the sculpted mesh uses.
     """
+    if human_pack_available():
+        body = build_human_body(
+            dials_from_parameters(params),
+            height=params.height,
+            name=params.name,
+        )
+        return build_human_skeleton(body)
+    return _sculpted_figure_skeleton(params)
+
+
+def _sculpted_figure_skeleton(params: FigureParameters) -> Skeleton:
+    """The original dial-driven rig, kept as the fallback when the pack is absent."""
     height = params.height
     shoulder = params.shoulder_width * 0.5 * params.overall_scale
     hip = params.hip_width * 0.28 * params.overall_scale
