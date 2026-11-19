@@ -81,8 +81,12 @@ class BodyStudioDialog(ThemedDialog):
         self._on_changed = on_changed
         self._closed = False
 
-        self._params = service.body_parameters(character_id)
+        self._params = service.character_body_parameters(character_id)
         self._figure_slot = service.character_figure_slot(character_id)
+        # The FR-CCE template this body is based on (its saved one, else the one its
+        # own sex and age select), so the window can show it and reset to it.
+        self._template_id = service.character_body_template(character_id)
+        self._light_scale = 1.0
         self._view = "full"
         self._camera_azimuth = 0.0
         self._camera_elevation = 0.0
@@ -200,15 +204,21 @@ class BodyStudioDialog(ThemedDialog):
         figures = column.add("figures", "Figure library", icon="🧑‍🤝‍🧑", open=True)
         self._build_figures_section(figures)
 
+        templates = column.add("templates", "Character templates", icon="🧬", open=True)
+        self._build_templates_section(templates)
+
         model = column.add("model", "Model (import & edit)", icon="🗿", open=True)
         self._build_model_section(model)
 
         camera = column.add("camera", "Camera (orbit)", icon="🎥", open=True)
         self._build_camera_section(camera)
 
-        templates = column.add("templates", "Templates", icon="🧍", open=True)
+        lighting = column.add("lighting", "Lighting", icon="💡", open=True)
+        self._build_lighting_section(lighting)
+
+        bodies = column.add("templates2", "Ready-made bodies", icon="🧍", open=True)
         tk.Label(
-            templates,
+            bodies,
             text="Start from a ready-made body, then adjust any measurement below.",
             bg=theme.surface,
             fg=theme.text_dim,
@@ -219,7 +229,7 @@ class BodyStudioDialog(ThemedDialog):
         ).pack(fill="x", pady=(0, 4))
         for preset_key, title in self.service.body_presets():
             self._button(
-                templates, title, _binder(self._apply_preset, preset_key),
+                bodies, title, _binder(self._apply_preset, preset_key),
             ).pack(side="top", fill="x", pady=1)
 
         build_section = column.add("build", "Body type", icon="⚧", open=True)
@@ -245,6 +255,140 @@ class BodyStudioDialog(ThemedDialog):
                 continue
             for dial in dials:
                 self._build_dial(section, dial)
+
+    def _build_templates_section(self, parent: tk.Frame) -> None:
+        """The four FR-CCE templates, and the save/load/regenerate controls.
+
+        Selecting a template rebuilds the body from that template's own default
+        geometry (the engine's :class:`CharacterTemplateManager`), so a woman, a
+        girl, a man, and a boy are each a real body at their age and sex -- not a
+        scaled copy. **Save custom preset** writes a named preset, **Load custom
+        preset** returns to one, and **Regenerate template** rebuilds from the
+        template's defaults; a character's saved body is never overwritten by a
+        regeneration.
+        """
+        theme = self.theme
+        tk.Label(
+            parent,
+            text=(
+                "The native character engine's four base templates. Choosing one "
+                "rebuilds the body from that template; Save writes a preset you can "
+                "return to."
+            ),
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=340,
+        ).pack(fill="x", pady=(0, 4))
+
+        self._template_label = tk.Label(
+            parent,
+            text="",
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=340,
+        )
+        self._template_label.pack(fill="x", pady=(0, 4))
+
+        grid = tk.Frame(parent, bg=theme.surface)
+        grid.pack(fill="x")
+        self._template_buttons: dict[str, tk.Button] = {}
+        for key, title in self.service.character_templates():
+            button = self._button(grid, title, _binder(self._select_template, key))
+            button.pack(side="top", fill="x", pady=1)
+            self._template_buttons[key] = button
+
+        self._button(
+            parent, "Regenerate from template", self._regenerate_template
+        ).pack(fill="x", pady=(4, 1))
+        self._button(parent, "Save custom preset…", self._save_preset).pack(fill="x", pady=1)
+        self._button(parent, "Load custom preset…", self._load_preset).pack(fill="x", pady=1)
+        self._button(
+            parent, "Save this character's body", self._save_character_body, variant="primary"
+        ).pack(fill="x", pady=(4, 1))
+        self._button(
+            parent, "Restore the saved body", self._restore_character_body
+        ).pack(fill="x", pady=1)
+        self._refresh_template_controls()
+
+    def _build_lighting_section(self, parent: tk.Frame) -> None:
+        """A single lighting control: the strength of the studio lights.
+
+        The engine renders with the project's own three-point studio lighting; this
+        scales every light at once, so the same body can be viewed brightly or
+        moodily. It changes only the light intensity, never the figure.
+        """
+        theme = self.theme
+        tk.Label(
+            parent,
+            text="Light the body. This scales the studio's own three-point lighting.",
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=340,
+        ).pack(fill="x", pady=(0, 4))
+
+        self._light_var = tk.DoubleVar(value=self._light_scale)
+        holder = tk.Frame(parent, bg=theme.surface)
+        holder.pack(fill="x", pady=(4, 0))
+        head = tk.Frame(holder, bg=theme.surface)
+        head.pack(fill="x")
+        tk.Label(
+            head, text="Light intensity", bg=theme.surface, fg=theme.foreground,
+            font=self._type.font("2xs", weight="bold"), anchor="w",
+        ).pack(side="left")
+        self._light_label = tk.Label(
+            head, text="", bg=theme.surface, fg=theme.text_dim,
+            font=self._type.font("2xs"), anchor="e",
+        )
+        self._light_label.pack(side="right")
+        scale = tk.Scale(
+            holder, from_=0.2, to=2.5, resolution=0.05, orient="horizontal",
+            variable=self._light_var, showvalue=False, highlightthickness=0, borderwidth=0,
+            troughcolor=theme.surface_raised, bg=theme.surface,
+            activebackground=theme.primary, length=320,
+        )
+        scale.pack(fill="x", pady=(1, 0))
+        self._light_var.trace_add("write", _light_trace(self._on_light))
+        self._button(parent, "Reset the lighting", self._reset_lighting).pack(
+            fill="x", pady=(6, 0)
+        )
+        self._sync_light_label()
+
+    def _on_light(self) -> None:
+        if self._syncing:
+            return
+        try:
+            self._light_scale = float(self._light_var.get())
+        except (tk.TclError, ValueError):
+            return
+        self._sync_light_label()
+        self._schedule_render()
+
+    def _sync_light_label(self) -> None:
+        try:
+            self._light_label.configure(text=f"{self._light_scale:.2f}")
+        except (tk.TclError, AttributeError):
+            pass
+
+    def _reset_lighting(self) -> None:
+        self._syncing = True
+        try:
+            self._light_var.set(1.0)
+        except tk.TclError:
+            pass
+        finally:
+            self._syncing = False
+        self._light_scale = 1.0
+        self._sync_light_label()
+        self._render_now()
 
     def _build_camera_section(self, parent: tk.Frame) -> None:
         """The camera tool: one-click angles, free orbit sliders, and drag-to-look.
@@ -1239,6 +1383,134 @@ class BodyStudioDialog(ThemedDialog):
         self._view = key if key in ("full", "face") else "full"
         self._render_now()
 
+    # -- FR-CCE templates and persistence ---------------------------------
+
+    def _refresh_template_controls(self) -> None:
+        """Show which of the four templates the body is on, and mark its button."""
+        if not hasattr(self, "_template_label"):
+            return
+        try:
+            titles = dict(self.service.character_templates())
+        except Exception:
+            titles = {}
+        title = titles.get(self._template_id, self._template_id)
+        config = self.service.character_body_config(self.character_id)
+        saved = " · saved body" if config is not None else " · not saved yet"
+        try:
+            self._template_label.configure(text=f"Template: {title}{saved}")
+        except tk.TclError:
+            pass
+        for key, button in getattr(self, "_template_buttons", {}).items():
+            try:
+                button.configure(relief="sunken" if key == self._template_id else "raised")
+            except tk.TclError:
+                pass
+
+    def _select_template(self, key: str) -> None:
+        """Open the body on one of the four templates (a fresh body from it)."""
+        try:
+            self._params = self.service.set_character_body_template(self.character_id, key)
+        except KeyError as error:
+            self._set_status(str(error))
+            return
+        self._template_id = key
+        self._sync_controls()
+        self._refresh_template_controls()
+        self._set_status(f"Template: {dict(self.service.character_templates()).get(key, key)}.")
+        self._render_now()
+
+    def _regenerate_template(self) -> None:
+        """Rebuild the body from its template's defaults (the saved body kept)."""
+        try:
+            self._params = self.service.set_character_body_template(
+                self.character_id, self._template_id
+            )
+        except KeyError as error:
+            self._set_status(str(error))
+            return
+        self._sync_controls()
+        self._set_status("Regenerated from the template's defaults.")
+        self._render_now()
+
+    def _save_character_body(self) -> None:
+        """Save this character's own body (its template and every dial)."""
+        try:
+            config = self.service.save_character_body(self.character_id, self._params)
+        except Exception as error:
+            self._set_status(f"Could not save the body: {error}")
+            return
+        self._refresh_template_controls()
+        self._notify()
+        self._set_status(
+            f"Saved {getattr(config, 'character_id', self.character_id)}'s body "
+            f"({getattr(config, 'template_id', self._template_id)})."
+        )
+
+    def _restore_character_body(self) -> None:
+        """Restore the character's saved body (its last save), if there is one."""
+        config = self.service.character_body_config(self.character_id)
+        if config is None:
+            self._set_status("No saved body for this character yet — press Save first.")
+            return
+        saved = self.service.character_body_parameters(self.character_id)
+        if saved is None:
+            self._set_status("The saved body could not be read.")
+            return
+        self._params = saved
+        self._template_id = config.template_id
+        self._sync_controls()
+        self._refresh_template_controls()
+        self._set_status("Restored the saved body.")
+        self._render_now()
+
+    def _save_preset(self) -> None:
+        """Save the current body as a named preset the user can return to."""
+        from tkinter import simpledialog
+
+        name = simpledialog.askstring(
+            "Save custom preset", "A name for this body preset:", parent=self.window
+        )
+        if not name or not name.strip():
+            return
+        try:
+            preset = self.service.save_body_preset_for(
+                name.strip(), name.strip(), self._template_id, self._params
+            )
+        except Exception as error:
+            self._set_status(f"Could not save the preset: {error}")
+            return
+        self._set_status(f"Saved preset: {getattr(preset, 'title', name)}.")
+
+    def _load_preset(self) -> None:
+        """Apply a saved body preset to the current body."""
+        presets = self.service.body_preset_names()
+        if not presets:
+            self._set_status("No saved presets yet — use Save custom preset first.")
+            return
+        from gui.choice_dialog import ask_choice
+
+        labels = dict(presets)
+        chosen = ask_choice(
+            self.window,
+            title="Load custom preset",
+            prompt="Choose a saved body preset:",
+            values=list(labels.values()),
+            theme=self.theme,
+        )
+        if not chosen:
+            return
+        preset_id = next((pid for pid, title in labels.items() if title == chosen), "")
+        if not preset_id:
+            return
+        loaded = self.service.apply_body_preset_instance(self._params, preset_id)
+        if loaded is None:
+            self._set_status("That preset could not be read.")
+            return
+        self._params = loaded
+        self._sync_controls()
+        self._set_status(f"Preset applied: {chosen}.")
+        self._render_now()
+
     # -- rendering --------------------------------------------------------
 
     def _cancel_pending_render(self) -> None:
@@ -1277,6 +1549,7 @@ class BodyStudioDialog(ThemedDialog):
         azimuth = self._camera_azimuth
         elevation = self._camera_elevation
         zoom = self._camera_zoom
+        light_scale = self._light_scale
 
         mesh = self._mesh
 
@@ -1289,6 +1562,7 @@ class BodyStudioDialog(ThemedDialog):
                 azimuth=azimuth,
                 elevation=elevation,
                 zoom=zoom,
+                light_scale=light_scale,
                 mesh=mesh,
             )
 
@@ -1302,6 +1576,7 @@ class BodyStudioDialog(ThemedDialog):
         self._show_preview()
         self._name_label.configure(text=self._character_name() or "Body")
         self._summary_label.configure(text=self.service.body_summary(self._params))
+        self._refresh_template_controls()
         self._set_status(
             f"Rendered {_PREVIEW_WIDTH}x{_PREVIEW_HEIGHT} ({len(self._preview_png)} bytes)."
         )
@@ -1470,6 +1745,15 @@ def _colour_trace(
 
     def callback(*_args: object) -> None:
         handler(key, var)
+
+    return callback
+
+
+def _light_trace(handler: Callable[[], None]) -> Callable[..., None]:
+    """A ``trace_add`` callback for the lighting slider (a zero-argument handler)."""
+
+    def callback(*_args: object) -> None:
+        handler()
 
     return callback
 

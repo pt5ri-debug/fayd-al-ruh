@@ -101,6 +101,24 @@ class FigureParameters:
     leg_thickness: float = 1.0
     hand_size: float = 1.0
     foot_size: float = 1.0
+    # -- fine measurements (FR-CCE): each is a multiplier whose 1.0 default
+    #    leaves the original geometry bit-for-bit unchanged, so an existing
+    #    caller and a saved scene are unaffected. They give the character engine
+    #    an independent, per-part control for every length and thickness the task
+    #    requires, on top of the coarse dials above.
+    overall_scale: float = 1.0
+    head_depth: float = 1.0
+    neck_length: float = 1.0
+    arm_length: float = 1.0
+    forearm_length: float = 1.0
+    hand_length: float = 1.0
+    hand_width: float = 1.0
+    thigh_thickness: float = 1.0
+    thigh_length: float = 1.0
+    calf_thickness: float = 1.0
+    lower_leg_length: float = 1.0
+    foot_length: float = 1.0
+    foot_width: float = 1.0
     # -- head, face and hair --------------------------------------------
     face_length: float = 1.0
     face_width: float = 1.0
@@ -169,6 +187,19 @@ class FigureParameters:
             "ear_size",
             "areola",
             "genital_size",
+            "overall_scale",
+            "head_depth",
+            "neck_length",
+            "arm_length",
+            "forearm_length",
+            "hand_length",
+            "hand_width",
+            "thigh_thickness",
+            "thigh_length",
+            "calf_thickness",
+            "lower_leg_length",
+            "foot_length",
+            "foot_width",
         ):
             value = getattr(self, field_name)
             if value <= 0.0:
@@ -238,11 +269,15 @@ def _body_parts(params: FigureParameters) -> list[_Blob]:
     s = H / 1.75  # scales the metre dials (shoulder width, etc.) to this height
     style = _proportion_scale(params)
     limb = params.limb_thickness * style["limb"]
+    # ``overall_scale`` is the general-body-shape dial: a single multiplier on every
+    # girth, so a user can make a whole figure heavier or lighter without touching a
+    # length. Its 1.0 default leaves every figure exactly as it was.
+    girth = params.overall_scale
 
-    shoulder = params.shoulder_width * style["shoulder"] * s
-    hips = params.hip_width * style["hip"] * (1.0 + 0.35 * params.hip_shape) * s
-    waist = params.waist * style["waist"] * (1.0 - 0.28 * params.waist_shape) * s
-    chest_depth = params.chest_depth * (0.9 + 0.25 * params.muscle) * s
+    shoulder = params.shoulder_width * style["shoulder"] * s * girth
+    hips = params.hip_width * style["hip"] * (1.0 + 0.35 * params.hip_shape) * s * girth
+    waist = params.waist * style["waist"] * (1.0 - 0.28 * params.waist_shape) * s * girth
+    chest_depth = params.chest_depth * (0.9 + 0.25 * params.muscle) * s * girth
     belly = params.belly
 
     parts: list[_Blob] = []
@@ -315,8 +350,12 @@ def _body_parts(params: FigureParameters) -> list[_Blob]:
 
     # -- neck and head ---------------------------------------------------
     neck_radius = 0.034 * H * params.neck_thickness
-    neck_y = shoulder_y + 0.025 * H
-    head_base = 0.875 * H
+    # A longer neck lifts the head with it, so the measurement is visible: the
+    # head's base shifts by however much the neck grew, rather than the neck
+    # stretching up inside a fixed head.
+    neck_lift = (params.neck_length - 1.0) * 0.025 * H
+    neck_y = shoulder_y + 0.025 * H * params.neck_length
+    head_base = 0.875 * H + neck_lift
     parts.append(
         capsule((0.0, shoulder_y + 0.005 * H, -0.004 * s), (0.0, neck_y, -0.008 * s),
                 neck_radius * 1.15, neck_radius, skin, blend=0.04)
@@ -325,7 +364,7 @@ def _body_parts(params: FigureParameters) -> list[_Blob]:
     # is tall: the classic proportions, so the head reads as a head.
     head_length = 0.125 * H * params.head_scale * params.face_length
     head_width = head_length * 0.36 * params.face_width
-    head_depth = head_length * 0.42 * params.face_length
+    head_depth = head_length * 0.42 * params.face_length * params.head_depth
     head_centre = head_base + head_length * 0.5
     parts.append(
         ellipsoid((0.0, head_centre, 0.006 * s),
@@ -400,9 +439,9 @@ def _body_parts(params: FigureParameters) -> list[_Blob]:
     )
 
     # -- arms: kept clear of the torso so the armpit stays open --------------
-    upper_arm_len = 0.170 * H
-    fore_arm_len = 0.145 * H
-    arm_radius = 0.026 * H * limb * params.arm_thickness
+    upper_arm_len = 0.170 * H * params.arm_length
+    fore_arm_len = 0.145 * H * params.forearm_length
+    arm_radius = 0.026 * H * limb * params.arm_thickness * girth
     arm_centre = shoulder * 0.5 * 0.96
     for side in (-1.0, 1.0):
         top = Vec3(side * arm_centre, shoulder_y - 0.010 * H, 0.0)
@@ -415,16 +454,18 @@ def _body_parts(params: FigureParameters) -> list[_Blob]:
     # -- legs: the feet sit on the ground and the legs stay clear of each other --
     # Hip joint at the hip line, knee and ankle a natural distance below it, so the
     # ankle lands about 0.04 of the height above the ground and the feet rest on it.
-    thigh_len = 0.240 * H
-    shin_len = 0.200 * H
-    leg_radius = 0.040 * H * limb * params.leg_thickness
+    thigh_len = 0.240 * H * params.thigh_length
+    shin_len = 0.200 * H * params.lower_leg_length
+    leg_radius = 0.040 * H * limb * params.leg_thickness * girth
     for side in (-1.0, 1.0):
         hip_x = side * hips * 0.5 * 0.62
         hip_top = Vec3(hip_x, hip_y, 0.0)
         knee = Vec3(hip_x, hip_top.y - thigh_len, 0.006 * s)
         ankle = Vec3(hip_x, knee.y - shin_len, 0.0)
-        parts.append(capsule(hip_top, knee, leg_radius * 1.10, leg_radius * 0.56, skin, blend=0.055))
-        parts.append(capsule(knee, ankle, leg_radius * 0.56, leg_radius * 0.38, skin, blend=0.035))
+        parts.append(capsule(hip_top, knee, leg_radius * 1.10 * params.thigh_thickness,
+                             leg_radius * 0.56 * params.thigh_thickness, skin, blend=0.055))
+        parts.append(capsule(knee, ankle, leg_radius * 0.56 * params.calf_thickness,
+                             leg_radius * 0.38 * params.calf_thickness, skin, blend=0.035))
         _add_foot(parts, params, skin, ankle, leg_radius, side, s)
 
     _add_genitalia(parts, params, skin, hip_y, hips, s)
@@ -443,12 +484,13 @@ def _add_hand(
     """A palm, four fingers, and a thumb, each tipped with a nail."""
     size = params.hand_size * s
     hand_r = arm_radius * 0.85 * size
+    hand_r *= params.hand_width
     palm = Vec3(wrist.x, wrist.y - hand_r * 1.15, wrist.z + 0.004 * s)
     parts.append(
         ellipsoid((palm.x, palm.y, palm.z), (hand_r * 0.85, hand_r * 1.05, hand_r * 0.40),
                   skin, blend=0.018)
     )
-    finger_len = hand_r * 1.0
+    finger_len = hand_r * 1.0 * params.hand_length
     finger_r = hand_r * 0.17
     for index in range(4):
         offset = (index - 1.5) * hand_r * 0.44
@@ -486,8 +528,8 @@ def _add_foot(
     fraction of the height (about ``0.15``), so it reads as a foot rather than a stub.
     """
     size = params.foot_size * s
-    width = leg_radius * 0.95 * size
-    length = 0.105 * params.height * size
+    width = leg_radius * 0.95 * size * params.foot_width
+    length = 0.105 * params.height * size * params.foot_length
     sole_r = width * 0.58
     parts.append(
         capsule((ankle.x, ankle.y, ankle.z),
@@ -597,15 +639,26 @@ def build_figure_skeleton(params: FigureParameters) -> Skeleton:
     its parent's local frame and its ``length`` matches the mesh segment it drives.
     """
     height = params.height
-    shoulder = params.shoulder_width * 0.5
-    hip = params.hip_width * 0.28
+    shoulder = params.shoulder_width * 0.5 * params.overall_scale
+    hip = params.hip_width * 0.28 * params.overall_scale
+    # The bones follow the same measurement dials the mesh does, so changing a
+    # proportion never leaves the rig behind the body it deforms. A bone's
+    # ``offset`` is expressed in its parent's local frame; ``length`` is what
+    # skinning measures a vertex's distance to, so it tracks the matching mesh
+    # segment (thigh, shin, arm, neck).
+    neck_len = height * 0.035 * params.neck_length
+    upper_arm_len = height * 0.155 * params.arm_length
+    fore_arm_len = height * 0.150 * params.forearm_length
+    hand_len = height * 0.055 * params.hand_length
+    thigh_len = height * 0.24 * params.thigh_length
+    shin_len = height * 0.235 * params.lower_leg_length
 
     bones: list[Bone] = [
         Bone("hips", None, Vec3(0, height * 0.50, 0), Vec3(), Vec3(), height * 0.10),
         Bone("spine", "hips", Vec3(0, height * 0.10, 0), Vec3(), Vec3(), height * 0.10),
         Bone("chest", "spine", Vec3(0, height * 0.10, 0), Vec3(), Vec3(), height * 0.11),
-        Bone("neck", "chest", Vec3(0, height * 0.11, 0), Vec3(), Vec3(), height * 0.035),
-        Bone("head", "neck", Vec3(0, height * 0.035, 0), Vec3(), Vec3(), height * 0.14),
+        Bone("neck", "chest", Vec3(0, height * 0.11, 0), Vec3(), Vec3(), neck_len),
+        Bone("head", "neck", Vec3(0, neck_len, 0), Vec3(), Vec3(), height * 0.14),
     ]
     for side, suffix in ((1.0, "L"), (-1.0, "R")):
         bones.extend(
@@ -624,23 +677,23 @@ def build_figure_skeleton(params: FigureParameters) -> Skeleton:
                     Vec3(side * shoulder * 0.45, 0, 0),
                     Vec3(),
                     Vec3(),
-                    height * 0.155,
+                    upper_arm_len,
                 ),
                 Bone(
                     f"forearm.{suffix}",
                     f"upper_arm.{suffix}",
-                    Vec3(0, -height * 0.155, 0),
+                    Vec3(0, -upper_arm_len, 0),
                     Vec3(),
                     Vec3(),
-                    height * 0.150,
+                    fore_arm_len,
                 ),
                 Bone(
                     f"hand.{suffix}",
                     f"forearm.{suffix}",
-                    Vec3(0, -height * 0.150, 0),
+                    Vec3(0, -fore_arm_len, 0),
                     Vec3(),
                     Vec3(),
-                    height * 0.055,
+                    hand_len,
                 ),
                 Bone(
                     f"thigh.{suffix}",
@@ -648,20 +701,20 @@ def build_figure_skeleton(params: FigureParameters) -> Skeleton:
                     Vec3(side * hip, 0, 0),
                     Vec3(),
                     Vec3(),
-                    height * 0.24,
+                    thigh_len,
                 ),
                 Bone(
                     f"shin.{suffix}",
                     f"thigh.{suffix}",
-                    Vec3(0, -height * 0.24, 0),
+                    Vec3(0, -thigh_len, 0),
                     Vec3(),
                     Vec3(),
-                    height * 0.235,
+                    shin_len,
                 ),
                 Bone(
                     f"foot.{suffix}",
                     f"shin.{suffix}",
-                    Vec3(0, -height * 0.235, 0),
+                    Vec3(0, -shin_len, 0),
                     Vec3(),
                     Vec3(),
                     height * 0.06,
