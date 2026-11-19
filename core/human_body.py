@@ -295,10 +295,6 @@ REGIONAL_SCALES: dict[str, RegionScale] = {
     "waist_shape": RegionScale(("joint-spine-3",), count=600, axes=(True, False, True)),
     "hip_shape": RegionScale(("joint-pelvis",), count=700, axes=(True, False, True)),
     "shoulder_slope": RegionScale(("joint-l-shoulder", "joint-r-shoulder"), count=420),
-    # The crotch: between the two upper legs, which is where the detail sits.
-    "areola": RegionScale(("joint-spine-4",), count=120, axes=(False, False, True)),
-    "genitalia": RegionScale(("joint-l-upper-leg", "joint-r-upper-leg"), count=220),
-    "genital_size": RegionScale(("joint-l-upper-leg", "joint-r-upper-leg"), count=220),
 }
 
 
@@ -440,8 +436,6 @@ def dials_from_parameters(parameters: object) -> dict[str, float]:
         "face_width": around(get("face_width", 1.0), 1.0, 0.25),
         "eye_spacing": around(get("eye_spacing", 1.0), 1.0, 0.35),
         "brow_ridge": NEUTRAL + 0.5 * _unit(get("brow_ridge", 0.0)),
-        "areola": NEUTRAL + 0.5 * _unit(get("areola", 0.0)),
-        "genital_size": NEUTRAL + 0.5 * _unit(get("genital_size", 0.0) - 1.0),
         "waist_shape": NEUTRAL + 0.5 * _unit(get("waist_shape", 0.0)),
         "hip_shape": NEUTRAL + 0.5 * _unit(get("hip_shape", 0.0)),
         "shoulder_slope": NEUTRAL + 0.5 * _unit(get("shoulder_slope", 0.0)),
@@ -458,10 +452,6 @@ def dials_from_parameters(parameters: object) -> dict[str, float]:
         "lips": around(get("lips", 1.0), 1.0, 0.45),
         "ear_size": around(get("ear_size", 1.0), 1.0, 0.45),
     }
-    # The intimate switch: the base body is the "present" state, so 0 flattens the
-    # region and 1 leaves it exactly as the modeller built it.
-    genitalia = _unit(get("genitalia", 1.0))
-    dials["genitalia"] = NEUTRAL + 0.5 * (genitalia - 1.0)
     # A named proportion nudges the whole figure the way its name implies, so the
     # Templates section still means what it says.
     style = str(getattr(parameters, "proportion", "average") or "average")

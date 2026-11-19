@@ -120,3 +120,42 @@ configurations, save/load persistence and migration, template regeneration,
 rig compatibility, the materials, the render, offline operation, and that the
 generator is a thin layer over the project's own figure builder.
 `tests/test_romance_body_studio.py` adds the service and window wiring.
+
+## Anatomical detail (areolae, nipples, the genital set)
+
+`core/human_anatomy.py` generates the body's own details as **real geometry** and
+appends them to the base mesh as their own closed shells, carrying per-vertex
+colours so the whole body is still one skinned mesh (the detail follows a pose
+instead of sliding off the skin).
+
+- `BreastDetail` / `GenitalDetail` are the validated settings; `normalised()`
+  clamps a hand-edited value.
+- `breast_geometry` builds an areola and a nipple per side, placed on the surface
+  the *morph actually produced* (the bust band's own depth, not a constant), so a
+  larger bust carries its areolae forward with it.
+- `genital_geometry` builds the set for the body's own sex (labia for a feminine
+  body, a scrotum and tapered shaft for a masculine one).
+- `merge_anatomy` appends both to the body; the body is found by **topology**
+  (the largest connected shell), never by position in the vertex list.
+
+The controls, in the window's **Intimate detail** group:
+
+| dial | what it does |
+| --- | --- |
+| `genitalia` | shows the set (adults only); `0` hides it |
+| `genital_size` / `genital_length` / `genital_fullness` | the set's overall scale, forward extent, and fullness |
+| `genital_direction` | the set's tilt in the vertical plane (degrees) |
+| `areola` / `areola_raise` | the areola's size, and how far it stands proud |
+| `nipple_size` / `nipple_length` | the nipple's radius (relative to the areola) and protrusion |
+| `nipple_direction` / `nipple_spacing` | the protrusion's tilt, and the two areolae's separation |
+| `nipple_color` / `nipple_tip_color` / `genital_color` | the areola's, the nipple's, and the set's own colours |
+
+**Age safety is structural**: `FigureParameters.minor` is an explicit, auditable
+flag (not inferred from height -- a short adult is still an adult), the `girl`,
+`boy`, and `child` templates set it, and `build_figure_mesh` generates **no**
+anatomical detail for a minor. A **neutral** build carries the areolae but no
+genital set, because the project does not presume one.
+
+Every control changes real geometry: the tests measure the vertex displacement of
+each dial and never accept a stored slider value as evidence. The intimate dials
+also leave the body itself untouched (they move only the generated detail).

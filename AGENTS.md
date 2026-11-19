@@ -8196,3 +8196,51 @@ regression monitor each can refuse a change.
   wiring. Docs: `docs/romance_companion/CHARACTER_GENERATION_ENGINE.md`. Gates:
   ruff clean, mypy 1207 files OK, evaluation PASS (`overall` 0.9918 unchanged),
   pytest green under `xvfb-run`.
+
+- Phase 73 — **the body's anatomical detail is real geometry, and every part of it
+  is a control**. A viewer of an avatar asked for the body's own details -- areolae,
+  nipples, and the genital set -- with controls for their **size, direction, and
+  colour**, and the previous build had only a single "areola" dial and a "genital
+  size" dial that merely scaled a *region* of the base skin, so nothing was really
+  modelled. `core/human_anatomy.py` (new) is the engine: `BreastDetail` and
+  `GenitalDetail` are the validated settings (each a bounded `0..1`-style dial,
+  `normalised()` clamps a hand-edited value), `breast_geometry` builds two real
+  shells (an areola and a nipple per side, placed on the **surface the morph
+  actually produced** -- found from the bust band's own z-span, not a constant, so
+  a larger bust carries its areolae forward with it), `genital_geometry` builds the
+  set (labia for a feminine body, a scrotum and tapered shaft for a masculine one),
+  and `merge_anatomy` appends them to the base mesh with **per-vertex colours**, so
+  one skinned mesh carries the skin, the lips, the irises, the areolae, the nipples,
+  and the genitals and every one follows a pose instead of sliding off. The body is
+  identified by **topology** (`_body_vertex_indices`, the largest connected shell)
+  rather than by position in the vertex list, so a mesh that already carries detail
+  can never place a new areola on the previous one. `FigureParameters` gained
+  `nipple_size`, `nipple_length`, `nipple_direction`, `nipple_spacing`,
+  `areola_raise`, `nipple_tip_color` (the nipple's own colour, kept apart from the
+  areola's), `genital_length`, `genital_fullness`, `genital_direction`, and a
+  `minor` flag; `build_figure_mesh` calls `merge_anatomy` through `_breast_detail`,
+  which returns `None` for a minor -- **age safety is structural**, so `girl`,
+  `boy`, and `child` are the base mesh exactly (13,660 vertices, no detail) and a
+  *short adult* is still an adult (the flag, not the height, decides). A neutral
+  build carries the areolae but no genital set, so nothing is presumed. The obsolete
+  region-scale entries for these dials were removed from `core/human_body.py`, so a
+  dial moves the **generated detail** and never the body it sits on (pinned: every
+  intimate dial leaves the first 13,660 vertices byte-identical). `core/romance/body.py`'s
+  dial catalogue gained the eleven intimate controls plus the three colour dials, in
+  their own **Intimate detail** group, so the Body & shape window (which builds every
+  dial generically) shows them with no per-control code; the CLI lists them
+  (`python -m cli romance body --dials`) and sets them (`--set nipple_size=0.55`).
+  Persistence is unchanged and **migrating**: a configuration written before these
+  dials existed loads with their reference defaults. `tests/test_human_anatomy.py`
+  (new, 44 tests) pins the generated detail (a real vertex gain, every vertex used,
+  the detail appended after an untouched body), the four templates (adult detail,
+  **no** detail on a minor, the explicit flag), **every control moving vertices**
+  (never a stored number), the detail controls leaving the body alone, the colours
+  reaching the detail vertices, the areolae on the chest and following a bust dial,
+  the genital set on the pelvis, mirror symmetry, the dial bounds, save/load and
+  migration, rig binding and posing, determinism, and offline operation (a socket is
+  refused); `tests/test_romance_body_studio.py` gained the intimate controls and a
+  window test, and its dial assertions were widened to the new ranges.
+  `tests/test_romance_figures.py`'s one-shell rule now allows the detail shells.
+  Gates: ruff clean, mypy 1211 files OK, evaluation PASS (`overall` 0.9918
+  unchanged), the affected suites green.
