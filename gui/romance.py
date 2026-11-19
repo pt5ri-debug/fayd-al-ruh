@@ -698,6 +698,7 @@ class RomanceStudioService:
         azimuth: float = 0.0,
         elevation: float = 0.0,
         zoom: float = 1.0,
+        light_scale: float = 1.0,
         mesh: Any = None,
     ) -> bytes:
         """Render the body and return the PNG bytes (the window shows them).
@@ -705,22 +706,46 @@ class RomanceStudioService:
         ``azimuth``/``elevation``/``zoom`` orbit the camera around the figure, so
         the window's camera tool can show the same body from any direction. When
         ``mesh`` is given (an imported or edited model) it *is* the body shown.
+        ``light_scale`` scales the studio's own three-point lighting.
         """
         from core.romance.body import (
             PREVIEW_HEIGHT,
             PREVIEW_WIDTH,
-            render_preview,
+            preview_scene,
         )
 
-        return render_preview(
+        if mesh is not None:
+            # An imported/edited mesh is shown as it is (the lighting still applies).
+            from core.scene3d_render import render_scene
+
+            scene = preview_scene(
+                params,
+                view=view,
+                azimuth=float(azimuth),
+                elevation=float(elevation),
+                zoom=float(zoom),
+                body_mesh=mesh,
+            )
+            if light_scale != 1.0:
+                from dataclasses import replace
+
+                scene.lights = [
+                    replace(light, intensity=light.intensity * float(light_scale))
+                    for light in scene.lights
+                ]
+            buffer, _stats = render_scene(
+                scene, width=int(width or PREVIEW_WIDTH), height=int(height or PREVIEW_HEIGHT)
+            )
+            return buffer.to_png()
+        return self.render_character_body(
             params,
             view=view,
-            width=int(width or PREVIEW_WIDTH),
-            height=int(height or PREVIEW_HEIGHT),
-            azimuth=float(azimuth),
-            elevation=float(elevation),
-            zoom=float(zoom),
-            body_mesh=mesh,
+            width=width,
+            height=height,
+            azimuth=azimuth,
+            elevation=elevation,
+            zoom=zoom,
+            light_scale=light_scale,
         )
 
     # -- an imported or edited model (the body is a mesh, not only the dials) --
@@ -927,6 +952,13 @@ class RomanceStudioService:
         return self.avatar_manager().set_from_bytes(character_id, data, source="body studio")
 
     # -- the FR-CCE character engine (Body & shape) -----------------------
+    #
+    # The window edits a character's body *parameters* (its dials), so these
+    # helpers work in parameter space: they read and write a character's own saved
+    # body and its template without building a mesh on every dial change (the mesh
+    # is built only when a preview is rendered, in a worker thread). The engine
+    # itself (core.character_generation) still owns templates, morphs, rig, and
+    # persistence, so nothing here reimplements it.
 
     def character_templates(self, *, language: str = "en") -> tuple[tuple[str, str], ...]:
         """``(key, title)`` for the four base templates (woman, girl, man, boy)."""
@@ -934,46 +966,59 @@ class RomanceStudioService:
 
     def template_for_character(self, character_id: str) -> str:
         """The template a character's own recorded sex and age select."""
-        try:
-            character = self.character(character_id) if character_id else None
-        except Exception:
-            character = None
-        return self.character_engine.templates.template_for_character(character)
-
-    def character_body(self, character_id: str) -> Any:
-        """The engine instance a character opens on: its **saved** body, else its template.
-
-        This is the one entry the Body & shape window uses, so a character that was
-        shaped and saved before reopens exactly as it was left, and a character with
-        no saved body opens on its own template.
-        """
-        try:
-            character = self.character(character_id) if character_id else None
-        except Exception:
-            character = None
-        return self.character_engine.load_for_character(character, character_id=character_id)
+        return self.character_engine.templates.template_for_character(
+            self._character_or_none(character_id)
+        )
 
     def character_body_template(self, character_id: str) -> str:
-        """The template the character's *live* body is on (saved or template)."""
-        return self.character_body(character_id).template_id
+        """The template a character's body is on: its **saved** template, else its own.
 
-    def save_character_body(
-        self, character_id: str, instance: Any, *, preset_id: str = ""
-    ) -> Any:
-        """Save a character's own body configuration (never a template's)."""
-        instance.character_id = character_id
-        return self.character_engine.save(instance, preset_id=preset_id)
+        This is what the Body & shape window shows first, so a character that was
+        shaped and saved before reopens on the template it was saved on, and a
+        character with no saved body opens on the template its sex and age select.
+        """
+        config = self.character_engine.load_config(character_id) if character_id else None
+        if config is not None and self.character_engine.templates.has(config.template_id):
+            return config.template_id
+        return self.template_for_character(character_id)
+
+    def character_body_parameters(self, character_id: str) -> Any:
+        """A character's body parameters: its **saved** body, else its template.
+
+        The saved body is restored exactly as it was left; a character with no
+        saved body opens on its own template, named after the character.
+        """
+        name = self._character_name(character_id)
+        saved = self.character_engine.load_params(character_id) if character_id else None
+        if saved is not None:
+            return saved.with_changes(name=name) if name else saved
+        template_id = self.template_for_character(character_id)
+        return self.character_engine.template_params(template_id, name=name)
+
+    def save_character_body(self, character_id: str, params: Any, *, preset_id: str = "") -> Any:
+        """Save a character's own body configuration (never a template's).
+
+        The template the body is *based on* is remembered too, so a saved body
+        keeps its provenance -- and regenerating the template never overwrites the
+        character's own configuration, because this is the only writer of it.
+        """
+        template_id = self.character_body_template(character_id)
+        return self.character_engine.save_params(
+            character_id, template_id, params, preset_id=preset_id
+        )
 
     def character_body_config(self, character_id: str) -> Any:
         """A character's saved body configuration, or ``None`` when there is none."""
         return self.character_engine.load_config(character_id)
 
-    def new_character_body(
-        self, template_id: str, *, character_id: str = "", name: str = ""
-    ) -> Any:
-        """A fresh engine instance from one of the four templates."""
-        return self.character_engine.create(
-            template_id, character_id=character_id, name=name
+    def set_character_body_template(self, character_id: str, template_id: str) -> Any:
+        """Open a character's body on one of the four templates (a fresh body).
+
+        The character's *saved* configuration is left untouched until it is saved
+        again, so switching a template is not destructive.
+        """
+        return self.character_engine.template_params(
+            template_id, name=self._character_name(character_id)
         )
 
     def body_parameter_groups(
@@ -982,25 +1027,18 @@ class RomanceStudioService:
         """``(group key, title, dials)`` for the engine's own parameter groups."""
         return self.character_engine.parameters.groups(language=language)
 
-    def morph_character_body(self, instance: Any, key: str, value: Any) -> Any:
-        """Set one body parameter and return the real geometry change it caused."""
-        return self.character_engine.morph(instance, key, value)
+    def morph_character_body(self, params: Any, key: str, value: Any) -> Any:
+        """Set one body parameter on a parameter set (no mesh is built here).
 
-    def regenerate_character_body(self, instance: Any) -> Any:
-        """Rebuild a character from its template's defaults (its saved body untouched)."""
-        return self.character_engine.regenerate(instance)
-
-    def restore_character_body(self, instance: Any, config: Any) -> Any:
-        """Restore a saved configuration onto a live character instance."""
-        return self.character_engine.restore(instance, config)
-
-    def set_character_body_pose(self, instance: Any, preset: str) -> None:
-        """Put a live character into a ready-made pose."""
-        self.character_engine.set_pose(instance, preset)
+        The real geometry move is measured by the window's render (and by
+        :meth:`core.character_generation.MorphTargetEngine`), so a dial only ever
+        counts when the rendered mesh really changed.
+        """
+        return self.character_engine.parameters.set(params, key, value)
 
     def render_character_body(
         self,
-        instance: Any,
+        params: Any,
         *,
         view: str = "full",
         width: int | None = None,
@@ -1010,11 +1048,15 @@ class RomanceStudioService:
         zoom: float = 1.0,
         light_scale: float = 1.0,
     ) -> bytes:
-        """Render the engine's own character (rig, materials, and lights) to a PNG."""
+        """Render a character's body (rig, materials, and lights) to a PNG.
+
+        The mesh is built here, on the worker thread the window renders on, so a
+        dial change never blocks the interface.
+        """
         from core.romance.body import PREVIEW_HEIGHT, PREVIEW_WIDTH
 
-        report = self.character_engine.render(
-            instance,
+        report = self.character_engine.renderer.render(
+            params,
             view=view,
             width=int(width or PREVIEW_WIDTH),
             height=int(height or PREVIEW_HEIGHT),
@@ -1025,9 +1067,16 @@ class RomanceStudioService:
         )
         return report.png
 
-    def save_body_preset(self, preset_id: str, title: str, instance: Any) -> Any:
-        """Save a named body preset from a live character."""
-        return self.character_engine.save_preset(preset_id, title, instance)
+    def save_body_preset(self, preset_id: str, title: str, params: Any) -> Any:
+        """Save a named body preset from a parameter set."""
+        template_id = getattr(self, "_active_template", "") or "woman"
+        return self.character_engine.save_preset_params(preset_id, title, template_id, params)
+
+    def save_body_preset_for(
+        self, preset_id: str, title: str, template_id: str, params: Any
+    ) -> Any:
+        """Save a named body preset for a given template (no mesh is built)."""
+        return self.character_engine.save_preset_params(preset_id, title, template_id, params)
 
     def body_preset_names(self) -> tuple[tuple[str, str], ...]:
         """``(preset id, title)`` for every saved body preset."""
@@ -1035,9 +1084,12 @@ class RomanceStudioService:
             (preset.preset_id, preset.title) for preset in self.character_engine.presets.list()
         )
 
-    def apply_body_preset_instance(self, instance: Any, preset_id: str) -> Any:
-        """Apply a saved body preset to a live character (``None`` when absent)."""
-        return self.character_engine.apply_preset(instance, preset_id)
+    def apply_body_preset_instance(self, params: Any, preset_id: str) -> Any:
+        """Apply a saved body preset onto a parameter set (``None`` when absent)."""
+        loaded = self.character_engine.load_preset_params(preset_id)
+        if loaded is None:
+            return None
+        return loaded.with_changes(name=getattr(params, "name", ""))
 
     def remove_body_preset(self, preset_id: str) -> bool:
         return self.character_engine.presets.remove(preset_id)
@@ -1046,9 +1098,22 @@ class RomanceStudioService:
         """An honest status of the FR-CCE engine (what it can and cannot do)."""
         return self.character_engine.status()
 
-    def engine_rig_report(self, instance: Any) -> Any:
-        """The rig report of a live character (bones, fingers, bound vertices)."""
+    def character_engine_rig_report(self, params: Any) -> Any:
+        """The rig report of a body (bones, finger/toe bones, bound vertices)."""
+        instance = self.character_engine.create_for_params(params)
         return self.character_engine.rig.report(instance.obj)
+
+    def _character_or_none(self, character_id: str) -> Any:
+        if not character_id:
+            return None
+        try:
+            return self.character(character_id)
+        except Exception:
+            return None
+
+    def _character_name(self, character_id: str) -> str:
+        character = self._character_or_none(character_id)
+        return str(getattr(character, "name", "") or "") if character is not None else ""
 
     # -- characters -------------------------------------------------------
 

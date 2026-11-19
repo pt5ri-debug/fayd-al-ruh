@@ -276,6 +276,85 @@ def test_the_service_sets_dials_and_applies_a_template(tmp_path: Path) -> None:
     assert service.body_summary(preset)
 
 
+# -- the FR-CCE character engine (the window's own engine) ----------------
+
+
+def test_the_service_exposes_the_four_character_templates(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    keys = [key for key, _title in service.character_templates()]
+    assert keys == ["woman", "girl", "man", "boy"]
+    assert dict(service.character_templates())["boy"] == "Boy"
+    assert dict(service.character_templates(language="ar"))["woman"] == "أنثى بالغة"
+
+
+def test_a_characters_body_opens_on_the_template_its_sex_and_age_select(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    woman = service.create_character(name="Amina", role=ROLE_COMPANION, gender="woman")
+    girl = service.create_character(name="Hala", role=ROLE_COMPANION, gender="female", fictional_age=9)
+    man = service.create_character(name="Omar", role=ROLE_COMPANION, gender="man")
+    assert service.template_for_character(woman.id) == "woman"
+    assert service.template_for_character(girl.id) == "girl"
+    assert service.template_for_character(man.id) == "man"
+    # A character with no saved body opens on its own template.
+    assert service.character_body_template(woman.id) == "woman"
+    assert service.character_body_parameters(woman.id).name == "Amina"
+
+
+def test_a_characters_body_saves_and_reopens_independently(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    a = service.create_character(name="Amina", role=ROLE_COMPANION, gender="woman")
+    b = service.create_character(name="Layla", role=ROLE_COMPANION, gender="woman")
+    params_a = service.body_parameters(a.id)
+    shaped = service.set_body_dial(params_a, "height", 1.83)
+    service.save_character_body(a.id, shaped)
+    # B was never saved: it still opens on the template.
+    assert service.character_body_config(a.id) is not None
+    assert service.character_body_config(b.id) is None
+    reopened = service.character_body_parameters(a.id)
+    assert reopened.height == pytest.approx(1.83)
+    assert service.character_body_template(a.id) == "woman"
+
+
+def test_switching_a_template_gives_a_fresh_body_without_saving(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    character = service.create_character(name="Amina", role=ROLE_COMPANION, gender="woman")
+    saved = service.set_body_dial(service.body_parameters(character.id), "height", 1.7)
+    service.save_character_body(character.id, saved)
+    # Open the body on another template: the saved config is left untouched.
+    fresh = service.set_character_body_template(character.id, "man")
+    assert fresh.height != pytest.approx(1.7)
+    assert service.character_body_config(character.id).template_id == "woman"
+
+
+def test_the_service_renders_through_the_engine_and_morphs_geometry(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    params = service.body_parameters("")
+    png = service.render_character_body(params, width=120, height=180)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    # A dial change really moves geometry (measured, not assumed).
+    report = service.character_engine_rig_report(params)
+    assert report.bones >= 19
+    assert report.bound_vertices > 0
+
+
+def test_a_body_preset_saves_and_loads_through_the_service(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    params = service.set_body_dial(service.body_parameters(""), "height", 1.9)
+    service.save_body_preset_for("tall", "Tall", "woman", params)
+    assert ("tall", "Tall") in service.body_preset_names()
+    loaded = service.apply_body_preset_instance(service.body_parameters(""), "tall")
+    assert loaded is not None
+    assert loaded.height == pytest.approx(1.9)
+    assert service.remove_body_preset("tall") is True
+
+
+def test_the_engine_status_is_honest(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    status = service.character_engine_status()
+    assert status["templates"] == ["woman", "girl", "man", "boy"]
+    assert status["materials"]["texture_maps"] is False
+
+
 def test_the_service_renders_a_body(tmp_path: Path) -> None:
     service = _service(tmp_path)
     data = service.render_body(service.body_parameters(""))
@@ -423,6 +502,90 @@ def test_the_body_window_applies_templates_views_and_stores_the_picture(tmp_path
         # The render becomes the character's picture through the avatar manager.
         dialog._use_as_avatar()
         assert _wait_for(root, lambda: service.avatar_path(character.id) is not None)
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_body_window_uses_the_character_engine_templates_and_persistence(
+    tmp_path: Path,
+) -> None:
+    """The window is the frontend of the FR-CCE engine: templates, save, restore.
+
+    The task requires the existing Body & Shape window to be the engine's own
+    frontend (never a competing window): it offers the four templates, shows the
+    one in force, saves a character's own body, and restores it -- and a dial still
+    changes the rendered geometry.
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_body import BodyStudioDialog
+
+    service = _service(tmp_path)
+    character = service.create_character(name="Amina", role=ROLE_COMPANION, gender="woman")
+    root = tk.Tk()
+    root.withdraw()
+    dialog = None
+    try:
+        dialog = BodyStudioDialog(
+            root, service, character.id, role=ROLE_COMPANION,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        # The window opens on the character's own template, marked and named.
+        assert dialog._template_id == "woman"
+        assert set(dialog._template_buttons) == {"woman", "girl", "man", "boy"}
+        # A template button switches the body.
+        dialog._select_template("man")
+        root.update()
+        assert dialog._template_id == "man"
+        assert dialog._params.build == "masculine"
+        # Save the body, shape it, then restore the saved body.
+        dialog._save_character_body()
+        root.update()
+        assert service.character_body_config(character.id) is not None
+        saved_height = dialog._params.height
+        dialog._params = service.set_body_dial(dialog._params, "height", 1.6)
+        dialog._sync_controls()
+        dialog._restore_character_body()
+        root.update()
+        assert dialog._params.height == pytest.approx(saved_height)
+        # The lighting slider changes the light scale the render uses.
+        dialog._light_var.set(1.8)
+        root.update()
+        assert dialog._light_scale == pytest.approx(1.8)
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_body_window_regenerates_and_saves_a_preset(tmp_path: Path) -> None:
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_body import BodyStudioDialog
+
+    service = _service(tmp_path)
+    character = service.create_character(name="Omar", role=ROLE_COMPANION, gender="man")
+    root = tk.Tk()
+    root.withdraw()
+    dialog = None
+    try:
+        dialog = BodyStudioDialog(
+            root, service, character.id, role=ROLE_COMPANION,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        template_height = dialog._params.height
+        dialog._params = service.set_body_dial(dialog._params, "height", 1.5)
+        dialog._sync_controls()
+        dialog._regenerate_template()
+        root.update()
+        assert dialog._params.height == pytest.approx(template_height)
+        # A saved preset is offered back through the service.
+        service.save_body_preset_for("mine", "Mine", dialog._template_id, dialog._params)
+        assert ("mine", "Mine") in service.body_preset_names()
     finally:
         _close_window(root, dialog)
 

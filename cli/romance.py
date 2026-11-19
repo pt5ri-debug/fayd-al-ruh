@@ -153,6 +153,46 @@ def _build_parser() -> argparse.ArgumentParser:
         help="List the four ready-made figures (woman, girl, man, boy) and the slot in force.",
     )
     body.add_argument(
+        "--templates", action="store_true",
+        help="List the character engine's four base templates (woman, girl, man, boy).",
+    )
+    body.add_argument(
+        "--template", default="", metavar="KEY",
+        help="Open the body on one of the four engine templates.",
+    )
+    body.add_argument(
+        "--save-body", action="store_true",
+        help="Save this character's own body (its template and every dial).",
+    )
+    body.add_argument(
+        "--restore-body", action="store_true",
+        help="Restore this character's saved body.",
+    )
+    body.add_argument(
+        "--body-config", action="store_true",
+        help="Show this character's saved body configuration (template, version, timestamp).",
+    )
+    body.add_argument(
+        "--save-preset", default="", metavar="NAME",
+        help="Save the current body as a named preset.",
+    )
+    body.add_argument(
+        "--load-preset", default="", metavar="ID",
+        help="Apply a saved body preset by id.",
+    )
+    body.add_argument(
+        "--body-presets", action="store_true",
+        help="List the saved body presets.",
+    )
+    body.add_argument(
+        "--light", type=float, default=1.0,
+        help="Scale the studio lighting in the render (0.2..2.5).",
+    )
+    body.add_argument(
+        "--engine-status", action="store_true",
+        help="Report the character engine's honest status (what it can and cannot do).",
+    )
+    body.add_argument(
         "--figure", default="", metavar="SLOT",
         help="Use one of the four figures (woman, girl, man, boy) as the body to show/edit.",
     )
@@ -685,6 +725,35 @@ def run_body(args: argparse.Namespace) -> int:
         _emit(args, rows, "\n".join(f"{row['key']:14s} {row['title']}" for row in rows))
         return EXIT_OK
 
+    # -- the character engine's templates and persistence ------------------
+    if args.templates:
+        rows = [{"key": key, "title": title} for key, title in service.character_templates()]
+        _emit(args, rows, "\n".join(f"{row['key']:10s} {row['title']}" for row in rows))
+        return EXIT_OK
+    if args.body_presets:
+        rows = [{"key": key, "title": title} for key, title in service.body_preset_names()]
+        _emit(args, rows, "\n".join(f"{row['key']:20s} {row['title']}" for row in rows))
+        return EXIT_OK
+    if args.engine_status:
+        _emit(args, service.character_engine_status(), _describe_engine_status(service))
+        return EXIT_OK
+    if args.body_config:
+        config = service.character_body_config(args.character_id)
+        if config is None:
+            _emit(args, {"saved": False}, "This character has no saved body yet.")
+            return EXIT_OK
+        body_payload = {
+            "saved": True,
+            "template_id": config.template_id,
+            "character_id": config.character_id,
+            "preset_id": config.preset_id,
+            "engine_version": config.engine_version,
+            "config_version": config.config_version,
+            "last_modified": config.last_modified,
+        }
+        _emit(args, body_payload, _describe_body_config(config))
+        return EXIT_OK
+
     # -- the four ready-made figures (the studio's default) ----------------
     if args.figures:
         rows = [
@@ -751,6 +820,22 @@ def run_body(args: argparse.Namespace) -> int:
         params = service.figure_slot_parameters(figure_slot).with_changes(
             name=params.name or service.figure_slot_parameters(figure_slot).name
         )
+    if args.template:
+        try:
+            params = service.set_character_body_template(args.character_id, args.template)
+        except KeyError as error:
+            print(f"romance: {error}", file=sys.stderr)
+            return EXIT_USAGE
+    if args.restore_body:
+        saved = service.character_body_parameters(args.character_id)
+        if saved is not None:
+            params = saved
+    if args.load_preset:
+        loaded = service.apply_body_preset_instance(params, args.load_preset)
+        if loaded is None:
+            print(f"romance: no such body preset: {args.load_preset!r}", file=sys.stderr)
+            return EXIT_USAGE
+        params = loaded
     if args.pose:
         try:
             params = service.set_body_pose(params, args.pose)
@@ -861,6 +946,7 @@ def run_body(args: argparse.Namespace) -> int:
                 azimuth=azimuth,
                 elevation=elevation,
                 zoom=float(args.zoom),
+                light_scale=float(args.light),
                 mesh=mesh,
             )
         )
@@ -870,6 +956,7 @@ def run_body(args: argparse.Namespace) -> int:
             "elevation": elevation,
             "zoom": float(args.zoom),
         }
+        payload["light"] = float(args.light)
     if args.use_as_picture:
         if not args.character_id:
             print("romance: --use-as-picture needs a character id", file=sys.stderr)
@@ -882,8 +969,55 @@ def run_body(args: argparse.Namespace) -> int:
             )
         result = service.use_body_as_avatar(args.character_id, params)
         payload["picture"] = str(result.path)
+    if args.save_body:
+        if not args.character_id:
+            print("romance: --save-body needs a character id", file=sys.stderr)
+            return EXIT_USAGE
+        config = service.save_character_body(args.character_id, params)
+        payload["saved_body"] = {
+            "template_id": config.template_id,
+            "engine_version": config.engine_version,
+        }
+    if args.save_preset:
+        preset = service.save_body_preset_for(
+            args.save_preset, args.save_preset, service.character_body_template(
+                args.character_id
+            ),
+            params,
+        )
+        payload["saved_preset"] = preset.preset_id
     _emit(args, payload, payload["summary"])
     return EXIT_OK
+
+
+def _describe_engine_status(service: Any) -> str:
+    """A readable, honest engine status (what it can and cannot do)."""
+    status = service.character_engine_status()
+    lines = [
+        "FR-CCE character engine",
+        f"  templates : {', '.join(status['templates'])}",
+        f"  parameters: {status['parameters']} in {len(status['groups'])} groups",
+        f"  version   : {status['engine_version']} (config {status['config_version']})",
+        "  materials :",
+    ]
+    for name, supported in status["materials"].items():
+        lines.append(f"    {'yes' if supported else ' no'} {name}")
+    lines.append(f"  {status['honesty']}")
+    return "\n".join(lines)
+
+
+def _describe_body_config(config: Any) -> str:
+    """A readable view of one character's saved body configuration."""
+    return "\n".join(
+        [
+            f"Character {config.character_id}",
+            f"  template      : {config.template_id}",
+            f"  preset        : {config.preset_id or '(none)'}",
+            f"  engine version: {config.engine_version}",
+            f"  config version: {config.config_version}",
+            f"  last modified : {config.last_modified}",
+        ]
+    )
 
 
 def _vector(text: str, name: str) -> tuple[float, float, float] | None:

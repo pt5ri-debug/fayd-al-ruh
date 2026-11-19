@@ -8134,5 +8134,65 @@ regression monitor each can refuse a change.
   rule (including the minor and the unrecorded-gender controls), importing (store,
   refuse a bad file, refuse an unknown slot, refuse a missing file, clear, a file
   that went missing, a corrupt record), the mesh/render a slot shows, the service,
-  the CLI, and the two real Tk windows. Gates: ruff clean, mypy 1205 files OK,
+  the   CLI, and the two real Tk windows. Gates: ruff clean, mypy 1205 files OK,
   evaluation PASS (`overall` 0.9918 unchanged).
+
+- Phase 73 — **the FR-CCE character-creation engine, and the Body & shape window
+  as its frontend**. The task asked for a *native procedural 3D human
+  character-generation and customization engine* used **directly** by the existing
+  Body & shape window -- not a demonstration app and not a competing window.
+  `core/character_generation.py` (new) is the engine, a thin composition over the
+  project's own 3D systems (`core.scene3d`, `core.scene3d_figures`,
+  `core.scene3d_render`, `core.romance.body`) so no mesh builder or renderer is
+  re-implemented: `CharacterGenerationEngine` (the facade) composes
+  `CharacterTemplateManager` (the four base templates + the sex/age -> template
+  rule), `ProceduralMeshGenerator` (builds a template's mesh, **caching by the
+  parameter signature**), `BodyParameterSystem` (the 58-dial catalogue in 16
+  groups, clamping and refusals), `MorphTargetEngine` (applies a dial and
+  **measures** the geometry change -- `MorphResult.moved_vertices` /
+  `max_displacement`), `SkeletonRigManager` (the 19-bone humanoid rig and
+  linear-blend binding), `MaterialManager` (skin/eye/hair materials, roughness,
+  metallic, with an honest `capabilities()` that reports texture and normal maps
+  as **unsupported** by the CPU rasteriser), `CharacterPresetManager` (named
+  presets), `CharacterPersistenceManager` (a character's own body, versioned and
+  migrated), and `CharacterPreviewRenderer` (renders rig, materials, and lights to
+  a PNG). **The four templates** (`woman`, `girl`, `man`, `boy`) are each a real
+  body at their age and sex -- the children shorter with child proportions, never a
+  scaled adult -- and every one fuses into **one connected skin**. A parameter
+  change moves **actual vertices**, and a `neck_length` fix made a longer neck lift
+  the head with it (previously the head stayed put and the change was swallowed).
+  **Persistence** saves the template id, character id, parameters, morph values,
+  skeleton, materials, preset id, last-modified timestamp, engine version, and
+  config version under `data/romance/characters/bodies/<id>.json`; an earlier
+  build's document **migrates** on load, a corrupt one reads as absent, and
+  **regenerating a template never overwrites a character's saved body**. The
+  **Body & shape window** (`gui/romance_body.py`) is now the engine's frontend:
+  a **Character templates** section (the four templates, marked with the one in
+  force; Regenerate from template; Save/Load custom preset; Save this character's
+  body; Restore the saved body) and a **Lighting** section (a light-intensity dial
+  the render honours), alongside the existing figure library, camera, dials, and
+  material colours. The window works in **parameter space** -- a dial change
+  re-renders on the worker thread but never builds a mesh just to move a control --
+  and opens on the character's own template (its saved one, else the one its sex
+  and age select). `gui/romance.py`'s `RomanceStudioService` gained the whole
+  engine surface (`character_templates`/`template_for_character`/
+  `character_body_template`/`character_body_parameters`/`save_character_body`/
+  `character_body_config`/`set_character_body_template`/`render_character_body`/
+  `save_body_preset_for`/`body_preset_names`/`apply_body_preset_instance`/
+  `remove_body_preset`/`character_engine_status`/`character_engine_rig_report`),
+  and `render_body` gained `light_scale`; `core/paths.py` gained
+  `character_bodies_dir()`/`character_presets_dir()` (both git-ignored under
+  `data/romance/characters`). The CLI `python -m cli romance body` gained
+  `--templates`/`--template KEY`/`--save-body`/`--restore-body`/`--body-config`/
+  `--save-preset NAME`/`--load-preset ID`/`--body-presets`/`--light`/
+  `--engine-status`. `tests/test_character_generation.py` (new, 40 tests) pins the
+  four templates (distinguishable proportions, one connected skin), geometry
+  validity, **vertex** deformation (not a slider value), the parameter limits, the
+  character mapping (with the minor and unrecorded-sex controls), independent
+  configurations, save/load and migration, template regeneration, rig
+  compatibility, the materials and their honest caps, the render, **offline
+  operation**, and that the generator is a thin layer over the project's own figure
+  builder; `tests/test_romance_body_studio.py` gained the service and window
+  wiring. Docs: `docs/romance_companion/CHARACTER_GENERATION_ENGINE.md`. Gates:
+  ruff clean, mypy 1207 files OK, evaluation PASS (`overall` 0.9918 unchanged),
+  pytest green under `xvfb-run`.

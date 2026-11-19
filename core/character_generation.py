@@ -1022,17 +1022,18 @@ class CharacterPreviewRenderer:
         zoom: float = 1.0,
         light_scale: float = 1.0,
     ) -> Scene:
+        from dataclasses import replace
+
         from core.romance.body import preview_scene
 
         scene = preview_scene(
             params, view=view, azimuth=azimuth, elevation=elevation, zoom=zoom
         )
         if light_scale != 1.0:
-            for light in scene.lights:
-                scene.lights[scene.lights.index(light)] = type(light)(
-                    light.name, light.kind, light.direction, light.position,
-                    light.color, light.intensity * light_scale,
-                )
+            scene.lights = [
+                replace(light, intensity=light.intensity * light_scale)
+                for light in scene.lights
+            ]
         return scene
 
     def render(
@@ -1138,6 +1139,19 @@ class CharacterGenerationEngine:
         ).title
         cid = character_id or str(_character_field(character, "id") or "")
         return self.create(template_id, character_id=cid, name=name)
+
+    def create_for_params(
+        self, params: FigureParameters, *, template_id: str = "", character_id: str = ""
+    ) -> CharacterInstance:
+        """Build a live character from an existing parameter set.
+
+        A window that edits parameters directly (rather than through a template)
+        uses this to render or bind them; the parameters are used as given, so the
+        rendered body is exactly the one the dials describe.
+        """
+        obj = build_figure(params)
+        self.rig.bind(obj)
+        return CharacterInstance(character_id, template_id or params.build, params, obj)
 
     # -- morphing --------------------------------------------------------
 
@@ -1285,6 +1299,42 @@ class CharacterGenerationEngine:
         obj.pose = pose
         self.rig.bind(obj)
         return CharacterInstance(instance.character_id, instance.template_id, params, obj)
+
+    # -- parameter-space helpers (no mesh built) -------------------------
+
+    def template_params(self, template_id: str, *, name: str = "") -> FigureParameters:
+        """A template's parameters without building a mesh (cheap for a window)."""
+        return self.templates.parameters(template_id, name=name)
+
+    def save_params(
+        self,
+        character_id: str,
+        template_id: str,
+        params: FigureParameters,
+        *,
+        preset_id: str = "",
+    ) -> CharacterBodyConfig:
+        """Save a parameter set as a character's body (no mesh is built)."""
+        return self.persistence.save(
+            character_id, template_id, params, preset_id=preset_id
+        )
+
+    def load_params(self, character_id: str) -> FigureParameters | None:
+        """A character's saved body parameters, or ``None`` when there is none."""
+        config = self.persistence.load(character_id)
+        if config is None:
+            return None
+        return params_from_primitive(config.parameters)
+
+    def save_preset_params(
+        self, preset_id: str, title: str, template_id: str, params: FigureParameters
+    ) -> CharacterPreset:
+        """Save a named preset from a parameter set (no mesh is built)."""
+        return self.presets.save(preset_id, title, template_id, params)
+
+    def load_preset_params(self, preset_id: str) -> FigureParameters | None:
+        """A saved preset's parameters, or ``None`` when it is absent."""
+        return self.presets.parameters(preset_id)
 
     # -- introspection ---------------------------------------------------
 

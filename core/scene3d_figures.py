@@ -350,8 +350,12 @@ def _body_parts(params: FigureParameters) -> list[_Blob]:
 
     # -- neck and head ---------------------------------------------------
     neck_radius = 0.034 * H * params.neck_thickness
+    # A longer neck lifts the head with it, so the measurement is visible: the
+    # head's base shifts by however much the neck grew, rather than the neck
+    # stretching up inside a fixed head.
+    neck_lift = (params.neck_length - 1.0) * 0.025 * H
     neck_y = shoulder_y + 0.025 * H * params.neck_length
-    head_base = 0.875 * H
+    head_base = 0.875 * H + neck_lift
     parts.append(
         capsule((0.0, shoulder_y + 0.005 * H, -0.004 * s), (0.0, neck_y, -0.008 * s),
                 neck_radius * 1.15, neck_radius, skin, blend=0.04)
