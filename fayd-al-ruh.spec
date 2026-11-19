@@ -18,6 +18,10 @@ PROJECT_ROOT = Path(SPECPATH).resolve()
 
 # Data the program reads at runtime and cannot regenerate on a fresh machine.
 datas = [
+    # The shipped human-body pack (the MakeHuman CC0 base mesh + morphs the Body
+    # & shape studio builds every figure from). It is data, not code, so a
+    # frozen build must carry it or the studio falls back to the sculpted mesh.
+    (str(PROJECT_ROOT / "core" / "human_pack"), "core/human_pack"),
     (str(PROJECT_ROOT / "ml" / "llm" / "checkpoints"), "ml/llm/checkpoints"),
     (str(PROJECT_ROOT / "ml" / "artifacts" / "petroleum"), "ml/artifacts/petroleum"),
     (str(PROJECT_ROOT / "weights"), "weights"),

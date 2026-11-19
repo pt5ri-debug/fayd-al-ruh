@@ -59,6 +59,21 @@ def test_read_only_assets_ship_with_the_wheel():
     package_data = data["package-data"]
     assert package_data["ml.llm"] == ["checkpoints/*"]
     assert "**/*.npz" in package_data["ml.artifacts"]
+    # The human-body pack is data the Body & shape studio reads at run time, so a
+    # wheel must carry it -- otherwise an installed copy silently falls back to
+    # the old sculpted mesh.
+    assert package_data["core.human_pack"] == ["human_pack.bin.z", "NOTICE.md"]
+
+
+def test_the_human_body_pack_travels_with_the_package():
+    """The MakeHuman CC0 mesh the studio builds every figure from is shipped."""
+    from core.human_pack import load_pack, pack_available, pack_path
+
+    assert pack_available(), "the human-body pack is missing from the package"
+    assert pack_path().is_file()
+    pack = load_pack()
+    assert pack.vertex_count > 10_000
+    assert pack.targets and pack.joints
 
 
 def test_discovery_covers_every_real_package_and_skips_the_tests():

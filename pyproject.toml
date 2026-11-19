@@ -56,6 +56,10 @@ py-modules = ["main"]
 [tool.setuptools.package-data]
 "ml.llm" = ["checkpoints/*"]
 "ml.artifacts" = ["**/*.npz", "**/*.json"]
+# The human body pack (MakeHuman CC0 base mesh + morph targets) must travel with
+# the package: the Body & shape studio reads it at run time, and without it a
+# wheel install would fall back to the old sculpted body.
+"core.human_pack" = ["human_pack.bin.z", "NOTICE.md"]
 
 [project.optional-dependencies]
 # PDF ingestion is optional: the reader imports pypdf lazily and reports a clear

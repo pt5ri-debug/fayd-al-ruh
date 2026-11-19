@@ -108,9 +108,17 @@ def test_each_template_fuses_into_one_connected_skin():
     manager = CharacterTemplateManager()
     for key in manager.keys():
         mesh = build_figure_mesh(manager.parameters(key))
-        # ``largest_shell`` keeps only the connected piece; a fused body is one.
-        shells = _shell_count(mesh)
-        assert shells == 1, f"{key} is {shells} pieces, not one body"
+        # The body is **one** connected skin. The eyes and the two rows of teeth
+        # are closed sub-surfaces inside it (as in any character asset), so the
+        # body itself is the single largest shell and everything else is a small
+        # closed detail -- never a second body part.
+        sizes = _shell_sizes(mesh)
+        body = sizes[0]
+        assert body > 12_000, f"{key}: the body shell is only {body} vertices"
+        assert body > 0.97 * sum(sizes), f"{key}: the body is not one skin ({sizes[:6]})"
+        # A detail shell is small (an eye or a tooth row), never a limb.
+        for detail in sizes[1:]:
+            assert detail < 200, f"{key}: a {detail}-vertex shell is not a detail"
 
 
 def _shell_count(mesh) -> int:
@@ -133,6 +141,30 @@ def _shell_count(mesh) -> int:
             union(face[0], face[index])
     used = {vertex for face in mesh.faces for vertex in face}
     return len({find(vertex) for vertex in used})
+
+
+def _shell_sizes(mesh) -> list[int]:
+    """The size of every connected component, largest first."""
+    parent = list(range(len(mesh.vertices)))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for face in mesh.faces:
+        root = find(face[0])
+        for index in face[1:]:
+            other = find(index)
+            if root != other:
+                parent[other] = root
+
+    sizes: dict[int, int] = {}
+    for vertex in {vertex for face in mesh.faces for vertex in face}:
+        root = find(vertex)
+        sizes[root] = sizes.get(root, 0) + 1
+    return sorted(sizes.values(), reverse=True)
 
 
 # -- geometry validity ----------------------------------------------------
@@ -533,3 +565,83 @@ def test_the_generator_is_a_thin_layer_over_the_project_figure_builder():
     # no second mesh generator.
     params = CharacterTemplateManager().parameters(TEMPLATE_WOMAN)
     assert ProceduralMeshGenerator().build(params).vertices == build_figure_mesh(params).vertices
+
+
+# -- the native human-body engine (the real MakeHuman-derived mesh) ----------
+
+
+def test_the_figure_is_built_from_the_human_mesh_not_a_blob():
+    """The body is a dense, anatomically-modelled human mesh, not primitives."""
+    from core.human_pack import load_pack
+
+    pack = load_pack()
+    # A real human base mesh has thousands of vertices; a primitive assembly has
+    # a few hundred. The engine must use the modelled mesh.
+    assert pack.vertex_count > 10_000
+    mesh = build_figure_mesh(CharacterTemplateManager().parameters(TEMPLATE_WOMAN))
+    assert len(mesh.vertices) >= pack.vertex_count
+
+
+def test_the_mesh_has_a_head_torso_arms_hands_legs_and_feet():
+    """Every region a human body needs is present in the generated geometry."""
+    mesh = build_figure_mesh(CharacterTemplateManager().parameters(TEMPLATE_WOMAN))
+    ys = [v.y for v in mesh.vertices]
+    height = max(ys)
+    top = [v for v in mesh.vertices if v.y > 0.93 * height]
+    # A head: a cluster at the very top, narrower than the shoulders.
+    assert top
+    head_width = max(v.x for v in top) - min(v.x for v in top)
+    shoulder = [v for v in mesh.vertices if 0.78 * height <= v.y <= 0.84 * height]
+    shoulder_width = max(v.x for v in shoulder) - min(v.x for v in shoulder)
+    assert head_width < shoulder_width
+    # Feet on the ground: geometry at y ~ 0 and a footprint wider than the ankle.
+    feet = [v for v in mesh.vertices if v.y < 0.04 * height]
+    assert feet
+    assert max(v.x for v in feet) - min(v.x for v in feet) > 0.05
+
+
+def test_a_child_head_is_larger_for_its_body_than_an_adults():
+    """The head-to-height ratio is what makes a child read as a child."""
+    from core.human_body import build_body, dials_from_parameters
+    from core.human_pack import load_pack
+
+    pack = load_pack()
+    manager = CharacterTemplateManager()
+
+    def ratio(key: str) -> float:
+        params = manager.parameters(key)
+        body = build_body(dials_from_parameters(params), height=params.height)
+        verts = body.mesh.vertices
+        height = max(v.y for v in verts)
+        neck_y = (pack.joints["joint-neck"][1] - body._offset.y) * body._scale
+        head_h = height - min(v.y for v in verts if v.y >= neck_y)
+        return head_h / height
+
+    adult = ratio(TEMPLATE_WOMAN)
+    girl = ratio(TEMPLATE_GIRL)
+    boy = ratio(TEMPLATE_BOY)
+    # A child's head is a visibly larger fraction of its height (roughly 1/5)
+    # than an adult's (roughly 1/6.5).
+    assert girl > adult * 1.05, f"girl head ratio {girl:.3f} vs adult {adult:.3f}"
+    assert boy > adult * 1.05, f"boy head ratio {boy:.3f} vs adult {adult:.3f}"
+
+
+def test_the_head_scale_dial_changes_the_head_proportion():
+    """The head-scale dial is a proportion change, not a whole-figure resize."""
+    from core.human_body import build_body, dials_from_parameters
+    from core.human_pack import load_pack
+    from core.scene3d_figures import FigureParameters
+
+    pack = load_pack()
+
+    def head_height(scale: float) -> float:
+        params = FigureParameters("probe", head_scale=scale)
+        body = build_body(dials_from_parameters(params), height=params.height)
+        verts = body.mesh.vertices
+        top = max(v.y for v in verts)
+        neck_y = (pack.joints["joint-neck"][1] - body._offset.y) * body._scale
+        return top - min(v.y for v in verts if v.y >= neck_y)
+
+    small = head_height(0.75)
+    large = head_height(1.35)
+    assert large > small * 1.15, f"head {small:.3f} -> {large:.3f} did not grow"

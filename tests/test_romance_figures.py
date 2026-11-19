@@ -101,7 +101,10 @@ def test_every_figure_is_one_connected_shell_not_a_pile_of_parts() -> None:
         params = slot_parameters(slot).with_changes(subdivisions=0)
         mesh = build_figure_mesh(params)
         assert len(mesh.vertices) > 0
-        # One connected component: every vertex is reachable from vertex 0.
+        # The body is one connected skin: every vertex of the largest shell is
+        # reachable from its first vertex, and that shell is the whole body. The
+        # eyes and the two rows of teeth are small closed sub-surfaces inside it,
+        # as in any character asset -- never a second body part.
         adjacency: dict[int, set[int]] = {}
         for face in mesh.faces:
             for index in face:
@@ -114,7 +117,26 @@ def test_every_figure_is_one_connected_shell_not_a_pile_of_parts() -> None:
                 if neighbour not in seen:
                     seen.add(neighbour)
                     stack.append(neighbour)
-        assert len(seen) == len(mesh.vertices), f"{slot} is not one connected shell"
+        assert len(seen) > 12_000, f"{slot}: the body shell is only {len(seen)} vertices"
+        assert len(seen) > 0.97 * len(mesh.vertices), f"{slot} is not one body shell"
+        for index in range(len(mesh.vertices)):
+            if index not in seen:
+                # A detail vertex must belong to a tiny closed surface.
+                component = _component_of(adjacency, index)
+                assert len(component) < 200, f"{slot}: a {len(component)}-vertex extra shell"
+
+
+def _component_of(adjacency: dict[int, set[int]], start: int) -> set[int]:
+    """The connected component of one vertex, by shared faces."""
+    seen = {start}
+    stack = [start]
+    while stack:
+        node = stack.pop()
+        for neighbour in adjacency.get(node, ()):
+            if neighbour not in seen:
+                seen.add(neighbour)
+                stack.append(neighbour)
+    return seen
 
 
 # -- the character -> slot rule -------------------------------------------
