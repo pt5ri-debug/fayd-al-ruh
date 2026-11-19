@@ -51,6 +51,7 @@ from gui.design import (
     RADIUS,
     SIZE,
     SPACE,
+    TITLEBAR,
     VARIANT_DANGER,
     VARIANT_GHOST,
     VARIANT_PRIMARY,
@@ -317,6 +318,64 @@ class StatusLine:
         return str(self.label.cget("text"))
 
 
+class TitleBadge(tk.Canvas):
+    """The rounded icon badge a title bar carries beside its title.
+
+    A window's own glyph in a soft rounded square: it gives each window a
+    recognisable identity at a glance -- the presentation deck for the
+    Presentation Studio, a document for Doc's Studio -- so a column of open
+    windows reads as a set of distinct tools rather than twenty identical bands.
+    Tk has no rounded rectangle, so the badge is a Canvas that paints the shape
+    (the same ``_rounded_points`` the composer's card uses) and centres the glyph
+    over it. A window with no icon simply never draws one.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        glyph: str,
+        *,
+        theme: Any,
+        typography: Any,
+        size: int = TITLEBAR.badge,
+        radius: int = TITLEBAR.badge_radius,
+    ) -> None:
+
+        fill = _token(theme, "surface_raised")
+        outline = _token(theme, "border_subtle")
+        super().__init__(
+            parent, width=size, height=size, bg=_token(theme, "titlebar"),
+            highlightthickness=0, borderwidth=0, takefocus=0,
+        )
+        self._size = size
+        self._radius = radius
+        self._fill = fill
+        self._outline = outline
+        self._glyph = glyph
+        self._glyph_font = typography.font("sm")
+        self._glyph_fg = _token(theme, "contrast")
+        self._shape: int | None = None
+        self._text: int | None = None
+        self.bind("<Configure>", self._redraw)
+        self._redraw()
+
+    def _redraw(self, _event: tk.Event | None = None) -> None:
+        from gui.chat_composer import _rounded_points
+
+        width = self.winfo_width() or self._size
+        height = self.winfo_height() or self._size
+        radius = min(self._radius, min(width, height) // 2)
+        self.delete("all")
+        self._shape = self.create_polygon(
+            _rounded_points(1, 1, width - 1, height - 1, radius),
+            smooth=True, splinesteps=24, fill=self._fill, outline=self._outline, width=1,
+        )
+        self._text = self.create_text(
+            width / 2, height / 2, text=self._glyph, fill=self._glyph_fg,
+            font=self._glyph_font,
+        )
+
+
 class DialogHeader:
     """The title/subtitle band every dialog draws, with its window controls.
 
@@ -325,8 +384,14 @@ class DialogHeader:
     builds them once, installs the controls through :mod:`gui.window_controls`,
     and returns the created widgets so a window can keep its own references.
 
-    Two optional pieces cover what the copies had *in addition* to the trio:
+    Three optional pieces make the band read as one designed title bar rather
+    than a stack of labels:
 
+    * ``icon`` -- a glyph (an emoji) drawn in a rounded badge to the left of the
+      title, giving the window its own identity. ``accent`` tints that badge with
+      the theme's primary, for a window that is the day's main task.
+    * ``eyebrow`` -- a small uppercase line *above* the title (a category, e.g.
+      "STUDIO" or "KNOWLEDGE"), so a window states what kind of tool it is.
     * ``extra`` -- a callback that draws into the header's inner frame, so a
       window with its own header control (a Cancel button, a live title label, a
       text spinner) keeps it while the band itself stays one implementation. The
@@ -342,6 +407,9 @@ class DialogHeader:
         *,
         title: str,
         subtitle: str = "",
+        eyebrow: str = "",
+        icon: str = "",
+        accent: bool = False,
         theme: Any,
         typography: Any,
         on_close: Callable[[], None] | None = None,
@@ -361,8 +429,30 @@ class DialogHeader:
         bar.pack(fill="x")
         inner = tk.Frame(bar, bg=_token(theme, "titlebar"))
         inner.pack(fill="x", padx=SPACE.xl, pady=(SPACE.lg, SPACE.md))
+        inner.configure(height=TITLEBAR.min_height)
+
+        # The identity badge, when the window has one: it sits on the far left and
+        # the title block follows it, so the eye lands on the window's own mark.
+        self.badge: TitleBadge | None = None
+        if icon:
+            self.badge = TitleBadge(
+                inner, icon, theme=theme, typography=typography
+            )
+            self.badge.pack(side="left", padx=(0, TITLEBAR.gap))
+
         titles = tk.Frame(inner, bg=_token(theme, "titlebar"))
-        titles.pack(side="left", anchor="w")
+        titles.pack(side="left", anchor="w", fill="x", expand=True)
+        self.eyebrow_label: tk.Label | None = None
+        if eyebrow:
+            self.eyebrow_label = tk.Label(
+                titles,
+                text=eyebrow.upper(),
+                bg=_token(theme, "titlebar"),
+                fg=_token(theme, "primary") if accent else _token(theme, "text_dim"),
+                font=typography.font("2xs", weight="bold"),
+                anchor="w",
+            )
+            self.eyebrow_label.pack(anchor="w")
         self.title_label = tk.Label(
             titles,
             text=title,
@@ -424,9 +514,10 @@ class HeroHeader:
 
     A different visual variant from :class:`DialogHeader` (a ``heading1`` title
     with a subtitle and one or more dim note lines), but the same *component*: it
-    builds the title row, installs the window controls, and returns them, so the
-    five copies become one. ``notes`` are the dim lines under the subtitle (the
-    honesty line, the accepted-formats line, the unsupported-formats line).
+    builds the title row -- with the same identity badge, eyebrow, and window
+    controls -- and returns them, so the five copies become one. ``notes`` are the
+    dim lines under the subtitle (the honesty line, the accepted-formats line, the
+    unsupported-formats line).
     """
 
     def __init__(
@@ -435,6 +526,9 @@ class HeroHeader:
         *,
         title: str,
         subtitle: str = "",
+        eyebrow: str = "",
+        icon: str = "",
+        accent: bool = False,
         notes: tuple[str, ...] = (),
         theme: Any,
         typography: Any,
@@ -452,11 +546,28 @@ class HeroHeader:
         header.pack(fill="x", padx=padx, pady=(SPACE.xl, SPACE.md))
         title_row = tk.Frame(header, bg=_token(theme, "titlebar"))
         title_row.pack(fill="x")
+
+        self.badge: TitleBadge | None = None
+        if icon:
+            self.badge = TitleBadge(
+                title_row, icon, theme=theme, typography=typography, size=TITLEBAR.badge + 4
+            )
+            self.badge.pack(side="left", padx=(0, TITLEBAR.gap))
+        title_block = tk.Frame(title_row, bg=_token(theme, "titlebar"))
+        title_block.pack(side="left", anchor="w", fill="x", expand=True)
+        self.eyebrow_label: tk.Label | None = None
+        if eyebrow:
+            self.eyebrow_label = tk.Label(
+                title_block, text=eyebrow.upper(), bg=_token(theme, "titlebar"),
+                fg=_token(theme, "primary") if accent else _token(theme, "text_dim"),
+                font=typography.font("2xs", weight="bold"), anchor="w",
+            )
+            self.eyebrow_label.pack(anchor="w")
         self.title_label = tk.Label(
-            title_row, text=title, bg=_token(theme, "titlebar"), fg=_token(theme, "contrast"),
+            title_block, text=title, bg=_token(theme, "titlebar"), fg=_token(theme, "contrast"),
             font=typography.font("heading1", weight="bold"), anchor="w",
         )
-        self.title_label.pack(side="left")
+        self.title_label.pack(anchor="w")
         self.controls = install_window_controls(
             window, title_row, theme=theme, typography=typography, on_close=on_close,
             on_help=on_help,

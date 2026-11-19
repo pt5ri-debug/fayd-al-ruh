@@ -1100,7 +1100,15 @@ def test_window_initial_geometry_is_clamped_to_the_work_area(monkeypatch, data_r
         monkeypatch.setattr(
             "gui.window_controls.work_area", lambda: (0, 30, 1000, 600)
         )
-        assert dialog._initial_geometry() == "1000x600"
+        # The work area, minus the window's own frame (which Tk's geometry does not
+        # count), so the whole window -- title bar and borders included -- fits
+        # above the taskbar and the composer stays reachable.
+        from gui import window_controls
+
+        assert dialog._initial_geometry() == (
+            f"{1000 - window_controls.WINDOW_CHROME_WIDTH}x"
+            f"{600 - window_controls.WINDOW_CHROME_HEIGHT}"
+        )
     finally:
         root.destroy()
 

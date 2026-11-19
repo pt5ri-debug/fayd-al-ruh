@@ -40,6 +40,7 @@ from gui.import_center import (
     picker_filetypes,
 )
 from gui.typography import resolve
+from gui.window_controls import apply_window_geometry
 
 #: The header line, kept as the page title.
 TITLE = "Knowledge Import Center"
@@ -96,8 +97,9 @@ class ImportCenterDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("720x640")
-        self.window.minsize(560, 480)
+        self._window_fit = apply_window_geometry(
+            self.window, 720, 640, min_width=560, min_height=480
+        )
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -114,6 +116,7 @@ class ImportCenterDialog(ThemedDialog):
 
         header = HeroHeader(
             self.window, title=TITLE, subtitle=SUBTITLE,
+            icon="📥", eyebrow="Knowledge", accent=False,
             notes=(FORMATS_LINE, UNSUPPORTED_LINE),
             theme=theme, typography=self._type, on_close=self._close, wraplength=660,
         )

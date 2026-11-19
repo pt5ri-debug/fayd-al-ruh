@@ -78,6 +78,34 @@ class Sizes:
 SIZE = Sizes()
 
 
+@dataclass(frozen=True)
+class TitleBar:
+    """The proportions of every window's title bar.
+
+    The bar is the one band a user sees first in every window, so its rhythm is
+    defined once here rather than nudged per dialog: the height of the band, the
+    icon badge's size and radius, the gap between the badge and the titles, and
+    the size of the window-control buttons. A dialog asks for these instead of
+    typing pixel figures, which is what keeps twenty-five title bars looking like
+    one program.
+    """
+
+    #: The minimum height of the band (a title and a subtitle need the room).
+    min_height: int = 56
+    #: The icon badge: a rounded square holding the window's own glyph.
+    badge: int = 34
+    badge_radius: int = 10
+    #: The gap between the badge and the title block.
+    gap: int = 12
+    #: The window-control buttons' square size (minimize / maximize / close).
+    control: int = 26
+    #: The gap between two window controls.
+    control_gap: int = 3
+
+
+TITLEBAR = TitleBar()
+
+
 #: The named spacing steps, so a test can assert the rhythm is monotonic and a
 #: caller can iterate them (e.g. a "spacing scale" section in a style guide).
 SPACING_STEPS: tuple[int, ...] = SPACE.steps()
@@ -117,6 +145,7 @@ __all__ = [
     "SIZE",
     "SPACE",
     "SPACING_STEPS",
+    "TITLEBAR",
     "VARIANT_DANGER",
     "VARIANT_GHOST",
     "VARIANT_PRIMARY",
@@ -124,5 +153,6 @@ __all__ = [
     "Radii",
     "Sizes",
     "Spacing",
+    "TitleBar",
     "space",
 ]

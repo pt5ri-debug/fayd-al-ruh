@@ -56,7 +56,7 @@ from gui.character_manager import CharacterManagerService
 from gui.dialog_base import ThemedDialog
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
-from gui.window_controls import fit_geometry
+from gui.window_controls import apply_window_geometry, window_fit
 
 #: The transcript reads as a centred column, capped like the chat window's.
 _COLUMN_MAX = 900
@@ -110,8 +110,13 @@ class CharacterManagerDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title("Characters — Fayd Al-Ruh")
         self.window.configure(bg=theme.base)
-        self.window.geometry(self._initial_geometry())
-        self.window.minsize(MIN_WIDTH, MIN_HEIGHT)
+        self._window_fit = apply_window_geometry(
+            self.window,
+            DEFAULT_WIDTH,
+            DEFAULT_HEIGHT,
+            min_width=MIN_WIDTH,
+            min_height=MIN_HEIGHT,
+        )
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
 
@@ -130,7 +135,13 @@ class CharacterManagerDialog(ThemedDialog):
     # -- layout -----------------------------------------------------------
 
     def _initial_geometry(self) -> str:
-        return fit_geometry(self.window, DEFAULT_WIDTH, DEFAULT_HEIGHT, min_height=MIN_HEIGHT)
+        return window_fit(
+            self.window,
+            DEFAULT_WIDTH,
+            DEFAULT_HEIGHT,
+            min_width=MIN_WIDTH,
+            min_height=MIN_HEIGHT,
+        ).geometry
 
     def _build(self) -> None:
         self._build_header()
@@ -149,6 +160,7 @@ class CharacterManagerDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window,
+            icon="🎭", eyebrow="Characters",
             title="Characters",
             subtitle=(
                 "Seven characters and the project's own model — each with its own "

@@ -37,6 +37,7 @@ from core.presentation_courses import CourseDetail, CourseMatch
 from gui.dialog_base import ThemedDialog
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
+from gui.window_controls import apply_window_geometry
 
 TITLE = "Course content"
 SUBTITLE = (
@@ -93,8 +94,9 @@ class PresentationCourseDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("1060x640")
-        self.window.minsize(860, 560)
+        self._window_fit = apply_window_geometry(
+            self.window, 1060, 640, min_width=860, min_height=560
+        )
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -111,6 +113,7 @@ class PresentationCourseDialog(ThemedDialog):
 
         header = HeroHeader(
             self.window, title=TITLE, subtitle=SUBTITLE, theme=theme,
+            icon="🎓", eyebrow="Course", accent=False,
             typography=self._type, on_close=self._close, wraplength=760,
             extra=lambda title_row: self._build_close_button(title_row, theme),
         )

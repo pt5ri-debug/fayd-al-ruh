@@ -101,7 +101,7 @@ from gui.typography_settings import (
     save_profiles,
     scope_shows,
 )
-from gui.window_controls import install_window_controls
+from gui.window_controls import apply_window_geometry, install_window_controls
 
 #: The answering mouths the header's model selector offers, in order. The label
 #: is what the user reads; the key is the value :class:`ChatService` expects.
@@ -632,8 +632,13 @@ class FaydGUI:
 
         root.title("Fayd Al-Ruh")
         width, height, zoomed = load_window_geometry(getattr(self.service, "data_root", None))
-        root.geometry(f"{width}x{height}")
-        root.minsize(_MIN_WINDOW_WIDTH, _MIN_WINDOW_HEIGHT)
+        # The saved size, but never more than the usable desktop: a size remembered
+        # from a larger monitor is shrunk to fit this laptop's screen *minus the
+        # Windows taskbar* (and the window's own frame is reserved), so the window
+        # always opens with its composer and its controls reachable.
+        self._window_fit = apply_window_geometry(
+            root, width, height, min_width=_MIN_WINDOW_WIDTH, min_height=_MIN_WINDOW_HEIGHT
+        )
         if zoomed:
             # Restore a maximized window; a window manager without "zoomed" simply
             # keeps the saved size, so this never fails.
@@ -2293,6 +2298,15 @@ class FaydGUI:
             inner, "☰", self._toggle_sidebar, tip="Show or hide the sidebar"
         )
         self._sidebar_toggle.pack(side="left")
+
+        # The project's own mark, so the main window carries the same identity
+        # badge every dialog's title bar does and the whole program reads as one.
+        from gui.components import TitleBadge
+
+        self._brand_badge = TitleBadge(
+            inner, "✦", theme=self._theme, typography=self._type
+        )
+        self._brand_badge.pack(side="left", padx=(8, 0))
 
         # The mode control: the project's one model, shown by name. The window no
         # longer switches between two operating modes -- the Fayd Al-Ruh Model is

@@ -49,7 +49,7 @@ from gui.dialog_base import ThemedDialog
 from gui.sidebar import SidebarColumn
 from gui.training_center import TrainingCenterService
 from gui.typography import resolve
-from gui.window_controls import fit_geometry
+from gui.window_controls import apply_window_geometry, window_fit
 
 TITLE = "Training Center"
 SUBTITLE = (
@@ -116,8 +116,13 @@ class TrainingCenterDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(f"{TITLE} — Fayd Al-Ruh")
         self.window.configure(bg=theme.base)
-        self.window.geometry(self._initial_geometry())
-        self.window.minsize(MIN_WIDTH, MIN_HEIGHT)
+        self._window_fit = apply_window_geometry(
+            self.window,
+            DEFAULT_WIDTH,
+            DEFAULT_HEIGHT,
+            min_width=MIN_WIDTH,
+            min_height=MIN_HEIGHT,
+        )
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
 
@@ -127,7 +132,13 @@ class TrainingCenterDialog(ThemedDialog):
         self._refresh_overview()
 
     def _initial_geometry(self) -> str:
-        return fit_geometry(self.window, DEFAULT_WIDTH, DEFAULT_HEIGHT, min_height=MIN_HEIGHT)
+        return window_fit(
+            self.window,
+            DEFAULT_WIDTH,
+            DEFAULT_HEIGHT,
+            min_width=MIN_WIDTH,
+            min_height=MIN_HEIGHT,
+        ).geometry
 
     # -- layout -----------------------------------------------------------
 
@@ -163,6 +174,7 @@ class TrainingCenterDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window, title=TITLE, subtitle=SUBTITLE, theme=self.theme,
+            icon="🎓", eyebrow="Training", accent=True,
             typography=self._type, on_close=self._close, on_help=self.open_help,
             show_spinner=False, extra=_extra,
         )

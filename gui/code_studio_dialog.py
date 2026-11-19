@@ -64,6 +64,7 @@ from gui.dialog_base import ThemedDialog
 from gui.message_footer import add_provenance_label
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
+from gui.window_controls import apply_window_geometry
 
 #: The Studio reads as a centred conversation, capped like the chat window's
 #: transcript so long lines stay readable on a wide screen.
@@ -170,8 +171,9 @@ class CodeStudioDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("1280x720")
-        self.window.minsize(1000, 640)
+        self._window_fit = apply_window_geometry(
+            self.window, 1280, 720, min_width=1000, min_height=640
+        )
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -215,6 +217,7 @@ class CodeStudioDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window, title=TITLE, subtitle=SUBTITLE, theme=self.theme,
+            icon="⌨", eyebrow="Code Studio", accent=True,
             typography=self._type, on_close=self._close,
         )
         self._spinner = header.spinner

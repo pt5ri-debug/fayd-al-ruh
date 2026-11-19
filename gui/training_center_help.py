@@ -31,7 +31,7 @@ from core.training_center.help import LANGUAGES, help_text, help_title, resolve_
 
 from gui.dialog_base import ThemedDialog
 from gui.typography import resolve
-from gui.window_controls import fit_geometry
+from gui.window_controls import apply_window_geometry
 
 DEFAULT_WIDTH = 900
 DEFAULT_HEIGHT = 760
@@ -68,10 +68,9 @@ class TrainingCenterHelpDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(help_title(self._language))
         self.window.configure(bg=theme.base)
-        self.window.geometry(
-            fit_geometry(self.window, DEFAULT_WIDTH, DEFAULT_HEIGHT, min_height=MIN_HEIGHT)
+        self._window_fit = apply_window_geometry(
+            self.window, DEFAULT_WIDTH, DEFAULT_HEIGHT, min_width=MIN_WIDTH, min_height=MIN_HEIGHT
         )
-        self.window.minsize(MIN_WIDTH, MIN_HEIGHT)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
 

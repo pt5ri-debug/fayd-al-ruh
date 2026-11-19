@@ -1,11 +1,14 @@
 """Shared minimize / maximize / close controls for every window's title bar.
 
-Every window in the program -- the main window and each secondary one: the Code
-Studio, the Presentation Studio, the final editor, the Course window, the Import
-Center, the SQL screen, and the two image pages -- draws its title in the
-project's own dark-grey bar. This module gives that bar the three controls a
-Windows title bar carries, once, so every window grows the same set instead of
-each one inventing its own:
+Every window in the program -- the main window and all twenty-five secondary
+windows (the Code Studio, the Presentation Studio and its finalize/course
+windows, the Import Center, the SQL screen, Doc's Studio, the image pages, the
+Characters window, the Cognition window, the Training Center, the Workplace, the
+Romance Studio and its managers, the Scene Studio, the speech studios, the Model
+Manager, the maintenance and personality windows, and the per-mouth chat
+windows) -- draws its title in the project's own dark-grey bar. This module gives
+that bar the three controls a Windows title bar carries, once, so every window
+grows the same set instead of each one inventing its own:
 
 * **minimize** (``–``) -- shrink the window to the taskbar / dock;
 * **maximize / restore** (``□`` / ``❐``) -- grow the window to the *usable desktop*
@@ -22,6 +25,14 @@ fill of the work area (see :func:`work_area`) rather than a full-screen takeover
 that would cover the taskbar. So the control always grows the window to fit the
 screen *without* hiding the taskbar, and never silently does nothing.
 
+It also owns the one **opening-size rule** every window uses
+(:func:`screen_metrics`, :func:`window_fit`, :func:`apply_window_geometry`,
+:func:`fit_minsize`), so a window opened on a laptop opens inside the usable
+desktop -- the whole screen minus the Windows taskbar, minus the window's own
+frame -- and its composer and controls stay reachable. The rule is one function
+rather than a per-dialog constant, so a window added tomorrow fits the same
+screen the same way with no extra work.
+
 Tk is imported at module import, so this module is only ever imported by GUI code
 that already depends on Tk; ``cli/`` must never import it.
 """
@@ -31,9 +42,21 @@ from __future__ import annotations
 import sys
 import tkinter as tk
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from core.best_effort import best_effort
+
+#: The room a *decorated* window needs for its own operating-system frame -- the
+#: title bar and the resize borders -- which Tk does **not** count when it is told
+#: a geometry. A window asked for the work area's exact height therefore ends up
+#: that much taller once its frame is drawn, and its bottom edge (a composer, a
+#: row of buttons) slides under the taskbar. These allowances are reserved when a
+#: window is *placed*, so the whole window -- frame included -- fits the usable
+#: desktop. They are deliberately modest: an under-estimate costs a few pixels, an
+#: over-estimate would shrink every window for no reason.
+WINDOW_CHROME_WIDTH = 16
+WINDOW_CHROME_HEIGHT = 44
 
 #: The glyphs. Chosen from the characters every Tk font on every platform carries,
 #: so a control never renders as a missing-glyph box.
@@ -51,6 +74,55 @@ _HELP_GLYPH = "?"
 #: -- the one title-bar affordance every desktop user already recognises.
 _BUTTON_HOVER = "hover"
 _CLOSE_HOVER = "close"
+
+
+@dataclass(frozen=True)
+class ScreenMetrics:
+    """What the desktop reports about the space a window may really use.
+
+    ``screen_width``/``screen_height`` are the display's **whole** size (the
+    taskbar included, which is what ``winfo_screenheight`` returns), and
+    ``work_x``/``work_y``/``work_width``/``work_height`` are the *usable* desktop
+    -- the screen minus the taskbar, minus any dock or panel the desktop reserves.
+    ``taskbar`` is the difference in height between the two (0 when the desktop
+    reports no work area, or a taskbar along a side), so a caller can *name* what
+    it subtracted rather than quietly shrinking a window.
+
+    Every field is a real, measured figure, never a guess: where the desktop
+    cannot report its work area the usable rectangle is the screen, and
+    :attr:`reported` is ``False`` so an honest caller can say so.
+    """
+
+    screen_width: int
+    screen_height: int
+    work_x: int
+    work_y: int
+    work_width: int
+    work_height: int
+    taskbar: int
+    reported: bool
+
+    @property
+    def usable_width(self) -> int:
+        """The width a window may occupy (the work area's)."""
+        return self.work_width
+
+    @property
+    def usable_height(self) -> int:
+        """The height a window may occupy -- the screen *minus the taskbar*."""
+        return self.work_height
+
+    def describe(self) -> str:
+        """A one-line, honest account of the measured desktop."""
+        if self.reported:
+            return (
+                f"screen {self.screen_width}x{self.screen_height}, "
+                f"taskbar {self.taskbar}px, usable {self.work_width}x{self.work_height}"
+            )
+        return (
+            f"screen {self.screen_width}x{self.screen_height}; "
+            "the desktop reports no work area, so the screen is the bound"
+        )
 
 
 def work_area() -> tuple[int, int, int, int] | None:
@@ -87,6 +159,69 @@ def work_area() -> tuple[int, int, int, int] | None:
     if sys.platform.startswith("linux"):
         return _x11_work_area()
     return None
+
+
+def screen_metrics(window: tk.Misc | None = None) -> ScreenMetrics:
+    """The desktop's whole size and its usable work area, measured once.
+
+    This is the one place a window learns *how much screen it may use*, so every
+    window -- the main one and each dialog, now and in future -- is sized against
+    the same honest figures: the screen **minus the Windows taskbar** (or the
+    desktop's panel), never the raw ``winfo_screenheight`` that includes it.
+
+    ``window`` supplies the screen size when the platform reports no work area
+    (and is what makes the answer testable with a stand-in). The work area, when
+    the desktop reports one, wins on both size *and* origin -- a taskbar at the
+    top moves the usable rectangle's ``y`` down, and a dock on the left moves its
+    ``x`` across -- so a placed window sits in the space that is really free.
+    """
+    screen_width, screen_height = _screen_size(window)
+    area = work_area()
+    if area is None:
+        return ScreenMetrics(
+            screen_width=screen_width,
+            screen_height=screen_height,
+            work_x=0,
+            work_y=0,
+            work_width=screen_width,
+            work_height=screen_height,
+            taskbar=0,
+            reported=False,
+        )
+    x, y, width, height = area
+    # A work area larger than the screen is a mis-report (a stale property after a
+    # resolution change); the screen is the honest bound in that case.
+    width = min(width, screen_width) if screen_width > 0 else width
+    height = min(height, screen_height) if screen_height > 0 else height
+    # The vertical space the desktop reserves (the taskbar, wherever it sits).
+    taskbar = max(0, screen_height - height)
+    return ScreenMetrics(
+        screen_width=screen_width,
+        screen_height=screen_height,
+        work_x=x,
+        work_y=y,
+        work_width=width,
+        work_height=height,
+        taskbar=taskbar,
+        reported=True,
+    )
+
+
+def _screen_size(window: tk.Misc | None) -> tuple[int, int]:
+    """The display's whole size, from the window when it has one.
+
+    A window that cannot report it (a stand-in, or one whose interpreter has gone
+    away) yields ``(0, 0)``, which every caller reads as "no screen bound" and
+    falls back to the work area -- so a probe failure narrows what is known
+    rather than breaking a window.
+    """
+    if window is not None:
+        try:
+            return int(window.winfo_screenwidth()), int(window.winfo_screenheight())
+        except (tk.TclError, AttributeError):
+            return 0, 0
+    return 0, 0
+
 
 
 def _windows_work_area() -> tuple[int, int, int, int] | None:
@@ -193,6 +328,7 @@ class WindowControls:
         close: Callable[[], None] | None = None,
         close_button: tk.Button | None = None,
         help_button: tk.Button | None = None,
+        open_fit: WindowFit | None = None,
     ) -> None:
         self.window = window
         self.frame = frame
@@ -206,6 +342,12 @@ class WindowControls:
         #: The geometry the window had before a work-area fill, so restore returns
         #: it exactly (Tk remembers nothing once ``geometry`` is set).
         self._restore_geometry: str | None = None
+        #: The size the window opened at. A window maximized before it is first
+        #: mapped has no live geometry yet (Tk answers ``1x1+0+0``), so restore
+        #: returns this instead of the placeholder -- which would collapse the
+        #: window. Only set when the window opened through
+        #: :func:`apply_window_geometry`, so a plain window is unaffected.
+        self._open_fit = open_fit
         self._bind_destroy()
 
     def _bind_destroy(self) -> None:
@@ -265,17 +407,42 @@ class WindowControls:
         """
         if self._is_open():
             return
+        if self._try_native_zoom():
+            self._sync_glyph()
+            return
+        if not self._fill_work_area():
+            try:
+                self.window.attributes("-fullscreen", True)
+                self._fullscreen = True
+            except tk.TclError:
+                pass
+        self._sync_glyph()
+
+    def _try_native_zoom(self) -> bool:
+        """Use the window manager's own maximize when it really implements one.
+
+        ``state("zoomed")`` is only trustworthy if the window manager *acts* on
+        it: on a desktop without the state it raises (handled here), but a desktop
+        that accepts the call and ignores it would leave the button offering a
+        restore for a window that never grew. So the state is read back, and the
+        native path is accepted only when the window really reports itself zoomed;
+        otherwise the caller falls back to the work-area fill.
+        """
         try:
             self.window.state("zoomed")
-            self._zoomed = True
         except tk.TclError:
-            if not self._fill_work_area():
-                try:
-                    self.window.attributes("-fullscreen", True)
-                    self._fullscreen = True
-                except tk.TclError:
-                    pass
-        self._sync_glyph()
+            return False
+        try:
+            zoomed = str(self.window.state()) == "zoomed"
+        except tk.TclError:
+            zoomed = True
+        if not zoomed:
+            # The call was accepted but ignored; undo it so the fill is honest.
+            with best_effort("undo an ignored native maximize"):
+                self.window.state("normal")
+            return False
+        self._zoomed = True
+        return True
 
     def _fill_work_area(self) -> bool:
         """Size the window to the work area; return whether it could be learned."""
@@ -283,13 +450,41 @@ class WindowControls:
         if area is None:
             return False
         x, y, width, height = area
+        # Reserve the operating system's own frame, which Tk's geometry does not
+        # count: without this the frame's title bar and borders push the window's
+        # bottom edge under the taskbar even though the *client* area fits.
+        width = max(MIN_USABLE_WIDTH, width - WINDOW_CHROME_WIDTH)
+        height = max(MIN_USABLE_HEIGHT, height - WINDOW_CHROME_HEIGHT)
         try:
-            self._restore_geometry = self.window.geometry()
+            self._restore_geometry = self._current_geometry()
             self.window.geometry(f"{width}x{height}+{x}+{y}")
             self._filled = True
         except tk.TclError:
             return False
         return True
+
+    def _current_geometry(self) -> str:
+        """The size restore should return to.
+
+        The live geometry, unless the window is not really drawn yet -- Tk answers
+        an unmapped window with ``1x1+0+0`` -- in which case the size the window
+        opened at is used, so maximizing before the first draw cannot leave restore
+        collapsing the window to a sliver.
+        """
+        try:
+            live = self.window.geometry()
+        except tk.TclError:
+            live = ""
+        size, _, _rest = live.partition("+")
+        try:
+            width, height = (int(part) for part in size.split("x", 1))
+        except ValueError:
+            width = height = 0
+        if width > 1 and height > 1:
+            return live
+        if self._open_fit is not None:
+            return self._open_fit.placement
+        return live
 
     def restore(self) -> None:
         """Undo :meth:`maximize`, whichever way it grew the window."""
@@ -359,6 +554,7 @@ def install_window_controls(
     on_help: Callable[[], None] | None = None,
     pack_side: Literal["left", "right", "top", "bottom"] = "right",
     padx: int = 4,
+    open_fit: WindowFit | None = None,
 ) -> WindowControls:
     """Build the minimize / maximize / close buttons into ``header``.
 
@@ -376,6 +572,13 @@ def install_window_controls(
     passes nothing and keeps exactly the three controls it had, so this is
     additive for every existing caller.
     """
+    if open_fit is None:
+        # A window that opened through ``apply_window_geometry`` recorded its fit
+        # on itself; read it here so no dialog has to thread it through by hand and
+        # restore still returns the size the window really opened at.
+        candidate = getattr(window, "_window_fit", None)
+        if isinstance(candidate, WindowFit):
+            open_fit = candidate
     controls = tk.Frame(header, bg=theme.titlebar)
     controls.pack(side=pack_side, padx=(0, padx))
 
@@ -395,7 +598,7 @@ def install_window_controls(
 
     controller = WindowControls(
         window, controls, maximize_button, close=on_close, close_button=close_button,
-        help_button=help_button,
+        help_button=help_button, open_fit=open_fit,
     )
     if help_button is not None and on_help is not None:
         help_button.configure(command=on_help)
@@ -432,20 +635,197 @@ def fit_geometry(
     ``min_height`` raises the result to a floor (a window must stay usable), but is
     itself capped at the available height, so a very short screen still fits.
     """
-    area = work_area()
-    if area is not None:
-        _x, _y, area_width, area_height = area
-    else:
-        try:
-            area_width = window.winfo_screenwidth()
-            area_height = window.winfo_screenheight()
-        except tk.TclError:
-            return f"{width}x{height}"
-    width = min(width, area_width)
-    height = min(height, area_height)
+    fit = window_fit(window, width, height, min_height=min_height)
+    return fit.geometry
+
+
+@dataclass(frozen=True)
+class WindowFit:
+    """The size one window should take, measured against the usable desktop.
+
+    Produced by :func:`window_fit`, and the single shape every window's opening
+    rule goes through, so the main window and all the dialogs are sized the same
+    way and by the same figures.
+
+    ``width``/``height`` are the window's **outer** size -- what Tk's ``geometry``
+    wants -- already inside the work area *and* already reserving the room the
+    operating system's own frame needs (:data:`WINDOW_CHROME_WIDTH`/
+    :data:`WINDOW_CHROME_HEIGHT`), so the whole window, frame included, fits
+    beside the taskbar. ``x``/``y`` are where to put it (the work area's origin,
+    so a taskbar along the top or a dock along the left is stepped over);
+    ``centred`` is true when the window was centred in the work area (the default)
+    rather than pinned to its origin.
+
+    ``shrunk`` names whether the request had to be reduced -- the honest signal a
+    caller (or a test) can read instead of guessing from the numbers -- and
+    ``metrics`` is the measured desktop it was fitted to.
+    """
+
+    width: int
+    height: int
+    x: int
+    y: int
+    centred: bool
+    shrunk: bool
+    metrics: ScreenMetrics
+
+    @property
+    def geometry(self) -> str:
+        """The Tk geometry string, ``"WxH"`` (the caller places the window)."""
+        return f"{self.width}x{self.height}"
+
+    @property
+    def placement(self) -> str:
+        """The Tk geometry string **with** a position, ``"WxH+X+Y"``."""
+        return f"{self.width}x{self.height}+{self.x}+{self.y}"
+
+
+#: The smallest a window may be shrunk to and still be usable. A very small
+#: screen gives up height before it gives up width, because a window's controls
+#: live in a row and a column of them would be unusable before the height is.
+MIN_USABLE_WIDTH = 420
+MIN_USABLE_HEIGHT = 360
+
+
+def window_fit(
+    window: tk.Misc,
+    width: int,
+    height: int,
+    *,
+    min_width: int = 0,
+    min_height: int = 0,
+    reserve_chrome: bool = True,
+    centre: bool = True,
+    metrics: ScreenMetrics | None = None,
+) -> WindowFit:
+    """Fit ``width`` x ``height`` into the desktop, taskbar and frame reserved.
+
+    The one rule every window -- the main one and each dialog, present and future
+    -- sizes itself by, so "fits the laptop screen, minus the Windows taskbar" is
+    true of all of them rather than of whichever window happened to be fixed last.
+
+    * the **usable** rectangle is the desktop's work area (screen minus taskbar /
+      panel) where it reports one, else the screen (see :func:`screen_metrics`);
+    * the operating system's own frame is reserved (``reserve_chrome``), because
+      Tk's geometry does not count it and a window asked for the exact work-area
+      height would otherwise hang its bottom edge under the taskbar;
+    * ``min_width``/``min_height`` raise a too-small request, but are themselves
+      capped at what fits, and :data:`MIN_USABLE_WIDTH`/:data:`MIN_USABLE_HEIGHT`
+      keep the result usable on a tiny screen;
+    * the window is **centred** in the work area (the professional default) rather
+      than jammed into its corner -- and centring is safe even for a shrunk window,
+      because the frame's room was reserved above, so the whole window still fits.
+    """
+    if metrics is None:
+        metrics = screen_metrics(window)
+    chrome_w = WINDOW_CHROME_WIDTH if reserve_chrome else 0
+    chrome_h = WINDOW_CHROME_HEIGHT if reserve_chrome else 0
+    available_w = max(MIN_USABLE_WIDTH, metrics.usable_width - chrome_w)
+    available_h = max(MIN_USABLE_HEIGHT, metrics.usable_height - chrome_h)
+
+    wanted_w = max(0, int(width))
+    wanted_h = max(0, int(height))
+    shrunk = wanted_w > available_w or wanted_h > available_h
+
+    fitted_w = min(wanted_w, available_w)
+    fitted_h = min(wanted_h, available_h)
+    if min_width:
+        fitted_w = max(fitted_w, min(min_width, available_w))
     if min_height:
-        height = max(height, min(min_height, area_height))
-    return f"{width}x{height}"
+        fitted_h = max(fitted_h, min(min_height, available_h))
+    fitted_w = max(fitted_w, min(MIN_USABLE_WIDTH, available_w))
+    fitted_h = max(fitted_h, min(MIN_USABLE_HEIGHT, available_h))
+
+    if centre:
+        x = metrics.work_x + max(0, (metrics.usable_width - fitted_w - chrome_w) // 2)
+        y = metrics.work_y + max(0, (metrics.usable_height - fitted_h - chrome_h) // 2)
+    else:
+        x = metrics.work_x
+        y = metrics.work_y
+    return WindowFit(
+        width=fitted_w,
+        height=fitted_h,
+        x=x,
+        y=y,
+        centred=centre,
+        shrunk=shrunk,
+        metrics=metrics,
+    )
+
+
+def fit_minsize(
+    window: tk.Misc,
+    width: int,
+    height: int,
+    *,
+    reserve_chrome: bool = True,
+    metrics: ScreenMetrics | None = None,
+) -> tuple[int, int]:
+    """The smallest size a window should allow, capped to the usable desktop.
+
+    A ``minsize`` larger than the work area would make the window impossible to
+    shrink to fit -- the window manager would refuse the resize and the window
+    would stay partly off-screen -- so the declared minimum is clamped to the
+    space that really exists, frame reserved. A screen too small for the minimum
+    still gets the whole usable desktop rather than an unreachable window.
+    """
+    if metrics is None:
+        metrics = screen_metrics(window)
+    chrome_w = WINDOW_CHROME_WIDTH if reserve_chrome else 0
+    chrome_h = WINDOW_CHROME_HEIGHT if reserve_chrome else 0
+    available_w = max(MIN_USABLE_WIDTH, metrics.usable_width - chrome_w)
+    available_h = max(MIN_USABLE_HEIGHT, metrics.usable_height - chrome_h)
+    return min(max(0, int(width)), available_w), min(max(0, int(height)), available_h)
+
+
+def apply_window_geometry(
+    window: tk.Tk | tk.Toplevel,
+    width: int,
+    height: int,
+    *,
+    min_width: int = 0,
+    min_height: int = 0,
+    centre: bool = True,
+    place: bool = True,
+) -> WindowFit:
+    """Size (and optionally place) a window inside the usable desktop.
+
+    The one call a window makes at construction, so every window -- the main one
+    and each dialog, now and in future -- opens at a size that fits the laptop
+    screen **minus the Windows taskbar**, and its ``minsize`` is capped to the
+    same space so it can never be stuck partly off-screen. ``place=False`` sets
+    only the size and lets the window manager choose the position (the dialogs'
+    ``transient`` behaviour); the default centres a window that fits, which is
+    what reads as deliberate rather than as a window dropped in the corner.
+
+    Returns the :class:`WindowFit` that was applied, so a caller (or a test) can
+    read what really happened -- including whether the request had to shrink.
+    """
+    # The desktop is measured **once** and reused, so a window open costs one
+    # ``xprop``/system probe rather than one per question asked about the screen.
+    metrics = screen_metrics(window)
+    fit = window_fit(
+        window,
+        width,
+        height,
+        min_width=min_width,
+        min_height=min_height,
+        centre=centre,
+        metrics=metrics,
+    )
+    with best_effort("size the window to the usable desktop"):
+        window.geometry(fit.placement if place else fit.geometry)
+    small_w, small_h = fit_minsize(window, min_width, min_height, metrics=metrics)
+    if small_w > 0 and small_h > 0:
+        with best_effort("cap the window's minimum size to the usable desktop"):
+            window.minsize(small_w, small_h)
+    # Record the fit on the window itself, so ``install_window_controls`` can give
+    # the controller the size restore should return to: a window maximized before
+    # it is first mapped has no live geometry, and Tk would answer ``1x1+0+0``.
+    with best_effort("record the window's opening fit"):
+        window.__dict__["_window_fit"] = fit
+    return fit
+
 
 
 def _control_button(
@@ -455,7 +835,7 @@ def _control_button(
         active_bg, active_fg = theme.danger, theme.contrast
     else:
         active_bg, active_fg = theme.interactive_active, theme.contrast
-    return tk.Button(
+    button = tk.Button(
         parent,
         text=text,
         relief="flat",
@@ -467,10 +847,46 @@ def _control_button(
         activeforeground=active_fg,
         font=font,
         width=2,
-        padx=2,
-        pady=0,
+        padx=6,
+        pady=4,
         cursor="hand2",
     )
+    # Tk's ``activebackground`` only paints while the button is *held*, so a
+    # title-bar control would give no feedback on hover -- which reads as dead.
+    # The tint is bound on enter/leave and restored to the button's own resting
+    # colour, exactly like the composer's controls.
+    resting = theme.surface_raised
+
+    def on_enter(_event: tk.Event) -> None:
+        try:
+            button.configure(bg=active_bg)
+        except tk.TclError:
+            pass
+
+    def on_leave(_event: tk.Event) -> None:
+        try:
+            button.configure(bg=resting)
+        except tk.TclError:
+            pass
+
+    button.bind("<Enter>", on_enter, add="+")
+    button.bind("<Leave>", on_leave, add="+")
+    return button
 
 
-__all__ = ["WindowControls", "fit_geometry", "install_window_controls", "work_area"]
+__all__ = [
+    "MIN_USABLE_HEIGHT",
+    "MIN_USABLE_WIDTH",
+    "WINDOW_CHROME_HEIGHT",
+    "WINDOW_CHROME_WIDTH",
+    "ScreenMetrics",
+    "WindowControls",
+    "WindowFit",
+    "apply_window_geometry",
+    "fit_geometry",
+    "fit_minsize",
+    "install_window_controls",
+    "screen_metrics",
+    "window_fit",
+    "work_area",
+]

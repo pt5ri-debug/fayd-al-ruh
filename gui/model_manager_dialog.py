@@ -46,6 +46,7 @@ from gui.model_manager import (
 )
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
+from gui.window_controls import apply_window_geometry
 
 TITLE = "Model Manager"
 SUBTITLE = (
@@ -111,8 +112,9 @@ class ModelManagerDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("1200x720")
-        self.window.minsize(940, 620)
+        self._window_fit = apply_window_geometry(
+            self.window, 1200, 720, min_width=940, min_height=620
+        )
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -141,6 +143,7 @@ class ModelManagerDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window, title=TITLE, subtitle=SUBTITLE, theme=self.theme,
+            icon="🧠", eyebrow="Models", accent=False,
             typography=self._type, on_close=self._close, cancel=self._on_cancel,
         )
         self._spinner = header.spinner
