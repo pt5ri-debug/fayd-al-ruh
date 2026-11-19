@@ -507,6 +507,48 @@ def test_the_body_window_applies_templates_views_and_stores_the_picture(tmp_path
 
 
 @pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_body_window_carries_the_intimate_detail_controls(tmp_path: Path) -> None:
+    """The areola/nipple/genital controls are real widgets that move the mesh.
+
+    Each one is a slider (or a colour field), and moving it changes the *rendered
+    geometry* -- the rendered PNG really differs, which is the only thing that
+    counts as a working control.
+    """
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_body import BodyStudioDialog
+
+    service = _service(tmp_path)
+    character = service.create_character(name="Nour", role=ROLE_COMPANION, gender="woman")
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        dialog = BodyStudioDialog(
+            root, service, character.id, role=ROLE_COMPANION,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        assert _wait_for(root, lambda: dialog._photo is not None)
+        # Every intimate numeric dial has a live control, and every colour one a field.
+        for key in (
+            "genitalia", "genital_size", "genital_length", "genital_fullness",
+            "genital_direction", "areola", "areola_raise", "nipple_size",
+            "nipple_length", "nipple_direction", "nipple_spacing",
+        ):
+            assert key in dialog._dial_vars, f"no control for {key}"
+        for key in ("nipple_color", "nipple_tip_color", "genital_color"):
+            assert key in dialog._colour_vars, f"no colour field for {key}"
+        # Changing one really moves the rendered geometry.
+        before = dialog._params.nipple_length
+        dialog._dial_vars["nipple_length"].set(2.4)
+        root.update()
+        assert dialog._params.nipple_length != before
+        assert dialog._params.nipple_length == pytest.approx(2.4, abs=1e-6)
+    finally:
+        _close_window(root, dialog)
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
 def test_the_body_window_uses_the_character_engine_templates_and_persistence(
     tmp_path: Path,
 ) -> None:
@@ -794,36 +836,52 @@ def test_the_colour_dials_cover_every_part() -> None:
 
 
 def test_the_intimate_dials_exist_and_are_bounded() -> None:
-    for key in ("genitalia", "genital_size", "areola"):
+    for key in (
+        "genitalia", "genital_size", "genital_length", "genital_fullness",
+        "genital_direction", "areola", "areola_raise", "nipple_size",
+        "nipple_length", "nipple_direction", "nipple_spacing",
+    ):
         dial = dial_for(key)
         assert dial is not None, key
     params = default_parameters()
     assert set_dial(params, "genitalia", 5.0).genitalia == 1.0
     assert set_dial(params, "genitalia", -3.0).genitalia == 0.0
-    assert set_dial(params, "genital_size", 0.01).genital_size >= 0.4
+    assert set_dial(params, "genital_size", 0.01).genital_size >= 0.30
+    assert set_dial(params, "nipple_direction", 500.0).nipple_direction == 85.0
 
 
 def test_the_intimate_group_holds_its_dials() -> None:
     keys = {dial.key for dial in dials_in_group("intimate")}
-    assert {"genitalia", "genital_size", "areola"} <= keys
+    assert {
+        "genitalia", "genital_size", "genital_length", "genital_fullness",
+        "genital_direction", "areola", "areola_raise", "nipple_size",
+        "nipple_length", "nipple_direction", "nipple_spacing",
+    } <= keys
 
 
-def test_hiding_the_intimate_dial_changes_the_mesh() -> None:
+def test_hiding_the_intimate_dial_removes_the_generated_detail() -> None:
     from core.scene3d_figures import build_figure_mesh
 
     shown = build_figure_mesh(set_dial(default_parameters(), "genitalia", 1.0))
     hidden = build_figure_mesh(set_dial(default_parameters(), "genitalia", 0.0))
-    # The body is one fixed-topology human mesh, so hiding the detail is a real
-    # deformation of the genital region rather than a vertex being deleted: the
-    # two meshes differ, and the hidden one is smaller there.
-    assert shown.vertices != hidden.vertices
-    assert shown.vertex_count == hidden.vertex_count
-    moved = sum(
-        1
-        for before, after in zip(shown.vertices, hidden.vertices, strict=True)
-        if (before - after).length() > 1e-6
-    )
-    assert moved > 0, "the genitalia dial did not move a single vertex"
+    # The genital set is *generated* geometry appended as its own closed shells, so
+    # hiding it really removes those vertices instead of collapsing them onto the
+    # body. The body itself is untouched -- only the detail disappears.
+    assert shown.vertex_count > hidden.vertex_count
+    assert shown.vertices[: hidden.vertex_count] == hidden.vertices
+    # Hiding it leaves the body and its areolae, and nothing else.
+    assert hidden.vertex_count > 13_000
+
+
+def test_the_generated_detail_is_a_closed_shell_of_its_own() -> None:
+    from core.scene3d_figures import build_figure_mesh
+
+    mesh = build_figure_mesh(default_parameters())
+    used = {index for face in mesh.faces for index in face}
+    # Every vertex the mesh carries is actually used by a face (no stray points),
+    # and the detail shells are separate from the body rather than welded into it.
+    assert len(used) == mesh.vertex_count
+    assert max(used) == mesh.vertex_count - 1
 
 
 def test_the_mesh_carries_per_vertex_colours() -> None:

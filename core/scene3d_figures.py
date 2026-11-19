@@ -33,6 +33,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
+from core.human_anatomy import BreastDetail, GenitalDetail, merge_anatomy
 from core.human_body import (
     build_body as build_human_body,
 )
@@ -151,10 +152,35 @@ class FigureParameters:
     lip_color: tuple[float, float, float] = (0.62, 0.30, 0.30)
     eye_color: tuple[float, float, float] = (0.22, 0.34, 0.42)
     nipple_color: tuple[float, float, float] = (0.60, 0.34, 0.32)
+    #: The nipple's own colour, kept apart from the areola's so the two can be
+    #: tinted independently (a nipple is usually a shade deeper than its areola).
+    nipple_tip_color: tuple[float, float, float] = (0.66, 0.38, 0.35)
     nail_color: tuple[float, float, float] = (0.90, 0.82, 0.80)
     genitalia: float = 1.0
     genital_size: float = 1.0
     genital_color: tuple[float, float, float] = (0.60, 0.40, 0.38)
+    # -- anatomical detail (FR-CCE): the areola, nipple and genital geometry is
+    #    *generated* and appended to the body as its own closed shells, so each
+    #    one can be sized, tilted, coloured, and (for the genitalia) shown or
+    #    hidden. The defaults describe the reference detail, so a figure that was
+    #    never edited carries the reference anatomy for its own build.
+    #: How far the areola stands proud of the breast (``0`` lies flat on the skin).
+    areola_raise: float = 0.35
+    #: The nipple's own radius, as a fraction of the areola's.
+    nipple_size: float = 0.30
+    #: The nipple's protrusion, as a multiplier of its reference length.
+    nipple_length: float = 1.0
+    #: The protrusion's tilt in the vertical plane (degrees, ``+`` is up).
+    nipple_direction: float = 0.0
+    #: The two areolae's separation, as a multiplier of their natural spacing.
+    nipple_spacing: float = 1.0
+    #: The genital set's tilt in the vertical plane (degrees, ``+`` is up).
+    genital_direction: float = 0.0
+    #: The genital set's forward extent, as a multiplier of its reference length.
+    genital_length: float = 1.0
+    #: The genital set's fullness (labia for a feminine body, shaft and scrotum
+    #: for a masculine one), as a multiplier.
+    genital_fullness: float = 1.0
     #: Extra Catmull-Clark smoothing passes over the body: 0 is the base human
     #: mesh exactly as the modeller authored it (already 27k triangles, and the
     #: default), 1 doubles the density, 2 quadruples it. It is a real detail dial
@@ -166,6 +192,16 @@ class FigureParameters:
     smoothing: int = 0
     #: The figure's pose, kept with the body so a saved body remembers how it stood.
     pose: str = "rest"
+    #: Whether this figure is a **minor**. It is an explicit, auditable flag
+    #: rather than something inferred from height (a short adult is not a child),
+    #: and the two child templates set it. Adult anatomy -- the areola, the
+    #: nipple, the genital set -- is never generated for a minor's body.
+    minor: bool = False
+
+    @property
+    def is_minor(self) -> bool:
+        """Whether this figure is a minor (see :attr:`minor`)."""
+        return self.minor
 
     def __post_init__(self) -> None:
         if not 0.8 <= self.height <= 2.6:
@@ -218,6 +254,21 @@ class FigureParameters:
                 raise ValueError(f"Figure {field_name} must be positive.")
         if not 0.0 <= self.genitalia <= 1.0:
             raise ValueError("The genitalia dial must be in [0, 1].")
+        for field_name in (
+            "areola_raise",
+            "nipple_size",
+            "nipple_length",
+            "genital_length",
+            "genital_fullness",
+        ):
+            if getattr(self, field_name) < 0.0:
+                raise ValueError(f"Figure {field_name} must not be negative.")
+        for field_name in ("nipple_spacing",):
+            if getattr(self, field_name) <= 0.0:
+                raise ValueError(f"Figure {field_name} must be positive.")
+        for field_name in ("nipple_direction", "genital_direction"):
+            if not -90.0 <= getattr(self, field_name) <= 90.0:
+                raise ValueError(f"Figure {field_name} must be between -90 and 90 degrees.")
         if not 0 <= self.subdivisions <= 2:
             raise ValueError("Subdivisions must be 0, 1, or 2.")
         if not 0 <= self.smoothing <= 4:
@@ -641,16 +692,65 @@ def build_figure_mesh(params: FigureParameters) -> Mesh:
             name=params.name,
         )
         mesh = body.mesh
-        # The subdivision dial still means something: the base body is already a
-        # fine mesh, and a caller that asks for more detail gets it.
         # The base body is already a fine, smooth mesh, so the detail dial only
         # adds density when a caller asks for it (a close-up render).
         if params.subdivisions > 0:
             mesh = mesh.subdivide(params.subdivisions)
         if params.smoothing > 0:
             mesh = mesh.smoothed(iterations=params.smoothing, factor=0.30)
-        return mesh
+        # The anatomy is *generated* and appended as its own closed shells, after
+        # the body has its final shape, so an areola sits on the breast a bust dial
+        # really moved and a genital set sits on the pelvis it really widened.
+        return merge_anatomy(
+            mesh,
+            breast=_breast_detail(params),
+            genital=_genital_detail(params),
+        )
     return _sculpted_figure_mesh(params)
+
+
+def _breast_detail(params: FigureParameters) -> BreastDetail | None:
+    """The areola and nipple settings a figure carries, or ``None`` for a child.
+
+    Every adult body carries areolae and nipples -- they are not a sex-specific
+    feature -- so the detail is built for any non-minor figure whatever its build.
+    A child's body is never given it.
+    """
+    if params.is_minor:
+        return None
+    return BreastDetail(
+        areola_size=params.areola,
+        areola_raise=params.areola_raise,
+        nipple_size=params.nipple_size,
+        nipple_length=params.nipple_length,
+        nipple_direction=params.nipple_direction,
+        nipple_spacing=params.nipple_spacing,
+        areola_color=params.nipple_color,
+        nipple_color=params.nipple_tip_color,
+    )
+
+
+def _genital_detail(params: FigureParameters) -> GenitalDetail | None:
+    """The genital settings a figure carries, or ``None`` when it carries none.
+
+    The set's *sex* follows the body's own build -- a feminine body is given the
+    female set, a masculine one the male set -- and it is never built for a child.
+    A **neutral** build carries no genital set at all, because the project does
+    not presume one; a caller that wants it sets the build. The ``genitalia`` dial
+    hides the set at ``0``.
+    """
+    if params.is_minor or params.build not in (BUILD_FEMININE, BUILD_MASCULINE):
+        return None
+    sex = "female" if params.build == BUILD_FEMININE else "male"
+    return GenitalDetail(
+        sex=sex,
+        show=params.genitalia,
+        size=params.genital_size,
+        length=params.genital_length,
+        direction=params.genital_direction,
+        fullness=params.genital_fullness,
+        color=params.genital_color,
+    )
 
 
 def _sculpted_figure_mesh(params: FigureParameters) -> Mesh:
@@ -880,6 +980,7 @@ FIGURE_PRESETS: dict[str, FigureParameters] = {
     ),
     "child": FigureParameters(
         "Child",
+        minor=True,
         height=1.25,
         shoulder_width=0.32,
         hip_width=0.24,
@@ -974,6 +1075,7 @@ FIGURE_PRESETS: dict[str, FigureParameters] = {
     "girl": FigureParameters(
         "Girl",
         build=BUILD_FEMININE,
+        minor=True,
         height=1.32,
         proportion="child",
         shoulder_width=0.30,
@@ -995,6 +1097,7 @@ FIGURE_PRESETS: dict[str, FigureParameters] = {
     "boy": FigureParameters(
         "Boy",
         build=BUILD_MASCULINE,
+        minor=True,
         height=1.38,
         proportion="child",
         shoulder_width=0.33,

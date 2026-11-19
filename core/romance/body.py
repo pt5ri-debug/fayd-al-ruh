@@ -258,13 +258,54 @@ DIALS: tuple[DialSpec, ...] = (
     DialSpec("ear_size", "Ears", "الأذنان", "head", minimum=0.50, maximum=1.80, step=0.01),
     DialSpec(
         "genitalia", "Intimate detail", "التفاصيل الحميمة", "intimate",
-        hint="Shows the genital region (adults only); 0 hides it",
+        hint="Shows the genital set (adults only); 0 hides it",
     ),
     DialSpec(
         "genital_size", "Intimate size", "حجم التفاصيل الحميمة", "intimate",
-        minimum=0.40, maximum=1.80, step=0.01,
+        minimum=0.30, maximum=2.20, step=0.01,
+        hint="The whole genital set, scaled",
     ),
-    DialSpec("areola", "Areola size", "حجم الهالة", "intimate", minimum=0.40, maximum=2.00, step=0.01),
+    DialSpec(
+        "genital_length", "Intimate length", "طول التفاصيل الحميمة", "intimate",
+        minimum=0.30, maximum=2.20, step=0.01,
+        hint="How far the set extends forward",
+    ),
+    DialSpec(
+        "genital_fullness", "Intimate fullness", "امتلاء التفاصيل الحميمة", "intimate",
+        minimum=0.30, maximum=2.20, step=0.01,
+        hint="Labia for a feminine body; shaft and scrotum for a masculine one",
+    ),
+    DialSpec(
+        "genital_direction", "Intimate direction", "اتجاه التفاصيل الحميمة", "intimate",
+        minimum=-85.0, maximum=85.0, step=1.0,
+        hint="Tilt of the set's axis in the vertical plane (degrees, + is up)",
+    ),
+    DialSpec("areola", "Areola size", "حجم الهالة", "intimate", minimum=0.25, maximum=2.50, step=0.01),
+    DialSpec(
+        "areola_raise", "Areola raise", "بروز الهالة", "intimate",
+        minimum=0.0, maximum=1.50, step=0.01,
+        hint="How far the areola stands proud of the breast; 0 lies flat",
+    ),
+    DialSpec(
+        "nipple_size", "Nipple size", "حجم الحلمة", "intimate",
+        minimum=0.05, maximum=1.20, step=0.01,
+        hint="The nipple's radius, as a fraction of the areola's",
+    ),
+    DialSpec(
+        "nipple_length", "Nipple length", "طول الحلمة", "intimate",
+        minimum=0.0, maximum=2.50, step=0.01,
+        hint="How far the nipple protrudes",
+    ),
+    DialSpec(
+        "nipple_direction", "Nipple direction", "اتجاه الحلمة", "intimate",
+        minimum=-85.0, maximum=85.0, step=1.0,
+        hint="Tilt of the protrusion in the vertical plane (degrees, + is up)",
+    ),
+    DialSpec(
+        "nipple_spacing", "Nipple spacing", "تباعد الحلمتين", "intimate",
+        minimum=0.50, maximum=1.80, step=0.01,
+        hint="How far apart the two are, as a multiplier of their natural spacing",
+    ),
     DialSpec(
         "subdivisions", "Mesh detail (smoothness)", "دقة الشبكة (النعومة)", "detail",
         kind="int", minimum=0, maximum=2, step=1,
@@ -282,6 +323,7 @@ DIALS: tuple[DialSpec, ...] = (
     DialSpec("lip_color", "Lip colour", "لون الشفتين", "colour", kind="colour"),
     DialSpec("eye_color", "Eye colour", "لون العين", "colour", kind="colour"),
     DialSpec("nipple_color", "Areola colour", "لون الهالة", "colour", kind="colour"),
+    DialSpec("nipple_tip_color", "Nipple colour", "لون الحلمة", "colour", kind="colour"),
     DialSpec("nail_color", "Nail colour", "لون الأظافر", "colour", kind="colour"),
     DialSpec("genital_color", "Intimate colour", "لون التفاصيل الحميمة", "colour", kind="colour"),
     DialSpec(

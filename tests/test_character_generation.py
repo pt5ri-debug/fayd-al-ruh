@@ -108,17 +108,32 @@ def test_each_template_fuses_into_one_connected_skin():
     manager = CharacterTemplateManager()
     for key in manager.keys():
         mesh = build_figure_mesh(manager.parameters(key))
-        # The body is **one** connected skin. The eyes and the two rows of teeth
-        # are closed sub-surfaces inside it (as in any character asset), so the
-        # body itself is the single largest shell and everything else is a small
-        # closed detail -- never a second body part.
+        # The body is **one** connected skin. The eyes, the two rows of teeth, the
+        # areolae/nipples and (for an adult) the genital set are each a small
+        # closed sub-surface inside it -- as in any character asset -- so the body
+        # itself is the single largest shell and everything else is a small closed
+        # detail, never a second body part.
         sizes = _shell_sizes(mesh)
         body = sizes[0]
         assert body > 12_000, f"{key}: the body shell is only {body} vertices"
-        assert body > 0.97 * sum(sizes), f"{key}: the body is not one skin ({sizes[:6]})"
-        # A detail shell is small (an eye or a tooth row), never a limb.
+        assert body > 0.93 * sum(sizes), f"{key}: the body is not one skin ({sizes[:6]})"
+        # A detail shell is small (an eye, a tooth row, an areola, a genital set),
+        # never a limb.
         for detail in sizes[1:]:
             assert detail < 200, f"{key}: a {detail}-vertex shell is not a detail"
+
+
+def test_a_child_template_carries_no_adult_anatomy():
+    from core.scene3d_figures import build_figure_mesh
+
+    manager = CharacterTemplateManager()
+    for key in (TEMPLATE_GIRL, TEMPLATE_BOY):
+        params = manager.parameters(key)
+        assert params.is_minor, f"{key} must be flagged as a minor"
+        mesh = build_figure_mesh(params)
+        # A child's body is the base human mesh and nothing else: no areolae, no
+        # nipples, no genital set -- adult anatomy is never generated for a minor.
+        assert mesh.vertex_count == 13_660, f"{key}: adult anatomy reached a child"
 
 
 def _shell_count(mesh) -> int:

@@ -103,8 +103,9 @@ def test_every_figure_is_one_connected_shell_not_a_pile_of_parts() -> None:
         assert len(mesh.vertices) > 0
         # The body is one connected skin: every vertex of the largest shell is
         # reachable from its first vertex, and that shell is the whole body. The
-        # eyes and the two rows of teeth are small closed sub-surfaces inside it,
-        # as in any character asset -- never a second body part.
+        # eyes, the two rows of teeth, and (on an adult) the areolae, nipples and
+        # genital set are small closed sub-surfaces inside it, as in any character
+        # asset -- never a second body part.
         adjacency: dict[int, set[int]] = {}
         for face in mesh.faces:
             for index in face:
@@ -118,7 +119,7 @@ def test_every_figure_is_one_connected_shell_not_a_pile_of_parts() -> None:
                     seen.add(neighbour)
                     stack.append(neighbour)
         assert len(seen) > 12_000, f"{slot}: the body shell is only {len(seen)} vertices"
-        assert len(seen) > 0.97 * len(mesh.vertices), f"{slot} is not one body shell"
+        assert len(seen) > 0.93 * len(mesh.vertices), f"{slot} is not one body shell"
         for index in range(len(mesh.vertices)):
             if index not in seen:
                 # A detail vertex must belong to a tiny closed surface.
