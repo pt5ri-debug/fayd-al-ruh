@@ -50,6 +50,7 @@ from gui.image_preview import load_scaled
 from gui.message_footer import add_provenance_label
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
+from gui.window_controls import apply_window_geometry
 
 TITLE = "Doc's Studio"
 SUBTITLE = (
@@ -128,8 +129,9 @@ class DocsDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("1240x720")
-        self.window.minsize(960, 640)
+        self._window_fit = apply_window_geometry(
+            self.window, 1240, 720, min_width=960, min_height=640
+        )
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -162,6 +164,7 @@ class DocsDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window, title=TITLE, subtitle=SUBTITLE, theme=self.theme,
+            icon="📄", eyebrow="Documents", accent=True,
             typography=self._type, on_close=self._close,
         )
         self._spinner = header.spinner

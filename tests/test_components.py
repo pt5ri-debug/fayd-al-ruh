@@ -242,6 +242,75 @@ def test_hero_header_builds_title_subtitle_notes_and_controls() -> None:
         window.destroy()
 
 
+def test_dialog_header_draws_an_identity_badge_when_given_an_icon() -> None:
+    """A window with an icon gets a rounded badge beside its title; one without gets none."""
+    with _Root() as root:
+        window = tk.Toplevel(root)
+        header = components.DialogHeader(
+            window, title="Presentation Studio", icon="📊", theme=DARK_THEME,
+            typography=DEFAULT_TYPOGRAPHY,
+        )
+        assert header.badge is not None
+        assert isinstance(header.badge, components.TitleBadge)
+        # The badge is a real canvas that painted its rounded shape and its glyph.
+        assert header.badge.winfo_manager() == "pack"
+        assert header.badge.find_all()  # at least the shape polygon and the glyph
+        plain = components.DialogHeader(
+            window, title="No icon", theme=DARK_THEME, typography=DEFAULT_TYPOGRAPHY
+        )
+        assert plain.badge is None
+        window.destroy()
+
+
+def test_dialog_header_eyebrow_states_the_window_kind() -> None:
+    """The eyebrow is upper-cased and accent-tinted, so a window names its own kind."""
+    with _Root() as root:
+        window = tk.Toplevel(root)
+        header = components.DialogHeader(
+            window, title="Deck", eyebrow="studio", accent=True, theme=DARK_THEME,
+            typography=DEFAULT_TYPOGRAPHY,
+        )
+        assert header.eyebrow_label is not None
+        assert str(header.eyebrow_label.cget("text")) == "STUDIO"
+        assert str(header.eyebrow_label.cget("fg")) == DARK_THEME.primary
+        plain = components.DialogHeader(
+            window, title="No eyebrow", theme=DARK_THEME, typography=DEFAULT_TYPOGRAPHY
+        )
+        assert plain.eyebrow_label is None
+        window.destroy()
+
+
+def test_dialog_header_has_a_divider_edge_below_the_band() -> None:
+    """Every title bar is closed by the theme's hairline, like the main window's."""
+    with _Root() as root:
+        window = tk.Toplevel(root)
+        components.DialogHeader(
+            window, title="T", theme=DARK_THEME, typography=DEFAULT_TYPOGRAPHY
+        )
+        window.update_idletasks()
+        # The bar, then the one-pixel edge frame, both packed into the window.
+        bars = [w for w in window.winfo_children() if isinstance(w, tk.Frame)]
+        edges = [
+            w for w in bars
+            if str(w.cget("bg")) == DARK_THEME.titlebar_edge
+        ]
+        assert edges, "the title bar must be closed by the titlebar_edge hairline"
+        window.destroy()
+
+
+def test_hero_header_draws_a_badge_and_eyebrow_too() -> None:
+    with _Root() as root:
+        window = tk.Toplevel(root)
+        header = components.HeroHeader(
+            window, title="Import", eyebrow="knowledge", icon="📥",
+            theme=DARK_THEME, typography=DEFAULT_TYPOGRAPHY,
+        )
+        assert header.badge is not None
+        assert header.eyebrow_label is not None
+        assert str(header.eyebrow_label.cget("text")) == "KNOWLEDGE"
+        window.destroy()
+
+
 def test_hero_header_extra_packs_beside_the_controls() -> None:
     with _Root() as root:
         window = tk.Toplevel(root)

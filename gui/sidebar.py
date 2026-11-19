@@ -61,6 +61,7 @@ class SidebarSection:
         typography: Typography,
         open: bool = True,
         on_toggle: Callable[[str, bool], None] | None = None,
+        first: bool = False,
     ) -> None:
         self.key = key
         self.title = title
@@ -78,17 +79,23 @@ class SidebarSection:
         # The header: a full-width clickable band (icon + title on the left, the
         # chevron on the right). Tk labels have no button styling, so the band is
         # a frame with two labels and the click is bound on all three.
+        # A hairline above every section but the first closes the previous one, so
+        # the column reads as a set of distinct groups rather than one long list.
+        if not first:
+            tk.Frame(self.frame, bg=_token(theme, "border_subtle"), height=1).pack(
+                fill="x", padx=12
+            )
         self.header = tk.Frame(self.frame, bg=_token(theme, "surface"), cursor="hand2")
         self.header.pack(fill="x", pady=(0, 1))
         self._title_label = tk.Label(
             self.header,
-            text=f"{icon}  {title}",
+            text=f"{icon}  {title}" if icon else title,
             bg=_token(theme, "surface"),
             fg=_token(theme, "text_secondary"),
-            font=typography.font("2xs", weight="bold"),
+            font=typography.font("xs", weight="bold"),
             anchor="w",
             padx=18,
-            pady=6,
+            pady=8,
             cursor="hand2",
         )
         self._title_label.pack(side="left", fill="x", expand=True)
@@ -257,6 +264,7 @@ class SidebarColumn:
             typography=self._type,
             open=self._states.get(key, open),
             on_toggle=self._on_toggle if self._scope else None,
+            first=not self.sections,
         )
         self.sections[key] = section
         self._bind_wheel_recursive(section.frame)

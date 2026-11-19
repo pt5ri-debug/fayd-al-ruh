@@ -41,7 +41,7 @@ from gui.dialog_base import ThemedDialog
 from gui.romance import RomanceStudioService
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
-from gui.window_controls import fit_geometry
+from gui.window_controls import apply_window_geometry
 
 TITLE = "Romance & Companion Studio"
 SUBTITLE = "استوديو الرومانسية والرفقة — local AI companions, dating, and roleplay"
@@ -168,10 +168,9 @@ class RomanceStudioDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry(
-            fit_geometry(self.window, DEFAULT_WIDTH, DEFAULT_HEIGHT, min_height=MIN_HEIGHT)
+        self._window_fit = apply_window_geometry(
+            self.window, DEFAULT_WIDTH, DEFAULT_HEIGHT, min_width=MIN_WIDTH, min_height=MIN_HEIGHT
         )
-        self.window.minsize(MIN_WIDTH, MIN_HEIGHT)
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -201,6 +200,7 @@ class RomanceStudioDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window, title=TITLE, subtitle=SUBTITLE, theme=self.theme,
+            icon="💞", eyebrow="Companion", accent=True,
             typography=self._type, on_close=self._close, extra=self._header_extra,
         )
         self._spinner = header.spinner

@@ -25,6 +25,7 @@ from core.romance.model import ROLE_USER
 from gui.dialog_base import ThemedDialog
 from gui.romance import RomanceStudioService
 from gui.typography import resolve
+from gui.window_controls import apply_window_geometry
 
 TITLE_NEW = "New companion"
 TITLE_EDIT = "Edit companion"
@@ -161,8 +162,9 @@ class CharacterEditorDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(self._title())
         self.window.configure(bg=theme.base)
-        self.window.geometry("820x760")
-        self.window.minsize(680, 560)
+        self._window_fit = apply_window_geometry(
+            self.window, 820, 760, min_width=680, min_height=560
+        )
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -179,6 +181,7 @@ class CharacterEditorDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window,
+            icon="✏", eyebrow="Companion",
             title=self._title(),
             subtitle=self._subtitle(),
             theme=self.theme, typography=self._type, on_close=self._close,

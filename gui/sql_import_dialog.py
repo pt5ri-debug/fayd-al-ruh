@@ -41,6 +41,7 @@ from gui.sql_import import (
     redact_secrets,
 )
 from gui.typography import resolve
+from gui.window_controls import apply_window_geometry
 
 #: The page title and one-line description.
 TITLE = "SQL Database Import"
@@ -100,8 +101,9 @@ class SqlImportDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("820x760")
-        self.window.minsize(640, 540)
+        self._window_fit = apply_window_geometry(
+            self.window, 820, 760, min_width=640, min_height=540
+        )
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -118,6 +120,7 @@ class SqlImportDialog(ThemedDialog):
 
         header = HeroHeader(
             self.window, title=TITLE, subtitle=SUBTITLE, notes=(FORMATS_LINE,),
+            icon="🗄", eyebrow="Data", accent=False,
             theme=theme, typography=self._type, on_close=self._close, wraplength=760,
         )
         self._window_controls = header.controls

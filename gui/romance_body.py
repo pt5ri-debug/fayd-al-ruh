@@ -33,6 +33,7 @@ from gui.dialog_base import ThemedDialog
 from gui.romance import RomanceStudioService
 from gui.sidebar import SidebarColumn
 from gui.typography import resolve
+from gui.window_controls import apply_window_geometry
 
 TITLE = "Body & shape"
 
@@ -117,8 +118,9 @@ class BodyStudioDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(f"{TITLE} — {name}" if name else TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("1120x780")
-        self.window.minsize(880, 600)
+        self._window_fit = apply_window_geometry(
+            self.window, 1120, 780, min_width=880, min_height=600
+        )
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -142,6 +144,7 @@ class BodyStudioDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window,
+            icon="🧍", eyebrow="Companion",
             title=TITLE,
             subtitle=_SUBTITLE,
             theme=self.theme,

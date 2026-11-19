@@ -36,6 +36,7 @@ from gui.romance import (
     RomanceStudioService,
 )
 from gui.typography import resolve
+from gui.window_controls import apply_window_geometry
 
 TITLE = "Companion Studio settings"
 SUBTITLE = (
@@ -108,8 +109,9 @@ class StudioSettingsDialog(ThemedDialog):
         self.window = tk.Toplevel(parent)
         self.window.title(TITLE)
         self.window.configure(bg=theme.base)
-        self.window.geometry("620x640")
-        self.window.minsize(520, 480)
+        self._window_fit = apply_window_geometry(
+            self.window, 620, 640, min_width=520, min_height=480
+        )
         self.window.transient(parent)
         self.window.protocol("WM_DELETE_WINDOW", self._close)
         self._themed_build()
@@ -121,6 +123,7 @@ class StudioSettingsDialog(ThemedDialog):
 
         header = DialogHeader(
             self.window, title=TITLE, subtitle=SUBTITLE, theme=self.theme,
+            icon="⚙", eyebrow="Companion", accent=False,
             typography=self._type, on_close=self._close,
         )
         self._spinner = header.spinner

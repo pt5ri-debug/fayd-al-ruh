@@ -1461,13 +1461,35 @@ Arabic is kept as secondary aliases where useful.
   platform lookup (`SystemParametersInfo`'s `rcWork` on Windows, the window
   manager's `_NET_WORKAREA` through `xprop` on X11, `NSScreen.visibleFrame` on
   macOS) and returns `None` where the desktop cannot report it, in which case a
-  real full-screen window is the honest fallback. `fit_geometry(window, width,
-  height, *, min_height=0)` is the shared **opening** size rule beside it: it
-  returns the `"WxH"` geometry string a window should open at, clamped to the
-  work area (or the screen when the desktop cannot report one), so a window never
-  opens taller or wider than the usable desktop and its controls stay reachable on
-  a small screen; `min_height` lifts a too-short request but is itself capped to
-  what fits. The pre-fill geometry is kept so
+  real full-screen window is the honest fallback. **One geometry rule serves every
+  window, present and future.** `screen_metrics(window)` is the one honest
+  measurement of the desktop: a `ScreenMetrics` carrying the **whole screen**
+  (`winfo_screenwidth/height`, which *includes* the taskbar) and the **usable
+  work area** (`work_area()`), with `taskbar` naming the difference and `reported`
+  saying whether the desktop could answer at all. `window_fit(window, width,
+  height, *, min_width=, min_height=, centre=, metrics=)` turns a request into a
+  `WindowFit` -- the outer `width`/`height`, the `x`/`y` placement, `centred`, and
+  `shrunk` -- reserving the operating-system frame
+  (`WINDOW_CHROME_WIDTH`/`WINDOW_CHROME_HEIGHT`, which Tk's geometry does *not*
+  count, so a window asked for the exact work-area height does not hang its bottom
+  edge under the taskbar), clamping to the usable desktop, raising to a floor but
+  never past it, and **centring** the result in the work area. `apply_window_geometry(window,
+  width, height, *, min_width=, min_height=, centre=, place=)` is the one call a
+  window makes at construction: it sizes and places the window *and* caps its
+  `minsize` to the same usable space, so a window can never be stuck partly
+  off-screen on a small laptop; it measures the desktop **once** and reuses the
+  figures. `fit_minsize(window, width, height)` is the matching "smallest size"
+  rule. `fit_geometry(window, width, height, *, min_height=0)` is kept as the thin
+  `"WxH"` wrapper every dialog already called, now backed by the same rule, so a
+  window never opens taller or wider than the usable desktop and its controls stay
+  reachable on a small screen. `WindowControls.maximize()` fills the work area
+  **minus the frame** too (and verifies a native `state("zoomed")` actually took
+  effect, falling back to the work-area fill when a window manager accepts the
+  call but ignores it). **Every** window now opens through `apply_window_geometry`
+  -- the main window (whose saved size is clamped to the current screen) and all
+  twenty-five dialogs -- so "fits the laptop screen, minus the Windows taskbar" is
+  true of the whole program rather than of whichever window happened to be fixed
+  last. The pre-fill geometry is kept so
   restore returns the window exactly, and each button's `command` is a bound
   method on the controller, which
   holds the window, which owns the buttons — a cycle a destroyed window would only
@@ -1487,7 +1509,19 @@ Arabic is kept as secondary aliases where useful.
   main window's bar is the same band, so the header's model control, model selector,
   and controls read as one piece with every dialog; `Theme` gained the two tokens
   and each window paints its bar, its title labels, and the control frame with
-  them, so one appearance switch restyles every window at once.
+  them, so one appearance switch restyles every window at once. The band's rhythm
+  lives in one token object (`gui.design.TITLEBAR`: the minimum height, the badge
+  size and radius, the gap, and the control size), and `gui.components`'s
+  `DialogHeader`/`HeroHeader` draw it once for every window with three optional
+  pieces that make each window *specialised*: a **`TitleBadge`** (a rounded Canvas
+  holding the window's own glyph -- the deck for the Presentation Studio, the
+  document for Doc's Studio, the mask for the Characters window), an **eyebrow**
+  (a small upper-case line above the title naming the window's kind: *STUDIO*,
+  *KNOWLEDGE*, *TRAINING*), and an **accent** tint for the day's main task. The
+  controls themselves carry a real hover tint (Tk's `activebackground` only paints
+  while the button is held, so the tint is bound on enter/leave), and each sidebar
+  section is closed by a `border_subtle` hairline so a column of collapsible
+  groups reads as a set of distinct panels rather than one long list.
 - `core/composition.py` — the deterministic composer: dependency-free rules that
   render evidence (retrieved passages, web sources, causal/reasoning/decision
   traces) into clean attributed prose. Shared by the assistant's extractive
