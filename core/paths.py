@@ -419,6 +419,31 @@ def romance_figures_dir() -> Path:
     return romance_dir() / "figures"
 
 
+def character_bodies_dir() -> Path:
+    """Where each character's **own body configuration** is saved (``data/bodies``).
+
+    The FR-CCE character engine (see :mod:`core.character_generation`) stores one
+    small JSON document per character here -- its template id, its body parameters,
+    its morph values, its skeleton and material settings, the preset it came from,
+    the last-modified time, and the engine version -- under a stable character id.
+    It is git-ignored like the rest of the user's data, so a character's body never
+    dirties the working tree, a program update never overwrites it, and
+    ``FAYD_DATA_DIR`` moves it with the rest of the data.
+    """
+    return data_dir() / "bodies"
+
+
+def character_presets_dir() -> Path:
+    """Where saved body presets live (``data/bodies/presets``, git-ignored).
+
+    A *preset* is a named set of body parameters a user saved to return to later
+    (``Save custom preset`` in the Body & shape window). One JSON document per
+    preset lives here, beside the per-character body configurations, so a preset
+    survives a program update and never dirties the working tree.
+    """
+    return character_bodies_dir() / "presets"
+
+
 def _asset_roots() -> tuple[Path, ...]:
     """Every place a bundled read-only asset may live, most specific first.
 
@@ -754,9 +779,11 @@ __all__ = [
     "bundled_checkpoints_dir",
     "bundled_config_dir",
     "bundled_knowledge_dir",
+    "character_bodies_dir",
     "character_config_dir",
     "character_learning_dir",
     "character_learning_store_dir",
+    "character_presets_dir",
     "characters_dir",
     "checkpoint_import_dir",
     "checkpoints_dir",

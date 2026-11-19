@@ -244,10 +244,20 @@ class RomanceStudioService:
         safety: Any = None,
         generator: Any = None,
         stream_generator: Any = None,
+        character_engine: Any = None,
     ) -> None:
         self.storage = CompanionStorageService(root=root)
         self.characters = CharacterManager(self.storage)
         self.memory = CompanionMemoryManager(self.storage)
+        # The FR-CCE character-generation engine (Body & shape). Its stores live
+        # beside the Studio's own data, so a character's saved body is independent
+        # of the database and survives an update. A service built for tests injects
+        # its own root here through ``character_engine=``.
+        if character_engine is None:
+            from core.character_generation import default_engine
+
+            character_engine = default_engine(data_root=self.storage.root / "bodies")
+        self.character_engine = character_engine
         self.conversations = ConversationManager(
             self.storage,
             characters=self.characters,
@@ -915,6 +925,130 @@ class RomanceStudioService:
 
         data = render_avatar(params, width=AVATAR_WIDTH, height=AVATAR_HEIGHT)
         return self.avatar_manager().set_from_bytes(character_id, data, source="body studio")
+
+    # -- the FR-CCE character engine (Body & shape) -----------------------
+
+    def character_templates(self, *, language: str = "en") -> tuple[tuple[str, str], ...]:
+        """``(key, title)`` for the four base templates (woman, girl, man, boy)."""
+        return self.character_engine.templates.summaries(language=language)
+
+    def template_for_character(self, character_id: str) -> str:
+        """The template a character's own recorded sex and age select."""
+        try:
+            character = self.character(character_id) if character_id else None
+        except Exception:
+            character = None
+        return self.character_engine.templates.template_for_character(character)
+
+    def character_body(self, character_id: str) -> Any:
+        """The engine instance a character opens on: its **saved** body, else its template.
+
+        This is the one entry the Body & shape window uses, so a character that was
+        shaped and saved before reopens exactly as it was left, and a character with
+        no saved body opens on its own template.
+        """
+        try:
+            character = self.character(character_id) if character_id else None
+        except Exception:
+            character = None
+        return self.character_engine.load_for_character(character, character_id=character_id)
+
+    def character_body_template(self, character_id: str) -> str:
+        """The template the character's *live* body is on (saved or template)."""
+        return self.character_body(character_id).template_id
+
+    def save_character_body(
+        self, character_id: str, instance: Any, *, preset_id: str = ""
+    ) -> Any:
+        """Save a character's own body configuration (never a template's)."""
+        instance.character_id = character_id
+        return self.character_engine.save(instance, preset_id=preset_id)
+
+    def character_body_config(self, character_id: str) -> Any:
+        """A character's saved body configuration, or ``None`` when there is none."""
+        return self.character_engine.load_config(character_id)
+
+    def new_character_body(
+        self, template_id: str, *, character_id: str = "", name: str = ""
+    ) -> Any:
+        """A fresh engine instance from one of the four templates."""
+        return self.character_engine.create(
+            template_id, character_id=character_id, name=name
+        )
+
+    def body_parameter_groups(
+        self, *, language: str = "en"
+    ) -> tuple[tuple[str, str, tuple[Any, ...]], ...]:
+        """``(group key, title, dials)`` for the engine's own parameter groups."""
+        return self.character_engine.parameters.groups(language=language)
+
+    def morph_character_body(self, instance: Any, key: str, value: Any) -> Any:
+        """Set one body parameter and return the real geometry change it caused."""
+        return self.character_engine.morph(instance, key, value)
+
+    def regenerate_character_body(self, instance: Any) -> Any:
+        """Rebuild a character from its template's defaults (its saved body untouched)."""
+        return self.character_engine.regenerate(instance)
+
+    def restore_character_body(self, instance: Any, config: Any) -> Any:
+        """Restore a saved configuration onto a live character instance."""
+        return self.character_engine.restore(instance, config)
+
+    def set_character_body_pose(self, instance: Any, preset: str) -> None:
+        """Put a live character into a ready-made pose."""
+        self.character_engine.set_pose(instance, preset)
+
+    def render_character_body(
+        self,
+        instance: Any,
+        *,
+        view: str = "full",
+        width: int | None = None,
+        height: int | None = None,
+        azimuth: float = 0.0,
+        elevation: float = 0.0,
+        zoom: float = 1.0,
+        light_scale: float = 1.0,
+    ) -> bytes:
+        """Render the engine's own character (rig, materials, and lights) to a PNG."""
+        from core.romance.body import PREVIEW_HEIGHT, PREVIEW_WIDTH
+
+        report = self.character_engine.render(
+            instance,
+            view=view,
+            width=int(width or PREVIEW_WIDTH),
+            height=int(height or PREVIEW_HEIGHT),
+            azimuth=float(azimuth),
+            elevation=float(elevation),
+            zoom=float(zoom),
+            light_scale=float(light_scale),
+        )
+        return report.png
+
+    def save_body_preset(self, preset_id: str, title: str, instance: Any) -> Any:
+        """Save a named body preset from a live character."""
+        return self.character_engine.save_preset(preset_id, title, instance)
+
+    def body_preset_names(self) -> tuple[tuple[str, str], ...]:
+        """``(preset id, title)`` for every saved body preset."""
+        return tuple(
+            (preset.preset_id, preset.title) for preset in self.character_engine.presets.list()
+        )
+
+    def apply_body_preset_instance(self, instance: Any, preset_id: str) -> Any:
+        """Apply a saved body preset to a live character (``None`` when absent)."""
+        return self.character_engine.apply_preset(instance, preset_id)
+
+    def remove_body_preset(self, preset_id: str) -> bool:
+        return self.character_engine.presets.remove(preset_id)
+
+    def character_engine_status(self) -> dict[str, Any]:
+        """An honest status of the FR-CCE engine (what it can and cannot do)."""
+        return self.character_engine.status()
+
+    def engine_rig_report(self, instance: Any) -> Any:
+        """The rig report of a live character (bones, fingers, bound vertices)."""
+        return self.character_engine.rig.report(instance.obj)
 
     # -- characters -------------------------------------------------------
 

@@ -123,6 +123,7 @@ DIAL_GROUPS: tuple[tuple[str, str, str], ...] = (
     ("proportions", "Proportions", "القياسات"),
     ("torso", "Torso and shape", "الجذع والقوام"),
     ("limbs", "Arms and legs", "الذراعان والساقان"),
+    ("measurements", "Fine measurements", "القياسات الدقيقة"),
     ("head", "Head and face", "الرأس والوجه"),
     ("intimate", "Intimate detail", "التفاصيل الحميمة"),
     ("detail", "Mesh and detail", "الشبكة والتفاصيل"),
@@ -190,12 +191,19 @@ def as_colour(value: Any) -> tuple[float, float, float]:
     return tuple(min(1.0, max(0.0, component)) for component in parts)  # type: ignore[return-value]
 
 
+#: The proportion styles a figure can be given (the figure builder's own set).
+PROPORTION_STYLES: tuple[str, ...] = ("average", "athletic", "slim", "curvy", "child")
+
 #: Every dial the studio can edit, grouped. The keys are the parameter field names
 #: themselves, so setting a dial is a direct write to the figure's own parameters.
 DIALS: tuple[DialSpec, ...] = (
     DialSpec(
         "build", "Build family", "نمط الجسم", "proportions",
         kind="choice", choices=BUILDS, hint="Feminine / masculine / neutral",
+    ),
+    DialSpec(
+        "proportion", "Proportion style", "نمط القوام", "proportions",
+        kind="choice", choices=PROPORTION_STYLES, hint="Average / athletic / slim / curvy / child",
     ),
     DialSpec(
         "height", "Height (metres)", "الطول (متر)", "proportions",
@@ -217,6 +225,25 @@ DIALS: tuple[DialSpec, ...] = (
     DialSpec("leg_thickness", "Leg thickness", "سماكة الساق", "limbs", minimum=0.60, maximum=1.70, step=0.01),
     DialSpec("hand_size", "Hand size", "حجم اليد", "limbs", minimum=0.60, maximum=1.50, step=0.01),
     DialSpec("foot_size", "Foot size", "حجم القدم", "limbs", minimum=0.60, maximum=1.50, step=0.01),
+    # -- fine measurements (FR-CCE): an independent control per part, on top of the
+    #    coarse dials above. Each 1.0 default leaves the body exactly as it was.
+    DialSpec(
+        "overall_scale", "Overall build (girth)", "البنية العامة", "measurements",
+        minimum=0.70, maximum=1.40, step=0.01,
+        hint="A single multiplier on every girth, so the whole body is heavier or lighter",
+    ),
+    DialSpec("head_depth", "Head depth", "عمق الرأس", "measurements", minimum=0.70, maximum=1.35, step=0.01),
+    DialSpec("neck_length", "Neck length", "طول الرقبة", "measurements", minimum=0.60, maximum=1.60, step=0.01),
+    DialSpec("arm_length", "Upper-arm length", "طول العضد", "measurements", minimum=0.70, maximum=1.40, step=0.01),
+    DialSpec("forearm_length", "Forearm length", "طول الساعد", "measurements", minimum=0.70, maximum=1.40, step=0.01),
+    DialSpec("hand_length", "Hand length", "طول اليد", "measurements", minimum=0.70, maximum=1.40, step=0.01),
+    DialSpec("hand_width", "Hand width", "عرض اليد", "measurements", minimum=0.70, maximum=1.40, step=0.01),
+    DialSpec("thigh_thickness", "Thigh thickness", "سماكة الفخذ", "measurements", minimum=0.60, maximum=1.70, step=0.01),
+    DialSpec("thigh_length", "Thigh length", "طول الفخذ", "measurements", minimum=0.70, maximum=1.40, step=0.01),
+    DialSpec("calf_thickness", "Calf thickness", "سماكة الساق", "measurements", minimum=0.60, maximum=1.70, step=0.01),
+    DialSpec("lower_leg_length", "Lower-leg length", "طول الساق السفلى", "measurements", minimum=0.70, maximum=1.40, step=0.01),
+    DialSpec("foot_length", "Foot length", "طول القدم", "measurements", minimum=0.70, maximum=1.40, step=0.01),
+    DialSpec("foot_width", "Foot width", "عرض القدم", "measurements", minimum=0.70, maximum=1.40, step=0.01),
     DialSpec("head_scale", "Head size", "حجم الرأس", "head", minimum=0.80, maximum=1.30, step=0.01),
     DialSpec("face_length", "Face length", "طول الوجه", "head", minimum=0.80, maximum=1.25, step=0.01),
     DialSpec("face_width", "Face width", "عرض الوجه", "head", minimum=0.80, maximum=1.25, step=0.01),
