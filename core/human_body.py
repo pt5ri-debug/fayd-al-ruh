@@ -23,7 +23,17 @@ import math
 from dataclasses import dataclass, field
 
 from core.human_pack import HumanPack, MorphTarget, load_pack
-from core.scene3d import Bone, Mesh, SceneObject, Skeleton, Vec3
+from core.scene3d import (
+    IDENTITY_MATRIX,
+    Bone,
+    Mat4,
+    Mesh,
+    SceneObject,
+    Skeleton,
+    Vec3,
+    euler_from_rotation,
+    rotation_for_direction,
+)
 
 #: The dial value that leaves the base body alone. Every dial is ``0..1`` and
 #: ``0.5`` is "no change", which is how MakeHuman's own sliders work.
@@ -183,18 +193,23 @@ def _tint(
 
 
 def _lips_region(data: HumanPack) -> set[int]:
-    """The mouth's own vertices: just in front of the jaw marker and near it."""
+    """The mouth's own vertices: a small band above the jaw marker, on the face.
+
+    The region is deliberately *tight* (about 2 cm tall, 4 cm wide) and scaled
+    from the jaw marker. An earlier, much larger box tinted the whole jaw, chin,
+    and neck with the lip colour, which read as a dark mask across the lower face.
+    """
     jaw = data.joint("joint-jaw")
     if jaw is None:
         return set()
     jx, jy, jz = jaw
-    radius = 0.55
+    mouth_y = jy + 0.20
     return {
         index
         for index in data.group("body")
-        if abs(data.vertices[index][0] - jx) < radius
-        and abs(data.vertices[index][1] - jy) < radius * 0.75
-        and data.vertices[index][2] > jz - radius * 1.4
+        if abs(data.vertices[index][0] - jx) < 0.22
+        and abs(data.vertices[index][1] - mouth_y) < 0.11
+        and data.vertices[index][2] > jz - 0.02
     }
 
 
@@ -687,6 +702,45 @@ def joint_positions(
     return positions
 
 
+def chain_skeleton(
+    specs: list[tuple[str, str | None, Vec3, Vec3]],
+) -> Skeleton:
+    """Build a bone chain whose axes follow the anatomy, from world head/tail points.
+
+    ``specs`` are ``(name, parent, head, tail)`` in **parents-first** order. Each
+    bone's ``rest_rotation`` is derived from ``tail - head`` (see
+    :func:`core.scene3d.rest_rotation_for`), so its local ``+Y`` really runs down
+    the limb, and its ``offset`` is the head expressed in the parent's own frame.
+    That is what makes skinning bind a leg's vertices to the leg rather than to a
+    vertical line through the hip -- and what makes a pose bend the body instead of
+    tearing it.
+    """
+    bones: list[Bone] = []
+    world_rotation: dict[str, Mat4] = {}
+    world_head: dict[str, Vec3] = {}
+    for name, parent, head, tail in specs:
+        direction = tail - head
+        world_rest = rotation_for_direction(direction)
+        if parent is None:
+            offset = head
+            parent_rotation = IDENTITY_MATRIX
+        else:
+            parent_rotation = world_rotation[parent]
+            offset = parent_rotation.inverse().transform_direction(head - world_head[parent])
+        # A bone's ``rest_rotation`` is expressed in its **parent's** frame, so the
+        # world rest orientation is re-expressed there before it is stored.
+        local_rest = euler_from_rotation(parent_rotation.inverse() @ world_rest)
+        world_rotation[name] = parent_rotation @ Mat4.euler(local_rest)
+        world_head[name] = head
+        bones.append(
+            Bone(
+                name, parent, offset, local_rest, Vec3(),
+                max(1e-3, direction.length()),
+            )
+        )
+    return Skeleton(tuple(bones))
+
+
 def build_skeleton(body: HumanBody, *, data: HumanPack | None = None) -> Skeleton:
     """A humanoid rig placed on *this* body's own joint markers.
 
@@ -695,6 +749,13 @@ def build_skeleton(body: HumanBody, *, data: HumanPack | None = None) -> Skeleto
     ``forearm.L``, ``hand.L``, ``thigh.L``, ``shin.L``, ``foot.L``, ``toe.L``),
     and every one is placed from a MakeHuman joint marker, so it sits where the
     anatomy puts it and stays there when the body is morphed.
+
+    The spine is built in the body's own anatomical order -- ``pelvis -> spine-4
+    -> spine-2 -> neck`` -- because MakeHuman numbers its spine markers from the
+    top down. The earlier chain took ``spine-2`` as the spine and ``spine-4`` as
+    the chest, which put the chest *below* the spine; with the rest rotation now
+    derived from the anatomy, that inversion would have pointed a bone down the
+    torso backwards.
     """
     points = joint_positions(body, data)
     height = body.height
@@ -703,18 +764,18 @@ def build_skeleton(body: HumanBody, *, data: HumanPack | None = None) -> Skeleto
         return points.get(name) or Vec3(*fallback)
 
     pelvis = point("joint-pelvis", (0.0, height * 0.52, 0.0))
-    spine = point("joint-spine-2", (0.0, height * 0.60, 0.0))
-    chest = point("joint-spine-4", (0.0, height * 0.70, 0.0))
+    spine = point("joint-spine-4", (0.0, height * 0.55, 0.0))
+    chest = point("joint-spine-2", (0.0, height * 0.65, 0.0))
     neck = point("joint-neck", (0.0, height * 0.80, 0.0))
     head = point("joint-head", (0.0, height * 0.86, 0.0))
     head_top = point("joint-head-2", (0.0, height * 0.97, 0.0))
 
-    bones: list[Bone] = [
-        Bone("hips", None, pelvis, Vec3(), Vec3(), _length(pelvis, spine)),
-        Bone("spine", "hips", spine - pelvis, Vec3(), Vec3(), _length(spine, chest)),
-        Bone("chest", "spine", chest - spine, Vec3(), Vec3(), _length(chest, neck)),
-        Bone("neck", "chest", neck - chest, Vec3(), Vec3(), _length(neck, head)),
-        Bone("head", "neck", head - neck, Vec3(), Vec3(), _length(head, head_top)),
+    specs: list[tuple[str, str | None, Vec3, Vec3]] = [
+        ("hips", None, pelvis, spine),
+        ("spine", "hips", spine, chest),
+        ("chest", "spine", chest, neck),
+        ("neck", "chest", neck, head),
+        ("head", "neck", head, head_top),
     ]
 
     for side, suffix in (("l", "L"), ("r", "R")):
@@ -726,22 +787,22 @@ def build_skeleton(body: HumanBody, *, data: HumanPack | None = None) -> Skeleto
         hip = point(f"joint-{side}-upper-leg", (0.0, height * 0.50, 0.0))
         knee = point(f"joint-{side}-knee", (0.0, height * 0.28, 0.0))
         ankle = point(f"joint-{side}-ankle", (0.0, height * 0.06, 0.0))
-        heel = point(f"joint-{side}-foot-1", (0.0, height * 0.03, 0.0))
+        ball = point(f"joint-{side}-foot-1", (0.0, height * 0.03, 0.04))
         toe = point(f"joint-{side}-foot-2", (0.0, height * 0.02, 0.10))
 
-        bones.extend(
+        specs.extend(
             [
-                Bone(f"shoulder.{suffix}", "chest", clavicle - chest, Vec3(), Vec3(), _length(clavicle, shoulder)),
-                Bone(f"upper_arm.{suffix}", f"shoulder.{suffix}", shoulder - clavicle, Vec3(), Vec3(), _length(shoulder, elbow)),
-                Bone(f"forearm.{suffix}", f"upper_arm.{suffix}", elbow - shoulder, Vec3(), Vec3(), _length(elbow, hand)),
-                Bone(f"hand.{suffix}", f"forearm.{suffix}", hand - elbow, Vec3(), Vec3(), _length(hand, hand_end)),
-                Bone(f"thigh.{suffix}", "hips", hip - pelvis, Vec3(), Vec3(), _length(hip, knee)),
-                Bone(f"shin.{suffix}", f"thigh.{suffix}", knee - hip, Vec3(), Vec3(), _length(knee, ankle)),
-                Bone(f"foot.{suffix}", f"shin.{suffix}", ankle - knee, Vec3(), Vec3(), _length(ankle, heel)),
-                Bone(f"toe.{suffix}", f"foot.{suffix}", heel - ankle, Vec3(), Vec3(), _length(heel, toe)),
+                (f"shoulder.{suffix}", "chest", clavicle, shoulder),
+                (f"upper_arm.{suffix}", f"shoulder.{suffix}", shoulder, elbow),
+                (f"forearm.{suffix}", f"upper_arm.{suffix}", elbow, hand),
+                (f"hand.{suffix}", f"forearm.{suffix}", hand, hand_end),
+                (f"thigh.{suffix}", "hips", hip, knee),
+                (f"shin.{suffix}", f"thigh.{suffix}", knee, ankle),
+                (f"foot.{suffix}", f"shin.{suffix}", ankle, ball),
+                (f"toe.{suffix}", f"foot.{suffix}", ball, toe),
             ]
         )
-    return Skeleton(tuple(bones))
+    return chain_skeleton(specs)
 
 
 def _length(start: Vec3, end: Vec3) -> float:

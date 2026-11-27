@@ -8278,3 +8278,51 @@ regression monitor each can refuse a change.
   `tests/test_romance_figures.py`'s one-shell rule now allows the detail shells.
   Gates: ruff clean, mypy 1211 files OK, evaluation PASS (`overall` 0.9918
   unchanged), the affected suites green.
+
+- Phase 74 — **the Body & shape studio, made a professional body editor** (the
+  user's "make it more capable than DAZ 3D" pass). Six reported defects, each
+  measured and fixed, all additive. **(1) A posed arm no longer tears the hip.**
+  The rig's bones were built with a zero rest rotation, so every bone pointed
+  straight up whatever its offset said: an arm's vertices were bound to a vertical
+  line through the shoulder, and the outer hip was physically closer to the hand
+  hanging beside it than to the hip bone at the centre -- raising the arm dragged
+  the hip out into a spike. `core.scene3d.py` gained `rotation_for_direction`/
+  `rest_rotation_for`/`euler_from_rotation` and `core.human_body.chain_skeleton`
+  builds every bone with the rest rotation that makes its axis follow the
+  anatomy; `MAX_INFLUENCES` rose from 2 to 4 (a shoulder or a hip blends across the
+  joint), and `BONE_INFLUENCE`/`bone_influence` divide a vertex's distance by a
+  per-bone radius so a torso bone wins the trunk and a hand cannot. Pinned by
+  `test_a_bone_influence_radius_keeps_the_torso_off_the_arm_bones` (raising both
+  arms moves an outer-hip vertex by < 1 cm). **(2) The poses really pose the
+  body.** `POSE_PRESETS` (`wave`, `tpose`, `reach`, `arms_crossed`,
+  `hands_hips`) were recalibrated against the anatomical rig, `pose_rotations`
+  applies them, and the window's pose buttons drive it; `test_a_tpose_raises_the_
+  hands_to_shoulder_height` and `test_every_pose_keeps_the_figure_recognisable`
+  (every pose keeps one body's size, a lying one measured along z) pin them.
+  **(3) The male set hangs where it belongs, and only on a male body.**
+  `_pubic_frame` is centred on x=0 and low (0.43..0.49 of the height), the male
+  set is built only for `sex="male"` (a female set is flush, never a protrusion),
+  and `_body_parts`/`merge_anatomy` keep the set on the pubic surface;
+  `test_the_pubic_frame_sits_on_the_centre_line` and
+  `test_the_male_set_hangs_at_the_pubic_symphysis` pin it. **(4) The breasts have
+  a control for every component.** `BreastShape` (bust, size, projection,
+  fullness, separation, height, sag) is applied as a smooth, bounded deformation
+  of the chest, and `core.romance.body` gained `BREAST_PRESETS`/
+  `breast_preset_keys`/`breast_preset_titles`/`breast_preset_changes`/
+  `apply_breast_preset` -- five one-click shapes (flat, small, medium, large,
+  full) that set all five size dials at once, beside the individual areola/nipple
+  dials. The window's *Breasts* group draws the five buttons and the CLI gained
+  `body --breast-shapes`/`--breast-shape KEY`; every preset moves the mesh.
+  **(5) The hair no longer covers the face.** The hairline was a fraction of the
+  *head bone*, and a scaled child head put that fraction at the eyes; it is now
+  measured on the *face* (jaw to crown, where the eyes sit at 0.41..0.53 for every
+  body), and the cap is a thin shell (`0.010 + 0.020 * hair`, rim at 0.15 of it)
+  instead of a 6 cm helmet pushed down over the brow; its rim vertices are snapped
+  onto the hairline so the fringe is one clean edge rather than a stair-step. **(6) The window is a
+  studio.** It gained a dial **search** box, **undo/redo**, **reset every
+  measurement**, a live **read-out**, the one-click breast shapes, the camera
+  orbit (presets, three sliders, click-and-drag), the four ready-made figures, and
+  an honest status line. `tests/test_scene3d.py` (+3), `tests/test_human_anatomy.py`
+  (+2), and `tests/test_romance_body_studio.py` (+4, one real Tk window) pin the
+  fixes. Gates: ruff clean, mypy 1211 files OK, evaluation PASS (`overall` 0.9918
+  unchanged), the body/scene suites green.

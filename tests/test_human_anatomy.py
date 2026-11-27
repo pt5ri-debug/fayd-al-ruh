@@ -70,9 +70,12 @@ def test_a_neutral_build_carries_no_genital_set() -> None:
     from core.scene3d_figures import BUILD_NEUTRAL
 
     mesh = build_figure_mesh(
-        FIGURE_PRESETS["woman"].with_changes(build=BUILD_NEUTRAL, minor=False)
+        FIGURE_PRESETS["woman"].with_changes(
+            build=BUILD_NEUTRAL, minor=False, genital_sex="auto"
+        )
     )
-    # Areolae are built for any adult body; the genital set is not presumed.
+    # Areolae are built for any adult body; with ``auto`` on a neutral build the
+    # genital set is not presumed.
     assert mesh.vertex_count == BODY_VERTICES + 204
 
 
@@ -407,3 +410,26 @@ def test_a_merged_detail_never_reuses_a_body_vertex() -> None:
     # Every new face indexes a vertex past the body's own count.
     for face in merged.faces[len(body.faces) :]:
         assert all(index >= body.vertex_count for index in face)
+
+
+def test_the_pubic_frame_sits_on_the_centre_line() -> None:
+    from core.human_anatomy import _pubic_frame
+
+    for key in ("woman", "man"):
+        frame = _pubic_frame(build_figure_mesh(FIGURE_PRESETS[key]))
+        assert frame is not None
+        # The reported failure: the frame picked the *side* of a narrow band and
+        # put the whole set a few centimetres off-centre.
+        assert abs(frame.origin.x) < 1e-9
+        # ...and at the pubic symphysis, not above it.
+        assert 0.42 < frame.origin.y / 1.75 < 0.51
+
+
+def test_the_male_set_hangs_at_the_pubic_symphysis() -> None:
+    mesh = build_figure_mesh(FIGURE_PRESETS["man"])
+    genital = [vertex for vertex in mesh.vertices[BODY_VERTICES:] if vertex.y < 1.05]
+    assert genital, "the fixture has no male set"
+    assert max(vertex.y for vertex in genital) < 0.53 * 1.75
+    assert min(vertex.y for vertex in genital) > 0.35 * 1.75
+    # Centred: the mean x of the set is the body's own centre line.
+    assert abs(sum(vertex.x for vertex in genital) / len(genital)) < 0.01

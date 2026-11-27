@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from core.composition import ThinkingFilter, strip_thinking
 from core.model_manager import ModelManager
 from core.model_registry import ModelRecord
@@ -709,6 +710,8 @@ def test_the_shipped_answer_limit_is_comfortably_larger_than_the_old_cap():
 def test_the_bubble_cap_allows_a_long_companion_answer():
     # The reader's second complaint was a reply drawn only up to the old cap, so a
     # complete answer looked truncated. The cap must be far above a long reply.
+    # The constant lives in the window module, so a machine without Tk skips.
+    pytest.importorskip("tkinter", exc_type=ImportError)
     from gui.romance_dialog import _MAX_BUBBLE_LINES
 
     assert _MAX_BUBBLE_LINES >= 1000

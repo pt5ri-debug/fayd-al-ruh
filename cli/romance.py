@@ -147,6 +147,14 @@ def _build_parser() -> argparse.ArgumentParser:
     body.add_argument("character_id", nargs="?", default="")
     body.add_argument("--dials", action="store_true", help="List every editable measurement.")
     body.add_argument("--presets", action="store_true", help="List the ready-made bodies.")
+    body.add_argument(
+        "--breast-shapes", action="store_true",
+        help="List the ready-made breast shapes (flat, small, medium, large, full).",
+    )
+    body.add_argument(
+        "--breast-shape", default="", metavar="KEY",
+        help="Apply a ready-made breast shape (flat, small, medium, large, full).",
+    )
     body.add_argument("--summary", action="store_true", help="Describe the current body.")
     body.add_argument(
         "--figures", action="store_true",
@@ -694,6 +702,12 @@ def run_body(args: argparse.Namespace) -> int:
         rows = [{"key": key, "title": title} for key, title in service.body_presets()]
         _emit(args, rows, "\n".join(f"{row['key']:12s} {row['title']}" for row in rows))
         return EXIT_OK
+    if args.breast_shapes:
+        from core.romance.body import breast_preset_titles
+
+        rows = [{"key": key, "title": title} for key, title in breast_preset_titles("en")]
+        _emit(args, rows, "\n".join(f"{row['key']:10s} {row['title']}" for row in rows))
+        return EXIT_OK
     if args.poses:
         rows = [{"key": key, "title": title} for key, title in service.body_poses()]
         _emit(args, rows, "\n".join(f"{row['key']:14s} {row['title']}" for row in rows))
@@ -836,6 +850,16 @@ def run_body(args: argparse.Namespace) -> int:
             print(f"romance: no such body preset: {args.load_preset!r}", file=sys.stderr)
             return EXIT_USAGE
         params = loaded
+    if args.breast_shape:
+        from core.romance.body import breast_preset_changes
+
+        try:
+            params = service.set_body_dials(
+                params, breast_preset_changes(args.breast_shape)
+            )
+        except KeyError as error:
+            print(f"romance: {error}", file=sys.stderr)
+            return EXIT_USAGE
     if args.pose:
         try:
             params = service.set_body_pose(params, args.pose)

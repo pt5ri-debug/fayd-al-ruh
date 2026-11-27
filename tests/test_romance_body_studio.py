@@ -1240,3 +1240,76 @@ def test_the_body_window_imports_and_edits_a_model(tmp_path: Path) -> None:
         assert dialog._mesh is None
     finally:
         _close_window(root, dialog)
+
+
+# -- the ready-made breast shapes ------------------------------------------
+
+
+def test_the_breast_shapes_are_named_bilingual_and_distinct() -> None:
+    from core.romance.body import breast_preset_keys, breast_preset_titles
+
+    assert breast_preset_keys() == ("flat", "small", "medium", "large", "full")
+    english = dict(breast_preset_titles("en"))
+    arabic = dict(breast_preset_titles("ar"))
+    assert set(english) == set(arabic) == set(breast_preset_keys())
+    assert len(set(english.values())) == len(english)
+
+
+def test_each_breast_shape_sets_every_size_dial_and_moves_the_mesh() -> None:
+    from core.romance.body import apply_breast_preset, breast_preset_changes
+    from core.scene3d_figures import build_figure_mesh
+
+    base = default_parameters()
+    for key in ("flat", "small", "medium", "large", "full"):
+        changes = breast_preset_changes(key)
+        assert set(changes) >= {
+            "breast_size",
+            "bust",
+            "breast_projection",
+            "breast_fullness",
+            "breast_sag",
+        }
+        shaped = apply_breast_preset(base, key)
+        assert shaped.breast_size == pytest.approx(changes["breast_size"])
+        assert build_figure_mesh(shaped).vertices != build_figure_mesh(base).vertices
+    assert apply_breast_preset(base, "full").breast_size > apply_breast_preset(
+        base, "flat"
+    ).breast_size
+
+
+def test_an_unknown_breast_shape_is_refused() -> None:
+    from core.romance.body import breast_preset_changes
+
+    with pytest.raises(KeyError):
+        breast_preset_changes("enormous")
+
+
+@pytest.mark.skipif(not _display_available(), reason="no display available")
+def test_the_body_window_has_one_click_breast_shapes(tmp_path: Path) -> None:
+    """The Breasts group carries a word per size, and a click really resizes it."""
+    import tkinter as tk
+
+    from gui.app import DARK_THEME
+    from gui.romance_body import BodyStudioDialog
+
+    service = _service(tmp_path)
+    character = service.create_character(name="Amina", role=ROLE_COMPANION, gender="woman")
+    root = tk.Tk()
+    root.withdraw()
+    dialog = None
+    try:
+        dialog = BodyStudioDialog(
+            root, service, character.id, role=ROLE_COMPANION,
+            theme=DARK_THEME, font="TkDefaultFont", mono="TkFixedFont",
+        )
+        root.update()
+        buttons = _all_buttons(dialog.window)
+        labels = {button.cget("text") for button in buttons}
+        assert {"Flat", "Small", "Medium", "Large", "Full"} <= labels
+        large = next(button for button in buttons if button.cget("text") == "Large")
+        large.invoke()
+        root.update()
+        assert dialog._params.breast_size == pytest.approx(1.40)
+        assert dialog._dial_vars["breast_size"].get() == pytest.approx(1.40)
+    finally:
+        _close_window(root, dialog)

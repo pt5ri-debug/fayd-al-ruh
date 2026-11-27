@@ -97,6 +97,47 @@ class BreastDetail:
 
 
 @dataclass(frozen=True)
+class BreastShape:
+    """The breast-shape dials: every component of the chest, not just its size.
+
+    ``bust`` is the base fullness the body morph already carries; the rest are
+    additional, independent controls applied as a smooth deformation of the chest
+    region. ``1.0`` is neutral for every multiplier and ``0.0`` is neutral for
+    ``sag``, so a body that was never edited is unchanged.
+    """
+
+    bust: float = 0.0
+    size: float = 1.0
+    projection: float = 1.0
+    fullness: float = 1.0
+    separation: float = 1.0
+    height: float = 1.0
+    sag: float = 0.0
+
+    @property
+    def is_neutral(self) -> bool:
+        return (
+            abs(self.size - 1.0) < 1e-9
+            and abs(self.projection - 1.0) < 1e-9
+            and abs(self.fullness - 1.0) < 1e-9
+            and abs(self.separation - 1.0) < 1e-9
+            and abs(self.height - 1.0) < 1e-9
+            and abs(self.sag) < 1e-9
+        )
+
+    def normalised(self) -> BreastShape:
+        return BreastShape(
+            bust=clamp(self.bust, 0.0, 1.5),
+            size=clamp(self.size, 0.3, 2.5),
+            projection=clamp(self.projection, 0.3, 2.5),
+            fullness=clamp(self.fullness, 0.3, 2.5),
+            separation=clamp(self.separation, 0.5, 1.8),
+            height=clamp(self.height, 0.6, 1.4),
+            sag=clamp(self.sag, 0.0, 1.0),
+        )
+
+
+@dataclass(frozen=True)
 class GenitalDetail:
     """The genital set: whether it shows, its size, tilt, and colour."""
 
@@ -113,6 +154,9 @@ class GenitalDetail:
     #: Female labia / male shaft-and-scrotum fullness.
     fullness: float = 1.0
     color: RGB = (0.60, 0.40, 0.38)
+    #: The body's skin colour, used for the mons so the mound reads as skin
+    #: rather than as a dark patch.
+    skin_color: RGB = (0.82, 0.66, 0.56)
 
     def normalised(self) -> GenitalDetail:
         sex = str(self.sex or "").strip().lower()
@@ -126,6 +170,7 @@ class GenitalDetail:
             direction=clamp(self.direction, MIN_DIRECTION, MAX_DIRECTION),
             fullness=clamp(self.fullness, 0.3, 2.2),
             color=_rgb(self.color),
+            skin_color=_rgb(self.skin_color),
         )
 
 
@@ -442,7 +487,14 @@ def _breast_frames(mesh: Mesh) -> tuple[_Frame, _Frame] | None:
 
 
 def _pubic_frame(mesh: Mesh) -> _Frame | None:
-    """The front of the pelvis, found on the surface (where the genitals sit)."""
+    """The front of the pelvis, found on the surface (where the genitals sit).
+
+    The band is deliberately **low** -- between 0.43 and 0.49 of the height, on
+    the centre line -- because that is where the pubic symphysis is. The earlier
+    band reached up to 0.53 of the height, which placed the whole set a few
+    centimetres too high (the reported "the male organ is higher than its correct
+    place"). The band is also narrow, so a thigh vertex can never define the point.
+    """
     points = _body_vertices(mesh)
     if not points:
         return None
@@ -450,18 +502,99 @@ def _pubic_frame(mesh: Mesh) -> _Frame | None:
     height = high.y - low.y
     if height <= 0.0:
         return None
-    # The crotch is just under the pelvis's midpoint, on the centre line.
-    y_lo = low.y + height * 0.42
-    y_hi = low.y + height * 0.53
+    y_lo = low.y + height * 0.43
+    y_hi = low.y + height * 0.49
+    width = max(high.x - low.x, 1e-6)
     band = [
         point
         for point in points
-        if y_lo <= point.y <= y_hi and abs(point.x) < (high.x - low.x) * 0.14
+        if y_lo <= point.y <= y_hi and abs(point.x) < width * 0.10
     ]
     if not band:
         return None
-    furthest = max(band, key=lambda point: point.z)
-    return _Frame(furthest, Vec3(0.0, 0.0, 1.0), Vec3(0.0, 1.0, 0.0))
+    centre_band = [point for point in band if abs(point.x) < width * 0.03]
+    furthest = max(centre_band or band, key=lambda point: point.z)
+    # The set hangs from the body's own centre line: the front-most vertex of a
+    # narrow centre band gives the depth, but the x is forced to 0 so the frame
+    # can never drift to one side (a half-centimetre of asymmetry there would put
+    # the whole set off-centre).
+    origin = Vec3(0.0, furthest.y, furthest.z)
+    # The pubic surface faces forward and slightly down, which is the axis the
+    # set hangs from.
+    return _Frame(origin, Vec3(0.0, -0.12, 1.0), Vec3(0.0, 1.0, 0.0))
+
+
+def shape_breasts(mesh: Mesh, shape: BreastShape) -> Mesh:
+    """Deform the chest region by the breast dials, as real geometry.
+
+    Every component is its own control: ``size`` scales the whole breast,
+    ``fullness`` rounds it, ``projection`` pushes it forward, ``separation`` moves
+    the two apart, ``height`` lifts them, and ``sag`` lets the lower half hang. A
+    smooth, bounded falloff around each breast's own centre keeps the deformation
+    local -- the sternum, the ribs, and the back are untouched -- and the neutral
+    settings return the mesh **exactly** as it was built.
+    """
+    settings = shape.normalised()
+    if settings.is_neutral:
+        return mesh
+    frames = _breast_frames(mesh)
+    if frames is None:
+        return mesh
+    low, high = mesh.bounds()
+    height = max(high.y - low.y, 1e-6)
+    sigma_x = 0.075 * height
+    sigma_y = 0.090 * height
+    z_front = max(frame.origin.z for frame in frames)
+    z_limit = z_front - 0.13 * height
+    max_step = 0.07 * height
+    points = list(mesh.vertices)
+    for index, vertex in enumerate(mesh.vertices):
+        if vertex.y < low.y + 0.56 * height or vertex.y > low.y + 0.87 * height:
+            continue
+        if vertex.z < z_limit:
+            continue
+        best_centre: Vec3 | None = None
+        best_weight = 0.0
+        best_dx = 0.0
+        best_dy = 0.0
+        for frame in frames:
+            centre = frame.origin
+            dx = vertex.x - centre.x
+            dy = vertex.y - centre.y
+            weight = math.exp(-0.5 * ((dx / sigma_x) ** 2 + (dy / sigma_y) ** 2))
+            if weight > best_weight:
+                best_weight = weight
+                best_centre = centre
+                best_dx = dx
+                best_dy = dy
+        if best_centre is None or best_weight < 1e-3:
+            continue
+        side = 1.0 if vertex.x >= 0.0 else -1.0
+        scale = (
+            1.0
+            + (settings.fullness - 1.0) * 0.45 * best_weight
+            + (settings.size - 1.0) * 0.35 * best_weight
+        )
+        new_x = best_centre.x + best_dx * scale
+        new_y = best_centre.y + best_dy * scale
+        new_z = vertex.z + (settings.projection - 1.0) * 0.045 * height * best_weight
+        new_x += (settings.separation - 1.0) * 0.020 * height * best_weight * side
+        new_y += (settings.height - 1.0) * 0.030 * height * best_weight
+        if settings.sag > 0.0 and best_dy < 0.0:
+            new_y -= settings.sag * 0.040 * height * best_weight
+            new_z += settings.sag * 0.012 * height * best_weight
+        moved = Vec3(new_x, new_y, new_z)
+        displacement = moved - vertex
+        if displacement.length() > max_step:
+            moved = vertex + displacement * (max_step / displacement.length())
+        points[index] = moved
+    return Mesh(
+        name=mesh.name,
+        vertices=tuple(points),
+        faces=mesh.faces,
+        normals=(),
+        vertex_colors=mesh.vertex_colors,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +641,18 @@ def breast_geometry(mesh: Mesh, detail: BreastDetail) -> AnatomyGeometry:
 
 
 def genital_geometry(mesh: Mesh, detail: GenitalDetail) -> AnatomyGeometry:
-    """The genital set for the body's own sex, sized, tilted, and coloured."""
+    """The genital set for the body's own sex, sized, tilted, and coloured.
+
+    The **female** set is deliberately *flush*: a soft mons, two labia, and a small
+    hood, all with almost no forward offset. The earlier female set was a single
+    forward-protruding ellipsoid with two more beside it, which read as a male set
+    on a female body -- the reported "the male organ is placed on the female figure".
+
+    The **male** set is a scrotum below the pubic root and a shaft that leaves the
+    body and hangs forward and **down** (a ``-30`` degree base tilt), with a glans
+    at its tip. Its root is the pubic point found by :func:`_pubic_frame`, so it
+    sits at the pubic symphysis rather than a few centimetres above it.
+    """
     geometry = AnatomyGeometry()
     settings = detail.normalised()
     if not settings.sex or settings.show <= 0.0:
@@ -520,54 +664,98 @@ def genital_geometry(mesh: Mesh, detail: GenitalDetail) -> AnatomyGeometry:
     height = max(high.y - low.y, 1e-6)
     # The set scales with the figure, so a child's body is never given adult
     # proportions even if a dial is set high.
-    unit = height * 0.055 * settings.size
+    unit = height * 0.048 * settings.size
     visible = 0.35 + 0.65 * settings.show
-    # The tilt applies to the whole set, whichever sex it is, so the direction
-    # control is never dead on one body.
-    tilted = _tilt(frame, settings.direction)
     if settings.sex == "female":
+        tilted = _tilt(frame, settings.direction)
+        # Mons pubis: a soft, wide mound above the opening. It is skin-coloured
+        # and almost flush, so it reads as the body's own surface.
         geometry.add(
             *_ellipsoid(
                 tilted,
-                (unit * 0.62 * settings.fullness, unit * 0.42, unit * 0.30),
-                centre=(0.0, -unit * 0.10, unit * 0.06 * visible),
+                (unit * 0.42 * settings.fullness, unit * 0.24, unit * 0.055),
+                centre=(0.0, unit * 0.10, 0.0),
             ),
-            settings.color,
+            settings.skin_color,
         )
+        # The two labia: elongated, side by side, flush with the surface.
         for side in (-1.0, 1.0):
             geometry.add(
                 *_ellipsoid(
                     tilted,
-                    (unit * 0.26 * settings.fullness, unit * 0.40 * settings.length, unit * 0.24),
-                    centre=(side * unit * 0.34, -unit * 0.26, unit * 0.10 * visible),
+                    (unit * 0.12 * settings.fullness, unit * 0.20 * settings.length, unit * 0.035),
+                    centre=(side * unit * 0.13 * settings.fullness, -unit * 0.14, 0.0),
                 ),
                 settings.color,
             )
+        # The clitoral hood and a small opening, both barely proud.
+        geometry.add(
+            *_ellipsoid(
+                tilted,
+                (unit * 0.07, unit * 0.06, unit * 0.030),
+                centre=(0.0, unit * 0.02, unit * 0.004),
+            ),
+            settings.color,
+        )
+        geometry.add(
+            *_ellipsoid(
+                tilted,
+                (unit * 0.045, unit * 0.10, unit * 0.012),
+                centre=(0.0, -unit * 0.14, unit * 0.002),
+            ),
+            settings.color,
+        )
         return geometry
-    # Male: a scrotum and a tapered shaft along the tilted axis.
+    # Male: a rounded shaft hangs forward and down from the pubic root, in
+    # front of a single scrotal sac.
+    shaft = _tilt(frame, -55.0 + settings.direction)
+    shaft_length = unit * 0.78 * settings.length * visible
+    shaft_radius = unit * 0.17 * settings.fullness
+    # A capsule-shaped shaft (an ellipsoid stretched along the out axis) reads
+    # as a body part; a cone tapers to a point and reads as a spike.
     geometry.add(
         *_ellipsoid(
-            tilted,
-            (unit * 0.42 * settings.fullness, unit * 0.40, unit * 0.34),
-            centre=(0.0, -unit * 0.22, unit * 0.10 * visible),
+            shaft,
+            (shaft_radius, shaft_radius * 1.05, shaft_length * 0.52),
+            centre=(0.0, -unit * 0.06, shaft_length * 0.52),
+        ),
+        settings.color,
+    )
+    # The glans sits at the tip, a little wider and rounder than the shaft.
+    geometry.add(
+        *_ellipsoid(
+            shaft,
+            (unit * 0.19, unit * 0.19, unit * 0.16),
+            centre=(0.0, -unit * 0.06, shaft_length * 0.92),
+        ),
+        settings.color,
+    )
+    # The urethral opening, a small dark mark at the very tip.
+    geometry.add(
+        *_ellipsoid(
+            shaft,
+            (unit * 0.030, unit * 0.055, unit * 0.012),
+            centre=(0.0, -unit * 0.06, shaft_length * 0.99),
+        ),
+        (settings.color[0] * 0.55, settings.color[1] * 0.50, settings.color[2] * 0.50),
+    )
+    # The scrotum: one rounded sac below and slightly behind the shaft root,
+    # with a soft central crease.
+    geometry.add(
+        *_ellipsoid(
+            frame,
+            (unit * 0.30 * settings.fullness, unit * 0.27, unit * 0.21),
+            centre=(0.0, -unit * 0.62, unit * 0.06 * visible),
         ),
         settings.color,
     )
     geometry.add(
-        *_cone(
-            tilted,
-            unit * 0.24 * settings.fullness,
-            unit * 0.85 * settings.length * visible,
-        ),
-        settings.color,
-    )
-    geometry.add(
         *_ellipsoid(
-            tilted,
-            (unit * 0.26, unit * 0.26, unit * 0.24),
-            centre=(0.0, 0.0, unit * 0.80 * settings.length * visible),
+            frame,
+            (unit * 0.018, unit * 0.21, unit * 0.16),
+            centre=(0.0, -unit * 0.62, unit * 0.22 * visible),
         ),
-        settings.color,
+        (settings.color[0] * 0.72, settings.color[1] * 0.66, settings.color[2] * 0.66),
     )
     return geometry
 

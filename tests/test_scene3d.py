@@ -41,6 +41,8 @@ from core.scene3d_figures import (
     build_figure_skeleton,
     figure_preset_names,
     morph_figure,
+    pose_preset_names,
+    pose_rotations,
 )
 from core.scene3d_io import (
     SceneIOError,
@@ -867,3 +869,53 @@ def test_skinning_is_cached_until_the_pose_changes():
     assert figure.deformed_vertices() is first
     figure.set_pose("forearm.L", vec3(0, 0, -45))
     assert figure.deformed_vertices() is not first
+
+
+def test_a_bone_influence_radius_keeps_the_torso_off_the_arm_bones():
+    # The reported failure: raising an arm dragged the outer hip out into a spike,
+    # because a hip vertex was physically closer to the hand hanging beside it than
+    # to the hip bone at the body's centre. The per-bone influence radius fixes it.
+    from core.scene3d import bone_influence
+
+    assert bone_influence("hips") > bone_influence("hand")
+    assert bone_influence("chest") > bone_influence("forearm")
+    figure = build_figure_from_preset("woman")
+    rest = figure.deformed_vertices()
+    hips = [
+        index
+        for index, vertex in enumerate(rest)
+        if 0.15 < vertex.x < 0.28 and 0.88 < vertex.y < 1.02 and vertex.z > -0.10
+    ]
+    assert hips, "the fixture has no outer-hip vertices"
+    figure.set_pose("upper_arm.L", vec3(0, 0, -90))
+    figure.set_pose("upper_arm.R", vec3(0, 0, 90))
+    posed = figure.deformed_vertices()
+    assert max((posed[index] - rest[index]).length() for index in hips) < 0.01
+
+
+def test_a_tpose_raises_the_hands_to_shoulder_height():
+    figure = build_figure_from_preset("woman")
+    figure.pose = pose_rotations("tpose")
+    posed = figure.skeleton.with_pose(figure.pose).world_matrices()
+    shoulder = posed["upper_arm.L"].transform_point(vec3(0, 0, 0))
+    hand = posed["hand.L"].transform_point(vec3(0, 0, 0))
+    assert hand.x > 0.50
+    assert abs(hand.y - shoulder.y) < 0.12
+
+
+def test_every_pose_keeps_the_figure_recognisable():
+    for key in pose_preset_names():
+        figure = build_figure_from_preset("woman")
+        figure.pose = pose_rotations(key)
+        vertices = figure.deformed_vertices()
+        xs = [vertex.x for vertex in vertices]
+        ys = [vertex.y for vertex in vertices]
+        # No pose explodes the mesh or collapses it: the figure stays roughly one
+        # body tall and no wider than a body with its arms out. A lying figure is
+        # one body *long* instead, so it is measured along z.
+        if key == "lying":
+            zs = [vertex.z for vertex in vertices]
+            assert 0.9 < max(zs) - min(zs) < 2.6, key
+        else:
+            assert 0.9 < max(ys) - min(ys) < 2.6, key
+        assert max(xs) - min(xs) < 2.2, key
