@@ -122,6 +122,7 @@ def clamp_zoom(value: float) -> float:
 DIAL_GROUPS: tuple[tuple[str, str, str], ...] = (
     ("proportions", "Proportions", "القياسات"),
     ("torso", "Torso and shape", "الجذع والقوام"),
+    ("breasts", "Breasts", "الثديان"),
     ("limbs", "Arms and legs", "الذراعان والساقان"),
     ("measurements", "Fine measurements", "القياسات الدقيقة"),
     ("head", "Head and face", "الرأس والوجه"),
@@ -213,7 +214,37 @@ DIALS: tuple[DialSpec, ...] = (
     DialSpec("hip_width", "Hip width", "عرض الحوض", "proportions", minimum=0.20, maximum=0.46, step=0.01),
     DialSpec("chest_depth", "Chest depth", "عمق الصدر", "proportions", minimum=0.14, maximum=0.36, step=0.01),
     DialSpec("waist", "Waist width", "عرض الخصر", "proportions", minimum=0.16, maximum=0.42, step=0.01),
-    DialSpec("bust", "Bust", "الصدر", "torso", hint="Chest fullness and forward shape"),
+    DialSpec("bust", "Bust fullness", "امتلاء الصدر", "breasts", hint="Base chest fullness and forward shape"),
+    DialSpec(
+        "breast_size", "Breast size", "حجم الثدي", "breasts",
+        minimum=0.30, maximum=2.50, step=0.01,
+        hint="The overall size of the breast (a multiplier; 1 is the reference)",
+    ),
+    DialSpec(
+        "breast_projection", "Breast projection", "بروز الثدي", "breasts",
+        minimum=0.30, maximum=2.50, step=0.01,
+        hint="How far the breast projects forward from the chest",
+    ),
+    DialSpec(
+        "breast_fullness", "Breast fullness", "امتلاء الثدي", "breasts",
+        minimum=0.30, maximum=2.50, step=0.01,
+        hint="How round and full the breast is",
+    ),
+    DialSpec(
+        "breast_separation", "Breast separation", "تباعد الثديين", "breasts",
+        minimum=0.50, maximum=1.80, step=0.01,
+        hint="How far apart the two breasts sit",
+    ),
+    DialSpec(
+        "breast_height", "Breast height", "ارتفاع الثدي", "breasts",
+        minimum=0.60, maximum=1.40, step=0.01,
+        hint="How high on the chest the breasts sit",
+    ),
+    DialSpec(
+        "breast_sag", "Breast sag", "ترهل الثدي", "breasts",
+        minimum=0.0, maximum=1.0, step=0.01,
+        hint="How much the lower half hangs (0 is perky, 1 is a full droop)",
+    ),
     DialSpec("waist_shape", "Waist curve", "انحناء الخصر", "torso"),
     DialSpec("hip_shape", "Hip curve", "انحناء الحوض", "torso"),
     DialSpec("belly", "Belly", "البطن", "torso"),
@@ -280,6 +311,11 @@ DIALS: tuple[DialSpec, ...] = (
         minimum=-85.0, maximum=85.0, step=1.0,
         hint="Tilt of the set's axis in the vertical plane (degrees, + is up)",
     ),
+    DialSpec(
+        "genital_sex", "Intimate set", "نوع التفاصيل الحميمة", "intimate",
+        kind="choice", choices=("auto", "female", "male", "none"),
+        hint="Which set the body carries: auto (from its build), female, male, or none",
+    ),
     DialSpec("areola", "Areola size", "حجم الهالة", "intimate", minimum=0.25, maximum=2.50, step=0.01),
     DialSpec(
         "areola_raise", "Areola raise", "بروز الهالة", "intimate",
@@ -318,6 +354,16 @@ DIALS: tuple[DialSpec, ...] = (
         hint="Relaxation passes that remove the last facets after subdivision",
     ),
     DialSpec("hair", "Hair volume", "كثافة الشعر", "hair"),
+    DialSpec(
+        "hair_length", "Hair length", "طول الشعر", "hair",
+        minimum=0.0, maximum=1.0, step=0.01,
+        hint="How far the hair falls down the back (0 is a close cap)",
+    ),
+    DialSpec(
+        "hairline", "Hairline", "خط الشعر", "hair",
+        minimum=0.0, maximum=1.0, step=0.01,
+        hint="Where the hairline sits (0 is low on the brow, 1 is high)",
+    ),
     DialSpec("skin", "Skin colour", "لون البشرة", "colour", kind="colour"),
     DialSpec("hair_color", "Hair colour", "لون الشعر", "colour", kind="colour"),
     DialSpec("lip_color", "Lip colour", "لون الشفتين", "colour", kind="colour"),
@@ -393,6 +439,81 @@ def body_preset_titles(language: str = "en") -> tuple[tuple[str, str], ...]:
     if language == "ar":
         return tuple((key, ar) for key, _en, ar, _params in BODY_PRESETS)
     return tuple((key, en) for key, en, _ar, _params in BODY_PRESETS)
+
+
+#: Ready-made breast shapes, as one click on the *Breasts* group. Each is a set of
+#: the breast dials applied together, so a user who wants a size picks a word
+#: rather than guessing six numbers -- and every dial stays individually editable
+#: afterwards, because a preset only sets them.
+BREAST_PRESETS: tuple[tuple[str, str, str, dict[str, float]], ...] = (
+    (
+        "flat",
+        "Flat",
+        "مسطح",
+        {"breast_size": 0.35, "bust": 0.10, "breast_projection": 0.50,
+         "breast_fullness": 0.50, "breast_sag": 0.30},
+    ),
+    (
+        "small",
+        "Small",
+        "صغير",
+        {"breast_size": 0.70, "bust": 0.30, "breast_projection": 0.80,
+         "breast_fullness": 0.55, "breast_sag": 0.35},
+    ),
+    (
+        "medium",
+        "Medium",
+        "متوسط",
+        {"breast_size": 1.00, "bust": 0.50, "breast_projection": 1.00,
+         "breast_fullness": 0.65, "breast_sag": 0.40},
+    ),
+    (
+        "large",
+        "Large",
+        "كبير",
+        {"breast_size": 1.40, "bust": 0.70, "breast_projection": 1.20,
+         "breast_fullness": 0.75, "breast_sag": 0.45},
+    ),
+    (
+        "full",
+        "Full",
+        "ممتلئ",
+        {"breast_size": 1.80, "bust": 0.85, "breast_projection": 1.35,
+         "breast_fullness": 0.85, "breast_sag": 0.50},
+    ),
+)
+
+_BREAST_PRESET_BY_KEY: dict[str, dict[str, float]] = {
+    key: changes for key, _en, _ar, changes in BREAST_PRESETS
+}
+
+
+def breast_preset_keys() -> tuple[str, ...]:
+    return tuple(key for key, _en, _ar, _changes in BREAST_PRESETS)
+
+
+def breast_preset_titles(language: str = "en") -> tuple[tuple[str, str], ...]:
+    """``(key, readable title)`` for each ready-made breast shape."""
+    if language == "ar":
+        return tuple((key, ar) for key, _en, ar, _changes in BREAST_PRESETS)
+    return tuple((key, en) for key, en, _ar, _changes in BREAST_PRESETS)
+
+
+def breast_preset_changes(key: str) -> dict[str, float]:
+    """The dial changes a named breast shape asks for.
+
+    An unknown key is refused with a ``KeyError`` rather than silently returning
+    nothing, so a typo in a window or a CLI call is reported.
+    """
+    try:
+        return dict(_BREAST_PRESET_BY_KEY[key])
+    except KeyError:
+        raise KeyError(f"Unknown breast preset {key!r}.") from None
+
+
+def apply_breast_preset(params: FigureParameters, key: str) -> FigureParameters:
+    """A copy of ``params`` with a named breast shape applied."""
+    return set_dials(params, breast_preset_changes(key))
 
 
 def preset_parameters(key: str) -> FigureParameters | None:
@@ -641,7 +762,9 @@ def preview_scene(
     else:
         figure = build_figure(params, name=name)
         scene.add_object(figure)
-        hair = build_hair_object(params, name)
+        # The hair is fitted to this body's own skull and bound to its rig, so it
+        # leaves the face clear and follows the head when the figure is posed.
+        hair = build_hair_object(params, name, body=figure)
         if hair is not None:
             scene.add_object(hair)
     scene.background = (0.13, 0.15, 0.19)

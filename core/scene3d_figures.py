@@ -33,7 +33,13 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
-from core.human_anatomy import BreastDetail, GenitalDetail, merge_anatomy
+from core.human_anatomy import (
+    BreastDetail,
+    BreastShape,
+    GenitalDetail,
+    merge_anatomy,
+    shape_breasts,
+)
 from core.human_body import (
     build_body as build_human_body,
 )
@@ -41,11 +47,11 @@ from core.human_body import (
     build_skeleton as build_human_skeleton,
 )
 from core.human_body import (
+    chain_skeleton,
     dials_from_parameters,
 )
 from core.human_pack import pack_available as human_pack_available
 from core.scene3d import (
-    Bone,
     Material,
     Mesh,
     Scene,
@@ -102,6 +108,19 @@ class FigureParameters:
     build: str = BUILD_NEUTRAL
     proportion: str = "average"
     bust: float = 0.0
+    # -- breast shape (the whole chest, not just its size) -----------------
+    #: The breast's overall size (a multiplier; ``1.0`` is the reference).
+    breast_size: float = 1.0
+    #: How far the breast projects forward.
+    breast_projection: float = 1.0
+    #: How round and full the breast is.
+    breast_fullness: float = 1.0
+    #: How far apart the two are.
+    breast_separation: float = 1.0
+    #: The breast's height on the chest.
+    breast_height: float = 1.0
+    #: How much the lower half hangs (``0`` is perky, ``1`` is a full droop).
+    breast_sag: float = 0.0
     waist_shape: float = 0.0
     hip_shape: float = 0.0
     belly: float = 0.0
@@ -143,6 +162,10 @@ class FigureParameters:
     cheek: float = 0.0
     ear_size: float = 1.0
     hair: float = 1.0
+    #: How far the hair falls down the back (``0`` is a close cap, ``1`` is long).
+    hair_length: float = 0.55
+    #: Where the hairline sits: ``0`` is low on the brow, ``1`` is high.
+    hairline: float = 0.5
     hair_color: tuple[float, float, float] = (0.20, 0.14, 0.10)
     # -- per-part shape and colour --------------------------------------
     #: The chest's areola size (a dial), and the colour of the lips, the irises,
@@ -159,6 +182,11 @@ class FigureParameters:
     genitalia: float = 1.0
     genital_size: float = 1.0
     genital_color: tuple[float, float, float] = (0.60, 0.40, 0.38)
+    #: Which genital set the body carries: ``auto`` (from its build), ``female``,
+    #: ``male``, or ``none``. It is explicit because a build family is a *shape*,
+    #: not a sex -- without this, a masculine-shaped body could be given the female
+    #: set (or the other way round) by changing the build buttons.
+    genital_sex: str = "auto"
     # -- anatomical detail (FR-CCE): the areola, nipple and genital geometry is
     #    *generated* and appended to the body as its own closed shells, so each
     #    one can be sized, tilted, coloured, and (for the genitalia) shown or
@@ -248,10 +276,21 @@ class FigureParameters:
             "lower_leg_length",
             "foot_length",
             "foot_width",
+            "breast_size",
+            "breast_projection",
+            "breast_fullness",
+            "breast_separation",
+            "breast_height",
         ):
             value = getattr(self, field_name)
             if value <= 0.0:
                 raise ValueError(f"Figure {field_name} must be positive.")
+        if not 0.0 <= self.breast_sag <= 1.0:
+            raise ValueError("The breast sag dial must be in [0, 1].")
+        if self.genital_sex not in ("auto", "female", "male", "none"):
+            raise ValueError(
+                "The genital sex must be auto, female, male, or none."
+            )
         if not 0.0 <= self.genitalia <= 1.0:
             raise ValueError("The genitalia dial must be in [0, 1].")
         for field_name in (
@@ -273,6 +312,12 @@ class FigureParameters:
             raise ValueError("Subdivisions must be 0, 1, or 2.")
         if not 0 <= self.smoothing <= 4:
             raise ValueError("Smoothing passes must be between 0 and 4.")
+        if not 0.0 <= self.hair <= 1.5:
+            raise ValueError("The hair dial must be between 0 and 1.5.")
+        if not 0.0 <= self.hair_length <= 1.0:
+            raise ValueError("The hair length dial must be in [0, 1].")
+        if not 0.0 <= self.hairline <= 1.0:
+            raise ValueError("The hairline dial must be in [0, 1].")
 
     # -- convenience -----------------------------------------------------
 
@@ -698,6 +743,9 @@ def build_figure_mesh(params: FigureParameters) -> Mesh:
             mesh = mesh.subdivide(params.subdivisions)
         if params.smoothing > 0:
             mesh = mesh.smoothed(iterations=params.smoothing, factor=0.30)
+        # The breast dials deform the chest *before* the detail is generated, so an
+        # areola is placed on the breast the dials really produced.
+        mesh = shape_breasts(mesh, _breast_shape(params))
         # The anatomy is *generated* and appended as its own closed shells, after
         # the body has its final shape, so an areola sits on the breast a bust dial
         # really moved and a genital set sits on the pelvis it really widened.
@@ -707,6 +755,19 @@ def build_figure_mesh(params: FigureParameters) -> Mesh:
             genital=_genital_detail(params),
         )
     return _sculpted_figure_mesh(params)
+
+
+def _breast_shape(params: FigureParameters) -> BreastShape:
+    """The chest deformation a figure carries (a neutral shape for an untouched body)."""
+    return BreastShape(
+        bust=params.bust,
+        size=params.breast_size,
+        projection=params.breast_projection,
+        fullness=params.breast_fullness,
+        separation=params.breast_separation,
+        height=params.breast_height,
+        sag=params.breast_sag,
+    )
 
 
 def _breast_detail(params: FigureParameters) -> BreastDetail | None:
@@ -733,15 +794,27 @@ def _breast_detail(params: FigureParameters) -> BreastDetail | None:
 def _genital_detail(params: FigureParameters) -> GenitalDetail | None:
     """The genital settings a figure carries, or ``None`` when it carries none.
 
-    The set's *sex* follows the body's own build -- a feminine body is given the
-    female set, a masculine one the male set -- and it is never built for a child.
-    A **neutral** build carries no genital set at all, because the project does
-    not presume one; a caller that wants it sets the build. The ``genitalia`` dial
-    hides the set at ``0``.
+    The set's *sex* is ``params.genital_sex``: ``auto`` reads it from the body's
+    build (a feminine body gets the female set, a masculine one the male set),
+    ``female``/``male`` name it explicitly, and ``none`` builds nothing. A build
+    family is a **shape**, not a sex -- the explicit dial is what stops a masculine
+    body from being given the female set (or the other way round) just because a
+    build button was pressed. It is never built for a child, and a neutral body
+    with ``auto`` carries no set at all because the project does not presume one.
+    The ``genitalia`` dial hides the set at ``0``.
     """
-    if params.is_minor or params.build not in (BUILD_FEMININE, BUILD_MASCULINE):
+    if params.is_minor:
         return None
-    sex = "female" if params.build == BUILD_FEMININE else "male"
+    if params.genital_sex == "none":
+        return None
+    if params.genital_sex in ("female", "male"):
+        sex = params.genital_sex
+    elif params.build == BUILD_FEMININE:
+        sex = "female"
+    elif params.build == BUILD_MASCULINE:
+        sex = "male"
+    else:
+        return None
     return GenitalDetail(
         sex=sex,
         show=params.genitalia,
@@ -750,6 +823,7 @@ def _genital_detail(params: FigureParameters) -> GenitalDetail | None:
         direction=params.genital_direction,
         fullness=params.genital_fullness,
         color=params.genital_color,
+        skin_color=params.skin,
     )
 
 
@@ -787,139 +861,309 @@ def build_figure_skeleton(params: FigureParameters) -> Skeleton:
 
 
 def _sculpted_figure_skeleton(params: FigureParameters) -> Skeleton:
-    """The original dial-driven rig, kept as the fallback when the pack is absent."""
-    height = params.height
-    shoulder = params.shoulder_width * 0.5 * params.overall_scale
-    hip = params.hip_width * 0.28 * params.overall_scale
-    # The bones follow the same measurement dials the mesh does, so changing a
-    # proportion never leaves the rig behind the body it deforms. A bone's
-    # ``offset`` is expressed in its parent's local frame; ``length`` is what
-    # skinning measures a vertex's distance to, so it tracks the matching mesh
-    # segment (thigh, shin, arm, neck).
-    neck_len = height * 0.035 * params.neck_length
-    upper_arm_len = height * 0.155 * params.arm_length
-    fore_arm_len = height * 0.150 * params.forearm_length
-    hand_len = height * 0.055 * params.hand_length
-    thigh_len = height * 0.24 * params.thigh_length
-    shin_len = height * 0.235 * params.lower_leg_length
+    """The original dial-driven rig, kept as the fallback when the pack is absent.
 
-    bones: list[Bone] = [
-        Bone("hips", None, Vec3(0, height * 0.50, 0), Vec3(), Vec3(), height * 0.10),
-        Bone("spine", "hips", Vec3(0, height * 0.10, 0), Vec3(), Vec3(), height * 0.10),
-        Bone("chest", "spine", Vec3(0, height * 0.10, 0), Vec3(), Vec3(), height * 0.11),
-        Bone("neck", "chest", Vec3(0, height * 0.11, 0), Vec3(), Vec3(), neck_len),
-        Bone("head", "neck", Vec3(0, neck_len, 0), Vec3(), Vec3(), height * 0.14),
+    The joints are placed where :func:`_body_parts` puts the matching limb, and
+    the bones are built through the shared :func:`core.human_body.chain_skeleton`
+    so each bone's axis really runs down the limb. A rig whose bones all point
+    ``+Y`` binds the wrong vertices and tears the body when posed; this is the
+    same fix the MakeHuman rig uses.
+    """
+    height = params.height
+    s = height / 1.75
+    style = _proportion_scale(params)
+    shoulder = params.shoulder_width * style["shoulder"] * s * params.overall_scale
+    hips = params.hip_width * style["hip"] * s * params.overall_scale
+    arm_len = 0.170 * height * params.arm_length
+    fore_len = 0.145 * height * params.forearm_length
+    thigh_len = 0.240 * height * params.thigh_length
+    shin_len = 0.200 * height * params.lower_leg_length
+    neck_lift = (params.neck_length - 1.0) * 0.025 * height
+    shoulder_y = 0.820 * height
+    hip_y = 0.480 * height
+    arm_x = shoulder * 0.5 * 0.96
+    hip_x = hips * 0.5 * 0.62
+
+    specs: list[tuple[str, str | None, Vec3, Vec3]] = [
+        ("hips", None, Vec3(0, hip_y, 0), Vec3(0, 0.600 * height, 0)),
+        ("spine", "hips", Vec3(0, 0.600 * height, 0), Vec3(0, 0.720 * height, 0)),
+        ("chest", "spine", Vec3(0, 0.720 * height, 0), Vec3(0, 0.820 * height, 0)),
+        ("neck", "chest", Vec3(0, 0.820 * height, 0), Vec3(0, 0.875 * height + neck_lift, 0)),
+        ("head", "neck", Vec3(0, 0.875 * height + neck_lift, 0), Vec3(0, height, 0)),
     ]
     for side, suffix in ((1.0, "L"), (-1.0, "R")):
-        bones.extend(
+        shoulder_joint = Vec3(side * arm_x, shoulder_y, 0)
+        elbow = Vec3(side * arm_x, shoulder_y - arm_len, 0.006 * s)
+        wrist = Vec3(side * arm_x, elbow.y - fore_len, 0.012 * s)
+        hand_end = Vec3(wrist.x, wrist.y - 0.055 * height * params.hand_length, wrist.z)
+        hip_joint = Vec3(side * hip_x, hip_y, 0)
+        knee = Vec3(side * hip_x, hip_y - thigh_len, 0.006 * s)
+        ankle = Vec3(side * hip_x, knee.y - shin_len, 0)
+        ball = Vec3(side * hip_x, max(0.01 * height, ankle.y - 0.020 * s), ankle.z + 0.06 * height)
+        toe = Vec3(side * hip_x, max(0.008 * height, ankle.y - 0.020 * s), ankle.z + 0.14 * height)
+        specs.extend(
             [
-                Bone(
-                    f"shoulder.{suffix}",
-                    "chest",
-                    Vec3(side * shoulder * 0.55, height * 0.10, 0),
-                    Vec3(),
-                    Vec3(),
-                    shoulder * 0.45,
-                ),
-                Bone(
-                    f"upper_arm.{suffix}",
-                    f"shoulder.{suffix}",
-                    Vec3(side * shoulder * 0.45, 0, 0),
-                    Vec3(),
-                    Vec3(),
-                    upper_arm_len,
-                ),
-                Bone(
-                    f"forearm.{suffix}",
-                    f"upper_arm.{suffix}",
-                    Vec3(0, -upper_arm_len, 0),
-                    Vec3(),
-                    Vec3(),
-                    fore_arm_len,
-                ),
-                Bone(
-                    f"hand.{suffix}",
-                    f"forearm.{suffix}",
-                    Vec3(0, -fore_arm_len, 0),
-                    Vec3(),
-                    Vec3(),
-                    hand_len,
-                ),
-                Bone(
-                    f"thigh.{suffix}",
-                    "hips",
-                    Vec3(side * hip, 0, 0),
-                    Vec3(),
-                    Vec3(),
-                    thigh_len,
-                ),
-                Bone(
-                    f"shin.{suffix}",
-                    f"thigh.{suffix}",
-                    Vec3(0, -thigh_len, 0),
-                    Vec3(),
-                    Vec3(),
-                    shin_len,
-                ),
-                Bone(
-                    f"foot.{suffix}",
-                    f"shin.{suffix}",
-                    Vec3(0, -shin_len, 0),
-                    Vec3(),
-                    Vec3(),
-                    height * 0.06,
-                ),
+                (f"shoulder.{suffix}", "chest", Vec3(side * shoulder * 0.10, shoulder_y, 0), shoulder_joint),
+                (f"upper_arm.{suffix}", f"shoulder.{suffix}", shoulder_joint, elbow),
+                (f"forearm.{suffix}", f"upper_arm.{suffix}", elbow, wrist),
+                (f"hand.{suffix}", f"forearm.{suffix}", wrist, hand_end),
+                (f"thigh.{suffix}", "hips", hip_joint, knee),
+                (f"shin.{suffix}", f"thigh.{suffix}", knee, ankle),
+                (f"foot.{suffix}", f"shin.{suffix}", ankle, ball),
+                (f"toe.{suffix}", f"foot.{suffix}", ball, toe),
             ]
         )
-    return Skeleton(tuple(bones))
+    return chain_skeleton(specs)
+
+
+def _merge_meshes(first: Mesh, second: Mesh, *, name: str) -> Mesh:
+    """Combine two meshes into one, rebasing the second's face indices."""
+    if not second.faces:
+        return first
+    if not first.faces:
+        return second
+    offset = len(first.vertices)
+    colors = list(first.vertex_colors) or [(0.86, 0.71, 0.62)] * len(first.vertices)
+    colors.extend(
+        list(second.vertex_colors) or [(0.86, 0.71, 0.62)] * len(second.vertices)
+    )
+    return Mesh(
+        name=name,
+        vertices=tuple(first.vertices) + tuple(second.vertices),
+        faces=tuple(first.faces)
+        + tuple(tuple(index + offset for index in face) for face in second.faces),
+        normals=(),
+        vertex_colors=tuple(colors),
+    )
+
+
+def _head_measurements(body: SceneObject) -> tuple[Vec3, Vec3, Vec3, Vec3] | None:
+    """The skull's own bounds and the head bone's two ends, from the built body.
+
+    Reading the *body* rather than guessing from a formula is what makes the hair
+    fit: the head of a MakeHuman body sits at a different height and depth from the
+    old sculpted one, and a hair blob placed from a constant offset ended up over
+    the face.
+    """
+    if body.skeleton is None or "head" not in body.skeleton.names():
+        return None
+    world = body.skeleton.world_matrices()
+    head_bone = body.skeleton.bone("head")
+    head_head = world["head"].translation_part()
+    head_tail = head_head + world["head"].transform_direction(Vec3(0.0, head_bone.length, 0.0))
+    # The skull's own vertices: everything above the jaw line, near the centre line.
+    height = max(1e-3, body.mesh.bounds()[1].y - body.mesh.bounds()[0].y)
+    lowest = head_head.y - 0.045 * height
+    skull = [
+        vertex
+        for vertex in body.mesh.vertices
+        if vertex.y >= lowest
+        and abs(vertex.x) <= height * 0.14
+        and abs(vertex.z) <= height * 0.18
+    ]
+    if not skull:
+        return None
+    xs = [v.x for v in skull]
+    ys = [v.y for v in skull]
+    zs = [v.z for v in skull]
+    low = Vec3(min(xs), min(ys), min(zs))
+    high = Vec3(max(xs), max(ys), max(zs))
+    return head_head, head_tail, low, high
+
+
+def _hair_cap(body: SceneObject, params: FigureParameters) -> Mesh | None:
+    """A hair cap that hugs the skull and leaves the face clear.
+
+    The cap is built from the **body's own head faces**, offset outward along their
+    normals: the vertices above a *slanted hairline* (higher at the brow than at the
+    nape) are selected, so the hair starts on the forehead and runs down the back of
+    the head -- the face, the ears, and the neck below the hairline are never
+    covered. Offsetting the real surface is what makes the cap fit any head the
+    morph produced, rather than being a guessed ellipsoid.
+    """
+    measurements = _head_measurements(body)
+    if measurements is None:
+        return None
+    head_head, _head_tail, low, high = measurements
+    mesh = body.mesh
+    # The hairline: a brow line that runs level around the front half of the
+    # head (so the temples are covered but the face is not), then drops to the
+    # nape behind the ears.
+    # The line is measured on the *face* (jaw to crown), not on the head bone: a
+    # child's head is scaled, so a fraction of the bone sat at the eyes and the
+    # fringe covered them. On the face the eyes are at 0.41..0.53 for every body,
+    # so 0.62 is a real forehead above them.
+    face_height = max(1e-3, high.y - low.y)
+    brow = low.y + face_height * (0.62 + 0.05 * params.hairline)
+    nape = low.y + face_height * (0.10 + 0.05 * params.hairline)
+    z_front = high.z
+    z_back = low.z
+    span = max(1e-3, z_front - z_back)
+    def _line(z: float) -> float:
+        behind = min(1.0, max(0.0, (z_front - z) / span - 0.5))
+        t = behind * 2.0
+        return brow + (nape - brow) * (t * t)
+
+    # A face belongs to the cap when its own centre is above the hairline. Testing
+    # the centre (rather than every vertex) lets the cap reach *down* to the line
+    # instead of stopping one ring above it, which is what left a bald forehead.
+    kept_faces: list[tuple[int, ...]] = []
+    for face in mesh.faces:
+        cx = sum(mesh.vertices[i].x for i in face) / len(face)
+        cy = sum(mesh.vertices[i].y for i in face) / len(face)
+        cz = sum(mesh.vertices[i].z for i in face) / len(face)
+        if not (low.y - 0.01 <= cy <= high.y + 0.01):
+            continue
+        if not (low.x - 0.01 <= cx <= high.x + 0.01):
+            continue
+        if not (low.z - 0.01 <= cz <= high.z + 0.01):
+            continue
+        if cy >= _line(cz):
+            kept_faces.append(face)
+    selected = {index for face in kept_faces for index in face}
+    if not selected:
+        return None
+    faces = tuple(kept_faces)
+    if not faces:
+        return None
+    # The rim: a kept vertex that a dropped face also touches. Snapping those
+    # vertices onto the hairline turns the stair-step a face-centre test leaves
+    # into one smooth edge across the brow, which is what a fringe should be.
+    kept = set(faces)
+    rim: set[int] = set()
+    for face in mesh.faces:
+        if face in kept:
+            continue
+        for index in face:
+            if index in selected:
+                rim.add(index)
+    normals = mesh.vertex_normals()
+    # Hair is a thin shell over the skull, not a helmet: a thick cap offset along
+    # the surface normal pushed its rim down over the eyes (the reported "the hair
+    # covers the face"). The dial adds volume, bounded so it never reaches the brow.
+    thickness = 0.010 + 0.020 * min(max(0.0, params.hair), 1.6)
+    crown = max(1e-3, high.y - head_head.y)
+    # Keep only the selected vertices, so the hair mesh is small (a few hundred
+    # vertices) and binding it costs almost nothing.
+    order = sorted(selected)
+    remap = {old: new for new, old in enumerate(order)}
+    points: list[Vec3] = []
+    for index in order:
+        vertex = mesh.vertices[index]
+        if index in rim:
+            vertex = Vec3(vertex.x, _line(vertex.z) + 0.003, vertex.z)
+        rise = min(1.0, max(0.0, (vertex.y - head_head.y) / crown))
+        # Thicker at the crown, flush at the hairline, so the cap has volume
+        # without a hard rim.
+        offset = thickness * (0.15 + 0.85 * rise)
+        points.append(vertex + normals[index] * offset)
+    rebased = tuple(tuple(remap[index] for index in face) for face in faces)
+    return Mesh(
+        name=f"{body.name} hair cap",
+        vertices=tuple(points),
+        faces=rebased,
+        normals=(),
+        vertex_colors=(params.hair_color,) * len(points),
+    )
+
+
+def _hair_fall(body: SceneObject, params: FigureParameters) -> Mesh | None:
+    """A fall of hair down the back, its length set by the hair dials."""
+    if params.hair_length <= 0.02:
+        return None
+    measurements = _head_measurements(body)
+    if measurements is None:
+        return None
+    head_head, head_tail, low, high = measurements
+    skull_height = max(1e-3, head_tail.y - head_head.y)
+    width = max(1e-3, high.x - low.x)
+    depth = max(1e-3, high.z - low.z)
+    # The fall starts at the nape and hangs behind the back -- never in front of
+    # the face, and never across the chest.
+    length = (0.12 + 0.55 * params.hair_length) * max(1.0, params.height / 1.75)
+    top = head_head.y + skull_height * 0.35
+    centre = Vec3(0.0, top - length * 0.5, low.z - depth * 0.15)
+    blobs = [
+        ellipsoid(
+            (centre.x, centre.y, centre.z),
+            (width * 0.62, length * 0.55, depth * 0.34),
+            params.hair_color,
+            blend=0.04,
+        )
+    ]
+    mesh = sculpt(blobs, cell=DEFAULT_CELL, name=f"{body.name} hair fall")
+    return mesh if mesh.faces else None
+
+
+def build_hair_object(
+    params: FigureParameters,
+    parent_name: str,
+    *,
+    body: SceneObject | None = None,
+) -> SceneObject | None:
+    """The hair as its own object (its own material), or ``None`` when there is none.
+
+    It is a *separate* object on purpose, so it keeps its own material and a hair
+    colour is real rather than the skin colour. When ``body`` is given the hair is
+    built from that body's own skull (:func:`_hair_cap`) and is **bound to the same
+    skeleton**, so it follows the head when the figure is posed; without a body it
+    falls back to a sculpted cap placed from the figure's measurements.
+    """
+    if params.hair <= 0.0:
+        return None
+    mesh: Mesh | None = None
+    if body is not None:
+        cap = _hair_cap(body, params)
+        fall = _hair_fall(body, params)
+        if cap is not None and fall is not None:
+            mesh = _merge_meshes(cap, fall, name=f"{parent_name} hair")
+        else:
+            mesh = cap or fall
+    if mesh is None or not mesh.faces:
+        parts = _hair_parts(params, params.hair_color)
+        if not parts:
+            return None
+        mesh = sculpt(parts, cell=DEFAULT_CELL, name=f"{parent_name} hair")
+    if not mesh.faces:
+        return None
+    material = Material(
+        name=f"{parent_name} hair", base_color=params.hair_color, specular=0.4, shininess=56.0
+    )
+    skeleton = body.skeleton if body is not None else None
+    hair = SceneObject(f"{parent_name} hair", mesh, material, skeleton=skeleton)
+    if skeleton is not None:
+        hair.bind()
+    return hair
 
 
 def _hair_parts(params: FigureParameters, colour: tuple[float, float, float]) -> list[_Blob]:
-    """The hair as volumetric parts: a cap over the crown, and a fall down the back."""
+    """A fallback hair cap for a caller that has no body to fit it to.
+
+    It is placed from the figure's own measurements and shifted back, so it does
+    not cover the face; the body-aware builder above is the path the studio uses.
+    """
     if params.hair <= 0.0:
         return []
     s = params.height / 1.75
     head_length = 0.235 * params.head_scale * params.face_length * s
     head_width = 0.088 * params.head_scale * params.face_width * s
     head_depth = 0.100 * params.head_scale * params.face_length * s
-    shoulder_y = 1.44 * s
-    neck_y = shoulder_y + 0.04 * s
-    head_base = neck_y + 0.05 * s
-    crown = head_base + head_length * 0.62
-    volume = 1.06 + 0.16 * params.hair
+    crown = 1.68 * s
+    volume = 1.04 + 0.14 * params.hair
     parts: list[_Blob] = [
-        # A larger mass than the skull, shifted back, so the face stays clear.
-        ellipsoid((0.0, crown, -head_depth * 0.28),
-                  (head_width * 1.18 * volume, head_length * 0.62 * volume,
-                   head_depth * 1.22 * volume),
+        ellipsoid((0.0, crown, -head_depth * 0.55),
+                  (head_width * 1.10 * volume, head_length * 0.46 * volume,
+                   head_depth * 0.90 * volume),
                   colour, blend=0.03)
     ]
-    if params.hair >= 0.35:
-        fall = (0.10 + 0.24 * params.hair) * params.head_scale * s
+    if params.hair_length > 0.05:
+        fall = (0.10 + 0.40 * params.hair_length) * s
         parts.append(
-            ellipsoid((0.0, crown - head_length * 0.5 - fall * 0.45, -head_depth * 1.0),
-                      (head_width * 1.08 * volume, fall * 0.7, head_depth * 0.6),
+            ellipsoid((0.0, crown - head_length * 0.5 - fall * 0.45, -head_depth * 1.05),
+                      (head_width * 1.00 * volume, fall * 0.7, head_depth * 0.55),
                       colour, blend=0.05)
         )
     return parts
-
-
-def build_hair_object(params: FigureParameters, parent_name: str) -> SceneObject | None:
-    """The hair as its own object (its own material), or ``None`` when there is none.
-
-    It is a *separate* object on purpose: the hair is not skinned to the body, so it
-    keeps its own material and a hair colour is real rather than the skin colour.
-    """
-    parts = _hair_parts(params, params.hair_color)
-    if not parts:
-        return None
-    mesh = sculpt(parts, cell=DEFAULT_CELL, name=f"{parent_name} hair")
-    if not mesh.faces:
-        return None
-    material = Material(
-        name=f"{parent_name} hair", base_color=params.hair_color, specular=0.4, shininess=56.0
-    )
-    return SceneObject(f"{parent_name} hair", mesh, material)
 
 
 def build_figure(
@@ -995,6 +1239,7 @@ FIGURE_PRESETS: dict[str, FigureParameters] = {
     "feminine": FigureParameters(
         "Feminine",
         build=BUILD_FEMININE,
+        genital_sex="female",
         proportion="curvy",
         shoulder_width=0.36,
         hip_width=0.35,
@@ -1006,10 +1251,12 @@ FIGURE_PRESETS: dict[str, FigureParameters] = {
         arm_thickness=0.92,
         leg_thickness=1.02,
         lips=1.15,
+        hair_length=0.75,
     ),
     "masculine": FigureParameters(
         "Masculine",
         build=BUILD_MASCULINE,
+        genital_sex="male",
         proportion="athletic",
         shoulder_width=0.50,
         hip_width=0.28,
@@ -1021,12 +1268,19 @@ FIGURE_PRESETS: dict[str, FigureParameters] = {
         brow_ridge=0.6,
         arm_thickness=1.14,
         leg_thickness=1.10,
-        hair=0.35,
+        hair=0.55,
+        hair_length=0.0,
+        hairline=0.45,
         hair_color=(0.14, 0.10, 0.07),
+        areola=0.70,
+        areola_raise=0.20,
+        nipple_size=0.55,
+        nipple_length=0.35,
     ),
     "curvy": FigureParameters(
         "Curvy",
         build=BUILD_FEMININE,
+        genital_sex="female",
         proportion="curvy",
         hip_width=0.37,
         waist=0.30,
@@ -1043,6 +1297,7 @@ FIGURE_PRESETS: dict[str, FigureParameters] = {
     "woman": FigureParameters(
         "Woman",
         build=BUILD_FEMININE,
+        genital_sex="female",
         proportion="curvy",
         shoulder_width=0.36,
         hip_width=0.35,
@@ -1054,10 +1309,12 @@ FIGURE_PRESETS: dict[str, FigureParameters] = {
         arm_thickness=0.92,
         leg_thickness=1.02,
         lips=1.15,
+        hair_length=0.75,
     ),
     "man": FigureParameters(
         "Man",
         build=BUILD_MASCULINE,
+        genital_sex="male",
         proportion="athletic",
         shoulder_width=0.50,
         hip_width=0.28,
@@ -1069,12 +1326,19 @@ FIGURE_PRESETS: dict[str, FigureParameters] = {
         brow_ridge=0.6,
         arm_thickness=1.14,
         leg_thickness=1.10,
-        hair=0.35,
+        hair=0.55,
+        hair_length=0.0,
+        hairline=0.45,
         hair_color=(0.14, 0.10, 0.07),
+        areola=0.70,
+        areola_raise=0.20,
+        nipple_size=0.55,
+        nipple_length=0.35,
     ),
     "girl": FigureParameters(
         "Girl",
         build=BUILD_FEMININE,
+        genital_sex="female",
         minor=True,
         height=1.32,
         proportion="child",
@@ -1092,11 +1356,13 @@ FIGURE_PRESETS: dict[str, FigureParameters] = {
         hip_shape=0.15,
         lips=1.05,
         hair=1.35,
+        hair_length=0.85,
         hair_color=(0.22, 0.15, 0.09),
     ),
     "boy": FigureParameters(
         "Boy",
         build=BUILD_MASCULINE,
+        genital_sex="male",
         minor=True,
         height=1.38,
         proportion="child",
@@ -1113,6 +1379,7 @@ FIGURE_PRESETS: dict[str, FigureParameters] = {
         jaw_width=1.02,
         brow_ridge=0.15,
         hair=0.75,
+        hair_length=0.0,
         hair_color=(0.20, 0.14, 0.09),
     ),
 }
@@ -1134,10 +1401,13 @@ POSE_PRESETS: dict[str, dict[str, Vec3]] = {
         "shin.L": Vec3(6.0, 0.0, 0.0),
         "thigh.R": Vec3(2.0, 0.0, -2.0),
     },
+    # The arm poses are calibrated against the *anatomical* rig: the shoulder
+    # lifts a little, the upper arm does the raising, and the elbow follows, so
+    # the hand reaches the intended place without the shoulder tearing.
     "wave": {
-        "shoulder.L": Vec3(0.0, 0.0, -20.0),
-        "upper_arm.L": Vec3(0.0, 0.0, -125.0),
-        "forearm.L": Vec3(0.0, 0.0, -35.0),
+        "shoulder.L": Vec3(-20.0, 0.0, 0.0),
+        "upper_arm.L": Vec3(-30.0, 20.0, -120.0),
+        "forearm.L": Vec3(60.0, 0.0, 0.0),
     },
     "walk": {
         "thigh.L": Vec3(-28.0, 0.0, 0.0),
@@ -1173,30 +1443,31 @@ POSE_PRESETS: dict[str, dict[str, Vec3]] = {
         "spine": Vec3(-6.0, 0.0, 0.0),
     },
     "tpose": {
-        "shoulder.L": Vec3(0.0, 0.0, -90.0),
-        "shoulder.R": Vec3(0.0, 0.0, 90.0),
-        "upper_arm.L": Vec3(0.0, 0.0, -90.0),
-        "upper_arm.R": Vec3(0.0, 0.0, 90.0),
+        "upper_arm.L": Vec3(0.0, -30.0, -40.0),
+        "upper_arm.R": Vec3(0.0, 30.0, 40.0),
     },
     "reach": {
-        "shoulder.L": Vec3(0.0, 0.0, -40.0),
-        "upper_arm.L": Vec3(-60.0, 0.0, -100.0),
-        "forearm.L": Vec3(-25.0, 0.0, 0.0),
-        "chest": Vec3(-8.0, 0.0, 0.0),
+        "shoulder.L": Vec3(-10.0, 0.0, 0.0),
+        "upper_arm.L": Vec3(0.0, -40.0, -120.0),
+        "forearm.L": Vec3(0.0, 0.0, 0.0),
+        "shoulder.R": Vec3(-10.0, 0.0, 0.0),
+        "upper_arm.R": Vec3(0.0, -40.0, 120.0),
+        "forearm.R": Vec3(0.0, 0.0, 0.0),
+        "chest": Vec3(-6.0, 0.0, 0.0),
     },
     "arms_crossed": {
-        "shoulder.L": Vec3(0.0, 0.0, -20.0),
-        "upper_arm.L": Vec3(-70.0, 30.0, -35.0),
-        "forearm.L": Vec3(0.0, 0.0, -95.0),
-        "shoulder.R": Vec3(0.0, 0.0, 20.0),
-        "upper_arm.R": Vec3(-70.0, -30.0, 35.0),
-        "forearm.R": Vec3(0.0, 0.0, 95.0),
+        "shoulder.L": Vec3(-15.0, 0.0, 0.0),
+        "upper_arm.L": Vec3(-50.0, 0.0, 80.0),
+        "forearm.L": Vec3(60.0, 0.0, -60.0),
+        "shoulder.R": Vec3(-15.0, 0.0, 0.0),
+        "upper_arm.R": Vec3(-50.0, 0.0, -80.0),
+        "forearm.R": Vec3(60.0, 0.0, 60.0),
     },
     "hands_hips": {
-        "upper_arm.L": Vec3(0.0, 0.0, -45.0),
-        "forearm.L": Vec3(-80.0, 0.0, -45.0),
-        "upper_arm.R": Vec3(0.0, 0.0, 45.0),
-        "forearm.R": Vec3(-80.0, 0.0, 45.0),
+        "upper_arm.L": Vec3(-20.0, -20.0, 10.0),
+        "forearm.L": Vec3(60.0, 0.0, 80.0),
+        "upper_arm.R": Vec3(-20.0, 20.0, -10.0),
+        "forearm.R": Vec3(60.0, 0.0, -80.0),
     },
     "squat": {
         "hips": Vec3(20.0, 0.0, 0.0),

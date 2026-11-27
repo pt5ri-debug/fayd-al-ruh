@@ -325,6 +325,69 @@ class Mat4:
 IDENTITY_MATRIX = Mat4.identity()
 
 
+def euler_from_rotation(matrix: Mat4) -> Vec3:
+    """The intrinsic X/Y/Z euler angles of a pure rotation matrix (degrees).
+
+    The inverse of :meth:`Mat4.euler`: it recovers the angles that build
+    ``Rz @ Ry @ Rx``, including the gimbal-lock branch, so a rotation can be
+    re-expressed in another frame (which is exactly what a bone chain needs).
+    """
+    m = matrix.m
+    m00, m10, m20 = m[0], m[4], m[8]
+    m11, m12 = m[5], m[6]
+    m21, m22 = m[9], m[10]
+    y_angle = math.asin(max(-1.0, min(1.0, -m20)))
+    if math.cos(y_angle) > 1e-6:
+        x_angle = math.atan2(m21, m22)
+        z_angle = math.atan2(m10, m00)
+    else:
+        x_angle = math.atan2(-m12, m11)
+        z_angle = 0.0
+    to_degrees = 180.0 / math.pi
+    return Vec3(x_angle * to_degrees, y_angle * to_degrees, z_angle * to_degrees)
+
+
+def rotation_for_direction(direction: Vec3) -> Mat4:
+    """A proper rotation whose local ``+Y`` points along ``direction``.
+
+    The *roll* is chosen so a limb's local X stays as close to world ``+X`` as it
+    can -- the axis a knee or an elbow bends about -- and a bone whose axis is
+    nearly world X (a clavicle) uses world ``+Z`` instead, so the roll is never
+    undefined.
+    """
+    y_axis = direction.normalized()
+    if y_axis.length() < 1e-9:
+        return Mat4.identity()
+    reference = Vec3(1.0, 0.0, 0.0)
+    if abs(y_axis.dot(reference)) > 0.98:
+        reference = Vec3(0.0, 0.0, 1.0)
+    x_axis = (reference - y_axis * reference.dot(y_axis)).normalized()
+    z_axis = x_axis.cross(y_axis).normalized()
+    # The rotation's columns are the images of the local axes: x, y, z.
+    return Mat4(
+        (
+            x_axis.x, y_axis.x, z_axis.x, 0.0,
+            x_axis.y, y_axis.y, z_axis.y, 0.0,
+            x_axis.z, y_axis.z, z_axis.z, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        )
+    )
+
+
+def rest_rotation_for(direction: Vec3) -> Vec3:
+    """Euler angles (degrees) that point a bone's local ``+Y`` along ``direction``.
+
+    A :class:`Bone` extends along its own local ``+Y``, and skinning measures a
+    vertex's distance to that axis. A bone built with a zero rest rotation
+    therefore points straight up whatever its offset says -- which binds an arm's
+    vertices to a vertical line through the shoulder and tears the body the moment
+    it is posed. This is the one helper that fixes that: given the anatomical
+    direction from a joint to its child, it returns the rest rotation that makes
+    the bone's axis follow the anatomy.
+    """
+    return euler_from_rotation(rotation_for_direction(direction))
+
+
 # --------------------------------------------------------------------------- mesh
 
 
@@ -818,10 +881,36 @@ class Skeleton:
         return result
 
 
-#: How many bones may influence one vertex. Two is the classic "smooth joint"
-#: compromise: a knee blends between thigh and shin, while a distant limb never
-#: drags a vertex with it.
-MAX_INFLUENCES = 2
+#: How many bones may influence one vertex. Four lets a shoulder or a hip blend
+#: across the joint (upper arm + shoulder + chest, or thigh + hip + pelvis) without
+#: a crease, while the per-bone influence radius below keeps a *distant* limb from
+#: winning a torso vertex.
+MAX_INFLUENCES = 4
+
+#: A per-bone influence radius. A vertex's distance to a bone is divided by this
+#: before ranking, so the *torso* bones win the vertices near the trunk. Without
+#: it, an outer hip vertex is physically closer to the hand hanging beside it than
+#: to the hip bone at the centre, and raising the arm drags the hip out into a
+#: spike -- the classic failure of plain distance-to-bone binding on an A-pose.
+BONE_INFLUENCE: dict[str, float] = {
+    "hips": 1.75,
+    "spine": 1.55,
+    "chest": 1.55,
+    "neck": 1.15,
+    "head": 1.05,
+    "shoulder": 0.95,
+    "upper_arm": 0.72,
+    "forearm": 0.68,
+    "hand": 0.66,
+    "thigh": 1.02,
+    "shin": 0.92,
+    "foot": 0.82,
+}
+
+
+def bone_influence(name: str) -> float:
+    """The influence radius of a bone, by its name (a sensible default)."""
+    return BONE_INFLUENCE.get(name, 1.0)
 
 
 def compute_skin_weights(
@@ -849,26 +938,27 @@ def compute_skin_weights(
     # then makes no ``Vec3`` allocations, and distances are compared *squared*
     # (monotonic, so the ranking is identical) with a single ``sqrt`` for the few
     # bones actually chosen.
-    bones: list[tuple[float, float, float, float, float, float, float]] = []
+    bones: list[tuple[float, float, float, float, float, float, float, float]] = []
     for name in order:
         start, end = segments[name]
         dx = end.x - start.x
         dy = end.y - start.y
         dz = end.z - start.z
+        scale = bone_influence(name)
         bones.append(
-            (start.x, start.y, start.z, dx, dy, dz, dx * dx + dy * dy + dz * dz)
+            (start.x, start.y, start.z, dx, dy, dz, dx * dx + dy * dy + dz * dz, scale * scale)
         )
     keep = max(1, min(max_influences, len(order)))
     bindings: list[tuple[tuple[int, float], ...]] = []
     for vertex in mesh.vertices:
         vx, vy, vz = vertex.x, vertex.y, vertex.z
         distances: list[float] = []
-        for sx, sy, sz, dx, dy, dz, length_sq in bones:
+        for sx, sy, sz, dx, dy, dz, length_sq, scale_sq in bones:
             px = vx - sx
             py = vy - sy
             pz = vz - sz
             if length_sq < 1e-12:
-                distances.append(px * px + py * py + pz * pz)
+                distances.append((px * px + py * py + pz * pz) / scale_sq)
                 continue
             t = (px * dx + py * dy + pz * dz) / length_sq
             if t < 0.0:
@@ -878,7 +968,7 @@ def compute_skin_weights(
             cx = px - dx * t
             cy = py - dy * t
             cz = pz - dz * t
-            distances.append(cx * cx + cy * cy + cz * cz)
+            distances.append((cx * cx + cy * cy + cz * cz) / scale_sq)
         ranked = sorted(range(len(order)), key=lambda index: distances[index])
         chosen = ranked[:keep]
         raw = [
@@ -945,14 +1035,22 @@ def skin_normals(
 ) -> tuple[Vec3, ...]:
     """Rotate a mesh's normals with the same skinning, so shading follows the pose.
 
-    A direction is transformed by the bone's rotation only (its translation does
-    not move a normal), which is the usual approximation and is exact for the
-    rigid, un-scaled bones this studio builds.
+    A normal is rotated by the bone's *deformation* -- ``pose @ inverse(bind)`` --
+    not by its pose alone. The distinction only shows once a bone carries a
+    non-zero **rest** rotation: applying the pose matrix directly then rotates
+    every normal away from the surface it belongs to, and the body renders with
+    dark patches where the shading no longer follows the skin. The deformation is
+    rigid (these bones carry no scale), so its rotation part is exact for a normal.
     """
     rotations: dict[str, Mat4] = {}
     for name in bone_order:
+        bind = bind_matrices.get(name)
         pose = pose_matrices.get(name)
-        if pose is not None:
+        if bind is None or pose is None:
+            continue
+        try:
+            rotations[name] = pose @ bind.inverse()
+        except ValueError:
             rotations[name] = pose
     posed: list[Vec3] = []
     for index, normal in enumerate(normals):
@@ -1303,8 +1401,11 @@ __all__ = [
     "Transform",
     "Vec3",
     "compute_skin_weights",
+    "euler_from_rotation",
     "iter_triangles",
     "make_default_scene",
+    "rest_rotation_for",
+    "rotation_for_direction",
     "skin_mesh",
     "skin_normals",
     "vec3",

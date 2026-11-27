@@ -101,8 +101,16 @@ class BodyStudioDialog(ThemedDialog):
         self._drag_angles: tuple[float, float] | None = None
         self._dial_vars: dict[str, tk.DoubleVar] = {}
         self._dial_labels: dict[str, tk.Label] = {}
+        self._dial_holders: dict[str, tk.Frame] = {}
+        self._dial_sections: dict[str, tk.Frame] = {}
+        self._choice_vars: dict[str, tk.StringVar] = {}
         self._colour_vars: dict[str, tk.StringVar] = {}
         self._swatches: dict[str, tk.Canvas] = {}
+        self._history: list[Any] = []
+        self._redo: list[Any] = []
+        self._last_remember = 0.0
+        self._last_remember_key = ""
+        self._summary_label: tk.Label | None = None
         self._syncing = False
         self._pending_render: str | None = None
         self._photo: Any = None
@@ -251,13 +259,200 @@ class BodyStudioDialog(ThemedDialog):
         for build_key, title in self.service.body_builds():
             self._button(row, title, _binder(self._set_build, build_key))
 
+        parameters = column.add("parameters", "Parameters", icon="🔎", open=True)
+        self._build_parameters_section(parameters)
+
         for group_key, title, dials in self.service.body_dial_groups():
             section = column.add(group_key, title, icon="🎚", open=(group_key == "proportions"))
+            self._dial_sections[group_key] = section
             if group_key == "pose":
                 self._build_pose_section(section)
                 continue
             for dial in dials:
                 self._build_dial(section, dial)
+            if group_key == "breasts":
+                self._build_breast_presets(section)
+
+    def _build_breast_presets(self, parent: tk.Frame) -> None:
+        """One-click breast shapes, so a size is a word and not six dials."""
+        from core.romance.body import breast_preset_titles
+
+        theme = self.theme
+        label = tk.Label(
+            parent,
+            text="Breast shape",
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+        )
+        label.pack(fill="x", pady=(6, 2))
+        titles = breast_preset_titles("en")
+        for start in range(0, len(titles), 3):
+            row = tk.Frame(parent, bg=theme.surface)
+            row.pack(fill="x")
+            for key, title in titles[start : start + 3]:
+                self._button(
+                    row, title, _binder(self._apply_breast_preset, key)
+                ).pack(side="left", fill="x", expand=True, padx=1)
+
+    def _apply_breast_preset(self, key: str) -> None:
+        from core.romance.body import breast_preset_changes
+
+        self._remember()
+        try:
+            self._params = self.service.set_body_dials(
+                self._params, breast_preset_changes(key)
+            )
+        except (KeyError, ValueError) as error:
+            self._set_status(str(error))
+            return
+        self._sync_controls()
+        self._set_status(f"Breast shape: {key}.")
+        self._render_now()
+
+    def _build_parameters_section(self, parent: tk.Frame) -> None:
+        """The DAZ-style parameter panel: search, undo/redo, reset, and a read-out."""
+        theme = self.theme
+        self._search_var = tk.StringVar(value="")
+        entry = tk.Entry(
+            parent,
+            textvariable=self._search_var,
+            relief="flat",
+            borderwidth=1,
+            highlightthickness=0,
+            bg=theme.surface_raised,
+            fg=theme.foreground,
+            insertbackground=theme.foreground,
+            font=self._type.font("2xs"),
+        )
+        entry.pack(fill="x", ipady=3, pady=(0, 4))
+        entry.insert(0, "")
+        self._search_var.trace_add("write", lambda *_a: self._filter_dials())
+        self._search_entry = entry
+
+        row = tk.Frame(parent, bg=theme.surface)
+        row.pack(fill="x", pady=(0, 4))
+        self._button(row, "↶ Undo", self._undo).pack(side="left", fill="x", expand=True)
+        self._button(row, "↷ Redo", self._redo_last).pack(side="left", fill="x", expand=True)
+        self._button(parent, "Reset every measurement", self._reset_all_dials).pack(
+            fill="x", pady=(0, 4)
+        )
+
+        self._summary_label = tk.Label(
+            parent,
+            text=self.service.body_summary(self._params),
+            bg=theme.surface,
+            fg=theme.text_dim,
+            font=self._type.font("2xs"),
+            anchor="w",
+            justify="left",
+            wraplength=340,
+        )
+        self._summary_label.pack(fill="x")
+
+    def _filter_dials(self) -> None:
+        """Show only the dials whose name matches the search box."""
+        from core.romance.body import dial_for
+
+        try:
+            query = self._search_var.get().strip().casefold()
+        except (tk.TclError, AttributeError):
+            return
+        groups = self.service.body_dial_groups()
+        for key, holder in self._dial_holders.items():
+            dial = dial_for(key)
+            label = str(getattr(dial, "label", "") or key).casefold()
+            match = not query or query in label or query in key.casefold()
+            try:
+                if match:
+                    holder.pack(fill="x", pady=2)
+                else:
+                    holder.pack_forget()
+            except tk.TclError:
+                pass
+        if not query:
+            return
+        for group_key, _title, dials in groups:
+            hit = group_key.casefold().find(query) >= 0 or any(
+                query in str(getattr(dial, "label", "")).casefold()
+                or query in str(dial.key).casefold()
+                for dial in dials
+            )
+            if hit:
+                try:
+                    self._column.set_open(group_key, True)
+                except Exception:
+                    pass
+
+    def _remember(self, key: str = "") -> None:
+        """Push the current parameters onto the undo stack (before a change).
+
+        A slider fires many times per drag, so consecutive ticks on the *same*
+        dial within half a second are coalesced into one undo step.
+        """
+        import time
+
+        now = time.monotonic()
+        if key and key == self._last_remember_key and now - self._last_remember < 0.5:
+            self._last_remember = now
+            return
+        self._last_remember = now
+        self._last_remember_key = key
+        try:
+            self._history.append(self._params)
+        except Exception:
+            return
+        if len(self._history) > 100:
+            del self._history[:-100]
+        self._redo.clear()
+
+    def _refresh_summary(self) -> None:
+        label = self._summary_label
+        if label is None:
+            return
+        try:
+            label.configure(text=self.service.body_summary(self._params))
+        except Exception:
+            pass
+
+    def _undo(self) -> None:
+        if not self._history:
+            self._set_status("Nothing to undo.")
+            return
+        try:
+            self._redo.append(self._params)
+            self._params = self._history.pop()
+        except Exception:
+            return
+        self._sync_controls()
+        self._set_status("Undone.")
+        self._render_now()
+
+    def _redo_last(self) -> None:
+        if not self._redo:
+            self._set_status("Nothing to redo.")
+            return
+        try:
+            self._history.append(self._params)
+            self._params = self._redo.pop()
+        except Exception:
+            return
+        self._sync_controls()
+        self._set_status("Redone.")
+        self._render_now()
+
+    def _reset_all_dials(self) -> None:
+        self._remember()
+        try:
+            from core.romance.body import default_parameters
+
+            self._params = default_parameters()
+        except Exception:
+            return
+        self._sync_controls()
+        self._set_status("Every measurement reset to the default body.")
+        self._render_now()
 
     def _build_templates_section(self, parent: tk.Frame) -> None:
         """The four FR-CCE templates, and the save/load/regenerate controls.
@@ -1094,6 +1289,7 @@ class BodyStudioDialog(ThemedDialog):
         theme = self.theme
         holder = tk.Frame(parent, bg=theme.surface)
         holder.pack(fill="x", pady=2)
+        self._dial_holders[dial.key] = holder
         head = tk.Frame(holder, bg=theme.surface)
         head.pack(fill="x")
         tk.Label(
@@ -1135,9 +1331,31 @@ class BodyStudioDialog(ThemedDialog):
             return
 
         if dial.kind == "choice":
-            # A choice dial (the build family) is driven by its own buttons in the
-            # Body type section, so no slider is drawn for it here.
-            value_label.configure(text=str(getattr(self._params, dial.key, "")))
+            current = str(getattr(self._params, dial.key, "") or "")
+            var = tk.StringVar(value=current)
+            value_label.configure(text="")
+            choices = tuple(str(choice) for choice in getattr(dial, "choices", ()) or ())
+            menu = tk.OptionMenu(holder, var, *(choices or (current,)))
+            menu.configure(
+                bg=theme.surface_raised,
+                fg=theme.foreground,
+                activebackground=theme.interactive_hover,
+                activeforeground=theme.foreground,
+                highlightthickness=0,
+                relief="flat",
+                font=self._type.font("2xs"),
+            )
+            menu["menu"].configure(
+                bg=theme.surface_raised,
+                fg=theme.foreground,
+                activebackground=theme.interactive_hover,
+                activeforeground=theme.foreground,
+                font=self._type.font("2xs"),
+            )
+            menu.pack(fill="x", pady=(2, 0))
+
+            var.trace_add("write", lambda *_a, k=dial.key: self._on_choice(k, var.get()))
+            self._choice_vars[dial.key] = var
             return
 
         dial_var = self._dial_vars.setdefault(dial.key, tk.DoubleVar(value=0.0))
@@ -1269,6 +1487,14 @@ class BodyStudioDialog(ThemedDialog):
                         colour_var.set(_colour_text(value))
                     self._paint_swatch(dial.key)
                     continue
+                if dial.kind == "choice":
+                    choice_var = self._choice_vars.get(dial.key)
+                    if choice_var is not None:
+                        try:
+                            choice_var.set(str(value or ""))
+                        except tk.TclError:
+                            pass
+                    continue
                 dial_var = self._dial_vars.get(dial.key)
                 if dial_var is not None:
                     try:
@@ -1283,6 +1509,7 @@ class BodyStudioDialog(ThemedDialog):
                         pass
         finally:
             self._syncing = False
+        self._refresh_summary()
 
     def _all_dials(self) -> tuple[Any, ...]:
         dials: list[Any] = []
@@ -1311,6 +1538,7 @@ class BodyStudioDialog(ThemedDialog):
             value = float(var.get())
         except (tk.TclError, ValueError):
             return
+        self._remember(key)
         try:
             self._params = self.service.set_body_dial(self._params, key, value)
         except KeyError:
@@ -1321,7 +1549,18 @@ class BodyStudioDialog(ThemedDialog):
                 label.configure(text=f"{value:.2f}")
             except tk.TclError:
                 pass
+        self._refresh_summary()
         self._schedule_render()
+
+    def _on_choice(self, key: str, value: str) -> None:
+        if self._syncing:
+            return
+        try:
+            self._params = self.service.set_body_dial(self._params, key, value)
+        except (KeyError, ValueError):
+            return
+        self._refresh_summary()
+        self._render_now()
 
     def _on_colour(self, key: str, var: tk.StringVar) -> None:
         if self._syncing:
@@ -1333,6 +1572,7 @@ class BodyStudioDialog(ThemedDialog):
         colour = _parse_colour(raw)
         if colour is None:
             return
+        self._remember(key)
         try:
             self._params = self.service.set_body_dial(self._params, key, colour)
         except KeyError:
@@ -1341,6 +1581,7 @@ class BodyStudioDialog(ThemedDialog):
         self._schedule_render()
 
     def _set_build(self, key: str) -> None:
+        self._remember()
         try:
             self._params = self.service.set_body_dial(self._params, "build", key)
         except KeyError:
@@ -1349,12 +1590,18 @@ class BodyStudioDialog(ThemedDialog):
         self._render_now()
 
     def _set_pose(self, key: str) -> None:
+        self._remember()
         try:
             self._params = self.service.set_body_pose(self._params, key)
         except KeyError as error:
             self._set_status(str(error))
             return
         self._set_status(f"Pose set to {key}.")
+        if key == "lying":
+            # A lying figure is seen from above; a front camera would look at its
+            # soles. Only the *gallery* choice moves the camera -- an orbit the
+            # user set is otherwise left alone.
+            self._apply_camera_preset("top")
         self._render_now()
 
     def _apply_pose_text(self) -> None:
@@ -1362,11 +1609,13 @@ class BodyStudioDialog(ThemedDialog):
             text = self._pose_var.get()
         except tk.TclError:
             return
+        self._remember()
         self._params, message = self.service.apply_body_pose_instruction(self._params, text)
         self._set_status(message)
         self._render_now()
 
     def _apply_preset(self, key: str) -> None:
+        self._remember()
         try:
             self._params = self.service.apply_body_preset(self._params, key)
         except KeyError as error:
@@ -1377,6 +1626,7 @@ class BodyStudioDialog(ThemedDialog):
         self._render_now()
 
     def _reset_shape(self) -> None:
+        self._remember()
         self._params = self.service.body_parameters(self.character_id)
         self._sync_controls()
         self._set_status("Shape reset to the character's starting body.")
@@ -1578,7 +1828,8 @@ class BodyStudioDialog(ThemedDialog):
         self._preview_png = data or b""
         self._show_preview()
         self._name_label.configure(text=self._character_name() or "Body")
-        self._summary_label.configure(text=self.service.body_summary(self._params))
+        if self._summary_label is not None:
+            self._summary_label.configure(text=self.service.body_summary(self._params))
         self._refresh_template_controls()
         self._set_status(
             f"Rendered {_PREVIEW_WIDTH}x{_PREVIEW_HEIGHT} ({len(self._preview_png)} bytes)."
