@@ -221,6 +221,21 @@ DIALS: tuple[DialSpec, ...] = (
         hint="The overall size of the breast (a multiplier; 1 is the reference)",
     ),
     DialSpec(
+        "breast_size_left", "Left breast size", "حجم الثدي الأيسر", "breasts",
+        minimum=0.30, maximum=2.50, step=0.01,
+        hint="The left breast's own size, independent of the right one",
+    ),
+    DialSpec(
+        "breast_size_right", "Right breast size", "حجم الثدي الأيمن", "breasts",
+        minimum=0.30, maximum=2.50, step=0.01,
+        hint="The right breast's own size, independent of the left one",
+    ),
+    DialSpec(
+        "chest_size", "Chest size (ribcage)", "حجم الصدر (القفص الصدري)", "breasts",
+        minimum=0.60, maximum=1.60, step=0.01,
+        hint="The whole chest the breasts sit on, separate from the breast volume",
+    ),
+    DialSpec(
         "breast_projection", "Breast projection", "بروز الثدي", "breasts",
         minimum=0.30, maximum=2.50, step=0.01,
         hint="How far the breast projects forward from the chest",
@@ -310,6 +325,21 @@ DIALS: tuple[DialSpec, ...] = (
         "genital_direction", "Intimate direction", "اتجاه التفاصيل الحميمة", "intimate",
         minimum=-85.0, maximum=85.0, step=1.0,
         hint="Tilt of the set's axis in the vertical plane (degrees, + is up)",
+    ),
+    DialSpec(
+        "genital_erection", "Erection (male)", "الانتصاب (للذكور)", "intimate",
+        minimum=0.0, maximum=1.0, step=0.01,
+        hint="The male organ: flaccid at 0, fully erect at 1 (adults only)",
+    ),
+    DialSpec(
+        "genital_glans", "Glans size", "حجم الحشفة", "intimate",
+        minimum=0.40, maximum=2.00, step=0.01,
+        hint="The glans's own size, relative to the shaft",
+    ),
+    DialSpec(
+        "genital_curve", "Shaft curve", "انحناء العضو", "intimate",
+        minimum=0.0, maximum=1.0, step=0.01,
+        hint="A gentle upward curve along the shaft (0 is straight)",
     ),
     DialSpec(
         "genital_sex", "Intimate set", "نوع التفاصيل الحميمة", "intimate",
@@ -506,9 +536,14 @@ def breast_preset_changes(key: str) -> dict[str, float]:
     nothing, so a typo in a window or a CLI call is reported.
     """
     try:
-        return dict(_BREAST_PRESET_BY_KEY[key])
+        changes = dict(_BREAST_PRESET_BY_KEY[key])
     except KeyError:
         raise KeyError(f"Unknown breast preset {key!r}.") from None
+    # A named shape is symmetric: it clears any left/right asymmetry the user
+    # had dialled in, so "Large" really means both.
+    changes.setdefault("breast_size_left", 1.0)
+    changes.setdefault("breast_size_right", 1.0)
+    return changes
 
 
 def apply_breast_preset(params: FigureParameters, key: str) -> FigureParameters:

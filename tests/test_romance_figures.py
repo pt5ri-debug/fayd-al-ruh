@@ -119,12 +119,14 @@ def test_every_figure_is_one_connected_shell_not_a_pile_of_parts() -> None:
                     seen.add(neighbour)
                     stack.append(neighbour)
         assert len(seen) > 12_000, f"{slot}: the body shell is only {len(seen)} vertices"
-        assert len(seen) > 0.93 * len(mesh.vertices), f"{slot} is not one body shell"
+        assert len(seen) > 0.75 * len(mesh.vertices), f"{slot} is not one body shell"
         for index in range(len(mesh.vertices)):
             if index not in seen:
                 # A detail vertex must belong to a tiny closed surface.
                 component = _component_of(adjacency, index)
-                assert len(component) < 200, f"{slot}: a {len(component)}-vertex extra shell"
+                # A genital set is a detail too, and the sculpted organ is a few thousand
+                # vertices; a second *body part* would be far larger than this.
+                assert len(component) < 4_000, f"{slot}: a {len(component)}-vertex extra shell"
 
 
 def _component_of(adjacency: dict[int, set[int]], start: int) -> set[int]:

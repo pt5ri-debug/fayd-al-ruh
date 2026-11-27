@@ -8326,3 +8326,49 @@ regression monitor each can refuse a change.
   (+2), and `tests/test_romance_body_studio.py` (+4, one real Tk window) pin the
   fixes. Gates: ruff clean, mypy 1211 files OK, evaluation PASS (`overall` 0.9918
   unchanged), the body/scene suites green.
+
+- Phase 74 — **the body reads as a person: sculpted anatomy, per-side breasts, a
+  real hairline, and poses that place the whole figure**. Four reports from the
+  Body & shape studio, all fixed additively. **(1) The "speckled" organ was a
+  winding bug, not shading.** `core/scene3d_sculpt._surface_nets` emits each quad
+  from the four cells around a lattice edge, but the vertex order depends on which
+  side of the edge is inside, so some quads were **bowties**: the rasteriser's fan
+  triangulation produced one good triangle and one reversed, wrongly-shaded one --
+  a regular grid of dark triangles over the shaft. `_orient_faces` now sorts each
+  quad's four vertices by their angle around its own centre (a simple polygon) and
+  flips it if its normal opposes the field's gradient (which always points
+  outward), so every sculpted surface (the organ, the hair, the fall) is correctly
+  wound. **(2) The organ is one continuous shell and sits at the pubic bone.**
+  `core/human_anatomy`'s male set is now a **single chain of capsules** from deep
+  inside the mons to the glans (a separate root stub meeting the shaft left a
+  pinch that surface nets split into two shells), with a tapered glans capsule, a
+  two-lobed scrotum fused by a pedicle, and an erection that raises the shaft to
+  +35 degrees; the female set is flush and centered, and a **minor never gets
+  either** (the `minor` flag, not the height, decides). A female body honestly
+  ignores `genital_erection`. **(3) The breasts are fully controllable.** The
+  `shape_breasts` dials now include `breast_size_left`/`breast_size_right` (each
+  side independently) and `chest_size` (the ribcage, separate from the breast
+  volume), and size/fullness really **project forward** (they used to only widen
+  the chest, which is why "size" looked like it did nothing); the two areolae are
+  exactly symmetric because the right frame is the left one mirrored, and the
+  whole catalogue (breast, chest, projection, fullness, separation, height, sag,
+  areola, nipple size/length/direction/spacing/raise, colours) is exposed by the
+  window's generic dial builder and `python -m cli romance body --dials`.
+  **(4) The hair and the poses.** The hair cap is thinner, its rim is flush with
+  the skin (it used to overhang the brow like a visor), its hairline drops at the
+  temples and dips at the centre, and the fall is a tapered chain that meets the
+  cap behind the ears; the hair object copies the body's **pose and whole-body
+  transform**, so it no longer floats off a posed head. The pose presets were
+  recalibrated against the anatomical rig (a horizontal T-pose is +-50 on the
+  upper arm's local Z, not +-90; the arms were lifting 50 degrees too far), and
+  `POSE_ROOT` adds a **whole-body placement** -- a drop for `sit`/`sit_ground`/
+  `squat` and a -90 degree X rotation for `lying` -- because bone rotations alone
+  left a seated figure's pelvis at standing height with its feet in the air.
+  `morph_figure` keeps the placement. `tests/test_human_anatomy.py` gained the
+  per-side breast, ribcage, erection, one-shell and female no-op judgements;
+  `tests/test_scene3d.py` builds each pose through the parameters (so the
+  placement is exercised) and the four-template shell tests allow the anatomical
+  detail shells (a sculpted organ is a few thousand vertices, still a detail, and
+  the body remains the one large skin). Gates: ruff clean, mypy 1211 files OK,
+  evaluation PASS (`overall` 0.9918 unchanged), the body/scene/anatomy suites
+  green.

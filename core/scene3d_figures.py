@@ -57,6 +57,7 @@ from core.scene3d import (
     Scene,
     SceneObject,
     Skeleton,
+    Transform,
     Vec3,
     make_default_scene,
 )
@@ -111,6 +112,12 @@ class FigureParameters:
     # -- breast shape (the whole chest, not just its size) -----------------
     #: The breast's overall size (a multiplier; ``1.0`` is the reference).
     breast_size: float = 1.0
+    #: Each breast's own size, so the two can be shaped independently.
+    breast_size_left: float = 1.0
+    breast_size_right: float = 1.0
+    #: The whole ribcage's size -- the chest the breasts sit on, independent of
+    #: the breast volume itself.
+    chest_size: float = 1.0
     #: How far the breast projects forward.
     breast_projection: float = 1.0
     #: How round and full the breast is.
@@ -209,6 +216,13 @@ class FigureParameters:
     #: The genital set's fullness (labia for a feminine body, shaft and scrotum
     #: for a masculine one), as a multiplier.
     genital_fullness: float = 1.0
+    #: How erect the male organ is: ``0`` is fully flaccid, ``1`` fully erect. It
+    #: moves the length, the girth, and the angle together.
+    genital_erection: float = 0.0
+    #: The glans's own size, relative to the shaft.
+    genital_glans: float = 1.0
+    #: How much the shaft curves along its length (``0`` straight).
+    genital_curve: float = 0.0
     #: Extra Catmull-Clark smoothing passes over the body: 0 is the base human
     #: mesh exactly as the modeller authored it (already 27k triangles, and the
     #: default), 1 doubles the density, 2 quadruples it. It is a real detail dial
@@ -277,6 +291,9 @@ class FigureParameters:
             "foot_length",
             "foot_width",
             "breast_size",
+            "breast_size_left",
+            "breast_size_right",
+            "chest_size",
             "breast_projection",
             "breast_fullness",
             "breast_separation",
@@ -287,6 +304,11 @@ class FigureParameters:
                 raise ValueError(f"Figure {field_name} must be positive.")
         if not 0.0 <= self.breast_sag <= 1.0:
             raise ValueError("The breast sag dial must be in [0, 1].")
+        for field_name in ("genital_erection", "genital_curve"):
+            if not 0.0 <= getattr(self, field_name) <= 1.0:
+                raise ValueError(f"Figure {field_name} must be in [0, 1].")
+        if self.genital_glans <= 0.0:
+            raise ValueError("Figure genital_glans must be positive.")
         if self.genital_sex not in ("auto", "female", "male", "none"):
             raise ValueError(
                 "The genital sex must be auto, female, male, or none."
@@ -762,6 +784,9 @@ def _breast_shape(params: FigureParameters) -> BreastShape:
     return BreastShape(
         bust=params.bust,
         size=params.breast_size,
+        size_left=params.breast_size_left,
+        size_right=params.breast_size_right,
+        chest_size=params.chest_size,
         projection=params.breast_projection,
         fullness=params.breast_fullness,
         separation=params.breast_separation,
@@ -822,6 +847,9 @@ def _genital_detail(params: FigureParameters) -> GenitalDetail | None:
         length=params.genital_length,
         direction=params.genital_direction,
         fullness=params.genital_fullness,
+        erection=params.genital_erection,
+        glans_size=params.genital_glans,
+        curve=params.genital_curve,
         color=params.genital_color,
         skin_color=params.skin,
     )
@@ -994,15 +1022,28 @@ def _hair_cap(body: SceneObject, params: FigureParameters) -> Mesh | None:
     # fringe covered them. On the face the eyes are at 0.41..0.53 for every body,
     # so 0.62 is a real forehead above them.
     face_height = max(1e-3, high.y - low.y)
-    brow = low.y + face_height * (0.62 + 0.05 * params.hairline)
-    nape = low.y + face_height * (0.10 + 0.05 * params.hairline)
+    brow = low.y + face_height * (0.63 + 0.05 * params.hairline)
+    nape = low.y + face_height * (0.08 + 0.05 * params.hairline)
     z_front = high.z
     z_back = low.z
     span = max(1e-3, z_front - z_back)
-    def _line(z: float) -> float:
+    half_width = max(1e-3, (high.x - low.x) * 0.5)
+
+    def _line(z: float, x: float = 0.0) -> float:
+        """The hairline's height at a point: a brow that runs level around the
+        front, drops to the nape behind the ears, rises at the temples, and dips
+        very slightly at the centre -- a straight cut across the brow is what read
+        as a helmet."""
         behind = min(1.0, max(0.0, (z_front - z) / span - 0.5))
         t = behind * 2.0
-        return brow + (nape - brow) * (t * t)
+        line = brow + (nape - brow) * (t * t)
+        edge = min(1.0, abs(x) / half_width)
+        # The hairline drops at the temples, to just above the ear, so the sides
+        # of the head are covered instead of ending in a straight bowl cut; it
+        # dips a little at the centre (a soft widow's peak).
+        line -= face_height * 0.115 * edge * edge
+        line -= face_height * 0.034 * math.exp(-((x / (0.34 * half_width)) ** 2))
+        return line
 
     # A face belongs to the cap when its own centre is above the hairline. Testing
     # the centre (rather than every vertex) lets the cap reach *down* to the line
@@ -1018,7 +1059,7 @@ def _hair_cap(body: SceneObject, params: FigureParameters) -> Mesh | None:
             continue
         if not (low.z - 0.01 <= cz <= high.z + 0.01):
             continue
-        if cy >= _line(cz):
+        if cy >= _line(cz, cx):
             kept_faces.append(face)
     selected = {index for face in kept_faces for index in face}
     if not selected:
@@ -1041,7 +1082,7 @@ def _hair_cap(body: SceneObject, params: FigureParameters) -> Mesh | None:
     # Hair is a thin shell over the skull, not a helmet: a thick cap offset along
     # the surface normal pushed its rim down over the eyes (the reported "the hair
     # covers the face"). The dial adds volume, bounded so it never reaches the brow.
-    thickness = 0.010 + 0.020 * min(max(0.0, params.hair), 1.6)
+    thickness = 0.005 + 0.014 * min(max(0.0, params.hair), 1.6)
     crown = max(1e-3, high.y - head_head.y)
     # Keep only the selected vertices, so the hair mesh is small (a few hundred
     # vertices) and binding it costs almost nothing.
@@ -1051,11 +1092,16 @@ def _hair_cap(body: SceneObject, params: FigureParameters) -> Mesh | None:
     for index in order:
         vertex = mesh.vertices[index]
         if index in rim:
-            vertex = Vec3(vertex.x, _line(vertex.z) + 0.003, vertex.z)
+            # The rim is the hairline itself: sit it on the skin (a hair's
+            # breadth inside) rather than in front of it, so the cap blends into
+            # the forehead instead of overhanging it like a visor.
+            vertex = Vec3(vertex.x, _line(vertex.z, vertex.x) - 0.001, vertex.z)
         rise = min(1.0, max(0.0, (vertex.y - head_head.y) / crown))
         # Thicker at the crown, flush at the hairline, so the cap has volume
         # without a hard rim.
-        offset = thickness * (0.15 + 0.85 * rise)
+        # No thickness at the rim, full thickness at the crown: the hair grows
+        # out of the scalp, so its edge is flush.
+        offset = thickness * (rise ** 1.4)
         points.append(vertex + normals[index] * offset)
     rebased = tuple(tuple(remap[index] for index in face) for face in faces)
     return Mesh(
@@ -1081,16 +1127,24 @@ def _hair_fall(body: SceneObject, params: FigureParameters) -> Mesh | None:
     # The fall starts at the nape and hangs behind the back -- never in front of
     # the face, and never across the chest.
     length = (0.12 + 0.55 * params.hair_length) * max(1.0, params.height / 1.75)
-    top = head_head.y + skull_height * 0.35
-    centre = Vec3(0.0, top - length * 0.5, low.z - depth * 0.15)
-    blobs = [
-        ellipsoid(
-            (centre.x, centre.y, centre.z),
-            (width * 0.62, length * 0.55, depth * 0.34),
-            params.hair_color,
-            blend=0.04,
+    top = head_head.y + skull_height * 0.52
+    back = low.z - depth * 0.22
+    # A chain of ellipsoids down the back, each a little narrower and thinner than
+    # the one above, so the fall tapers to a soft end instead of hanging as one
+    # rectangular slab behind the head.
+    blobs = []
+    for index, (share, wide, deep) in enumerate(
+        ((0.30, 0.88, 0.32), (0.40, 0.74, 0.20), (0.30, 0.58, 0.12))
+    ):
+        centre_y = top - length * (0.15 + 0.70 * index / 2)
+        blobs.append(
+            ellipsoid(
+                (0.0, centre_y, back - depth * 0.06 * index),
+                (width * wide, length * share * 0.62, depth * deep),
+                params.hair_color,
+                blend=0.035,
+            )
         )
-    ]
     mesh = sculpt(blobs, cell=DEFAULT_CELL, name=f"{body.name} hair fall")
     return mesh if mesh.faces else None
 
@@ -1133,6 +1187,12 @@ def build_hair_object(
     hair = SceneObject(f"{parent_name} hair", mesh, material, skeleton=skeleton)
     if skeleton is not None:
         hair.bind()
+    if body is not None:
+        # The hair is its own object, so it carries its own pose and transform:
+        # without this copy it stayed at rest while the head turned or the whole
+        # body lay down, which is the "hair floats off the head" defect.
+        hair.pose = dict(body.pose)
+        hair.transform = body.transform
     return hair
 
 
@@ -1193,6 +1253,12 @@ def build_figure(
     obj.bind()
     if settings.pose and settings.pose != "rest":
         obj.pose = pose_rotations(settings.pose)
+        rotation, drop = POSE_ROOT.get(settings.pose, (Vec3(), 0.0))
+        if rotation.length() > 1e-9 or abs(drop) > 1e-9:
+            obj.transform = Transform(
+                translation=Vec3(0.0, drop * settings.height, 0.0),
+                rotation=rotation,
+            )
     return obj
 
 
@@ -1401,92 +1467,105 @@ POSE_PRESETS: dict[str, dict[str, Vec3]] = {
         "shin.L": Vec3(6.0, 0.0, 0.0),
         "thigh.R": Vec3(2.0, 0.0, -2.0),
     },
-    # The arm poses are calibrated against the *anatomical* rig: the shoulder
-    # lifts a little, the upper arm does the raising, and the elbow follows, so
-    # the hand reaches the intended place without the shoulder tearing.
+    # The arm poses are calibrated against the *anatomical* rig. The upper arm's
+    # local Z is the axis that raises it in the body's own plane (a negative Z on
+    # the left arm, a positive Z on the right), so a T-pose is exactly +-90 and a
+    # reach is +-160; a smaller angle (the earlier presets used +-40) only lifted
+    # the arms halfway and looked like a shrug.
     "wave": {
-        "shoulder.L": Vec3(-20.0, 0.0, 0.0),
-        "upper_arm.L": Vec3(-30.0, 20.0, -120.0),
-        "forearm.L": Vec3(60.0, 0.0, 0.0),
+        "shoulder.L": Vec3(-10.0, 0.0, 0.0),
+        "upper_arm.L": Vec3(-8.0, 0.0, -150.0),
+        "forearm.L": Vec3(0.0, 0.0, -25.0),
+        "hand.L": Vec3(0.0, 0.0, -8.0),
     },
     "walk": {
         "thigh.L": Vec3(-28.0, 0.0, 0.0),
         "shin.L": Vec3(22.0, 0.0, 0.0),
         "thigh.R": Vec3(24.0, 0.0, 0.0),
         "shin.R": Vec3(8.0, 0.0, 0.0),
-        "upper_arm.L": Vec3(22.0, 0.0, 0.0),
-        "upper_arm.R": Vec3(-22.0, 0.0, 0.0),
+        "upper_arm.L": Vec3(20.0, 0.0, 0.0),
+        "upper_arm.R": Vec3(-20.0, 0.0, 0.0),
     },
     "run": {
-        "hips": Vec3(6.0, 0.0, 0.0),
-        "thigh.L": Vec3(-48.0, 0.0, 0.0),
-        "shin.L": Vec3(58.0, 0.0, 0.0),
-        "thigh.R": Vec3(34.0, 0.0, 0.0),
-        "shin.R": Vec3(22.0, 0.0, 0.0),
-        "upper_arm.L": Vec3(48.0, 0.0, 0.0),
-        "forearm.L": Vec3(-70.0, 0.0, 0.0),
-        "upper_arm.R": Vec3(-48.0, 0.0, 0.0),
-        "forearm.R": Vec3(-70.0, 0.0, 0.0),
+        "spine": Vec3(5.0, 0.0, 0.0),
+        "thigh.L": Vec3(-45.0, 0.0, 0.0),
+        "shin.L": Vec3(55.0, 0.0, 0.0),
+        "thigh.R": Vec3(30.0, 0.0, 0.0),
+        "shin.R": Vec3(20.0, 0.0, 0.0),
+        "upper_arm.L": Vec3(42.0, 0.0, 0.0),
+        "forearm.L": Vec3(-55.0, 0.0, 0.0),
+        "upper_arm.R": Vec3(-42.0, 0.0, 0.0),
+        "forearm.R": Vec3(-55.0, 0.0, 0.0),
     },
     "sit": {
         "thigh.L": Vec3(-85.0, 0.0, 0.0),
         "shin.L": Vec3(85.0, 0.0, 0.0),
         "thigh.R": Vec3(-85.0, 0.0, 0.0),
         "shin.R": Vec3(85.0, 0.0, 0.0),
+        "spine": Vec3(-3.0, 0.0, 0.0),
     },
     "sit_ground": {
-        "hips": Vec3(0.0, 0.0, 0.0),
-        "thigh.L": Vec3(-92.0, 12.0, 0.0),
-        "shin.L": Vec3(60.0, 0.0, 0.0),
-        "thigh.R": Vec3(-92.0, -12.0, 0.0),
-        "shin.R": Vec3(60.0, 0.0, 0.0),
-        "spine": Vec3(-6.0, 0.0, 0.0),
+        "thigh.L": Vec3(-95.0, 10.0, 0.0),
+        "shin.L": Vec3(70.0, 0.0, 0.0),
+        "thigh.R": Vec3(-95.0, -10.0, 0.0),
+        "shin.R": Vec3(70.0, 0.0, 0.0),
+        "spine": Vec3(-4.0, 0.0, 0.0),
     },
     "tpose": {
-        "upper_arm.L": Vec3(0.0, -30.0, -40.0),
-        "upper_arm.R": Vec3(0.0, 30.0, 40.0),
+        # The rest arm hangs about 40 degrees below horizontal, so a *horizontal*
+        # T-pose is +-50 on the upper arm's local Z, not +-90 (which points the
+        # arms 50 degrees above the shoulder).
+        "upper_arm.L": Vec3(0.0, 0.0, -50.0),
+        "upper_arm.R": Vec3(0.0, 0.0, 50.0),
     },
     "reach": {
-        "shoulder.L": Vec3(-10.0, 0.0, 0.0),
-        "upper_arm.L": Vec3(0.0, -40.0, -120.0),
-        "forearm.L": Vec3(0.0, 0.0, 0.0),
-        "shoulder.R": Vec3(-10.0, 0.0, 0.0),
-        "upper_arm.R": Vec3(0.0, -40.0, 120.0),
-        "forearm.R": Vec3(0.0, 0.0, 0.0),
+        "upper_arm.L": Vec3(0.0, 0.0, -160.0),
+        "upper_arm.R": Vec3(0.0, 0.0, 160.0),
         "chest": Vec3(-6.0, 0.0, 0.0),
     },
     "arms_crossed": {
-        "shoulder.L": Vec3(-15.0, 0.0, 0.0),
-        "upper_arm.L": Vec3(-50.0, 0.0, 80.0),
-        "forearm.L": Vec3(60.0, 0.0, -60.0),
-        "shoulder.R": Vec3(-15.0, 0.0, 0.0),
-        "upper_arm.R": Vec3(-50.0, 0.0, -80.0),
-        "forearm.R": Vec3(60.0, 0.0, 60.0),
+        "upper_arm.L": Vec3(-35.0, 0.0, 22.0),
+        "forearm.L": Vec3(0.0, 0.0, 78.0),
+        "upper_arm.R": Vec3(-35.0, 0.0, -22.0),
+        "forearm.R": Vec3(0.0, 0.0, -78.0),
     },
     "hands_hips": {
-        "upper_arm.L": Vec3(-20.0, -20.0, 10.0),
-        "forearm.L": Vec3(60.0, 0.0, 80.0),
-        "upper_arm.R": Vec3(-20.0, 20.0, -10.0),
-        "forearm.R": Vec3(60.0, 0.0, -80.0),
+        "upper_arm.L": Vec3(0.0, 0.0, -22.0),
+        "forearm.L": Vec3(0.0, 0.0, 88.0),
+        "upper_arm.R": Vec3(0.0, 0.0, 22.0),
+        "forearm.R": Vec3(0.0, 0.0, -88.0),
     },
     "squat": {
-        "hips": Vec3(20.0, 0.0, 0.0),
-        "thigh.L": Vec3(-70.0, 8.0, 0.0),
-        "shin.L": Vec3(80.0, 0.0, 0.0),
+        "hips": Vec3(14.0, 0.0, 0.0),
+        "thigh.L": Vec3(-75.0, 7.0, 0.0),
+        "shin.L": Vec3(85.0, 0.0, 0.0),
         "foot.L": Vec3(-10.0, 0.0, 0.0),
-        "thigh.R": Vec3(-70.0, -8.0, 0.0),
-        "shin.R": Vec3(80.0, 0.0, 0.0),
+        "thigh.R": Vec3(-75.0, -7.0, 0.0),
+        "shin.R": Vec3(85.0, 0.0, 0.0),
         "foot.R": Vec3(-10.0, 0.0, 0.0),
-        "upper_arm.L": Vec3(-40.0, 0.0, -20.0),
-        "upper_arm.R": Vec3(-40.0, 0.0, 20.0),
+        "upper_arm.L": Vec3(-55.0, 0.0, -8.0),
+        "forearm.L": Vec3(-25.0, 0.0, 0.0),
+        "upper_arm.R": Vec3(-55.0, 0.0, 8.0),
+        "forearm.R": Vec3(-25.0, 0.0, 0.0),
     },
     "lying": {
-        "hips": Vec3(-90.0, 0.0, 0.0),
         "thigh.L": Vec3(6.0, 0.0, 0.0),
         "thigh.R": Vec3(6.0, 0.0, 0.0),
-        "upper_arm.L": Vec3(0.0, 0.0, -20.0),
-        "upper_arm.R": Vec3(0.0, 0.0, 20.0),
+        "upper_arm.L": Vec3(0.0, 0.0, -18.0),
+        "upper_arm.R": Vec3(0.0, 0.0, 18.0),
     },
+}
+
+#: A pose's whole-body placement: a rotation (degrees) and a vertical drop as a
+#: fraction of the figure's height. Bone rotations alone cannot make a sitting,
+#: squatting, or lying pose -- the pelvis would stay at standing height and the
+#: feet would lift off the floor -- so the object itself is placed as well. The
+#: drop is measured from the feet so a bent-leg pose keeps them on the ground.
+POSE_ROOT: dict[str, tuple[Vec3, float]] = {
+    "sit": (Vec3(), 0.245),
+    "sit_ground": (Vec3(), 0.360),
+    "squat": (Vec3(), 0.185),
+    "lying": (Vec3(-90.0, 0.0, 0.0), 0.0),
 }
 
 
@@ -1535,6 +1614,7 @@ def morph_figure(obj: SceneObject, params: FigureParameters) -> SceneObject:
     pose = dict(obj.pose)
     rebuilt = build_figure(params, name=obj.name, material=obj.material)
     rebuilt.pose = pose
+    rebuilt.transform = obj.transform
     return rebuilt
 
 
