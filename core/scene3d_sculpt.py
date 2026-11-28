@@ -339,6 +339,63 @@ def _surface_nets(
     return vertices, faces
 
 
+def _orient_faces(
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    field: np.ndarray,
+    origin: np.ndarray,
+    cell: float,
+) -> np.ndarray:
+    """Make every quad a simple polygon wound counter-clockwise when seen outside.
+
+    Surface nets emits each quad from the four cells around a lattice edge, but the
+    vertex order depends on which side of the edge is inside. For some edges that
+    order is a **bowtie**, so the renderer's fan triangulation produces one good
+    triangle and one reversed one -- a regular grid of dark, wrongly-shaded
+    triangles across the surface (the "speckled" shaft). Two fixes here: sort each
+    quad's four vertices by their angle around the quad's own centre, which makes
+    it a simple polygon, and then flip the whole quad if its normal points against
+    the field's gradient (which always points outward for a signed distance field).
+    """
+    if len(faces) == 0:
+        return faces
+    corners = vertices[faces]
+    centre = corners.mean(axis=1)
+    normal = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+    lengths = np.linalg.norm(normal, axis=1, keepdims=True)
+    normal = np.divide(normal, np.where(lengths < 1e-12, 1.0, lengths))
+    first = corners[:, 0] - centre
+    first = first - normal * np.einsum("ij,ij->i", first, normal)[:, None]
+    first_lengths = np.linalg.norm(first, axis=1, keepdims=True)
+    first = np.divide(first, np.where(first_lengths < 1e-12, 1.0, first_lengths))
+    second = np.cross(normal, first)
+    relative = corners - centre[:, None, :]
+    angles = np.arctan2(
+        np.einsum("nkj,nj->nk", relative, second),
+        np.einsum("nkj,nj->nk", relative, first),
+    )
+    order = np.argsort(angles, axis=1)
+    faces = np.take_along_axis(faces, order, axis=1)
+    corners = vertices[faces]
+    normal = np.cross(corners[:, 2] - corners[:, 0], corners[:, 3] - corners[:, 0])
+    gx, gy, gz = np.gradient(field, cell)
+    shape = np.array(field.shape)
+    index = np.clip(((centre - origin) / cell).astype(np.int64), 0, shape - 1)
+    gradient = np.stack(
+        [
+            gx[index[:, 0], index[:, 1], index[:, 2]],
+            gy[index[:, 0], index[:, 1], index[:, 2]],
+            gz[index[:, 0], index[:, 1], index[:, 2]],
+        ],
+        axis=1,
+    )
+    flip = np.einsum("ij,ij->i", normal, gradient) < 0.0
+    if flip.any():
+        faces = faces.copy()
+        faces[flip] = faces[flip][:, ::-1]
+    return faces
+
+
 def _bounds_of(blobs: Sequence[_Blob]) -> tuple[np.ndarray, np.ndarray]:
     lo = np.array([math.inf, math.inf, math.inf])
     hi = np.array([-math.inf, -math.inf, -math.inf])
@@ -378,6 +435,7 @@ def sculpt(
     zs = lo[2] + spacing * np.arange(nz)
     field, colour_index = _field_on_grid(blobs, xs, ys, zs)
     vertices, faces = _surface_nets(field, lo, spacing)
+    faces = _orient_faces(vertices, faces, field, lo, spacing)
     colours = _vertex_colours(blobs, vertices, colour_index, xs, ys, zs)
     return Mesh(
         name,

@@ -904,10 +904,14 @@ def test_a_tpose_raises_the_hands_to_shoulder_height():
 
 
 def test_every_pose_keeps_the_figure_recognisable():
+    from core.scene3d_figures import FIGURE_PRESETS, build_figure
+
     for key in pose_preset_names():
-        figure = build_figure_from_preset("woman")
-        figure.pose = pose_rotations(key)
-        vertices = figure.deformed_vertices()
+        # A pose now carries its whole-body placement (a sitting or lying figure is
+        # lowered or turned), so it is built through the parameters rather than by
+        # setting the bone pose on an upright figure.
+        figure = build_figure(FIGURE_PRESETS["woman"].with_changes(pose=key))
+        vertices = figure.world_vertices()
         xs = [vertex.x for vertex in vertices]
         ys = [vertex.y for vertex in vertices]
         # No pose explodes the mesh or collapses it: the figure stays roughly one

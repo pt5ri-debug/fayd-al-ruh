@@ -36,8 +36,14 @@ def _mesh(**changes):
 
 
 def _moved(a, b) -> int:
-    """How many vertices really differ between two meshes of equal topology."""
-    assert a.vertex_count == b.vertex_count
+    """How many vertices really differ between two meshes.
+
+    The sculpted genital set is polygonised at a resolution that follows its own
+    size, so a size dial legitimately changes the vertex count; a differing count
+    is therefore a change, not a failure.
+    """
+    if a.vertex_count != b.vertex_count:
+        return max(a.vertex_count, b.vertex_count)
     return sum(
         1
         for before, after in zip(a.vertices, b.vertices, strict=True)
@@ -133,6 +139,21 @@ GENITAL_DIALS = (
     ("genital_length", 0.40, 2.00),
     ("genital_fullness", 0.40, 2.00),
     ("genital_direction", -60.0, 60.0),
+    ("genital_erection", 0.0, 1.0),
+    ("genital_glans", 0.5, 1.8),
+    ("genital_curve", 0.0, 1.0),
+)
+
+BREAST_DIALS = (
+    ("breast_size", 0.40, 2.20),
+    ("breast_size_left", 0.40, 2.20),
+    ("breast_size_right", 0.40, 2.20),
+    ("chest_size", 0.70, 1.50),
+    ("breast_projection", 0.40, 2.20),
+    ("breast_fullness", 0.40, 2.20),
+    ("breast_separation", 0.60, 1.60),
+    ("breast_height", 0.70, 1.30),
+    ("breast_sag", 0.0, 1.0),
 )
 
 
@@ -143,6 +164,26 @@ def test_every_nipple_control_moves_vertices(key: str, low: float, high: float) 
 
 @pytest.mark.parametrize(("key", "low", "high"), GENITAL_DIALS)
 def test_every_genital_control_moves_vertices(key: str, low: float, high: float) -> None:
+    # The male set, because the erection and glans dials are the male organ's own.
+    assert (
+        _moved(
+            _mesh(genital_sex="male", **{key: low}),
+            _mesh(genital_sex="male", **{key: high}),
+        )
+        > 0
+    ), f"{key} moved nothing"
+
+
+def test_an_erection_is_a_no_op_on_a_female_body() -> None:
+    # The dial is honestly the male organ's: on a female body it changes nothing.
+    assert (
+        _moved(_mesh(genital_sex="female"), _mesh(genital_sex="female", genital_erection=1.0))
+        == 0
+    )
+
+
+@pytest.mark.parametrize(("key", "low", "high"), BREAST_DIALS)
+def test_every_breast_control_moves_vertices(key: str, low: float, high: float) -> None:
     assert _moved(_mesh(**{key: low}), _mesh(**{key: high})) > 0, f"{key} moved nothing"
 
 
@@ -214,6 +255,87 @@ def test_the_areolae_follow_a_bust_dial() -> None:
     # A larger bust stands further forward, so its areolae move forward with it --
     # they are placed from the surface the morph actually produced.
     assert max(point.z for point in full_areolae) > max(point.z for point in flat_areolae)
+
+
+def _chest_front(mesh, side: float) -> float:
+    low, high = mesh.bounds()
+    height = high.y - low.y
+    band = [
+        point
+        for point in mesh.vertices[:BODY_VERTICES]
+        if low.y + height * 0.66 <= point.y <= low.y + height * 0.78
+        and height * 0.04 < point.x * side < height * 0.16
+    ]
+    return max(point.z for point in band)
+
+
+def test_each_breast_can_be_made_larger_on_its_own() -> None:
+    base = _mesh()
+    left_big = _mesh(breast_size_left=2.0)
+    # The left breast really grows forward ...
+    assert _chest_front(left_big, 1.0) > _chest_front(base, 1.0) + 0.004
+    # ... and the right one is untouched by the left's dial.
+    assert math.isclose(_chest_front(left_big, -1.0), _chest_front(base, -1.0), abs_tol=1e-9)
+    right_big = _mesh(breast_size_right=2.0)
+    assert _chest_front(right_big, -1.0) > _chest_front(base, -1.0) + 0.004
+    assert math.isclose(_chest_front(right_big, 1.0), _chest_front(base, 1.0), abs_tol=1e-9)
+
+
+def test_the_full_chest_size_grows_the_ribcage_not_only_the_breast() -> None:
+    from core.human_anatomy import BreastShape, shape_breasts
+    from core.scene3d import Mesh, Vec3
+
+    # A clean cylinder torso, so no arm or hand can mask the ribcage's own width.
+    rings = 16
+    vertices = []
+    for step in range(10):
+        y = 0.70 + step * 0.0778
+        for ring in range(rings):
+            angle = 2.0 * math.pi * ring / rings
+            vertices.append(Vec3(0.14 * math.cos(angle), y, 0.10 * math.sin(angle)))
+    faces = []
+    for step in range(9):
+        for ring in range(rings):
+            a = step * rings + ring
+            b = step * rings + (ring + 1) % rings
+            faces.append((a, b, b + rings, a + rings))
+    cylinder = Mesh("torso", tuple(vertices), tuple(faces))
+
+    def half_width(shape):
+        out = shape_breasts(cylinder, shape)
+        return max(abs(point.x) for point in out.vertices)
+
+    base = half_width(BreastShape())
+    assert half_width(BreastShape(chest_size=1.40)) > base + 0.01
+    # A breast-only dial does not widen the ribcage itself.
+    assert half_width(BreastShape(size=2.0)) <= base + 0.005
+
+
+def test_an_erection_changes_the_male_organ_itself() -> None:
+    flaccid = _mesh(genital_sex="male", genital_erection=0.0)
+    erect = _mesh(genital_sex="male", genital_erection=1.0)
+    assert flaccid.vertex_count > BODY_VERTICES
+    # The erect organ is longer and raised: its detail reaches higher and further
+    # forward than the flaccid one.
+    # The areolae come first in the detail; the organ's own vertices follow.
+    f = flaccid.vertices[BODY_VERTICES + 204 :]
+    e = erect.vertices[BODY_VERTICES + 204 :]
+    assert max(point.y for point in e) > max(point.y for point in f)
+    assert max(point.z for point in e) > max(point.z for point in f)
+
+
+def test_the_male_organ_is_one_continuous_shell() -> None:
+    body = build_figure_mesh(FIGURE_PRESETS["man"])
+    detail = genital_geometry(body, GenitalDetail(sex="male", erection=1.0))
+    assert detail.vertex_count > 0
+    # A fused organ is one connected surface, not a shaft resting beside a
+    # scrotum: the largest shell is the whole set.
+    from core.scene3d import Mesh
+
+    mesh = Mesh(
+        "organ", tuple(detail.vertices), tuple(detail.faces), (), tuple(detail.colors)
+    )
+    assert mesh.largest_shell().vertex_count == mesh.vertex_count
 
 
 def test_the_genital_set_sits_on_the_pelvis() -> None:
